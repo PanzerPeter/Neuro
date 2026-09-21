@@ -163,10 +163,12 @@ that path and never its safety.
 
 Three rules keep arena memory from outliving the block, all checked at compile time:
 
-- **Nothing that outlives the block may be written from inside it, unless the value
-  is provably off the arena.** Storing a `string`, a collection, a tensor or a
-  struct into a binding declared before the `pool` would leave it addressing bytes
-  the block's exit reclaims. Scalars cross freely: an `i32` carries no address.
+- **Nothing the block already allocated may be written into something that outlives
+  it.** Storing a `string`, a collection, a tensor or a struct that the block took
+  from the arena into a binding declared before the `pool` would leave it addressing
+  bytes the block's exit reclaims. Scalars cross freely: an `i32` carries no address.
+  A value the statement itself builds crosses too, because the compiler routes it off
+  the arena — see below.
 - **Nothing the block allocated may be handed to a callee that can store it past
   the block.** The rule above watches stores written inside the block; this one
   watches the store a callee makes on your behalf. A `&mut self` receiver and a
@@ -181,17 +183,36 @@ Three rules keep arena memory from outliving the block, all checked at compile t
 mut total: i32 = 0
 mut name: string = ""
 pool {
+    val joined = "a" + "b"   // the block's own: allocated in the arena
     total = total + 1        // fine: a scalar carries no arena address
-    name = "a" + "b"         // error: `name` outlives the arena
+    name = "c" + "d"         // fine: routed off the arena, because `name` outlives it
+    name = joined            // error: `joined` was already taken from the arena
 }
 ```
 
-"Provably off the arena" is the exception that makes the first rule usable, and it
-follows from the paragraph above: a function's body is emitted outside every arena,
-so what it returns is heap memory the block's release never touches. A call to a
-function you declared therefore crosses the boundary, as long as every argument and
-the receiver cross it too — otherwise the callee could be handing back the very
-pointer the block gave it.
+### Routing
+
+The compiler decides where an allocation comes from by asking who ends up owning it.
+Where the owner is a place that outlives the block — a binding declared before it, a
+field or element reached through one, or the referent of a reference — the allocation
+is routed to the ordinary heap and the arena never sees it. That is why `name = "c" +
+"d"` above compiles: the whole statement is emitted with the arena switched off, so
+the text it builds survives the release and reads correctly afterwards.
+
+Routing applies to the value the statement builds, never to one built earlier. By the
+time `name = joined` runs, `joined`'s buffer is already in the bump region and no
+choice of allocator can move it, so that store is refused.
+
+An allocation the block keeps for itself is unaffected: `val joined = "a" + "b"` is
+owned by a binding that dies at the closing brace, so it takes the bump path, and a
+reassignment of such a binding does too.
+
+### Values a callee builds
+
+A function's body is emitted outside every arena, so what it returns is heap memory
+the block's release never touches. A call to a function you declared therefore
+crosses the boundary, as long as every argument and the receiver cross it too —
+otherwise the callee could be handing back the very pointer the block gave it.
 
 ```neuro
 func render(n: i32) -> string {
@@ -202,7 +223,7 @@ mut kept: string = ""
 pool {
     val step = 7
     kept = render(step)          // fine: `render`'s allocation is heap memory
-    kept = render(step).clone()  // error: `.clone()` is inlined here, in the arena
+    kept = render(step).clone()  // fine too: the store is routed off the arena
 }
 println(kept)                    // still valid after the release
 ```
@@ -230,14 +251,19 @@ A callee's write access is read from its signature, not from its body: a method 
 `&self` receiver and a shared `&T` parameter have no way to write back, so they take
 arena values freely.
 
-The last two lines of the previous example are the whole first rule in miniature. A
-builtin method such as `.clone()` is not a function the backend emits somewhere else;
-it is instructions
-placed where you wrote them, which puts its allocation in the arena. A call through
-a trait object (`&dyn Renderer`) is refused for the opposite reason: the
-implementation behind the vtable is not known until the program runs, so neither is
-what it allocates. Where the compiler cannot prove the owner, the value stays in the
-block. That costs the arena's speed on such a path and never its safety.
+The two rules part company over a builtin method such as `.clone()`. It is not a
+function the backend emits somewhere else; it is instructions placed where you wrote
+them. In a routed store that is harmless, because the arena is switched off across
+the whole statement — `kept = render(step).clone()` compiles for the same reason
+`name = "c" + "d"` does. Passed to a callee it is not harmless, because the argument
+is emitted where it stands, in the arena, which is why `b.stash("a" + "b")` is
+refused.
+
+A call through a trait object (`&dyn Renderer`) is refused under both rules, and for
+a different reason: the implementation behind the vtable is not known until the
+program runs, so neither is what it allocates. Where the compiler cannot prove the
+owner, the value stays in the block. That costs the arena's speed on such a path and
+never its safety.
 
 ### Destructors and `PoolAware`
 

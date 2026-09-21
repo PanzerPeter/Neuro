@@ -1132,6 +1132,24 @@ at zero, so it stays on the heap: the arena holds what the block writes, which i
 rule sound without an ownership analysis. It costs the arena's speed on such a path, never its
 safety.
 
+**A store whose place outlives the block is emitted at depth zero too**, which is the
+language's routing rule: the mark restore would leave that buffer dangling, so it comes from libc instead.
+`HirStmt::Assign` goes through `store_outside_pool`, which consults `route_store_off_arena` and,
+when it answers yes, swaps `pool_depth` to zero for the whole statement before restoring it. The
+whole statement rather than just the right-hand side: an address computation that allocates is
+reachable from the same place, and a `PoolAware` value stored this way must take its own `Drop`
+rather than the block's sweep, which `pool_registered_type` decides from the same counter.
+
+Which places outlive is read off `pool_locals`, one `HashSet<String>` per open `pool` region,
+pushed beside `pool_marks` in `codegen_pool_expr` and filled by `note_pool_local` at each
+`codegen_var_decl`. A store is kept on the bump path only when `Self::place_root` (in `drops.rs`,
+over `moved_place`) names a binding in the INNERMOST frame. Everything else routes: a `*p = v`
+write, whose referent belongs to whoever handed the reference over; a binding of an enclosing
+pool, whose own arena outlives this block's release; and any binding the set happens to miss,
+which costs the arena's speed on that store and never its safety. `semantic-analysis` rejects
+the stores routing cannot save — a value that already holds arena memory when the statement
+starts — so the two sides meet at the same line.
+
 **Every release goes through a wrapper**, `__neuro_release` and `__neuro_aligned_release`
 (`release_fn` / `aligned_release_fn`), which return without calling libc when the pointer lies
 inside the chunk. Arena memory is reclaimed by the mark restore, and handing it to `free` would

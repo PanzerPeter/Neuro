@@ -7,10 +7,17 @@
 // leaves the block. Everything else the block allocates dies with it.
 //
 // A store is judged by the place's type AND by the value's provenance. The type test
-// alone refused a value that never touched the arena, so `off_arena` answers the second
-// half: it returns true only where the source *proves* the value carries no arena
+// alone refused a value that never touched the arena, so `carries_no_arena` answers the
+// second half: it returns true only where the source *proves* the value carries no arena
 // memory. Everything it cannot prove is arena memory by assumption: the conservative
 // fallback the language rule demands, which fails toward the heap, never toward the arena.
+//
+// Provenance depends on where the backend emits the value, which is why the walk takes an
+// `Emission`. A store into a place that outlives the block is ROUTED: the backend emits
+// its whole right-hand side with the arena switched off, so the only arena memory such a
+// value can hold is memory it read out of a binding the block already allocated. An
+// argument handed to a callee is not routed, because the callee decides what it does with
+// it, so that walk keeps the stricter reading.
 //
 // One rule here is not an escape rule: a `Drop`-only value the block owns is refused
 // outright. Nothing about it escapes; the arena simply cannot run a destructor per
@@ -19,7 +26,7 @@
 
 use std::collections::HashSet;
 
-use ast_types::Expr;
+use ast_types::{Expr, InterpPart};
 use shared_types::Span;
 
 use crate::errors::TypeError;
@@ -31,6 +38,18 @@ use super::{PoolContext, TypeChecker};
 /// arena's single sweep instead of by a per-object destructor. Declared in the
 /// prelude and matched here by name, the way `Drop` is.
 const POOL_AWARE_TRAIT: &str = "PoolAware";
+
+/// Where the backend emits a value, which is what decides whether an allocation the
+/// value makes for itself can come from the arena.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Emission {
+    /// At the point it is written, inside the open pool: an allocation made here takes
+    /// the bump path.
+    InPlace,
+    /// With the arena switched off, because the value is being stored into a place that
+    /// outlives the block. The language routes such an allocation to the ordinary heap.
+    Routed,
+}
 
 impl TypeChecker {
     /// Open a pool region for the body about to be checked. `label` is the pool's
@@ -62,7 +81,7 @@ impl TypeChecker {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
-        if pool_safe(ty) || self.off_arena(value) {
+        if pool_safe(ty) || self.carries_no_arena(value, Emission::Routed) {
             return;
         }
         // A name the symbol table does not know is already an undefined-variable
@@ -91,7 +110,7 @@ impl TypeChecker {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
-        if pool_safe(referent) || self.off_arena(value) {
+        if pool_safe(referent) || self.carries_no_arena(value, Emission::Routed) {
             return;
         }
         let pool = pool.pool.clone();
@@ -103,13 +122,14 @@ impl TypeChecker {
         });
     }
 
-    /// Whether the source proves `value` holds no memory from any open pool's arena.
+    /// Whether the source proves `value` holds no memory from any open pool's arena,
+    /// given where the backend emits it.
     ///
     /// False is the answer for everything not enumerated here, including every
     /// expression shape a later phase might add: an allocation whose owner cannot be
     /// proven belongs to the heap, never to the arena, so the unproven answer has to be
     /// the one that keeps the value inside the block.
-    fn off_arena(&self, value: &Expr) -> bool {
+    fn carries_no_arena(&self, value: &Expr, emission: Emission) -> bool {
         match value {
             // A scalar literal carries no pointer, and a string literal's bytes live in
             // `.rodata` for the program's lifetime rather than in any allocation.
@@ -123,23 +143,40 @@ impl TypeChecker {
                     .is_some_and(|symbol| pool_safe(&symbol.ty))
                     || self.declared_before_pools(&id.name)
             }
-            Expr::Paren(inner, _) => self.off_arena(inner),
-            Expr::Cast { expr, .. } => self.off_arena(expr),
-            Expr::Unary { operand, .. } => self.off_arena(operand),
-            Expr::Reference { operand, .. } => self.off_arena(operand),
-            Expr::Deref { operand, .. } => self.off_arena(operand),
+            Expr::Paren(inner, _) => self.carries_no_arena(inner, emission),
+            Expr::Cast { expr, .. } => self.carries_no_arena(expr, emission),
+            Expr::Unary { operand, .. } => self.carries_no_arena(operand, emission),
+            Expr::Reference { operand, .. } => self.carries_no_arena(operand, emission),
+            Expr::Deref { operand, .. } => self.carries_no_arena(operand, emission),
+            // An operator that allocates does so inline at the point it is written, so
+            // only a routed emission puts its buffer on the heap. Either way it can still
+            // carry an operand's arena memory out, which the walk below rules out.
+            Expr::Binary { left, right, .. } => {
+                emission == Emission::Routed
+                    && self.carries_no_arena(left, emission)
+                    && self.carries_no_arena(right, emission)
+            }
+            // Interpolation builds one fresh buffer, on the same terms as the operator
+            // above: routed, that buffer is heap memory, and each hole is walked because
+            // a formatter is free to hand back its operand rather than a copy of it.
+            Expr::InterpString { parts, .. } => {
+                emission == Emission::Routed
+                    && parts.iter().all(|part| match part {
+                        InterpPart::Text(_) => true,
+                        InterpPart::Formatted { expr, .. } => self.carries_no_arena(expr, emission),
+                    })
+            }
             // A callee's allocations are emitted while its own body is generated, with
             // the backend's pool depth back at zero, so they come from libc however deep
             // inside a pool the call sits. The result is therefore heap memory unless the
             // callee was handed arena memory to give back, which is what the operand walk
-            // rules out. It holds only for a callee the compiler can name: a builtin
-            // method is emitted inline at the call site and does take the bump path.
+            // rules out.
             Expr::Call { func, args, .. } => {
-                self.callee_is_user_code(func)
+                self.callee_provenance_is_provable(func, emission)
                     && self
                         .callee_operand(func)
-                        .is_none_or(|obj| self.off_arena(obj))
-                    && args.iter().all(|arg| self.off_arena(arg))
+                        .is_none_or(|obj| self.carries_no_arena(obj, emission))
+                    && args.iter().all(|arg| self.carries_no_arena(arg, emission))
             }
             _ => false,
         }
@@ -159,15 +196,34 @@ impl TypeChecker {
             .is_some_and(|depth| depth < outermost.scope_floor)
     }
 
-    /// Whether `func` names a function this program declares, whose body the backend
-    /// emits on its own outside every pool.
+    /// Whether the memory `func`'s result holds can be traced at all.
     ///
-    /// A trait object's callee is not known until runtime, so `dyn` dispatch answers
-    /// false: it is the case the conservative fallback exists for. A builtin or
-    /// collection method answers false too, for the opposite reason — its body is not a
-    /// function at all, but instructions inlined where the call was written.
-    fn callee_is_user_code(&self, func: &Expr) -> bool {
-        self.callee_key(func).is_some()
+    /// A function this program declares can: the backend emits its body on its own
+    /// outside every pool, so what it allocates is libc's. A builtin or collection
+    /// method cannot be traced that way — its body is not a function at all, but
+    /// instructions inlined where the call was written, which take the bump path. Under
+    /// a routed emission it can, because routing switches the arena off across the whole
+    /// call site, including those inlined instructions.
+    ///
+    /// Dynamic dispatch is the one case neither emission rescues, and the language rule names
+    /// it: the
+    /// callee is not known until runtime, so the compiler does not guess what it
+    /// allocates or who ends up owning it.
+    fn callee_provenance_is_provable(&self, func: &Expr, emission: Emission) -> bool {
+        if self.callee_key(func).is_some() {
+            return true;
+        }
+        emission == Emission::Routed && !self.dispatches_dynamically(func)
+    }
+
+    /// Whether `func` reaches its body through a trait object's vtable.
+    fn dispatches_dynamically(&self, func: &Expr) -> bool {
+        let Some(Expr::Identifier(receiver)) = self.callee_operand(func) else {
+            return false;
+        };
+        self.symbols
+            .lookup(&receiver.name)
+            .is_some_and(|symbol| matches!(symbol.ty.referent(), Type::DynObject(_)))
     }
 
     /// The key into `functions` for a callee the program declares, or `None` where the
@@ -207,7 +263,10 @@ impl TypeChecker {
             return;
         };
         // Nothing the block owns is being handed over, so there is nothing to retain.
-        if args.iter().all(|arg| self.off_arena(arg)) {
+        if args
+            .iter()
+            .all(|arg| self.carries_no_arena(arg, Emission::InPlace))
+        {
             return;
         }
         let Some(place) = self.retaining_place(func, args) else {
@@ -633,10 +692,33 @@ func main() -> i32 {
         assert!(errs.is_empty(), "expected no errors, got {errs:?}");
     }
 
-    /// The same call with an operand the block allocated: the callee can hand that very
-    /// pointer back, so the result is arena memory again.
+    /// The same call with an operand the block already took from the arena: the callee
+    /// can hand that very pointer back, and routing the call site cannot move a buffer
+    /// that was allocated before it.
     #[test]
     fn a_call_taking_an_arena_operand_is_still_rejected() {
+        let errs = errors(
+            "func echo(s: string) -> string { s }
+func main() -> i32 {
+    mut out: string = \"\"
+    pool scratch {
+        val local = \"a\" + \"b\"
+        out = echo(local)
+    }
+    return 0
+}",
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("outlives")),
+            "expected an escape rejection, got {errs:?}"
+        );
+    }
+
+    /// An operand built at the routed call site is not that case: the arena is switched
+    /// off across the whole store, so the concatenation below is libc's and the callee
+    /// can only hand back heap memory.
+    #[test]
+    fn a_call_taking_an_operand_built_at_the_call_site_is_allowed() {
         let errs = errors(
             "func echo(s: string) -> string { s }
 func main() -> i32 {
@@ -647,10 +729,7 @@ func main() -> i32 {
     return 0
 }",
         );
-        assert!(
-            errs.iter().any(|e| e.contains("outlives")),
-            "expected an escape rejection, got {errs:?}"
-        );
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
     }
 
     /// The language rule's own example of an unprovable owner: behind a trait object the

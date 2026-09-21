@@ -13,14 +13,17 @@
 // the ordinary drop path stay exactly as it is inside a pool. In a program with no
 // `pool` the base global is never written, so the check folds away.
 //
-// What the arena does NOT capture is as important as what it does: only allocations
-// emitted lexically inside the block body take the bump path. An allocation made by a
-// callee belongs to whoever the callee gives it to, which this phase cannot prove, so
-// it stays an ordinary heap allocation — slower, and never unsafe.
+// What the arena does NOT capture is as important as what it does. An allocation made by
+// a callee belongs to whoever the callee gives it to, which this phase cannot prove, so
+// it stays an ordinary heap allocation — slower, and never unsafe. Nor does the arena
+// capture a store whose place outlives the block: the language routes that allocation to the
+// heap, because the value is still reachable after the mark goes back. `route_store_off_arena`
+// is where the block's own bindings are told apart from the ones it inherited.
 
 use inkwell::module::Linkage;
 use inkwell::values::{FunctionValue, GlobalValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
+use neuro_hir::HirPlace;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -66,6 +69,49 @@ const CELL_FIELDS: u64 = 4;
 const POOL_HANDLE_STRUCT: &str = "PoolHandle";
 
 impl<'ctx> CodegenContext<'ctx> {
+    /// Record `name` as a binding of the innermost open `pool`, so a later store into it
+    /// keeps the bump path. Inert outside a pool.
+    pub(crate) fn note_pool_local(&mut self, name: &str) {
+        if let Some(locals) = self.pool_locals.last_mut() {
+            locals.insert(name.to_string());
+        }
+    }
+
+    /// Emit `store` with the arena switched off when `place` reaches storage that
+    /// outlives the innermost open `pool`.
+    ///
+    /// The language rule: an allocation reachable from a value that outlives the block does not come
+    /// from the arena, because the mark restore at the closing brace would leave it
+    /// dangling. The whole store is emitted at depth zero rather than just its
+    /// right-hand side: an address computation that allocates is reachable from the same
+    /// place, and a `PoolAware` value stored this way must take its own `Drop` rather
+    /// than the block's sweep. Inert outside a pool, and inert for a store into one of
+    /// the block's own bindings, which the arena still holds.
+    pub(crate) fn store_outside_pool<T>(
+        &mut self,
+        place: &HirPlace,
+        store: impl FnOnce(&mut Self) -> CodegenResult<T>,
+    ) -> CodegenResult<T> {
+        if !self.route_store_off_arena(place) {
+            return store(self);
+        }
+        let depth = std::mem::replace(&mut self.pool_depth, 0);
+        let result = store(self);
+        self.pool_depth = depth;
+        result
+    }
+
+    /// Whether a store into `place` must bypass the arena. True for every place not
+    /// rooted in a binding the innermost open `pool` declared itself, which is the
+    /// conservative half of the routing rule: an owner the analysis cannot place inside the
+    /// block is treated as outliving it.
+    fn route_store_off_arena(&self, place: &HirPlace) -> bool {
+        let Some(locals) = self.pool_locals.last() else {
+            return false;
+        };
+        !Self::place_root(place).is_some_and(|root| locals.contains(root))
+    }
+
     /// The allocator the code being emitted right now must call for a plain buffer:
     /// the arena inside a `pool` body, libc `malloc` outside one. Same signature
     /// either way, so a call site needs no branch of its own.

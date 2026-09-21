@@ -80,6 +80,10 @@ impl<'ctx> CodegenContext<'ctx> {
             if let Some(scope) = self.name_scopes.last_mut() {
                 scope.push(shadowed);
             }
+            // A binding the block declares dies with the arena, so a later store into it
+            // may keep the bump path. Everything else a store can reach outlives the
+            // block.
+            self.note_pool_local(name);
 
             // Binding a place into a new owner moves it (`val b = a`): clear the source's
             // drop flag so it is not also dropped. Then register the new binding.
@@ -843,7 +847,9 @@ impl<'ctx> CodegenContext<'ctx> {
             HirStmt::VarDecl { name, ty, init, .. } => {
                 self.codegen_var_decl(name, ty, init.as_ref())
             }
-            HirStmt::Assign { place, value, span } => self.codegen_place_store(place, value, *span),
+            HirStmt::Assign { place, value, span } => {
+                self.store_outside_pool(place, |ctx| ctx.codegen_place_store(place, value, *span))
+            }
             HirStmt::TensorCompoundAssign {
                 place,
                 op,

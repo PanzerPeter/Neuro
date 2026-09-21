@@ -1025,39 +1025,53 @@ here the way `Drop` and `Hashable` are. Only its name is known, and its shape is
 What may cross the boundary is decided by the place's TYPE and by the value's PROVENANCE, in that
 order. A type carrying no pointer at all (the scalars, `void`, and an enum, a newtype, an array or
 a tuple built only out of those) crosses unconditionally, which is why `total = total + 1` compiles inside a pool.
-Everything else has to pass `off_arena`, which returns true only where the source PROVES the value
-holds no arena memory:
+Everything else has to pass `carries_no_arena`, which returns true only where the source PROVES
+the value holds no arena memory:
 
 - a literal, including a `string` one, whose bytes live in `.rodata` rather than an allocation;
 - a binding of pointerless type, or one declared before the OUTERMOST open pool (the outermost,
   not the innermost: an enclosing block's arena outlives a nested block's release too);
 - `&e`, `*e`, `(e)`, `e as T` and a unary operator over a value that passes;
-- a call to a function this program DECLARES — a free function found in `functions`, or an
-  associated function / method found through `impl_methods` — whose receiver and every argument
-  also pass. A callee's body is emitted with the backend's pool depth back at zero, so what it
-  allocates comes from libc; the operand walk is what rules out its handing back arena memory it
-  was given.
+- a call whose provenance is provable and whose receiver and every argument also pass. A
+  function this program DECLARES — a free function found in `functions`, or an associated
+  function / method found through `impl_methods` — is always provable: its body is emitted with
+  the backend's pool depth back at zero, so what it allocates comes from libc. The operand walk
+  is what rules out its handing back arena memory it was given.
 
-Everything else is arena memory by assumption. Two exclusions carry the weight and are deliberate.
-A `dyn` receiver fails `callee_is_user_code`, because the implementation behind the vtable is not
-known until runtime and neither is what it allocates — the case the conservative fallback exists
-for. A builtin or collection method fails it too, for the opposite reason: its body is not a
-function at all but instructions inlined where the call was written, so it DOES take the bump path.
-`name = a + b` is still refused; `name = render(step)` is not.
+Everything else is arena memory by assumption. The walk takes an `Emission` because provenance
+depends on where the backend puts the value, and the two call sites want different answers.
+
+`Emission::InPlace` is the reading for an argument handed to a callee (`check_pool_retention`):
+the value is emitted where it was written, inside the pool, so anything inlined there takes the
+bump path. A builtin or collection method is therefore not provable — its body is not a function
+at all but instructions emitted at the call site.
+
+`Emission::Routed` is the reading for a store (`check_pool_store`, `check_pool_ref_store`),
+because the language routes an allocation whose owner outlives the block to the heap and the backend
+does exactly that: `store_outside_pool` in `llvm-backend` emits the whole statement with
+`pool_depth` at zero. A builtin's inlined allocation then lands on libc too, so it becomes
+provable, and so do `a + b` and `"row {n}"`, which allocate one fresh buffer at the point they
+are written. What routing cannot do is move a buffer allocated EARLIER, which is why the operand
+walk still runs: `out = local` and `out = local + "c"` stay refused where `local` is the block's.
+
+Dynamic dispatch is the one exclusion neither emission rescues, and the language rule names it: behind a
+vtable the implementation is not known until runtime and neither is what it allocates.
+`dispatches_dynamically` reads the receiver's type for a `Type::DynObject` referent, and a `dyn`
+call fails the routed reading as well as the in-place one.
 
 The store rules above see only places the block's own text writes. A store a CALLEE performs
 is written in the callee, so `check_pool_retention` covers it separately: a call inside a pool
-is refused when an argument fails `off_arena` AND the call gives the callee write access to a
+is refused when an argument fails the in-place reading AND the call gives the callee write access to a
 place declared before the outermost open pool. Write access is read from the SIGNATURE, never
 from the callee's body — a `&mut self` receiver (found in `mut_self_methods`) and a `&mut T`
 parameter are the complete set of channels a callee has back into its caller, and whether the
 body actually stores through one is not asked. That over-approximates in the same direction
-`off_arena` does: unproven means refused.
+`carries_no_arena` does: unproven means refused.
 
 Both rules resolve their callee through the shared `callee_key`, which returns the key into
 `functions` for a free function, a `Type::method` path, or a method on a bare-identifier
-receiver, and `None` otherwise. `callee_is_user_code` is now just `callee_key(..).is_some()`.
-Note the two rules want OPPOSITE conservatism from it — an unnameable callee is assumed to
+receiver, and `None` otherwise. `callee_provenance_is_provable` is `callee_key(..).is_some()`,
+plus the routed relaxation above. Note the two rules want OPPOSITE conservatism from it — an unnameable callee is assumed to
 allocate arena memory (safe) but cannot be shown to retain any (unsafe) — which is the gap
 LIM-110 records for generic callees and nested receivers.
 

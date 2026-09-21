@@ -30,13 +30,20 @@
 // destructor: the two notes each step builds are released by one reverse-order sweep at
 // the block's brace, newest first, not one at a time as they go out of scope.
 //
-// The fourth is the string `headline` the inner block writes back out. A `string`
-// carries a pointer, so the arena refuses one whose allocation it cannot account for:
-// `headline = "step " + "{step}"` inside the block does not compile. What DOES compile
-// is the line below it, because `summarize` is a declared function and its body is
-// emitted outside every arena — the text it returns is ordinary heap memory the block's
-// release never touches, which is why it is still readable after the closing brace. Only
-// what the compiler can trace to the heap crosses; everything it cannot trace stays in.
+// The fourth is the two strings the inner block writes back out. A `string` carries a
+// pointer, so the arena refuses one whose allocation it cannot account for. `headline`
+// is the easy half: it is declared before the block, so `headline = "step " + "{step}"`
+// is ROUTED — the compiler sees the owner in the statement and builds that text on the
+// heap rather than in the arena, and it still reads after the closing brace. Writing
+// `headline = opened_note` instead would not compile, because that buffer was taken from
+// the arena on an earlier line and no routing can move it afterwards.
+//
+// `tally.record(...)` is the hard half, and routing does not reach it: the store happens
+// inside the callee, on a `&mut self` the block handed over, so the argument is emitted
+// where it was written — in the arena. `tally.record("step " + "{step}")` therefore still
+// does not compile. What DOES compile is the line below it, because `summarize` is a
+// declared function whose body is emitted outside every arena, so the text it returns is
+// ordinary heap memory the block's release never touches.
 
 // A running tally, carried across the batches on the stack rather than in the
 // arena. Its fields are scalars, so it never allocates at all.
@@ -112,6 +119,11 @@ func main() -> i32 {
     mut running: f32 = 0.0
     mut steps: i32 = 0
 
+    // Declared outside every arena, and written from inside the innermost one. The
+    // compiler routes the concatenation off the bump region because this binding is the
+    // proven owner, which is what lets the line survive both closing braces below.
+    mut headline: string = "no batches yet"
+
     // Declared before the arena, so it survives every block below — which is exactly
     // what makes `tally.record(...)` inside them a rule the compiler has to check.
     mut tally = Tally { steps: 0, total: 0.0, last: "no batches yet" }
@@ -138,6 +150,10 @@ func main() -> i32 {
                 running = running + mean
                 steps = steps + 1
 
+                // A routed store: `headline` outlives the block, so this text is built
+                // on the heap even though the statement sits two arenas deep.
+                headline = "step {step} peaked at " + "{top:.3}"
+
                 // And so may this string, because the compiler can trace it to the heap.
                 // Passing it THROUGH a `&mut self` method is checked on the same terms:
                 // `tally.record("step " + "{step}")` does not compile, because that text
@@ -147,8 +163,11 @@ func main() -> i32 {
         }
     }
 
-    // Both arenas are back to their marks by here, and the line the callee stored
-    // still reads correctly because it never pointed into one.
+    // Both arenas are back to their marks by here. The routed line and the line the
+    // callee stored both still read correctly, for two different reasons: the first was
+    // built off the arena because its owner was known, the second because the callee's
+    // body is emitted outside every arena.
+    println(headline)
     println(tally.last)
     tally.steps = steps
     tally.total = running

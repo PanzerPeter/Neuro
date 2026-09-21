@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-09-21
+
+### Changed
+
+- An allocation stored into something that outlives a `pool` block is now routed
+  to the ordinary heap instead of being refused. The compiler already knew the
+  owner — it is the left-hand side of the statement — so `out = "a" + "b"` inside
+  a pool, with `out` declared before it, compiles and the text survives the
+  arena's release. The whole statement is emitted with the arena switched off,
+  which covers a field or element of an outliving binding and a write through a
+  reference as well as a plain binding. A store into one of the block's own
+  bindings still takes the bump path.
+- What a pool still refuses is narrower and more precise: a value the block
+  allocated on an earlier line (`out = local`), because no choice of allocator
+  moves a buffer that already exists, and a result reached through a trait
+  object, because the implementation behind the vtable is unknown. Handing a
+  value to a callee that can store it past the block is unchanged — the argument
+  is emitted where it stands, so `b.stash("a" + "b")` is still an error.
+
 ## [3.2.0] - 2026-09-21
 
 ### Changed

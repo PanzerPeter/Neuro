@@ -8,7 +8,7 @@ use inkwell::module::Module;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use source_location::SourceFile;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::codegen::expressions::matches::SavedBinding;
 use crate::codegen::string_ownership::StringOwnership;
@@ -375,6 +375,13 @@ pub(crate) struct CodegenContext<'ctx> {
     /// is the only thing `PoolHandle` carries.
     pub(crate) pool_marks: Vec<IntValue<'ctx>>,
 
+    /// The bindings each open `pool` region declares, innermost last. A store whose
+    /// place is not rooted in one of the innermost region's own bindings lands somewhere
+    /// that outlives the block, so the language routes its allocation off the arena. A binding
+    /// this misses is simply treated as outliving, which costs the arena's speed on that
+    /// store and never its safety.
+    pub(crate) pool_locals: Vec<HashSet<String>>,
+
     /// Every `abort` and `llvm.trap` call emitted, in emission order. Neither runs an
     /// exit hook, so buffered standard output has to be drained immediately in front of
     /// them; `finalize_stdout_buffer` does that once the module is known to print at all.
@@ -417,6 +424,7 @@ impl<'ctx> CodegenContext<'ctx> {
             process_exit_points: Vec::new(),
             pool_depth: 0,
             pool_marks: Vec::new(),
+            pool_locals: Vec::new(),
         }
     }
 

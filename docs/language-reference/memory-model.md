@@ -18,7 +18,7 @@ for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `poo
 | A binding that is reassigned | The displaced value is destroyed at the assignment, before the new one is stored |
 | Owners held inside a destroyed value | A struct field, array or tuple element, enum payload or newtype inner value goes back with the value that holds it |
 | A value moved out of a position | Destroyed on the path it moved to, never twice |
-| Allocations inside a `pool` block | One bump region, released in reverse order at the closing brace. A type with a destructor implements `PoolAware` to live in one |
+| Allocations inside a `pool` block | One bump region, released in reverse order at the closing brace. A type with a destructor implements `PoolAware` to live in one. An allocation stored into something that outlives the block is routed to the heap instead |
 | A heap `string` stored into a struct field, array element or tuple element | With the holder, when the store into that position provably allocated |
 | A heap `string` a function returns | By the caller, when every one of the function's return paths allocates |
 | A heap `string` passed by value to a parameter the callee only reads | At the call it was built for |

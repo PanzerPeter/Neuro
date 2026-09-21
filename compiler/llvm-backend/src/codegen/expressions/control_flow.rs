@@ -3,6 +3,7 @@
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::*;
 use neuro_hir::{HirExpr, HirStmt, HirType};
+use std::collections::HashSet;
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -175,7 +176,9 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         self.pool_depth += 1;
         self.pool_marks.push(mark);
+        self.pool_locals.push(HashSet::new());
         let result = self.codegen_block_expr(stmts);
+        let _ = self.pool_locals.pop();
         let _ = self.pool_marks.pop();
         self.pool_depth -= 1;
         result?;

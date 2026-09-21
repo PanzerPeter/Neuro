@@ -12,7 +12,7 @@ use ast_types::BinaryOp;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use neuro_hir::{HirExpr, HirExprKind, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirType};
 use shared_types::Literal;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -498,6 +498,21 @@ impl<'ctx> CodegenContext<'ctx> {
             .flat_map(|scope| scope.iter().rev())
             .find(|entry| &entry.name == name)
             .is_some_and(|entry| matches!(entry.target, DropTarget::PoolRegistered))
+    }
+
+    /// The binding a store's place is rooted in, or `None` where the place reaches
+    /// storage no binding here names — a `*p` write, whose referent belongs to whoever
+    /// handed the reference over.
+    pub(crate) fn place_root(place: &HirPlace) -> Option<&str> {
+        match place {
+            HirPlace::Var { name, .. } => Some(name),
+            HirPlace::Field { object, .. }
+            | HirPlace::Index { object, .. }
+            | HirPlace::TensorIndex { object, .. } => {
+                Self::moved_place(object).map(|(root, _)| root)
+            }
+            HirPlace::Deref { .. } => None,
+        }
     }
 
     /// Resolve the place `expr` names as a binding plus the field and element path

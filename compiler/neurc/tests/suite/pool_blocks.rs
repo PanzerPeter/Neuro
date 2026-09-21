@@ -181,20 +181,54 @@ func main() -> i32 {
 }
 
 #[test]
-fn storing_a_heap_value_into_an_outer_binding_is_rejected() {
+fn a_value_built_into_an_outer_binding_outlives_the_arena() {
+    // The routing rule end to end. `kept` is declared before the block, so the
+    // concatenation written inside it is emitted with the arena switched off. The
+    // second pool then reuses the very bytes the first released: if the buffer had
+    // come from the arena, the line printed last would be the filler's, not the
+    // survivor's.
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut kept: string = "none"
+    pool first {
+        kept = "survivor-" + "{42}"
+    }
+    pool second {
+        mut i: i32 = 0
+        while i < 32 {
+            val filler = "clobber-clobber-clobber-{i}"
+            println("{filler.len()}")
+            i = i + 1
+        }
+    }
+    println("kept: {kept}")
+    0
+}
+"#;
+    let stdout = stdout_of(&test, "pool_routed_store.nr", source);
+    let last = stdout.lines().next_back().unwrap_or_default();
+    assert_eq!(last, "kept: survivor-42", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn storing_the_blocks_own_allocation_into_an_outer_binding_is_rejected() {
+    // The limit of the routing: a store can be emitted off the arena, but it cannot
+    // move a buffer the block already took from it.
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
     mut out: string = ""
     pool {
-        out = "a" + "b"
+        val local = "a" + "b"
+        out = local
     }
     0
 }
 "#;
     let error = test
         .check("pool_escape.nr", source)
-        .expect_err("storing arena memory past the block must not compile");
+        .expect_err("carrying arena memory past the block must not compile");
     assert!(error.contains("outlives"), "unexpected diagnostic: {error}");
 }
 

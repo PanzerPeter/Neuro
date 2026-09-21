@@ -98,7 +98,7 @@ No Rust edits are needed: discovery is automatic.
 One line each. The program's own header comment is the full description.
 
 - [`attention_head.nr`](showcase/attention_head.nr): one attention head written as two `einsum` contractions, with a `>>` composition rescaling every score through `.map` and `.reduce` folding the context
-- [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas, with a `PoolAware` scratch type the arena sweeps in reverse construction order, and a summary line a declared function builds so a `&mut self` method may store it past the block
+- [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas, with a `PoolAware` scratch type the arena sweeps in reverse construction order, a headline the compiler routes off the arena because the binding it is stored into outlives the block, and a summary line a declared function builds so a `&mut self` method may store it past the block
 - [`borrow_discipline.nr`](showcase/borrow_discipline.nr): `&mut self` methods, arrays and interpolation written around a live borrow, which freezes the borrowee's own name and forbids moving out from under it
 - [`borrowed_text.nr`](showcase/borrowed_text.nr): explicit lifetime annotations over borrowed text
 - [`buffered_report.nr`](showcase/buffered_report.nr): a shift report long enough to exercise buffered stdout

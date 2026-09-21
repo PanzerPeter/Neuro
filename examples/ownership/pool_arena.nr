@@ -12,11 +12,11 @@
 // Three rules keep the arena safe, all checked at compile time:
 //
 //   * Nothing that outlives the block may be written from inside it, unless the value
-//     is provably off the arena. Storing a `string`, a collection or a tensor into a
-//     binding declared before the `pool` would leave that binding pointing at bytes the
-//     block's exit reclaims. Scalars are free to cross: an `i32` carries no address.
-//     So is anything the compiler can trace to the heap, which is the `summary` line
-//     below.
+//     is provably off the arena. Storing a `string`, a collection or a tensor that the
+//     block ALREADY allocated into a binding declared before the `pool` would leave that
+//     binding pointing at bytes the block's exit reclaims. Scalars are free to cross: an
+//     `i32` carries no address. So is anything the compiler can trace to the heap, which
+//     is both `summary` lines below.
 //   * `return`, `break` and `continue` may not leave the block. Each would jump past
 //     the arena release, so the compiler asks for the exit to be written outside.
 //   * A value the block owns may not have a destructor unless its type also
@@ -32,13 +32,19 @@
 // an ordinary heap allocation. That costs the arena's speed on such a path and never
 // its safety.
 //
-// That same fact is what lets a call's result leave the block. `describe` is a function
-// you declared, so its text is heap memory and `summary` may keep it past the closing
-// brace; `"run-" + "042"` is written in the block, so it may not. The trace has to hold
-// all the way down: every argument must itself be off the arena, or the callee could be
-// handing back the pointer the block gave it. Where the compiler cannot prove the owner
-// — a builtin method inlined on the spot, or a call through a trait object whose
-// implementation is only known at runtime — the value stays in the block.
+// Nor does the arena capture a value the block is storing somewhere that outlives it.
+// The compiler routes that allocation to the heap instead, because the owner is right
+// there in the statement: `summary = "round " + ...` below builds its text with the
+// arena switched off, so the binding still reads correctly after the closing brace,
+// while `val run = "run-" + "042"` a few lines up — kept by the block itself — does come
+// from the bump region.
+//
+// What routing cannot do is move a buffer allocated EARLIER. `summary = line` would not
+// compile, because `line` was already taken from the arena on its own line. The same
+// trace has to hold through a call: every argument must itself be off the arena, or the
+// callee could be handing back the pointer the block gave it. And where the owner cannot
+// be known at all — a call through a trait object, whose implementation is only known at
+// runtime — the value stays in the block.
 
 // A round marker built inside the arena. It has a destructor, so a `pool` would refuse
 // to own one, so the `impl PoolAware` beneath it is what makes this program compile.
@@ -97,6 +103,11 @@ func main() -> i32 {
                 // Writing `summary = line` instead would not compile: `line` is the
                 // block's own.
                 summary = describe(round as i64, 16)
+
+                // Written inside the block and kept outside it. The concatenation is
+                // routed off the arena because `summary` outlives this brace, so the
+                // text below survives both releases.
+                summary = "round {round}, " + summary
             }
         }
 

@@ -62,7 +62,7 @@ func main() -> i32 {
 }
 
 #[test]
-fn storing_a_string_into_an_outer_binding_is_rejected() {
+fn building_a_string_into_an_outer_binding_is_allowed() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -75,10 +75,74 @@ func main() -> i32 {
 "#,
     );
     assert!(
+        errors.is_empty(),
+        "the concatenation is routed off the arena because 'out' outlives it; got {errors:?}"
+    );
+}
+
+#[test]
+fn storing_the_blocks_own_allocation_into_an_outer_binding_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut out: string = ""
+    pool {
+        val local = "a" + "b"
+        out = local
+    }
+    0
+}
+"#,
+    );
+    assert!(
         errors
             .iter()
             .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
-        "an outer string binding outlives the arena; got {errors:?}"
+        "routing cannot move a buffer the block already took from the arena; got {errors:?}"
+    );
+}
+
+#[test]
+fn building_from_the_blocks_own_allocation_is_rejected_too() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut out: string = ""
+    pool {
+        val local = "a" + "b"
+        out = local + "c"
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
+        "the routed buffer would still carry the operand's arena memory; got {errors:?}"
+    );
+}
+
+#[test]
+fn interpolating_an_arena_binding_into_an_outer_binding_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut out: string = ""
+    pool {
+        val local = "a" + "b"
+        out = "row {local}"
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
+        "a hole reading arena memory is not proven off the arena; got {errors:?}"
     );
 }
 
@@ -187,7 +251,7 @@ func main() -> i32 {
 }
 
 #[test]
-fn assigning_a_string_through_a_reference_is_rejected() {
+fn building_a_string_through_a_reference_is_allowed() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -201,10 +265,31 @@ func main() -> i32 {
 "#,
     );
     assert!(
+        errors.is_empty(),
+        "the referent is not known to die with the block, so the store is routed; got {errors:?}"
+    );
+}
+
+#[test]
+fn assigning_an_arena_value_through_a_reference_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut text: string = ""
+    val slot = &mut text
+    pool {
+        val local = "a" + "b"
+        *slot = local
+    }
+    0
+}
+"#,
+    );
+    assert!(
         errors
             .iter()
             .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
-        "the referent is not known to die with the block; got {errors:?}"
+        "the referent may outlive the block and the value is the arena's; got {errors:?}"
     );
 }
 

@@ -366,6 +366,67 @@ fn an_allocation_outside_a_pool_stays_on_the_heap() {
     assert!(!body.contains("__neuro_arena"));
 }
 
+/// The routing rule, read off the IR: a store whose place outlives the block
+/// bypasses the arena, because the mark restore would leave that buffer dangling.
+/// Both statements are written inside the same block, so nothing but the target
+/// separates them.
+#[test]
+fn a_store_that_outlives_the_pool_bypasses_the_arena() {
+    let source = r#"
+        func main() -> i32 {
+            mut outer: string = "x"
+            pool {
+                mut inner: string = "y"
+                inner = "a" + "b"
+                outer = "c" + "d"
+                println(inner)
+                println(outer)
+            }
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+
+    let arena = body
+        .find("call ptr @__neuro_arena_alloc(")
+        .expect("the block's own binding keeps the bump path");
+    let heap = body[arena..]
+        .find("call ptr @malloc(")
+        .expect("the binding that outlives the block is routed to libc");
+    assert!(
+        heap > 0,
+        "the routed store must follow the pooled one, in:\n{body}"
+    );
+}
+
+/// The routing reaches a place the store is only rooted in: `outer.text` is a field
+/// of a binding declared before the block, so the buffer written into it outlives
+/// the arena exactly as the whole binding would.
+#[test]
+fn a_store_into_a_field_of_an_outliving_binding_is_routed_too() {
+    let source = r#"
+        struct Row {
+            text: string
+        }
+
+        func main() -> i32 {
+            mut outer = Row { text: "x" }
+            pool {
+                outer.text = "c" + "d"
+            }
+            println(outer.text)
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("call ptr @malloc("),
+        "a field of an outliving binding is not the arena's, in:\n{body}"
+    );
+}
+
 /// Nested pools share one arena: the inner block restores to its own mark, which
 /// is why nesting needs no second chunk and no second offset.
 #[test]

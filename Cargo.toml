@@ -50,7 +50,7 @@ members = [
 ]
 
 [workspace.package]
-version = "3.2.0"
+version = "3.3.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
