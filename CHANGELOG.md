@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-09-21
+
+### Changed
+
+- Phase 3's automatic differentiation is now specified as a reverse-mode
+  transform over HIR rather than an Enzyme pass over LLVM or MLIR IR. Enzyme was
+  built against LLVM 22.1.8 and measured against `neurc --emit llvm-ir` output:
+  it differentiates scalar code, calls and data-dependent loops exactly, and
+  fails on every value carrying a tensor shape, because a Neuro tensor is a
+  DLPack managed struct whose allocator it does not model and whose metadata it
+  cannot tell from data. Enzyme is not, and will not become, a build dependency.
+
 ## [3.1.1] - 2026-09-21
 
 ### Added
