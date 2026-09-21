@@ -28,12 +28,18 @@ struct Cli {
 /// something other than a C runtime startup — a shared library a foreign consumer loads,
 /// which is what the DLPack differential harness needs to reach a tensor-returning
 /// function. It therefore carries no entry-point requirement: a library has no `main`.
+///
+/// `LlvmIr` stops one step earlier still, at the textual module, for a consumer that
+/// rewrites the IR before it becomes machine code. It carries no entry-point requirement
+/// for the same reason `Obj` does not.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum EmitKind {
     /// A native executable, linked through the platform C compiler
     Exe,
     /// An unlinked object file
     Obj,
+    /// Textual LLVM IR
+    LlvmIr,
 }
 
 #[derive(Subcommand)]
@@ -363,13 +369,15 @@ fn print_warnings(warnings: &[semantic_analysis::Warning]) {
     }
 }
 
-/// Compile a Neuro source file to a native executable, or to an unlinked object file.
+/// Compile a Neuro source file to a native executable, an unlinked object file, or
+/// textual LLVM IR.
 ///
-/// Pipeline: read source → parse → type-check → lower to HIR → LLVM object
-/// code → link. `emit` decides whether the last step runs. For an executable `output`
-/// defaults to the input name without its extension (plus `.exe` on Windows); for an
-/// object it defaults to the input name with the platform object extension. Returns the
-/// path it wrote, which `run` needs and `compile` reports.
+/// Pipeline: read source → parse → type-check → lower to HIR → LLVM IR → object
+/// code → link. `emit` decides where it stops. For an executable `output` defaults to
+/// the input name without its extension (plus `.exe` on Windows); for an object it
+/// defaults to the input name with the platform object extension, and for IR to the
+/// input name with `.ll`. Returns the path it wrote, which `run` needs and `compile`
+/// reports.
 fn compile_file(
     input: &Path,
     output: Option<&Path>,
@@ -429,6 +437,19 @@ fn compile_file(
     log::debug!("Generating LLVM IR and object code...");
     let optimization =
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
+
+    if emit == EmitKind::LlvmIr {
+        let ir =
+            llvm_backend::compile_to_ir(&hir, optimization, &source, &input.display().to_string())
+                .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
+                .context("Failed to generate LLVM IR")?;
+        let output_path = output
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| input.with_extension("ll"));
+        fs::write(&output_path, ir)
+            .with_context(|| format!("Failed to write LLVM IR file {}", output_path.display()))?;
+        return Ok(output_path);
+    }
 
     let object_code =
         llvm_backend::compile(&hir, optimization, &source, &input.display().to_string())

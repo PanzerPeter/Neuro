@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-09-21
+
+### Added
+
+- neurc: `compile --emit llvm-ir` writes the textual LLVM module instead of an object or an
+  executable, defaulting to the input name with `.ll`. Like `--emit obj` it requires no
+  `main`, since the module may be a library. The IR carries the host data layout and triple,
+  and `-O` still selects the middle-end pass pipeline, so `-O0` is the module as codegen
+  built it and `-O2` is what the object path would have handed to instruction selection.
+  This is the input an out-of-process IR consumer reads.
+
 ## [3.1.0] - 2026-09-21
 
 ### Added

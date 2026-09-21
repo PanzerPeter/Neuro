@@ -6,9 +6,10 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 ## Entry Point
 - Type: CLI
 - Input: `neurc check <file.nr>` |
-  `neurc compile <file.nr> [-O<0-3>] [-o <output>] [--emit exe|obj]` |
+  `neurc compile <file.nr> [-O<0-3>] [-o <output>] [--emit exe|obj|llvm-ir]` |
   `neurc run <file.nr> [-O<0-3>]`
-- Output: an executable binary on success, or an unlinked object file under `--emit obj`;
+- Output: an executable binary on success, an unlinked object file under `--emit obj`, or a
+  textual LLVM module under `--emit llvm-ir`;
   diagnostics and non-fatal lint warnings to stderr
 
 ## Shared Kernel
@@ -62,6 +63,14 @@ the handle; `tools/dlpack_differential.py` does exactly that, driven from
 `tests/numpy_differential.rs`. `neurc` deliberately does NOT learn to link the shared library
 itself: `-shared` is trivial on Unix and needs an export list on Windows, and choosing that
 export convention is a decision no caller has yet asked for.
+
+`--emit llvm-ir` stops one step earlier again, at `llvm_backend::compile_to_ir`: the module is
+built, verified and optimized exactly as for an object, then printed instead of handed to
+instruction selection. It lifts the `main` requirement for the same reason `obj` does. The
+output carries the host data layout and triple, because IR without them is re-read against
+whatever the consumer assumes, and `-O` still selects the pass pipeline, so `-O0` is the
+unoptimized module a rewriting consumer wants and `-O2` is what the object path would have
+handed to the backend.
 
 `--emit obj` does not reach the MLIR backend. That path is still unreferenced by the driver
 (the MLIR backend is off by default and `neurc` has no dependency on it); `--emit` names the

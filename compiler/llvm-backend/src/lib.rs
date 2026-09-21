@@ -1,5 +1,5 @@
 // Feature slice for LLVM IR generation and optimization.
-// Public API: the `compile()` entry point.
+// Public API: the `compile()` and `compile_to_ir()` entry points.
 
 mod codegen;
 mod errors;
@@ -81,6 +81,27 @@ pub fn compile(
     let context = LLVMContext::create();
     let codegen_ctx = build_module(&context, program, optimization, source, source_path)?;
     emit_object_code(&codegen_ctx, optimization)
+}
+
+/// Compile a typed HIR program to textual LLVM IR.
+///
+/// The same pipeline as [`compile`], stopped one step earlier: the module is built,
+/// verified and run through `optimization`'s pass pipeline, then printed instead of
+/// handed to instruction selection. What reaches this is `neurc compile --emit llvm-ir`,
+/// whose output is the input an out-of-process IR consumer reads.
+pub fn compile_to_ir(
+    program: &HirProgram,
+    optimization: OptimizationLevelSetting,
+    source: &str,
+    source_path: &str,
+) -> CodegenResult<String> {
+    let context = LLVMContext::create();
+    let codegen_ctx = build_module(&context, program, optimization, source, source_path)?;
+    // The target machine is built for its data layout and triple as much as for the
+    // passes: IR without them is re-interpreted against the consumer's defaults.
+    let (target_machine, target_triple) = host_target_machine(optimization)?;
+    optimize_module(&codegen_ctx, &target_machine, &target_triple, optimization)?;
+    Ok(codegen_ctx.module.print_to_string().to_string())
 }
 
 /// Generate and verify the LLVM module for `program`.

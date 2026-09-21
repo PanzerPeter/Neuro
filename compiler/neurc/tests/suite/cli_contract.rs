@@ -375,3 +375,45 @@ fn emit_obj_does_not_require_a_main_function() {
         object_path.display()
     );
 }
+
+/// `--emit llvm-ir` stops before instruction selection and writes the textual module.
+/// The source has no `main`, which is half the point: the IR is what an out-of-process
+/// consumer rewrites, and such a module is a library. The data layout is asserted
+/// alongside the definition because IR without one is re-read against whatever defaults
+/// the consumer assumes.
+#[test]
+fn emit_llvm_ir_writes_a_main_less_module() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source_path = write_source(
+        &temp_dir,
+        "twice.nr",
+        "func twice(value: i32) -> i32 {\n    return value * 2\n}\n",
+    );
+    let ir_path = temp_dir.path().join("twice.ll");
+
+    let output = Command::new(neurc_path())
+        .arg("compile")
+        .arg("--emit")
+        .arg("llvm-ir")
+        .arg("-o")
+        .arg(&ir_path)
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc compile");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "Expected --emit llvm-ir to succeed, stderr: {stderr}"
+    );
+
+    let ir = fs::read_to_string(&ir_path).expect("--emit llvm-ir must write the output path");
+    assert!(
+        ir.contains("target datalayout"),
+        "Expected a data layout in the emitted IR, got: {ir}"
+    );
+    assert!(
+        ir.contains("define i32 @twice(i32"),
+        "Expected a definition of `twice` in the emitted IR, got: {ir}"
+    );
+}

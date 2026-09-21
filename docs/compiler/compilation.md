@@ -112,6 +112,10 @@ instead. It carries no `main` requirement, because an object may be a library; t
 [CLI Usage](../guides/cli-usage.md#emitting-an-object-file) for linking one into a shared
 library a foreign DLPack consumer can call.
 
+`--emit llvm-ir` stops one step earlier still and writes the textual LLVM module, with the
+host data layout and triple and after `-O`'s pass pipeline. It carries no `main` requirement
+either. See [CLI Usage](../guides/cli-usage.md#emitting-llvm-ir).
+
 ### Linking
 
 The driver shells out to a linker driver (a C compiler front-ending the real linker, which brings
@@ -134,7 +138,7 @@ neurc compile <INPUT> [OPTIONS]  # Full pipeline to a native binary
 **Options** (for `compile`):
 - `-o, --output <FILE>`, output executable path (defaults to the input filename, `.exe` on Windows)
 - `-O <LEVEL>`, optimization level (0 to 3)
-- `--emit <exe|obj>`, artifact to write (defaults to `exe`)
+- `--emit <exe|obj|llvm-ir>`, artifact to write (defaults to `exe`)
 
 **Examples**:
 ```bash

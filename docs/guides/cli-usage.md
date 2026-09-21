@@ -54,7 +54,7 @@ neurc compile <file.nr> [options]
 **Options**:
 - `-o, --output <FILE>` - Specify output executable path (default: the input filename without its extension)
 - `-O, --optimization <0-3>` - Optimization level (default: `0`); see [Optimization](#optimization)
-- `--emit <exe|obj>` - Artifact to write (default: `exe`); see [Emitting an object file](#emitting-an-object-file)
+- `--emit <exe|obj|llvm-ir>` - Artifact to write (default: `exe`); see [Emitting an object file](#emitting-an-object-file) and [Emitting LLVM IR](#emitting-llvm-ir)
 
 **Examples**:
 ```bash
@@ -104,6 +104,20 @@ through `cargo test -p neurc --test numpy_differential`.
 
 `neurc` does not link the shared library itself: `-shared` is the platform C compiler's job,
 and on Windows a DLL additionally needs an export list.
+
+#### Emitting LLVM IR
+
+`--emit llvm-ir` stops before instruction selection and writes the textual module (default
+output: the input name with `.ll`). Like `--emit obj` it does not require a `main` function.
+
+```bash
+neurc compile --emit llvm-ir -o twice.ll twice.nr
+```
+
+The module carries the host data layout and triple, so it can be handed straight to `opt`,
+`llc` or `clang`. `-O` still selects the middle-end pass pipeline: `-O0` emits the module as
+codegen built it, which is what a tool that rewrites the IR wants, and `-O2` emits what the
+object path would have given the backend.
 
 **Output**:
 - Success: `Successfully compiled <input.nr> -> <output_path>`

@@ -1,13 +1,14 @@
 # llvm-backend
 
 ## Purpose
-Emit native object code from the typed Neuro HIR via LLVM IR generation.
+Emit native object code, or the textual LLVM module behind it, from the typed Neuro HIR.
 
 ## Entry Point
 - Type: Library function
 - Input: `program: &neuro_hir::HirProgram, optimization: OptimizationLevelSetting, source: &str,
   source_path: &str`
-- Output: `Result<Vec<u8>, CodegenError>`
+- Output: `Result<Vec<u8>, CodegenError>` from `compile`, or `Result<String, CodegenError>`
+  from `compile_to_ir`, which prints the module instead of selecting instructions
 
 `CodegenError` implements `From<inkwell::builder::BuilderError>`, so the several hundred
 builder calls inside codegen use `?` directly. A builder failure is always an internal
@@ -53,7 +54,9 @@ source to HIR before compiling).
 
 ## Module Emission Order
 `compile` splits into `build_module` (generate + verify) and `emit_object_code`, so codegen tests
-can assert on IR text that object emission erases. Inside `build_module` the order is fixed and
+can assert on IR text that object emission erases. `compile_to_ir` is the third caller of that
+split: `build_module`, then `optimize_module` for the data layout, triple and pass pipeline, then
+`print_to_string`. Inside `build_module` the order is fixed and
 load-bearing:
 
 1. **Signature pre-declaration** over every function, method, and closure before any body:
