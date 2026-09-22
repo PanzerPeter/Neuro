@@ -1,3 +1,4 @@
+mod autodiff_tests;
 mod closure_tests;
 mod coalesce_tests;
 mod derive_tests;

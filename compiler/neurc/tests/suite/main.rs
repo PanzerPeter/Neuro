@@ -14,6 +14,7 @@ mod arrays;
 mod assignments;
 mod associated_type_bounds;
 mod associated_types;
+mod autodiff;
 mod basic_features;
 mod bitwise_operators;
 mod block_scoped_bindings;

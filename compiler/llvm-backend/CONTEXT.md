@@ -1061,6 +1061,11 @@ releases the displaced position (`drop_displaced_held_value`) and re-arms it, an
 re-arms the whole plan (`rearm_held_drop_flags`), which is unconditional because a held position
 exists only where its own type proves ownership.
 
+Every aggregate literal disowns the places written into it: a struct literal per field, and a
+tuple or array literal per element (`codegen_tuple_literal`, `codegen_array_literal`). The tuple
+and array halves were missing until BUG-052, so `(weights, counts)` left both bindings armed and
+the value was released by its old binding and again by the holder.
+
 Two conservative edges keep it sound rather than complete. A `match` whose arms bind disowns the
 scrutinee's entire plan (`mark_held_moved_for_drop`), because which payload left depends on a
 runtime tag, so an unbound variant leaks instead of being released twice. And

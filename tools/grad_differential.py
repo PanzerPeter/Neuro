@@ -5,21 +5,22 @@ This is the oracle every automatic-differentiation item is measured against. The
 spike that preceded Neuro's own AD engine produced silently ZERO derivatives rather than
 crashing, so "the transform ran" proves nothing: a gradient is only believed once a second,
 independent computation of the same number agrees with it. Finite differences are that
-second computation, and they need no AD machinery to exist, which is why this harness lands
+second computation, and they need no AD machinery to exist, which is why this harness landed
 before the transform rather than after it.
 
-What it checks today: `neurc` compiles each case into a shared library, the harness
-differentiates the compiled function numerically, and the result must match a derivative
-written out by hand on this side. That is the calibration step — it fixes the step size, the
-tolerance and the case set, and proves the comparison has teeth — and it is a real check of
-the primal the AD transform will read, because every perturbed point is evaluated by
-compiled code rather than by a model of it.
+Two case sets share one compiled module.
 
-When the reverse-mode transform lands it emits a pure `__f__rev` sibling per `@grad`
-function. Driving that is one more call site on top of `fd_gradient` and `compare` below:
-the produced gradient replaces `expected` and the finite-difference result becomes the
-reference, with the case's analytic gradient staying as a third opinion. Nothing in the
-comparison core changes, which is the point of landing it first.
+The scalar cases are the calibration: `neurc` compiles each into a shared library, the
+harness differentiates the compiled function numerically, and the result must match a
+derivative written out by hand on this side. That fixes the step size and the tolerance and
+proves the comparison has teeth, against compiled code rather than a model of it.
+
+The tensor cases are the pass condition of the reverse-mode transform. Each is a `@grad`
+function, so the module also holds its generated `__f__rev`, which returns the loss and a
+`GradsOf_f` bundle of owned gradient tensors. The harness calls `__f__rev`, reads the
+gradient straight out of the DLPack handle it returns, and requires it to agree with central
+finite differences of the compiled primal `f` at the same point. The analytic gradient stays
+as a third opinion, and the bundle's dtype and shape must be the parameter's own.
 
 Pipeline: write one Neuro module holding every case's function, `neurc compile --emit obj`,
 link it into a shared library with the platform C compiler, `ctypes`-load it, and call each
@@ -36,6 +37,7 @@ import argparse
 import ctypes
 import math
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -62,6 +64,28 @@ ABSOLUTE_TOLERANCE = 1e-8
 # O(100) here, so a shift of one is comfortably outside the tolerance above and inside the
 # range where a comparison that merely checked magnitudes could not get lucky.
 SELF_TEST_PERTURBATION = 1.0
+
+# The same balance for a function evaluated in `f32`, which every `@grad` loss is: it returns
+# a rank-0 `Tensor<f32, []>`, so the primal carries about seven digits rather than sixteen.
+# The step moves to eps32^(1/3), leaving four to five correct digits (the cases below land
+# within 1e-4 of the analytic partials), and the tolerance widens to match with a margin of
+# about ten. A shift of `SELF_TEST_PERTURBATION` still lands far outside it for every case,
+# whose partials are O(1) to O(10).
+F32_EPSILON = 2.0**-23
+F32_STEP_SCALE = F32_EPSILON ** (1.0 / 3.0)
+F32_RELATIVE_TOLERANCE = 1e-3
+F32_ABSOLUTE_TOLERANCE = 1e-3
+
+# The produced gradient against the analytic one: both are exact up to the `f32` rounding
+# of a few operations, so this is far tighter than any finite difference could support.
+REVERSE_RELATIVE_TOLERANCE = 1e-5
+REVERSE_ABSOLUTE_TOLERANCE = 1e-5
+
+# `__f__rev` returns a two-pointer aggregate, and the tensor cases read it through ctypes as
+# the equivalent C struct. On the System V and AArch64 C ABIs that struct comes back in two
+# registers, as LLVM returns the aggregate. The Windows x64 C ABI returns it through a hidden
+# pointer instead, so ctypes would read garbage there and the tensor cases are skipped.
+AGGREGATE_RETURN_MATCHES_C = sys.platform != "win32"
 
 
 def find_c_compiler():
@@ -248,6 +272,227 @@ func unused_parameter(x: f64, y: f64) -> f64 {
 ]
 
 
+class TensorCase:
+    """One `@grad` function of a single `f32` tensor, a point, and its true gradient.
+
+    `source` declares the function; its first parameter is the differentiated tensor, of
+    extents `shape`, and any further ones are the `f32` `constants`, which have no
+    gradient. `point` lists the tensor's elements in row-major order and `gradient`
+    recomputes the partials from `(*point, *constants)` by hand, in the same order.
+
+    One differentiated parameter per case, because the bundle then holds one pointer and
+    `__f__rev` returns two: the size the C ABIs return in registers (see
+    `AGGREGATE_RETURN_MATCHES_C`).
+    """
+
+    def __init__(self, name, source, shape, point, gradient, constants=()):
+        self.name = name
+        self.source = source
+        self.shape = shape
+        self.point = point
+        self.gradient = gradient
+        self.constants = constants
+
+
+def weighted_matmul_gradient(*a):
+    # loss = sum((A @ B) * K) with A the [2, 3] parameter, so dA = K @ B^T.
+    b = [[1.0, -1.0], [0.5, 2.0], [-2.0, 1.5]]
+    k = [[1.0, 2.0], [-1.0, 0.5]]
+    return [
+        sum(k[i][j] * b[l][j] for j in range(2)) for i in range(2) for l in range(3)
+    ]
+
+
+def right_matmul_gradient(*w):
+    # loss = sum((A @ W)^2) with W the [3, 2] parameter, so dW = A^T @ (2 A @ W).
+    a = [[1.0, 2.0, -1.0], [0.5, -1.5, 2.0]]
+    wm = [[w[2 * r], w[2 * r + 1]] for r in range(3)]
+    p = [[sum(a[i][l] * wm[l][j] for l in range(3)) for j in range(2)] for i in range(2)]
+    return [sum(a[i][l] * 2.0 * p[i][j] for i in range(2)) for l in range(3) for j in range(2)]
+
+
+TENSOR_CASES = [
+    TensorCase(
+        "weighted_squares",
+        """
+@grad
+func weighted_squares(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    val squares = w * w
+    val weights: Tensor<f32, [3]> = [3.0, -2.0, 0.5]
+    val weighted = squares * weights
+    return Tensor::scalar(weighted.sum())
+}
+""",
+        (3,),
+        (1.25, -0.5, 2.0),
+        lambda a, b, c: (6.0 * a, -4.0 * b, 1.0 * c),
+    ),
+    TensorCase(
+        "element_product",
+        """
+@grad
+func element_product(w: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
+    val scaled_product = w[0] * w[1] * scale
+    return Tensor::scalar(scaled_product - w[0])
+}
+""",
+        (2,),
+        (1.5, -0.75),
+        # The constant is an argument like any other and has no partial of its own.
+        lambda x, y, s: (y * s - 1.0, x * s),
+        constants=(2.5,),
+    ),
+    TensorCase(
+        "element_quotient",
+        """
+@grad
+func element_quotient(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val numerator = (w[0] * w[0]) + w[1]
+    val denominator = (w[1] * w[1]) + 1.0
+    return Tensor::scalar(numerator / denominator)
+}
+""",
+        (2,),
+        (1.5, 2.0),
+        # The scalar `rational` case above, now through the transform's quotient rule.
+        lambda x, y: (
+            2.0 * x / (1.0 + y * y),
+            (1.0 + y * y - 2.0 * y * (x * x + y)) / (1.0 + y * y) ** 2,
+        ),
+    ),
+    TensorCase(
+        "left_matmul",
+        """
+@grad
+func left_matmul(a: &mut Tensor<f32, [2, 3]>) -> Tensor<f32, []> {
+    val b: Tensor<f32, [3, 2]> = [[1.0, -1.0], [0.5, 2.0], [-2.0, 1.5]]
+    val k: Tensor<f32, [2, 2]> = [[1.0, 2.0], [-1.0, 0.5]]
+    val contracted = a @ b
+    val weighted = contracted * k
+    return Tensor::scalar(weighted.sum())
+}
+""",
+        (2, 3),
+        (0.5, -1.0, 2.0, 1.5, 0.25, -0.75),
+        weighted_matmul_gradient,
+    ),
+    TensorCase(
+        "right_matmul",
+        """
+@grad
+func right_matmul(w: &mut Tensor<f32, [3, 2]>) -> Tensor<f32, []> {
+    val a: Tensor<f32, [2, 3]> = [[1.0, 2.0, -1.0], [0.5, -1.5, 2.0]]
+    val contracted = a @ w
+    val squares = &contracted * &contracted
+    return Tensor::scalar(squares.sum())
+}
+""",
+        (3, 2),
+        (0.5, -0.25, 1.0, 0.75, -0.5, 0.125),
+        right_matmul_gradient,
+    ),
+    TensorCase(
+        "broadcast_row",
+        """
+@grad
+func broadcast_row(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    val m: Tensor<f32, [2, 3]> = [[1.0, -2.0, 0.5], [0.25, 1.5, -1.0]]
+    val shifted = m + w
+    val squares = &shifted * &shifted
+    return Tensor::scalar(squares.sum())
+}
+""",
+        (3,),
+        (0.5, -0.25, 1.0),
+        # The row is stretched over both rows of `m`, so its adjoint sums back over them.
+        lambda a, b, c: tuple(
+            2.0 * ((m0 + w) + (m1 + w))
+            for w, m0, m1 in ((a, 1.0, 0.25), (b, -2.0, 1.5), (c, 0.5, -1.0))
+        ),
+    ),
+    TensorCase(
+        "broadcast_column",
+        """
+@grad
+func broadcast_column(w: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {
+    val m: Tensor<f32, [2, 3]> = [[1.0, -2.0, 0.5], [0.25, 1.5, -1.0]]
+    val scaled = w * m
+    val squares = &scaled * &scaled
+    return Tensor::scalar(squares.sum())
+}
+""",
+        (2, 1),
+        (0.75, -1.25),
+        # An extent-1 axis stretched to 3: summed back, then restored to [2, 1].
+        lambda p, q: (
+            2.0 * p * (1.0 + 4.0 + 0.25),
+            2.0 * q * (0.0625 + 2.25 + 1.0),
+        ),
+    ),
+    TensorCase(
+        "row_means",
+        """
+@grad
+func row_means(w: &mut Tensor<f32, [2, 3]>) -> Tensor<f32, []> {
+    val means = w.mean(axis: 1)
+    val squares = &means * &means
+    return Tensor::scalar(squares.sum())
+}
+""",
+        (2, 3),
+        (1.0, 2.0, -0.5, 0.25, -1.5, 3.0),
+        lambda *w: tuple(
+            2.0 * (sum(w[3 * (k // 3) : 3 * (k // 3) + 3]) / 3.0) / 3.0 for k in range(6)
+        ),
+    ),
+    TensorCase(
+        "negation_and_reuse",
+        """
+@grad
+func negation_and_reuse(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val negated = 0.0 - w
+    val squared = negated * w
+    val total = squared + w
+    val inverse = 1.0 / w
+    val offset = -total.sum()
+    return Tensor::scalar(w.mean() + inverse.sum() - offset)
+}
+""",
+        (2,),
+        (1.25, -0.8),
+        # `w` is read five times, once through a scalar negation; its adjoint is the sum of
+        # all five contributions.
+        lambda a, b: tuple(-2.0 * x + 1.0 + 0.5 - 1.0 / (x * x) for x in (a, b)),
+    ),
+    TensorCase(
+        "rank_zero_cube",
+        """
+@grad
+func rank_zero_cube(w: &mut Tensor<f32, []>) -> Tensor<f32, []> {
+    val square = w * w
+    return square * w
+}
+""",
+        (),
+        (1.3,),
+        lambda x: (3.0 * x * x,),
+    ),
+    TensorCase(
+        "unread_element",
+        """
+@grad
+func unread_element(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    return Tensor::scalar((w[0] * w[0]) + 1.0)
+}
+""",
+        (2,),
+        (3.0, 11.0),
+        # The tensor analogue of `unused_parameter`: an element nothing reads.
+        lambda x, y: (2.0 * x, 0.0),
+    ),
+]
+
+
 class Failure(Exception):
     """A case whose gradient disagreed with the oracle, carrying the report to print."""
 
@@ -280,18 +525,24 @@ def fd_gradient(entry, point):
     return partials
 
 
-def compare(produced, expected):
+def compare(
+    produced,
+    expected,
+    produced_by="finite differences",
+    expected_by="the derivative rules",
+    relative=RELATIVE_TOLERANCE,
+    absolute=ABSOLUTE_TOLERANCE,
+):
     """Assert two gradients agree componentwise, or raise the report."""
     if len(produced) != len(expected):
         raise Failure(f"arity: {len(produced)} partials against {len(expected)}")
     for axis, (got, want) in enumerate(zip(produced, expected)):
         if not math.isfinite(got):
-            raise Failure(f"partial {axis}: finite differences produced {got!r}")
-        tolerance = RELATIVE_TOLERANCE * max(abs(got), abs(want)) + ABSOLUTE_TOLERANCE
+            raise Failure(f"partial {axis}: {produced_by} produced {got!r}")
+        tolerance = relative * max(abs(got), abs(want)) + absolute
         if abs(got - want) > tolerance:
             raise Failure(
-                f"partial {axis}: finite differences give {got!r}, "
-                f"the derivative rules give {want!r}"
+                f"partial {axis}: {produced_by} give {got!r}, {expected_by} give {want!r}"
             )
 
 
@@ -302,6 +553,9 @@ def build_library(neurc, work_dir):
     # not be emitted twice: the module would declare the same function name twice and fail
     # to compile. Keyed by source text, in declaration order.
     sources = dict.fromkeys(case.source for case in CASES)
+    sources.update(dict.fromkeys(case.source for case in TENSOR_CASES))
+    shapes = dict.fromkeys(case.shape for case in TENSOR_CASES)
+    sources.update(dict.fromkeys(constructor_source(shape) for shape in shapes))
     source_path.write_text("".join(sources), encoding="utf-8")
 
     object_path = work_dir / "grad_cases.o"
@@ -348,6 +602,224 @@ def detectable(expected):
     return any(partial != 0.0 for partial in expected)
 
 
+def constructor_name(shape):
+    return "make_tensor_" + ("x".join(str(extent) for extent in shape) or "scalar")
+
+
+def constructor_source(shape):
+    """A Neuro function building an `f32` tensor of `shape` from one `f64` per element.
+
+    The input tensors are built by compiled code, not assembled on this side, so the handle
+    `__f__rev` reads is exactly the one a Neuro caller would pass and the harness never has
+    to know the control block's layout. Arguments are `f64` because that is the one float
+    width ctypes passes unambiguously; the narrowing happens in Neuro.
+    """
+    count = math.prod(shape)
+    params = ", ".join(f"a{k}: f64" for k in range(count))
+    elements = [f"a{k} as f32" for k in range(count)]
+
+    def nest(extents, flat):
+        if not extents:
+            return flat[0]
+        step = len(flat) // extents[0]
+        rows = [nest(extents[1:], flat[i * step : (i + 1) * step]) for i in range(extents[0])]
+        return "[" + ", ".join(rows) + "]"
+
+    body = f"Tensor::from({nest(shape, elements)})" if shape else f"Tensor::scalar({elements[0]})"
+    dims = ", ".join(str(extent) for extent in shape)
+    return (
+        f"\nfunc {constructor_name(shape)}({params}) -> Tensor<f32, [{dims}]> {{\n"
+        f"    return {body}\n}}\n"
+    )
+
+
+class DLDevice(ctypes.Structure):
+    _fields_ = [("device_type", ctypes.c_int32), ("device_id", ctypes.c_int32)]
+
+
+class DLDataType(ctypes.Structure):
+    _fields_ = [("code", ctypes.c_uint8), ("bits", ctypes.c_uint8), ("lanes", ctypes.c_uint16)]
+
+
+class DLTensor(ctypes.Structure):
+    _fields_ = [
+        ("data", ctypes.c_void_p),
+        ("device", DLDevice),
+        ("ndim", ctypes.c_int32),
+        ("dtype", DLDataType),
+        ("shape", ctypes.POINTER(ctypes.c_int64)),
+        ("strides", ctypes.POINTER(ctypes.c_int64)),
+        ("byte_offset", ctypes.c_uint64),
+    ]
+
+
+class DLPackVersion(ctypes.Structure):
+    _fields_ = [("major", ctypes.c_uint32), ("minor", ctypes.c_uint32)]
+
+
+DELETER = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+
+
+class DLManagedTensorVersioned(ctypes.Structure):
+    _fields_ = [
+        ("version", DLPackVersion),
+        ("manager_ctx", ctypes.c_void_p),
+        ("deleter", DELETER),
+        ("flags", ctypes.c_uint64),
+        ("dl_tensor", DLTensor),
+    ]
+
+
+class GradientBundle(ctypes.Structure):
+    """`GradsOf_f` for a function of one tensor: one owned handle."""
+
+    _fields_ = [("gradient", ctypes.c_void_p)]
+
+
+class ReverseResult(ctypes.Structure):
+    """`(Tensor<f32, []>, GradsOf_f)`, the value `__f__rev` returns."""
+
+    _fields_ = [("loss", ctypes.c_void_p), ("grads", GradientBundle)]
+
+
+# `kDLFloat`, the type code every tensor here must carry.
+DLPACK_FLOAT = 2
+F32_BITS = 32
+
+
+def to_f32(value):
+    return struct.unpack("f", struct.pack("f", value))[0]
+
+
+def read_tensor(handle, what):
+    """The elements and extents of an `f32` tensor handle, checked against DLPack."""
+    if not handle:
+        raise Failure(f"{what} is a null handle")
+    tensor = DLManagedTensorVersioned.from_address(handle).dl_tensor
+    if tensor.dtype.code != DLPACK_FLOAT or tensor.dtype.bits != F32_BITS:
+        raise Failure(f"{what} has dtype code {tensor.dtype.code}, {tensor.dtype.bits} bits")
+    extents = tuple(tensor.shape[axis] for axis in range(tensor.ndim))
+    elements = (ctypes.c_float * math.prod(extents)).from_address(tensor.data)
+    return list(elements), extents
+
+
+def release(handle):
+    """Free a tensor through its own deleter, the one release path DLPack allows."""
+    DLManagedTensorVersioned.from_address(handle).deleter(handle)
+
+
+class TensorEntry:
+    """The compiled primal, derivative and input constructor of one tensor case."""
+
+    def __init__(self, library, case):
+        self.case = case
+        self.make = getattr(library, constructor_name(case.shape))
+        self.make.restype = ctypes.c_void_p
+        self.make.argtypes = [ctypes.c_double] * math.prod(case.shape)
+        arguments = [ctypes.POINTER(ctypes.c_void_p)] + [ctypes.c_float] * len(case.constants)
+        self.primal = getattr(library, case.name)
+        self.primal.restype = ctypes.c_void_p
+        self.primal.argtypes = arguments
+        self.reverse = getattr(library, f"__{case.name}__rev")
+        self.reverse.restype = ReverseResult
+        self.reverse.argtypes = arguments
+
+    def loss(self, point):
+        """The compiled primal at `point`, as the one element of its rank-0 result."""
+        tensor = ctypes.c_void_p(self.make(*point))
+        result = self.primal(ctypes.byref(tensor), *self.case.constants)
+        try:
+            (value,), _ = read_tensor(result, f"{self.case.name}'s loss")
+        finally:
+            release(result)
+            release(tensor.value)
+        return value
+
+    def derivative(self, point):
+        """`__f__rev` at `point`: the loss it reports and the gradient in its bundle."""
+        tensor = ctypes.c_void_p(self.make(*point))
+        result = self.reverse(ctypes.byref(tensor), *self.case.constants)
+        try:
+            loss, loss_extents = read_tensor(result.loss, "the reverse pass's loss")
+            gradient, extents = read_tensor(result.grads.gradient, "the bundle's gradient")
+        finally:
+            release(result.loss)
+            release(result.grads.gradient)
+            release(tensor.value)
+        if loss_extents != ():
+            raise Failure(f"the reverse pass returned a loss of extents {loss_extents}")
+        if extents != self.case.shape:
+            raise Failure(
+                f"the bundle's gradient has extents {extents}, the parameter {self.case.shape}"
+            )
+        return loss[0], gradient
+
+
+def fd_gradient_f32(loss, point):
+    """Central differences of an `f32` function, stepping each element in `f32`.
+
+    The same method as `fd_gradient`, at the `f32` step. The perturbed coordinates are
+    rounded to `f32` before the span is taken, because that rounded value is what the tensor
+    actually holds.
+    """
+    partials = []
+    for axis, coordinate in enumerate(point):
+        step = F32_STEP_SCALE * max(abs(coordinate), 1.0)
+        forward = list(point)
+        backward = list(point)
+        forward[axis] = to_f32(coordinate + step)
+        backward[axis] = to_f32(coordinate - step)
+        span = forward[axis] - backward[axis]
+        partials.append((loss(forward) - loss(backward)) / span)
+    return partials
+
+
+def run_tensor_case(entry, corrupt):
+    case = entry.case
+    point = [to_f32(value) for value in case.point]
+    expected = list(case.gradient(*point, *case.constants))
+    if not detectable(expected):
+        raise Failure(
+            f"every partial at {case.point} is zero, so the case cannot tell a correct "
+            "gradient from one that returns zeros"
+        )
+    primal = entry.loss(point)
+    reported, produced = entry.derivative(point)
+    compare(
+        [reported],
+        [primal],
+        "the reverse pass's loss",
+        "the primal",
+        REVERSE_RELATIVE_TOLERANCE,
+        REVERSE_ABSOLUTE_TOLERANCE,
+    )
+    if corrupt:
+        produced = [partial + SELF_TEST_PERTURBATION for partial in produced]
+    finite = fd_gradient_f32(entry.loss, point)
+    compare(
+        finite,
+        expected,
+        relative=F32_RELATIVE_TOLERANCE,
+        absolute=F32_ABSOLUTE_TOLERANCE,
+    )
+    compare(
+        produced,
+        finite,
+        "`__f__rev`",
+        "finite differences",
+        F32_RELATIVE_TOLERANCE,
+        F32_ABSOLUTE_TOLERANCE,
+    )
+    compare(
+        produced,
+        expected,
+        "`__f__rev`",
+        "the derivative rules",
+        REVERSE_RELATIVE_TOLERANCE,
+        REVERSE_ABSOLUTE_TOLERANCE,
+    )
+
+
 def run(neurc, corrupt):
     """Compile, differentiate and compare every case. Returns the list of failure reports."""
     failures = []
@@ -370,7 +842,23 @@ def run(neurc, corrupt):
                 compare(produced, expected)
             except Failure as failure:
                 failures.append(f"{case.name}: {failure}")
+        for case in tensor_cases():
+            try:
+                run_tensor_case(TensorEntry(library, case), corrupt)
+            except Failure as failure:
+                failures.append(f"{case.name}: {failure}")
     return failures
+
+
+def tensor_cases():
+    """The tensor cases this platform can drive; see `AGGREGATE_RETURN_MATCHES_C`."""
+    if AGGREGATE_RETURN_MATCHES_C:
+        return TENSOR_CASES
+    return []
+
+
+def case_count():
+    return len(CASES) + len(tensor_cases())
 
 
 def main():
@@ -396,6 +884,13 @@ def main():
         print(f"neurc not found at {neurc}", file=sys.stderr)
         return EXIT_SKIPPED
 
+    if not AGGREGATE_RETURN_MATCHES_C:
+        print(
+            "skipping the tensor cases: the Windows x64 C ABI returns `__f__rev`'s "
+            "aggregate through memory, not in the registers LLVM uses",
+            file=sys.stderr,
+        )
+
     try:
         failures = run(neurc, corrupt=args.self_test)
     except Failure as failure:
@@ -412,7 +907,7 @@ def main():
                 file=sys.stderr,
             )
             return 1
-        missed = len(CASES) - len(failures)
+        missed = case_count() - len(failures)
         if missed:
             print(
                 f"self-test: {missed} shifted case(s) were accepted; the comparison does "
@@ -420,19 +915,19 @@ def main():
                 file=sys.stderr,
             )
             return 1
-        print(f"self-test: every one of {len(CASES)} shifted cases rejected")
+        print(f"self-test: every one of {case_count()} shifted cases rejected")
         return 0
 
     for failure in failures:
         print(failure, file=sys.stderr)
     if failures:
         print(
-            f"{len(failures)} of {len(CASES)} cases disagree with the derivative rules",
+            f"{len(failures)} of {case_count()} cases disagree with the derivative rules",
             file=sys.stderr,
         )
         return 1
 
-    print(f"{len(CASES)} finite-difference gradients agree with the derivative rules")
+    print(f"{case_count()} gradients agree with finite differences of the compiled code")
     return 0
 
 

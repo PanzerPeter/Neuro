@@ -27,7 +27,7 @@ module per declaration kind beside it. `tests/` is split by subject.
 
 ### Pass order
 `check_program` is multi-pass, with lettered sub-passes slotted between the numbered ones
-(0z/0a/0/1b/1c/1d/2b) as later requirements landed. The full ordering and its rationale live in
+(0z/0a/0/1b/1c/1d/2b/3c) as later requirements landed. The full ordering and its rationale live in
 `docs/compiler/components/semantic-analysis.md`; the load-bearing points are:
 
 - **0z. `check_reserved_names`** runs *first, before anything mangles*. It rejects any declared
@@ -52,6 +52,14 @@ module per declaration kind beside it. `tests/` is split by subject.
   before any body is checked, so a call resolves regardless of source order and mutually recursive
   functions can name each other. `check_function` reads the signature back via
   `lookup_registered_signature` rather than resolving it twice.
+- **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
+  signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every tensor
+  parameter `&mut` over a float element with literal extents (`GradSignature`), a free
+  non-generic function with a bare attribute (`GradFormUnsupported`), and no declared struct
+  named `GradsOf_<f>` (`GradGeneratedNameTaken`; `__<f>__rev` cannot clash, pass 0z reserves
+  `__`). The bundle prefix is duplicated from `hir-lowering`, which emits it. Which constructs
+  a `@grad` BODY may use is deliberately not checked here: the transform owns that rule set
+  and reports it with a span itself.
 - **4. full check**: `check_function` / `check_impl` / `check_const_item`.
 - **5. lints**: `run_lints` walks bodies collecting non-fatal `Warning`s
   (`prefer-loop-over-while-true` today, silenced by `@allow(prefer_loop_over_while_true)`;

@@ -154,6 +154,11 @@ line, the column, the offending line and a caret run under the span. A `TypeErro
 `TypeError::span()` is what the driver renders instead. A use-after-move carries a second
 span and gets a `note: moved here` under the error, rendered by the same helper.
 
+`report_lowering_error` renders a lowering failure. `LoweringError::NotDifferentiable`, the
+derivative transform's refusal of a construct in a `@grad` body, carries a span and goes through
+`render_diagnostic` like a type error, in both `check` and `compile`; every other variant is a
+checker escape with no location and keeps the plain `HIR lowering error:` line.
+
 Line and column are computed from the source text here rather than through
 `source_location::SourceFile`, whose column is a byte offset within the line: a caret placed
 at a byte column drifts off the text it underlines as soon as the line holds a multi-byte

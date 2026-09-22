@@ -26,13 +26,36 @@ would couple two feature slices (VSA: duplicate over couple). Several tables her
 deliberate duplicates of the checker's (the collection method surface, the `val-else` binding
 table, return-position `impl Trait` resolution), and a divergence between the two surfaces as a
 `LoweringError`, which is the point. Lowering assumes well-typedness: a shape the checker should
-have rejected is a `LoweringError`, never a panic.
+have rejected is a `LoweringError`, never a panic. The one exception is `NotDifferentiable`, below.
 
 A registration pre-pass mirrors the checker's: struct field tables (plus `@derive(Copy/Clone)`
 and `@derive(PartialEq)` intent, in `clone_structs` / `partial_eq_structs`), `impl` method
 signatures under mangled `Struct__method` keys, free-function signatures,
 trait method order, and module constants. Bodies then lower under a lexical scope stack and a
 loop-context stack.
+
+### `@grad` and the derivative transform
+`autodiff/` lowers `@grad func f` to `f` plus a `GradsOf_f` struct (one owned field per `&mut
+Tensor` parameter, typed as that parameter's tensor) and `__f__rev(<f's params>) -> (loss,
+GradsOf_f)`, built from `f`'s already-lowered HIR by `derive_reverse`, called from
+`lower_program`'s function arm. `tape.rs` flattens the body into one-operation entries over
+leaves and marks activity; `mod.rs` replays them with every tensor operand borrowed, seeds the
+loss with `1.0` and sweeps backwards; `rules.rs` holds each operation's adjoint and the
+per-value accumulation; `emit.rs` binds every emitted expression to a fresh `__ad_t*` val so no
+nested owned temporary exists. Two ownership rules make the result sound: the only consuming
+node emitted is the reshape in an axis-reduction rule, applied to an adjoint nothing else reads,
+and an adjoint handed to two owners (an add passes its own through to both operands) is copied
+before either takes it (`Adjoints::owners`).
+
+The rule set is closed: `val` bindings over float and tensor `+ - * /`, scalar unary `-`, `@`,
+`.sum()` / `.mean()` whole or along one axis, tensor literals, element reads at literal
+positions, and constant fills. Anything else, inactive or not, is
+`LoweringError::NotDifferentiable { function, construct, span }`, the one user-facing variant of
+this enum: the transform owns its rule set, so it is the one place that can say precisely what
+it cannot differentiate, and it says where. `neurc` renders it like a type error. The signature
+rules (loss type, `&mut` tensor parameters) are the checker's, in `semantic-analysis`; the
+generated names are duplicated there, and a user name containing `__` is already rejected, so
+`__f__rev` cannot clash.
 
 `expressions/` holds the expression work: `mod.rs` the dispatch and the block-value tail rule,
 with `calls`, `enums`, `structs`, `matches`, `sequences`, `coercion`, `try_op`, `coalesce`, and

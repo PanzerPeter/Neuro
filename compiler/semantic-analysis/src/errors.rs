@@ -1128,6 +1128,23 @@ pub enum TypeError {
         pool: String,
         span: Span,
     },
+
+    #[error("`@grad` {form} is not supported yet; annotate a free, non-generic function with a bare `@grad`")]
+    GradFormUnsupported { form: String, span: Span },
+
+    #[error("`@grad` function '{function}' {problem}")]
+    GradSignature {
+        function: String,
+        problem: String,
+        span: Span,
+    },
+
+    #[error("`@grad` function '{function}' generates '{generated}', which the program already declares; rename one of them")]
+    GradGeneratedNameTaken {
+        function: String,
+        generated: String,
+        span: Span,
+    },
 }
 
 impl TypeError {
@@ -1326,6 +1343,9 @@ impl TypeError {
             | Self::NewtypeAlreadyDefined { span, .. }
             | Self::CyclicNewtype { span, .. }
             | Self::UnsupportedEnumPayload { span, .. }
+            | Self::GradFormUnsupported { span, .. }
+            | Self::GradSignature { span, .. }
+            | Self::GradGeneratedNameTaken { span, .. }
             | Self::UnknownEnumVariant { span, .. }
             | Self::EnumVariantFormMismatch { span, .. }
             | Self::EnumVariantArityMismatch { span, .. }

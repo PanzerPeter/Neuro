@@ -322,6 +322,23 @@ fn report_type_errors(
     anyhow::anyhow!("{} type error(s) found", errors.len())
 }
 
+/// Render a lowering failure. The derivative transform's refusal is a user-facing
+/// diagnostic with a location; every other variant is a checker escape and has none.
+fn report_lowering_error(
+    path: &Path,
+    source: Option<&str>,
+    error: &hir_lowering::LoweringError,
+) -> anyhow::Error {
+    let hir_lowering::LoweringError::NotDifferentiable { span, .. } = error else {
+        return anyhow::anyhow!("HIR lowering error: {}", error);
+    };
+    eprintln!(
+        "{}",
+        render_diagnostic(path, source, &error.to_string(), *span)
+    );
+    anyhow::anyhow!("`@grad` function could not be differentiated")
+}
+
 /// Check a Neuro source file for syntax and type errors
 fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     validate_source_file(path)?;
@@ -337,8 +354,13 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             // Lower the type-checked AST to typed HIR (Phase 1.8). The result is the
             // backend-agnostic contract every backend will consume; building it here
             // exercises the lowering end-to-end on every checked program.
-            let hir = hir_lowering::lower_program(&ast)
-                .map_err(|e| anyhow::anyhow!("HIR lowering error: {}", e))?;
+            let hir = hir_lowering::lower_program(&ast).map_err(|error| {
+                report_lowering_error(
+                    path,
+                    single_module_source(path, module_count).as_deref(),
+                    &error,
+                )
+            })?;
             println!(
                 "Type checking passed for {:?} ({} module(s), {} HIR items)",
                 path,
@@ -413,7 +435,10 @@ fn compile_file(
     // from the AST.
     log::debug!("Lowering to typed HIR...");
     let hir = hir_lowering::lower_program(&ast)
-        .map_err(|e| anyhow::anyhow!("HIR lowering error: {}", e))
+        .map_err(|error| {
+            let rendered = (module_count == 1).then_some(source.as_str());
+            report_lowering_error(input, rendered, &error)
+        })
         .context("Failed to lower to HIR")?;
     log::debug!("Lowered {} HIR items", hir.items.len());
 

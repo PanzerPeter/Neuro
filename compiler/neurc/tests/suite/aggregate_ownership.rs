@@ -262,3 +262,68 @@ func main() -> i32 { 0 }
         "expected a derive diagnostic, got: {err}"
     );
 }
+
+/// BUG-052: a tuple literal left each owned element armed in the binding it was moved
+/// out of, so the binding and the tuple's holder both released it. Every heap-owning
+/// kind double-freed; returning the tuple from a function aborted the program.
+#[test]
+fn regression_bug_052_a_tuple_literal_takes_ownership_of_its_elements() {
+    let test = CompileTest::new();
+    let source = r#"
+func pair() -> (Tensor<f32, [2]>, Vec<i32>) {
+    val weights: Tensor<f32, [2]> = [1.5, 2.5]
+    mut counts: Vec<i32> = Vec::new()
+    counts.push(4)
+    return (weights, counts)
+}
+
+func main() -> i32 {
+    val result = pair()
+    val local: Tensor<f32, [2]> = [1.0, 1.0]
+    val held = (local, 3)
+    (result.0.sum() + held.0.sum()) as i32 + result.1[0] + held.1
+}
+"#;
+    let exit = test
+        .compile_and_run("bug_052_tuple.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 13);
+}
+
+/// BUG-052, the array half, observed through a destructor: a value moved into an array
+/// literal was dropped by its old binding and again by the array.
+#[test]
+fn regression_bug_052_an_array_literal_takes_ownership_of_its_elements() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Noisy { id: i32 }
+
+impl Drop for Noisy {
+    func drop(&mut self) {
+        println("drop {self.id}")
+    }
+}
+
+func main() -> i32 {
+    val first = Noisy { id: 1 }
+    val tuple = (Noisy { id: 2 }, 0)
+    val held = [first]
+    held[0].id + tuple.1
+}
+"#;
+    let exe = test
+        .compile(&test.write_source("bug_052_array.nr", source))
+        .expect("compile failed");
+    let run = std::process::Command::new(&exe)
+        .output()
+        .expect("run executable");
+    assert_eq!(run.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    for id in [1, 2] {
+        assert_eq!(
+            stdout.matches(&format!("drop {id}")).count(),
+            1,
+            "value {id} must be destroyed exactly once, got:\n{stdout}"
+        );
+    }
+}

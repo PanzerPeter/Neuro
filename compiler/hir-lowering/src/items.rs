@@ -704,7 +704,13 @@ impl Lowerer {
                 // instantiations, discovered at call sites, reach the HIR.
                 Item::Function(func) if !func.generics.is_empty() => {}
                 Item::Function(func) => {
-                    hir_items.push(HirItem::Function(self.lower_function(func)?))
+                    let lowered = self.lower_function(func)?;
+                    // `@grad` lowers to the function plus its derivative: the bundle struct
+                    // and `__f__rev`, derived from the lowered body.
+                    if crate::autodiff::is_grad(&func.attributes) {
+                        hir_items.extend(crate::autodiff::derive_reverse(&lowered)?);
+                    }
+                    hir_items.push(HirItem::Function(lowered));
                 }
                 // Generic struct / impl templates are likewise never lowered directly;
                 // each concrete instance is emitted from the monomorphization worklist.

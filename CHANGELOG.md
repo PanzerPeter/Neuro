@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-09-22
+
+### Added
+
+- `@grad` compiles a reverse-mode derivative. A function marked `@grad` still compiles and runs
+  as written, and gains a generated sibling, `__f__rev`, taking the same parameters and returning
+  the loss with a `GradsOf_f` bundle: one owned gradient per tensor parameter, with that
+  parameter's element type and shape. The derivative is built at compile time from the typed HIR,
+  with no gradient tape. A `@grad` body may use `val` bindings over float and tensor `+ - * /`
+  (broadcasting included), scalar unary `-`, `@`, `.sum()` / `.mean()`, tensor literals and
+  element reads at literal positions. Any other construct is a located error. `.backward()`,
+  which makes the gradient readable from Neuro, comes next.
+- `@grad` signature checks: the loss must be a rank-0 `Tensor<f32, []>`, every tensor parameter
+  must be borrowed `&mut` with an `f32` or `f64` element and literal extents, and methods,
+  generic functions and attribute arguments are refused for now.
+- `tools/grad_differential.py` drives the generated derivatives. Its tensor cases call
+  `__f__rev` and must agree with central finite differences of the compiled function. They cover
+  products, quotients, both sides of `@`, row and column broadcasting, axis means, rank-0
+  tensors and a value read five times. The tensor cases skip on Windows, where the C ABI returns
+  the result differently.
+- `examples/showcase/gradient_loss.nr`: a least-squares loss marked `@grad`, evaluated inside a
+  `pool` over three candidate weights.
+
+### Fixed
+
+- BUG-052: a tuple or array literal now takes ownership of the bindings written into it.
+  `(weights, counts)` or `[first]` used to leave the original bindings live, so the value was
+  released twice. For a `Tensor` or a `Vec` that was a double free, and returning such a tuple
+  from a function aborted the program. For a `Drop` type it ran the destructor twice.
+
 ## [3.4.2] - 2026-09-22
 
 ### Fixed

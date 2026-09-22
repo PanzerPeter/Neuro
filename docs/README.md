@@ -36,6 +36,7 @@ Design goals:
 | [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, borrows, type inference |
 | [Strings](language-reference/strings.md) | The `string` slice type, the growable `String` buffer, interpolation, triple-quoted literals, codepoint iteration |
 | [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, dynamic shapes, devices |
+| [Automatic Differentiation](language-reference/autodiff.md) | `@grad`, the derivative function it generates, its signature rules, and which constructs a differentiated body may use |
 | [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |
 | [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, generics, dispatch, closures |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |
@@ -74,7 +75,7 @@ current entry points when this directory disagrees.
 |---|---|---|
 | CPU codegen | inkwell (LLVM 20) | In use |
 | MLIR construction | melior (LLVM/MLIR 20) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR, behind the off-by-default `mlir` feature |
-| Autodiff | Neuro's own reverse-mode HIR transform | Phase 3+ |
+| Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
 | GPU | MLIR nvgpu / rocdl / Triton | Phase 4+ |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.

@@ -28,7 +28,8 @@ not expose them, so the lowerer **re-derives** each expression's type while walk
 ## Behavior
 
 Lowering **assumes well-typedness**, it computes types, it does not validate them. A shape the
-checker should have rejected surfaces as a `LoweringError`, never a panic.
+checker should have rejected surfaces as a `LoweringError`, never a panic. The one exception is
+the derivative transform's refusal, described under [`@grad` functions](#grad-functions).
 
 A registration pre-pass mirrors the checker's: struct field tables (plus `@derive(Copy/Clone)`
 intent), `impl` method signatures under mangled `Struct__method` keys, free-function signatures, and
@@ -51,6 +52,21 @@ Three nodes carry a deliberately-chosen type the source has no first-class form 
 Divergent panic-family calls (`panic` / `assert` / `unreachable`) adopt their context's expected
 type, or `void` in statement position. The AST's `Expr::Paren` grouping node is dropped, tree
 structure already encodes grouping.
+
+### `@grad` functions
+
+A function marked `@grad` lowers to itself plus two generated items: a `GradsOf_<f>` struct with
+one field per differentiated parameter, and `__<f>__rev`, which takes the same parameters and
+returns the loss and that struct. The derivative is built from the function's already-lowered HIR,
+where every value still carries its tensor shape. The work lives in `src/autodiff/`: the body is
+flattened into one operation per binding, those bindings are emitted again with every tensor
+operand borrowed, and a reverse sweep adds each operation's adjoint rule, summing contributions
+for values used more than once.
+
+This is the one place lowering reports a user error with a location. The transform owns its rule
+set, so a construct it has no rule for is a `LoweringError::NotDifferentiable` that carries the
+construct's span, and `neurc` renders it like a type error. See
+[Automatic Differentiation](../../language-reference/autodiff.md) for the accepted body.
 
 ## Testing
 

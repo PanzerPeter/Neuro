@@ -27,7 +27,9 @@ use std::collections::{HashMap, HashSet};
 
 use ast_types::Item;
 use neuro_hir::{HirProgram, HirType};
+use shared_types::Span;
 
+mod autodiff;
 mod closures;
 mod collections;
 mod expressions;
@@ -75,6 +77,17 @@ pub enum LoweringError {
     /// as a template, so an instantiation is the path that reaches here.
     #[error("cannot apply binary operator {op} to operands of type '{ty}': '{ty}' has no built-in {op} and no operator-trait impl providing it")]
     UnsupportedOperand { op: String, ty: String },
+
+    /// A `@grad` body uses a construct the derivative transform has no rule for. Unlike
+    /// every other variant this is a user-facing limit of the transform, not a checker
+    /// escape: the transform owns its rule set, so it is the one place that can say
+    /// precisely what it cannot differentiate, and it says where.
+    #[error("cannot differentiate {construct} in `@grad` function '{function}'; a `@grad` body is `val` bindings over float and tensor arithmetic (`+`, `-`, `*`, `/`, unary `-`, `@`), `.sum()`, `.mean()`, tensor literals and element reads at literal positions, ending in the loss")]
+    NotDifferentiable {
+        function: String,
+        construct: String,
+        span: Span,
+    },
 
     /// An expression appeared in a position whose type the well-typed contract
     /// guarantees against (e.g. a `??` operator the checker rejects, or indexing a

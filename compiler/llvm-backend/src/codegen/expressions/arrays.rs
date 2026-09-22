@@ -36,6 +36,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut agg = arr_llvm.get_undef();
         for (i, el) in elements.iter().enumerate() {
             let val = self.codegen_expr(el)?;
+            // Same move as a tuple element: the array holder owns it from here.
+            self.mark_moved_for_drop(el);
             let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
             agg = self
                 .builder

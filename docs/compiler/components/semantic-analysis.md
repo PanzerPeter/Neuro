@@ -89,6 +89,12 @@ func test() -> i32 {
 - Function names must be unique (no overloading in Phase 1)
 - Forward references are supported
 
+A function marked `@grad` has its signature held to the rules the derivative needs: a rank-0
+`Tensor<f32, []>` return, every tensor parameter borrowed `&mut` with a float element and literal
+extents, and a free, non-generic function with no attribute arguments. The pass runs after every
+signature is registered, in `type_checkers/grad.rs`. Which constructs a `@grad` body may use is
+not checked here: that rule set belongs to the transform in [HIR lowering](hir-lowering.md).
+
 #### 4. Variable Declaration Validation
 
 - Variables must have a type (explicit or inferred)
@@ -270,6 +276,7 @@ where a later requirement was slotted between two existing ones.
 | 2 | Register `impl` method signatures (generic ones via `register_generic_impl`) | uses the struct types from pass 1 |
 | 2b | Operator-trait supertrait check (`check_operator_supertraits`) | all impls are registered, so `Comparable: PartialEq` is order-independent |
 | 3 | Register module-level constants | they must be visible in every function body |
+| 3c | `@grad` signature rules (`check_grad_attributes`) | every signature is resolved, and the generated bundle name can be tested against every declared struct |
 | 4 | Check function, method, and const **bodies** | every signature is known, so forward references and mutual recursion resolve |
 | 5 | Lints (`run_lints`) | run independently of type errors so style guidance always reaches the developer |
 

@@ -72,7 +72,8 @@ fn expect_success(output: Option<Output>, subject: &str) {
 }
 
 /// Every case's gradient, taken numerically from the compiled function, agrees with the
-/// derivative rules written out by hand on the harness's side.
+/// derivative rules written out by hand on the harness's side, and every `@grad` case's
+/// generated `__f__rev` agrees with both.
 #[test]
 fn finite_differences_agree_with_the_derivative_rules() {
     expect_success(run_harness(&[]), "the finite-difference gradient harness");
