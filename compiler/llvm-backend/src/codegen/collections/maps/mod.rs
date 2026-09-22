@@ -306,7 +306,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_int_mul(len, stride, "keys.bytes")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let malloc = self.alloc_fn()?;
+        // A `Vec` grows its buffer with libc `realloc`, which must never be handed an
+        // arena pointer, so the buffer it starts from is libc's too.
+        let malloc = self.get_or_declare_malloc();
         let buffer = self
             .builder
             .build_call(malloc, &[bytes.into()], "keys.buf")

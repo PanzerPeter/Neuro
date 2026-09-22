@@ -182,7 +182,7 @@ pub enum HirStmt {
     ///
     /// `test` decides the success path; `bindings` are then materialized into the
     /// ENCLOSING scope and stay live for every statement after this one: the
-    /// difference from a [`HirExprKind::Match`](crate::HirExprKind::Match) arm, whose
+    /// difference from a [`HirExprKind::Match`] arm, whose
     /// bindings die with the arm. `else_binding` is scoped to `else_block` alone. The
     /// frontend has verified that `else_block` diverges, so control leaves the scope
     /// on the failure path and never rejoins the success path.

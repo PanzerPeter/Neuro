@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-09-22
+
+### Fixed
+
+- A `pool` no longer lets an enum payload or a newtype carry arena memory past its closing
+  brace. `o = Some(local)`, `o = Ok(local)`, `o = Msg::Text(local)` and `n = Name(local)`, with
+  `local` built inside the block, compiled and read back whatever the next pool wrote over the
+  buffer. An enum or newtype now counts as pointerless only when its payloads do. A unit
+  variant such as `o = None` and a payload built in the store itself, `o = Some("a" + "b")`,
+  still cross.
+- `v.push(x)` and `m.insert(k, x)` on a collection declared before a `pool` are refused when
+  `x` may be arena memory, the same as a `&mut self` method that stores its argument. The
+  collection used to keep a pointer into the released arena.
+- A call inside a `pool` that passes a `&mut` binding no longer refuses a pointerless argument
+  because of how it was computed: `add_to(&mut total, i + 1)` is accepted, as
+  `val x = i + 1` then `add_to(&mut total, x)` always was.
+- A generic callee (`func put<T>(slot: &mut T, x: T)`) and a method reached through a field
+  (`outer.inner.stash(x)`) are now checked for keeping a pool value, like any other callee.
+  Both used to be accepted and left the store dangling.
+- A `HashMap` grown inside a `pool` keeps its entries after the block. Its table used to come
+  from the arena, so a map declared before the block lost everything inserted into it there.
+- A `Vec` returned by `keys()` inside a `pool` can grow. Its buffer used to come from the arena,
+  and growing it passed an arena pointer to the system allocator, which could crash the
+  program.
+
 ## [3.4.0] - 2026-09-22
 
 ### Added

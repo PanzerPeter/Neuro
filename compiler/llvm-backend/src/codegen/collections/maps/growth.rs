@@ -103,7 +103,10 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_int_mul(new_cap, stride, "cap.bytes")
             .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
 
-        let malloc = self.alloc_fn()?;
+        // The table belongs to the map, not to the expression growing it, and the map may
+        // outlive an enclosing `pool`. Like `Vec` growth, it therefore never comes from the
+        // arena.
+        let malloc = self.get_or_declare_malloc();
         let fresh = self
             .builder
             .build_call(malloc, &[bytes.into()], "table.new")

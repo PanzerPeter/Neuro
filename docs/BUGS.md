@@ -5,6 +5,158 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-050: calling a closure literal in place reports a function type as "non-function"
+
+- **Status**: open, specification gap plus a wrong diagnostic
+- **Area**: `semantic-analysis`; call checking in `type_checkers/expressions/calls.rs`
+- **Severity**: minor. Nothing miscompiles; the program is refused with a message that
+  contradicts itself
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val e = (|x: i32| -> i32 { x + 1 })(3)
+    e
+}
+```
+
+Observed: `error: cannot call non-function type fn(i32) -> i32`, followed by a cascade error
+on every later use of `e`. The type the message prints IS a function type. Binding the closure
+first (`val f = |x: i32| -> i32 { x + 1 }` then `f(3)`) compiles and returns 4.
+
+**Open question for the specification**: the closures section says nothing about calling a
+closure expression directly. Either it is legal, in which case this is a missing call path, or
+it is not, in which case the diagnostic should say that a closure has to be bound before it is
+called. Whichever is chosen, "non-function type" is wrong for a function type.
+
+**Root cause**: not yet confirmed in the code. The call checker appears to accept a callee
+that is a name or a path and to fall through to the non-function error for any other callee
+expression, whatever its type.
+
+**Workaround**: bind the closure to a `val` and call the binding.
+
+## BUG-049: a `pool` refuses to store some values it could prove are heap memory
+
+- **Status**: open, undecided (reproduces; whether the refusal is a defect or an accepted
+  limit of the provenance walk is not settled)
+- **Area**: `semantic-analysis`; `carries_no_arena` in `type_checkers/pools.rs`
+- **Severity**: minor. Sound (the refusal never lets arena memory escape) but it rejects
+  programs whose values never touch the arena
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    mut out: Tensor<i32, [2, 2]> = [[0, 0], [0, 0]]
+    mut s: string = "none"
+    val c = true
+    pool scratch {
+        out = a.map(|x: i32| -> i32 { x * 10 })   // refused
+        s = if c { "a" } else { "b" }              // refused
+    }
+    0
+}
+```
+
+Each store above is refused with "... outlives the pool". Written another way, the same
+values are accepted: `out = &a + &a` and `out = einsum("ij->ij", a)` compile, as does
+`s = "a"`. A store into a binding that outlives the block is emitted with the arena switched
+off, so none of these values can hold arena memory unless an operand already did.
+
+**Root cause**: confirmed in the code. `carries_no_arena` enumerates the expression shapes it
+can prove, and falls back to "may carry arena memory" for everything else. A closure literal
+argument, an `if` / `match` / block expression, and a method call such as `local.clone()` on a
+block-local receiver are not enumerated, so each is refused.
+
+**Workaround**: bind the value inside the block and copy out a scalar, or build it before the
+block.
+
+**Fix sketch**: walk an `if` / `match` / block through its result positions, and admit a
+closure literal argument whose captures are all admitted. Decide first whether the provenance
+walk is meant to grow these shapes or whether the refusal is the intended boundary.
+
+## BUG-048: `&dyn Trait` as a struct field reports the trait as undeclared
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; pass ordering in `TypeChecker::check_program`
+- **Severity**: minor. Refused with a false diagnostic rather than miscompiled
+
+**Minimal repro**
+
+```neuro
+trait Namer {
+    func name(&self) -> i32
+}
+
+struct Holder { d: &dyn Namer }
+
+func main() -> i32 { 0 }
+```
+
+Expected: the trait resolves, since items may be declared in any order and `Namer` is even
+declared first. The same `&dyn Namer` is accepted as a function parameter. Observed:
+`error: unknown trait 'Namer': no trait Namer is declared`, then "struct 'Holder' has no field
+'d'" at every construction.
+
+**Root cause**: confirmed in the code. Struct field types are resolved in the pass that
+registers structs, which runs before the pass that registers traits. Enums and newtypes avoid
+the same trap by pre-registering their names first; traits have no such pass, and a
+`dyn Trait` field also needs the trait's object safety, which is only known once its methods
+are registered.
+
+**Workaround**: none for a struct field; pass the trait object as a parameter instead.
+
+**Fix sketch**: defer resolving a `dyn Trait` field type until traits are registered, or
+pre-register trait names and check object safety in a later pass. Either touches the pass
+order, so it wants a regression test with the trait declared both before and after the struct.
+
+## BUG-047: a `Drop` value that is never bound is never destroyed
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; drop scheduling for expression temporaries
+- **Severity**: major. A destructor with a side effect (closing a handle, releasing a
+  resource) silently never runs
+
+**Minimal repro**
+
+```neuro
+struct Tok { id: i32 }
+
+impl Drop for Tok {
+    func drop(&mut self) { println("drop {self.id}") }
+}
+
+func make() -> Tok { Tok { id: 22 } }
+
+func main() -> i32 {
+    make()
+    val a = make().id
+    val b = Tok { id: 5 }.id
+    val t = make()
+    val c = t.id
+    println("end")
+    a + b + c - 49
+}
+```
+
+Expected: every `Tok` is destroyed exactly once, as the ownership rules require. Observed:
+only `t` is. The output is `end` then `drop 22`, once. The discarded `make()`, the temporary
+whose field `a` reads, and the struct literal whose field `b` reads are never dropped. Binding
+the value first (`val t = make()` then `t.id`) is the only form that runs the destructor.
+Passing a temporary by value to a function (`consume(make())`) does drop it, inside the callee.
+
+**Root cause**: not yet confirmed in the code. Drop flags are registered for bindings and for
+the positions a value is stored into; a temporary that is read from and then discarded has
+neither, so no scope exit reaches it.
+
+**Workaround**: bind the value to a `val` before reading from it.
+
+**Fix sketch**: give an unbound `Drop` temporary an owner for the rest of its statement and
+drop it at the statement's end, after the read. Regression tests want an expression
+statement, a field read, a method-call receiver and a struct literal receiver.
+
 ## BUG-039 — a function that hands back its own `string` parameter leaks the buffer
 
 - **Status**: open, confirmed

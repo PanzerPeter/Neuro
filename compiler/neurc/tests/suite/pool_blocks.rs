@@ -720,3 +720,265 @@ func main() -> i32 {
         "diagnostic should name the callee and the place, got: {err}"
     );
 }
+
+/// A second pool that fills the arena with fresh text, so a buffer the first pool left
+/// dangling reads back as filler instead of what was stored in it.
+const CLOBBER_POOL: &str = r#"
+    pool second {
+        mut i: i32 = 0
+        while i < 32 {
+            val filler = "clobber-clobber-clobber-{i}"
+            if filler.len() == 0 { println("x") }
+            i = i + 1
+        }
+    }
+"#;
+
+/// An enum payload and a newtype's inner value are positions that can hold a `string`,
+/// so an enum or newtype is not pointerless just because its name is nominal.
+#[test]
+fn regression_bug_041_an_enum_payload_may_not_carry_a_pool_value_out() {
+    let test = CompileTest::new();
+    let stores = [
+        ("mut o: Option<string> = None", "o = Some(local)"),
+        ("mut o: Result<string, i32> = Err(0)", "o = Ok(local)"),
+        ("mut o = Msg::Empty", "o = Msg::Text(local)"),
+        ("mut o = Name(\"none\")", "o = Name(local)"),
+    ];
+    for (i, (decl, store)) in stores.iter().enumerate() {
+        let source = format!(
+            r#"
+enum Msg {{ Text(string), Empty }}
+newtype Name = string
+func main() -> i32 {{
+    {decl}
+    pool first {{
+        val local = "survivor-" + "{{42}}"
+        {store}
+    }}
+    0
+}}
+"#
+        );
+        let err = test
+            .check(&format!("pool_enum_escape_{i}.nr"), &source)
+            .expect_err("a payload the block allocated must not outlive it");
+        assert!(
+            err.contains("outlives"),
+            "`{store}`: unexpected diagnostic: {err}"
+        );
+    }
+}
+
+/// The other half of the enum rule: a unit variant carries nothing, and a payload built
+/// in a routed store comes from the heap, so both still cross the boundary.
+#[test]
+fn an_enum_value_built_off_the_arena_still_crosses_the_pool() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+enum Msg {{ Text(string), Empty }}
+func main() -> i32 {{
+    mut o: Option<string> = Some("none")
+    mut m = Msg::Text("none")
+    pool first {{
+        o = None
+        m = Msg::Empty
+        o = Some("a" + "b")
+    }}
+{CLOBBER_POOL}
+    match o {{ Some(s) => println("{{s}}"), None => println("none") }}
+    match m {{ Msg::Text(s) => println("{{s}}"), Msg::Empty => println("empty") }}
+    0
+}}
+"#
+    );
+    let stdout = stdout_of(&test, "pool_enum_routed.nr", &source);
+    assert_eq!(stdout, "ab\nempty\n", "unexpected stdout: {stdout}");
+}
+
+/// `push` and `insert` store their argument into the receiver exactly as a `&mut self`
+/// method would, so an outliving collection is the same channel `stash` is.
+#[test]
+fn regression_bug_042_a_collection_may_not_keep_a_pool_value() {
+    let test = CompileTest::new();
+    let stores = [
+        ("mut v: Vec<string> = Vec::new()", "v.push(local)"),
+        ("mut v: Vec<string> = Vec::new()", "v.push(\"a\" + \"b\")"),
+        (
+            "mut m: HashMap<i32, string> = HashMap::new()",
+            "m.insert(1, local)",
+        ),
+    ];
+    for (i, (decl, store)) in stores.iter().enumerate() {
+        let source = format!(
+            r#"
+func main() -> i32 {{
+    {decl}
+    pool scratch {{
+        val local = "survivor-" + "{{42}}"
+        {store}
+    }}
+    0
+}}
+"#
+        );
+        let err = test
+            .check(&format!("pool_collection_retains_{i}.nr"), &source)
+            .expect_err("an outliving collection must not keep arena memory");
+        assert!(
+            err.contains("'scratch'") && (err.contains("'v'") || err.contains("'m'")),
+            "`{store}`: diagnostic should name the place and the pool, got: {err}"
+        );
+    }
+}
+
+/// An `i32` has no address to leave behind, whatever expression computed it: the bound
+/// form `val x = i + 1` was always accepted, so the inline one must be too.
+#[test]
+fn regression_bug_043_a_pointerless_argument_is_not_arena_memory() {
+    let test = CompileTest::new();
+    let source = r#"
+func add_to(t: &mut i32, x: i32) { *t = *t + x }
+func main() -> i32 {
+    mut total: i32 = 0
+    mut v: Vec<i32> = Vec::new()
+    pool first {
+        mut i: i32 = 0
+        while i < 4 {
+            add_to(&mut total, i + 1)
+            v.push((i * 10) as i32)
+            i = i + 1
+        }
+    }
+    mut s: i32 = 0
+    for x in v { s = s + x }
+    total + s
+}
+"#;
+    let code = test
+        .compile_and_run("pool_scalar_argument.nr", source)
+        .expect("a scalar argument carries no arena memory");
+    assert_eq!(code, 70);
+}
+
+/// A generic callee's `&mut T` is the same channel a concrete one's `&mut string` is;
+/// the template not being in the function table does not make it any less of one.
+#[test]
+fn regression_bug_044_a_generic_callee_may_not_retain_a_pool_value() {
+    let test = CompileTest::new();
+    let source = r#"
+func put<T>(slot: &mut T, x: T) { *slot = x }
+func main() -> i32 {
+    mut out: string = "none"
+    pool scratch {
+        val local = "survivor-" + "{42}"
+        put(&mut out, local)
+    }
+    0
+}
+"#;
+    let err = test
+        .check("pool_generic_retains.nr", source)
+        .expect_err("a generic callee must not keep arena memory either");
+    assert!(
+        err.contains("'put'") && err.contains("'out'"),
+        "diagnostic should name the callee and the place, got: {err}"
+    );
+}
+
+/// A map's table is the map's own buffer. Growing an outliving map inside a pool must
+/// not take the new table from the arena, or the entries vanish with the block.
+#[test]
+fn regression_bug_045_a_map_grown_inside_a_pool_keeps_its_entries() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+func main() -> i32 {{
+    mut m: HashMap<i32, i32> = HashMap::new()
+    pool first {{
+        mut i: i32 = 1
+        while i <= 20 {{
+            m.insert(i, i)
+            i = i + 1
+        }}
+    }}
+{CLOBBER_POOL}
+    match m.get(7) {{ Some(x) => x, None => 99 }}
+}}
+"#
+    );
+    let code = test
+        .compile_and_run("pool_map_growth.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(code, 7);
+}
+
+/// `Vec` growth reallocates its buffer with libc, so a `Vec` whose buffer came from the
+/// arena would hand `realloc` a pointer libc never gave out. `keys()` is such a `Vec`.
+/// The second pool writes past the arena's first page, which is where the damage that
+/// `realloc` did to the chunk becomes a fault.
+#[test]
+fn regression_bug_046_a_key_vec_built_inside_a_pool_can_grow() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut m: HashMap<i32, i32> = HashMap::new()
+    m.insert(1, 10)
+    m.insert(2, 20)
+    mut total: i32 = 0
+    pool first {
+        mut k = m.keys()
+        mut i: i32 = 0
+        while i < 40 {
+            k.push(i)
+            i = i + 1
+        }
+        for x in k { total = total + x }
+    }
+    pool second {
+        mut j: i32 = 0
+        while j < 200 {
+            val s = "after-after-after-after-{j}"
+            if s.len() == 0 { println("x") }
+            j = j + 1
+        }
+    }
+    total
+}
+"#;
+    let code = test
+        .compile_and_run("pool_keys_growth.nr", source)
+        .expect("compile/run failed");
+    // 1 + 2 + (0 + 1 + ... + 39) = 783, and an exit code keeps the low byte.
+    assert_eq!(code, 783 % 256);
+}
+
+/// A receiver reached through a field is the same channel as one named directly: the
+/// write lands in `o`, which outlives the block, however many fields sit in between.
+#[test]
+fn regression_bug_051_a_nested_receiver_may_not_retain_a_pool_value() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Box { s: string }
+impl Box {
+    func stash(&mut self, v: string) { self.s = v }
+}
+struct Outer { inner: Box }
+func main() -> i32 {
+    mut o = Outer { inner: Box { s: "none" } }
+    pool scratch {
+        val local = "survivor-" + "{42}"
+        o.inner.stash(local)
+    }
+    0
+}
+"#;
+    let err = test
+        .check("pool_nested_receiver.nr", source)
+        .expect_err("a nested receiver must not keep arena memory");
+    assert!(
+        err.contains("'stash'") && err.contains("'o'"),
+        "diagnostic should name the callee and the root binding, got: {err}"
+    );
+}

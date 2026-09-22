@@ -252,6 +252,12 @@ impl TypeChecker {
             }
         }
 
+        // `push` and `insert` keep what they are handed, so an outliving receiver is a
+        // channel out of a `pool` the way a `&mut self` method is.
+        if spec.params.contains(&ParamSlot::Value) {
+            self.check_pool_collection_store(object, method, args, &expected_args, span);
+        }
+
         Some(spec.result.resolve_result(self, &params, span))
     }
 

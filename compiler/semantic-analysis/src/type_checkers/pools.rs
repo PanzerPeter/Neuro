@@ -81,7 +81,7 @@ impl TypeChecker {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
-        if pool_safe(ty) || self.carries_no_arena(value, Emission::Routed) {
+        if self.pool_safe(ty) || self.carries_no_arena(value, Emission::Routed) {
             return;
         }
         // A name the symbol table does not know is already an undefined-variable
@@ -110,7 +110,7 @@ impl TypeChecker {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
-        if pool_safe(referent) || self.carries_no_arena(value, Emission::Routed) {
+        if self.pool_safe(referent) || self.carries_no_arena(value, Emission::Routed) {
             return;
         }
         let pool = pool.pool.clone();
@@ -137,12 +137,15 @@ impl TypeChecker {
             // A binding of pointerless type has nothing to carry; otherwise it must
             // predate every open arena mark, since a store into such a binding from
             // inside a pool is exactly what this rule rejects.
-            Expr::Identifier(id) => {
-                self.symbols
-                    .lookup(&id.name)
-                    .is_some_and(|symbol| pool_safe(&symbol.ty))
-                    || self.declared_before_pools(&id.name)
-            }
+            Expr::Identifier(id) => match self.symbols.lookup(&id.name) {
+                Some(symbol) => self.pool_safe(&symbol.ty) || self.declared_before_pools(&id.name),
+                // Not a binding: a unit variant such as `None`, or a function item.
+                // Neither holds an allocation.
+                None => true,
+            },
+            // A path in value position names a unit variant, a constant or a function
+            // item, none of which the block allocated.
+            Expr::Path { .. } => true,
             Expr::Paren(inner, _) => self.carries_no_arena(inner, emission),
             Expr::Cast { expr, .. } => self.carries_no_arena(expr, emission),
             Expr::Unary { operand, .. } => self.carries_no_arena(operand, emission),
@@ -239,15 +242,32 @@ impl TypeChecker {
                 type_name, member, ..
             } => self.method_key(&type_name.name, &member.name).cloned(),
             Expr::FieldAccess { object, field, .. } => {
-                let Expr::Identifier(receiver) = &**object else {
-                    return None;
-                };
-                let symbol = self.symbols.lookup(&receiver.name)?;
-                let Type::Struct(struct_name) = symbol.ty.referent() else {
-                    return None;
-                };
-                self.method_key(struct_name, &field.name).cloned()
+                let struct_name = self.receiver_struct(object)?;
+                self.method_key(&struct_name, &field.name).cloned()
             }
+            _ => None,
+        }
+    }
+
+    /// The struct a method receiver denotes: a binding, or a field chain rooted in one
+    /// (`outer.inner`), each step read off the struct table. `None` for anything that is
+    /// not a struct, including a trait object, whose method is not known statically.
+    fn receiver_struct(&self, receiver: &Expr) -> Option<String> {
+        let ty = match receiver {
+            Expr::Identifier(id) => self.symbols.lookup(&id.name)?.ty.clone(),
+            Expr::FieldAccess { object, field, .. } => {
+                let owner = self.receiver_struct(object)?;
+                self.struct_defs
+                    .get(&owner)?
+                    .iter()
+                    .find(|(name, _)| *name == field.name)?
+                    .1
+                    .clone()
+            }
+            _ => return None,
+        };
+        match ty.referent() {
+            Type::Struct(name) => Some(name.clone()),
             _ => None,
         }
     }
@@ -259,23 +279,68 @@ impl TypeChecker {
     /// covers the store a callee performs on the caller's behalf, which no amount of
     /// looking at the block's text reveals. Inert outside a pool.
     pub(crate) fn check_pool_retention(&mut self, func: &Expr, args: &[Expr], span: Span) {
-        let Some(pool) = self.pool_stack.last() else {
-            return;
-        };
-        // Nothing the block owns is being handed over, so there is nothing to retain.
-        if args
-            .iter()
-            .all(|arg| self.carries_no_arena(arg, Emission::InPlace))
-        {
+        if self.pool_stack.is_empty() {
             return;
         }
         let Some(place) = self.retaining_place(func, args) else {
+            return;
+        };
+        // Nothing the block owns is being handed over, so there is nothing to retain. A
+        // parameter of pointerless type receives no address, whatever computed the argument.
+        let params = self.declared_params(func).unwrap_or_default();
+        let handed_over = args.iter().enumerate().any(|(i, arg)| {
+            !params.get(i).is_some_and(|param| self.pool_safe(param))
+                && !self.carries_no_arena(arg, Emission::InPlace)
+        });
+        if !handed_over {
+            return;
+        }
+        let Some(pool) = self.pool_stack.last() else {
             return;
         };
         let pool = pool.pool.clone();
         let callee = callee_label(func);
         self.record_error(TypeError::PoolValueRetainedByCallee {
             callee,
+            place,
+            pool,
+            span,
+        });
+    }
+
+    /// Reject a collection `push` / `insert` inside a pool that stores a value the block
+    /// may have allocated into a collection declared before it. The receiver keeps its
+    /// argument exactly as a `&mut self` method would, but a builtin has no signature for
+    /// [`check_pool_retention`](TypeChecker::check_pool_retention) to read, so the
+    /// collection surface names the stored positions itself in `stored`. Inert outside a
+    /// pool.
+    pub(crate) fn check_pool_collection_store(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        args: &[Expr],
+        stored: &[Type],
+        span: Span,
+    ) {
+        if self.pool_stack.is_empty() {
+            return;
+        }
+        let handed_over = args
+            .iter()
+            .zip(stored)
+            .any(|(arg, ty)| !self.pool_safe(ty) && !self.carries_no_arena(arg, Emission::InPlace));
+        if !handed_over {
+            return;
+        }
+        let Some(place) = self.outliving_root(receiver) else {
+            return;
+        };
+        let Some(pool) = self.pool_stack.last() else {
+            return;
+        };
+        let pool = pool.pool.clone();
+        self.record_error(TypeError::PoolValueRetainedByCallee {
+            callee: format!("'{method}'"),
             place,
             pool,
             span,
@@ -291,13 +356,10 @@ impl TypeChecker {
     /// what a callee allocates — an unproven answer has to be the one that keeps the
     /// value inside the block.
     fn retaining_place(&self, func: &Expr, args: &[Expr]) -> Option<String> {
-        let key = self.callee_key(func)?;
-
         // The receiver is not in `args`; it rides inside a field-access callee, and its
         // mutability lives in `mut_self_methods` rather than in the signature, where
         // `self` is recorded as the bare struct type.
-        let receiver = self.callee_operand(func);
-        if let Some(object) = receiver {
+        if let (Some(key), Some(object)) = (self.callee_key(func), self.callee_operand(func)) {
             if self.mut_self_methods.contains(&key) {
                 if let Some(root) = self.outliving_root(object) {
                     return Some(root);
@@ -305,20 +367,36 @@ impl TypeChecker {
             }
         }
 
-        let Some(Type::Function { params, .. }) = self.functions.get(&key) else {
-            return None;
-        };
-        // An instance method's signature carries the implicit `self` in front of the
-        // declared parameters, so the positional arguments start one later.
-        let declared = match receiver {
-            Some(_) => params.get(1..)?,
-            None => params.as_slice(),
-        };
-        declared
+        self.declared_params(func)?
             .iter()
             .zip(args)
             .filter(|(param, _)| matches!(param, Type::Reference { mutable: true, .. }))
             .find_map(|(_, arg)| self.outliving_root(arg))
+    }
+
+    /// The callee's declared parameter types, aligned with the call's positional
+    /// arguments. `None` for a callee with no signature to read: a builtin, a trait
+    /// object, a closure value.
+    fn declared_params(&self, func: &Expr) -> Option<&[Type]> {
+        if let Some(key) = self.callee_key(func) {
+            let Some(Type::Function { params, .. }) = self.functions.get(&key) else {
+                return None;
+            };
+            // An instance method's signature carries the implicit `self` in front of the
+            // declared parameters, so the positional arguments start one later.
+            return match self.callee_operand(func) {
+                Some(_) => params.get(1..),
+                None => Some(params.as_slice()),
+            };
+        }
+        // A generic template is not in `functions`, since each call site monomorphizes
+        // its own instance, but its signature still says which parameters are `&mut`.
+        let Expr::Identifier(id) = func else {
+            return None;
+        };
+        self.generic_funcs
+            .get(&id.name)
+            .map(|sig| sig.params.as_slice())
     }
 
     /// The binding a place expression is rooted in, quoted for a diagnostic, when that
@@ -326,8 +404,13 @@ impl TypeChecker {
     /// rooted in such a binding, which includes every expression that is not a place.
     fn outliving_root(&self, place: &Expr) -> Option<String> {
         let name = root_binding(place)?;
-        self.declared_before_pools(name)
-            .then(|| format!("'{name}'"))
+        // A binding of pointerless type has nowhere to keep an address, so nothing
+        // stored into it can be left pointing into the arena.
+        let holds_pointers = self
+            .symbols
+            .lookup(name)
+            .is_none_or(|symbol| !self.pool_safe(symbol.ty.referent()));
+        (holds_pointers && self.declared_before_pools(name)).then(|| format!("'{name}'"))
     }
 
     /// The receiver a method call passes as `self`, which the operand walk must clear
@@ -423,6 +506,65 @@ impl TypeChecker {
         }
     }
 
+    /// Whether a value of this type can cross a pool boundary whatever its provenance.
+    ///
+    /// Only types that carry no pointer at all qualify. A `string`, collection, tensor,
+    /// reference or struct MAY hold an address into the arena, so one of those is admitted
+    /// only when [`TypeChecker::carries_no_arena`] proves this particular value does not.
+    /// An enum or newtype is looked through rather than trusted by name: a payload may be
+    /// non-`Copy`, so `Option<string>` holds exactly the pointer a `string` does.
+    fn pool_safe(&self, ty: &Type) -> bool {
+        self.pool_safe_within(ty, &mut HashSet::new())
+    }
+
+    /// [`pool_safe`](TypeChecker::pool_safe) over a nominal walk. `seen` keeps a cycle
+    /// from recursing forever; a revisited name adds no position the walk has not judged.
+    fn pool_safe_within(&self, ty: &Type, seen: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::F16
+            | Type::BF16
+            | Type::F32
+            | Type::F64
+            | Type::Bool
+            | Type::Char
+            | Type::Void
+            | Type::ConstValue(_)
+            | Type::Unknown => true,
+            Type::Enum(name) => {
+                if !seen.insert(name.clone()) {
+                    return true;
+                }
+                self.enum_defs.get(name).is_some_and(|variants| {
+                    variants
+                        .iter()
+                        .flat_map(|variant| variant.fields.iter())
+                        .all(|(_, payload)| self.pool_safe_within(payload, seen))
+                })
+            }
+            Type::Newtype(name) => {
+                if !seen.insert(name.clone()) {
+                    return true;
+                }
+                self.newtype_defs
+                    .get(name)
+                    .is_some_and(|inner| self.pool_safe_within(inner, seen))
+            }
+            Type::Array { element, .. } => self.pool_safe_within(element, seen),
+            Type::Tuple(elements) => elements
+                .iter()
+                .all(|element| self.pool_safe_within(element, seen)),
+            _ => false,
+        }
+    }
+
     /// Reject a `return` written inside a pool block. Inert outside a pool.
     pub(crate) fn check_pool_return(&mut self, span: Span) {
         let Some(pool) = self.pool_stack.last() else {
@@ -488,38 +630,6 @@ fn callee_label(func: &Expr) -> String {
         _ => return "the callee".to_string(),
     };
     format!("'{name}'")
-}
-
-/// Whether a value of this type can cross a pool boundary whatever its provenance.
-///
-/// Only types that carry no pointer at all qualify. A `string`, collection, tensor,
-/// reference or struct MAY hold an address into the arena, so one of those is admitted
-/// only when [`TypeChecker::off_arena`] proves this particular value does not.
-fn pool_safe(ty: &Type) -> bool {
-    match ty {
-        Type::I8
-        | Type::I16
-        | Type::I32
-        | Type::I64
-        | Type::U8
-        | Type::U16
-        | Type::U32
-        | Type::U64
-        | Type::F16
-        | Type::BF16
-        | Type::F32
-        | Type::F64
-        | Type::Bool
-        | Type::Char
-        | Type::Void
-        | Type::Enum(_)
-        | Type::Newtype(_)
-        | Type::ConstValue(_)
-        | Type::Unknown => true,
-        Type::Array { element, .. } => pool_safe(element),
-        Type::Tuple(elements) => elements.iter().all(pool_safe),
-        _ => false,
-    }
 }
 
 #[cfg(test)]

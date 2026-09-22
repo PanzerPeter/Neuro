@@ -1025,12 +1025,17 @@ here the way `Drop` and `Hashable` are. Only its name is known, and its shape is
 What may cross the boundary is decided by the place's TYPE and by the value's PROVENANCE, in that
 order. A type carrying no pointer at all (the scalars, `void`, and an enum, a newtype, an array or
 a tuple built only out of those) crosses unconditionally, which is why `total = total + 1` compiles inside a pool.
+`pool_safe` reads an enum's payloads and a newtype's inner type out of `enum_defs` and
+`newtype_defs` rather than trusting the name: a payload may be non-`Copy`, so `Option<string>`
+holds a pointer exactly as a `string` does (BUG-041).
 Everything else has to pass `carries_no_arena`, which returns true only where the source PROVES
 the value holds no arena memory:
 
 - a literal, including a `string` one, whose bytes live in `.rodata` rather than an allocation;
 - a binding of pointerless type, or one declared before the OUTERMOST open pool (the outermost,
   not the innermost: an enclosing block's arena outlives a nested block's release too);
+- a name or a path that is not a binding at all: a unit variant (`None`, `Msg::Empty`), a
+  constant or a function item;
 - `&e`, `*e`, `(e)`, `e as T` and a unary operator over a value that passes;
 - a call whose provenance is provable and whose receiver and every argument also pass. A
   function this program DECLARES — a free function found in `functions`, or an associated
@@ -1066,14 +1071,28 @@ place declared before the outermost open pool. Write access is read from the SIG
 from the callee's body — a `&mut self` receiver (found in `mut_self_methods`) and a `&mut T`
 parameter are the complete set of channels a callee has back into its caller, and whether the
 body actually stores through one is not asked. That over-approximates in the same direction
-`carries_no_arena` does: unproven means refused.
+`carries_no_arena` does: unproven means refused. Two things narrow it without weakening it. An
+argument whose declared parameter type is pointerless hands over no address, whatever
+expression computed it (BUG-043). And `outliving_root` skips a root binding of pointerless type,
+which has nowhere to keep one, so `put(&mut n, i + 1)` with `n: i32` is accepted through a
+generic `&mut T`. A generic free function is not in `functions`, so `declared_params` reads its
+template signature from `generic_funcs` instead, with the type parameters left abstract (BUG-044).
+
+A collection's `push` and `insert` keep their argument the way a `&mut self` method does, but a
+builtin has no signature to read. `resolve_collection_method` therefore calls
+`check_pool_collection_store` itself for any method with a `ParamSlot::Value` position, passing
+the element and key types the surface resolved, and the same diagnostic
+(`PoolValueRetainedByCallee`) names the method (BUG-042).
 
 Both rules resolve their callee through the shared `callee_key`, which returns the key into
-`functions` for a free function, a `Type::method` path, or a method on a bare-identifier
-receiver, and `None` otherwise. `callee_provenance_is_provable` is `callee_key(..).is_some()`,
+`functions` for a free function, a `Type::method` path, or a method on a struct receiver, and
+`None` otherwise. `receiver_struct` resolves the receiver through a field chain
+(`outer.inner.stash(..)`) one `struct_defs` step at a time, so a nested receiver is checked
+like a direct one (BUG-051). `callee_provenance_is_provable` is `callee_key(..).is_some()`,
 plus the routed relaxation above. Note the two rules want OPPOSITE conservatism from it — an unnameable callee is assumed to
-allocate arena memory (safe) but cannot be shown to retain any (unsafe) — which is the gap
-LIM-110 records for generic callees and nested receivers.
+allocate arena memory (safe) but cannot be shown to retain any (unsafe). That is why every
+callee the retention rule can name has to be resolvable: a generic template and a nested
+receiver were once unnameable, and each let a callee keep arena memory unchecked.
 
 One asymmetry the parameter walk has to handle: an instance method's signature in `functions`
 carries the implicit `self` as `params[0]`, as the bare struct type rather than a reference, so

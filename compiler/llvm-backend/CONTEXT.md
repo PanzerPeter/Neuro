@@ -1161,8 +1161,11 @@ non-null base, so the check folds away.
 The two libc pairs stay distinct through the wrappers, since `free` cannot release an
 over-aligned block on Windows. `realloc` is NOT wrapped and needs no arena path: the only
 buffers it grows (a `Vec`'s and a `String` builder's) are produced by `realloc` from a null
-pointer, so they never come from the arena at all. A map's table does, through `malloc`, and its
-growth path frees the old table through the wrapper.
+pointer, so they never come from the arena at all. A map's table and the `Vec` that `keys()`
+returns take libc `malloc` directly for the same pair of reasons: the table belongs to the map,
+which may outlive the block that grows it (BUG-045), and the key `Vec` will be grown by `realloc`,
+which must never see an arena pointer (BUG-046). The growth path frees the old table through the
+wrapper.
 
 ### `PoolAware` registration and the LIFO sweep
 `pool_aware_types: HashSet<String>` (filled by `compile` from `impl PoolAware for T` blocks) gates
@@ -1186,8 +1189,8 @@ indirectly, honours the cell's flag so a moved-out value is passed over, and run
 `__neuro_arena_release` reclaims the memory the instances and the cells live in.
 
 **Known limits**: the chunk is reserved once and never released, an allocation that does not fit
-falls back to the heap (correct, not fast), and `Vec` / `String` buffers stay off the arena for
-the `realloc` reason above. Registration follows bindings, so a `PoolAware` temporary is never
+falls back to the heap (correct, not fast), and `Vec` / `String` buffers and map tables stay off
+the arena for the reasons above. Registration follows bindings, so a `PoolAware` temporary is never
 registered, and the sweep issues one call per instance rather than batching per device.
 
 ## Collections ABI
