@@ -64,6 +64,13 @@ the handle; `tools/dlpack_differential.py` does exactly that, driven from
 itself: `-shared` is trivial on Unix and needs an export list on Windows, and choosing that
 export convention is a decision no caller has yet asked for.
 
+The second consumer of `--emit obj` is `tools/grad_differential.py`, driven from
+`tests/grad_differential.rs`. It differentiates a compiled scalar function numerically by
+calling it at perturbed points, which needs the function callable from outside rather than a
+tensor handle read in place. This is the oracle every automatic-differentiation item is
+measured against: a generated derivative is believed only once central differences of the
+compiled primal agree with it.
+
 `--emit llvm-ir` stops one step earlier again, at `llvm_backend::compile_to_ir`: the module is
 built, verified and optimized exactly as for an object, then printed instead of handed to
 instruction selection. It lifts the `main` requirement for the same reason `obj` does. The

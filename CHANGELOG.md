@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-09-22
+
+### Added
+
+- A finite-difference differential harness, `tools/grad_differential.py`, driven
+  from `cargo test -p neurc --test grad_differential`. It compiles a module of
+  scalar functions with `--emit obj`, links it into a shared library, calls each
+  function at perturbed points and takes its gradient by central differences.
+  This is the oracle every automatic-differentiation feature will be measured
+  against: a generated derivative is believed only once a second computation that
+  shares none of its machinery agrees with it.
+- The harness ships its own proof that it compares. `--self-test` shifts every
+  expectation and requires every case to be rejected, and refuses any case
+  whose true gradient is entirely zero, since such a case would pass under a
+  producer that silently returns zeros instead of differentiating. Missing
+  prerequisites (python3, a C compiler) skip with a printed reason rather than
+  fail, so the suite stays runnable without them.
+
+### Changed
+
+- The syntax spec now states that a `@grad` function's derivative is defined only
+  where its primal is differentiable, and that the value exactly at a kink is
+  unspecified. A central difference straddles the point it is taken at, so the
+  compiler's own pass condition cannot measure a derivative there; choosing a
+  convention is part of differentiating through control flow.
+- The README and the docs index no longer name Enzyme as the differentiation
+  engine. It was dropped in 3.2.0 in favour of Neuro's own reverse-mode transform
+  over typed HIR, and the public capability tables had not caught up.
+
 ## [3.3.0] - 2026-09-21
 
 ### Changed

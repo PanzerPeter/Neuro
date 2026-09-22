@@ -11,14 +11,14 @@ once, in the page that owns it.
 ## What is Neuro?
 
 A compiled language for high-performance AI workloads. It generates native code through an LLVM 20
-backend, with a roadmap toward MLIR-based tensor operations, IR-level automatic differentiation
-(Enzyme), and GPU acceleration via MLIR GPU dialects.
+backend, with a roadmap toward MLIR-based tensor operations, compile-time automatic
+differentiation, and GPU acceleration via MLIR GPU dialects.
 
 Design goals:
 
 - **Static typing** with inference, for safety and performance
 - **Tensor primitives** as first-class language types (Phase 2+)
-- **IR-level AD** via Enzyme MLIR, no runtime gradient tape (Phase 3+)
+- **Compile-time AD** as a source-to-source transform over typed HIR, no runtime gradient tape (Phase 3+)
 - **GPU acceleration** via MLIR `nvgpu` / `rocdl` / Triton dialects (Phase 4+)
 - **Zero-copy Python interop** via DLPack (Phase 7+)
 
@@ -74,7 +74,7 @@ current entry points when this directory disagrees.
 |---|---|---|
 | CPU codegen | inkwell (LLVM 20) | In use |
 | MLIR construction | melior (LLVM/MLIR 20) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR, behind the off-by-default `mlir` feature |
-| Autodiff | Enzyme MLIR dialect | Phase 3+ |
+| Autodiff | Neuro's own reverse-mode HIR transform | Phase 3+ |
 | GPU | MLIR nvgpu / rocdl / Triton | Phase 4+ |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.

@@ -259,7 +259,7 @@ The planned lowering strategy:
 ```
 typed HIR (neuro-hir)
   → MLIR dialects (linalg / tensor / func / arith)
-  → Enzyme MLIR AD pass (@grad)
+  → reverse-mode AD transform (@grad)
   → GPU dialects (nvgpu / rocdl / Triton)  or  llvm dialect
   → inkwell (final LLVM IR emission)
   → native object code

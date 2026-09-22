@@ -102,6 +102,13 @@ extents and strides from the handle. Run it with
 `python tools/dlpack_differential.py --neurc target/debug/neurc`, or as part of the suite
 through `cargo test -p neurc --test numpy_differential`.
 
+`tools/grad_differential.py` links the same way for a different reason: it calls compiled
+scalar functions at perturbed points and takes their gradients by central differences, which
+is how a derivative this compiler generates gets checked against a computation that shares
+none of its machinery. Run it with
+`python tools/grad_differential.py --neurc target/debug/neurc`, or through
+`cargo test -p neurc --test grad_differential`.
+
 `neurc` does not link the shared library itself: `-shared` is the platform C compiler's job,
 and on Windows a DLL additionally needs an export list.
 

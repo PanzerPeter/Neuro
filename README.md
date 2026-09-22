@@ -220,7 +220,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 |:---:|---|:---:|
 | **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits, closures, enums and pattern matching, error handling, modules | Complete |
 | **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value model they need | Complete |
-| **3** | **Automatic differentiation**: Enzyme MLIR pass, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | In progress |
+| **3** | **Automatic differentiation**: a reverse-mode source-to-source transform over Neuro's own typed HIR, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | In progress |
 | **4** | **GPU acceleration**: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
 | **5** | **Neural network standard library**: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
 | **6** | **Async runtime**: `async func`, `Future<T>`, `spawn`, `join` / `race`, an executor for data-loader and I/O overlap | Planned |
@@ -231,8 +231,9 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 Phase 2 is complete: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
 lowering, **2D** the pool allocator, **2E** the value model and **2F** functional sugar — the
 `|>` and `>>` operators, Einstein notation, and the `.map` / `.zip` / `.reduce` traversals —
-all shipped. Phase 3 opens on the binding question its first item names: whether a Rust
-process can reach Enzyme's MLIR dialect at all.
+all shipped. Phase 3 has settled what a gradient IS as a value and now has its pass
+condition: every derivative the compiler generates is measured against central finite
+differences of the compiled function.
 
 ---
 
@@ -259,7 +260,8 @@ compiler/
 
 Today a `.nr` file travels: **tokens → AST → type-checked AST → typed HIR → LLVM object code →
 system linker**. The tensor path forks after HIR into MLIR (linalg, tensor, func, arith) and will
-carry the Enzyme AD pass and the GPU dialects as Phases 3 and 4 land. Stage by stage:
+carry the GPU dialects as Phase 4 lands; the AD transform reads the same typed HIR. Stage by
+stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---
@@ -284,8 +286,10 @@ Everything is published at [neuro-lang.netlify.app](https://neuro-lang.netlify.a
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the architecture rules, coding standards, quality gates and
 pull request process. Open defects are in [docs/BUGS.md](docs/BUGS.md), and fixing one is the best
-way to start. Work is most useful in **Phase 3 (Automatic Differentiation)**, which opens on
-proving that Enzyme's MLIR dialect is reachable from Rust before any `@grad` surface is designed.
+way to start. Work is most useful in **Phase 3 (Automatic Differentiation)**. The engine is
+Neuro's own reverse-mode transform over the typed HIR, where tensor shapes are still in the
+types, and every gradient it generates is checked against central finite differences of the
+compiled function by `tools/grad_differential.py`.
 
 See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 

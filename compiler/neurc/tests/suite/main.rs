@@ -3,9 +3,9 @@
 //! Every file under `tests/suite/` is a module of this one binary rather than a
 //! test target of its own. Cargo builds and links one executable per `tests/*.rs`,
 //! so a file per feature meant a hundred-plus link steps on every `cargo test` and
-//! as many copies of the same binary in `target/`. The three targets that stayed
+//! as many copies of the same binary in `target/`. The four targets that stayed
 //! outside this file are the ones named directly in published docs:
-//! `architecture_tests`, `examples`, and `numpy_differential`.
+//! `architecture_tests`, `examples`, `numpy_differential`, and `grad_differential`.
 
 mod compile_harness;
 
