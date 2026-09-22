@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.2] - 2026-09-22
+
+### Fixed
+
+- The pool `keys()` growth regression test failed on Windows, which reports the full exit
+  value instead of its low byte. The test program now reduces its result to one byte itself.
+
 ## [3.4.1] - 2026-09-22
 
 ### Fixed

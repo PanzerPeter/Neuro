@@ -944,13 +944,14 @@ func main() -> i32 {
             j = j + 1
         }
     }
-    total
+    total % 256
 }
 "#;
     let code = test
         .compile_and_run("pool_keys_growth.nr", source)
         .expect("compile/run failed");
-    // 1 + 2 + (0 + 1 + ... + 39) = 783, and an exit code keeps the low byte.
+    // 1 + 2 + (0 + 1 + ... + 39) = 783. Windows reports the full exit value, so the
+    // program reduces it to one byte itself.
     assert_eq!(code, 783 % 256);
 }
 
