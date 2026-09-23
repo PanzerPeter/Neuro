@@ -91,9 +91,7 @@ impl<'ctx> CodegenContext<'ctx> {
             match self.codegen_expr(receiver)? {
                 BasicValueEnum::PointerValue(ptr) => {
                     let struct_ty = self.get_struct_llvm_type(struct_name)?;
-                    self.builder
-                        .build_load(struct_ty, ptr, "deref.self")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    self.builder.build_load(struct_ty, ptr, "deref.self")?
                 }
                 other => other,
             }
@@ -286,13 +284,8 @@ impl<'ctx> CodegenContext<'ctx> {
             } else {
                 // `&self`: allocate and store a private copy of the struct value.
                 let self_type = self_val.get_type();
-                let alloca = self
-                    .builder
-                    .build_alloca(self_type, "self")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-                self.builder
-                    .build_store(alloca, self_val)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                let alloca = self.builder.build_alloca(self_type, "self")?;
+                self.builder.build_store(alloca, self_val)?;
                 self.variables.insert("self".to_string(), alloca);
                 self.variable_types.insert("self".to_string(), self_type);
             }
@@ -303,13 +296,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 .get_nth_param((non_self_start + i) as u32)
                 .ok_or_else(|| CodegenError::InternalError(format!("missing parameter {}", i)))?;
             let param_type = param_val.get_type();
-            let alloca = self
-                .builder
-                .build_alloca(param_type, &param.name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_store(alloca, param_val)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let alloca = self.builder.build_alloca(param_type, &param.name)?;
+            self.builder.build_store(alloca, param_val)?;
             self.variables.insert(param.name.clone(), alloca);
             self.variable_types.insert(param.name.clone(), param_type);
             if let Some(sem_ty) = param_types.get(non_self_start + i) {
@@ -513,9 +501,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         self.mark_moved_for_drop(expr);
                     }
                     self.emit_drops_through(0)?;
-                    self.builder
-                        .build_return(Some(&ret_val))
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    self.builder.build_return(Some(&ret_val))?;
                 }
             }
         } else {

@@ -10,11 +10,12 @@
 // consumes the buffer it summarises, so nothing is moved and a borrowed receiver is
 // accepted: reading a shared weight's mean must not move it out of whatever owns it.
 
+use super::tensor_shape::{const_integer, declared_names};
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
-use ast_types::{Expr, UnaryOp};
-use shared_types::{Literal, Span};
+use ast_types::Expr;
+use shared_types::Span;
 
 pub(crate) const SUM_METHOD: &str = "sum";
 pub(crate) const MEAN_METHOD: &str = "mean";
@@ -168,31 +169,4 @@ fn extents(shape: &[TensorAxis]) -> impl Iterator<Item = usize> + '_ {
         ArrayLen::Fixed(extent) => extent,
         _ => 0,
     })
-}
-
-/// The value of an integer constant expression written as an axis: a literal, or one
-/// under a negation (`-1`) or parentheses.
-fn const_integer(expr: &Expr) -> Option<i128> {
-    match expr {
-        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
-        Expr::Paren(inner, _) => const_integer(inner),
-        Expr::Unary {
-            op: UnaryOp::Negate,
-            operand,
-            ..
-        } => const_integer(operand).map(|value| -value),
-        _ => None,
-    }
-}
-
-/// The dimension names a shape declares, for the diagnostic that lists them.
-fn declared_names(shape: &[TensorAxis]) -> String {
-    let names: Vec<&str> = shape
-        .iter()
-        .filter_map(|axis| axis.name.as_deref())
-        .collect();
-    if names.is_empty() {
-        return "no dimension names".to_string();
-    }
-    names.join(", ")
 }

@@ -36,7 +36,7 @@ const INTO_ITER_METHOD: &str = "into_iter";
 /// `Iterator`'s stepping method.
 const NEXT_METHOD: &str = "next";
 /// The type of an enumerated loop's position binding, matching the counted loops'.
-const LOOP_INDEX_TYPE: HirType = HirType::U64;
+pub(crate) const LOOP_INDEX_TYPE: HirType = HirType::U64;
 /// The byte cursor a `Chars` iterator carries, which is what `.char_indices()` binds.
 const CHARS_OFFSET_FIELD: &str = "offset";
 /// The `for`-head form that drives a `Chars` iterator by that cursor.
@@ -389,14 +389,14 @@ fn nominal_name(ty: &HirType) -> Option<String> {
 
 /// The place a synthesized loop cursor is stored in. Its type is fixed by the
 /// lowering that created the binding.
-fn cursor_place(name: &str) -> HirPlace {
+pub(crate) fn cursor_place(name: &str) -> HirPlace {
     HirPlace::Var {
         name: name.to_string(),
         ty: LOOP_INDEX_TYPE,
     }
 }
 
-fn variable(name: &str, ty: HirType, span: Span) -> HirExpr {
+pub(crate) fn variable(name: &str, ty: HirType, span: Span) -> HirExpr {
     HirExpr::new(HirExprKind::Variable(name.to_string()), ty, span)
 }
 

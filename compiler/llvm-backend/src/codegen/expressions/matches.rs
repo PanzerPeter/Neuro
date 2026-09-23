@@ -58,9 +58,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let scrut_val = self.codegen_expr(scrutinee)?;
         let scrut_llvm = scrut_val.get_type();
         let scrut_alloca = self.entry_alloca(scrut_llvm, "match.scrut")?;
-        self.builder
-            .build_store(scrut_alloca, scrut_val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(scrut_alloca, scrut_val)?;
 
         // A binding an arm takes by value carries whatever the scrutinee held out of it.
         // Which position leaves depends on the tag, which is not knowable here, so every
@@ -94,9 +92,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let fail_bb = self.context.append_basic_block(parent_fn, "match.fail");
         test_bbs.push(fail_bb);
 
-        self.builder
-            .build_unconditional_branch(test_bbs[0])
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(test_bbs[0])?;
 
         for (i, arm) in arms.iter().enumerate() {
             let body_bb = self
@@ -108,8 +104,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let matched =
                 self.codegen_arm_tests(&arm.tests, scrut_alloca, scrut_llvm, &scrut_sem)?;
             self.builder
-                .build_conditional_branch(matched, body_bb, next_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(matched, body_bb, next_bb)?;
 
             self.builder.position_at_end(body_bb);
             self.codegen_arm_body(
@@ -126,9 +121,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // Exhaustiveness is guaranteed by the type checker, so no value reaches here.
         self.builder.position_at_end(fail_bb);
-        self.builder
-            .build_unreachable()
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unreachable()?;
 
         self.builder.position_at_end(merge_bb);
         match result_slot {
@@ -136,7 +129,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let llvm_ty = self.get_any_llvm_type(result_ty)?;
                 self.builder
                     .build_load(llvm_ty, slot, "match.val")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                    .map_err(CodegenError::from)
             }
             None => Ok(self.context.i32_type().const_int(0, false).into()),
         }
@@ -155,10 +148,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let one = self.codegen_single_test(test, scrut_alloca, scrut_llvm, scrut_sem)?;
             acc = Some(match acc {
                 None => one,
-                Some(prev) => self
-                    .builder
-                    .build_or(prev, one, "match.or")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+                Some(prev) => self.builder.build_or(prev, one, "match.or")?,
             });
         }
         match acc {
@@ -183,14 +173,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 let want = self.context.i32_type().const_int(*tag as u64, false);
                 self.builder
                     .build_int_compare(IntPredicate::EQ, tag_val, want, "match.tag")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                    .map_err(CodegenError::from)
             }
             HirMatchTest::IntEq { value } => {
                 let scalar = self.load_match_scalar(scrut_alloca, scrut_llvm)?;
                 let want = scalar.get_type().const_int(*value as u64, false);
                 self.builder
                     .build_int_compare(IntPredicate::EQ, scalar, want, "match.eq")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                    .map_err(CodegenError::from)
             }
             HirMatchTest::IntRange { lo, hi } => {
                 let scalar = self.load_match_scalar(scrut_alloca, scrut_llvm)?;
@@ -205,15 +195,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 let hi_c = scalar.get_type().const_int(*hi as u64, false);
                 let ge = self
                     .builder
-                    .build_int_compare(ge_pred, scalar, lo_c, "match.ge")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    .build_int_compare(ge_pred, scalar, lo_c, "match.ge")?;
                 let le = self
                     .builder
-                    .build_int_compare(le_pred, scalar, hi_c, "match.le")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    .build_int_compare(le_pred, scalar, hi_c, "match.le")?;
                 self.builder
                     .build_and(ge, le, "match.range")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                    .map_err(CodegenError::from)
             }
         }
     }
@@ -252,8 +240,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let guard_val = self.codegen_expr(guard)?.into_int_value();
             let eval_bb = self.context.append_basic_block(parent_fn, "match.guard.ok");
             self.builder
-                .build_conditional_branch(guard_val, eval_bb, next_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(guard_val, eval_bb, next_bb)?;
             self.builder.position_at_end(eval_bb);
         }
 
@@ -262,9 +249,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let val = self.codegen_expr(&arm.body)?;
                 if !self.current_block_terminated() {
                     self.mark_moved_for_drop(&arm.body);
-                    self.builder
-                        .build_store(slot, val)
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    self.builder.build_store(slot, val)?;
                 }
             }
             None => {
@@ -281,9 +266,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         if !self.current_block_terminated() {
             self.emit_top_scope_drops()?;
-            self.builder
-                .build_unconditional_branch(merge_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(merge_bb)?;
         }
 
         self.pop_drop_scope();
@@ -307,8 +290,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 HirBindingSource::Scrutinee => {
                     let val = self
                         .builder
-                        .build_load(scrut_llvm, scrut_alloca, "match.bind")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                        .build_load(scrut_llvm, scrut_alloca, "match.bind")?;
                     (val, scrut_sem.clone(), scrut_llvm)
                 }
                 HirBindingSource::EnumPayload { slot } => {
@@ -327,9 +309,7 @@ impl<'ctx> CodegenContext<'ctx> {
             };
 
             let alloca = self.entry_alloca(llvm_ty, &b.name)?;
-            self.builder
-                .build_store(alloca, value)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(alloca, value)?;
 
             let payload = matches!(b.source, HirBindingSource::EnumPayload { .. });
             if let (ArmOwnership::Arm { scrutinee }, true) = (ownership, payload) {
@@ -410,12 +390,10 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<IntValue<'ctx>> {
         let agg = self
             .builder
-            .build_load(scrut_llvm, scrut_alloca, "match.enum")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_load(scrut_llvm, scrut_alloca, "match.enum")?;
         let tag = self
             .builder
-            .build_extract_value(agg.into_struct_value(), 0, "match.tag")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_extract_value(agg.into_struct_value(), 0, "match.tag")?;
         Ok(tag.into_int_value())
     }
 
@@ -429,15 +407,13 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let agg = self
             .builder
-            .build_load(scrut_llvm, scrut_alloca, "match.enum")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let payload = self
-            .builder
-            .build_extract_value(agg.into_struct_value(), 1, "match.payload")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_load(scrut_llvm, scrut_alloca, "match.enum")?;
+        let payload =
+            self.builder
+                .build_extract_value(agg.into_struct_value(), 1, "match.payload")?;
         self.builder
             .build_extract_value(payload.into_array_value(), slot as u32, "match.slot")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Load a scalar scrutinee (integer / `char` / `bool`) as an integer value.
@@ -448,8 +424,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<IntValue<'ctx>> {
         let val = self
             .builder
-            .build_load(scrut_llvm, scrut_alloca, "match.scalar")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_load(scrut_llvm, scrut_alloca, "match.scalar")?;
         Ok(val.into_int_value())
     }
 
@@ -463,12 +438,10 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let slot_ty = self.type_mapper.enum_slot_type(enum_name)?;
         let cell = self.enum_payload_cell(slot_ty)?;
-        self.builder
-            .build_store(cell, raw)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(cell, raw)?;
         let field_llvm = self.type_mapper.map_type(field_ty)?;
         self.builder
             .build_load(field_llvm, cell, "match.field")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 }

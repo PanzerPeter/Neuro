@@ -22,7 +22,6 @@ Workspace layout (`compiler/`):
 | Crate | Role |
 | --- | --- |
 | `infrastructure/shared-types` | `Span`, `Identifier`, `Literal`: no business logic |
-| `infrastructure/source-location` | Source mapping |
 | `infrastructure/ast-types` | AST node definitions (owned here, not in the parser) |
 | `infrastructure/neuro-hir` | Typed HIR: the frontend/backend contract |
 | `lexical-analysis` | Tokenizer (logos + unicode-ident) |

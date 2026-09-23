@@ -151,7 +151,7 @@ impl<'ctx> CodegenContext<'ctx> {
             owned: false,
         };
 
-        let buffer_ty = self.tensor_buffer_type(&tensor_ty)?;
+        let buffer_ty = self.type_mapper.tensor_buffer_type(&tensor_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         self.emit_elementwise_loop(
             ElementwiseLoop {
@@ -207,7 +207,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let rhs = self.codegen_operand_source(right, &result_shape)?;
 
         let (handle, data) = self.alloc_tensor(result_ty, "tensor.bin")?;
-        let buffer_ty = self.tensor_buffer_type(result_ty)?;
+        let buffer_ty = self.type_mapper.tensor_buffer_type(result_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         self.emit_elementwise_loop(
             ElementwiseLoop {
@@ -279,7 +279,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         let (handle, destination) = self.alloc_tensor(result_ty, "tensor.mm")?;
-        let buffer_ty = self.tensor_buffer_type(result_ty)?;
+        let buffer_ty = self.type_mapper.tensor_buffer_type(result_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         self.emit_contraction_loop(
             Contraction {

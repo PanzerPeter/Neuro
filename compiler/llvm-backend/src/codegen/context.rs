@@ -4,10 +4,9 @@ use inkwell::attributes::Attribute;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
-use inkwell::module::Module;
-use inkwell::types::BasicTypeEnum;
+use inkwell::module::{Linkage, Module};
+use inkwell::types::{BasicTypeEnum, FunctionType, PointerType};
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
-use source_location::SourceFile;
 use std::collections::{HashMap, HashSet};
 
 use crate::codegen::expressions::matches::SavedBinding;
@@ -304,10 +303,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// the plain wrapping instruction is emitted. See.
     pub(crate) overflow_checks: bool,
 
-    /// Source text wrapper for the module being compiled, used to render `file:line:col`
+    /// `(path, text)` of the module being compiled, used to render `file:line:col`
     /// in panic-family diagnostics. `None` when the caller did not supply source
     /// (e.g. the library doctest); panic diagnostics then omit the location suffix.
-    pub(crate) source: Option<SourceFile>,
+    pub(crate) source: Option<(String, String)>,
 
     /// Names of structs implementing the `Drop` lang-item (`impl Drop for T`).
     /// A binding of such a type gets a scope-exit destructor call. Empty for programs
@@ -477,7 +476,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let slot = self
             .builder
             .build_alloca(ty, name)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()));
+            .map_err(CodegenError::from);
         if let Some(block) = restore {
             self.builder.position_at_end(block);
         }
@@ -504,31 +503,39 @@ impl<'ctx> CodegenContext<'ctx> {
             })
     }
 
+    /// Declare the external function `name` with signature `ty`, or return the
+    /// declaration an earlier call already inserted.
+    pub(crate) fn extern_fn(&self, name: &str, ty: FunctionType<'ctx>) -> FunctionValue<'ctx> {
+        self.module
+            .get_function(name)
+            .unwrap_or_else(|| self.module.add_function(name, ty, Some(Linkage::External)))
+    }
+
+    fn ptr_type(&self) -> PointerType<'ctx> {
+        self.context.ptr_type(inkwell::AddressSpace::default())
+    }
+
     /// Get the external libc `memset` declaration, inserting it on first use.
     /// `memset(dst, byte: i32, n: i64) -> dst`. Resets a collection's slots on `clear`.
     pub(crate) fn get_or_declare_memset(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("memset") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = ptr_type.fn_type(
+        let ptr = self.ptr_type();
+        let ty = ptr.fn_type(
             &[
-                ptr_type.into(),
+                ptr.into(),
                 self.context.i32_type().into(),
                 self.context.i64_type().into(),
             ],
             false,
         );
-        self.module
-            .add_function("memset", fn_type, Some(inkwell::module::Linkage::External))
+        self.extern_fn("memset", ty)
     }
 
-    /// Record the set of structs implementing `Drop` before code generation.
     /// Record each declared trait's method order, fixing the vtable slot layout.
     pub(crate) fn set_trait_methods(&mut self, trait_methods: HashMap<String, Vec<String>>) {
         self.trait_methods = trait_methods;
     }
 
+    /// Record the set of structs implementing `Drop` before code generation.
     pub(crate) fn set_drop_types(&mut self, drop_types: std::collections::HashSet<String>) {
         self.drop_types = drop_types;
     }
@@ -566,59 +573,20 @@ impl<'ctx> CodegenContext<'ctx> {
         self.overflow_checks = enabled;
     }
 
-    /// The `[N x T]` layout of the buffer a tensor value points at.
-    pub(crate) fn tensor_buffer_type(
-        &self,
-        ty: &crate::types::Type,
-    ) -> CodegenResult<inkwell::types::BasicTypeEnum<'ctx>> {
-        self.type_mapper.tensor_buffer_type(ty)
-    }
-
-    /// The `DLManagedTensorVersioned` layout a tensor value points at.
-    pub(crate) fn dlpack_managed_tensor_type(&self) -> inkwell::types::StructType<'ctx> {
-        self.type_mapper.dlpack_managed_tensor_type()
-    }
-
-    /// The allocation a tensor's handle and its control block share.
-    pub(crate) fn dlpack_tensor_storage_type(&self) -> inkwell::types::StructType<'ctx> {
-        self.type_mapper.dlpack_tensor_storage_type()
-    }
-
-    /// The DLPack type code and bit width of a tensor element type.
-    pub(crate) fn dlpack_dtype(
-        &self,
-        element: &crate::types::Type,
-    ) -> CodegenResult<crate::type_mapping::DlpackDataType> {
-        self.type_mapper.dlpack_dtype(element)
-    }
-
-    /// The byte size of a tensor's element buffer.
-    pub(crate) fn tensor_buffer_bytes(&self, ty: &crate::types::Type) -> CodegenResult<u64> {
-        self.type_mapper.tensor_buffer_bytes(ty)
-    }
-
     /// Provide the module source so panic-family diagnostics can render `file:line:col`.
-    pub(crate) fn set_source(&mut self, source: SourceFile) {
-        self.source = Some(source);
+    pub(crate) fn set_source(&mut self, path: String, text: String) {
+        self.source = Some((path, text));
     }
 
     /// Get the external `memcmp` declaration, inserting it on first use.
     /// memcmp(s1: ptr, s2: ptr, n: i64) -> i32, from libc, always available on Linux/macOS.
     pub(crate) fn get_or_declare_memcmp(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("memcmp") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = self.context.i32_type().fn_type(
-            &[
-                ptr_type.into(),
-                ptr_type.into(),
-                self.context.i64_type().into(),
-            ],
+        let ptr = self.ptr_type();
+        let ty = self.context.i32_type().fn_type(
+            &[ptr.into(), ptr.into(), self.context.i64_type().into()],
             false,
         );
-        self.module
-            .add_function("memcmp", fn_type, Some(inkwell::module::Linkage::External))
+        self.extern_fn("memcmp", ty)
     }
 
     /// Get the external POSIX `write` declaration, inserting it on first use.
@@ -626,81 +594,61 @@ impl<'ctx> CodegenContext<'ctx> {
     /// the diagnostic to stderr (fd 2); the return value is discarded. POSIX-standard on
     /// Linux/macOS and exposed by the MSVC CRT compatibility layer on Windows.
     pub(crate) fn get_or_declare_write(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("write") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = self.context.i64_type().fn_type(
+        let i64_type = self.context.i64_type();
+        let ty = i64_type.fn_type(
             &[
                 self.context.i32_type().into(),
-                ptr_type.into(),
-                self.context.i64_type().into(),
+                self.ptr_type().into(),
+                i64_type.into(),
             ],
             false,
         );
-        self.module
-            .add_function("write", fn_type, Some(inkwell::module::Linkage::External))
+        self.extern_fn("write", ty)
     }
 
-    /// Get the external libc `malloc` declaration, inserting it on first use.
-    /// `malloc(size: i64) -> ptr`. Backs the heap buffer for runtime string
-    /// concatenation; `size_t` is 64-bit on every supported target.
     /// Get the external over-aligned allocation declaration, inserting it on first use.
     /// A tensor's element buffer comes from here rather than from `malloc` because DLPack
     /// requires its `data` pointer to be 64-byte aligned, which `malloc` guarantees only
     /// up to `max_align_t`. Both spellings take two `size_t`s and return the block; the
     /// call site orders the arguments, see [`ALIGNED_ALLOC_FN`].
     pub(crate) fn get_or_declare_aligned_alloc(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function(ALIGNED_ALLOC_FN) {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
         let i64_type = self.context.i64_type();
-        let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        self.module.add_function(
-            ALIGNED_ALLOC_FN,
-            fn_type,
-            Some(inkwell::module::Linkage::External),
-        )
+        let ty = self
+            .ptr_type()
+            .fn_type(&[i64_type.into(), i64_type.into()], false);
+        self.extern_fn(ALIGNED_ALLOC_FN, ty)
     }
 
     /// Get the release matching [`get_or_declare_aligned_alloc`], inserting it on first
     /// use. `free` cannot release an over-aligned block on Windows, so the pairing is
     /// per-platform and a buffer must go back to its own allocator's release.
     pub(crate) fn get_or_declare_aligned_free(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function(ALIGNED_FREE_FN) {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        self.module.add_function(
-            ALIGNED_FREE_FN,
-            fn_type,
-            Some(inkwell::module::Linkage::External),
-        )
+        let ty = self
+            .context
+            .void_type()
+            .fn_type(&[self.ptr_type().into()], false);
+        self.extern_fn(ALIGNED_FREE_FN, ty)
     }
 
+    /// Get the external libc `malloc` declaration, inserting it on first use.
+    /// `malloc(size: i64) -> ptr`. Backs the heap buffer for runtime string
+    /// concatenation; `size_t` is 64-bit on every supported target.
     pub(crate) fn get_or_declare_malloc(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("malloc") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = ptr_type.fn_type(&[self.context.i64_type().into()], false);
-        self.module
-            .add_function("malloc", fn_type, Some(inkwell::module::Linkage::External))
+        let ty = self
+            .ptr_type()
+            .fn_type(&[self.context.i64_type().into()], false);
+        self.extern_fn("malloc", ty)
     }
 
     /// Get the external libc `free` declaration, inserting it on first use.
     /// `free(ptr)`. Releases a collection's heap buffer when its owner leaves scope;
     /// a null pointer is a defined no-op, so an untouched empty collection needs no guard.
     pub(crate) fn get_or_declare_free(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("free") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        self.module
-            .add_function("free", fn_type, Some(inkwell::module::Linkage::External))
+        let ty = self
+            .context
+            .void_type()
+            .fn_type(&[self.ptr_type().into()], false);
+        self.extern_fn("free", ty)
     }
 
     /// Get the external libc `realloc` declaration, inserting it on first use.
@@ -708,53 +656,32 @@ impl<'ctx> CodegenContext<'ctx> {
     /// contents; a null `ptr` degenerates to `malloc`, which is how the first
     /// insertion into an empty collection allocates.
     pub(crate) fn get_or_declare_realloc(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("realloc") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = ptr_type.fn_type(&[ptr_type.into(), self.context.i64_type().into()], false);
-        self.module
-            .add_function("realloc", fn_type, Some(inkwell::module::Linkage::External))
+        let ptr = self.ptr_type();
+        let ty = ptr.fn_type(&[ptr.into(), self.context.i64_type().into()], false);
+        self.extern_fn("realloc", ty)
+    }
+
+    /// `(dst: ptr, src: ptr, n: i64) -> dst`, the shared shape of `memmove` and `memcpy`.
+    fn mem_transfer_type(&self) -> FunctionType<'ctx> {
+        let ptr = self.ptr_type();
+        ptr.fn_type(
+            &[ptr.into(), ptr.into(), self.context.i64_type().into()],
+            false,
+        )
     }
 
     /// Get the external libc `memmove` declaration, inserting it on first use.
     /// `memmove(dst, src, n: i64) -> dst`. Shifts the ordered map's slot array on
     /// insertion and removal, where source and destination overlap.
     pub(crate) fn get_or_declare_memmove(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("memmove") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = ptr_type.fn_type(
-            &[
-                ptr_type.into(),
-                ptr_type.into(),
-                self.context.i64_type().into(),
-            ],
-            false,
-        );
-        self.module
-            .add_function("memmove", fn_type, Some(inkwell::module::Linkage::External))
+        self.extern_fn("memmove", self.mem_transfer_type())
     }
 
     /// Get the external libc `memcpy` declaration, inserting it on first use.
     /// `memcpy(dst: ptr, src: ptr, n: i64) -> dst`. Copies each operand's bytes
     /// into the freshly allocated buffer during string concatenation.
     pub(crate) fn get_or_declare_memcpy(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("memcpy") {
-            return f;
-        }
-        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = ptr_type.fn_type(
-            &[
-                ptr_type.into(),
-                ptr_type.into(),
-                self.context.i64_type().into(),
-            ],
-            false,
-        );
-        self.module
-            .add_function("memcpy", fn_type, Some(inkwell::module::Linkage::External))
+        self.extern_fn("memcpy", self.mem_transfer_type())
     }
 
     /// Get the external libc `abort` declaration, inserting it on first use.

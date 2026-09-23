@@ -60,14 +60,8 @@ impl<'ctx> CodegenContext<'ctx> {
         suffix: &str,
     ) -> CodegenResult<()> {
         let fat = message.into_struct_value();
-        let ptr = self
-            .builder
-            .build_extract_value(fat, 0, "panic.msg.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let len = self
-            .builder
-            .build_extract_value(fat, 1, "panic.msg.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let ptr = self.builder.build_extract_value(fat, 0, "panic.msg.ptr")?;
+        let len = self.builder.build_extract_value(fat, 1, "panic.msg.len")?;
 
         let thunk = self.cold_message_panic_thunk(suffix)?;
         self.emit_cold_call(thunk, &[ptr.into(), len.into()])
@@ -196,10 +190,7 @@ impl<'ctx> CodegenContext<'ctx> {
         thunk: FunctionValue<'ctx>,
         args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
     ) -> CodegenResult<()> {
-        let call = self
-            .builder
-            .build_call(thunk, args, "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let call = self.builder.build_call(thunk, args, "")?;
         for attribute in ["cold", "noreturn"] {
             call.add_attribute(
                 AttributeLoc::Function,
@@ -209,9 +200,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 ),
             );
         }
-        self.builder
-            .build_unreachable()
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unreachable()?;
         Ok(())
     }
 }

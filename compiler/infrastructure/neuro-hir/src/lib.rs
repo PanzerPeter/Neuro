@@ -96,10 +96,8 @@ mod tests {
             inner: Box::new(HirType::I32),
             mutable: true,
         };
-        assert!(r.is_reference());
         assert_eq!(r.referent(), &HirType::I32);
         // A non-reference returns itself unchanged.
-        assert!(!HirType::I32.is_reference());
         assert_eq!(HirType::I32.referent(), &HirType::I32);
     }
 

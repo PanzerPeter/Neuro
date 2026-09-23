@@ -237,10 +237,9 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
 /// the text of whichever module raised the error, not the root file's, so resolving
 /// it here would point confidently at the wrong line; the message is printed alone.
 ///
-/// Line and column are computed from the source text rather than through
-/// `source_location::SourceFile`, whose column is a byte offset within the line: a
-/// caret placed at a byte column drifts away from the text it is meant to underline
-/// as soon as the line holds a multi-byte character.
+/// The column counts characters, not bytes: a caret placed at a byte column drifts
+/// away from the text it is meant to underline as soon as the line holds a
+/// multi-byte character.
 fn render_diagnostic(path: &Path, source: Option<&str>, message: &str, span: Span) -> String {
     render_labeled("error", path, source, message, span)
 }

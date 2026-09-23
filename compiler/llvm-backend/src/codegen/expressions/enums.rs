@@ -57,17 +57,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut payload_val = payload_array_ty.get_undef();
         for (slot, (value, _)) in payload.iter().enumerate() {
             let cell = self.enum_payload_cell(slot_ty)?;
-            self.builder
-                .build_store(cell, *value)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let encoded = self
-                .builder
-                .build_load(slot_ty, cell, "enum.words")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(cell, *value)?;
+            let encoded = self.builder.build_load(slot_ty, cell, "enum.words")?;
             payload_val = self
                 .builder
-                .build_insert_value(payload_val, encoded, slot as u32, "enum.slot")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_insert_value(payload_val, encoded, slot as u32, "enum.slot")?
                 .into_array_value();
         }
 
@@ -75,13 +69,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut agg = enum_ty.get_undef();
         agg = self
             .builder
-            .build_insert_value(agg, tag_val, 0, "enum.tag")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(agg, tag_val, 0, "enum.tag")?
             .into_struct_value();
         agg = self
             .builder
-            .build_insert_value(agg, payload_val, 1, "enum.payload")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(agg, payload_val, 1, "enum.payload")?
             .into_struct_value();
 
         Ok(agg.into())
@@ -100,9 +92,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // In the entry block, not at the builder's position: a cell built inside a
         // loop body would otherwise grow the stack by one slot per iteration.
         let cell = self.entry_alloca(slot_ty, "enum.cell")?;
-        self.builder
-            .build_store(cell, slot_ty.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(cell, slot_ty.const_zero())?;
         Ok(cell)
     }
 }

@@ -92,8 +92,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let branch = self
             .builder
-            .build_conditional_branch(ok, cont_bb, fail_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(ok, cont_bb, fail_bb)?;
         self.mark_cold_branch(branch)?;
 
         self.builder.position_at_end(fail_bb);
@@ -116,8 +115,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let branch = self
             .builder
-            .build_conditional_branch(cond_val, cont_bb, fail_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(cond_val, cont_bb, fail_bb)?;
         self.mark_cold_branch(branch)?;
 
         self.builder.position_at_end(fail_bb);
@@ -128,23 +126,23 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Render the ` at file:line:col` suffix for a panic diagnostic from a byte offset.
-    /// Empty when no source was supplied (e.g. the library doctest path).
+    /// Empty when no source was supplied (e.g. the library doctest path). The column
+    /// counts characters, not bytes, matching the compile-time diagnostics `neurc`
+    /// renders, so a multi-byte character earlier on the line does not shift it.
     fn panic_location_suffix(&self, offset: usize) -> String {
-        match &self.source {
-            Some(src) => {
-                let pos = src.position_at(offset);
-                format!(" at {}:{}:{}", src.path, pos.line, pos.column)
-            }
-            None => String::new(),
-        }
+        let Some((path, text)) = &self.source else {
+            return String::new();
+        };
+        let before = text.get(..offset).unwrap_or(text);
+        let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+        let line = before.matches('\n').count() + 1;
+        let column = before[line_start..].chars().count() + 1;
+        format!(" at {path}:{line}:{column}")
     }
 
     /// Emit `write(2, <global ".rodata" bytes>, len)` for a compile-time-known string.
     pub(crate) fn emit_write_cstr(&self, text: &str) -> CodegenResult<()> {
-        let global = self
-            .builder
-            .build_global_string_ptr(text, "panic.str")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let global = self.builder.build_global_string_ptr(text, "panic.str")?;
         let len = self.context.i64_type().const_int(text.len() as u64, false);
         self.emit_write(global.as_pointer_value().into(), len)
     }
@@ -158,22 +156,16 @@ impl<'ctx> CodegenContext<'ctx> {
         let write_fn = self.get_or_declare_write();
         let fd = self.context.i32_type().const_int(STDERR_FD, false);
         let args: [BasicMetadataValueEnum; 3] = [fd.into(), ptr.into(), len.into()];
-        self.builder
-            .build_call(write_fn, &args, "panic.write")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(write_fn, &args, "panic.write")?;
         Ok(())
     }
 
     /// Emit `abort()` followed by an `unreachable` terminator, ending the basic block.
     pub(crate) fn emit_abort_unreachable(&mut self) -> CodegenResult<()> {
         let abort_fn = self.get_or_declare_abort();
-        self.builder
-            .build_call(abort_fn, &[], "panic.abort")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(abort_fn, &[], "panic.abort")?;
         self.record_process_exit();
-        self.builder
-            .build_unreachable()
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unreachable()?;
         Ok(())
     }
 }

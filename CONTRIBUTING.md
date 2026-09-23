@@ -154,8 +154,7 @@ compiler/
 ├── infrastructure/          # Shared utilities, no business logic
 │   ├── ast-types/           # AST node definitions (owned here, not in syntax-parsing)
 │   ├── neuro-hir/           # Typed HIR, the backend-agnostic frontend/backend contract (1D)
-│   ├── shared-types/        # Span, Identifier, Literal
-│   └── source-location/     # Source mapping
+│   └── shared-types/        # Span, Identifier, Literal
 │
 ├── lexical-analysis/        # Tokenizer slice
 ├── syntax-parsing/          # Parser slice (depends on lexical-analysis by design)

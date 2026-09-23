@@ -65,16 +65,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let find = self.build_map_find_helper(CollectionKind::HashMap, key_ty, value_ty)?;
         let existing = self
             .builder
-            .build_call(find, &[header.into(), key.into()], "existing")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(find, &[header.into(), key.into()], "existing")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("map lookup returned void".into()))?
             .into_int_value();
         let hit = self.slot_found(existing)?;
         self.builder
-            .build_conditional_branch(hit, update_bb, fresh_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(hit, update_bb, fresh_bb)?;
 
         self.builder.position_at_end(update_bb);
         let value_ptr = self.map_slot_field_ptr(
@@ -90,87 +88,61 @@ impl<'ctx> CodegenContext<'ctx> {
         if matches!(value_ty, Type::String) {
             self.release_slot_string(value_ptr)?;
         }
-        self.builder
-            .build_store(value_ptr, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(value_ptr, value)?;
+        self.builder.build_unconditional_branch(exit_bb)?;
 
         self.builder.position_at_end(fresh_bb);
         self.emit_hashed_grow_if_needed(header, key_ty, value_ty)?;
         let capacity = self.load_header_field(header, FIELD_CAP, "cap")?;
         let cursor = self.entry_alloca(i64_ty, "cursor")?;
         let start = self.bucket_of(key_ty, key, capacity)?;
-        self.builder
-            .build_store(cursor, start)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(probe_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(cursor, start)?;
+        self.builder.build_unconditional_branch(probe_bb)?;
 
         // The first slot that is not FULL takes the entry: an EMPTY one, or a
         // tombstone whose run is thereby reused.
         self.builder.position_at_end(probe_bb);
         let slot = self
             .builder
-            .build_load(i64_ty, cursor, "slot")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, cursor, "slot")?
             .into_int_value();
         let state = self.load_slot_state(header, key_ty, value_ty, slot)?;
-        let is_full = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                state,
-                self.context.i8_type().const_int(STATE_FULL, false),
-                "is.full",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let is_full = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            state,
+            self.context.i8_type().const_int(STATE_FULL, false),
+            "is.full",
+        )?;
         self.builder
-            .build_conditional_branch(is_full, advance_bb, place_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(is_full, advance_bb, place_bb)?;
 
         self.builder.position_at_end(advance_bb);
         self.advance_probe(&ProbeCursor { cursor, capacity })?;
-        self.builder
-            .build_unconditional_branch(probe_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(probe_bb)?;
 
         self.builder.position_at_end(place_bb);
         // A new entry is where the map takes ownership of the key, so this is where the
         // bytes are copied; the caller still holds the operand it was handed.
         let key = self.key_for_new_slot(key_ty, key)?;
         // Only an EMPTY slot consumes new capacity; reusing a tombstone does not.
-        let was_empty = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                state,
-                self.context.i8_type().const_int(STATE_EMPTY, false),
-                "was.empty",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let was_empty = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            state,
+            self.context.i8_type().const_int(STATE_EMPTY, false),
+            "was.empty",
+        )?;
         self.write_hashed_slot(header, key_ty, value_ty, slot, key, value)?;
         let used = self.load_header_field(header, FIELD_USED, "used")?;
         let used_delta = self
             .builder
-            .build_int_z_extend(was_empty, i64_ty, "used.delta")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let used_next = self
-            .builder
-            .build_int_add(used, used_delta, "used.next")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_z_extend(was_empty, i64_ty, "used.delta")?;
+        let used_next = self.builder.build_int_add(used, used_delta, "used.next")?;
         self.store_header_field(header, FIELD_USED, used_next)?;
         self.bump_len(header)?;
-        self.builder
-            .build_unconditional_branch(exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(exit_bb)?;
 
         self.builder.position_at_end(exit_bb);
-        self.builder
-            .build_return(None)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_return(None)?;
         Ok(())
     }
 
@@ -213,16 +185,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let find = self.build_map_find_helper(CollectionKind::BTreeMap, key_ty, value_ty)?;
         let existing = self
             .builder
-            .build_call(find, &[header.into(), key.into()], "existing")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(find, &[header.into(), key.into()], "existing")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("map lookup returned void".into()))?
             .into_int_value();
         let hit = self.slot_found(existing)?;
         self.builder
-            .build_conditional_branch(hit, update_bb, fresh_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(hit, update_bb, fresh_bb)?;
 
         self.builder.position_at_end(update_bb);
         let value_ptr = self.map_slot_field_ptr(
@@ -236,37 +206,25 @@ impl<'ctx> CodegenContext<'ctx> {
         if matches!(value_ty, Type::String) {
             self.release_slot_string(value_ptr)?;
         }
-        self.builder
-            .build_store(value_ptr, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(value_ptr, value)?;
+        self.builder.build_unconditional_branch(exit_bb)?;
 
         self.builder.position_at_end(fresh_bb);
         self.emit_ordered_grow_if_needed(header, key_ty, value_ty)?;
         let at = self.emit_lower_bound(header, key_ty, value_ty, key)?;
         let len = self.load_header_field(header, FIELD_LEN, "len")?;
-        let tail = self
-            .builder
-            .build_int_sub(len, at, "tail")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let tail = self.builder.build_int_sub(len, at, "tail")?;
         let slot_ty = self.map_slot_type(CollectionKind::BTreeMap, key_ty, value_ty)?;
         let stride = self.size_of_type(slot_ty.into())?;
-        let bytes = self
-            .builder
-            .build_int_mul(tail, stride, "tail.bytes")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let bytes = self.builder.build_int_mul(tail, stride, "tail.bytes")?;
         let next = self
             .builder
-            .build_int_add(at, i64_ty.const_int(1, false), "at1")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(at, i64_ty.const_int(1, false), "at1")?;
         let dst = self.map_slot_ptr(CollectionKind::BTreeMap, header, key_ty, value_ty, next)?;
         let src = self.map_slot_ptr(CollectionKind::BTreeMap, header, key_ty, value_ty, at)?;
         let memmove = self.get_or_declare_memmove();
         self.builder
-            .build_call(memmove, &[dst.into(), src.into(), bytes.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(memmove, &[dst.into(), src.into(), bytes.into()], "")?;
 
         let key_ptr = self.map_slot_field_ptr(
             CollectionKind::BTreeMap,
@@ -277,9 +235,7 @@ impl<'ctx> CodegenContext<'ctx> {
             SlotField::Key,
         )?;
         let key = self.key_for_new_slot(key_ty, key)?;
-        self.builder
-            .build_store(key_ptr, key)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(key_ptr, key)?;
         let value_ptr = self.map_slot_field_ptr(
             CollectionKind::BTreeMap,
             header,
@@ -288,18 +244,12 @@ impl<'ctx> CodegenContext<'ctx> {
             at,
             SlotField::Value,
         )?;
-        self.builder
-            .build_store(value_ptr, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(value_ptr, value)?;
         self.bump_len(header)?;
-        self.builder
-            .build_unconditional_branch(exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(exit_bb)?;
 
         self.builder.position_at_end(exit_bb);
-        self.builder
-            .build_return(None)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_return(None)?;
         Ok(())
     }
 }

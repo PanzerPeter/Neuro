@@ -152,10 +152,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// restores.
     pub(crate) fn emit_arena_mark(&self) -> CodegenResult<IntValue<'ctx>> {
         let mark = self.get_or_build_arena_mark()?;
-        let call = self
-            .builder
-            .build_call(mark, &[], "pool.mark")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let call = self.builder.build_call(mark, &[], "pool.mark")?;
         call.try_as_basic_value()
             .basic()
             .map(|v| v.into_int_value())
@@ -165,9 +162,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Leave a pool region, releasing everything the block allocated in one store.
     pub(crate) fn emit_arena_release(&self, mark: IntValue<'ctx>) -> CodegenResult<()> {
         let release = self.get_or_build_arena_release()?;
-        self.builder
-            .build_call(release, &[mark.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(release, &[mark.into()], "")?;
         Ok(())
     }
 
@@ -179,8 +174,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         Ok(self
             .builder
-            .build_load(ptr_type, self.pool_head().as_pointer_value(), "pool.head")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(ptr_type, self.pool_head().as_pointer_value(), "pool.head")?
             .into_pointer_value())
     }
 
@@ -196,17 +190,15 @@ impl<'ctx> CodegenContext<'ctx> {
         flag: PointerValue<'ctx>,
     ) -> CodegenResult<()> {
         let register = self.get_or_build_pool_register()?;
-        self.builder
-            .build_call(
-                register,
-                &[
-                    instance.into(),
-                    release.as_global_value().as_pointer_value().into(),
-                    flag.into(),
-                ],
-                "",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(
+            register,
+            &[
+                instance.into(),
+                release.as_global_value().as_pointer_value().into(),
+                flag.into(),
+            ],
+            "",
+        )?;
         Ok(())
     }
 
@@ -215,9 +207,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// cells themselves live in the arena, so the restore reclaims them too.
     pub(crate) fn emit_pool_sweep(&self, stop: PointerValue<'ctx>) -> CodegenResult<()> {
         let sweep = self.get_or_build_pool_sweep()?;
-        self.builder
-            .build_call(sweep, &[stop.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(sweep, &[stop.into()], "")?;
         Ok(())
     }
 
@@ -251,17 +241,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let handle = self.emit_pool_handle()?;
         // `register_with_pool` takes `&self`, which this backend passes by value; only
         // the `&mut self` of `bulk_release` arrives as a pointer.
-        let receiver = self
-            .builder
-            .build_load(
-                self.get_struct_llvm_type(struct_name)?,
-                storage_ptr,
-                "pool.receiver",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let receiver = self.builder.build_load(
+            self.get_struct_llvm_type(struct_name)?,
+            storage_ptr,
+            "pool.receiver",
+        )?;
         self.builder
-            .build_call(registrar, &[receiver.into(), handle.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(registrar, &[receiver.into(), handle.into()], "")?;
         self.transfer_pool_registration(name, struct_name, storage_ptr)
     }
 
@@ -306,11 +292,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let handle = self.entry_alloca(handle_type, "pool.handle")?;
         let id = self
             .builder
-            .build_struct_gep(handle_type, handle, 0, "pool.handle.id")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(id, mark)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_struct_gep(handle_type, handle, 0, "pool.handle.id")?;
+        self.builder.build_store(id, mark)?;
         Ok(handle)
     }
 
@@ -359,28 +342,21 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
             let cell = self
                 .builder
-                .build_call(alloc, &[size.into()], "pool.cell")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_call(alloc, &[size.into()], "pool.cell")?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| CodegenError::InternalError("arena alloc returned void".into()))?
                 .into_pointer_value();
             // An allocator that failed leaves the instance unregistered rather than
             // storing through null; its own `Drop` is all that is owed then.
-            let missing = self
-                .builder
-                .build_is_null(cell, "pool.cell.missing")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_conditional_branch(missing, done, link)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let missing = self.builder.build_is_null(cell, "pool.cell.missing")?;
+            self.builder.build_conditional_branch(missing, done, link)?;
 
             self.builder.position_at_end(link);
             let head_global = self.pool_head();
-            let head = self
-                .builder
-                .build_load(ptr_type, head_global.as_pointer_value(), "pool.head")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let head =
+                self.builder
+                    .build_load(ptr_type, head_global.as_pointer_value(), "pool.head")?;
             let fields = [
                 (CELL_NEXT, head),
                 (
@@ -403,25 +379,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 ),
             ];
             for (index, value) in fields {
-                let slot = self
-                    .builder
-                    .build_struct_gep(cell_type, cell, index, "pool.cell.field")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-                self.builder
-                    .build_store(slot, value)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                let slot =
+                    self.builder
+                        .build_struct_gep(cell_type, cell, index, "pool.cell.field")?;
+                self.builder.build_store(slot, value)?;
             }
             self.builder
-                .build_store(head_global.as_pointer_value(), cell)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_unconditional_branch(done)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_store(head_global.as_pointer_value(), cell)?;
+            self.builder.build_unconditional_branch(done)?;
 
             self.builder.position_at_end(done);
-            self.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_return(None)?;
             Ok(())
         })?;
         Ok(function)
@@ -454,35 +422,28 @@ impl<'ctx> CodegenContext<'ctx> {
                 .into_pointer_value();
 
             self.builder.position_at_end(entry);
-            self.builder
-                .build_unconditional_branch(walk)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(walk)?;
 
             self.builder.position_at_end(walk);
             let cell = self
                 .builder
-                .build_load(ptr_type, head_global.as_pointer_value(), "pool.cell")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(ptr_type, head_global.as_pointer_value(), "pool.cell")?
                 .into_pointer_value();
-            let reached_stop = self
-                .builder
-                .build_int_compare(IntPredicate::EQ, cell, stop, "pool.at.stop")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let reached_stop =
+                self.builder
+                    .build_int_compare(IntPredicate::EQ, cell, stop, "pool.at.stop")?;
             self.builder
-                .build_conditional_branch(reached_stop, done, body)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(reached_stop, done, body)?;
 
             self.builder.position_at_end(body);
             let mut loaded = Vec::with_capacity(CELL_FIELDS as usize);
             for index in [CELL_NEXT, CELL_INSTANCE, CELL_RELEASE, CELL_FLAG] {
-                let slot = self
-                    .builder
-                    .build_struct_gep(cell_type, cell, index, "pool.cell.field")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                let slot =
+                    self.builder
+                        .build_struct_gep(cell_type, cell, index, "pool.cell.field")?;
                 loaded.push(
                     self.builder
-                        .build_load(ptr_type, slot, "pool.cell.value")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_load(ptr_type, slot, "pool.cell.value")?
                         .into_pointer_value(),
                 );
             }
@@ -490,43 +451,28 @@ impl<'ctx> CodegenContext<'ctx> {
             // Unlinked before the call so a `bulk_release` that itself enters a pool
             // cannot walk a cell this sweep has already claimed.
             self.builder
-                .build_store(head_global.as_pointer_value(), next)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_store(head_global.as_pointer_value(), next)?;
             let live = self
                 .builder
-                .build_load(bool_type, flag, "pool.cell.live")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(bool_type, flag, "pool.cell.live")?
                 .into_int_value();
-            self.builder
-                .build_conditional_branch(live, call, unlink)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_conditional_branch(live, call, unlink)?;
 
             self.builder.position_at_end(call);
             let thunk_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
             self.builder
-                .build_indirect_call(thunk_type, thunk, &[instance.into()], "")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_store(flag, bool_type.const_zero())
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_unconditional_branch(unlink)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_indirect_call(thunk_type, thunk, &[instance.into()], "")?;
+            self.builder.build_store(flag, bool_type.const_zero())?;
+            self.builder.build_unconditional_branch(unlink)?;
 
             self.builder.position_at_end(unlink);
             // A no-op for the cells the arena holds; it matters only for one the
             // allocator spilled to the heap because the chunk was full.
-            self.builder
-                .build_call(release, &[cell.into()], "")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_unconditional_branch(walk)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_call(release, &[cell.into()], "")?;
+            self.builder.build_unconditional_branch(walk)?;
 
             self.builder.position_at_end(done);
-            self.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_return(None)?;
             Ok(())
         })?;
         Ok(function)
@@ -586,16 +532,11 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.position_at_end(entry);
             let current = self
                 .builder
-                .build_load(ptr_type, base.as_pointer_value(), "arena.base")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(ptr_type, base.as_pointer_value(), "arena.base")?
                 .into_pointer_value();
-            let missing = self
-                .builder
-                .build_is_null(current, "arena.missing")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let missing = self.builder.build_is_null(current, "arena.missing")?;
             self.builder
-                .build_conditional_branch(missing, reserve, done)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(missing, reserve, done)?;
 
             // A failed reservation leaves the base null, which routes every allocation
             // in the block to the heap instead of aborting the program.
@@ -607,27 +548,19 @@ impl<'ctx> CodegenContext<'ctx> {
                     malloc,
                     &[i64_type.const_int(ARENA_CAPACITY, false).into()],
                     "arena.chunk",
-                )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                )?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| CodegenError::InternalError("malloc returned void".into()))?;
-            self.builder
-                .build_store(base.as_pointer_value(), chunk)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_unconditional_branch(done)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(base.as_pointer_value(), chunk)?;
+            self.builder.build_unconditional_branch(done)?;
 
             self.builder.position_at_end(done);
             let offset = self.arena_offset();
-            let mark = self
-                .builder
-                .build_load(i64_type, offset.as_pointer_value(), "arena.mark")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_return(Some(&mark))
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let mark =
+                self.builder
+                    .build_load(i64_type, offset.as_pointer_value(), "arena.mark")?;
+            self.builder.build_return(Some(&mark))?;
             Ok(())
         })?;
         Ok(function)
@@ -650,12 +583,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 .get_first_param()
                 .ok_or_else(|| CodegenError::InternalError("arena release lost its mark".into()))?;
             let offset = self.arena_offset();
-            self.builder
-                .build_store(offset.as_pointer_value(), mark)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(offset.as_pointer_value(), mark)?;
+            self.builder.build_return(None)?;
             Ok(())
         })?;
         Ok(function)
@@ -752,94 +681,59 @@ impl<'ctx> CodegenContext<'ctx> {
         let base_global = self.arena_base();
         let base = self
             .builder
-            .build_load(ptr_type, base_global.as_pointer_value(), "arena.base")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(ptr_type, base_global.as_pointer_value(), "arena.base")?
             .into_pointer_value();
-        let missing = self
-            .builder
-            .build_is_null(base, "arena.missing")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_conditional_branch(missing, heap, bump)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let missing = self.builder.build_is_null(base, "arena.missing")?;
+        self.builder.build_conditional_branch(missing, heap, bump)?;
 
         self.builder.position_at_end(bump);
         let base_int = self
             .builder
-            .build_ptr_to_int(base, i64_type, "arena.base.int")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_ptr_to_int(base, i64_type, "arena.base.int")?;
         let offset_global = self.arena_offset();
         let offset = self
             .builder
-            .build_load(i64_type, offset_global.as_pointer_value(), "arena.offset")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_type, offset_global.as_pointer_value(), "arena.offset")?
             .into_int_value();
         let cursor = self
             .builder
-            .build_int_add(base_int, offset, "arena.cursor")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(base_int, offset, "arena.cursor")?;
         let bias = self
             .builder
-            .build_int_sub(align, i64_type.const_int(1, false), "align.bias")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let raised = self
-            .builder
-            .build_int_add(cursor, bias, "align.raised")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_sub(align, i64_type.const_int(1, false), "align.bias")?;
+        let raised = self.builder.build_int_add(cursor, bias, "align.raised")?;
         // `-align` is `~(align - 1)` for the powers of two an alignment may be, which
         // is what clears the low bits without a second constant.
-        let mask = self
-            .builder
-            .build_int_neg(align, "align.mask")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let aligned = self
-            .builder
-            .build_and(raised, mask, "align.addr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let mask = self.builder.build_int_neg(align, "align.mask")?;
+        let aligned = self.builder.build_and(raised, mask, "align.addr")?;
         let used = self
             .builder
-            .build_int_sub(aligned, base_int, "arena.used")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let end = self
-            .builder
-            .build_int_add(used, size, "arena.end")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let fits = self
-            .builder
-            .build_int_compare(
-                IntPredicate::ULE,
-                end,
-                i64_type.const_int(ARENA_CAPACITY, false),
-                "arena.fits",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_conditional_branch(fits, take, heap)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_sub(aligned, base_int, "arena.used")?;
+        let end = self.builder.build_int_add(used, size, "arena.end")?;
+        let fits = self.builder.build_int_compare(
+            IntPredicate::ULE,
+            end,
+            i64_type.const_int(ARENA_CAPACITY, false),
+            "arena.fits",
+        )?;
+        self.builder.build_conditional_branch(fits, take, heap)?;
 
         self.builder.position_at_end(take);
         self.builder
-            .build_store(offset_global.as_pointer_value(), end)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_store(offset_global.as_pointer_value(), end)?;
         let allocated = self
             .builder
-            .build_int_to_ptr(aligned, ptr_type, "arena.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_return(Some(&allocated))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_to_ptr(aligned, ptr_type, "arena.ptr")?;
+        self.builder.build_return(Some(&allocated))?;
 
         self.builder.position_at_end(heap);
         let spilled = self
             .builder
-            .build_call(fallback, fallback_args, "arena.spill")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(fallback, fallback_args, "arena.spill")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("allocator returned void".into()))?;
-        self.builder
-            .build_return(Some(&spilled))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_return(Some(&spilled))?;
         Ok(())
     }
 
@@ -870,22 +764,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 .ok_or_else(|| CodegenError::InternalError("release lost its pointer".into()))?
                 .into_pointer_value();
             let owned = self.build_arena_owns(target)?;
-            self.builder
-                .build_conditional_branch(owned, done, heap)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_conditional_branch(owned, done, heap)?;
 
             self.builder.position_at_end(heap);
             self.builder
-                .build_call(libc_release, &[target.into()], "")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_unconditional_branch(done)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_call(libc_release, &[target.into()], "")?;
+            self.builder.build_unconditional_branch(done)?;
 
             self.builder.position_at_end(done);
-            self.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_return(None)?;
             Ok(())
         })?;
         Ok(function)
@@ -899,45 +786,34 @@ impl<'ctx> CodegenContext<'ctx> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let base = self
             .builder
-            .build_load(ptr_type, self.arena_base().as_pointer_value(), "arena.base")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(ptr_type, self.arena_base().as_pointer_value(), "arena.base")?
             .into_pointer_value();
         let base_int = self
             .builder
-            .build_ptr_to_int(base, i64_type, "arena.base.int")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_ptr_to_int(base, i64_type, "arena.base.int")?;
         let target_int = self
             .builder
-            .build_ptr_to_int(target, i64_type, "arena.target.int")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let limit = self
-            .builder
-            .build_int_add(
-                base_int,
-                i64_type.const_int(ARENA_CAPACITY, false),
-                "arena.limit",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let above = self
-            .builder
-            .build_int_compare(IntPredicate::UGE, target_int, base_int, "arena.above")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let below = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, target_int, limit, "arena.below")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let inside = self
-            .builder
-            .build_and(above, below, "arena.inside")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_ptr_to_int(target, i64_type, "arena.target.int")?;
+        let limit = self.builder.build_int_add(
+            base_int,
+            i64_type.const_int(ARENA_CAPACITY, false),
+            "arena.limit",
+        )?;
+        let above = self.builder.build_int_compare(
+            IntPredicate::UGE,
+            target_int,
+            base_int,
+            "arena.above",
+        )?;
+        let below =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, target_int, limit, "arena.below")?;
+        let inside = self.builder.build_and(above, below, "arena.inside")?;
         // An unreserved arena is a null base, against which every heap pointer would
         // compare "above".
-        let reserved = self
-            .builder
-            .build_is_not_null(base, "arena.reserved")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let reserved = self.builder.build_is_not_null(base, "arena.reserved")?;
         self.builder
             .build_and(inside, reserved, "arena.owns")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 }

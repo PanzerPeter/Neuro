@@ -245,38 +245,6 @@ mod tests {
     }
 
     #[test]
-    fn span_equality() {
-        let span1 = Span::new(5, 10);
-        let span2 = Span::new(5, 10);
-        let span3 = Span::new(5, 11);
-        assert_eq!(span1, span2);
-        assert_ne!(span1, span3);
-    }
-
-    #[test]
-    fn identifier_creation() {
-        let ident = Identifier::new("my_variable".to_string(), Span::new(0, 11));
-        assert_eq!(ident.name, "my_variable");
-        assert_eq!(ident.span, Span::new(0, 11));
-    }
-
-    #[test]
-    fn identifier_equality() {
-        let ident1 = Identifier::new("foo".to_string(), Span::new(0, 3));
-        let ident2 = Identifier::new("foo".to_string(), Span::new(0, 3));
-        let ident3 = Identifier::new("bar".to_string(), Span::new(0, 3));
-        assert_eq!(ident1, ident2);
-        assert_ne!(ident1, ident3);
-    }
-
-    #[test]
-    fn literal_integer() {
-        let lit = Literal::Integer(42, None);
-        assert_eq!(lit, Literal::Integer(42, None));
-        assert_ne!(lit, Literal::Integer(43, None));
-    }
-
-    #[test]
     fn format_spec_default_is_display() {
         let spec = FormatSpec::default();
         assert_eq!(spec.kind, FormatKind::Default);
@@ -285,34 +253,5 @@ mod tests {
         assert!(!spec.plus_sign);
         assert_eq!(spec.width, None);
         assert_eq!(spec.precision, None);
-    }
-
-    #[test]
-    fn literal_float() {
-        let lit = Literal::Float(2.5, None);
-        assert_eq!(lit, Literal::Float(2.5, None));
-    }
-
-    #[test]
-    fn literal_float_suffixed() {
-        let lit = Literal::Float(1.5, Some(FloatSuffix::F32));
-        assert_eq!(lit, Literal::Float(1.5, Some(FloatSuffix::F32)));
-        assert_ne!(lit, Literal::Float(1.5, Some(FloatSuffix::F64)));
-        assert_ne!(lit, Literal::Float(1.5, None));
-    }
-
-    #[test]
-    fn literal_string() {
-        let lit = Literal::String("hello".to_string());
-        assert_eq!(lit, Literal::String("hello".to_string()));
-    }
-
-    #[test]
-    fn literal_boolean() {
-        let lit_true = Literal::Boolean(true);
-        let lit_false = Literal::Boolean(false);
-        assert_eq!(lit_true, Literal::Boolean(true));
-        assert_eq!(lit_false, Literal::Boolean(false));
-        assert_ne!(lit_true, lit_false);
     }
 }

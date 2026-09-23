@@ -257,7 +257,7 @@ fn reorder_names(names: &AxisNames, order: &[usize]) -> AxisNames {
 }
 
 /// The value of an integer constant expression written in an axis list.
-fn const_integer(expr: &Expr) -> Option<i128> {
+pub(crate) fn const_integer(expr: &Expr) -> Option<i128> {
     match expr {
         Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
         Expr::Paren(inner, _) => const_integer(inner),

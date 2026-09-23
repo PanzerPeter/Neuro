@@ -85,8 +85,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
                 let insert = self.build_map_insert_helper(kind, &key_ty, &value_ty)?;
                 self.builder
-                    .build_call(insert, &[header.into(), key.into(), value.into()], "")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    .build_call(insert, &[header.into(), key.into(), value.into()], "")?;
                 // The helper has copied whatever bytes it kept by the time it returns, so
                 // a key built for this call has no reader left.
                 if let Some(expr) = args.first() {
@@ -169,8 +168,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let find = self.build_map_find_helper(kind, key_ty, value_ty)?;
         Ok(self
             .builder
-            .build_call(find, &[header.into(), key.into()], "map.find")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(find, &[header.into(), key.into()], "map.find")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("map lookup returned void".into()))?
@@ -186,7 +184,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.context.i64_type().const_zero(),
                 "map.hit",
             )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Load the value out of slot `slot`, predicated on the lookup having hit. The
@@ -205,37 +203,27 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let value_llvm = self.collection_value_type(value_ty)?;
         let out = self.entry_alloca(value_llvm, "map.read")?;
-        self.builder
-            .build_store(out, value_llvm.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(out, value_llvm.const_zero())?;
 
         let read_bb = self.context.append_basic_block(parent_fn, "map.read.do");
         let done_bb = self.context.append_basic_block(parent_fn, "map.read.done");
         self.builder
-            .build_conditional_branch(present, read_bb, done_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(present, read_bb, done_bb)?;
 
         self.builder.position_at_end(read_bb);
         let value_ptr =
             self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, SlotField::Value)?;
-        let value = self
-            .builder
-            .build_load(value_llvm, value_ptr, "map.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let value = self.builder.build_load(value_llvm, value_ptr, "map.val")?;
         // Inside the guarded block: a miss reads no slot at all, so a copy is only ever
         // made of bytes that exist.
         let value = self.value_from_collection_slot(value, value_ty, SlotTransfer::Copied)?;
-        self.builder
-            .build_store(out, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(done_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(out, value)?;
+        self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
         self.builder
             .build_load(value_llvm, out, "map.read.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// `m.remove(k)`, which is `true` when the key was present. The hashed map leaves a
@@ -256,8 +244,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let do_bb = self.context.append_basic_block(parent_fn, "map.rm.do");
         let done_bb = self.context.append_basic_block(parent_fn, "map.rm.done");
         self.builder
-            .build_conditional_branch(present, do_bb, done_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(present, do_bb, done_bb)?;
 
         self.builder.position_at_end(do_bb);
         // The slot's own buffers go with the entry: after the tombstone or the shift,
@@ -266,24 +253,21 @@ impl<'ctx> CodegenContext<'ctx> {
         match kind {
             CollectionKind::HashMap => {
                 let state_ptr = self.hashed_slot_state_ptr(header, key_ty, value_ty, slot)?;
-                self.builder
-                    .build_store(
-                        state_ptr,
-                        self.context.i8_type().const_int(STATE_TOMBSTONE, false),
-                    )
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_store(
+                    state_ptr,
+                    self.context.i8_type().const_int(STATE_TOMBSTONE, false),
+                )?;
             }
             _ => self.shift_ordered_slots_down(header, key_ty, value_ty, slot)?,
         }
         let len = self.load_header_field(header, FIELD_LEN, "map.len")?;
-        let shrunk = self
-            .builder
-            .build_int_sub(len, self.context.i64_type().const_int(1, false), "map.len1")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let shrunk = self.builder.build_int_sub(
+            len,
+            self.context.i64_type().const_int(1, false),
+            "map.len1",
+        )?;
         self.store_header_field(header, FIELD_LEN, shrunk)?;
-        self.builder
-            .build_unconditional_branch(done_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
         Ok(present)
@@ -302,24 +286,19 @@ impl<'ctx> CodegenContext<'ctx> {
         let key_llvm = self.collection_value_type(key_ty)?;
         let stride = self.size_of_type(key_llvm)?;
         let len = self.load_header_field(header, FIELD_LEN, "map.len")?;
-        let bytes = self
-            .builder
-            .build_int_mul(len, stride, "keys.bytes")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let bytes = self.builder.build_int_mul(len, stride, "keys.bytes")?;
         // A `Vec` grows its buffer with libc `realloc`, which must never be handed an
         // arena pointer, so the buffer it starts from is libc's too.
         let malloc = self.get_or_declare_malloc();
         let buffer = self
             .builder
-            .build_call(malloc, &[bytes.into()], "keys.buf")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(malloc, &[bytes.into()], "keys.buf")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("malloc returned void".into()))?
             .into_pointer_value();
         self.builder
-            .build_call(helper, &[header.into(), buffer.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(helper, &[header.into(), buffer.into()], "")?;
         self.vec_header_value(buffer, len)
     }
 
@@ -362,7 +341,7 @@ impl<'ctx> CodegenContext<'ctx> {
         unsafe {
             self.builder
                 .build_in_bounds_gep(slot_ty, buffer, &[slot], "map.slot")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 
@@ -394,24 +373,16 @@ impl<'ctx> CodegenContext<'ctx> {
         let len = self.load_header_field(header, FIELD_LEN, "map.len")?;
         let next = self
             .builder
-            .build_int_add(slot, i64_ty.const_int(1, false), "rm.next")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let tail = self
-            .builder
-            .build_int_sub(len, next, "rm.tail")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(slot, i64_ty.const_int(1, false), "rm.next")?;
+        let tail = self.builder.build_int_sub(len, next, "rm.tail")?;
         let slot_ty = self.map_slot_type(CollectionKind::BTreeMap, key_ty, value_ty)?;
         let stride = self.size_of_type(slot_ty.into())?;
-        let bytes = self
-            .builder
-            .build_int_mul(tail, stride, "rm.bytes")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let bytes = self.builder.build_int_mul(tail, stride, "rm.bytes")?;
         let dst = self.map_slot_ptr(CollectionKind::BTreeMap, header, key_ty, value_ty, slot)?;
         let src = self.map_slot_ptr(CollectionKind::BTreeMap, header, key_ty, value_ty, next)?;
         let memmove = self.get_or_declare_memmove();
         self.builder
-            .build_call(memmove, &[dst.into(), src.into(), bytes.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(memmove, &[dst.into(), src.into(), bytes.into()], "")?;
         Ok(())
     }
 

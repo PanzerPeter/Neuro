@@ -220,13 +220,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Get the external libc `isatty` declaration, inserting it on first use.
     fn get_or_declare_isatty(&self) -> FunctionValue<'ctx> {
-        if let Some(existing) = self.module.get_function(ISATTY_FN) {
-            return existing;
-        }
         let i32_type = self.context.i32_type();
-        let fn_type = i32_type.fn_type(&[i32_type.into()], false);
-        self.module
-            .add_function(ISATTY_FN, fn_type, Some(Linkage::External))
+        self.extern_fn(ISATTY_FN, i32_type.fn_type(&[i32_type.into()], false))
     }
 
     /// Get the `emit(ptr, len)` helper, emitting its body on first use.

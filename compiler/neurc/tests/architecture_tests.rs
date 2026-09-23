@@ -105,7 +105,6 @@ fn test_infrastructure_no_slice_dependencies() {
     let infrastructure_crates = vec![
         "compiler/infrastructure/shared-types",
         "compiler/infrastructure/ast-types",
-        "compiler/infrastructure/source-location",
         "compiler/infrastructure/neuro-hir",
     ];
 
@@ -157,7 +156,6 @@ fn test_all_slices_have_context_md() {
         // Infrastructure crates also require CONTEXT.md (VSA AC-012)
         "compiler/infrastructure/shared-types",
         "compiler/infrastructure/ast-types",
-        "compiler/infrastructure/source-location",
         "compiler/infrastructure/neuro-hir",
     ];
 

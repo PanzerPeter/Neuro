@@ -8,10 +8,11 @@
 //! is a divergence between the two surfaces and becomes a `LoweringError`, as this
 //! slice's CONTEXT.md requires.
 
-use ast_types::{Expr, UnaryOp};
+use ast_types::Expr;
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirReduceOp, HirType};
-use shared_types::{Literal, Span};
+use shared_types::Span;
 
+use crate::tensor_shape::const_integer;
 use crate::{Lowerer, LoweringError};
 
 pub(crate) const SUM_METHOD: &str = "sum";
@@ -132,18 +133,4 @@ fn resolve_axis(
                 "`.{method}` reached lowering with axis {value} out of range"
             ))
         })
-}
-
-/// The value of an integer constant expression written as an axis.
-fn const_integer(expr: &Expr) -> Option<i128> {
-    match expr {
-        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
-        Expr::Paren(inner, _) => const_integer(inner),
-        Expr::Unary {
-            op: UnaryOp::Negate,
-            operand,
-            ..
-        } => const_integer(operand).map(|value| -value),
-        _ => None,
-    }
 }

@@ -31,9 +31,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let helper = self.get_or_build_helper(&name, fn_type, move |ctx, func| {
             ctx.emit_map_release_body(func, kind, &key_ty, &value_ty)
         })?;
-        self.builder
-            .build_call(helper, &[header.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(helper, &[header.into()], "")?;
         Ok(())
     }
 
@@ -67,68 +65,49 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => self.load_header_field(header, FIELD_LEN, "len")?,
         };
         let cursor = self.entry_alloca(i64_ty, "rel.slot")?;
-        self.builder
-            .build_store(cursor, i64_ty.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(cursor, i64_ty.const_zero())?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(cond_bb);
         let slot = self
             .builder
-            .build_load(i64_ty, cursor, "rel.slot.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, cursor, "rel.slot.val")?
             .into_int_value();
         let more = self
             .builder
-            .build_int_compare(IntPredicate::ULT, slot, limit, "rel.more")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_compare(IntPredicate::ULT, slot, limit, "rel.more")?;
         self.builder
-            .build_conditional_branch(more, body_bb, exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(more, body_bb, exit_bb)?;
 
         self.builder.position_at_end(body_bb);
         let live = match kind {
             CollectionKind::HashMap => {
                 let state = self.load_slot_state(header, key_ty, value_ty, slot)?;
-                self.builder
-                    .build_int_compare(
-                        IntPredicate::EQ,
-                        state,
-                        self.context.i8_type().const_int(STATE_FULL, false),
-                        "rel.live",
-                    )
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                self.builder.build_int_compare(
+                    IntPredicate::EQ,
+                    state,
+                    self.context.i8_type().const_int(STATE_FULL, false),
+                    "rel.live",
+                )?
             }
             _ => self.context.bool_type().const_int(1, false),
         };
         self.builder
-            .build_conditional_branch(live, take_bb, step_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(live, take_bb, step_bb)?;
 
         self.builder.position_at_end(take_bb);
         self.release_slot_strings(kind, header, key_ty, value_ty, slot)?;
-        self.builder
-            .build_unconditional_branch(step_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(step_bb)?;
 
         self.builder.position_at_end(step_bb);
         let next = self
             .builder
-            .build_int_add(slot, i64_ty.const_int(1, false), "rel.next")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(cursor, next)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(slot, i64_ty.const_int(1, false), "rel.next")?;
+        self.builder.build_store(cursor, next)?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(exit_bb);
-        self.builder
-            .build_return(None)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_return(None)?;
         Ok(())
     }
 

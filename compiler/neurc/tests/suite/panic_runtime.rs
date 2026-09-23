@@ -119,6 +119,22 @@ fn panic_aborts_and_prints_message() {
     );
 }
 
+/// The location column counts characters: the `é` before `panic` is two bytes but one
+/// column, so the call sits at column 13 of line 3, not 14.
+const PANIC_AFTER_MULTIBYTE_PROG: &str = r#"
+func main() -> i32 {
+    /* é */ panic("boom")
+    return 0
+}
+"#;
+
+#[test]
+fn panic_location_column_counts_characters() {
+    let exe = compile_source(PANIC_AFTER_MULTIBYTE_PROG, "multibyte_col");
+    let err = stderr(&run(&exe));
+    assert!(err.contains(".nr:3:13"), "stderr was: {err}");
+}
+
 #[test]
 fn assert_false_aborts() {
     let exe = compile_source(ASSERT_FALSE_PROG, "false");

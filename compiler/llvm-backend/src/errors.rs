@@ -17,17 +17,11 @@ pub enum CodegenError {
     #[error("undefined function: {0}")]
     UndefinedFunction(String),
 
-    #[error("type mismatch: expected {expected}, found {found}")]
-    TypeMismatch { expected: String, found: String },
-
     #[error("invalid operand type for operator {op}: {ty}")]
     InvalidOperandType { op: String, ty: String },
 
     #[error("LLVM error: {0}")]
     LlvmError(String),
-
-    #[error("missing return statement in non-void function")]
-    MissingReturn,
 
     #[error("internal compiler error: {0}")]
     InternalError(String),

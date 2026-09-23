@@ -248,7 +248,6 @@ compiler/
 ├── infrastructure/          # Shared, zero-business-logic crates
 │   ├── ast-types/           #   AST node definitions
 │   ├── shared-types/        #   Primitives shared across slices
-│   ├── source-location/     #   Spans, positions, source files
 │   └── neuro-hir/           #   Typed High-Level IR (frontend <-> backend contract)
 ├── lexical-analysis/        # Tokenizer (logos, Unicode XID)
 ├── syntax-parsing/          # Pratt + statement parser -> AST

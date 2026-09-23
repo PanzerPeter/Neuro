@@ -162,20 +162,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let cap = self.load_header_field(header, FIELD_CAP, "col.cap")?;
         let bytes = self
             .builder
-            .build_int_mul(cap, slot_stride, "col.wipe.bytes")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_mul(cap, slot_stride, "col.wipe.bytes")?;
         let memset = self.get_or_declare_memset();
-        self.builder
-            .build_call(
-                memset,
-                &[
-                    buffer.into(),
-                    self.context.i32_type().const_zero().into(),
-                    bytes.into(),
-                ],
-                "",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(
+            memset,
+            &[
+                buffer.into(),
+                self.context.i32_type().const_zero().into(),
+                bytes.into(),
+            ],
+            "",
+        )?;
         Ok(())
     }
 
@@ -225,9 +222,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let aliases_a_holder = self.reads_a_held_place(object);
         let value = self.codegen_expr(object)?;
         let tmp = self.entry_alloca(value.get_type(), "col.tmp")?;
-        self.builder
-            .build_store(tmp, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(tmp, value)?;
         if !aliases_a_holder {
             // The synthetic name cannot collide with a source binding: `__` is rejected in
             // every declared name, so no move site will ever clear this entry's drop flag.
@@ -259,8 +254,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|_| CodegenError::InternalError("collection header GEP failed".into()))?;
         Ok(self
             .builder
-            .build_load(self.context.i64_type(), field_ptr, name)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(self.context.i64_type(), field_ptr, name)?
             .into_int_value())
     }
 
@@ -276,9 +270,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_struct_gep(header_ty, header, field, "col.field")
             .map_err(|_| CodegenError::InternalError("collection header GEP failed".into()))?;
-        self.builder
-            .build_store(field_ptr, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(field_ptr, value)?;
         Ok(())
     }
 
@@ -298,8 +290,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.context.ptr_type(inkwell::AddressSpace::default()),
                 field_ptr,
                 "col.buf",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            )?
             .into_pointer_value())
     }
 
@@ -314,9 +305,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_struct_gep(header_ty, header, FIELD_BUFFER, "col.buf.ptr")
             .map_err(|_| CodegenError::InternalError("collection header GEP failed".into()))?;
-        self.builder
-            .build_store(field_ptr, buffer)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(field_ptr, buffer)?;
         Ok(())
     }
 
@@ -344,7 +333,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let none_val = self.codegen_enum_value(enum_name, none_tag, &[])?;
         self.builder
             .build_select(present, some_val, none_val, "opt")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Get (creating on first use) a private helper function for a collection

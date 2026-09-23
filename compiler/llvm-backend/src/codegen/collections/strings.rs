@@ -39,8 +39,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let reserve = self.build_string_reserve_helper()?;
         self.builder
-            .build_call(reserve, &[header.into(), extra.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(reserve, &[header.into(), extra.into()], "")?;
 
         let buffer = self.load_header_buffer(header)?;
         let len = self.load_header_field(header, FIELD_LEN, "str.len")?;
@@ -49,23 +48,18 @@ impl<'ctx> CodegenContext<'ctx> {
         // inside the allocation.
         let dst = unsafe {
             self.builder
-                .build_in_bounds_gep(self.context.i8_type(), buffer, &[len], "str.dst")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_in_bounds_gep(self.context.i8_type(), buffer, &[len], "str.dst")?
         };
         let memcpy = self.get_or_declare_memcpy();
         self.builder
-            .build_call(memcpy, &[dst.into(), src.into(), extra.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(memcpy, &[dst.into(), src.into(), extra.into()], "")?;
 
         // The append copies the argument's bytes into the builder's own buffer and
         // stores nothing of the argument itself, so one built for this call (the
         // `b.push_str(a + b)` shape) has no reader left.
         self.release_string_temporary(text_expr, text)?;
 
-        let grown = self
-            .builder
-            .build_int_add(len, extra, "str.len.new")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let grown = self.builder.build_int_add(len, extra, "str.len.new")?;
         self.store_header_field(header, FIELD_LEN, grown)?;
         Ok(())
     }
@@ -87,32 +81,30 @@ impl<'ctx> CodegenContext<'ctx> {
         // indistinguishable from a failed allocation; one spare byte keeps every
         // `string` this produces a real pointer.
         let one = i64_ty.const_int(1, false);
-        let empty = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, len, i64_ty.const_zero(), "str.empty")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let empty = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            len,
+            i64_ty.const_zero(),
+            "str.empty",
+        )?;
         let alloc_size = self
             .builder
-            .build_select(empty, one, len, "str.alloc")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_select(empty, one, len, "str.alloc")?
             .into_int_value();
         let copy = self.build_malloc(alloc_size, "str.copy")?;
 
         let memcpy = self.get_or_declare_memcpy();
         self.builder
-            .build_call(memcpy, &[copy.into(), buffer.into(), len.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(memcpy, &[copy.into(), buffer.into(), len.into()], "")?;
 
         let fat_ptr_type = self.type_mapper.map_type(&Type::String)?.into_struct_type();
         let with_ptr = self
             .builder
-            .build_insert_value(fat_ptr_type.get_undef(), copy, 0, "str.res.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(fat_ptr_type.get_undef(), copy, 0, "str.res.ptr")?
             .into_struct_value();
         Ok(self
             .builder
-            .build_insert_value(with_ptr, len, 1, "str.res")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(with_ptr, len, 1, "str.res")?
             .into_struct_value()
             .into())
     }
@@ -129,22 +121,18 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat_ptr = match value {
             BasicValueEnum::PointerValue(ptr) => {
                 let string_ty = self.type_mapper.map_type(&Type::String)?;
-                self.builder
-                    .build_load(string_ty, ptr, "str.arg")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                self.builder.build_load(string_ty, ptr, "str.arg")?
             }
             other => other,
         };
         let fat_ptr = fat_ptr.into_struct_value();
         let data = self
             .builder
-            .build_extract_value(fat_ptr, 0, "str.arg.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat_ptr, 0, "str.arg.ptr")?
             .into_pointer_value();
         let len = self
             .builder
-            .build_extract_value(fat_ptr, 1, "str.arg.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat_ptr, 1, "str.arg.len")?
             .into_int_value();
         Ok((data, len))
     }
@@ -180,63 +168,54 @@ impl<'ctx> CodegenContext<'ctx> {
 
             let len = ctx.load_header_field(header, FIELD_LEN, "len")?;
             let cap = ctx.load_header_field(header, FIELD_CAP, "cap")?;
-            let needed = ctx
-                .builder
-                .build_int_add(len, extra, "needed")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let needed = ctx.builder.build_int_add(len, extra, "needed")?;
             let fits = ctx
                 .builder
-                .build_int_compare(IntPredicate::ULE, needed, cap, "fits")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_compare(IntPredicate::ULE, needed, cap, "fits")?;
             ctx.builder
-                .build_conditional_branch(fits, done_bb, grow_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(fits, done_bb, grow_bb)?;
 
             ctx.builder.position_at_end(grow_bb);
             let doubled = ctx
                 .builder
-                .build_int_mul(cap, i64_ty.const_int(2, false), "double")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let doubled_short = ctx
-                .builder
-                .build_int_compare(IntPredicate::ULT, doubled, needed, "double.short")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_mul(cap, i64_ty.const_int(2, false), "double")?;
+            let doubled_short = ctx.builder.build_int_compare(
+                IntPredicate::ULT,
+                doubled,
+                needed,
+                "double.short",
+            )?;
             let candidate = ctx
                 .builder
-                .build_select(doubled_short, needed, doubled, "cap.candidate")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_select(doubled_short, needed, doubled, "cap.candidate")?
                 .into_int_value();
             let min_cap = i64_ty.const_int(initial_capacity(), false);
-            let use_min = ctx
-                .builder
-                .build_int_compare(IntPredicate::ULT, candidate, min_cap, "too.small")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let use_min = ctx.builder.build_int_compare(
+                IntPredicate::ULT,
+                candidate,
+                min_cap,
+                "too.small",
+            )?;
             let new_cap = ctx
                 .builder
-                .build_select(use_min, min_cap, candidate, "new.cap")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_select(use_min, min_cap, candidate, "new.cap")?
                 .into_int_value();
 
             let old = ctx.load_header_buffer(header)?;
             let realloc = ctx.get_or_declare_realloc();
             let grown = ctx
                 .builder
-                .build_call(realloc, &[old.into(), new_cap.into()], "grown")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_call(realloc, &[old.into(), new_cap.into()], "grown")?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| CodegenError::InternalError("realloc returned void".into()))?
                 .into_pointer_value();
             ctx.store_header_buffer(header, grown)?;
             ctx.store_header_field(header, FIELD_CAP, new_cap)?;
-            ctx.builder
-                .build_unconditional_branch(done_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            ctx.builder.build_unconditional_branch(done_bb)?;
 
             ctx.builder.position_at_end(done_bb);
-            ctx.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            ctx.builder.build_return(None)?;
             Ok(())
         })
     }

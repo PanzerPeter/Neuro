@@ -133,9 +133,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let slot = self.tensor_element_ptr(elem_llvm, data, base)?;
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element)?;
-        self.builder
-            .build_store(slot, val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot, val)?;
         self.mark_moved_for_drop(value);
         Ok(())
     }

@@ -148,19 +148,6 @@ impl TypeChecker {
         }
     }
 
-    /// `unsafe` is inert in Phase 1.7: it introduces a scope and yields
-    /// its trailing expression's type, exactly like a bare block.
-    pub(super) fn check_unsafe_block_expr(
-        &mut self,
-        stmts: &[ast_types::Stmt],
-        expected: Option<&Type>,
-    ) -> Option<Type> {
-        self.symbols.push_scope();
-        let ty = self.check_block_expr_type(stmts, expected);
-        self.symbols.pop_scope();
-        Some(ty)
-    }
-
     /// A `pool` block introduces a scope and an arena region, and always yields unit:
     /// it is not an expression in the language, so a trailing value has nowhere to go.
     /// The escape rules that make the arena safe ride the region opened here.

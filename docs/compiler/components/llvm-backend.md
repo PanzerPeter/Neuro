@@ -24,7 +24,7 @@ bounds, slice boundaries).
 
 ## Architecture
 
-- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `source-location`, `diagnostics`, `inkwell 0.10.0`; `hir-lowering` is a dev-dependency (tests/benches lower before compiling)
+- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `inkwell 0.10.0`; `hir-lowering` is a dev-dependency (tests/benches lower before compiling)
 - **Public API**: single `compile()` function returning object code bytes
 - **All internals**: `pub(crate)`, `CodegenContext`, `TypeMapper`, `codegen_*` helpers
 - **Output**: platform object code (`.o`) passed to the system linker by `neurc`

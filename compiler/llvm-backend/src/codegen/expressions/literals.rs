@@ -541,8 +541,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let int_value = value.into_int_value();
                 Ok(self
                     .builder
-                    .build_int_z_extend(int_value, target_llvm.into_int_type(), "cast_bool")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .build_int_z_extend(int_value, target_llvm.into_int_type(), "cast_bool")?
                     .into())
             }
             // Float to Int.
@@ -582,8 +581,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         ))
                     })?;
                 self.builder
-                    .build_call(declaration, &[float_value.into()], "cast_f2i")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .build_call(declaration, &[float_value.into()], "cast_f2i")?
                     .try_as_basic_value()
                     .basic()
                     .ok_or_else(|| {
@@ -602,8 +600,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             int_value,
                             target_llvm.into_float_type(),
                             "cast_u2f",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else {
                     Ok(self
@@ -612,8 +609,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             int_value,
                             target_llvm.into_float_type(),
                             "cast_s2f",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -632,24 +628,20 @@ impl<'ctx> CodegenContext<'ctx> {
                     let f32t = self.context.f32_type();
                     let widened = self
                         .builder
-                        .build_float_ext(float_value, f32t, "cast_f2f_w")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                        .build_float_ext(float_value, f32t, "cast_f2f_w")?;
                     Ok(self
                         .builder
-                        .build_float_trunc(widened, target_ft, "cast_f2f_n")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_trunc(widened, target_ft, "cast_f2f_n")?
                         .into())
                 } else if to_w > from_w {
                     Ok(self
                         .builder
-                        .build_float_ext(float_value, target_ft, "cast_f2f")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_ext(float_value, target_ft, "cast_f2f")?
                         .into())
                 } else {
                     Ok(self
                         .builder
-                        .build_float_trunc(float_value, target_ft, "cast_f2f")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_trunc(float_value, target_ft, "cast_f2f")?
                         .into())
                 }
             }
@@ -665,21 +657,18 @@ impl<'ctx> CodegenContext<'ctx> {
                     if t1.is_unsigned_like() {
                         Ok(self
                             .builder
-                            .build_int_z_extend(int_value, target_llvm.into_int_type(), "cast_ext")
-                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                            .build_int_z_extend(int_value, target_llvm.into_int_type(), "cast_ext")?
                             .into())
                     } else {
                         Ok(self
                             .builder
-                            .build_int_s_extend(int_value, target_llvm.into_int_type(), "cast_ext")
-                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                            .build_int_s_extend(int_value, target_llvm.into_int_type(), "cast_ext")?
                             .into())
                     }
                 } else if to_width < from_width {
                     Ok(self
                         .builder
-                        .build_int_truncate(int_value, target_llvm.into_int_type(), "cast_trunc")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_int_truncate(int_value, target_llvm.into_int_type(), "cast_trunc")?
                         .into())
                 } else {
                     Ok(value)

@@ -194,11 +194,6 @@ impl HirType {
             other => other,
         }
     }
-
-    /// Whether this is a reference type (`&T` or `&mut T`).
-    pub fn is_reference(&self) -> bool {
-        matches!(self, HirType::Reference { .. })
-    }
 }
 
 impl fmt::Display for HirType {

@@ -149,7 +149,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.literal")?;
-        let buffer_ty = self.tensor_buffer_type(tensor_ty)?;
+        let buffer_ty = self.type_mapper.tensor_buffer_type(tensor_ty)?;
         let i64_type = self.context.i64_type();
         for (index, value) in values.into_iter().enumerate() {
             let slot =
@@ -231,7 +231,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let std = self.codegen_expr(std)?.into_float_value();
 
         let normal_fn = self.get_or_define_rng_normal()?;
-        let buffer_ty = self.tensor_buffer_type(tensor_ty)?;
+        let buffer_ty = self.type_mapper.tensor_buffer_type(tensor_ty)?;
         let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.rand")?;
         let i64_type = self.context.i64_type();
         let index = self.entry_alloca(i64_type, "tensor.rand.i")?;
@@ -390,7 +390,7 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         }
 
-        let buffer_ty = self.tensor_buffer_type(result_ty)?;
+        let buffer_ty = self.type_mapper.tensor_buffer_type(result_ty)?;
         let source_data = self.load_dlpack_data(source)?;
         let (handle, data) = self.alloc_tensor(result_ty, "tensor.permute")?;
         self.emit_permuted_copy(

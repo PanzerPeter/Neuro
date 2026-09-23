@@ -42,23 +42,22 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat_ptr = value.into_struct_value();
         let source = self
             .builder
-            .build_extract_value(fat_ptr, 0, "str.src")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat_ptr, 0, "str.src")?
             .into_pointer_value();
         let len = self
             .builder
-            .build_extract_value(fat_ptr, 1, "str.src.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat_ptr, 1, "str.src.len")?
             .into_int_value();
 
-        let empty = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, len, i64_ty.const_zero(), "str.dup.empty")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let empty = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            len,
+            i64_ty.const_zero(),
+            "str.dup.empty",
+        )?;
         let bytes = self
             .builder
-            .build_select(empty, i64_ty.const_int(1, false), len, "str.dup.size")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_select(empty, i64_ty.const_int(1, false), len, "str.dup.size")?
             .into_int_value();
         let copy = self.build_malloc(bytes, "str.dup")?;
         self.build_memcpy_call(copy, source, len)?;
@@ -113,20 +112,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat_ptr_ty = self.string_fat_ptr_type();
         let buffer_ptr = self
             .builder
-            .build_struct_gep(fat_ptr_ty, slot_ptr, 0, "slot.str.addr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let buffer = self
-            .builder
-            .build_load(
-                self.context.ptr_type(inkwell::AddressSpace::default()),
-                buffer_ptr,
-                "slot.str.buf",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_struct_gep(fat_ptr_ty, slot_ptr, 0, "slot.str.addr")?;
+        let buffer = self.builder.build_load(
+            self.context.ptr_type(inkwell::AddressSpace::default()),
+            buffer_ptr,
+            "slot.str.buf",
+        )?;
         let release = self.release_fn()?;
-        self.builder
-            .build_call(release, &[buffer.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(release, &[buffer.into()], "")?;
         Ok(())
     }
 
@@ -182,53 +175,37 @@ impl<'ctx> CodegenContext<'ctx> {
                 .into_pointer_value();
             let i64_ty = ctx.context.i64_type();
             let cursor = ctx.entry_alloca(i64_ty, "rel.i")?;
-            ctx.builder
-                .build_store(cursor, i64_ty.const_zero())
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            ctx.builder.build_store(cursor, i64_ty.const_zero())?;
             // The live prefix is what the collection owns; a slot past `len` was given
             // up by a `pop` that took its buffer with it.
             let len = ctx.load_header_field(header, FIELD_LEN, "rel.len")?;
-            ctx.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            ctx.builder.build_unconditional_branch(cond_bb)?;
 
             ctx.builder.position_at_end(cond_bb);
             let index = ctx
                 .builder
-                .build_load(i64_ty, cursor, "rel.iv")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(i64_ty, cursor, "rel.iv")?
                 .into_int_value();
             let more = ctx
                 .builder
-                .build_int_compare(IntPredicate::ULT, index, len, "rel.more")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_compare(IntPredicate::ULT, index, len, "rel.more")?;
             ctx.builder
-                .build_conditional_branch(more, body_bb, exit_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(more, body_bb, exit_bb)?;
 
             ctx.builder.position_at_end(body_bb);
             let slot = ctx.vec_slot_ptr(header, &element_ty, index)?;
             ctx.release_slot_string(slot)?;
             let next = ctx
                 .builder
-                .build_int_add(index, i64_ty.const_int(1, false), "rel.next")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_store(cursor, next)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_add(index, i64_ty.const_int(1, false), "rel.next")?;
+            ctx.builder.build_store(cursor, next)?;
+            ctx.builder.build_unconditional_branch(cond_bb)?;
 
             ctx.builder.position_at_end(exit_bb);
-            ctx.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            ctx.builder.build_return(None)?;
             Ok(())
         })?;
-        self.builder
-            .build_call(helper, &[header.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_call(helper, &[header.into()], "")?;
         Ok(())
     }
 }

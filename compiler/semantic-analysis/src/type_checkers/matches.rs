@@ -2,8 +2,9 @@
 // unification, binding introduction, and exhaustiveness.
 
 use ast_types::{EnumPatternPayload, Expr, MatchArm, Pattern};
-use shared_types::{IntSuffix, Literal, Span};
+use shared_types::{Literal, Span};
 
+use super::literals::suffix_to_type;
 use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
 use crate::type_checkers::val_else::expr_diverges;
@@ -317,7 +318,7 @@ impl TypeChecker {
         }
         let ok = match lit {
             Literal::Integer(_, None) => scrut_ty.is_integer(),
-            Literal::Integer(_, Some(suffix)) => &int_suffix_type(suffix) == scrut_ty,
+            Literal::Integer(_, Some(suffix)) => &suffix_to_type(suffix) == scrut_ty,
             Literal::Char(_) => scrut_ty.is_char(),
             Literal::Boolean(_) => scrut_ty.is_bool(),
             // Float and string literal patterns have no matchable scrutinee in phase 1E.
@@ -430,19 +431,5 @@ fn literal_type_word(lit: &Literal) -> &'static str {
         Literal::Char(_) => "a `char`",
         Literal::Boolean(_) => "a `bool`",
         Literal::String(_) => "a `string`",
-    }
-}
-
-/// The concrete integer type an integer-literal suffix denotes.
-fn int_suffix_type(suffix: &IntSuffix) -> Type {
-    match suffix {
-        IntSuffix::I8 => Type::I8,
-        IntSuffix::I16 => Type::I16,
-        IntSuffix::I32 => Type::I32,
-        IntSuffix::I64 => Type::I64,
-        IntSuffix::U8 => Type::U8,
-        IntSuffix::U16 => Type::U16,
-        IntSuffix::U32 => Type::U32,
-        IntSuffix::U64 => Type::U64,
     }
 }

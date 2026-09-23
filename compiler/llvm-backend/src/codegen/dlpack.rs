@@ -83,7 +83,7 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
 
-        let storage_ty = self.dlpack_tensor_storage_type();
+        let storage_ty = self.type_mapper.dlpack_tensor_storage_type();
         let i64_type = self.context.i64_type();
         let storage_size = storage_ty.size_of().ok_or_else(|| {
             CodegenError::InternalError("the DLPack storage block has no size".to_string())
@@ -97,7 +97,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // buffer is rounded up rather than passed through, since a small tensor's
         // element run is routinely shorter than one alignment unit. `_aligned_malloc`
         // has no such requirement, and the rounding is harmless there.
-        let bytes = self.tensor_buffer_bytes(tensor_ty)?;
+        let bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?;
         let padded = bytes.div_ceil(DLPACK_DATA_ALIGN) * DLPACK_DATA_ALIGN;
         let aligned_alloc = self.aligned_alloc_fn()?;
         let alignment = i64_type.const_int(DLPACK_DATA_ALIGN, false);
@@ -138,7 +138,7 @@ impl<'ctx> CodegenContext<'ctx> {
         element: &Type,
         shape: &[usize],
     ) -> CodegenResult<()> {
-        let handle_ty = self.dlpack_managed_tensor_type();
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
         let i8_type = self.context.i8_type();
         let i16_type = self.context.i16_type();
         let i32_type = self.context.i32_type();
@@ -194,7 +194,7 @@ impl<'ctx> CodegenContext<'ctx> {
             &[FIELD_DL_TENSOR, FIELD_NDIM],
             i32_type.const_int(shape.len() as u64, false).into(),
         )?;
-        let dtype_value = self.dlpack_dtype(element)?;
+        let dtype_value = self.type_mapper.dlpack_dtype(element)?;
         let dtype = self
             .context
             .struct_type(&[i8_type.into(), i8_type.into(), i16_type.into()], false)
@@ -244,7 +244,7 @@ impl<'ctx> CodegenContext<'ctx> {
         handle: PointerValue<'ctx>,
         data_bytes: u64,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        let storage_ty = self.dlpack_tensor_storage_type();
+        let storage_ty = self.type_mapper.dlpack_tensor_storage_type();
         let control = self
             .builder
             .build_struct_gep(storage_ty, handle, FIELD_CONTROL, "dlpack.control")
@@ -285,7 +285,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a DLPack handle is only re-described as a tensor type".to_string(),
             ));
         };
-        let handle_ty = self.dlpack_managed_tensor_type();
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
         let i32_type = self.context.i32_type();
         self.store_handle_field(
             handle_ty,
@@ -449,7 +449,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &self,
         handle: PointerValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        let handle_ty = self.dlpack_managed_tensor_type();
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
         let dl_tensor = self
             .builder
             .build_struct_gep(handle_ty, handle, FIELD_DL_TENSOR, "dlpack.tensor")
@@ -480,7 +480,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Dispatched through the field rather than called by name so that the release a
     /// tensor performs at scope exit is provably the release a foreign owner performs.
     pub(crate) fn build_dlpack_release(&self, handle: PointerValue<'ctx>) -> CodegenResult<()> {
-        let handle_ty = self.dlpack_managed_tensor_type();
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
         let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
         let deleter_addr = self
             .builder
@@ -506,6 +506,6 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(self
             .context
             .i64_type()
-            .const_int(self.tensor_buffer_bytes(tensor_ty)?, false))
+            .const_int(self.type_mapper.tensor_buffer_bytes(tensor_ty)?, false))
     }
 }

@@ -25,13 +25,11 @@
 //! loop's index, which counts source steps and would leave gaps.
 
 use ast_types::{LoopAdapter, LoopAdapterKind, Stmt, UnaryOp};
-use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirStmt, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
 use shared_types::{Identifier, Literal, Span};
 
+use crate::iteration::{cursor_place, variable, LOOP_INDEX_TYPE};
 use crate::{Lowerer, LoweringError};
-
-/// The type of a yielded-position binding, matching the counted loops' index.
-const LOOP_INDEX_TYPE: HirType = HirType::U64;
 
 /// One adapter, resolved to the binding holding its function.
 struct AdapterStep {
@@ -329,19 +327,6 @@ fn adapter_name(kind: LoopAdapterKind) -> &'static str {
         LoopAdapterKind::Map => "map",
         LoopAdapterKind::Filter => "filter",
     }
-}
-
-/// The place a synthesized loop cursor is stored in. Its type is fixed by the
-/// lowering that created the binding.
-fn cursor_place(name: &str) -> HirPlace {
-    HirPlace::Var {
-        name: name.to_string(),
-        ty: LOOP_INDEX_TYPE,
-    }
-}
-
-fn variable(name: &str, ty: HirType, span: Span) -> HirExpr {
-    HirExpr::new(HirExprKind::Variable(name.to_string()), ty, span)
 }
 
 fn int_literal(value: i64, span: Span) -> HirExpr {

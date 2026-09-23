@@ -5,7 +5,7 @@ use inkwell::values::*;
 use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::codegen::context::CodegenContext;
-use crate::errors::{CodegenError, CodegenResult};
+use crate::errors::CodegenResult;
 use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
@@ -43,8 +43,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if TypeMapper::is_float_type(operand_ty) {
                     return Ok(self
                         .builder
-                        .build_float_neg(val.into_float_value(), "negtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_neg(val.into_float_value(), "negtmp")?
                         .into());
                 }
                 // Integer negation IS `0 - x`, so it overflows exactly where that
@@ -68,13 +67,11 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             UnaryOp::Not => Ok(self
                 .builder
-                .build_not(val.into_int_value(), "nottmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_not(val.into_int_value(), "nottmp")?
                 .into()),
             UnaryOp::BitNot => Ok(self
                 .builder
-                .build_not(val.into_int_value(), "bnottmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_not(val.into_int_value(), "bnottmp")?
                 .into()),
         }
     }

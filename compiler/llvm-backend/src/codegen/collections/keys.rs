@@ -45,7 +45,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     rhs.into_int_value(),
                     "key.eq",
                 )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()));
+                .map_err(CodegenError::from);
         }
         if matches!(key_ty, Type::String) {
             return self.codegen_string_eq(lhs, rhs);
@@ -75,7 +75,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     rhs.into_int_value(),
                     "key.lt",
                 )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()));
+                .map_err(CodegenError::from);
         }
         if matches!(key_ty, Type::String) {
             return self.emit_string_lt(lhs, rhs);
@@ -90,28 +90,26 @@ impl<'ctx> CodegenContext<'ctx> {
         key: BasicValueEnum<'ctx>,
     ) -> CodegenResult<IntValue<'ctx>> {
         if key_ty.is_int_like() {
-            let widened = self
-                .builder
-                .build_int_z_extend(key.into_int_value(), self.context.i64_type(), "key.wide")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let widened = self.builder.build_int_z_extend(
+                key.into_int_value(),
+                self.context.i64_type(),
+                "key.wide",
+            )?;
             return self.emit_integer_mix(widened);
         }
         if matches!(key_ty, Type::String) {
             let bytes = self
                 .builder
-                .build_extract_value(key.into_struct_value(), 0, "key.str.ptr")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_extract_value(key.into_struct_value(), 0, "key.str.ptr")?
                 .into_pointer_value();
             let len = self
                 .builder
-                .build_extract_value(key.into_struct_value(), 1, "key.str.len")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_extract_value(key.into_struct_value(), 1, "key.str.len")?
                 .into_int_value();
             let helper = self.build_string_hash_helper()?;
             return Ok(self
                 .builder
-                .build_call(helper, &[bytes.into(), len.into()], "key.hash")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_call(helper, &[bytes.into(), len.into()], "key.hash")?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| CodegenError::InternalError("string hash returned void".into()))?
@@ -128,24 +126,20 @@ impl<'ctx> CodegenContext<'ctx> {
         for multiplier in [MIX_MULTIPLIER_1, MIX_MULTIPLIER_2] {
             let shifted = self
                 .builder
-                .build_right_shift(acc, shift, false, "mix.shr")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let xored = self
-                .builder
-                .build_xor(acc, shifted, "mix.xor")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            acc = self
-                .builder
-                .build_int_mul(xored, i64_ty.const_int(multiplier, false), "mix.mul")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_right_shift(acc, shift, false, "mix.shr")?;
+            let xored = self.builder.build_xor(acc, shifted, "mix.xor")?;
+            acc = self.builder.build_int_mul(
+                xored,
+                i64_ty.const_int(multiplier, false),
+                "mix.mul",
+            )?;
         }
         let shifted = self
             .builder
-            .build_right_shift(acc, shift, false, "mix.shr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_right_shift(acc, shift, false, "mix.shr")?;
         self.builder
             .build_xor(acc, shifted, "mix.final")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Lexicographic `<` over two UTF-8 strings: compare the shared prefix, and fall
@@ -159,33 +153,27 @@ impl<'ctx> CodegenContext<'ctx> {
         let rhs_struct = rhs.into_struct_value();
         let lhs_ptr = self
             .builder
-            .build_extract_value(lhs_struct, 0, "lt.l.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(lhs_struct, 0, "lt.l.ptr")?
             .into_pointer_value();
         let lhs_len = self
             .builder
-            .build_extract_value(lhs_struct, 1, "lt.l.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(lhs_struct, 1, "lt.l.len")?
             .into_int_value();
         let rhs_ptr = self
             .builder
-            .build_extract_value(rhs_struct, 0, "lt.r.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(rhs_struct, 0, "lt.r.ptr")?
             .into_pointer_value();
         let rhs_len = self
             .builder
-            .build_extract_value(rhs_struct, 1, "lt.r.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(rhs_struct, 1, "lt.r.len")?
             .into_int_value();
 
-        let shorter = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, lhs_len, rhs_len, "lt.shorter")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let shorter =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, lhs_len, rhs_len, "lt.shorter")?;
         let common = self
             .builder
-            .build_select(shorter, lhs_len, rhs_len, "lt.common")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_select(shorter, lhs_len, rhs_len, "lt.common")?
             .into_int_value();
 
         let memcmp = self.get_or_declare_memcmp();
@@ -195,25 +183,22 @@ impl<'ctx> CodegenContext<'ctx> {
                 memcmp,
                 &[lhs_ptr.into(), rhs_ptr.into(), common.into()],
                 "lt.cmp",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            )?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("memcmp returned void".into()))?
             .into_int_value();
 
         let i32_zero = self.context.i32_type().const_zero();
-        let prefix_equal = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, order, i32_zero, "lt.prefix.eq")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let prefix_less = self
-            .builder
-            .build_int_compare(IntPredicate::SLT, order, i32_zero, "lt.prefix.lt")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let prefix_equal =
+            self.builder
+                .build_int_compare(IntPredicate::EQ, order, i32_zero, "lt.prefix.eq")?;
+        let prefix_less =
+            self.builder
+                .build_int_compare(IntPredicate::SLT, order, i32_zero, "lt.prefix.lt")?;
         self.builder
             .build_select(prefix_equal, shorter, prefix_less, "lt.result")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
             .map(|v| v.into_int_value())
     }
 
@@ -255,8 +240,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let result = self
             .builder
-            .build_call(callee, &call_args, name)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(callee, &call_args, name)?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| {
@@ -269,9 +253,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// where a `&self` / `&Rhs` parameter is expected.
     fn spill_to_stack(&mut self, value: BasicValueEnum<'ctx>) -> CodegenResult<PointerValue<'ctx>> {
         let slot = self.entry_alloca(value.get_type(), "key.spill")?;
-        self.builder
-            .build_store(slot, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot, value)?;
         Ok(slot)
     }
 
@@ -300,81 +282,55 @@ impl<'ctx> CodegenContext<'ctx> {
             let hash_slot = ctx.entry_alloca(i64_ty, "hash")?;
             let index_slot = ctx.entry_alloca(i64_ty, "i")?;
             ctx.builder
-                .build_store(hash_slot, i64_ty.const_int(FNV_OFFSET_BASIS, false))
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_store(index_slot, i64_ty.const_zero())
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_store(hash_slot, i64_ty.const_int(FNV_OFFSET_BASIS, false))?;
+            ctx.builder.build_store(index_slot, i64_ty.const_zero())?;
+            ctx.builder.build_unconditional_branch(cond_bb)?;
 
             ctx.builder.position_at_end(cond_bb);
             let index = ctx
                 .builder
-                .build_load(i64_ty, index_slot, "i.val")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(i64_ty, index_slot, "i.val")?
                 .into_int_value();
             let more = ctx
                 .builder
-                .build_int_compare(IntPredicate::ULT, index, len, "more")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_compare(IntPredicate::ULT, index, len, "more")?;
             ctx.builder
-                .build_conditional_branch(more, body_bb, exit_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(more, body_bb, exit_bb)?;
 
             ctx.builder.position_at_end(body_bb);
             // SAFETY: the loop condition above proved `index < len`, so the byte is
             // inside the string's UTF-8 buffer.
             let byte_ptr = unsafe {
-                ctx.builder
-                    .build_in_bounds_gep(ctx.context.i8_type(), bytes, &[index], "byte.ptr")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                ctx.builder.build_in_bounds_gep(
+                    ctx.context.i8_type(),
+                    bytes,
+                    &[index],
+                    "byte.ptr",
+                )?
             };
             let byte = ctx
                 .builder
-                .build_load(ctx.context.i8_type(), byte_ptr, "byte")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(ctx.context.i8_type(), byte_ptr, "byte")?
                 .into_int_value();
-            let byte64 = ctx
-                .builder
-                .build_int_z_extend(byte, i64_ty, "byte64")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let byte64 = ctx.builder.build_int_z_extend(byte, i64_ty, "byte64")?;
             let hash = ctx
                 .builder
-                .build_load(i64_ty, hash_slot, "hash.val")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(i64_ty, hash_slot, "hash.val")?
                 .into_int_value();
-            let xored = ctx
-                .builder
-                .build_xor(hash, byte64, "hash.xor")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let multiplied = ctx
-                .builder
-                .build_int_mul(xored, i64_ty.const_int(FNV_PRIME, false), "hash.mul")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_store(hash_slot, multiplied)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let xored = ctx.builder.build_xor(hash, byte64, "hash.xor")?;
+            let multiplied =
+                ctx.builder
+                    .build_int_mul(xored, i64_ty.const_int(FNV_PRIME, false), "hash.mul")?;
+            ctx.builder.build_store(hash_slot, multiplied)?;
             let next = ctx
                 .builder
-                .build_int_add(index, i64_ty.const_int(1, false), "i.next")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_store(index_slot, next)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_add(index, i64_ty.const_int(1, false), "i.next")?;
+            ctx.builder.build_store(index_slot, next)?;
+            ctx.builder.build_unconditional_branch(cond_bb)?;
 
             ctx.builder.position_at_end(exit_bb);
-            let final_hash = ctx
-                .builder
-                .build_load(i64_ty, hash_slot, "hash.out")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            ctx.builder
-                .build_return(Some(&final_hash))
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let final_hash = ctx.builder.build_load(i64_ty, hash_slot, "hash.out")?;
+            ctx.builder.build_return(Some(&final_hash))?;
             Ok(())
         })
     }

@@ -41,8 +41,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
             agg = self
                 .builder
-                .build_insert_value(agg, val, i as u32, "arr.elem")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_insert_value(agg, val, i as u32, "arr.elem")?
                 .into_array_value();
         }
         Ok(agg.into())
@@ -80,23 +79,19 @@ impl<'ctx> CodegenContext<'ctx> {
             // below `size` for every `offset` in the loop and the GEP stays inside the
             // source array.
             let elem_ptr = unsafe {
-                self.builder
-                    .build_in_bounds_gep(
-                        src_arr_llvm,
-                        base_ptr,
-                        &[i64t.const_zero(), i64t.const_int(src_index, false)],
-                        "arr.rest.src",
-                    )
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                self.builder.build_in_bounds_gep(
+                    src_arr_llvm,
+                    base_ptr,
+                    &[i64t.const_zero(), i64t.const_int(src_index, false)],
+                    "arr.rest.src",
+                )?
             };
             let elem_val = self
                 .builder
-                .build_load(elem_llvm, elem_ptr, "arr.rest.elem")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_load(elem_llvm, elem_ptr, "arr.rest.elem")?;
             agg = self
                 .builder
-                .build_insert_value(agg, elem_val, offset as u32, "arr.rest.ins")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_insert_value(agg, elem_val, offset as u32, "arr.rest.ins")?
                 .into_array_value();
         }
         Ok(agg.into())
@@ -194,9 +189,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // Induction variable `i` and the element binding `x`, both stack slots.
         let idx_alloca = self.entry_alloca(i64t, "foreach.i")?;
-        self.builder
-            .build_store(idx_alloca, i64t.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(idx_alloca, i64t.const_zero())?;
         let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
 
         // Record the element binding's resolved type so a place statement in the body
@@ -214,47 +207,37 @@ impl<'ctx> CodegenContext<'ctx> {
         let exit_bb = self.context.append_basic_block(parent_fn, "foreach.exit");
 
         if !self.current_block_terminated() {
-            self.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(cond_bb)?;
         }
 
         self.builder.position_at_end(cond_bb);
         let i_val = self
             .builder
-            .build_load(i64t, idx_alloca, "foreach.iv")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64t, idx_alloca, "foreach.iv")?
             .into_int_value();
         let size_c = i64t.const_int(size as u64, false);
-        let cond = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, i_val, size_c, "foreach.cmp")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let cond =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, i_val, size_c, "foreach.cmp")?;
         self.builder
-            .build_conditional_branch(cond, body_bb, exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(cond, body_bb, exit_bb)?;
 
         self.builder.position_at_end(body_bb);
         // Load the current element into the binding slot, then run the body.
         // SAFETY: this block is only reached when the loop condition proved
         // `i_val < size`, so the indexed element is inside the array.
         let elem_ptr = unsafe {
-            self.builder
-                .build_in_bounds_gep(
-                    arr_llvm,
-                    base_ptr,
-                    &[i64t.const_zero(), i_val],
-                    "foreach.elem.ptr",
-                )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            self.builder.build_in_bounds_gep(
+                arr_llvm,
+                base_ptr,
+                &[i64t.const_zero(), i_val],
+                "foreach.elem.ptr",
+            )?
         };
         let elem_val = self
             .builder
-            .build_load(elem_llvm, elem_ptr, "foreach.elem")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(elem_alloca, elem_val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_load(elem_llvm, elem_ptr, "foreach.elem")?;
+        self.builder.build_store(elem_alloca, elem_val)?;
         self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();
@@ -283,28 +266,20 @@ impl<'ctx> CodegenContext<'ctx> {
 
         if let Some(tail_bb) = self.builder.get_insert_block() {
             if tail_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(step_bb)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_unconditional_branch(step_bb)?;
             }
         }
 
         self.builder.position_at_end(step_bb);
         let cur = self
             .builder
-            .build_load(i64t, idx_alloca, "foreach.iv")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64t, idx_alloca, "foreach.iv")?
             .into_int_value();
         let next = self
             .builder
-            .build_int_add(cur, i64t.const_int(1, false), "foreach.next")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(idx_alloca, next)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(cur, i64t.const_int(1, false), "foreach.next")?;
+        self.builder.build_store(idx_alloca, next)?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(exit_bb);
         self.unbind_loop_index(index_binding);
@@ -363,9 +338,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let val = self.codegen_expr(object)?;
         let tmp = self.entry_alloca(val.get_type(), "arr.tmp")?;
-        self.builder
-            .build_store(tmp, val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(tmp, val)?;
         Ok((tmp, element_ty, size))
     }
 
@@ -390,10 +363,9 @@ impl<'ctx> CodegenContext<'ctx> {
         // sign-extends to a large unsigned value and so fails the `< size` test.
         if self.overflow_checks {
             let size_c = i64t.const_int(size as u64, false);
-            let ok = self
-                .builder
-                .build_int_compare(IntPredicate::ULT, idx64, size_c, "arr.bounds")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let ok =
+                self.builder
+                    .build_int_compare(IntPredicate::ULT, idx64, size_c, "arr.bounds")?;
             self.codegen_guard_or_panic(ok, "array index out of bounds", offset)?;
         }
 
@@ -409,7 +381,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     &[i64t.const_zero(), idx64],
                     "arr.elem.ptr",
                 )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 
@@ -427,11 +399,11 @@ impl<'ctx> CodegenContext<'ctx> {
         if idx_sem.is_unsigned_int() {
             self.builder
                 .build_int_z_extend(idx, i64t, "idx.zext")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         } else {
             self.builder
                 .build_int_s_extend(idx, i64t, "idx.sext")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 }

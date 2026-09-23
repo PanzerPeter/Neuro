@@ -43,15 +43,12 @@ impl<'ctx> CodegenContext<'ctx> {
         let merge_bb = self.context.append_basic_block(parent_fn, "ifexpr.merge");
 
         self.builder
-            .build_conditional_branch(cond_val, then_bb, else_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(cond_val, then_bb, else_bb)?;
 
         self.builder.position_at_end(then_bb);
         self.codegen_arm_into_alloca(then_block, result_alloca)?;
         if !self.current_block_terminated() {
-            self.builder
-                .build_unconditional_branch(merge_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(merge_bb)?;
         }
 
         self.builder.position_at_end(else_bb);
@@ -60,7 +57,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(merge_bb);
         self.builder
             .build_load(llvm_result_ty, result_alloca, "ifexpr.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Recursively emit the else/elif arm of an if-expression, storing the result into `alloca`.
@@ -84,15 +81,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 .append_basic_block(parent_fn, "ifexpr.elif.else");
 
             self.builder
-                .build_conditional_branch(elif_cond_val, elif_then_bb, elif_else_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(elif_cond_val, elif_then_bb, elif_else_bb)?;
 
             self.builder.position_at_end(elif_then_bb);
             self.codegen_arm_into_alloca(elif_stmts, alloca)?;
             if !self.current_block_terminated() {
-                self.builder
-                    .build_unconditional_branch(merge_bb)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_unconditional_branch(merge_bb)?;
             }
 
             self.builder.position_at_end(elif_else_bb);
@@ -100,14 +94,10 @@ impl<'ctx> CodegenContext<'ctx> {
         } else if let Some(else_stmts) = else_block {
             self.codegen_arm_into_alloca(else_stmts, alloca)?;
             if !self.current_block_terminated() {
-                self.builder
-                    .build_unconditional_branch(merge_bb)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_unconditional_branch(merge_bb)?;
             }
         } else {
-            self.builder
-                .build_unconditional_branch(merge_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(merge_bb)?;
         }
         Ok(())
     }
@@ -140,9 +130,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 // with `unreachable`; there is no result to store and the caller skips merge.
                 if !self.current_block_terminated() {
                     self.mark_moved_for_drop(expr);
-                    self.builder
-                        .build_store(alloca, val)
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    self.builder.build_store(alloca, val)?;
                 }
             } else {
                 self.codegen_stmt(last)?;

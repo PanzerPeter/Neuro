@@ -33,17 +33,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let scrut_val = self.codegen_expr(scrutinee)?;
         let scrut_llvm = scrut_val.get_type();
         let scrut_alloca = self.entry_alloca(scrut_llvm, "valelse.scrut")?;
-        self.builder
-            .build_store(scrut_alloca, scrut_val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(scrut_alloca, scrut_val)?;
 
         let ok_bb = self.context.append_basic_block(parent_fn, "valelse.ok");
         let else_bb = self.context.append_basic_block(parent_fn, "valelse.else");
 
         let matched = self.codegen_single_test(test, scrut_alloca, scrut_llvm, &scrut_sem)?;
         self.builder
-            .build_conditional_branch(matched, ok_bb, else_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(matched, ok_bb, else_bb)?;
 
         self.builder.position_at_end(else_bb);
         self.codegen_else_branch(
@@ -100,9 +97,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.pop_drop_scope();
 
         if !self.current_block_terminated() {
-            self.builder
-                .build_unreachable()
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unreachable()?;
         }
 
         self.restore_bindings(saved);

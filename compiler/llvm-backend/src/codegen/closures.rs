@@ -68,18 +68,12 @@ impl<'ctx> CodegenContext<'ctx> {
         for (i, cap) in closure.captures.iter().enumerate() {
             let sem_ty = Type::from_hir(&cap.ty);
             let llvm_ty = self.get_any_llvm_type(&sem_ty)?;
-            let field_ptr = self
-                .builder
-                .build_struct_gep(env_struct_ty, env_ptr, i as u32, &cap.name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let loaded = self
-                .builder
-                .build_load(llvm_ty, field_ptr, &cap.name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let field_ptr =
+                self.builder
+                    .build_struct_gep(env_struct_ty, env_ptr, i as u32, &cap.name)?;
+            let loaded = self.builder.build_load(llvm_ty, field_ptr, &cap.name)?;
             let alloca = self.entry_alloca(llvm_ty, &cap.name)?;
-            self.builder
-                .build_store(alloca, loaded)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(alloca, loaded)?;
             self.variables.insert(cap.name.clone(), alloca);
             self.variable_types.insert(cap.name.clone(), llvm_ty);
             self.type_env.insert(cap.name.clone(), sem_ty);
@@ -92,9 +86,7 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
             let param_type = param_val.get_type();
             let alloca = self.entry_alloca(param_type, &param.name)?;
-            self.builder
-                .build_store(alloca, param_val)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(alloca, param_val)?;
             self.variables.insert(param.name.clone(), alloca);
             self.variable_types.insert(param.name.clone(), param_type);
             self.type_env
@@ -134,13 +126,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let env_ptr = self.entry_alloca(env_struct_ty, "closure.env")?;
         for (i, cap) in captures.iter().enumerate() {
             let value = self.codegen_identifier(&cap.name)?;
-            let field_ptr = self
-                .builder
-                .build_struct_gep(env_struct_ty, env_ptr, i as u32, "closure.cap")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_store(field_ptr, value)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let field_ptr =
+                self.builder
+                    .build_struct_gep(env_struct_ty, env_ptr, i as u32, "closure.cap")?;
+            self.builder.build_store(field_ptr, value)?;
         }
 
         let function = *self
@@ -155,13 +144,11 @@ impl<'ctx> CodegenContext<'ctx> {
             .struct_type(&[ptr_ty.into(), ptr_ty.into()], false);
         let with_fn = self
             .builder
-            .build_insert_value(closure_ty.get_undef(), fn_ptr, 0, "closure.fn")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(closure_ty.get_undef(), fn_ptr, 0, "closure.fn")?
             .into_struct_value();
         let fat = self
             .builder
-            .build_insert_value(with_fn, env_ptr, 1, "closure.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(with_fn, env_ptr, 1, "closure.val")?
             .into_struct_value();
         Ok(fat.into())
     }
@@ -213,13 +200,11 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let fn_ptr = self
             .builder
-            .build_extract_value(fat, 0, "closure.fn")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat, 0, "closure.fn")?
             .into_pointer_value();
         let env_ptr = self
             .builder
-            .build_extract_value(fat, 1, "closure.env")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat, 1, "closure.env")?
             .into_pointer_value();
         Ok(FunctionValueHalves { fn_ptr, env_ptr })
     }
@@ -246,10 +231,9 @@ impl<'ctx> CodegenContext<'ctx> {
             self.get_any_llvm_type(ret_ty)?.fn_type(&param_types, false)
         };
 
-        let call = self
-            .builder
-            .build_indirect_call(fn_type, target.fn_ptr, &call_args, "closure.call")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let call =
+            self.builder
+                .build_indirect_call(fn_type, target.fn_ptr, &call_args, "closure.call")?;
         Ok(call.try_as_basic_value().basic())
     }
 }

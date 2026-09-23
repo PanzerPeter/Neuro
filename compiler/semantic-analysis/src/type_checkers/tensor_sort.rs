@@ -14,10 +14,11 @@
 // The receiver is READ, not consumed: the result is a fresh allocation, so ordering a
 // weight must not move it out of whatever owns it.
 
+use super::tensor_shape::{const_integer, declared_names};
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
-use ast_types::{Expr, UnaryOp};
+use ast_types::Expr;
 use shared_types::{Literal, Span};
 
 pub(crate) const SORT_METHOD: &str = "sort";
@@ -243,21 +244,6 @@ impl TypeChecker {
     }
 }
 
-/// The value of an integer constant expression written as an argument: a literal, or one
-/// under a negation (`-1`) or parentheses.
-fn const_integer(expr: &Expr) -> Option<i128> {
-    match expr {
-        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
-        Expr::Paren(inner, _) => const_integer(inner),
-        Expr::Unary {
-            op: UnaryOp::Negate,
-            operand,
-            ..
-        } => const_integer(operand).map(|value| -value),
-        _ => None,
-    }
-}
-
 /// The value of a boolean constant expression written as an argument.
 fn const_boolean(expr: &Expr) -> Option<bool> {
     match expr {
@@ -265,16 +251,4 @@ fn const_boolean(expr: &Expr) -> Option<bool> {
         Expr::Paren(inner, _) => const_boolean(inner),
         _ => None,
     }
-}
-
-/// The dimension names a shape declares, for the diagnostic that lists them.
-fn declared_names(shape: &[TensorAxis]) -> String {
-    let names: Vec<&str> = shape
-        .iter()
-        .filter_map(|axis| axis.name.as_deref())
-        .collect();
-    if names.is_empty() {
-        return "no dimension names".to_string();
-    }
-    names.join(", ")
 }

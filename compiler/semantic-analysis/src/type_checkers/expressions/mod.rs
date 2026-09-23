@@ -264,7 +264,7 @@ impl TypeChecker {
 
             // `unsafe` is inert in Phase 1.7: it introduces a scope and yields
             // its trailing expression's type, exactly like a bare block.
-            Expr::Unsafe { stmts, .. } => self.check_unsafe_block_expr(stmts, expected),
+            Expr::Unsafe { stmts, .. } => self.check_bare_block_expr(stmts, expected),
 
             Expr::Pool { label, stmts, .. } => {
                 let label = label.as_ref().map(|id| id.name.clone());

@@ -242,8 +242,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let bool_ty = self.context.bool_type();
         let flag_ptr = self.entry_alloca(bool_ty, "drop.flag")?;
         self.builder
-            .build_store(flag_ptr, bool_ty.const_int(1, false))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_store(flag_ptr, bool_ty.const_int(1, false))?;
         Ok(flag_ptr)
     }
 
@@ -257,9 +256,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn disarmed_drop_flag(&mut self) -> CodegenResult<PointerValue<'ctx>> {
         let bool_ty = self.context.bool_type();
         let flag_ptr = self.entry_alloca(bool_ty, STRING_POSITION_FLAG)?;
-        self.builder
-            .build_store(flag_ptr, bool_ty.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(flag_ptr, bool_ty.const_zero())?;
         Ok(flag_ptr)
     }
 
@@ -375,8 +372,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let buffer = self
             .builder
-            .build_extract_value(fat_ptr, 0, "str.tmp.buf")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_extract_value(fat_ptr, 0, "str.tmp.buf")?;
         let free_fn = self.release_fn()?;
         self.builder
             .build_call(free_fn, &[buffer.into()], "")
@@ -422,18 +418,14 @@ impl<'ctx> CodegenContext<'ctx> {
     /// initializer [`produces_owned_string`] proved allocates.
     fn emit_heap_string_free(&mut self, storage_ptr: PointerValue<'ctx>) -> CodegenResult<()> {
         let fat_ptr_ty = self.string_fat_ptr_type();
-        let buffer = self
-            .builder
-            .build_struct_gep(fat_ptr_ty, storage_ptr, 0, "str.drop.buf.addr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let buffer = self
-            .builder
-            .build_load(
-                self.context.ptr_type(inkwell::AddressSpace::default()),
-                buffer,
-                "str.drop.buf",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let buffer =
+            self.builder
+                .build_struct_gep(fat_ptr_ty, storage_ptr, 0, "str.drop.buf.addr")?;
+        let buffer = self.builder.build_load(
+            self.context.ptr_type(inkwell::AddressSpace::default()),
+            buffer,
+            "str.drop.buf",
+        )?;
         let free_fn = self.release_fn()?;
         self.builder
             .build_call(free_fn, &[buffer.into()], "")
@@ -456,8 +448,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.context.ptr_type(inkwell::AddressSpace::default()),
                 storage_ptr,
                 "tensor.drop.handle",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            )?
             .into_pointer_value();
         self.build_dlpack_release(handle)
     }
@@ -750,9 +741,7 @@ impl<'ctx> CodegenContext<'ctx> {
             if matches!(target, DropTarget::HeapString) {
                 continue;
             }
-            self.builder
-                .build_store(flag_ptr, armed)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(flag_ptr, armed)?;
         }
         Ok(())
     }
@@ -791,8 +780,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let bool_ty = self.context.bool_type();
         self.builder
-            .build_store(flag_ptr, bool_ty.const_int(owns_new_value as u64, false))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_store(flag_ptr, bool_ty.const_int(owns_new_value as u64, false))?;
         Ok(())
     }
 
@@ -822,9 +810,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let armed = self.context.bool_type().const_int(1, false);
         for flag_ptr in flags {
-            self.builder
-                .build_store(flag_ptr, armed)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(flag_ptr, armed)?;
         }
         Ok(())
     }
@@ -868,9 +854,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let armed_flag = self.context.bool_type().const_int(1, false);
         for flag_ptr in flags {
-            self.builder
-                .build_store(flag_ptr, armed_flag)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_store(flag_ptr, armed_flag)?;
         }
         Ok(())
     }
@@ -931,7 +915,7 @@ impl<'ctx> CodegenContext<'ctx> {
             return self
                 .builder
                 .build_struct_gep(holder_llvm, base_ptr, index, name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()));
+                .map_err(CodegenError::from);
         }
         let i64_ty = self.context.i64_type();
         // SAFETY: `index` is a position of `holder_llvm`'s own layout, so it is within
@@ -944,7 +928,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     &[i64_ty.const_zero(), i64_ty.const_int(index as u64, false)],
                     name,
                 )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 
@@ -998,19 +982,16 @@ impl<'ctx> CodegenContext<'ctx> {
                 CodegenError::InternalError(format!("enum '{}' has no payload field", enum_name))
             })?
             .into_array_type();
-        let tag_ptr = self
-            .builder
-            .build_struct_gep(enum_llvm, storage_ptr, 0, "enum.drop.tag.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let tag_ptr =
+            self.builder
+                .build_struct_gep(enum_llvm, storage_ptr, 0, "enum.drop.tag.ptr")?;
         let tag = self
             .builder
-            .build_load(self.context.i32_type(), tag_ptr, "enum.drop.tag")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(self.context.i32_type(), tag_ptr, "enum.drop.tag")?
             .into_int_value();
-        let payload_ptr = self
-            .builder
-            .build_struct_gep(enum_llvm, storage_ptr, 1, "enum.drop.payload")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let payload_ptr =
+            self.builder
+                .build_struct_gep(enum_llvm, storage_ptr, 1, "enum.drop.payload")?;
 
         let join_bb = self.context.append_basic_block(parent_fn, "enum.drop.cont");
         let owning: Vec<usize> = variants
@@ -1029,9 +1010,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 )
             })
             .collect();
-        self.builder
-            .build_switch(tag, join_bb, &cases)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_switch(tag, join_bb, &cases)?;
 
         for (tag_value, (_, case_bb)) in owning.iter().zip(cases.iter()) {
             self.builder.position_at_end(*case_bb);
@@ -1047,9 +1026,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 )?;
                 self.emit_value_destructor(slot_ptr, field_ty)?;
             }
-            self.builder
-                .build_unconditional_branch(join_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(join_bb)?;
         }
 
         self.builder.position_at_end(join_bb);
@@ -1181,15 +1158,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let bool_ty = self.context.bool_type();
         let flag = self
             .builder
-            .build_load(bool_ty, flag_ptr, "drop.flag.load")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(bool_ty, flag_ptr, "drop.flag.load")?
             .into_int_value();
 
         let run_bb = self.context.append_basic_block(parent_fn, "drop.run");
         let cont_bb = self.context.append_basic_block(parent_fn, "drop.cont");
         self.builder
-            .build_conditional_branch(flag, run_bb, cont_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(flag, run_bb, cont_bb)?;
 
         self.builder.position_at_end(run_bb);
         match target {
@@ -1219,12 +1194,8 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
         // Clear the flag so a re-reachable drop site cannot run the destructor twice.
-        self.builder
-            .build_store(flag_ptr, bool_ty.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cont_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(flag_ptr, bool_ty.const_zero())?;
+        self.builder.build_unconditional_branch(cont_bb)?;
 
         self.builder.position_at_end(cont_bb);
         Ok(())

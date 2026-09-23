@@ -39,14 +39,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let len = self.load_header_field(header, FIELD_LEN, "vec.len")?;
         let slot = self.vec_slot_ptr(header, element_ty, len)?;
-        self.builder
-            .build_store(slot, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot, value)?;
 
-        let next = self
-            .builder
-            .build_int_add(len, self.context.i64_type().const_int(1, false), "vec.len1")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let next = self.builder.build_int_add(
+            len,
+            self.context.i64_type().const_int(1, false),
+            "vec.len1",
+        )?;
         self.store_header_field(header, FIELD_LEN, next)?;
         Ok(())
     }
@@ -60,30 +59,29 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let i64_ty = self.context.i64_type();
         let len = self.load_header_field(header, FIELD_LEN, "vec.len")?;
-        let present = self
-            .builder
-            .build_int_compare(IntPredicate::UGT, len, i64_ty.const_zero(), "vec.any")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let present = self.builder.build_int_compare(
+            IntPredicate::UGT,
+            len,
+            i64_ty.const_zero(),
+            "vec.any",
+        )?;
 
         // Read the last element unconditionally under a clamped index: with `len == 0`
         // the index saturates to 0, which is in bounds whenever a buffer exists, and the
         // value is discarded by the `None` select. This keeps `pop` branch-free.
         let last = self
             .builder
-            .build_int_sub(len, i64_ty.const_int(1, false), "vec.last")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_sub(len, i64_ty.const_int(1, false), "vec.last")?;
         let index = self
             .builder
-            .build_select(present, last, i64_ty.const_zero(), "vec.pop.idx")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_select(present, last, i64_ty.const_zero(), "vec.pop.idx")?
             .into_int_value();
         let value =
             self.load_vec_element_or_zero(header, element_ty, index, present, SlotTransfer::Moved)?;
 
         let shrunk = self
             .builder
-            .build_select(present, last, i64_ty.const_zero(), "vec.len.new")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_select(present, last, i64_ty.const_zero(), "vec.len.new")?
             .into_int_value();
         self.store_header_field(header, FIELD_LEN, shrunk)?;
 
@@ -107,10 +105,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let index = self.widen_collection_index(raw, &index_sem)?;
 
         let len = self.load_header_field(header, FIELD_LEN, "vec.len")?;
-        let present = self
-            .builder
-            .build_int_compare(IntPredicate::ULT, index, len, "vec.in.bounds")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let present =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, index, len, "vec.in.bounds")?;
         let clamped = self
             .builder
             .build_select(
@@ -118,8 +115,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 index,
                 self.context.i64_type().const_zero(),
                 "vec.get.idx",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            )?
             .into_int_value();
         let value = self.load_vec_element_or_zero(
             header,
@@ -146,10 +142,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let header = self.collection_place_ptr(object, obj_ty)?;
         let slot = self.checked_vec_slot(header, &element_ty, index, offset)?;
         let elem_llvm = self.collection_value_type(&element_ty)?;
-        let value = self
-            .builder
-            .build_load(elem_llvm, slot, "vec.idx")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let value = self.builder.build_load(elem_llvm, slot, "vec.idx")?;
         self.value_from_collection_slot(value, &element_ty, SlotTransfer::Copied)
     }
 
@@ -174,9 +167,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if matches!(element_ty, Type::String) {
             self.release_slot_string(slot)?;
         }
-        self.builder
-            .build_store(slot, val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot, val)?;
         Ok(())
     }
 
@@ -201,9 +192,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let i64_ty = self.context.i64_type();
 
         let idx_alloca = self.entry_alloca(i64_ty, "veach.i")?;
-        self.builder
-            .build_store(idx_alloca, i64_ty.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(idx_alloca, i64_ty.const_zero())?;
         let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
 
         self.type_env
@@ -219,37 +208,27 @@ impl<'ctx> CodegenContext<'ctx> {
         let exit_bb = self.context.append_basic_block(parent_fn, "veach.exit");
 
         if !self.current_block_terminated() {
-            self.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(cond_bb)?;
         }
 
         self.builder.position_at_end(cond_bb);
         let i_val = self
             .builder
-            .build_load(i64_ty, idx_alloca, "veach.iv")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, idx_alloca, "veach.iv")?
             .into_int_value();
         let len = self.load_header_field(header, FIELD_LEN, "veach.len")?;
         let cond = self
             .builder
-            .build_int_compare(IntPredicate::ULT, i_val, len, "veach.cmp")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_compare(IntPredicate::ULT, i_val, len, "veach.cmp")?;
         self.builder
-            .build_conditional_branch(cond, body_bb, exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(cond, body_bb, exit_bb)?;
 
         self.builder.position_at_end(body_bb);
         let slot = self.vec_slot_ptr(header, &element_ty, i_val)?;
-        let elem_val = self
-            .builder
-            .build_load(elem_llvm, slot, "veach.elem")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let elem_val = self.builder.build_load(elem_llvm, slot, "veach.elem")?;
         let elem_val =
             self.value_from_collection_slot(elem_val, &element_ty, SlotTransfer::Copied)?;
-        self.builder
-            .build_store(elem_alloca, elem_val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(elem_alloca, elem_val)?;
         self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();
@@ -281,28 +260,20 @@ impl<'ctx> CodegenContext<'ctx> {
 
         if let Some(tail_bb) = self.builder.get_insert_block() {
             if tail_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(step_bb)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_unconditional_branch(step_bb)?;
             }
         }
 
         self.builder.position_at_end(step_bb);
         let cur = self
             .builder
-            .build_load(i64_ty, idx_alloca, "veach.iv")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, idx_alloca, "veach.iv")?
             .into_int_value();
         let next = self
             .builder
-            .build_int_add(cur, i64_ty.const_int(1, false), "veach.next")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(idx_alloca, next)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(cur, i64_ty.const_int(1, false), "veach.next")?;
+        self.builder.build_store(idx_alloca, next)?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(exit_bb);
         self.unbind_loop_index(index_binding);
@@ -347,8 +318,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for (field, value) in fields {
             agg = self
                 .builder
-                .build_insert_value(agg, value, field, "vec.hdr")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_insert_value(agg, value, field, "vec.hdr")?
                 .into_struct_value();
         }
         Ok(agg.into())
@@ -369,7 +339,7 @@ impl<'ctx> CodegenContext<'ctx> {
         unsafe {
             self.builder
                 .build_in_bounds_gep(elem_llvm, buffer, &[index], "vec.slot")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 
@@ -387,8 +357,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let len = self.load_header_field(header, FIELD_LEN, "vec.len")?;
         let ok = self
             .builder
-            .build_int_compare(IntPredicate::ULT, widened, len, "vec.bounds")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_compare(IntPredicate::ULT, widened, len, "vec.bounds")?;
         self.codegen_guard_or_panic(ok, "Vec index out of bounds", offset)?;
         self.vec_slot_ptr(header, element_ty, widened)
     }
@@ -408,36 +377,26 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let elem_llvm = self.collection_value_type(element_ty)?;
         let slot_alloca = self.entry_alloca(elem_llvm, "vec.read")?;
-        self.builder
-            .build_store(slot_alloca, zero_of(elem_llvm))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot_alloca, zero_of(elem_llvm))?;
 
         let read_bb = self.context.append_basic_block(parent_fn, "vec.read.do");
         let done_bb = self.context.append_basic_block(parent_fn, "vec.read.done");
         self.builder
-            .build_conditional_branch(present, read_bb, done_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(present, read_bb, done_bb)?;
 
         self.builder.position_at_end(read_bb);
         let slot = self.vec_slot_ptr(header, element_ty, index)?;
-        let value = self
-            .builder
-            .build_load(elem_llvm, slot, "vec.elem")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let value = self.builder.build_load(elem_llvm, slot, "vec.elem")?;
         // Inside the guarded block: an absent element is the zero fat pointer, whose null
         // buffer a copy must never read.
         let value = self.value_from_collection_slot(value, element_ty, transfer)?;
-        self.builder
-            .build_store(slot_alloca, value)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(done_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot_alloca, value)?;
+        self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
         self.builder
             .build_load(elem_llvm, slot_alloca, "vec.read.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Ensure the buffer has room for one more element, doubling it if not.
@@ -450,8 +409,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let stride = self.size_of_type(elem_llvm)?;
         let reserve = self.build_reserve_helper()?;
         self.builder
-            .build_call(reserve, &[header.into(), stride.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(reserve, &[header.into(), stride.into()], "")?;
         Ok(())
     }
 
@@ -488,52 +446,39 @@ impl<'ctx> CodegenContext<'ctx> {
             let cap = ctx.load_header_field(header, FIELD_CAP, "cap")?;
             let full = ctx
                 .builder
-                .build_int_compare(IntPredicate::UGE, len, cap, "full")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_compare(IntPredicate::UGE, len, cap, "full")?;
             ctx.builder
-                .build_conditional_branch(full, grow_bb, done_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_conditional_branch(full, grow_bb, done_bb)?;
 
             ctx.builder.position_at_end(grow_bb);
             let doubled = ctx
                 .builder
-                .build_int_mul(cap, i64_ty.const_int(2, false), "double")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_mul(cap, i64_ty.const_int(2, false), "double")?;
             let min_cap = i64_ty.const_int(initial_capacity(), false);
-            let use_min = ctx
-                .builder
-                .build_int_compare(IntPredicate::ULT, doubled, min_cap, "too.small")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let use_min =
+                ctx.builder
+                    .build_int_compare(IntPredicate::ULT, doubled, min_cap, "too.small")?;
             let new_cap = ctx
                 .builder
-                .build_select(use_min, min_cap, doubled, "new.cap")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_select(use_min, min_cap, doubled, "new.cap")?
                 .into_int_value();
-            let bytes = ctx
-                .builder
-                .build_int_mul(new_cap, stride, "new.bytes")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let bytes = ctx.builder.build_int_mul(new_cap, stride, "new.bytes")?;
 
             let old = ctx.load_header_buffer(header)?;
             let realloc = ctx.get_or_declare_realloc();
             let grown = ctx
                 .builder
-                .build_call(realloc, &[old.into(), bytes.into()], "grown")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_call(realloc, &[old.into(), bytes.into()], "grown")?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| CodegenError::InternalError("realloc returned void".into()))?
                 .into_pointer_value();
             ctx.store_header_buffer(header, grown)?;
             ctx.store_header_field(header, FIELD_CAP, new_cap)?;
-            ctx.builder
-                .build_unconditional_branch(done_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            ctx.builder.build_unconditional_branch(done_bb)?;
 
             ctx.builder.position_at_end(done_bb);
-            ctx.builder
-                .build_return(None)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            ctx.builder.build_return(None)?;
             Ok(())
         })
     }
@@ -553,11 +498,11 @@ impl<'ctx> CodegenContext<'ctx> {
         if index_ty.is_unsigned_int() {
             self.builder
                 .build_int_z_extend(index, i64_ty, "idx.zext")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         } else {
             self.builder
                 .build_int_s_extend(index, i64_ty, "idx.sext")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 }

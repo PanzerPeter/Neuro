@@ -136,41 +136,21 @@ impl<'ctx> CodegenContext<'ctx> {
                 let to_w = it.get_bit_width();
                 if to_w > from_w {
                     if TypeMapper::is_unsigned_int(target_sem) {
-                        Ok(self
-                            .builder
-                            .build_int_z_extend(iv, it, "coerce")
-                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                            .into())
+                        Ok(self.builder.build_int_z_extend(iv, it, "coerce")?.into())
                     } else {
-                        Ok(self
-                            .builder
-                            .build_int_s_extend(iv, it, "coerce")
-                            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                            .into())
+                        Ok(self.builder.build_int_s_extend(iv, it, "coerce")?.into())
                     }
                 } else {
-                    Ok(self
-                        .builder
-                        .build_int_truncate(iv, it, "coerce")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
+                    Ok(self.builder.build_int_truncate(iv, it, "coerce")?.into())
                 }
             }
             (BasicValueEnum::FloatValue(fv), BasicTypeEnum::FloatType(ft)) => {
                 // Choose ext vs trunc by bit width so half-precision targets coerce
                 // correctly; equal-width never reaches here (guarded above).
                 if ft.get_bit_width() > fv.get_type().get_bit_width() {
-                    Ok(self
-                        .builder
-                        .build_float_ext(fv, ft, "coerce")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
+                    Ok(self.builder.build_float_ext(fv, ft, "coerce")?.into())
                 } else {
-                    Ok(self
-                        .builder
-                        .build_float_trunc(fv, ft, "coerce")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into())
+                    Ok(self.builder.build_float_trunc(fv, ft, "coerce")?.into())
                 }
             }
             // Element-wise array coercion: rebuild an `[N x T]` aggregate at the
@@ -183,15 +163,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 let elem_llvm = self.type_mapper.map_type(element)?;
                 let mut agg = at.get_undef();
                 for i in 0..*size as u32 {
-                    let e = self
-                        .builder
-                        .build_extract_value(av, i, "arr.coerce.get")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                    let e = self.builder.build_extract_value(av, i, "arr.coerce.get")?;
                     let ce = self.coerce_if_needed(e, elem_llvm, element)?;
                     agg = self
                         .builder
-                        .build_insert_value(agg, ce, i, "arr.coerce.set")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_insert_value(agg, ce, i, "arr.coerce.set")?
                         .into_array_value();
                 }
                 Ok(agg.into())
@@ -582,10 +558,7 @@ impl<'ctx> CodegenContext<'ctx> {
         match result_slot {
             Some(slot) => {
                 let llvm_ty = self.get_any_llvm_type(&result_ty)?;
-                let val = self
-                    .builder
-                    .build_load(llvm_ty, slot, "loopexpr.val")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                let val = self.builder.build_load(llvm_ty, slot, "loopexpr.val")?;
                 Ok(Some(val))
             }
             None => Ok(None),
@@ -609,14 +582,15 @@ impl<'ctx> CodegenContext<'ctx> {
         let end = end.into_int_value();
         let last = match inclusive {
             true => end,
-            false => self
-                .builder
-                .build_int_sub(end, end.get_type().const_int(1, false), "for.rev.last")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+            false => self.builder.build_int_sub(
+                end,
+                end.get_type().const_int(1, false),
+                "for.rev.last",
+            )?,
         };
         self.builder
             .build_int_add(start.into_int_value(), last, "for.rev.origin")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Generate code for a for-range statement (`for i in start..end { ... }`).
@@ -679,9 +653,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let position_alloca = match index {
             Some(_) => {
                 let slot = self.entry_alloca(i64_ty, "for.pos")?;
-                self.builder
-                    .build_store(slot, i64_ty.const_zero())
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_store(slot, i64_ty.const_zero())?;
                 Some(slot)
             }
             None => None,
@@ -706,8 +678,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(cond_bb);
         let iter_int = self
             .builder
-            .build_load(start_val.get_type(), induction_alloca, "for.cur")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(start_val.get_type(), induction_alloca, "for.cur")?
             .into_int_value();
         let end_int = end_val.into_int_value();
 
@@ -734,17 +705,13 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some(origin) = mirror_origin {
             let mirrored = self
                 .builder
-                .build_int_sub(origin, iter_int, "for.rev.cur")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_store(iter_alloca, mirrored)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_sub(origin, iter_int, "for.rev.cur")?;
+            self.builder.build_store(iter_alloca, mirrored)?;
         }
         if let Some(slot) = position_alloca {
             let position = self
                 .builder
-                .build_load(i64_ty, slot, "for.pos.cur")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(i64_ty, slot, "for.pos.cur")?
                 .into_int_value();
             self.store_loop_index(&index_binding, position)?;
         }
@@ -784,8 +751,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(step_bb);
         let current_iter = self
             .builder
-            .build_load(start_val.get_type(), induction_alloca, "for.cur")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(start_val.get_type(), induction_alloca, "for.cur")?
             .into_int_value();
         let one = current_iter.get_type().const_int(1, false);
         let next_iter = self
@@ -800,16 +766,12 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some(slot) = position_alloca {
             let current = self
                 .builder
-                .build_load(i64_ty, slot, "for.pos.cur")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_load(i64_ty, slot, "for.pos.cur")?
                 .into_int_value();
-            let next = self
-                .builder
-                .build_int_add(current, i64_ty.const_int(1, false), "for.pos.next")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            self.builder
-                .build_store(slot, next)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let next =
+                self.builder
+                    .build_int_add(current, i64_ty.const_int(1, false), "for.pos.next")?;
+            self.builder.build_store(slot, next)?;
         }
         self.builder
             .build_unconditional_branch(cond_bb)
@@ -939,9 +901,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     let val = self.codegen_expr(value_expr)?;
                     if let Some(slot) = break_slot {
                         if !self.current_block_terminated() {
-                            self.builder
-                                .build_store(slot, val)
-                                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                            self.builder.build_store(slot, val)?;
                         }
                     }
                     // A broken-out place is moved out of the loop and must not be dropped.

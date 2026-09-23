@@ -95,7 +95,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         let struct_ty = self.get_struct_llvm_type(name)?;
                         self.builder
                             .build_load(struct_ty, ptr, "deref.struct")
-                            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                            .map_err(CodegenError::from)
                     }
                     other => Ok(other),
                 }
@@ -154,13 +154,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat = self.string_receiver_struct(receiver)?;
         let base_ptr = self
             .builder
-            .build_extract_value(fat, 0, "slice.base.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat, 0, "slice.base.ptr")?
             .into_pointer_value();
         let len = self
             .builder
-            .build_extract_value(fat, 1, "slice.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat, 1, "slice.len")?
             .into_int_value();
 
         let i64_ty = self.context.i64_type();
@@ -169,34 +167,28 @@ impl<'ctx> CodegenContext<'ctx> {
         // `a..=b` covers byte `b`, so the exclusive upper bound is `b + 1`.
         let end = if inclusive {
             self.builder
-                .build_int_add(raw_end, i64_ty.const_int(1, false), "slice.incl.end")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_int_add(raw_end, i64_ty.const_int(1, false), "slice.incl.end")?
         } else {
             raw_end
         };
 
         // Bounds: 0 <= start <= end <= len. Signed comparisons so a negative bound is caught.
         let zero = i64_ty.const_zero();
-        let start_nonneg = self
-            .builder
-            .build_int_compare(IntPredicate::SGE, start, zero, "slice.start.nonneg")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let start_le_end = self
-            .builder
-            .build_int_compare(IntPredicate::SLE, start, end, "slice.start.le.end")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let end_le_len = self
-            .builder
-            .build_int_compare(IntPredicate::SLE, end, len, "slice.end.le.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let start_nonneg =
+            self.builder
+                .build_int_compare(IntPredicate::SGE, start, zero, "slice.start.nonneg")?;
+        let start_le_end =
+            self.builder
+                .build_int_compare(IntPredicate::SLE, start, end, "slice.start.le.end")?;
+        let end_le_len =
+            self.builder
+                .build_int_compare(IntPredicate::SLE, end, len, "slice.end.le.len")?;
         let lower_ok = self
             .builder
-            .build_and(start_nonneg, start_le_end, "slice.lower.ok")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_and(start_nonneg, start_le_end, "slice.lower.ok")?;
         let in_bounds = self
             .builder
-            .build_and(lower_ok, end_le_len, "slice.in.bounds")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_and(lower_ok, end_le_len, "slice.in.bounds")?;
         self.codegen_guard_or_panic(in_bounds, "string slice out of bounds", offset)?;
 
         // Both endpoints must land on UTF-8 code-point boundaries.
@@ -204,8 +196,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let end_aligned = self.slice_boundary_ok(base_ptr, end, len)?;
         let aligned = self
             .builder
-            .build_and(start_aligned, end_aligned, "slice.aligned")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_and(start_aligned, end_aligned, "slice.aligned")?;
         self.codegen_guard_or_panic(aligned, "string slice splits a UTF-8 code point", offset)?;
 
         self.string_fat_slice(base_ptr, start, end)
@@ -226,25 +217,23 @@ impl<'ctx> CodegenContext<'ctx> {
         // SAFETY: the caller's bounds guard proved `0 <= start <= len`, so offsetting the
         // base pointer by `start` stays within the string's allocation.
         let new_ptr = unsafe {
-            self.builder
-                .build_in_bounds_gep(self.context.i8_type(), base_ptr, &[start], "slice.ptr")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            self.builder.build_in_bounds_gep(
+                self.context.i8_type(),
+                base_ptr,
+                &[start],
+                "slice.ptr",
+            )?
         };
-        let new_len = self
-            .builder
-            .build_int_sub(end, start, "slice.newlen")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let new_len = self.builder.build_int_sub(end, start, "slice.newlen")?;
 
         let fat_ty = self.type_mapper.map_type(&Type::String)?.into_struct_type();
         let with_ptr = self
             .builder
-            .build_insert_value(fat_ty.get_undef(), new_ptr, 0, "slice.res.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(fat_ty.get_undef(), new_ptr, 0, "slice.res.ptr")?
             .into_struct_value();
         let fat_val = self
             .builder
-            .build_insert_value(with_ptr, new_len, 1, "slice.res")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(with_ptr, new_len, 1, "slice.res")?
             .into_struct_value();
 
         // `&string` is the `{ ptr, i64 }` fat pointer by value, so the computed slice is
@@ -261,11 +250,11 @@ impl<'ctx> CodegenContext<'ctx> {
         if width < 64 {
             self.builder
                 .build_int_s_extend(value, i64_ty, "slice.idx")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         } else if width > 64 {
             self.builder
                 .build_int_truncate(value, i64_ty, "slice.idx")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         } else {
             Ok(value)
         }
@@ -285,56 +274,41 @@ impl<'ctx> CodegenContext<'ctx> {
         let i8_ty = self.context.i8_type();
         let zero = i64_ty.const_zero();
 
-        let at_start = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, offset, zero, "slice.b.start")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let at_end = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, offset, len, "slice.b.end")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let at_edge = self
-            .builder
-            .build_or(at_start, at_end, "slice.b.edge")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let at_start =
+            self.builder
+                .build_int_compare(IntPredicate::EQ, offset, zero, "slice.b.start")?;
+        let at_end =
+            self.builder
+                .build_int_compare(IntPredicate::EQ, offset, len, "slice.b.end")?;
+        let at_edge = self.builder.build_or(at_start, at_end, "slice.b.edge")?;
         let safe_idx = self
             .builder
-            .build_select(at_edge, zero, offset, "slice.b.idx")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_select(at_edge, zero, offset, "slice.b.idx")?
             .into_int_value();
 
         // SAFETY: at an edge the index is clamped to 0; otherwise `0 < offset < len`, so
         // `base[safe_idx]` is an interior byte within the allocation.
         let byte_ptr = unsafe {
             self.builder
-                .build_in_bounds_gep(i8_ty, base, &[safe_idx], "slice.b.ptr")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_in_bounds_gep(i8_ty, base, &[safe_idx], "slice.b.ptr")?
         };
         let byte = self
             .builder
-            .build_load(i8_ty, byte_ptr, "slice.byte")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i8_ty, byte_ptr, "slice.byte")?
             .into_int_value();
         let masked = self
             .builder
-            .build_and(byte, i8_ty.const_int(0xC0, false), "slice.b.mask")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let is_cont = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                masked,
-                i8_ty.const_int(0x80, false),
-                "slice.b.cont",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let not_cont = self
-            .builder
-            .build_not(is_cont, "slice.b.notcont")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_and(byte, i8_ty.const_int(0xC0, false), "slice.b.mask")?;
+        let is_cont = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            masked,
+            i8_ty.const_int(0x80, false),
+            "slice.b.cont",
+        )?;
+        let not_cont = self.builder.build_not(is_cont, "slice.b.notcont")?;
         self.builder
             .build_or(at_edge, not_cont, "slice.b.ok")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Lower a string receiver to its `{ ptr, len }` fat-pointer value.
@@ -352,8 +326,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let string_ty = self.type_mapper.map_type(&Type::String)?;
                 Ok(self
                     .builder
-                    .build_load(string_ty, ptr, "deref.str")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .build_load(string_ty, ptr, "deref.str")?
                     .into_struct_value())
             }
             other => Err(CodegenError::InternalError(format!(
@@ -378,8 +351,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         Ok(self
             .builder
-            .build_float_compare(FloatPredicate::UNO, value, value, "is.nan")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_float_compare(FloatPredicate::UNO, value, value, "is.nan")?
             .into())
     }
 
@@ -397,22 +369,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let (lhs, rhs) = self.int_intrinsic_operands(recv_ty, receiver, args)?;
 
         let value = match kind {
-            BuiltinMethod::WrappingAdd => self
-                .builder
-                .build_int_add(lhs, rhs, "wrap.add")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
-            BuiltinMethod::WrappingSub => self
-                .builder
-                .build_int_sub(lhs, rhs, "wrap.sub")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
-            BuiltinMethod::WrappingMul => self
-                .builder
-                .build_int_mul(lhs, rhs, "wrap.mul")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
-            BuiltinMethod::Shr => self
-                .builder
-                .build_right_shift(lhs, rhs, !unsigned, "shr")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+            BuiltinMethod::WrappingAdd => self.builder.build_int_add(lhs, rhs, "wrap.add")?,
+            BuiltinMethod::WrappingSub => self.builder.build_int_sub(lhs, rhs, "wrap.sub")?,
+            BuiltinMethod::WrappingMul => self.builder.build_int_mul(lhs, rhs, "wrap.mul")?,
+            BuiltinMethod::Shr => self.builder.build_right_shift(lhs, rhs, !unsigned, "shr")?,
             BuiltinMethod::SaturatingAdd | BuiltinMethod::SaturatingSub => {
                 let intrinsic_name = match (kind, unsigned) {
                     (BuiltinMethod::SaturatingAdd, false) => "llvm.sadd.sat",
@@ -479,10 +439,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         let (value, overflowed) = self.emit_with_overflow(intrinsic_name, lhs, rhs)?;
-        let ok = self
-            .builder
-            .build_not(overflowed, "chk.ok")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let ok = self.builder.build_not(overflowed, "chk.ok")?;
         self.build_option_value(result_ty, ok, value.into(), recv_ty)
     }
 
@@ -533,21 +490,18 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let agg = self
             .builder
-            .build_call(decl, &[lhs.into(), rhs.into()], "ovf")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(decl, &[lhs.into(), rhs.into()], "ovf")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError(format!("{intrinsic_name} returned void")))?
             .into_struct_value();
         let result = self
             .builder
-            .build_extract_value(agg, 0, "ovf.res")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(agg, 0, "ovf.res")?
             .into_int_value();
         let overflowed = self
             .builder
-            .build_extract_value(agg, 1, "ovf.bit")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(agg, 1, "ovf.bit")?
             .into_int_value();
         Ok((result, overflowed))
     }
@@ -573,8 +527,7 @@ impl<'ctx> CodegenContext<'ctx> {
             })?;
         Ok(self
             .builder
-            .build_call(decl, &[lhs.into(), rhs.into()], "sat")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(decl, &[lhs.into(), rhs.into()], "sat")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| {
@@ -612,24 +565,18 @@ impl<'ctx> CodegenContext<'ctx> {
             let smax_val = int_ty.const_int(smax, false);
             let smin_val = int_ty.const_int(smin, false);
             let zero = int_ty.const_zero();
-            let signs = self
-                .builder
-                .build_xor(lhs, rhs, "smul.signs")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-            let negative = self
-                .builder
-                .build_int_compare(IntPredicate::SLT, signs, zero, "smul.neg")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            let signs = self.builder.build_xor(lhs, rhs, "smul.signs")?;
+            let negative =
+                self.builder
+                    .build_int_compare(IntPredicate::SLT, signs, zero, "smul.neg")?;
             self.builder
-                .build_select(negative, smin_val, smax_val, "smul.bound")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_select(negative, smin_val, smax_val, "smul.bound")?
                 .into_int_value()
         };
 
         Ok(self
             .builder
-            .build_select(overflowed, bound, result, "sat.mul")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_select(overflowed, bound, result, "sat.mul")?
             .into_int_value())
     }
 }

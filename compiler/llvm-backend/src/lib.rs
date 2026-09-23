@@ -266,10 +266,7 @@ fn build_module<'ctx>(
 
     // Supply source so panic-family builtins can render `file:line:col` in their
     // runtime diagnostics.
-    codegen_ctx.set_source(source_location::SourceFile::new(
-        source_path.to_string(),
-        source.to_string(),
-    ));
+    codegen_ctx.set_source(source_path.to_string(), source.to_string());
 
     // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);

@@ -4,7 +4,6 @@ resolver = "2"
 members = [
     # Infrastructure Components (Shared across slices)
     "compiler/infrastructure/shared-types",
-    "compiler/infrastructure/source-location",
     "compiler/infrastructure/ast-types",
     "compiler/infrastructure/neuro-hir",
 
@@ -22,44 +21,15 @@ members = [
 
     # Compiler Driver
     "compiler/neurc",
-
-    # Phase 2+: Feature Slices
-    # "compiler/tensor-operations",
-    # "compiler/automatic-differentiation",
-    # "compiler/gpu-compilation",
-    # "compiler/memory-management",
-    # "compiler/pattern-matching",
-    # "compiler/optimization-passes",
-    # "compiler/error-reporting",
-
-    # Runtime Libraries (Phase 3+)
-    # "runtime/neuro-std",
-    # "runtime/neuro-nn",
-    # "runtime/neuro-gpu",
-
-    # Development Tools (Phase 7+)
-    # "tools/neuro-lsp",
-    # "tools/neuro-fmt",
-
-    # Package Manager (Phase 7+)
-    # "neurpm",
-
-    # Testing
-    # "integration-tests",
-    # "benchmarks",
 ]
 
 [workspace.package]
-version = "3.5.0"
+version = "3.5.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
 license-file = "LICENSE"
 publish = false
-repository = "https://github.com/PanzerPeter/Neuro"
-homepage = "https://github.com/PanzerPeter/Neuro"
-keywords = ["compiler", "ai", "machine-learning", "tensor", "neural-networks"]
-categories = ["development-tools", "science"]
 
 [workspace.dependencies]
 # Core dependencies used across multiple crates
@@ -109,24 +79,18 @@ mlir-sys = "0.5.0"
 serde_json = "1.0"
 
 # CLI
-clap = { version = "4.5", features = ["derive", "color", "suggestions"] }
-env_logger = "0.11"
+clap = { version = "4.5", features = ["derive"] }
+env_logger = { version = "0.11", default-features = false }
 log = "0.4"
 
 # Testing
 criterion = "0.8"
 
 [profile.dev]
-opt-level = 0
-debug = true
 split-debuginfo = "unpacked"
-debug-assertions = true
-overflow-checks = true
 incremental = false
 
 [profile.release]
-opt-level = 3
-debug = false
 lto = "thin"
 codegen-units = 1
 strip = true
@@ -134,12 +98,8 @@ panic = "abort"
 
 [profile.test]
 opt-level = 1
-debug = true
-incremental = false
 
 [profile.bench]
-opt-level = 3
-debug = false
 lto = true
 
 # Custom profile for faster development builds

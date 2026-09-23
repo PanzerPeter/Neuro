@@ -526,12 +526,6 @@ impl Type {
     pub(crate) fn is_char(&self) -> bool {
         matches!(self, Type::Char)
     }
-
-    /// Check if this is a string type
-    #[allow(dead_code)]
-    pub(crate) fn is_string(&self) -> bool {
-        matches!(self, Type::String)
-    }
 }
 
 impl fmt::Display for Type {
@@ -929,9 +923,6 @@ mod tests {
 
     #[test]
     fn string_type_predicates() {
-        // Test is_string predicate
-        assert!(Type::String.is_string());
-
         // String is NOT numeric, integer, float, or bool
         assert!(!Type::String.is_numeric());
         assert!(!Type::String.is_integer());
@@ -939,11 +930,5 @@ mod tests {
         assert!(!Type::String.is_bool());
         assert!(!Type::String.is_signed_int());
         assert!(!Type::String.is_unsigned_int());
-
-        // Other types are NOT strings
-        assert!(!Type::I32.is_string());
-        assert!(!Type::Bool.is_string());
-        assert!(!Type::F64.is_string());
-        assert!(!Type::Void.is_string());
     }
 }

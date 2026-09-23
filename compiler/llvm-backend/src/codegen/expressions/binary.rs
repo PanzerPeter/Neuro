@@ -34,36 +34,30 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let ptr1 = self
             .builder
-            .build_extract_value(lhs_struct, 0, "s1.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(lhs_struct, 0, "s1.ptr")?
             .into_pointer_value();
         let len1 = self
             .builder
-            .build_extract_value(lhs_struct, 1, "s1.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(lhs_struct, 1, "s1.len")?
             .into_int_value();
 
         let ptr2 = self
             .builder
-            .build_extract_value(rhs_struct, 0, "s2.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(rhs_struct, 0, "s2.ptr")?
             .into_pointer_value();
         let len2 = self
             .builder
-            .build_extract_value(rhs_struct, 1, "s2.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(rhs_struct, 1, "s2.len")?
             .into_int_value();
 
         let len_eq = self
             .builder
-            .build_int_compare(IntPredicate::EQ, len1, len2, "len_eq")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_compare(IntPredicate::EQ, len1, len2, "len_eq")?;
 
         let zero_len = self.context.i64_type().const_int(0, false);
         let cmp_len = self
             .builder
-            .build_select(len_eq, len1, zero_len, "cmp_len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_select(len_eq, len1, zero_len, "cmp_len")?;
 
         let memcmp_fn = self.get_or_declare_memcmp();
         let call = self
@@ -81,19 +75,16 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError("memcmp returned void".to_string()))?
             .into_int_value();
 
-        let content_eq = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                memcmp_val,
-                self.context.i32_type().const_int(0, false),
-                "content_eq",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let content_eq = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            memcmp_val,
+            self.context.i32_type().const_int(0, false),
+            "content_eq",
+        )?;
 
         self.builder
             .build_and(len_eq, content_eq, "str_eq")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Concatenate two string fat-pointers into a new owned `string`.
@@ -114,29 +105,22 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let ptr1 = self
             .builder
-            .build_extract_value(lhs_struct, 0, "cat.s1.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(lhs_struct, 0, "cat.s1.ptr")?
             .into_pointer_value();
         let len1 = self
             .builder
-            .build_extract_value(lhs_struct, 1, "cat.s1.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(lhs_struct, 1, "cat.s1.len")?
             .into_int_value();
         let ptr2 = self
             .builder
-            .build_extract_value(rhs_struct, 0, "cat.s2.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(rhs_struct, 0, "cat.s2.ptr")?
             .into_pointer_value();
         let len2 = self
             .builder
-            .build_extract_value(rhs_struct, 1, "cat.s2.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(rhs_struct, 1, "cat.s2.len")?
             .into_int_value();
 
-        let total_len = self
-            .builder
-            .build_int_add(len1, len2, "cat.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let total_len = self.builder.build_int_add(len1, len2, "cat.len")?;
 
         let malloc_fn = self.alloc_fn()?;
         let buf = self
@@ -158,8 +142,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // remaining `len2` bytes starting at that offset.
         let dst2 = unsafe {
             self.builder
-                .build_in_bounds_gep(self.context.i8_type(), buf, &[len1], "cat.dst2")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_in_bounds_gep(self.context.i8_type(), buf, &[len1], "cat.dst2")?
         };
         self.builder
             .build_call(memcpy_fn, &[dst2.into(), ptr2.into(), len2.into()], "")
@@ -168,13 +151,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat_ptr_type = self.type_mapper.map_type(&Type::String)?.into_struct_type();
         let with_ptr = self
             .builder
-            .build_insert_value(fat_ptr_type.get_undef(), buf, 0, "cat.res.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(fat_ptr_type.get_undef(), buf, 0, "cat.res.ptr")?
             .into_struct_value();
         let fat_ptr = self
             .builder
-            .build_insert_value(with_ptr, total_len, 1, "cat.res")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_insert_value(with_ptr, total_len, 1, "cat.res")?;
 
         Ok(fat_ptr.into_struct_value().into())
     }
@@ -192,7 +173,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let string_ty = self.type_mapper.map_type(&Type::String)?;
                 self.builder
                     .build_load(string_ty, ptr, "deref.str")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                    .map_err(CodegenError::from)
             }
             other => Ok(other),
         }
@@ -234,12 +215,10 @@ impl<'ctx> CodegenContext<'ctx> {
         match op {
             BinaryOp::And => self
                 .builder
-                .build_conditional_branch(lhs, rhs_bb, merge_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+                .build_conditional_branch(lhs, rhs_bb, merge_bb)?,
             _ => self
                 .builder
-                .build_conditional_branch(lhs, merge_bb, rhs_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?,
+                .build_conditional_branch(lhs, merge_bb, rhs_bb)?,
         };
 
         // RHS block: evaluate the RHS, then branch to merge. Capture the block we
@@ -252,9 +231,7 @@ impl<'ctx> CodegenContext<'ctx> {
         })?;
         let rhs_terminated = self.current_block_terminated();
         if !rhs_terminated {
-            self.builder
-                .build_unconditional_branch(merge_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(merge_bb)?;
         }
 
         // The short-circuit constant: `&&` yields false, `||` yields true.
@@ -264,10 +241,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         self.builder.position_at_end(merge_bb);
-        let phi = self
-            .builder
-            .build_phi(bool_ty, "logic.result")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let phi = self.builder.build_phi(bool_ty, "logic.result")?;
         // Skip the RHS incoming edge if that block terminated (e.g. RHS diverged).
         if rhs_terminated {
             phi.add_incoming(&[(&short_circuit_val, entry_bb)]);
@@ -327,8 +301,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let agg = self
             .builder
-            .build_call(decl, &[lhs.into(), rhs.into()], name)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(decl, &[lhs.into(), rhs.into()], name)?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| {
@@ -338,19 +311,14 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let result = self
             .builder
-            .build_extract_value(agg, 0, "arith.res")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(agg, 0, "arith.res")?
             .into_int_value();
         let overflowed = self
             .builder
-            .build_extract_value(agg, 1, "arith.ovf")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(agg, 1, "arith.ovf")?
             .into_int_value();
 
-        let ok = self
-            .builder
-            .build_not(overflowed, "arith.ok")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let ok = self.builder.build_not(overflowed, "arith.ok")?;
         self.codegen_guard_or_panic(ok, OVERFLOW_PANIC, offset)?;
         Ok(result)
     }
@@ -373,7 +341,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 ))
             }
         };
-        value.map_err(|e| CodegenError::LlvmError(e.to_string()))
+        value.map_err(CodegenError::from)
     }
 
     /// Emit integer `/` or `%`, with the guards LLVM's `sdiv` / `udiv` / `srem` /
@@ -512,11 +480,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.release_string_temporary(right, rhs_str)?;
             return match op {
                 BinaryOp::Equal => Ok(eq.into()),
-                _ => Ok(self
-                    .builder
-                    .build_not(eq, "str_ne")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                    .into()),
+                _ => Ok(self.builder.build_not(eq, "str_ne")?.into()),
             };
         }
 
@@ -529,11 +493,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let eq = self.codegen_derived_struct_eq(&name, lhs, rhs)?;
                 return match op {
                     BinaryOp::Equal => Ok(eq.into()),
-                    _ => Ok(self
-                        .builder
-                        .build_not(eq, "struct_ne")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
-                        .into()),
+                    _ => Ok(self.builder.build_not(eq, "struct_ne")?.into()),
                 };
             }
         }
@@ -581,8 +541,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
-                        .build_float_add(lhs.into_float_value(), rhs.into_float_value(), "addtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_add(lhs.into_float_value(), rhs.into_float_value(), "addtmp")?
                         .into())
                 } else {
                     let unsigned = TypeMapper::is_unsigned_int(left_ty);
@@ -602,8 +561,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
-                        .build_float_sub(lhs.into_float_value(), rhs.into_float_value(), "subtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_sub(lhs.into_float_value(), rhs.into_float_value(), "subtmp")?
                         .into())
                 } else {
                     let unsigned = TypeMapper::is_unsigned_int(left_ty);
@@ -623,8 +581,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
-                        .build_float_mul(lhs.into_float_value(), rhs.into_float_value(), "multmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_mul(lhs.into_float_value(), rhs.into_float_value(), "multmp")?
                         .into())
                 } else {
                     let unsigned = TypeMapper::is_unsigned_int(left_ty);
@@ -644,8 +601,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
-                        .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "divtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "divtmp")?
                         .into())
                 } else {
                     let unsigned = TypeMapper::is_unsigned_int(left_ty);
@@ -665,8 +621,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if TypeMapper::is_float_type(left_ty) {
                     Ok(self
                         .builder
-                        .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "modtmp")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "modtmp")?
                         .into())
                 } else {
                     let unsigned = TypeMapper::is_unsigned_int(left_ty);
@@ -693,8 +648,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_float_value(),
                             rhs.into_float_value(),
                             "eqtmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else {
                     Ok(self
@@ -704,8 +658,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "eqtmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -718,8 +671,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_float_value(),
                             rhs.into_float_value(),
                             "netmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else {
                     Ok(self
@@ -729,8 +681,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "netmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -743,8 +694,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_float_value(),
                             rhs.into_float_value(),
                             "lttmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else if TypeMapper::is_unsigned_int(left_ty) {
                     // Unsigned less than comparison
@@ -755,8 +705,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "lttmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else {
                     // Signed less than comparison
@@ -767,8 +716,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "lttmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -781,8 +729,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_float_value(),
                             rhs.into_float_value(),
                             "gttmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else if TypeMapper::is_unsigned_int(left_ty) {
                     // Unsigned greater than comparison
@@ -793,8 +740,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "gttmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else {
                     // Signed greater than comparison
@@ -805,8 +751,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "gttmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -819,8 +764,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_float_value(),
                             rhs.into_float_value(),
                             "letmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else if TypeMapper::is_unsigned_int(left_ty) {
                     // Unsigned less than or equal comparison
@@ -831,8 +775,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "letmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else {
                     // Signed less than or equal comparison
@@ -843,8 +786,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "letmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -857,8 +799,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_float_value(),
                             rhs.into_float_value(),
                             "getmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else if TypeMapper::is_unsigned_int(left_ty) {
                     // Unsigned greater than or equal comparison
@@ -869,8 +810,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "getmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 } else {
                     // Signed greater than or equal comparison
@@ -881,8 +821,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             lhs.into_int_value(),
                             rhs.into_int_value(),
                             "getmp",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into())
                 }
             }
@@ -896,23 +835,19 @@ impl<'ctx> CodegenContext<'ctx> {
             // Bitwise operators
             BinaryOp::BitAnd => Ok(self
                 .builder
-                .build_and(lhs.into_int_value(), rhs.into_int_value(), "bandtmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_and(lhs.into_int_value(), rhs.into_int_value(), "bandtmp")?
                 .into()),
             BinaryOp::BitOr => Ok(self
                 .builder
-                .build_or(lhs.into_int_value(), rhs.into_int_value(), "bortmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_or(lhs.into_int_value(), rhs.into_int_value(), "bortmp")?
                 .into()),
             BinaryOp::BitXor => Ok(self
                 .builder
-                .build_xor(lhs.into_int_value(), rhs.into_int_value(), "xortmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_xor(lhs.into_int_value(), rhs.into_int_value(), "xortmp")?
                 .into()),
             BinaryOp::Shl => Ok(self
                 .builder
-                .build_left_shift(lhs.into_int_value(), rhs.into_int_value(), "shltmp")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_left_shift(lhs.into_int_value(), rhs.into_int_value(), "shltmp")?
                 .into()),
             // `@` is defined on tensors only, and a tensor operand never reaches this
             // scalar path: the guard above rejects it before the dispatch.

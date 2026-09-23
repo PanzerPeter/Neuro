@@ -71,8 +71,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let raw_end = self.slice_index_to_i64(end_expr)?;
         let end = if inclusive {
             self.builder
-                .build_int_add(raw_end, i64_ty.const_int(1, false), "sl.incl.end")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_int_add(raw_end, i64_ty.const_int(1, false), "sl.incl.end")?
         } else {
             raw_end
         };
@@ -81,26 +80,21 @@ impl<'ctx> CodegenContext<'ctx> {
         // negative bound fails the first test rather than wrapping to a huge unsigned
         // value that would then pass the upper-bound test.
         let zero = i64_ty.const_zero();
-        let start_nonneg = self
-            .builder
-            .build_int_compare(IntPredicate::SGE, start, zero, "sl.start.nonneg")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let start_le_end = self
-            .builder
-            .build_int_compare(IntPredicate::SLE, start, end, "sl.start.le.end")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let end_le_len = self
-            .builder
-            .build_int_compare(IntPredicate::SLE, end, len, "sl.end.le.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let start_nonneg =
+            self.builder
+                .build_int_compare(IntPredicate::SGE, start, zero, "sl.start.nonneg")?;
+        let start_le_end =
+            self.builder
+                .build_int_compare(IntPredicate::SLE, start, end, "sl.start.le.end")?;
+        let end_le_len =
+            self.builder
+                .build_int_compare(IntPredicate::SLE, end, len, "sl.end.le.len")?;
         let lower_ok = self
             .builder
-            .build_and(start_nonneg, start_le_end, "sl.lower.ok")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_and(start_nonneg, start_le_end, "sl.lower.ok")?;
         let in_bounds = self
             .builder
-            .build_and(lower_ok, end_le_len, "sl.in.bounds")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_and(lower_ok, end_le_len, "sl.in.bounds")?;
         self.codegen_guard_or_panic(in_bounds, "slice range out of bounds", offset)?;
 
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
@@ -109,13 +103,9 @@ impl<'ctx> CodegenContext<'ctx> {
         // the empty slice and a legal GEP result).
         let new_ptr = unsafe {
             self.builder
-                .build_in_bounds_gep(elem_llvm, base, &[start], "sl.ptr")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_in_bounds_gep(elem_llvm, base, &[start], "sl.ptr")?
         };
-        let new_len = self
-            .builder
-            .build_int_sub(end, start, "sl.newlen")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let new_len = self.builder.build_int_sub(end, start, "sl.newlen")?;
         self.slice_fat_pointer(new_ptr, new_len)
     }
 
@@ -127,7 +117,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat = self.codegen_expr(receiver)?.into_struct_value();
         self.builder
             .build_extract_value(fat, FIELD_LEN, "sl.len")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Lower a slice index read `xs[i]`: bounds-check (debug), then load the element.
@@ -143,7 +133,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let slot = self.slice_element_ptr(base, &element_ty, len, index, offset)?;
         self.builder
             .build_load(elem_llvm, slot, "sl.idx")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
     }
 
     /// Lower a slice element assignment `xs[i] = value` through a `&mut [T]`. The write
@@ -160,9 +150,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let slot = self.slice_element_ptr(base, &element_ty, len, index, index.span.start)?;
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
-        self.builder
-            .build_store(slot, val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot, val)?;
         self.mark_moved_for_drop(value);
         Ok(())
     }
@@ -187,9 +175,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let i64_ty = self.context.i64_type();
 
         let idx_alloca = self.entry_alloca(i64_ty, "sleach.i")?;
-        self.builder
-            .build_store(idx_alloca, i64_ty.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(idx_alloca, i64_ty.const_zero())?;
         let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
 
         self.type_env
@@ -205,40 +191,29 @@ impl<'ctx> CodegenContext<'ctx> {
         let exit_bb = self.context.append_basic_block(parent_fn, "sleach.exit");
 
         if !self.current_block_terminated() {
-            self.builder
-                .build_unconditional_branch(cond_bb)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            self.builder.build_unconditional_branch(cond_bb)?;
         }
 
         self.builder.position_at_end(cond_bb);
         let i_val = self
             .builder
-            .build_load(i64_ty, idx_alloca, "sleach.iv")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, idx_alloca, "sleach.iv")?
             .into_int_value();
         let cond = self
             .builder
-            .build_int_compare(IntPredicate::ULT, i_val, len, "sleach.cmp")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_compare(IntPredicate::ULT, i_val, len, "sleach.cmp")?;
         self.builder
-            .build_conditional_branch(cond, body_bb, exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(cond, body_bb, exit_bb)?;
 
         self.builder.position_at_end(body_bb);
         // SAFETY: this block is reached only when the loop condition proved
         // `i_val < len`, so the addressed element is inside the borrowed run.
         let slot = unsafe {
             self.builder
-                .build_in_bounds_gep(elem_llvm, base, &[i_val], "sleach.slot")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_in_bounds_gep(elem_llvm, base, &[i_val], "sleach.slot")?
         };
-        let elem_val = self
-            .builder
-            .build_load(elem_llvm, slot, "sleach.elem")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(elem_alloca, elem_val)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let elem_val = self.builder.build_load(elem_llvm, slot, "sleach.elem")?;
+        self.builder.build_store(elem_alloca, elem_val)?;
         self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();
@@ -264,28 +239,20 @@ impl<'ctx> CodegenContext<'ctx> {
 
         if let Some(tail_bb) = self.builder.get_insert_block() {
             if tail_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(step_bb)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_unconditional_branch(step_bb)?;
             }
         }
 
         self.builder.position_at_end(step_bb);
         let cur = self
             .builder
-            .build_load(i64_ty, idx_alloca, "sleach.iv")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, idx_alloca, "sleach.iv")?
             .into_int_value();
         let next = self
             .builder
-            .build_int_add(cur, i64_ty.const_int(1, false), "sleach.next")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(idx_alloca, next)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(cur, i64_ty.const_int(1, false), "sleach.next")?;
+        self.builder.build_store(idx_alloca, next)?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(exit_bb);
         self.unbind_loop_index(index_binding);
@@ -345,13 +312,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 let fat = self.codegen_expr(object)?.into_struct_value();
                 let base = self
                     .builder
-                    .build_extract_value(fat, FIELD_PTR, "sl.src.ptr")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .build_extract_value(fat, FIELD_PTR, "sl.src.ptr")?
                     .into_pointer_value();
                 let len = self
                     .builder
-                    .build_extract_value(fat, FIELD_LEN, "sl.src.len")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .build_extract_value(fat, FIELD_LEN, "sl.src.len")?
                     .into_int_value();
                 Ok((base, (*element).clone(), len))
             }
@@ -379,8 +344,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if self.overflow_checks {
             let ok = self
                 .builder
-                .build_int_compare(IntPredicate::ULT, idx64, len, "sl.bounds")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                .build_int_compare(IntPredicate::ULT, idx64, len, "sl.bounds")?;
             self.codegen_guard_or_panic(ok, "slice index out of bounds", offset)?;
         }
 
@@ -391,7 +355,7 @@ impl<'ctx> CodegenContext<'ctx> {
         unsafe {
             self.builder
                 .build_in_bounds_gep(elem_llvm, base, &[idx64], "sl.slot")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 
@@ -404,13 +368,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat_ty = self.slice_ref_type();
         let with_ptr = self
             .builder
-            .build_insert_value(fat_ty.get_undef(), base, FIELD_PTR, "sl.res.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(fat_ty.get_undef(), base, FIELD_PTR, "sl.res.ptr")?
             .into_struct_value();
         let full = self
             .builder
-            .build_insert_value(with_ptr, len, FIELD_LEN, "sl.res")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(with_ptr, len, FIELD_LEN, "sl.res")?
             .into_struct_value();
         Ok(full.into())
     }

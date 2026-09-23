@@ -82,8 +82,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     val,
                     idx as u32,
                     &format!("{}.{}", name, field_init.name),
-                )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                )?
                 .into_struct_value();
         }
         Ok(agg.into())
@@ -130,10 +129,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 ))
             })?;
 
-        let field_ptr = self
-            .builder
-            .build_struct_gep(llvm_ty, ptr, idx as u32, &format!("{}.ptr", field_name))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let field_ptr = self.builder.build_struct_gep(
+            llvm_ty,
+            ptr,
+            idx as u32,
+            &format!("{}.ptr", field_name),
+        )?;
 
         let llvm_field_ty = self.type_mapper.map_type(&field_ty)?;
         self.builder
@@ -184,15 +185,12 @@ impl<'ctx> CodegenContext<'ctx> {
         let llvm_struct_ty = self.get_struct_llvm_type(&struct_name)?;
         let idx = self.struct_field_index(&struct_name, field_name)?;
 
-        let field_ptr = self
-            .builder
-            .build_struct_gep(
-                llvm_struct_ty,
-                ptr,
-                idx as u32,
-                &format!("{}.ptr", field_name),
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let field_ptr = self.builder.build_struct_gep(
+            llvm_struct_ty,
+            ptr,
+            idx as u32,
+            &format!("{}.ptr", field_name),
+        )?;
 
         let val = self.codegen_expr(value)?;
         // Ordered as a binding's reassignment is: the field may be read on the way to
@@ -249,8 +247,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             self.context.ptr_type(inkwell::AddressSpace::default()),
                             ptr,
                             "place.deref",
-                        )
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        )?
                         .into_pointer_value();
                     return Ok(Some(loaded));
                 }
@@ -267,15 +264,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
                 let parent_llvm = self.get_struct_llvm_type(&parent_name)?;
                 let idx = self.struct_field_index(&parent_name, field)?;
-                let field_ptr = self
-                    .builder
-                    .build_struct_gep(
-                        parent_llvm,
-                        parent_ptr,
-                        idx as u32,
-                        &format!("{}.ptr", field),
-                    )
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                let field_ptr = self.builder.build_struct_gep(
+                    parent_llvm,
+                    parent_ptr,
+                    idx as u32,
+                    &format!("{}.ptr", field),
+                )?;
                 Ok(Some(field_ptr))
             }
 
@@ -311,15 +305,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 if !tuple_llvm.is_struct_type() {
                     return Ok(None);
                 }
-                let slot = self
-                    .builder
-                    .build_struct_gep(
-                        tuple_llvm.into_struct_type(),
-                        base,
-                        *index as u32,
-                        "tup.ptr",
-                    )
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                let slot = self.builder.build_struct_gep(
+                    tuple_llvm.into_struct_type(),
+                    base,
+                    *index as u32,
+                    "tup.ptr",
+                )?;
                 Ok(Some(slot))
             }
 
@@ -355,8 +346,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if var_ty.is_pointer_type() {
                     let struct_ptr = self
                         .builder
-                        .build_load(*var_ty, alloca, "deref.struct.ptr")
-                        .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                        .build_load(*var_ty, alloca, "deref.struct.ptr")?
                         .into_pointer_value();
                     Ok((struct_ptr, llvm_ty))
                 } else {
@@ -381,15 +371,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 let (parent_ptr, parent_llvm) =
                     self.get_struct_ptr_and_type(parent, &parent_name)?;
                 let idx = self.struct_field_index(&parent_name, field)?;
-                let field_ptr = self
-                    .builder
-                    .build_struct_gep(
-                        parent_llvm,
-                        parent_ptr,
-                        idx as u32,
-                        &format!("{}.ptr", field),
-                    )
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                let field_ptr = self.builder.build_struct_gep(
+                    parent_llvm,
+                    parent_ptr,
+                    idx as u32,
+                    &format!("{}.ptr", field),
+                )?;
                 Ok((field_ptr, self.get_struct_llvm_type(struct_name)?))
             }
             other => Err(CodegenError::UnsupportedType(format!(

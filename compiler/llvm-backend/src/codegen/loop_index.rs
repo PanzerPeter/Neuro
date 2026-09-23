@@ -14,7 +14,7 @@
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{IntValue, PointerValue};
 
-use crate::errors::{CodegenError, CodegenResult};
+use crate::errors::CodegenResult;
 use crate::types::Type;
 
 use super::CodegenContext;
@@ -63,9 +63,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let Some(binding) = binding else {
             return Ok(());
         };
-        self.builder
-            .build_store(binding.slot, position)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(binding.slot, position)?;
         Ok(())
     }
 

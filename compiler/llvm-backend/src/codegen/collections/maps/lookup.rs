@@ -61,87 +61,65 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let (header, key) = helper_params(func)?;
         let capacity = self.load_header_field(header, FIELD_CAP, "cap")?;
-        let has_slots = self
-            .builder
-            .build_int_compare(IntPredicate::UGT, capacity, i64_ty.const_zero(), "any")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let has_slots = self.builder.build_int_compare(
+            IntPredicate::UGT,
+            capacity,
+            i64_ty.const_zero(),
+            "any",
+        )?;
         let cursor = self.entry_alloca(i64_ty, "cursor")?;
         let start = self.bucket_of(key_ty, key, capacity)?;
+        self.builder.build_store(cursor, start)?;
         self.builder
-            .build_store(cursor, start)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_conditional_branch(has_slots, probe_bb, empty_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(has_slots, probe_bb, empty_bb)?;
 
         self.builder.position_at_end(empty_bb);
-        self.builder
-            .build_unconditional_branch(miss_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(miss_bb)?;
 
         // Stop at the first EMPTY slot: the key would have been placed there.
         self.builder.position_at_end(probe_bb);
         let slot = self
             .builder
-            .build_load(i64_ty, cursor, "slot")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, cursor, "slot")?
             .into_int_value();
         let state = self.load_slot_state(header, key_ty, value_ty, slot)?;
-        let is_empty = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                state,
-                self.context.i8_type().const_int(STATE_EMPTY, false),
-                "is.empty",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let is_empty = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            state,
+            self.context.i8_type().const_int(STATE_EMPTY, false),
+            "is.empty",
+        )?;
         self.builder
-            .build_conditional_branch(is_empty, miss_bb, occupied_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(is_empty, miss_bb, occupied_bb)?;
 
         // A tombstone is skipped; only a FULL slot's key is compared.
         self.builder.position_at_end(occupied_bb);
-        let is_full = self
-            .builder
-            .build_int_compare(
-                IntPredicate::EQ,
-                state,
-                self.context.i8_type().const_int(STATE_FULL, false),
-                "is.full",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let is_full = self.builder.build_int_compare(
+            IntPredicate::EQ,
+            state,
+            self.context.i8_type().const_int(STATE_FULL, false),
+            "is.full",
+        )?;
         self.builder
-            .build_conditional_branch(is_full, compare_bb, advance_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(is_full, compare_bb, advance_bb)?;
 
         self.builder.position_at_end(compare_bb);
         let stored = self.load_slot_key(CollectionKind::HashMap, header, key_ty, value_ty, slot)?;
         let same = self.emit_key_eq(key_ty, stored, key)?;
         self.builder
-            .build_conditional_branch(same, hit_bb, advance_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(same, hit_bb, advance_bb)?;
 
         self.builder.position_at_end(advance_bb);
         self.advance_probe(&ProbeCursor { cursor, capacity })?;
-        self.builder
-            .build_unconditional_branch(probe_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(probe_bb)?;
 
         self.builder.position_at_end(hit_bb);
-        let found = self
-            .builder
-            .build_load(i64_ty, cursor, "found")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_return(Some(&found))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let found = self.builder.build_load(i64_ty, cursor, "found")?;
+        self.builder.build_return(Some(&found))?;
 
         self.builder.position_at_end(miss_bb);
         let missing = i64_ty.const_int(NOT_FOUND as u64, true);
-        self.builder
-            .build_return(Some(&missing))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_return(Some(&missing))?;
         Ok(())
     }
 
@@ -166,49 +144,31 @@ impl<'ctx> CodegenContext<'ctx> {
         // exactly when it is in range and its key is not ordered after the key either.
         let in_range = self
             .builder
-            .build_int_compare(IntPredicate::ULT, bound, len, "in.range")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_compare(IntPredicate::ULT, bound, len, "in.range")?;
         let match_bb = self.context.append_basic_block(func, "check.match");
         let result_slot = self.entry_alloca(i64_ty, "result")?;
         self.builder
-            .build_store(result_slot, i64_ty.const_int(NOT_FOUND as u64, true))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_store(result_slot, i64_ty.const_int(NOT_FOUND as u64, true))?;
         self.builder
-            .build_conditional_branch(in_range, match_bb, exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(in_range, match_bb, exit_bb)?;
 
         self.builder.position_at_end(match_bb);
         let stored =
             self.load_slot_key(CollectionKind::BTreeMap, header, key_ty, value_ty, bound)?;
         let greater = self.emit_key_lt(key_ty, key, stored)?;
-        let equal = self
-            .builder
-            .build_not(greater, "is.equal")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let chosen = self
-            .builder
-            .build_select(
-                equal,
-                bound,
-                i64_ty.const_int(NOT_FOUND as u64, true),
-                "chosen",
-            )
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(result_slot, chosen)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let equal = self.builder.build_not(greater, "is.equal")?;
+        let chosen = self.builder.build_select(
+            equal,
+            bound,
+            i64_ty.const_int(NOT_FOUND as u64, true),
+            "chosen",
+        )?;
+        self.builder.build_store(result_slot, chosen)?;
+        self.builder.build_unconditional_branch(exit_bb)?;
 
         self.builder.position_at_end(exit_bb);
-        let result = self
-            .builder
-            .build_load(i64_ty, result_slot, "result.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_return(Some(&result))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let result = self.builder.build_load(i64_ty, result_slot, "result.val")?;
+        self.builder.build_return(Some(&result))?;
         Ok(())
     }
 
@@ -227,85 +187,57 @@ impl<'ctx> CodegenContext<'ctx> {
         let low = self.entry_alloca(i64_ty, "lo")?;
         let high = self.entry_alloca(i64_ty, "hi")?;
         let len = self.load_header_field(header, FIELD_LEN, "len")?;
-        self.builder
-            .build_store(low, i64_ty.const_zero())
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(high, len)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(low, i64_ty.const_zero())?;
+        self.builder.build_store(high, len)?;
 
         let cond_bb = self.context.append_basic_block(parent_fn, "bs.cond");
         let body_bb = self.context.append_basic_block(parent_fn, "bs.body");
         let go_right = self.context.append_basic_block(parent_fn, "bs.right");
         let go_left = self.context.append_basic_block(parent_fn, "bs.left");
         let exit_bb = self.context.append_basic_block(parent_fn, "bs.exit");
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(cond_bb);
         let lo = self
             .builder
-            .build_load(i64_ty, low, "lo.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, low, "lo.val")?
             .into_int_value();
         let hi = self
             .builder
-            .build_load(i64_ty, high, "hi.val")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, high, "hi.val")?
             .into_int_value();
         let more = self
             .builder
-            .build_int_compare(IntPredicate::ULT, lo, hi, "bs.more")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_compare(IntPredicate::ULT, lo, hi, "bs.more")?;
         self.builder
-            .build_conditional_branch(more, body_bb, exit_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(more, body_bb, exit_bb)?;
 
         self.builder.position_at_end(body_bb);
-        let span = self
-            .builder
-            .build_int_sub(hi, lo, "bs.span")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let half = self
-            .builder
-            .build_right_shift(span, i64_ty.const_int(1, false), false, "bs.half")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        let mid = self
-            .builder
-            .build_int_add(lo, half, "bs.mid")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let span = self.builder.build_int_sub(hi, lo, "bs.span")?;
+        let half =
+            self.builder
+                .build_right_shift(span, i64_ty.const_int(1, false), false, "bs.half")?;
+        let mid = self.builder.build_int_add(lo, half, "bs.mid")?;
         let stored = self.load_slot_key(CollectionKind::BTreeMap, header, key_ty, value_ty, mid)?;
         let before = self.emit_key_lt(key_ty, stored, key)?;
         self.builder
-            .build_conditional_branch(before, go_right, go_left)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_conditional_branch(before, go_right, go_left)?;
 
         self.builder.position_at_end(go_right);
         let after_mid = self
             .builder
-            .build_int_add(mid, i64_ty.const_int(1, false), "bs.mid1")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_store(low, after_mid)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_int_add(mid, i64_ty.const_int(1, false), "bs.mid1")?;
+        self.builder.build_store(low, after_mid)?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(go_left);
-        self.builder
-            .build_store(high, mid)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
-        self.builder
-            .build_unconditional_branch(cond_bb)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(high, mid)?;
+        self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(exit_bb);
         Ok(self
             .builder
-            .build_load(i64_ty, low, "bound")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(i64_ty, low, "bound")?
             .into_int_value())
     }
 }

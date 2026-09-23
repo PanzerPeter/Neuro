@@ -21,9 +21,9 @@ resolved type (`HirExpr::ty`), so codegen reads types inline rather than re-deri
 populated as bindings are lowered, exists only so the place statements `obj.field = …` and
 `arr[i] = …` can recover a binding's nominal struct/array type.
 
-`source` / `source_path` are the original module text and path, wrapped in a
-`source_location::SourceFile` solely to render `file:line:col` in panic-family runtime
-diagnostics. They affect nothing else.
+`source` / `source_path` are the original module text and path, kept solely to render
+`file:line:col` in panic-family runtime diagnostics. The column counts characters, as
+`neurc`'s compile-time diagnostics do. They affect nothing else.
 
 `optimization` selects two independent things. It picks the `TargetMachine`'s level, which
 governs instruction selection and register allocation; and it picks the LLVM IR pass
@@ -41,7 +41,6 @@ transforms.
 - neuro-hir: the typed HIR lowered from (`HirProgram` / `HirExpr` / `HirType`)
 - ast-types: the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)
 - shared-types: type system primitives, `FormatSpec` for interpolation
-- source-location: `SourceFile` byte-offset → line/column mapping for panic diagnostics
 
 inkwell 0.10.0 (feature `llvm20-1`) is a third-party crate, not Shared Kernel. Requires LLVM 20;
 set `LLVM_SYS_201_PREFIX` (e.g. `/usr/lib/llvm20`) before building. `semantic-analysis` is not a
@@ -874,7 +873,8 @@ Each builtin writes its diagnostic to stderr (fd 2) via external POSIX `write`
   `"assertion failed at file:line:col\n"`, abort).
 
 That sequence is **not** emitted inline. See Error-Path Outlining. The `file:line:col` suffix
-comes from the `Call` span start via the `SourceFile` (empty when no source is supplied).
+comes from the `Call` span start, resolved against the module text (empty when no source is
+supplied).
 `write` + `abort` are POSIX/libc (Linux, macOS; MSVC CRT on Windows). `abort` runs no exit hook, so
 `emit_abort_unreachable` takes `&mut self` and records its call for the standard-output drain. See
 Exit-path draining.

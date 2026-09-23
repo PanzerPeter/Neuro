@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-09-23
+
+### Fixed
+
+- A runtime `panic`, `assert` or `unreachable` diagnostic counted its column in bytes, so a
+  multi-byte character earlier on the line pushed `file:line:col` one column right per extra
+  byte. It now counts characters, matching the compile-time diagnostics.
+
+### Changed
+
+- `build`: the `source-location` infrastructure crate is gone. Its one caller, the panic
+  location suffix in `llvm-backend`, computes line and column from the module text directly.
+- `build`: `env_logger` builds without its default features, dropping `regex` and `jiff` from
+  `neurc`. `RUST_LOG` filtering is unchanged; log lines no longer carry a timestamp or color.
+- `build`: the workspace manifest drops commented-out future members, profile keys that
+  restated Cargo's defaults, package metadata no crate inherited, and clap features that are
+  already on by default.
+- `codegen`: builder errors reach `CodegenError` through its existing `From` conversion
+  instead of a hand-written `map_err` at each of several hundred call sites. External libc
+  declarations share one `extern_fn` helper, and `CodegenContext` no longer forwards five
+  layout queries to its `TypeMapper`. The never-constructed `TypeMismatch` and `MissingReturn`
+  error variants are removed.
+- `semantic`, `codegen`: helpers copied between modules of one crate now have a single copy:
+  the tensor constant and dimension-name helpers, integer suffix typing, the loop cursor
+  helpers, and the `unsafe` block check, which was a duplicate of the bare block check.
+- `tests`: tests that only exercised derived `PartialEq` on `shared-types` values are removed.
+
 ## [3.5.0] - 2026-09-22
 
 ### Added

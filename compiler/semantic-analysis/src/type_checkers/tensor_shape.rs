@@ -373,7 +373,7 @@ impl TypeChecker {
 
 /// The value of an integer constant expression written in an axis list: a literal, or a
 /// literal under a negation (`-1`) or parentheses.
-fn const_integer(expr: &Expr) -> Option<i128> {
+pub(super) fn const_integer(expr: &Expr) -> Option<i128> {
     match expr {
         Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
         Expr::Paren(inner, _) => const_integer(inner),
@@ -388,7 +388,7 @@ fn const_integer(expr: &Expr) -> Option<i128> {
 
 /// The dimension names a shape declares, for the diagnostic that names them: naming a
 /// dimension the type does not declare lists the ones it does.
-fn declared_names(shape: &[TensorAxis]) -> String {
+pub(super) fn declared_names(shape: &[TensorAxis]) -> String {
     let names: Vec<&str> = shape
         .iter()
         .filter_map(|axis| axis.name.as_deref())

@@ -45,22 +45,15 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let with_ptr = self
             .builder
-            .build_insert_value(self.string_fat_ptr_type().get_undef(), ptr, 0, "str.ptr")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(self.string_fat_ptr_type().get_undef(), ptr, 0, "str.ptr")?
             .into_struct_value();
-        let full = self
-            .builder
-            .build_insert_value(with_ptr, len, 1, "str")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let full = self.builder.build_insert_value(with_ptr, len, 1, "str")?;
         Ok(full.into_struct_value().into())
     }
 
     /// `snprintf(buf, size, fmt, ...) -> i32`. The `(NULL, 0)` probe form gives the
     /// exact rendered length, so every helper allocates precisely once.
     fn get_or_declare_snprintf(&self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("snprintf") {
-            return f;
-        }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let fn_type = self.context.i32_type().fn_type(
             &[
@@ -70,8 +63,7 @@ impl<'ctx> CodegenContext<'ctx> {
             ],
             true,
         );
-        self.module
-            .add_function("snprintf", fn_type, Some(Linkage::External))
+        self.extern_fn("snprintf", fn_type)
     }
 
     /// Start a helper definition: declare it, remember where the caller was
@@ -117,8 +109,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<PointerValue<'ctx>> {
         let malloc = self.alloc_fn()?;
         self.builder
-            .build_call(malloc, &[size.into()], name)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_call(malloc, &[size.into()], name)?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("malloc returned void".to_string()))
@@ -133,8 +124,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let memcpy = self.get_or_declare_memcpy();
         self.builder
-            .build_call(memcpy, &[dst.into(), src.into(), len.into()], "")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_call(memcpy, &[dst.into(), src.into(), len.into()], "")?;
         Ok(())
     }
 
@@ -150,7 +140,7 @@ impl<'ctx> CodegenContext<'ctx> {
         unsafe {
             self.builder
                 .build_in_bounds_gep(self.context.i8_type(), buf, &[offset], name)
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))
+                .map_err(CodegenError::from)
         }
     }
 
@@ -161,9 +151,7 @@ impl<'ctx> CodegenContext<'ctx> {
         byte: IntValue<'ctx>,
     ) -> CodegenResult<()> {
         let slot = self.byte_offset(buf, offset, "byte.slot")?;
-        self.builder
-            .build_store(slot, byte)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_store(slot, byte)?;
         Ok(())
     }
 
@@ -176,7 +164,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let slot = self.byte_offset(buf, offset, "load.slot")?;
         self.builder
             .build_load(self.context.i8_type(), slot, name)
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))
+            .map_err(CodegenError::from)
             .map(|value| value.into_int_value())
     }
 
@@ -389,9 +377,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let fmt = self.param(func, 1)?.into_pointer_value();
         let result = self.build_snprintf_alloc(func, fmt, value)?;
 
-        self.builder
-            .build_return(Some(&result))
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        self.builder.build_return(Some(&result))?;
         self.end_helper(saved);
         Ok(func)
     }

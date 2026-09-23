@@ -152,8 +152,7 @@ impl<'ctx> CodegenContext<'ctx> {
             } else {
                 let struct_ty = self.get_struct_llvm_type(type_name)?;
                 self.builder
-                    .build_load(struct_ty, self_ptr, "dyn.self")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .build_load(struct_ty, self_ptr, "dyn.self")?
                     .into()
             };
 
@@ -165,20 +164,13 @@ impl<'ctx> CodegenContext<'ctx> {
             call_args.push(arg.into());
         }
 
-        let call = self
-            .builder
-            .build_call(target, &call_args, "dyn.fwd")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+        let call = self.builder.build_call(target, &call_args, "dyn.fwd")?;
         match call.try_as_basic_value().basic() {
             Some(value) => {
-                self.builder
-                    .build_return(Some(&value))
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_return(Some(&value))?;
             }
             None => {
-                self.builder
-                    .build_return(None)
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+                self.builder.build_return(None)?;
             }
         }
 
@@ -237,13 +229,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let fat_ty = self.type_mapper.dyn_ref_type();
         let with_data = self
             .builder
-            .build_insert_value(fat_ty.get_undef(), data_ptr, 0, "dyn.data")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(fat_ty.get_undef(), data_ptr, 0, "dyn.data")?
             .into_struct_value();
         let fat = self
             .builder
-            .build_insert_value(with_data, vtable.as_pointer_value(), 1, "dyn.obj")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_insert_value(with_data, vtable.as_pointer_value(), 1, "dyn.obj")?
             .into_struct_value();
         Ok(fat.into())
     }
@@ -279,13 +269,11 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let data_ptr = self
             .builder
-            .build_extract_value(fat, 0, "dyn.recv.data")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat, 0, "dyn.recv.data")?
             .into_pointer_value();
         let vtable_ptr = self
             .builder
-            .build_extract_value(fat, 1, "dyn.recv.vt")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_extract_value(fat, 1, "dyn.recv.vt")?
             .into_pointer_value();
 
         let ptr_ty = self.context.ptr_type(AddressSpace::default());
@@ -293,19 +281,16 @@ impl<'ctx> CodegenContext<'ctx> {
         // with one slot per trait method, and `slot` came from that same method list, so
         // the index is always within the allocation.
         let slot_ptr = unsafe {
-            self.builder
-                .build_in_bounds_gep(
-                    ptr_ty,
-                    vtable_ptr,
-                    &[self.context.i32_type().const_int(slot as u64, false)],
-                    "dyn.slot",
-                )
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            self.builder.build_in_bounds_gep(
+                ptr_ty,
+                vtable_ptr,
+                &[self.context.i32_type().const_int(slot as u64, false)],
+                "dyn.slot",
+            )?
         };
         let fn_ptr = self
             .builder
-            .build_load(ptr_ty, slot_ptr, "dyn.fn")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+            .build_load(ptr_ty, slot_ptr, "dyn.fn")?
             .into_pointer_value();
 
         let mut call_args: Vec<BasicMetadataValueEnum<'ctx>> = vec![data_ptr.into()];
@@ -326,8 +311,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let call = self
             .builder
-            .build_indirect_call(fn_type, fn_ptr, &call_args, "dyn.call")
-            .map_err(|e| CodegenError::LlvmError(e.to_string()))?;
+            .build_indirect_call(fn_type, fn_ptr, &call_args, "dyn.call")?;
         Ok(call.try_as_basic_value().basic())
     }
 }

@@ -159,10 +159,8 @@ derivative transform's refusal of a construct in a `@grad` body, carries a span 
 `render_diagnostic` like a type error, in both `check` and `compile`; every other variant is a
 checker escape with no location and keeps the plain `HIR lowering error:` line.
 
-Line and column are computed from the source text here rather than through
-`source_location::SourceFile`, whose column is a byte offset within the line: a caret placed
-at a byte column drifts off the text it underlines as soon as the line holds a multi-byte
-character.
+The column counts characters, not bytes: a caret placed at a byte column drifts off the text
+it underlines as soon as the line holds a multi-byte character.
 
 A program with more than one module prints the message alone. Spans share one space across
 merged modules (see the panic-location note below), so a span raised by an imported module

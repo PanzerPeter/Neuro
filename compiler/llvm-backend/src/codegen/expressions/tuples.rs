@@ -43,8 +43,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let val = self.coerce_if_needed(val, field_llvm[i], el_ty)?;
             agg = self
                 .builder
-                .build_insert_value(agg, val, i as u32, "tup.elem")
-                .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                .build_insert_value(agg, val, i as u32, "tup.elem")?
                 .into_struct_value();
         }
         Ok(agg.into())
@@ -65,8 +64,7 @@ impl<'ctx> CodegenContext<'ctx> {
             BasicValueEnum::PointerValue(ptr) => {
                 let struct_llvm = self.get_any_llvm_type(&Type::from_hir(object.ty.referent()))?;
                 self.builder
-                    .build_load(struct_llvm, ptr, "tup.deref")
-                    .map_err(|e| CodegenError::LlvmError(e.to_string()))?
+                    .build_load(struct_llvm, ptr, "tup.deref")?
                     .into_struct_value()
             }
             other => {
