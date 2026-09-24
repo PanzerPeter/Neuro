@@ -126,13 +126,15 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
         let shape = crate::types::static_extents(&shape)?;
+        let elem_llvm = self.get_any_llvm_type(&element)?;
+        // The value first (the language evaluates it before the place): it may reassign the tensor, releasing the buffer a
+        // data pointer read before it would still address.
+        let val = self.codegen_expr(value)?;
+        let val = self.coerce_if_needed(val, elem_llvm, &element)?;
         let data = self.tensor_index_data(object, &source_ty)?;
         let strides = row_major_strides(&shape);
         let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
-        let elem_llvm = self.get_any_llvm_type(&element)?;
         let slot = self.tensor_element_ptr(elem_llvm, data, base)?;
-        let val = self.codegen_expr(value)?;
-        let val = self.coerce_if_needed(val, elem_llvm, &element)?;
         self.builder.build_store(slot, val)?;
         self.mark_moved_for_drop(value);
         Ok(())

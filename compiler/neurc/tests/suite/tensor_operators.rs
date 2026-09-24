@@ -154,6 +154,36 @@ func main() -> i32 {
     assert_eq!(exit, 8 + 20);
 }
 
+/// A bare literal left of a tensor that is not a binding (a call, a clone, a negated
+/// literal) is the same scalar broadcast, and takes the element type as `m * 0.5` does.
+#[test]
+fn a_bare_literal_left_of_any_tensor_expression_is_the_element() {
+    let exit = run_program(
+        "tensor_binary_literal_left_of_call.nr",
+        r#"
+func make() -> Tensor<f32, [2]> {
+    [2.0, 4.0]
+}
+
+func makei() -> Tensor<i32, [2]> {
+    [3, 5]
+}
+
+func main() -> i32 {
+    val a = 0.5 * make()
+    val b = 2 * makei()
+    val c = -1.0 * make()
+    val same = (make() * 0.5)[1] == a[1]
+    if !same {
+        return 1
+    }
+    return (a[1] as i32) * 100 + b[0] + (c[0] as i32)
+}
+"#,
+    );
+    assert_eq!(exit, 200 + 6 - 2);
+}
+
 /// The scalar guards ride along: a tensor's arithmetic is its element's arithmetic, so a
 /// division by zero aborts exactly where the scalar one would.
 #[test]

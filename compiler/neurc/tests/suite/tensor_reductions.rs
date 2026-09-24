@@ -143,6 +143,35 @@ func main() -> i32 {
     assert_eq!(run_program("tensor_reduce_rank0.nr", source), 22);
 }
 
+/// `.max()` / `.min()` fold with the sorting comparator, where a `NaN` is the worst
+/// element in either direction, so the answer is the extreme non-`NaN` wherever the `NaN`
+/// sits. Before, a leading `NaN` was carried out while a later one was skipped.
+#[test]
+fn a_nan_never_wins_a_max_or_a_min() {
+    let source = r#"
+func main() -> i32 {
+    val z = 0.0f32
+    val nan = z / z
+    val a: Tensor<f32, [4]> = [nan, 1.0, 3.0, 2.0]
+    val b: Tensor<f32, [4]> = [1.0, 3.0, nan, 2.0]
+    val c: Tensor<f32, [3]> = [2.0, nan, 1.0]
+    val d: Tensor<f32, [2]> = [nan, nan]
+    val m: Tensor<f32, [2, 2]> = [[nan, 5.0], [4.0, nan]]
+    mut total = 0
+    total += a.clone().max() as i32
+    total += b.max() as i32
+    total += a.min() as i32
+    total += c.min() as i32
+    // Only an all-NaN run has no candidate, and then the answer is NaN.
+    if d.max().is_nan() { total += 10 }
+    val r = m.max(axis: 0)
+    total += (r[0] as i32) * 20 + (r[1] as i32)
+    return total
+}
+"#;
+    assert_eq!(run_program("tensor_reduce_nan.nr", source), 103);
+}
+
 #[test]
 fn a_non_numeric_element_is_rejected() {
     let source = r#"

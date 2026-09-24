@@ -367,15 +367,70 @@ impl Emitter {
     /// Re-describe `tensor`'s buffer at `ty`, CONSUMING it: the node moves the buffer into
     /// the result. Callers pass an adjoint no other rule reads again.
     pub(super) fn reshape(&mut self, tensor: &Leaf, ty: HirType) -> Result<Leaf, LoweringError> {
+        self.shape_cast(tensor, ty, None)
+    }
+
+    /// [`Emitter::reshape`], reordering the axes when `permutation` is given: result axis
+    /// `d` is `tensor`'s axis `permutation[d]`. Consumes `tensor` the same way.
+    pub(super) fn shape_cast(
+        &mut self,
+        tensor: &Leaf,
+        ty: HirType,
+        permutation: Option<Vec<usize>>,
+    ) -> Result<Leaf, LoweringError> {
         let Leaf::Var { name, ty: from } = tensor else {
             return Err(malformed("a reshape of a constant"));
         };
         let receiver = HirExpr::new(HirExprKind::Variable(name.clone()), from.clone(), self.span);
         let kind = HirExprKind::TensorShapeCast {
             receiver: Box::new(receiver),
-            permutation: None,
+            permutation,
         };
         Ok(self.bind(kind, ty))
+    }
+
+    /// `value as ty`, between two integer or float types.
+    pub(super) fn convert(&mut self, value: &Leaf, ty: &HirType) -> Leaf {
+        let kind = HirExprKind::Cast {
+            value: self.read(value),
+        };
+        self.bind(kind, ty.clone())
+    }
+
+    /// A zero tensor of type `ty` holding `value` at `positions`, which may be known only
+    /// at run time: the adjoint of an element read the compiler cannot place.
+    pub(super) fn scatter(
+        &mut self,
+        value: &Leaf,
+        positions: &[Leaf],
+        ty: &HirType,
+    ) -> Result<Leaf, LoweringError> {
+        let (element, _) =
+            tensor_parts(ty).ok_or_else(|| malformed("an element write into a non-tensor"))?;
+        let name = self.fresh();
+        let zero = self.zero(ty)?;
+        self.declare_mut(name.clone(), zero);
+        let axes = positions
+            .iter()
+            .map(|leaf| HirTensorAxis::Position(operand(leaf, self.span)))
+            .collect();
+        self.stmts.push(HirStmt::Assign {
+            place: HirPlace::TensorIndex {
+                object: Box::new(HirExpr::new(
+                    HirExprKind::Variable(name.clone()),
+                    ty.clone(),
+                    self.span,
+                )),
+                axes,
+                ty: element.clone(),
+            },
+            value: operand(value, self.span),
+            span: self.span,
+        });
+        Ok(Leaf::Var {
+            name,
+            ty: ty.clone(),
+        })
     }
 
     /// A tensor of type `ty` with `value` at every element. The fill node takes a
@@ -443,7 +498,7 @@ impl Emitter {
 
     pub(super) fn einsum(
         &mut self,
-        operands: [&Leaf; 2],
+        operands: &[&Leaf],
         inputs: Vec<Vec<usize>>,
         output: Vec<usize>,
         extents: Vec<usize>,

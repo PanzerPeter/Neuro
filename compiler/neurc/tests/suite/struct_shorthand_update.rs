@@ -198,3 +198,39 @@ func main() -> i32 {
         err
     );
 }
+
+/// Regression test for BUG-058: `..base` moves the positions it takes out of `base`, so
+/// `base` must stop owning them. Codegen left them armed, so a `Vec` taken by the update
+/// was released by both holders, a double free that aborted the run. The same hole let a
+/// returned update keep pointing at a buffer the callee's `base` released on the way out.
+#[test]
+fn test_bug_058_a_functional_update_takes_what_it_copies_from_its_base() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Bag {
+    id: i32,
+    items: Vec<i32>
+}
+
+func rebuilt(n: i32) -> Bag {
+    mut xs: Vec<i32> = Vec::new()
+    xs.push(n)
+    val base = Bag { id: n, items: xs }
+    return Bag { id: 7, ..base }
+}
+
+func main() -> i32 {
+    mut xs: Vec<i32> = Vec::new()
+    xs.push(4)
+    val a = Bag { id: 1, items: xs }
+    val b = Bag { id: 2, ..a }
+    val c = rebuilt(5)
+    return b.id + b.items.len() as i32 + c.id + c.items[0]
+}
+"#;
+    let exit = test
+        .compile_and_run("update_takes_base.nr", source)
+        .expect("compile/run failed");
+    // 2 + 1 + 7 + 5; a double free aborts instead.
+    assert_eq!(exit, 15);
+}

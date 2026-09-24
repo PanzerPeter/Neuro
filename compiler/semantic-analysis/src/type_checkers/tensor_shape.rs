@@ -11,7 +11,7 @@
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
-use ast_types::{Expr, UnaryOp};
+use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Literal, Span};
 
 /// The rank-2 transpose `matrix.t()`.
@@ -109,7 +109,7 @@ impl TypeChecker {
         let mut extents: Vec<Option<usize>> = Vec::with_capacity(entries.len());
         let mut inferred_at: Option<usize> = None;
         for entry in entries {
-            let Some(value) = const_integer(entry) else {
+            let Some(value) = self.reshape_extent(entry) else {
                 self.record_error(TypeError::TensorReshapeExtentNotConstant { span: entry.span() });
                 return None;
             };
@@ -368,6 +368,60 @@ impl TypeChecker {
             total *= extent;
         }
         Some(total)
+    }
+}
+
+impl TypeChecker {
+    /// A `.reshape` extent's folded value. The spec calls the list "a constant-expression
+    /// array", so beyond a literal an extent may name a `const`, or combine either with
+    /// arithmetic. A local binding shadows a constant of its name and is a run-time
+    /// value, so it does not fold. `None` when the extent is not a constant.
+    fn reshape_extent(&self, expr: &Expr) -> Option<i128> {
+        fold_extent(expr, CONST_FOLD_DEPTH, &|name| {
+            if self.symbols.lookup(name).is_some() {
+                return None;
+            }
+            self.constant_values.get(name)
+        })
+    }
+}
+
+/// How many constants deep an extent folds. A constant naming itself through a cycle
+/// would otherwise never bottom out.
+const CONST_FOLD_DEPTH: u32 = 64;
+
+/// Fold an integer constant expression, resolving a name through `constant`. Checked
+/// arithmetic, so a pathological extent is refused rather than overflowing.
+fn fold_extent<'a>(
+    expr: &'a Expr,
+    depth: u32,
+    constant: &dyn Fn(&str) -> Option<&'a Expr>,
+) -> Option<i128> {
+    let depth = depth.checked_sub(1)?;
+    match expr {
+        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
+        Expr::Paren(inner, _) => fold_extent(inner, depth, constant),
+        Expr::Unary {
+            op: UnaryOp::Negate,
+            operand,
+            ..
+        } => fold_extent(operand, depth, constant)?.checked_neg(),
+        Expr::Identifier(ident) => fold_extent(constant(&ident.name)?, depth, constant),
+        Expr::Binary {
+            left, op, right, ..
+        } => {
+            let l = fold_extent(left, depth, constant)?;
+            let r = fold_extent(right, depth, constant)?;
+            match op {
+                BinaryOp::Add => l.checked_add(r),
+                BinaryOp::Subtract => l.checked_sub(r),
+                BinaryOp::Multiply => l.checked_mul(r),
+                BinaryOp::Divide => l.checked_div(r),
+                BinaryOp::Modulo => l.checked_rem(r),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 

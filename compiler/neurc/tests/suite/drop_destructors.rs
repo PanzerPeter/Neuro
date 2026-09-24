@@ -578,6 +578,80 @@ func main() -> i32 {{
     assert_eq!(exit, 1, "the taken arm releases its payload once");
 }
 
+/// Regression test for BUG-060: a binding moved into an enum payload (`Slot::Full(p)`,
+/// `Some(xs)`) belongs to the enum, whose drop releases it. The payload was never disowned
+/// at the construction, so the binding's own scope released it a second time: the probe
+/// counted two drops and a `Vec` payload aborted in `free`.
+#[test]
+fn test_bug_060_a_binding_moved_into_an_enum_payload_is_released_once() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+enum Slot {{ Full(Probe), Empty }}
+
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        val p = Probe {{ sink: &mut count }}
+        val s = Slot::Full(p)
+    }}
+    mut xs: Vec<i32> = Vec::new()
+    xs.push(4)
+    val o = Some(xs)
+    val n = match o {{
+        Some(v) => v.len() as i32,
+        None => 0
+    }}
+    return count * 10 + n
+}}
+"#
+    );
+    let exit = test
+        .compile_and_run("enum_payload_moved_binding.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 11, "one drop of the probe, and the Vec is freed once");
+}
+
+/// An arm that binds nothing leaves the scrutinee whole, so the scrutinee still owns
+/// every payload when that arm runs. The match disowns the scrutinee up front whenever
+/// SOME arm binds, which left a `B(_)` or `_` arm's payload owned by nobody.
+#[test]
+fn a_match_arm_that_binds_nothing_leaves_the_payload_to_the_scrutinee() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+enum Two {{ A(Probe), B(Probe), C }}
+
+func main() -> i32 {{
+    mut count: i32 = 0
+    {{
+        val t = Two::B(Probe {{ sink: &mut count }})
+        val n = match t {{
+            Two::A(x) => 0,
+            Two::B(_) => 1,
+            Two::C => 2
+        }}
+        val u = Two::B(Probe {{ sink: &mut count }})
+        val m = match u {{
+            Two::A(x) => 0,
+            _ => 1
+        }}
+        val v = Two::A(Probe {{ sink: &mut count }})
+        val k = match v {{
+            Two::A(x) => 0,
+            _ => 1
+        }}
+    }}
+    return count
+}}
+"#
+    );
+    let exit = test
+        .compile_and_run("match_arm_unbound_payload.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 3, "each payload is destroyed exactly once");
+}
+
 /// An arm that MOVES the payload out hands ownership on, so the arm must not release it
 /// as well: the binding it flows into is what destroys it, once.
 #[test]

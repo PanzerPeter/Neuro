@@ -40,13 +40,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.release_string_temporary(receiver, struct_val.into())?;
                 Ok(len)
             }
-            // `string.clone()`, an explicit deep copy of an owned string.
-            // String literals live in immutable `.rodata` and no heap-backed string type
-            // exists yet (Phase 1.7), so duplicating the `{ ptr, len }` fat-pointer value is
-            // observationally a deep copy: the pointee bytes are immutable and shared safely.
-            // When runtime heap strings land this must duplicate the underlying buffer.
-            // A `&string` receiver is auto-dereferenced first.
-            BuiltinMethod::StringClone => Ok(self.string_receiver_struct(receiver)?.into()),
+            // `string.clone()`, the explicit deep copy: the bytes in a buffer of their own.
+            // Handing back the receiver's fat pointer made the "copy" an alias, which
+            // dangled as soon as the original was dropped. A `&string` receiver is
+            // auto-dereferenced first, and a receiver built for the call (`(a + b).clone()`,
+            // `v[0].clone()`) is dead once its bytes are copied.
+            BuiltinMethod::StringClone => {
+                let original = self.string_receiver_struct(receiver)?;
+                let copy = self.copy_string_bytes(original.into())?;
+                self.release_string_temporary(receiver, original.into())?;
+                Ok(copy)
+            }
             // `string.slice(a..b)`, a borrowed `&string` view into the receiver's
             // UTF-8 bytes, with runtime bounds and codepoint-boundary checks.
             BuiltinMethod::StringSlice => self.codegen_string_slice(receiver, args),

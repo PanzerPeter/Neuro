@@ -358,23 +358,6 @@ func main() -> i32 {
 }
 
 #[test]
-fn test_an_element_of_a_temporary_array_is_rejected() {
-    let test = CompileTest::new();
-    let source = r#"
-func main() -> i32 {
-    mut v: Vec<[i32; 2]> = Vec::new()
-    v.push([1, 2])
-    v[0][1] = 9
-    return v[0][1]
-}
-"#;
-    let error = test
-        .compile_and_run("temporary_array_target.nr", source)
-        .expect_err("a collection element read out by value has no storage to write into");
-    assert!(error.contains("not a temporary"), "got: {error}");
-}
-
-#[test]
 fn test_bug_036_mutating_a_collection_held_in_a_field() {
     let test = CompileTest::new();
     let source = r#"
@@ -446,4 +429,170 @@ func main() -> i32 {
         .compile_and_run("held_collection_roundtrip.nr", source)
         .expect("compilation failed");
     assert_eq!(exit_code, 17);
+}
+
+// BUG-053: the value of an element store is evaluated first. It may grow the very `Vec`
+// the element lives in, and a slot address taken before that growth pointed into the
+// buffer the reallocation freed: the write was lost and landed in freed memory.
+#[test]
+fn test_bug_053_a_vec_element_store_survives_a_value_that_grows_the_vec() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    v[0] = {
+        mut k = 0
+        while k < 100000 {
+            v.push(k)
+            k += 1
+        }
+        42
+    }
+    return v[0]
+}
+"#;
+    let exit_code = test
+        .compile_and_run("bug_053_vec_store_growth.nr", source)
+        .expect("compilation failed");
+    assert_eq!(exit_code, 42);
+}
+
+// BUG-054: an aggregate element of a `Vec` or a `&mut` slice is storage, so a field or
+// an element of it is a place, as the place rule lists. Each of these passed the checker
+// and then failed in the backend with no span.
+#[test]
+fn test_bug_054_a_field_of_a_vec_element_is_a_place() {
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct P { x: i32 }
+
+func main() -> i32 {
+    mut v: Vec<P> = Vec::new()
+    v.push(P { x: 1 })
+    v.push(P { x: 2 })
+    v[1].x = 9
+    v[1].x += 5
+    return v[0].x * 100 + v[1].x
+}
+"#;
+    let exit_code = test
+        .compile_and_run("bug_054_vec_field.nr", source)
+        .expect("compilation failed");
+    assert_eq!(exit_code, 114);
+}
+
+#[test]
+fn test_bug_054_an_element_of_an_array_held_in_a_vec_is_a_place() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut v: Vec<(i32, [i32; 2])> = Vec::new()
+    v.push((1, [2, 3]))
+    mut w: Vec<[i32; 2]> = Vec::new()
+    w.push([4, 5])
+    v[0].1[0] = 6
+    w[0][1] = 7
+    return v[0].1[0] * 10 + w[0][1]
+}
+"#;
+    let exit_code = test
+        .compile_and_run("bug_054_vec_nested.nr", source)
+        .expect("compilation failed");
+    assert_eq!(exit_code, 67);
+}
+
+// A store into a `Vec` element's field evaluates its value first too, for BUG-053's
+// reason: the growth would otherwise free the slot the field lives in.
+#[test]
+fn test_a_vec_element_field_store_survives_a_value_that_grows_the_vec() {
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct P { x: i32 }
+
+func main() -> i32 {
+    mut v: Vec<P> = Vec::new()
+    v.push(P { x: 1 })
+    v[0].x = {
+        mut k = 0
+        while k < 100000 {
+            v.push(P { x: k })
+            k += 1
+        }
+        42
+    }
+    return v[0].x
+}
+"#;
+    let exit_code = test
+        .compile_and_run("vec_field_store_growth.nr", source)
+        .expect("compilation failed");
+    assert_eq!(exit_code, 42);
+}
+
+// BUG-056: a `&mut` borrow carries write permission however many projections lie
+// between it and the place.
+#[test]
+fn test_bug_056_a_nested_write_through_a_mut_slice() {
+    let test = CompileTest::new();
+    let source = r#"
+func set(r: &mut [[i32; 2]]) {
+    r[0][1] = 8
+}
+
+func main() -> i32 {
+    mut s: [[i32; 2]; 2] = [[1, 2], [3, 4]]
+    set(&mut s)
+    return s[0][1]
+}
+"#;
+    let exit_code = test
+        .compile_and_run("bug_056_nested_mut_slice.nr", source)
+        .expect("compilation failed");
+    assert_eq!(exit_code, 8);
+}
+
+// BUG-055: a shared borrow never writes, even held by a `mut` binding and even behind
+// further projections. Both of these used to compile and mutate an immutable `s`.
+#[test]
+fn test_bug_055_no_nested_write_through_a_shared_borrow() {
+    let test = CompileTest::new();
+    for (name, borrow) in [
+        ("bug_055_shared_slice.nr", "&[[i32; 2]]"),
+        ("bug_055_shared_array.nr", "&[[i32; 2]; 2]"),
+    ] {
+        let source = format!(
+            r#"
+func main() -> i32 {{
+    val s: [[i32; 2]; 2] = [[1, 2], [3, 4]]
+    mut r: {borrow} = &s
+    r[0][1] = 8
+    return s[0][1]
+}}
+"#
+        );
+        let err = test
+            .check(name, &source)
+            .expect_err("a write through a shared borrow must be refused");
+        assert!(err.contains("shared `&` borrow"), "{name}: {err}");
+    }
+}
+
+#[test]
+fn test_a_place_rooted_at_a_call_result_is_named_a_temporary() {
+    let test = CompileTest::new();
+    let source = r#"
+func mk() -> [i32; 2] { [1, 2] }
+
+func main() -> i32 {
+    mk()[0] = 5
+    return 0
+}
+"#;
+    let err = test
+        .check("temporary_place.nr", source)
+        .expect_err("a write into a temporary must be refused");
+    assert!(err.contains("temporary"), "{err}");
 }

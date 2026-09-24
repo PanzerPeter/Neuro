@@ -8,7 +8,7 @@ use crate::errors::TypeError;
 use crate::type_checkers::collections::OPTION_ENUM;
 use crate::types::Type;
 use ast_types::{BinaryOp, Expr, UnaryOp};
-use shared_types::Span;
+use shared_types::{Literal, Span};
 
 /// The `Result<T, E>` half of the fallible pair `??` unwraps. Like `Option`, it comes
 /// from the prelude rather than the compiler; `??` recognizes it by name.
@@ -59,14 +59,28 @@ impl TypeChecker {
         // right to be its ELEMENT instead, so `matrix * 2.0` types its literal as
         // the scalar being broadcast rather than as the default `f64`.
         let left_expectation = self.scalar_broadcast_expectation(right);
-        let left_ty = self
+        let errors_before_left = self.errors.len();
+        let mut left_ty = self
             .check_expr(left, left_expectation.as_ref())
             .unwrap_or(Type::Unknown);
+        let left_was_clean = self.errors.len() == errors_before_left;
         let right_expectation =
             Self::tensor_element_expectation(&left_ty).unwrap_or_else(|| left_ty.clone());
         let right_ty = self
             .check_expr(right, Some(&right_expectation))
             .unwrap_or(Type::Unknown);
+        // The lookahead above sees a tensor on the right only when it is a binding.
+        // Anywhere else (`0.5 * make()`), a bare literal on the left took its default
+        // type before the tensor was known; it is the scalar broadcast all the same, so
+        // it is re-typed as the element now. Only an unsuffixed literal qualifies,
+        // because re-checking one has no effect beyond its type.
+        if left_expectation.is_none() && left_was_clean && is_bare_literal(left) {
+            if let Some(element) = Self::tensor_element_expectation(&right_ty) {
+                left_ty = self
+                    .check_expr(left, Some(&element))
+                    .unwrap_or(Type::Unknown);
+            }
+        }
 
         // If either operand is Unknown (error), propagate Unknown
         if matches!(left_ty, Type::Unknown) || matches!(right_ty, Type::Unknown) {
@@ -557,5 +571,20 @@ impl TypeChecker {
             });
             Some(Type::Unknown)
         }
+    }
+}
+
+/// An unsuffixed numeric literal, possibly negated or parenthesised: the one operand whose
+/// type is decided entirely by its context and whose check has no other effect.
+pub(super) fn is_bare_literal(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(Literal::Integer(_, None) | Literal::Float(_, None), _) => true,
+        Expr::Paren(inner, _) => is_bare_literal(inner),
+        Expr::Unary {
+            op: UnaryOp::Negate,
+            operand,
+            ..
+        } => is_bare_literal(operand),
+        _ => false,
     }
 }

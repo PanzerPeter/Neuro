@@ -280,7 +280,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("this extent is not a constant; `.reshape` takes an array of integer literals, with `-1` in at most one position to infer that extent")]
+    #[error("this extent is not a constant; `.reshape` takes an array of integer literals or `const` names, with `-1` in at most one position to infer that extent")]
     TensorReshapeExtentNotConstant { span: Span },
 
     #[error("`.reshape` writes `-1` more than once; only one extent can be inferred, because the rest have to determine it")]
@@ -835,6 +835,12 @@ pub enum TypeError {
     #[error("cannot assign through an immutable reference `&{inner}`: writing through `*` requires a `&mut {inner}`")]
     CannotAssignThroughRef { inner: Type, span: Span },
 
+    #[error("cannot assign through '{name}': the place is reached through a shared `&` borrow, and only a `&mut` borrow may write; `mut` on the binding lets it be re-pointed, not written through")]
+    AssignThroughSharedBorrow { name: String, span: Span },
+
+    #[error("cannot assign into a temporary: this place is rooted at a value no binding holds, so the write would be lost when the statement ends; bind the value to a `mut` first")]
+    AssignToTemporary { span: Span },
+
     #[error("cannot borrow '{name}' as mutable: it is already borrowed; a `&mut` borrow is exclusive, so no other borrow of '{name}' may be live at the same time")]
     CannotMutablyBorrowWhileBorrowed { name: String, span: Span },
 
@@ -1315,6 +1321,8 @@ impl TypeError {
             | Self::CannotBorrowMutably { span, .. }
             | Self::CannotDereference { span, .. }
             | Self::CannotAssignThroughRef { span, .. }
+            | Self::AssignThroughSharedBorrow { span, .. }
+            | Self::AssignToTemporary { span }
             | Self::CannotMutablyBorrowWhileBorrowed { span, .. }
             | Self::CannotBorrowWhileMutablyBorrowed { span, .. }
             | Self::CannotUseWhileMutablyBorrowed { span, .. }

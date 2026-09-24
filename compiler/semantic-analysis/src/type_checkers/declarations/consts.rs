@@ -22,6 +22,8 @@ impl TypeChecker {
 
         let ty = self.resolve_type(&def.ty)?;
         self.constants.insert(def.name.name.clone(), ty);
+        self.constant_values
+            .insert(def.name.name.clone(), def.value.clone());
         Some(())
     }
 

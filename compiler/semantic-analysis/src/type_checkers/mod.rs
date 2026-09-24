@@ -135,6 +135,9 @@ pub(crate) struct TypeChecker {
     pub(crate) lifetime_scope: HashSet<String>,
     /// Compile-time constant names and their declared types (module and function scope).
     pub(crate) constants: HashMap<String, Type>,
+    /// The same constants' value expressions, for the one place a constant is folded
+    /// into a type rather than read as a value: a `.reshape` extent.
+    pub(crate) constant_values: HashMap<String, ast_types::Expr>,
     /// Collected type errors
     errors: Vec<TypeError>,
     /// Collected non-fatal lint warnings
@@ -357,6 +360,7 @@ impl TypeChecker {
             const_scope: HashMap::new(),
             lifetime_scope: HashSet::new(),
             constants: HashMap::new(),
+            constant_values: HashMap::new(),
             errors: Vec::new(),
             warnings: Vec::new(),
             current_function_return_type: None,

@@ -382,6 +382,27 @@ func element_product(w: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
         constants=(2.5,),
     ),
     TensorCase(
+        # A shape-generic `@grad` function is differentiated per instance; this is the
+        # `[3]` one the caller below instantiates, under its mangled name.
+        "shape_generic_g_c3",
+        """
+@grad
+func shape_generic<N>(w: &mut Tensor<f32, [N]>, scale: f32) -> Tensor<f32, []> {
+    val first = w[0]
+    val last = w[2]
+    return Tensor::scalar((first * last + first) * scale)
+}
+
+func instantiate_shape_generic(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    shape_generic(w, 1.0f32)
+}
+""",
+        (3,),
+        (1.5, -0.75, 2.0),
+        lambda a, b, c, s: ((c + 1.0) * s, 0.0, a * s),
+        constants=(2.5,),
+    ),
+    TensorCase(
         "element_quotient",
         """
 @grad
@@ -726,7 +747,173 @@ func kink_trip_count_path(w: &mut Tensor<f32, [1]>) -> Tensor<f32, []> {
         lambda w: (2.0 * w,),
         path="kink_trip_count_path",
     ),
+    TensorCase(
+        "transposed",
+        """
+@grad
+func transposed(w: &mut Tensor<f32, [2, 3]>) -> Tensor<f32, []> {
+    val copy = w * 1.0
+    val flipped = copy.t()
+    val weights: Tensor<f32, [3, 2]> = [[1.0, -2.0], [0.5, 3.0], [-1.5, 2.5]]
+    val weighted = &flipped * &flipped * weights
+    return Tensor::scalar(weighted.sum())
+}
+""",
+        (2, 3),
+        (1.0, -0.5, 2.0, 1.5, -1.25, 0.75),
+        # loss = sum(K * W^T * W^T), so dW[i][j] = 2 * K[j][i] * W[i][j].
+        lambda *w: transposed_gradient(*w),
+    ),
+    TensorCase(
+        "reshaped",
+        """
+@grad
+func reshaped(w: &mut Tensor<f32, [2, 3]>) -> Tensor<f32, []> {
+    val scaled = w * 2.0
+    val columns = scaled.reshape([3, 2])
+    val weights: Tensor<f32, [3, 2]> = [[1.0, -2.0], [0.5, 3.0], [-1.5, 2.5]]
+    val flat = (&columns * weights).reshape([6])
+    return Tensor::scalar(flat.sum() + (&columns * &columns).sum())
+}
+""",
+        (2, 3),
+        (1.0, -0.5, 2.0, 1.5, -1.25, 0.75),
+        # A reshape keeps row-major order, so element f of W meets element f of K:
+        # loss = sum(2 W * K) + sum(4 W^2), and dW[f] = 2 K[f] + 8 W[f].
+        lambda *w: tuple(2.0 * k + 8.0 * x for k, x in zip(RESHAPE_WEIGHTS, w)),
+    ),
+    TensorCase(
+        "converted",
+        """
+@grad
+func converted(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val x = w[0]
+    val wide = x as f64
+    val squared = (wide * wide) as f32
+    val steps = (w[1] * 2.0) as i32
+    val stepped = steps as f32
+    return Tensor::scalar(squared + w[1] * 3.0 + stepped)
+}
+""",
+        (2,),
+        (1.25, 0.8),
+        # The widening round trip is the identity, and truncating 2 * w1 = 1.6 is flat
+        # around the point, so only x^2 and 3 * w1 have slopes.
+        lambda x, y: (2.0 * x, 3.0),
+    ),
+    TensorCase(
+        "computed_reads",
+        """
+@grad
+func computed_reads(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    mut i = 0
+    mut s = 0.0f32
+    while i < 3 {
+        s = s + w[i] * w[2 - i]
+        i = i + 1
+    }
+    return Tensor::scalar(s)
+}
+""",
+        (3,),
+        (1.25, -0.5, 2.0),
+        # Positions known only at run time: loss = 2 w0 w2 + w1^2.
+        lambda a, b, c: (2.0 * c, 2.0 * b, 2.0 * a),
+    ),
+    TensorCase(
+        "sliced",
+        """
+@grad
+func sliced(w: &mut Tensor<f32, [3, 2]>) -> Tensor<f32, []> {
+    val flipped = w[(0..3).rev(), 1]
+    val rows = w[1..3, ..]
+    val weights: Tensor<f32, [3]> = [1.0, -2.0, 0.5]
+    return Tensor::scalar((flipped * weights).sum() + (&rows * &rows).sum())
+}
+""",
+        (3, 2),
+        (1.0, -0.5, 2.0, 1.5, -1.25, 0.75),
+        # flipped[r] = w[2 - r][1] meets K[r], so column 1 gets K reversed; rows 1 and 2
+        # are squared.
+        lambda a, b, c, d, e, f: (0.0, 0.5, 2.0 * c, -2.0 + 2.0 * d, 2.0 * e, 1.0 + 2.0 * f),
+    ),
+    TensorCase(
+        "contracted",
+        """
+@grad
+func contracted(w: &mut Tensor<f32, [2, 3]>) -> Tensor<f32, []> {
+    val b: Tensor<f32, [3, 2]> = [[1.0, -1.0], [0.5, 2.0], [-2.0, 1.5]]
+    val c = einsum("ij,jk->ik", w, &b)
+    val rows = einsum("ij->i", w)
+    val weights: Tensor<f32, [2]> = [2.0, -1.0]
+    val square = einsum("ij,ij->", w, w)
+    return Tensor::scalar((&c * &c).sum() + (rows * weights).sum() + square)
+}
+""",
+        (2, 3),
+        (1.0, -0.5, 2.0, 1.5, -1.25, 0.75),
+        # dW = 2 (W B) B^T + K[i] along each row + 2 W.
+        lambda *w: contracted_gradient(*w),
+    ),
+    TensorCase(
+        "counted_loops",
+        """
+@grad
+func counted_loops(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    mut s = 0.0f32
+    for i in 0..3 {
+        s = s + w[i] * w[i]
+    }
+    mut acc = 0.0f32
+    for j in (0..3).rev() {
+        acc = acc * 0.5 + w[j]
+    }
+    val k = w[0]
+    mut t = 0.0f32
+    for k in 1..=2 {
+        t = t + w[k] * (k as f32)
+    }
+    for k in 2..=1 {
+        t = t + w[k] * 100.0
+    }
+    for j in (2..2).rev() {
+        t = t + w[j] * 100.0
+    }
+    mut u = 0.0f32
+    for (n, m) in (1..3).enumerate() {
+        u = u + w[m] * (n as f32 + 2.0)
+    }
+    return Tensor::scalar(s + acc + t + u + k)
+}
+""",
+        (3,),
+        (1.25, -0.5, 2.0),
+        # s = sum(w^2); the reversed loop is Horner's rule, acc = w0 + w1 / 2 + w2 / 4, so
+        # its order shows; t = w1 + 2 w2 over the inclusive range, and the two empty ranges
+        # add nothing; u = 2 w1 + 3 w2; the outer k = w0 survives the loop that shadows it.
+        lambda a, b, c: (2.0 * a + 2.0, 2.0 * b + 3.5, 2.0 * c + 5.25),
+    ),
 ]
+
+
+RESHAPE_WEIGHTS = (1.0, -2.0, 0.5, 3.0, -1.5, 2.5)
+
+
+def transposed_gradient(*w):
+    k = [[1.0, -2.0], [0.5, 3.0], [-1.5, 2.5]]
+    return tuple(2.0 * k[j][i] * w[3 * i + j] for i in range(2) for j in range(3))
+
+
+def contracted_gradient(*w):
+    b = [[1.0, -1.0], [0.5, 2.0], [-2.0, 1.5]]
+    rows = (2.0, -1.0)
+    wm = [[w[3 * i + j] for j in range(3)] for i in range(2)]
+    c = [[sum(wm[i][l] * b[l][k] for l in range(3)) for k in range(2)] for i in range(2)]
+    return tuple(
+        sum(2.0 * c[i][k] * b[j][k] for k in range(2)) + rows[i] + 2.0 * wm[i][j]
+        for i in range(2)
+        for j in range(3)
+    )
 
 
 class Failure(Exception):

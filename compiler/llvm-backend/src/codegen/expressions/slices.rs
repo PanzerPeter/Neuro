@@ -327,6 +327,28 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
+    /// The slot of `s[index]` as a place, when the element is an aggregate a longer
+    /// place projects into, as `vec_element_place` does for a `Vec`.
+    pub(crate) fn slice_element_place(
+        &mut self,
+        object: &HirExpr,
+        obj_ty: &Type,
+        index: &HirExpr,
+    ) -> CodegenResult<Option<PointerValue<'ctx>>> {
+        let Type::Slice(element) = obj_ty.referent() else {
+            return Ok(None);
+        };
+        if !matches!(
+            **element,
+            Type::Struct(_) | Type::Array { .. } | Type::Tuple(_)
+        ) {
+            return Ok(None);
+        }
+        let (base, element_ty, len) = self.slice_source(object, obj_ty)?;
+        self.slice_element_ptr(base, &element_ty, len, index, index.span.start)
+            .map(Some)
+    }
+
     /// Address of element `index` in a borrowed run, emitting the same debug-build
     /// bounds guard the owning container gets; only the bound is a runtime length.
     fn slice_element_ptr(

@@ -23,6 +23,8 @@ use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
 /// The `String` builder method that copies its bytes out into an owned `string`.
 /// Matched by name here the way the builder type itself is matched by name.
 const TO_OWNED_METHOD: &str = "to_string";
+/// `string.clone()`, which copies the bytes into a buffer of their own.
+const STRING_CLONE_METHOD: &str = "clone";
 
 /// The collection readers that hand their result out inside an `Option`. Matched by
 /// name against a collection receiver, the way the builder's `to_string` is.
@@ -99,7 +101,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// its initializer allocated one ([`produces_owned_string`]), which is a property of
     /// the expression and not of the type, so no position reached through a type can be
     /// proven to own one.
-    fn holds_owner(&self, ty: &Type) -> bool {
+    pub(crate) fn holds_owner(&self, ty: &Type) -> bool {
         match ty {
             Type::Collection { .. } | Type::Tensor { .. } => true,
             Type::Struct(name) => {
@@ -302,15 +304,19 @@ impl<'ctx> CodegenContext<'ctx> {
             // `Type::Struct` that this arm does not match.
             HirExprKind::Call { callee, args } => match &callee.kind {
                 HirExprKind::FieldAccess { object, field } => {
-                    args.is_empty()
-                        && field == TO_OWNED_METHOD
+                    let receiver = Type::from_hir(&object.ty);
+                    let builder_copy = field == TO_OWNED_METHOD
                         && matches!(
-                            Type::from_hir(&object.ty).referent(),
+                            receiver.referent(),
                             Type::Collection {
                                 kind: CollectionKind::String,
                                 ..
                             }
-                        )
+                        );
+                    // `string.clone()` copies the bytes into a buffer of their own.
+                    let string_clone =
+                        field == STRING_CLONE_METHOD && matches!(receiver.referent(), Type::String);
+                    args.is_empty() && (builder_copy || string_clone)
                 }
                 // A function whose every return path allocates hands the buffer to its
                 // caller, which is the one storing position that no expression shape
@@ -350,8 +356,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// and that no binding will ever name.
     ///
     /// Emitted at the consumers that provably copy the bytes out and retain none of
-    /// them: a `+` operand, an `==` operand, a `.len()` receiver, a `push_str` argument,
-    /// and a statement whose value is discarded. A consumer that may STORE the fat
+    /// them: a `+` operand, an `==` operand, a `.len()` or `.clone()` receiver, a
+    /// `push_str` argument, and a statement whose value is discarded. A consumer that may STORE the fat
     /// pointer instead (a by-value call argument, a collection element, a struct field)
     /// is deliberately not one of them: the buffer outlives the expression there, so
     /// releasing it would hand out a dangling pointer. It leaks instead, which is the
@@ -475,6 +481,44 @@ impl<'ctx> CodegenContext<'ctx> {
             });
         }
         Ok(flag_ptr)
+    }
+
+    /// The drop flag of the binding `expr` names, when that binding may own a heap
+    /// `string`.
+    fn owned_string_flag_ptr(&self, expr: &HirExpr) -> Option<PointerValue<'ctx>> {
+        let HirExprKind::Variable(name) = &expr.kind else {
+            return None;
+        };
+        self.drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| &entry.name == name)
+            .filter(|entry| matches!(entry.target, DropTarget::HeapString))
+            .map(|entry| entry.flag_ptr)
+    }
+
+    /// Whether `expr` names a binding that may own a heap `string`, so a move out of it
+    /// may carry a buffer.
+    pub(crate) fn names_an_owned_string(&self, expr: &HirExpr) -> bool {
+        self.owned_string_flag_ptr(expr).is_some()
+    }
+
+    /// The current value of the drop flag of the binding `expr` names, when that binding
+    /// may own a heap `string`: whether it owns the buffer at this point of the run.
+    /// `None` for anything else, which owns nothing a move could carry.
+    pub(crate) fn load_owned_string_flag(
+        &mut self,
+        expr: &HirExpr,
+    ) -> CodegenResult<Option<IntValue<'ctx>>> {
+        let Some(flag_ptr) = self.owned_string_flag_ptr(expr) else {
+            return Ok(None);
+        };
+        let owns = self
+            .builder
+            .build_load(self.context.bool_type(), flag_ptr, "str.owns")?
+            .into_int_value();
+        Ok(Some(owns))
     }
 
     /// Whether `expr` names a binding the enclosing `pool` already registered, making
@@ -636,13 +680,18 @@ impl<'ctx> CodegenContext<'ctx> {
         self.build_dlpack_release(handle)
     }
 
-    /// Disown every owner a binding holds, without touching the binding's own flag.
+    /// Disown every owner a binding holds, without touching the binding's own flag, and
+    /// hand back each cleared flag with the value it held.
     ///
     /// A `match` that binds a payload by value is the one move site with no place
     /// expression to name: which position left depends on the tag. Clearing all of them
-    /// is the conservative answer — a variant whose payload the arm did not bind leaks
-    /// rather than being released twice.
-    pub(crate) fn mark_held_moved_for_drop(&mut self, name: &str) {
+    /// is the conservative answer for an arm that binds — a part of the variant it did
+    /// not bind leaks rather than being released twice. An arm that binds nothing takes
+    /// nothing, and stores the returned values back.
+    pub(crate) fn mark_held_moved_for_drop(
+        &mut self,
+        name: &str,
+    ) -> CodegenResult<Vec<(PointerValue<'ctx>, IntValue<'ctx>)>> {
         let flags: Vec<PointerValue<'ctx>> = self
             .drop_scopes
             .iter()
@@ -659,10 +708,19 @@ impl<'ctx> CodegenContext<'ctx> {
             })
             .unwrap_or_default();
 
-        let zero = self.context.bool_type().const_zero();
+        let bool_ty = self.context.bool_type();
+        let mut saved = Vec::with_capacity(flags.len());
         for flag_ptr in flags {
-            let _ = self.builder.build_store(flag_ptr, zero);
+            let owned = self
+                .builder
+                .build_load(bool_ty, flag_ptr, "match.owned")?
+                .into_int_value();
+            saved.push((flag_ptr, owned));
         }
+        for (flag_ptr, _) in &saved {
+            self.builder.build_store(*flag_ptr, bool_ty.const_zero())?;
+        }
+        Ok(saved)
     }
 
     /// Release the value a reassigned binding is about to lose, and hand back its drop
@@ -857,6 +915,138 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_store(flag_ptr, armed_flag)?;
         }
         Ok(())
+    }
+
+    /// The current flags of the `string` positions the holder `expr` names, keyed by
+    /// path: which of them own their buffer at this point of the run. Empty unless `expr`
+    /// is a bare binding, the one holder whose positions a move hands over whole.
+    pub(crate) fn load_held_string_flags(
+        &mut self,
+        expr: &HirExpr,
+    ) -> CodegenResult<Vec<(Vec<String>, IntValue<'ctx>)>> {
+        let HirExprKind::Variable(name) = &expr.kind else {
+            return Ok(Vec::new());
+        };
+        let positions: Vec<(Vec<String>, PointerValue<'ctx>)> = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| &entry.name == name)
+            .map(|entry| {
+                entry
+                    .held
+                    .iter()
+                    .filter(|held| matches!(held.target, DropTarget::HeapString))
+                    .map(|held| (held.path.clone(), held.flag_ptr))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let bool_ty = self.context.bool_type();
+        let mut flags = Vec::with_capacity(positions.len());
+        for (path, flag_ptr) in positions {
+            let owns = self
+                .builder
+                .build_load(bool_ty, flag_ptr, "held.str.owns")?
+                .into_int_value();
+            flags.push((path, owns));
+        }
+        Ok(flags)
+    }
+
+    /// Store flags [`load_held_string_flags`] read off a moved holder into the same
+    /// positions of `name`, the holder that took the value.
+    pub(crate) fn store_held_string_flags(
+        &mut self,
+        name: &str,
+        flags: &[(Vec<String>, IntValue<'ctx>)],
+    ) -> CodegenResult<()> {
+        let targets: Vec<(PointerValue<'ctx>, IntValue<'ctx>)> = self
+            .drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .map(|entry| {
+                flags
+                    .iter()
+                    .filter_map(|(path, owns)| {
+                        entry
+                            .held
+                            .iter()
+                            .find(|held| {
+                                matches!(held.target, DropTarget::HeapString) && &held.path == path
+                            })
+                            .map(|held| (held.flag_ptr, *owns))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (flag_ptr, owns) in targets {
+            self.builder.build_store(flag_ptr, owns)?;
+        }
+        Ok(())
+    }
+
+    /// Evaluate `value` into position `segment` of the aggregate literal being built, and
+    /// move it in: the place it names stops owning what it held.
+    ///
+    /// While a holder is being built ([`CodegenContext::literal_string_moves`]), a `string`
+    /// binding moved in hands its runtime flag to the position, read before the move clears
+    /// it. A nested literal extends the path; anything else is evaluated with the collection
+    /// suspended, because a literal inside it (a call's argument, a branch) builds a value
+    /// that is not this holder's.
+    pub(crate) fn codegen_literal_position(
+        &mut self,
+        segment: String,
+        value: &HirExpr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let nested = matches!(
+            value.kind,
+            HirExprKind::StructLiteral { .. }
+                | HirExprKind::TupleLiteral { .. }
+                | HirExprKind::ArrayLiteral { .. }
+        );
+        let suspended = if nested {
+            if let Some(moves) = &mut self.literal_string_moves {
+                moves.path.push(segment.clone());
+            }
+            None
+        } else {
+            self.literal_string_moves.take()
+        };
+        let val = self.codegen_expr(value);
+        if nested {
+            if let Some(moves) = &mut self.literal_string_moves {
+                let _ = moves.path.pop();
+            }
+        } else {
+            self.literal_string_moves = suspended;
+        }
+        let val = val?;
+        if self.literal_string_moves.is_some() && matches!(Type::from_hir(&value.ty), Type::String)
+        {
+            if let Some(owns) = self.load_owned_string_flag(value)? {
+                if let Some(moves) = &mut self.literal_string_moves {
+                    let mut path = moves.path.clone();
+                    path.push(segment);
+                    moves.flags.push((path, owns));
+                }
+            }
+        }
+        self.mark_moved_for_drop(value);
+        Ok(val)
+    }
+
+    /// Whether `value` is an aggregate literal, the one holder shape whose positions'
+    /// moved-in ownership [`codegen_literal_position`] can collect.
+    pub(crate) fn is_aggregate_literal(value: &HirExpr) -> bool {
+        matches!(
+            value.kind,
+            HirExprKind::StructLiteral { .. }
+                | HirExprKind::TupleLiteral { .. }
+                | HirExprKind::ArrayLiteral { .. }
+        )
     }
 
     /// The paths under `value` that a provable allocation was stored into, walking the

@@ -11,7 +11,7 @@
 //! not work out here is a divergence between the two surfaces and becomes a
 //! `LoweringError`, exactly as the governing rule in this slice's CONTEXT.md requires.
 
-use ast_types::{Expr, UnaryOp};
+use ast_types::{BinaryOp, Expr, UnaryOp};
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::{Literal, Span};
 
@@ -68,7 +68,7 @@ impl Lowerer {
         let shape = crate::static_extents(&shape)?;
         let cast = match method {
             TRANSPOSE_METHOD => transpose(&shape, &names)?,
-            RESHAPE_METHOD => reshape(&shape, args)?,
+            RESHAPE_METHOD => reshape(&shape, args, &|name| self.reshape_constant(name))?,
             PERMUTE_METHOD => permute(&shape, &names, args)?,
             FLATTEN_METHOD => flatten(&shape, &names, args)?,
             other => return Err(malformed(format!("`.{other}` is not a shape method"))),
@@ -89,6 +89,55 @@ impl Lowerer {
     }
 }
 
+impl Lowerer {
+    /// The value expression a `.reshape` extent's name folds through, mirroring the
+    /// checker: a local binding shadows a constant and is a run-time value.
+    fn reshape_constant(&self, name: &str) -> Option<&Expr> {
+        if self.lookup_local(name).is_some() {
+            return None;
+        }
+        self.constant_values.get(name)
+    }
+}
+
+/// How many constants deep an extent folds; the checker uses the same bound.
+const CONST_FOLD_DEPTH: u32 = 64;
+
+/// Fold a `.reshape` extent: a literal, a negation or parentheses around one, a
+/// constant's name, or arithmetic over these. Checked, like the checker's fold.
+fn fold_extent<'a>(
+    expr: &'a Expr,
+    depth: u32,
+    constant: &dyn Fn(&str) -> Option<&'a Expr>,
+) -> Option<i128> {
+    let depth = depth.checked_sub(1)?;
+    match expr {
+        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
+        Expr::Paren(inner, _) => fold_extent(inner, depth, constant),
+        Expr::Unary {
+            op: UnaryOp::Negate,
+            operand,
+            ..
+        } => fold_extent(operand, depth, constant)?.checked_neg(),
+        Expr::Identifier(ident) => fold_extent(constant(&ident.name)?, depth, constant),
+        Expr::Binary {
+            left, op, right, ..
+        } => {
+            let l = fold_extent(left, depth, constant)?;
+            let r = fold_extent(right, depth, constant)?;
+            match op {
+                BinaryOp::Add => l.checked_add(r),
+                BinaryOp::Subtract => l.checked_sub(r),
+                BinaryOp::Multiply => l.checked_mul(r),
+                BinaryOp::Divide => l.checked_div(r),
+                BinaryOp::Modulo => l.checked_rem(r),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn transpose(shape: &[usize], names: &AxisNames) -> Result<ShapeCast, LoweringError> {
     if shape.len() != 2 {
         return Err(malformed(format!(
@@ -103,14 +152,18 @@ fn transpose(shape: &[usize], names: &AxisNames) -> Result<ShapeCast, LoweringEr
     })
 }
 
-fn reshape(shape: &[usize], args: &[Expr]) -> Result<ShapeCast, LoweringError> {
+fn reshape<'a>(
+    shape: &[usize],
+    args: &'a [Expr],
+    constant: &dyn Fn(&str) -> Option<&'a Expr>,
+) -> Result<ShapeCast, LoweringError> {
     let total: usize = shape.iter().product();
     let entries = axis_list(args, RESHAPE_METHOD)?;
 
     let mut extents: Vec<Option<usize>> = Vec::with_capacity(entries.len());
     let mut inferred_at = None;
     for entry in entries {
-        let value = const_integer(entry).ok_or_else(|| {
+        let value = fold_extent(entry, CONST_FOLD_DEPTH, constant).ok_or_else(|| {
             malformed("`.reshape` reached lowering with a non-constant extent".to_string())
         })?;
         if value == INFERRED_EXTENT {

@@ -200,6 +200,45 @@ func main() -> i32 {
     );
 }
 
+/// The spec calls a `.reshape` argument a constant-expression array, so a module or
+/// function `const`, and arithmetic over one, folds like a literal in both frontends.
+#[test]
+fn a_reshape_extent_may_name_a_const() {
+    let source = r#"
+const ROWS: i32 = 3
+
+func main() -> i32 {
+    const HALF: i32 = 2
+    val t: Tensor<i32, [6, 2]> = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]]
+    val r = t.clone().reshape([ROWS, -1])
+    val q = t.reshape([HALF * 2, ROWS])
+    // r is [3, 4] and q is [4, 3], both over 0..12 in row-major order.
+    return r[1, 0] * 10 + q[1, 0]
+}
+"#;
+    assert_eq!(run_program("tensor_reshape_const.nr", source), 43);
+}
+
+/// A local binding shadows the constant of its name, and a binding is a run-time value.
+#[test]
+fn a_reshape_extent_shadowed_by_a_local_is_not_a_constant() {
+    let source = r#"
+const ROWS: i32 = 3
+
+func main() -> i32 {
+    val ROWS = 3
+    val t: Tensor<i32, [6, 2]> = Tensor::<i32, [6, 2]>::ones()
+    val r = t.reshape([ROWS, -1])
+    return 0
+}
+"#;
+    let out = rejection("tensor_reshape_shadowed_const.nr", source);
+    assert!(
+        out.contains("not a constant"),
+        "a shadowed constant should not fold; got: {out}"
+    );
+}
+
 /// A transposed named shape is not the shape it came from, which is the transposition
 /// error named dimensions exist to catch.
 #[test]

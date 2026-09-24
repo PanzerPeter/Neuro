@@ -9,6 +9,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-09-24
+
+### Added
+
+- `@grad` on a generic function: `@grad func loss<N>(w: &mut Tensor<f32, [N]>) -> ...` is
+  differentiated once per instance the program uses, at that instance's concrete shapes. The
+  template's signature is held to the same rules, with a shape parameter admitted as an extent.
+- `tools/grad_differential.py`: a shape-generic case, checked through its `[3]` instance.
+- A `@grad` body may now use `.t()`, `.permute(...)`, `.reshape(...)` and `.flatten(...)`,
+  slices at literal bounds (reversed ranges included), `einsum`, `as` between integer and float
+  types, and an element read at a position computed at run time, such as `w[i]` in a `while`
+  loop. Each has a derivative rule and a case in `tools/grad_differential.py`. Still refused:
+  `.max()` / `.min()`, a slice at a run-time position, and an `einsum` operand that repeats a
+  letter.
+- A `@grad` body may loop with `for` over a range: `a..b`, `a..=b`, `.rev()` and
+  `.enumerate()`, differentiated as the counted `while` each one is.
+
+### Fixed
+
+- A `.reshape` extent may name a `const`, or combine constants and literals with arithmetic:
+  `t.reshape([ROWS, -1])` with a module or function `const ROWS: i32 = 3`. The argument was
+  already specified as a constant-expression array, but only a literal folded. A local
+  binding still shadows a constant of its name and is refused as a run-time value.
+- `.max()` / `.min()` on a float tensor no longer depend on where a `NaN` sits. A `NaN` in the
+  first position was carried out as the answer while a `NaN` anywhere else was skipped. Both
+  now fold with the sorting comparator, where `NaN` is the worst element in either direction:
+  the answer is the extreme non-`NaN` element, and `NaN` only for a run with no other. This
+  holds per run for the `axis:` forms too.
+- BUG-060: a binding moved into an enum payload (`Some(xs)`, `Slot::Full(p)`) was released by
+  the enum's drop and again by the binding's own scope: a `Vec` payload aborted in `free`, and
+  a `Drop` payload ran its destructor twice. The construction now disowns what it moves in.
+- A `match` arm that binds nothing (`B(_) => ...`, `_ => ...`) no longer loses the value when
+  another arm of the same `match` binds a payload: the scrutinee keeps ownership in that arm
+  and releases the payload at its own scope exit.
+- BUG-059: a function returning `string` that could leave through a `return` written inside
+  an expression (`loop { if c { return "lit" } }`, `val x = if c { return "lit" } else { 1 }`,
+  a `match` arm) was read as allocating on every path, so its caller released the literal and
+  the run aborted in `free`. Such a body is no longer read as allocating.
+- A function returning `string` whose tail is an `if`, a `match` or a block now hands its
+  buffer to the caller when every branch allocates, as one whose every `return` allocates
+  already did. The caller released nothing, so each call leaked its result.
+- BUG-058: a functional update `Bag { id: 2, ..a }` left `a` owning the fields it took, so a
+  `Vec` field was released by both holders (a double free that aborted the run), and an update
+  returned from a function pointed at a `string` its `base` released on the way out. The
+  update now moves the fields it copies out of the base, which is what the checker already
+  enforced.
+- A `string` binding moved into a struct, tuple or array literal (`Entry { label: t }`,
+  `(t, 1)`), or into a holder through a functional update's base, now belongs to the holder
+  and is released with it. It was released by nobody.
+- BUG-053: a store into a `Vec` element evaluated the element's address before the value, so
+  a value that grew the same `Vec` (`v[0] = { v.push(..); 42 }`) wrote into the buffer the
+  growth had freed and the write was lost. Every element and field store now evaluates its
+  value first, as assignment already specifies; a tensor element store the same way.
+- BUG-054: a field or element of an aggregate held in a `Vec` or a `&mut` slice is a place:
+  `v[i].x = 9`, `v[i][j] += 1`, `v[i].1[0] = 6`. Each passed the checker and then failed in the
+  backend without a source location.
+- BUG-055: a `mut` binding holding a shared borrow could write through it once the place was
+  more than one projection deep: `mut r: &[[i32; 2]] = &s; r[0][1] = 8` compiled and changed
+  the immutable `s`. It is now refused with a diagnostic naming the shared borrow.
+- BUG-056: the converse was refused: `r[0][1] = 8` through a parameter `r: &mut [[i32; 2]]`
+  reported `r` as immutable. The nearest reference on the path now decides.
+- A bare numeric literal left of a tensor is the scalar broadcast whatever the tensor
+  expression is: `0.5 * make_matrix()` and `2 * m.clone()` now type the literal as the
+  element, as `matrix * 0.5` always did. Before, only a tensor BINDING on the right was
+  recognized, and anything else needed a suffix (`0.5f32 * ...`).
+- BUG-057: `string.clone()` handed back the receiver's own buffer instead of a copy, so a
+  clone outlived nothing: `func f() -> string { val a = x + y; a.clone() }` returned a
+  pointer into memory freed when `a` was dropped. It now copies the bytes into a buffer the
+  clone owns and releases, as the language specifies. A receiver built only to be cloned
+  (`(a + b).clone()`, `v[0].clone()`) is released once its bytes are copied.
+- An owned `string` argument is released after the call in three more shapes, where it
+  leaked one buffer per call: when the callee hands the parameter on to another function
+  that only reads it, when it reads the parameter through `.clone()`, and when it reads it
+  under an `as` cast (`s.len() as i64`).
+- A `string` buffer moved between bindings, or given to a binding that began as a literal,
+  is released: `val u = t`, `s = t`, and `mut s = "x"` followed by `s = a + b` each leaked the
+  buffer, because ownership was re-derived from the expression and a bare binding name proves
+  nothing. The move now carries the source binding's runtime ownership flag to the target,
+  and a `mut` string binding always has a flag for a later assignment to arm. A holder
+  moved whole (`val q = p`, `q = p`) hands over its `string` positions the same way.
+- `val Some(s) = m.get(k) else { ... }` (and `v.pop()`, `v.get(i)`) releases the `string`
+  payload it binds when the enclosing block ends, as the `match` form already did. The copy
+  the reader made leaked once per evaluation.
+- A `pool` store into a binding that outlives the block accepts a struct, tuple or array
+  literal, and an `if` / `match` whose arms are single expressions, when every leaf is
+  provably off the arena: `out = Entry { label: "a" + "b", n: 1 }` and
+  `s = if c { "a" } else { "b" }` compile. The backend already routed these to the heap; only
+  the proof was narrower than the emission. An arm that declares a binding is still refused.
+- A place rooted at a call result or another temporary (`mk()[0] = 5`) is refused by the
+  checker as a write into a temporary, with a span. It was reported against a binding with an
+  empty name.
+
 ## [3.6.0] - 2026-09-24
 
 ### Added

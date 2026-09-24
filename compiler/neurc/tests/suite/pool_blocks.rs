@@ -233,6 +233,93 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_routed_store_proves_struct_tuple_and_branch_values_off_the_arena() {
+    // Each value below is a container or a branch whose leaves are all literals or
+    // routed operators, so none can hold arena memory. The second pool reuses the bytes
+    // the first released: a buffer that had come from the arena would read back as filler.
+    let test = CompileTest::new();
+    let source = r#"
+struct Entry { label: string, n: i32 }
+
+func main() -> i32 {
+    mut out = Entry { label: "x", n: 0 }
+    mut pair: (string, i32) = ("p", 0)
+    mut s: string = "none"
+    mut word: string = "w"
+    val c = true
+    val k = 2
+    pool first {
+        out = Entry { label: "entry-" + "{7}", n: 7 }
+        pair = ("pair-" + "{3}", 3)
+        s = if c { "then" } else { "else" }
+        word = match k {
+            1 => "one",
+            _ => "other-" + "{k}"
+        }
+    }
+    pool second {
+        mut i: i32 = 0
+        while i < 32 {
+            val filler = "clobber-clobber-clobber-{i}"
+            println("{filler.len()}")
+            i = i + 1
+        }
+    }
+    println("{out.label} {pair.0} {s} {word} {out.n + pair.1}")
+    0
+}
+"#;
+    let stdout = stdout_of(&test, "pool_routed_containers.nr", source);
+    let last = stdout.lines().next_back().unwrap_or_default();
+    assert_eq!(
+        last, "entry-7 pair-3 then other-2 10",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn a_container_or_branch_holding_the_blocks_allocation_is_rejected() {
+    // The widened walk still refuses a leaf the block allocated, an arm that declares
+    // a name (which the walk cannot see before the arm is checked), and a `match` whose
+    // scrutinee is the block's own memory.
+    let test = CompileTest::new();
+    for (name, body) in [
+        ("pool_if_local.nr", "s = if c { local } else { \"b\" }"),
+        ("pool_struct_local.nr", "out = Entry { label: local, n: 1 }"),
+        (
+            "pool_match_local.nr",
+            "s = match o { Some(x) => x, None => \"\" }",
+        ),
+        (
+            "pool_if_declares.nr",
+            "s = if c {\n            val t = \"t\"\n            t\n        } else { \"b\" }",
+        ),
+    ] {
+        let source = format!(
+            r#"
+struct Entry {{ label: string, n: i32 }}
+
+func main() -> i32 {{
+    mut out = Entry {{ label: "x", n: 0 }}
+    mut s: string = "none"
+    val c = true
+    pool {{
+        val local = "a" + "b"
+        val o: Option<string> = Some(local.clone())
+        {body}
+    }}
+    return out.n
+}}
+"#
+        );
+        let error = test
+            .check(name, &source)
+            .expect_err("arena memory must not cross the block");
+        assert!(error.contains("outlives"), "{name}: {error}");
+    }
+}
+
+#[test]
 fn a_value_a_callee_built_survives_the_pool() {
     // The counterpart to the test above, and the reason the escape rule reads the VALUE
     // and not only the place. `render` is emitted as its own function, outside every

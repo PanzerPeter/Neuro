@@ -180,6 +180,9 @@ struct Lowerer {
     operator_unary_impls: HashMap<(String, ast_types::UnaryOp), (String, HirType)>,
     /// Module- and function-scope constant names → resolved type.
     constants: HashMap<String, HirType>,
+    /// The same constants' value expressions, for a `.reshape` extent that names one
+    /// and has to be folded into the result type.
+    constant_values: HashMap<String, ast_types::Expr>,
     /// Lexical scope stack of `binding name → type`, innermost last.
     scopes: Vec<HashMap<String, HirType>>,
     /// Active loops, innermost last.
@@ -334,6 +337,7 @@ impl Lowerer {
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
             constants: HashMap::new(),
+            constant_values: HashMap::new(),
             scopes: Vec::new(),
             loop_stack: Vec::new(),
             current_return: HirType::Void,

@@ -459,8 +459,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// sorts to the END whatever the direction, so it never precedes anything and
     /// everything precedes it. Both facts fall out of the ordered predicates: a `NaN`
     /// operand makes `<` and `>` alike false, so the two `NaN` tests are all that has to
-    /// be spelled out.
-    fn precedes(
+    /// be spelled out. `.max()` / `.min()` fold with this same comparator, so a `NaN`
+    /// is the worst candidate there too and the answer does not depend on where it sits.
+    pub(super) fn precedes(
         &self,
         a: BasicValueEnum<'ctx>,
         b: BasicValueEnum<'ctx>,

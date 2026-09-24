@@ -294,8 +294,8 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
 }
 
 #[test]
-fn a_for_loop_is_refused_at_the_statement() {
-    refusal_at(
+fn a_for_over_a_range_is_the_counted_while_it_desugars_to() {
+    let program = lower(
         r#"
 @grad
 func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
@@ -306,7 +306,38 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     return Tensor::scalar(acc.sum())
 }
 "#,
-        "for i",
+    );
+    let reverse = item_function(&program, "__loss__rev");
+    let stmts = all_stmts(&reverse.body);
+    assert!(
+        !stmts
+            .iter()
+            .any(|stmt| matches!(stmt, HirStmt::ForRange { .. })),
+        "the derivative walks a range as a while, got {stmts:?}"
+    );
+    assert_eq!(
+        stmts
+            .iter()
+            .filter(|stmt| matches!(stmt, HirStmt::While { .. }))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn a_for_over_a_collection_is_refused_at_the_statement() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>, scales: [f32; 2]) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    for scale in scales {
+        acc = &acc * scale
+    }
+    return Tensor::scalar(acc.sum())
+}
+"#,
+        "for scale",
     );
 }
 
@@ -355,5 +386,33 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     assert!(
         matches!(error, LoweringError::NotDifferentiable { .. }),
         "got {error:?}"
+    );
+}
+
+#[test]
+fn a_slice_at_a_computed_position_is_refused_at_the_slice() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2, 2]>, row: i64) -> Tensor<f32, []> {
+    val picked = w[row, ..]
+    return Tensor::scalar(picked.sum())
+}
+"#,
+        "w[row, ..]",
+    );
+}
+
+#[test]
+fn an_einsum_along_a_diagonal_is_refused_at_the_contraction() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2, 2]>) -> Tensor<f32, []> {
+    val trace = einsum("ii->", w)
+    return Tensor::scalar(trace)
+}
+"#,
+        "einsum(",
     );
 }

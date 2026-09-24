@@ -59,7 +59,7 @@ impl<'ctx> CodegenContext<'ctx> {
             scrut_alloca,
             scrut_llvm,
             &scrut_sem,
-            ArmOwnership::Enclosing,
+            ArmOwnership::EnclosingString { scrutinee },
         )?;
         Ok(())
     }

@@ -404,12 +404,15 @@ impl Point {
 The rules:
 
 - The binding the place is rooted at must be `mut`, except where the place is reached
-  through a `&mut` borrow, which carries the permission itself: `xs: &mut [T]` is an
-  immutable binding you may write elements through, and a `&[T]` binding declared `mut`
-  is one you may not.
-- Anything that is not one of the forms above is not a place. A call result, a literal,
-  or an operator result is a value with no storage, and assigning to one is a parse
-  error naming what a place is.
+  through a borrow. Then the borrow nearest the place decides, however deep the place is:
+  `xs: &mut [T]` is an immutable binding you may write elements through (`xs[0][1] = 9`
+  included), and a `&[T]` binding declared `mut` is one you may not.
+- The value is evaluated before the place is addressed, so a value that grows the `Vec`
+  it is stored into (`v[0] = { v.push(x); 42 }`) lands in the grown `Vec`.
+- Anything that is not one of the forms above is not a place. A literal or an operator
+  result is a value with no storage, and assigning to one is a parse error naming what a
+  place is. A projection of a call result (`make()[0] = 5`) parses, and is refused as a
+  write into a temporary.
 - A tensor index that leaves an axis standing (`t[0, ..]`) produces a *fresh* tensor
   rather than naming storage, so it cannot be assigned to. Name every axis.
 - A tuple element (`pair.0 = v`) is not yet a place.

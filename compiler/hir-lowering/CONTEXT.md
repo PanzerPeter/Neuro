@@ -38,7 +38,9 @@ loop-context stack.
 `autodiff/` lowers `@grad func f` to `f` plus a `GradsOf_f` struct (one owned field per `&mut
 Tensor` parameter, typed as that parameter's tensor) and `__f__rev(<f's params>) -> (loss,
 GradsOf_f)`, built from `f`'s already-lowered HIR by `derive_reverse`, called from
-`lower_program`'s function arm. `tape.rs` flattens the body into one-operation entries over
+`lower_program`'s function arm. A generic `@grad` template is derived per INSTANCE, from the
+monomorphization drain, so each instance `f_g_...` gets its own `GradsOf_f_g_...` and
+`__f_g_...__rev` over concrete shapes; an instance nothing calls is never emitted. `tape.rs` flattens the body into one-operation entries over
 leaves and marks activity, keeping `if` as a `Branch` (one tape per arm) and `while` as a `Loop`
 (condition and body tapes); a reassigned binding is versioned (each assignment rebinds the name
 to its new value's leaf), and one that leaves an arm or a loop body goes through a `Slot`, a `mut`
@@ -50,8 +52,9 @@ an iteration count only). What a nested sweep sends to an outer value leaves thr
 sum declared before the construct. `mod.rs` seeds the loss with `1.0`; `rules.rs` holds each
 operation's adjoint and the per-value accumulation; `emit.rs` binds every emitted expression to a
 fresh `__ad_t*` val so no nested owned temporary exists. Two ownership rules make the result
-sound: the only consuming node emitted is the reshape in an axis-reduction rule, applied to an
-adjoint nothing else reads, and an adjoint handed to two owners (an add passes its own through to
+sound: the only consuming nodes emitted are shape casts, on an adjoint nothing else reads (the
+reshape in an axis-reduction rule and the inverse cast in a shape-cast rule) or on a fresh copy
+(a shape cast's forward replay), and an adjoint handed to two owners (an add passes its own through to
 both operands) is copied before either takes it (`Adjoints::owners`). A slot is only ever given a
 value its arm owns outright or a copy (`store`), and a nested sweep works on a copy of its seed.
 
@@ -60,10 +63,16 @@ reverse pass follows the path the forward pass took. That is the language's ruli
 an accident of the implementation.
 
 The rule set is closed: float and tensor `+ - * /`, scalar unary `-`, `@`, `.sum()` / `.mean()`
-whole or along one axis, tensor literals, element reads at literal positions, constant fills,
-scalar comparisons, integer arithmetic and logic (`&&` / `||` become branches, keeping the
+whole or along one axis, tensor literals, element reads (a literal position scatters through one
+literal per tensor, a run-time one through a zero tensor and one element store), slices at
+literal bounds, the four shape casts (replayed on a copy, since the node consumes its receiver;
+the adjoint goes back through the inverse permutation), `einsum` without a repeated letter in an
+operand, `as` between integer and float types, constant fills, scalar comparisons, integer arithmetic and logic (`&&` / `||` become branches, keeping the
 short circuit); `val` / `mut` bindings, assignment to a local, `if` / `else if` / `else` as a
-statement or an expression, an early `return` ending an arm of a top-level `if`, and `while`.
+statement or an expression, an early `return` ending an arm of a top-level `if`, `while`, and
+`for` over a range, which `for_range` rewrites into the counted `while` it is (bounds read once;
+an inclusive range stops on a flag rather than stepping past its end, and a reversed one counts up
+and mirrors the counter onto the binding, as the backend's own loop does).
 Anything else, inactive or not, is
 `LoweringError::NotDifferentiable { function, construct, span }`, the one user-facing variant of
 this enum: the transform owns its rule set, so it is the one place that can say precisely what

@@ -14,7 +14,7 @@
 // summarises a buffer its owner keeps.
 
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use inkwell::{FloatPredicate, IntPredicate};
+use inkwell::IntPredicate;
 use neuro_hir::{HirExpr, HirReduceOp};
 
 use crate::codegen::context::CodegenContext;
@@ -235,7 +235,8 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// One fold step. A sum carries the same overflow guard the scalar `+` does: a
-    /// tensor's arithmetic is its element's arithmetic.
+    /// tensor's arithmetic is its element's arithmetic. `.max()` / `.min()` keep the
+    /// candidate the sorting comparator would put first, descending or ascending.
     fn fold_element(
         &mut self,
         op: HirReduceOp,
@@ -244,56 +245,39 @@ impl<'ctx> CodegenContext<'ctx> {
         element: &Type,
         offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        if let (BasicValueEnum::FloatValue(a), BasicValueEnum::FloatValue(b)) = (carried, value) {
-            return match op {
-                HirReduceOp::Sum | HirReduceOp::Mean => Ok(self
+        match (op, carried, value) {
+            (HirReduceOp::Max | HirReduceOp::Min, _, _) => {
+                let descending = op == HirReduceOp::Max;
+                let wins = self.precedes(value, carried, element, descending)?;
+                Ok(self
                     .builder
-                    .build_float_add(a, b, "tensor.reduce.add")?
-                    .into()),
-                HirReduceOp::Max | HirReduceOp::Min => {
-                    let predicate = match op {
-                        HirReduceOp::Max => FloatPredicate::OGT,
-                        _ => FloatPredicate::OLT,
-                    };
-                    let wins =
-                        self.builder
-                            .build_float_compare(predicate, b, a, "tensor.reduce.cmp")?;
-                    Ok(self.builder.build_select(wins, b, a, "tensor.reduce.sel")?)
-                }
-            };
-        }
-        let (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) = (carried, value) else {
-            return Err(CodegenError::InternalError(
-                "a tensor element is an integer or a float".to_string(),
-            ));
-        };
-        let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element);
-        match op {
-            HirReduceOp::Sum => Ok(self
-                .codegen_int_arith(
-                    ast_types::BinaryOp::Add,
-                    a,
-                    b,
-                    unsigned,
-                    offset,
-                    "tensor.reduce.add",
-                )?
-                .into()),
-            HirReduceOp::Mean => Err(CodegenError::InternalError(
-                "`.mean()` reached codegen on an integer tensor".to_string(),
-            )),
-            HirReduceOp::Max | HirReduceOp::Min => {
-                let predicate = match (op, unsigned) {
-                    (HirReduceOp::Max, true) => IntPredicate::UGT,
-                    (HirReduceOp::Max, false) => IntPredicate::SGT,
-                    (_, true) => IntPredicate::ULT,
-                    (_, false) => IntPredicate::SLT,
-                };
-                let wins = self
-                    .builder
-                    .build_int_compare(predicate, b, a, "tensor.reduce.cmp")?;
-                Ok(self.builder.build_select(wins, b, a, "tensor.reduce.sel")?)
+                    .build_select(wins, value, carried, "tensor.reduce.sel")?)
             }
+            (_, BasicValueEnum::FloatValue(a), BasicValueEnum::FloatValue(b)) => Ok(self
+                .builder
+                .build_float_add(a, b, "tensor.reduce.add")?
+                .into()),
+            (HirReduceOp::Sum, BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) => {
+                let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element);
+                Ok(self
+                    .codegen_int_arith(
+                        ast_types::BinaryOp::Add,
+                        a,
+                        b,
+                        unsigned,
+                        offset,
+                        "tensor.reduce.add",
+                    )?
+                    .into())
+            }
+            (HirReduceOp::Mean, BasicValueEnum::IntValue(_), _) => {
+                Err(CodegenError::InternalError(
+                    "`.mean()` reached codegen on an integer tensor".into(),
+                ))
+            }
+            _ => Err(CodegenError::InternalError(
+                "a tensor element is an integer or a float".to_string(),
+            )),
         }
     }
 

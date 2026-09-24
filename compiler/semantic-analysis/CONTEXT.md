@@ -55,11 +55,13 @@ module per declaration kind beside it. `tests/` is split by subject.
 - **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
   signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every tensor
   parameter `&mut` over a float element with literal extents (`GradSignature`), a free
-  non-generic function with a bare attribute (`GradFormUnsupported`), and no declared struct
+  function with a bare attribute (`GradFormUnsupported`), and no declared struct
   named `GradsOf_<f>` (`GradGeneratedNameTaken`; `__<f>__rev` cannot clash, pass 0z reserves
   `__`). The bundle prefix is duplicated from `hir-lowering`, which emits it. Which constructs
   a `@grad` BODY may use is deliberately not checked here: the transform owns that rule set
-  and reports it with a span itself.
+  and reports it with a span itself. A generic function is checked once, on the template
+  signature from `generic_funcs`, where a shape parameter is admitted as an extent since every
+  instance fixes it; the derivative is derived per instance in `hir-lowering`.
 - **4. full check**: `check_function` / `check_impl` / `check_const_item`.
 - **5. lints**: `run_lints` walks bodies collecting non-fatal `Warning`s
   (`prefer-loop-over-while-true` today, silenced by `@allow(prefer_loop_over_while_true)`;
@@ -758,8 +760,13 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `&[T; N]` / `&Vec<T>` / `&[T]` → `&[T]` (`unsizes_to_slice`), with mutability matching exactly,
   and every argument, return, and annotated-binding site routes through it. `.slice(range)` on an
   array, a `Vec`, or a slice yields `&[T]`; `slice.len()` is `u64`; indexing, `for x in xs`, and
-  `Stmt::IndexAssignment` all accept a slice, the last taking its write permission from the
-  *reference* (`&mut [T]`) rather than from the binding's own `mut`.
+  a place store all accept a slice, the last taking its write permission from the
+  *reference* (`&mut [T]`) rather than from the binding's own `mut`. The reference NEAREST the
+  place decides however many projections lie between them (`place_is_writable` walks the
+  object chain through `nearest_reference`, typing each link with `projection_type` rather than
+  re-running `check_expr`): `r[0][1]` writes through `r: &mut [[T; 2]]`, and a `mut` binding
+  holding a `&[[T; 2]]` is `AssignThroughSharedBorrow`. A place rooted at no binding at all is
+  `AssignToTemporary`.
   A `.slice` call registers a shared borrow of the place its receiver roots at
   (`slice_borrow_root` sees through a chain of slice calls), so a live view blocks a `&mut` of
   the source and `borrow_target_of` promotes it to a persistent borrow when it initializes a
@@ -1049,7 +1056,16 @@ the value holds no arena memory:
   function this program DECLARES — a free function found in `functions`, or an associated
   function / method found through `impl_methods` — is always provable: its body is emitted with
   the backend's pool depth back at zero, so what it allocates comes from libc. The operand walk
-  is what rules out its handing back arena memory it was given.
+  is what rules out its handing back arena memory it was given;
+- a struct or tuple literal whose every field (and `..base`) passes: the aggregate allocates
+  nothing of its own. An array literal likewise, but under `Emission::Routed` only, because it
+  may be a tensor literal, which allocates its buffer where it is written;
+- an `if` with an `else`, or a `match` whose scrutinee passes, when every arm is a bare tail
+  expression that passes. The walk runs BEFORE the value is checked (`check_place_store` asks
+  first), so a name an arm declares is unknown and would read as "not a binding"; an arm that
+  declares anything (`tail_only` fails) is refused rather than guessed at. A `match` arm's
+  pattern bindings are unknown for the same reason, and are sound to admit only because they
+  are parts of a scrutinee already proven.
 
 Everything else is arena memory by assumption. The walk takes an `Emission` because provenance
 depends on where the backend puts the value, and the two call sites want different answers.

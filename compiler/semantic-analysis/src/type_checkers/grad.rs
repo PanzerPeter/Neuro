@@ -37,7 +37,10 @@ fn is_scalar_loss(ty: &Type) -> bool {
 }
 
 /// Why a tensor parameter cannot be differentiated, or `None` when it can.
-fn differentiated_param_problem(ty: &Type) -> Option<&'static str> {
+///
+/// A shape parameter is an extent every instance fixes, so a generic function's template
+/// may name one; only a dynamic `?` axis has no static shape to give a gradient buffer.
+fn differentiated_param_problem(ty: &Type, generic: bool) -> Option<&'static str> {
     let Type::Reference {
         inner,
         mutable: true,
@@ -53,10 +56,11 @@ fn differentiated_param_problem(ty: &Type) -> Option<&'static str> {
             "has an element type other than `f32` or `f64`, the two that have a derivative",
         );
     }
-    if shape
-        .iter()
-        .any(|axis| !matches!(axis.extent, ArrayLen::Fixed(_)))
-    {
+    if shape.iter().any(|axis| match axis.extent {
+        ArrayLen::Fixed(_) => false,
+        ArrayLen::Param(_) => !generic,
+        _ => true,
+    }) {
         return Some("has an extent that is not a literal; a gradient buffer is shaped like its parameter and needs a static shape");
     }
     None
@@ -97,17 +101,21 @@ impl TypeChecker {
             });
             return;
         }
-        if !func.generics.is_empty() {
-            self.record_error(TypeError::GradFormUnsupported {
-                form: "on a generic function".to_string(),
-                span: attr.span,
-            });
-            return;
-        }
+        // A generic template is checked once, with its parameters abstract; the
+        // derivative itself is derived per instance, where every extent is concrete.
+        let generic = !func.generics.is_empty();
         // A signature that failed to register was already reported.
-        let Some(Type::Function { params, ret }) = self.functions.get(&func.name.name).cloned()
-        else {
-            return;
+        let (params, ret) = if generic {
+            let Some(sig) = self.generic_funcs.get(&func.name.name).cloned() else {
+                return;
+            };
+            (sig.params, sig.ret)
+        } else {
+            let Some(Type::Function { params, ret }) = self.functions.get(&func.name.name).cloned()
+            else {
+                return;
+            };
+            (params, *ret)
         };
         let name = &func.name.name;
 
@@ -128,7 +136,7 @@ impl TypeChecker {
                 continue;
             }
             differentiated += 1;
-            if let Some(problem) = differentiated_param_problem(ty) {
+            if let Some(problem) = differentiated_param_problem(ty, generic) {
                 self.record_error(TypeError::GradSignature {
                     function: name.clone(),
                     problem: format!("takes '{}' as '{ty}', which {problem}", param.name.name),

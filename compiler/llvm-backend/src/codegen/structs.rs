@@ -58,7 +58,42 @@ impl<'ctx> CodegenContext<'ctx> {
             .clone();
 
         let mut agg = match base {
-            Some(base_expr) => self.codegen_expr(base_expr)?.into_struct_value(),
+            Some(base_expr) => {
+                let collecting = self.literal_string_moves.take();
+                let value = self.codegen_expr(base_expr);
+                self.literal_string_moves = collecting;
+                let value = value?.into_struct_value();
+                let taken = |path: &[String]| {
+                    path.first()
+                        .is_some_and(|field| fields.iter().all(|init| &init.name != field))
+                };
+                if self.literal_string_moves.is_some() {
+                    let flags = self.load_held_string_flags(base_expr)?;
+                    if let Some(moves) = &mut self.literal_string_moves {
+                        for (path, owns) in flags.into_iter().filter(|(path, _)| taken(path)) {
+                            moves
+                                .flags
+                                .push(([moves.path.clone(), path].concat(), owns));
+                        }
+                    }
+                }
+                // The update moves every field it does not write out of the base, so the
+                // base stops owning those; the ones it overrides stay the base's to release.
+                for (field, _) in &def {
+                    if taken(std::slice::from_ref(field)) {
+                        let taken = HirExpr::new(
+                            HirExprKind::FieldAccess {
+                                object: Box::new(base_expr.clone()),
+                                field: field.clone(),
+                            },
+                            base_expr.ty.clone(),
+                            base_expr.span,
+                        );
+                        self.mark_moved_for_drop(&taken);
+                    }
+                }
+                value
+            }
             None => llvm_ty.get_undef(),
         };
         for field_init in fields {
@@ -71,10 +106,9 @@ impl<'ctx> CodegenContext<'ctx> {
                         name, field_init.name
                     ))
                 })?;
-            let val = self.codegen_expr(&field_init.value)?;
             // A place stored into a struct field is moved into the aggregate,
             // so it must not also be dropped at the surrounding scope's exit.
-            self.mark_moved_for_drop(&field_init.value);
+            let val = self.codegen_literal_position(field_init.name.clone(), &field_init.value)?;
             agg = self
                 .builder
                 .build_insert_value(
@@ -176,6 +210,9 @@ impl<'ctx> CodegenContext<'ctx> {
             )));
         };
 
+        // The value first (the language evaluates it before the place): when the holder is an element of a `Vec`, the value
+        // may grow that `Vec` and free the buffer an address taken earlier points into.
+        let val = self.codegen_expr(value)?;
         let Some(ptr) = self.held_place_ptr(object)? else {
             return Err(CodegenError::UnsupportedType(format!(
                 "the holder of field '{}' is not a place",
@@ -192,7 +229,6 @@ impl<'ctx> CodegenContext<'ctx> {
             &format!("{}.ptr", field_name),
         )?;
 
-        let val = self.codegen_expr(value)?;
         // Ordered as a binding's reassignment is: the field may be read on the way to
         // replacing itself, so its prior value loses its owner only once the new one
         // has been built. Drop tracking is keyed by binding, so only a field of a named
@@ -273,11 +309,19 @@ impl<'ctx> CodegenContext<'ctx> {
                 Ok(Some(field_ptr))
             }
 
-            // An element of an array that itself has storage. Only the array is
-            // resolved here: a `Vec` slot lives behind a header and a slice slot behind
-            // a fat pointer, and neither is reached by this GEP.
+            // An element of an array that itself has storage, or an aggregate element of
+            // a `Vec` or a borrowed slice, whose slot lives in the buffer behind the
+            // header or the fat pointer.
             HirExprKind::Index { object, index } => {
                 let obj_ty = Type::from_hir(&object.ty);
+                match obj_ty.referent() {
+                    Type::Collection {
+                        kind: crate::types::CollectionKind::Vec,
+                        ..
+                    } => return self.vec_element_place(object, &obj_ty, index),
+                    Type::Slice(_) => return self.slice_element_place(object, &obj_ty, index),
+                    _ => {}
+                }
                 let Type::Array { element, size } = obj_ty.referent().clone() else {
                     return Ok(None);
                 };

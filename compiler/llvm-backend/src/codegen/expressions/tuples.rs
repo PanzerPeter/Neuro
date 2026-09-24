@@ -35,11 +35,10 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let mut agg = struct_ty.get_undef();
         for (i, (el, el_ty)) in elements.iter().zip(element_tys.iter()).enumerate() {
-            let val = self.codegen_expr(el)?;
             // An owned place written as an element moves into the aggregate, exactly as
             // it does into a struct field; left armed, the binding and the tuple's own
             // holder would each release it.
-            self.mark_moved_for_drop(el);
+            let val = self.codegen_literal_position(i.to_string(), el)?;
             let val = self.coerce_if_needed(val, field_llvm[i], el_ty)?;
             agg = self
                 .builder

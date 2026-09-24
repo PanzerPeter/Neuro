@@ -145,3 +145,50 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     );
     assert!(diagnostics.contains(":7:9"), "{diagnostics}");
 }
+
+/// A shape-generic `@grad` template is differentiated once per instance: each shape the
+/// program calls it at gets its own derivative, and the primal still runs at both.
+#[test]
+fn a_generic_grad_function_gets_a_derivative_per_instance() {
+    let test = CompileTest::new();
+    let source = r#"
+@grad
+func loss<N>(w: &mut Tensor<f32, [N]>, scale: f32) -> Tensor<f32, []> {
+    val first = w[0]
+    val second = w[1]
+    return Tensor::scalar((first * first + second * second) * scale)
+}
+
+func main() -> i32 {
+    mut a: Tensor<f32, [2]> = [1.0, 2.0]
+    mut b: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
+    val la = loss(&mut a, 2.0f32)
+    val lb = loss(&mut b, 1.0f32)
+    (la.sum() + lb.sum()) as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("grad_generic.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 10 + 5);
+
+    let source_path = test.write_source("grad_generic_ir.nr", source);
+    let ir_path = source_path.with_extension("ll");
+    let output = Command::new(env!("CARGO_BIN_EXE_neurc"))
+        .args(["compile", "--emit", "llvm-ir", "-o"])
+        .arg(&ir_path)
+        .arg(&source_path)
+        .output()
+        .expect("run neurc");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ir = std::fs::read_to_string(&ir_path).expect("read IR");
+    let derivatives = ir
+        .lines()
+        .filter(|line| line.starts_with("define") && line.contains("__rev("))
+        .count();
+    assert_eq!(derivatives, 2, "one derivative per instance:\n{ir}");
+}

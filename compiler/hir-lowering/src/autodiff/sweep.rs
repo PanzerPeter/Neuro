@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use ast_types::{BinaryOp, UnaryOp};
-use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirTensorAxis, HirType};
 
 use super::emit::{self, Emitter};
 use super::rules::{self, Adjoints};
@@ -29,7 +29,7 @@ pub(super) fn forward(em: &mut Emitter, nodes: &[Node]) -> Result<(), LoweringEr
     for node in nodes {
         match node {
             Node::Entry(entry) => {
-                let init = replay(entry, em.span());
+                let init = replay(em, entry)?;
                 em.declare(entry.name.clone(), init);
             }
             Node::Branch(branch) => forward_branch(em, branch)?,
@@ -64,7 +64,8 @@ pub(super) fn reverse(
 }
 
 /// The forward computation of one tape entry, with every operand borrowed.
-fn replay(entry: &Entry, span: shared_types::Span) -> HirExpr {
+fn replay(em: &mut Emitter, entry: &Entry) -> Result<HirExpr, LoweringError> {
+    let span = em.span();
     let read = |leaf: &Leaf| Box::new(emit::operand(leaf, span));
     let kind = match &entry.op {
         Op::Binary { op, left, right } => HirExprKind::Binary {
@@ -87,13 +88,47 @@ fn replay(entry: &Entry, span: shared_types::Span) -> HirExpr {
                 .map(|leaf| emit::operand(leaf, span))
                 .collect(),
         },
-        Op::Read { object, axes, .. } => HirExprKind::TensorIndex {
+        Op::Read { object, positions } => HirExprKind::TensorIndex {
+            object: read(object),
+            axes: positions
+                .iter()
+                .map(|leaf| HirTensorAxis::Position(emit::operand(leaf, span)))
+                .collect(),
+        },
+        Op::Slice { object, axes, .. } => HirExprKind::TensorIndex {
             object: read(object),
             axes: axes.clone(),
         },
-        Op::Constant(expr) => return expr.clone(),
+        Op::ShapeCast {
+            receiver,
+            permutation,
+        } => {
+            let copy = em.copy(receiver)?;
+            HirExprKind::TensorShapeCast {
+                receiver: Box::new(emit::operand_owned(&copy, span)),
+                permutation: permutation.clone(),
+            }
+        }
+        Op::Convert(operand) => HirExprKind::Cast {
+            value: read(operand),
+        },
+        Op::Einsum {
+            operands,
+            inputs,
+            output,
+            extents,
+        } => HirExprKind::TensorEinsum {
+            operands: operands
+                .iter()
+                .map(|leaf| emit::operand(leaf, span))
+                .collect(),
+            inputs: inputs.clone(),
+            output: output.clone(),
+            extents: extents.clone(),
+        },
+        Op::Constant(expr) => return Ok(expr.clone()),
     };
-    HirExpr::new(kind, entry.ty.clone(), entry.span)
+    Ok(HirExpr::new(kind, entry.ty.clone(), entry.span))
 }
 
 fn forward_branch(em: &mut Emitter, branch: &Branch) -> Result<(), LoweringError> {

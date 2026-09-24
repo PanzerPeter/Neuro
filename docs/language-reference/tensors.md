@@ -239,8 +239,8 @@ The scalar carries the tensor's **element type**: the `2.0` above is an `f32` li
 because the tensor is an `f32` one, the same way `val x: f32 = 0.01` types its literal.
 A scalar that already has a type is not converted for the operator's benefit, so an `f64`
 value beside an `f32` tensor is a type mismatch. A bare literal takes the element's type
-when the tensor on the other side is written as a binding name; anywhere else it needs its
-suffix.
+on either side of any tensor expression, a call result (`0.5 * make_matrix()`) as much as a
+binding.
 
 ## Matrix multiplication
 
@@ -526,7 +526,7 @@ val flat: Tensor<i32, [6]> = t.reshape([-1])       // same order, new extents
 | Method | Result |
 |---|---|
 | `.t()` | the rank-2 transpose; any other rank is an error suggesting `.permute` |
-| `.reshape([d0, ...])` | the same elements at new extents; `-1` in at most one position takes whatever extent the others leave over |
+| `.reshape([d0, ...])` | the same elements at new extents; `-1` in at most one position takes whatever extent the others leave over. An extent is a constant: a literal, a `const`, or arithmetic over them |
 | `.permute([...])` | the axes reordered; every axis named exactly once |
 | `.flatten()` | every axis merged into one |
 | `.flatten(dims: [...])` | an adjacent run of axes merged into one, the rest untouched |
@@ -590,7 +590,7 @@ val col_totals: Tensor<i32, [3]> = grid.sum(axis: 0)   // (5, 7, 9)
 |---|---|
 | `.sum()` / `.sum(axis: k)` | the elements added |
 | `.mean()` / `.mean(axis: k)` | the arithmetic mean; `f32`/`f64` elements only |
-| `.max()` / `.min()`, with or without `axis:` | the largest / smallest element |
+| `.max()` / `.min()`, with or without `axis:` | the largest / smallest element; a float `NaN` never wins, so a run that is all `NaN` is the only one answering `NaN` |
 
 Unlike the shape casts, a reduction **reads** its receiver. It produces a scalar, or
 allocates a fresh and smaller tensor, and leaves the buffer it summarised where it was, so

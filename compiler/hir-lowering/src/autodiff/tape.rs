@@ -23,6 +23,7 @@ use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirReduceOp, HirStmt, HirTensorAxis, HirType};
 use shared_types::{Literal, Span};
 
+use super::emit::tensor_parts;
 use crate::LoweringError;
 
 /// The prefix of every name the tape generates. User names may not contain `__`, so no
@@ -79,11 +80,32 @@ pub(super) enum Op {
     },
     /// A tensor built from scalar elements, `Tensor::scalar(v)` among them.
     Literal(Vec<Leaf>),
-    /// One element read at literal positions; `flat` is its row-major offset.
+    /// One element read, at a position per axis that may be known only at run time.
     Read {
         object: Leaf,
+        positions: Vec<Leaf>,
+    },
+    /// A slice at literal bounds. `sources[r]` is the row-major offset in `object` of
+    /// the result's element `r`.
+    Slice {
+        object: Leaf,
         axes: Vec<HirTensorAxis>,
-        flat: usize,
+        sources: Vec<usize>,
+    },
+    /// `.t()`, `.permute(...)`, `.reshape(...)` or `.flatten(...)`. The node consumes its
+    /// receiver, so the replay casts a copy.
+    ShapeCast {
+        receiver: Leaf,
+        permutation: Option<Vec<usize>>,
+    },
+    /// `value as T` between two integer or float types.
+    Convert(Leaf),
+    /// An `einsum` contraction, with the HIR node's letter tables.
+    Einsum {
+        operands: Vec<Leaf>,
+        inputs: Vec<Vec<usize>>,
+        output: Vec<usize>,
+        extents: Vec<usize>,
     },
     /// A value with no operand at all (`zeros()`, `ones()`, `identity()`), replayed as
     /// written.
@@ -199,6 +221,16 @@ pub(super) fn linearize(
     })
 }
 
+/// The head of a `for` over a range, as `HirStmt::ForRange` carries it.
+struct ForRange<'a> {
+    index: Option<&'a str>,
+    iterator: &'a str,
+    start: &'a HirExpr,
+    end: &'a HirExpr,
+    inclusive: bool,
+    reversed: bool,
+}
+
 /// The bindings one arm or loop body declares, so that leaving it can undo them.
 #[derive(Default)]
 struct Scope {
@@ -264,7 +296,10 @@ impl<'f> Linearizer<'f> {
                 Op::Unary { operand, .. } => self.is_active(operand),
                 Op::Reduce { receiver, .. } => self.is_active(receiver),
                 Op::Literal(elements) => elements.iter().any(|leaf| self.is_active(leaf)),
-                Op::Read { object, .. } => self.is_active(object),
+                Op::Read { object, .. } | Op::Slice { object, .. } => self.is_active(object),
+                Op::ShapeCast { receiver, .. } => self.is_active(receiver),
+                Op::Convert(operand) => self.is_active(operand),
+                Op::Einsum { operands, .. } => operands.iter().any(|leaf| self.is_active(leaf)),
                 Op::Constant(_) => false,
             };
         let name = self.fresh();
@@ -486,6 +521,28 @@ impl<'f> Linearizer<'f> {
                 span,
                 ..
             } => self.while_loop(condition, body, *span),
+            HirStmt::ForRange {
+                index,
+                iterator,
+                start,
+                end,
+                inclusive,
+                reversed,
+                body,
+                span,
+                ..
+            } => self.for_range(
+                ForRange {
+                    index: index.as_deref(),
+                    iterator,
+                    start,
+                    end,
+                    inclusive: *inclusive,
+                    reversed: *reversed,
+                },
+                body,
+                *span,
+            ),
             other => Err(self.refuse(describe_stmt(other), stmt_span(other))),
         }
     }
@@ -642,6 +699,129 @@ impl<'f> Linearizer<'f> {
         }
     }
 
+    /// `for iterator in start..end { body }` as the counted `while` it is. The bounds are
+    /// read once, as the primal reads them. The counter never steps past `end`, so an
+    /// inclusive range that ends at its type's maximum stops on a flag instead, and a
+    /// reversed one counts up and mirrors the counter onto the binding, as the backend does.
+    fn for_range(
+        &mut self,
+        head: ForRange<'_>,
+        body: &[HirStmt],
+        span: Span,
+    ) -> Result<(), LoweringError> {
+        let ty = &head.start.ty;
+        let var = |name: &str, ty: &HirType| {
+            HirExpr::new(HirExprKind::Variable(name.to_string()), ty.clone(), span)
+        };
+        let literal = |value: Literal, ty: &HirType| {
+            HirExpr::new(HirExprKind::Literal(value), ty.clone(), span)
+        };
+        let one = |ty: &HirType| literal(Literal::Integer(1, None), ty);
+        let binary = |op: BinaryOp, left: HirExpr, right: HirExpr, ty: &HirType| {
+            HirExpr::new(
+                HirExprKind::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                ty.clone(),
+                span,
+            )
+        };
+        let declare = |name: &str, init: HirExpr, mutable: bool| HirStmt::VarDecl {
+            name: name.to_string(),
+            ty: init.ty.clone(),
+            init: Some(init),
+            mutable,
+            span,
+        };
+        let assign = |name: &str, value: HirExpr| HirStmt::Assign {
+            place: HirPlace::Var {
+                name: name.to_string(),
+                ty: value.ty.clone(),
+            },
+            value,
+            span,
+        };
+
+        let (low, high, counter) = (self.fresh(), self.fresh(), self.fresh());
+        self.stmt(&declare(&low, head.start.clone(), false))?;
+        self.stmt(&declare(&high, head.end.clone(), false))?;
+        self.stmt(&declare(&counter, var(&low, ty), true))?;
+        let current = if head.reversed {
+            let walked = binary(BinaryOp::Subtract, var(&counter, ty), var(&low, ty), ty);
+            let top = if head.inclusive {
+                var(&high, ty)
+            } else {
+                binary(BinaryOp::Subtract, var(&high, ty), one(ty), ty)
+            };
+            binary(BinaryOp::Subtract, top, walked, ty)
+        } else {
+            var(&counter, ty)
+        };
+        let mut looped = vec![declare(head.iterator, current, false)];
+        let mut position = None;
+        if let Some(index) = head.index {
+            let name = self.fresh();
+            self.stmt(&declare(
+                &name,
+                literal(Literal::Integer(0, None), &HirType::U64),
+                true,
+            ))?;
+            looped.push(declare(index, var(&name, &HirType::U64), false));
+            position = Some(name);
+        }
+        looped.extend_from_slice(body);
+        if let Some(name) = &position {
+            let next = binary(
+                BinaryOp::Add,
+                var(name, &HirType::U64),
+                one(&HirType::U64),
+                &HirType::U64,
+            );
+            looped.push(assign(name, next));
+        }
+        let step = assign(
+            &counter,
+            binary(BinaryOp::Add, var(&counter, ty), one(ty), ty),
+        );
+        let condition = if head.inclusive {
+            let more = self.fresh();
+            let nonempty = binary(
+                BinaryOp::LessEqual,
+                var(&low, ty),
+                var(&high, ty),
+                &HirType::Bool,
+            );
+            self.stmt(&declare(&more, nonempty, true))?;
+            looped.push(HirStmt::If {
+                condition: binary(
+                    BinaryOp::Less,
+                    var(&counter, ty),
+                    var(&high, ty),
+                    &HirType::Bool,
+                ),
+                then_block: vec![step],
+                else_if_blocks: Vec::new(),
+                else_block: Some(vec![assign(
+                    &more,
+                    literal(Literal::Boolean(false), &HirType::Bool),
+                )]),
+                span,
+            });
+            var(&more, &HirType::Bool)
+        } else {
+            looped.push(step);
+            binary(
+                BinaryOp::Less,
+                var(&counter, ty),
+                var(&high, ty),
+                &HirType::Bool,
+            )
+        };
+        self.while_loop(&condition, &looped, span)
+    }
+
     fn leaf(&mut self, expr: &HirExpr) -> Result<Leaf, LoweringError> {
         match &expr.kind {
             HirExprKind::Literal(_) if is_scalar(&expr.ty) => Ok(Leaf::Const(expr.clone())),
@@ -728,14 +908,67 @@ impl<'f> Linearizer<'f> {
                 Ok(self.push(&expr.ty, expr.span, Op::Constant(expr.clone())))
             }
             HirExprKind::TensorIndex { object, axes } if is_scalar(&expr.ty) => {
-                let Some(flat) = literal_offset(&object.ty, axes) else {
-                    return Err(self.refuse("an element read at a computed position", expr.span));
+                let mut positions = Vec::with_capacity(axes.len());
+                for axis in axes {
+                    let HirTensorAxis::Position(position) = axis else {
+                        return Err(self.malformed("an element read with a range axis"));
+                    };
+                    positions.push(self.leaf(position)?);
+                }
+                let object = self.leaf(object)?;
+                let op = Op::Read { object, positions };
+                Ok(self.push(&expr.ty, expr.span, op))
+            }
+            HirExprKind::TensorIndex { object, axes } if is_float_valued(&expr.ty) => {
+                let Some(sources) = slice_sources(&object.ty, axes) else {
+                    return Err(self.refuse("a tensor slice at a computed position", expr.span));
                 };
                 let object = self.leaf(object)?;
-                let op = Op::Read {
+                let op = Op::Slice {
                     object,
                     axes: axes.clone(),
-                    flat,
+                    sources,
+                };
+                Ok(self.push(&expr.ty, expr.span, op))
+            }
+            HirExprKind::TensorShapeCast {
+                receiver,
+                permutation,
+            } if is_float_valued(&expr.ty)
+                && tensor_parts(&expr.ty).is_some()
+                && tensor_parts(&receiver.ty).is_some() =>
+            {
+                let receiver = self.leaf(receiver)?;
+                let op = Op::ShapeCast {
+                    receiver,
+                    permutation: permutation.clone(),
+                };
+                Ok(self.push(&expr.ty, expr.span, op))
+            }
+            HirExprKind::Cast { value } if is_numeric(&expr.ty) && is_numeric(&value.ty) => {
+                let operand = self.leaf(value)?;
+                Ok(self.push(&expr.ty, expr.span, Op::Convert(operand)))
+            }
+            HirExprKind::TensorEinsum {
+                operands,
+                inputs,
+                output,
+                extents,
+            } if is_float_valued(&expr.ty) => {
+                // The adjoint of an operand walked along its diagonal would have to be
+                // written back along that diagonal, which no contraction can express.
+                if inputs.iter().any(|letters| repeats(letters)) {
+                    return Err(self.refuse("an `einsum` operand that repeats a letter", expr.span));
+                }
+                let mut leaves = Vec::with_capacity(operands.len());
+                for operand in operands {
+                    leaves.push(self.leaf(operand)?);
+                }
+                let op = Op::Einsum {
+                    operands: leaves,
+                    inputs: inputs.clone(),
+                    output: output.clone(),
+                    extents: extents.clone(),
                 };
                 Ok(self.push(&expr.ty, expr.span, op))
             }
@@ -818,6 +1051,17 @@ fn is_integer(ty: &HirType) -> bool {
     )
 }
 
+fn is_numeric(ty: &HirType) -> bool {
+    is_float(ty) || is_integer(ty)
+}
+
+fn repeats(letters: &[usize]) -> bool {
+    letters
+        .iter()
+        .enumerate()
+        .any(|(at, letter)| letters[at + 1..].contains(letter))
+}
+
 fn is_scalar(ty: &HirType) -> bool {
     !matches!(
         ty,
@@ -852,31 +1096,75 @@ fn is_slot_type(ty: &HirType) -> bool {
     }
 }
 
-/// The row-major offset an element read names, when every axis is a literal position
-/// inside its extent. A read the compiler cannot place has no single element to send the
-/// adjoint back to.
-fn literal_offset(object_ty: &HirType, axes: &[HirTensorAxis]) -> Option<usize> {
-    let HirType::Tensor { shape, .. } = object_ty.referent() else {
-        return None;
-    };
-    if shape.len() != axes.len() {
+/// The row-major offset an element read names, when every position is a literal inside
+/// its extent. `None` for a read placed only at run time.
+pub(super) fn literal_offset(object_ty: &HirType, positions: &[Leaf]) -> Option<usize> {
+    let (_, extents) = tensor_parts(object_ty)?;
+    if extents.len() != positions.len() {
         return None;
     }
     let mut flat = 0usize;
-    for (axis, extent) in axes.iter().zip(shape) {
-        let HirTensorAxis::Position(position) = axis else {
-            return None;
-        };
-        let HirExprKind::Literal(Literal::Integer(value, _)) = position.kind else {
-            return None;
-        };
-        let extent = (*extent)?;
-        let index = usize::try_from(value)
-            .ok()
-            .filter(|index| *index < extent)?;
+    for (position, extent) in positions.iter().zip(&extents) {
+        let index = literal_index(position)?.filter(|index| index < extent)?;
         flat = flat * extent + index;
     }
     Some(flat)
+}
+
+fn literal_index(position: &Leaf) -> Option<Option<usize>> {
+    let Leaf::Const(HirExpr {
+        kind: HirExprKind::Literal(Literal::Integer(value, _)),
+        ..
+    }) = position
+    else {
+        return None;
+    };
+    Some(usize::try_from(*value).ok())
+}
+
+/// For a slice whose every axis is a literal position or a range, the offset in the
+/// object of each result element, in the result's row-major order.
+fn slice_sources(object_ty: &HirType, axes: &[HirTensorAxis]) -> Option<Vec<usize>> {
+    let (_, extents) = tensor_parts(object_ty)?;
+    if extents.len() != axes.len() {
+        return None;
+    }
+    // Per object axis, the coordinates the result visits along it, in result order.
+    let mut visits: Vec<Vec<usize>> = Vec::with_capacity(axes.len());
+    for (axis, extent) in axes.iter().zip(&extents) {
+        let along = match axis {
+            HirTensorAxis::Position(HirExpr {
+                kind: HirExprKind::Literal(Literal::Integer(value, _)),
+                ..
+            }) => vec![usize::try_from(*value)
+                .ok()
+                .filter(|index| index < extent)?],
+            HirTensorAxis::Position(_) => return None,
+            HirTensorAxis::Range {
+                start,
+                end,
+                reversed,
+            } => {
+                if start > end || end > extent {
+                    return None;
+                }
+                let mut along: Vec<usize> = (*start..*end).collect();
+                if *reversed {
+                    along.reverse();
+                }
+                along
+            }
+        };
+        visits.push(along);
+    }
+    let mut sources = vec![0usize];
+    for (along, extent) in visits.iter().zip(&extents) {
+        sources = sources
+            .iter()
+            .flat_map(|base| along.iter().map(move |at| base * extent + at))
+            .collect();
+    }
+    Some(sources)
 }
 
 fn stmt_span(stmt: &HirStmt) -> Span {
@@ -905,7 +1193,7 @@ fn describe_stmt(stmt: &HirStmt) -> &'static str {
         }
         HirStmt::Return { .. } => "a `return` that does not end the body or an `if` arm",
         HirStmt::If { .. } | HirStmt::While { .. } => "this statement",
-        HirStmt::ForRange { .. } | HirStmt::ForEach { .. } => "a `for` loop",
+        HirStmt::ForRange { .. } | HirStmt::ForEach { .. } => "a `for` loop over a collection",
         HirStmt::Break { .. } | HirStmt::Continue { .. } => "a `break` or `continue`",
         HirStmt::ValElse { .. } => "a `val ... else` binding",
         HirStmt::Const { .. } => "a local `const`",
@@ -922,7 +1210,7 @@ fn describe_expr(expr: &HirExpr) -> &'static str {
         HirExprKind::TensorReduce { .. } => "a `.max()` / `.min()` reduction",
         HirExprKind::TensorEinsum { .. } => "an `einsum` contraction",
         HirExprKind::TensorShapeCast { .. } => "a shape change",
-        HirExprKind::TensorIndex { .. } => "a tensor slice",
+        HirExprKind::TensorIndex { .. } => "a tensor slice at a computed position",
         HirExprKind::TensorApply { .. } => "a `.map` / `.zip` / `.reduce` traversal",
         HirExprKind::TensorSort { .. } => "a sort",
         HirExprKind::TensorRandomNormal { .. } => "a random tensor",

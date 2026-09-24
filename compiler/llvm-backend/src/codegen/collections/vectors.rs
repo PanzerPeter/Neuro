@@ -155,12 +155,14 @@ impl<'ctx> CodegenContext<'ctx> {
         value: &HirExpr,
     ) -> CodegenResult<()> {
         let element_ty = collection_arg(collection_args(target_ty)?, 0)?;
-        let header = self.collection_place_ptr(object, target_ty)?;
-        let slot = self.checked_vec_slot(header, &element_ty, index, index.span.start)?;
         let elem_llvm = self.collection_value_type(&element_ty)?;
+        // The value first (the language evaluates it before the place): it may grow this very `Vec`, and a slot address taken
+        // before a reallocation points into the buffer the growth freed.
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
         let val = self.value_for_collection_slot(value, val, &element_ty)?;
+        let header = self.collection_place_ptr(object, target_ty)?;
+        let slot = self.checked_vec_slot(header, &element_ty, index, index.span.start)?;
         // The slot gives up what it held, and it is read on the way there: `v[i] = v[i]`
         // would otherwise release the buffer the new value is, so the release follows the
         // incoming value's own copy.
@@ -341,6 +343,36 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_in_bounds_gep(elem_llvm, buffer, &[index], "vec.slot")
                 .map_err(CodegenError::from)
         }
+    }
+
+    /// The slot of `v[index]` as a place, when the element is an aggregate a longer
+    /// place projects into (`v[i].x = ...`, `v[i][j] = ...`). A `string` slot is never
+    /// one: a read of it copies the bytes out, and handing its address on would let a
+    /// consumer release the collection's own copy. `None` when the `Vec` itself has no
+    /// storage, so a write would land in a temporary.
+    pub(crate) fn vec_element_place(
+        &mut self,
+        object: &HirExpr,
+        obj_ty: &Type,
+        index: &HirExpr,
+    ) -> CodegenResult<Option<PointerValue<'ctx>>> {
+        let element_ty = collection_arg(collection_args(obj_ty)?, 0)?;
+        if !matches!(
+            element_ty,
+            Type::Struct(_) | Type::Array { .. } | Type::Tuple(_)
+        ) {
+            return Ok(None);
+        }
+        let header = if matches!(obj_ty, Type::Reference { .. }) {
+            self.codegen_expr(object)?.into_pointer_value()
+        } else {
+            match self.held_place_ptr(object)? {
+                Some(ptr) => ptr,
+                None => return Ok(None),
+            }
+        };
+        self.checked_vec_slot(header, &element_ty, index, index.span.start)
+            .map(Some)
     }
 
     /// Address of element `index`, panicking first when it is outside `0..len`.

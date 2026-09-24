@@ -362,3 +362,80 @@ func main() -> i32 {{
         .expect("compile/run failed");
     assert_eq!(exit, 0);
 }
+
+// BUG-057: `string.clone()` is a deep copy. It handed back the receiver's own fat
+// pointer, so a clone returned out of the function that owned the original pointed at
+// a buffer freed on the way out, and the filler loop below reused it.
+#[test]
+fn test_bug_057_a_string_clone_outlives_its_original() {
+    let test = CompileTest::new();
+    let source = r#"
+func make() -> string {
+    val a = "hello-" + "world"
+    a.clone()
+}
+
+func main() -> i32 {
+    val s = make()
+    mut i = 0
+    while i < 50 {
+        val filler = "XXXXXXXXXXXX-{i}"
+        i += 1
+    }
+    if s == "hello-world" {
+        return 0
+    }
+    return 1
+}
+"#;
+    let exit = test
+        .compile_and_run("bug_057_string_clone.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}
+
+/// Regression test for BUG-059: a `return` written inside an expression (a `loop` body, an
+/// `if` used as a binding's value, a `match` arm) is an exit of the function like any other. The summary
+/// of functions that return an owned buffer did not see those exits, so a function that
+/// could return a literal through one was read as allocating on every path, and its caller
+/// handed the literal's `.rodata` to `free`.
+#[test]
+fn test_bug_059_a_return_inside_an_expression_is_an_exit() {
+    let test = CompileTest::new();
+    let source = r#"
+func looped(c: bool, a: &string) -> string {
+    loop {
+        if c { return "lit" }
+        break
+    }
+    a + "?"
+}
+
+func bound(c: bool, a: &string) -> string {
+    val x = if c { return "lit" } else { 1 }
+    a + "{x}"
+}
+
+func matched(n: i32, a: &string) -> string {
+    val k = match n {
+        0 => return "lit",
+        _ => 1
+    }
+    a + "{k}"
+}
+
+func main() -> i32 {
+    val a = "a"
+    val s = looped(true, &a)
+    val t = bound(true, &a)
+    val u = looped(false, &a)
+    val v = matched(0, &a)
+    return (s.len() + t.len() + u.len() + v.len()) as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("return_inside_expression.nr", source)
+        .expect("compile/run failed");
+    // 3 + 3 + 2 + 3; freeing a literal aborts instead.
+    assert_eq!(exit, 11);
+}

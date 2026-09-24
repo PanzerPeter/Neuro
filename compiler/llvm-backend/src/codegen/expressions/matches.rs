@@ -39,6 +39,11 @@ pub(crate) enum ArmOwnership<'e> {
     /// A `val ... else` binding, whose release belongs to the binding it introduces into
     /// the enclosing scope rather than to the pattern.
     Enclosing,
+    /// A `val ... else` success binding. Like `Enclosing`, except that a `string` payload
+    /// the scrutinee provably handed out as a buffer of its own (a collection's fallible
+    /// reader) is registered in the enclosing scope, which is where the binding lives.
+    /// Every other payload stays unregistered, as `Enclosing` leaves it.
+    EnclosingString { scrutinee: &'e HirExpr },
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -62,12 +67,14 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // A binding an arm takes by value carries whatever the scrutinee held out of it.
         // Which position leaves depends on the tag, which is not knowable here, so every
-        // owner the scrutinee holds is disowned at once: a payload the taken arm did not
-        // bind leaks rather than being released twice.
+        // owner the scrutinee holds is disowned at once: a part of the variant the taken
+        // arm did not bind leaks rather than being released twice. An arm that binds
+        // nothing takes nothing, so it hands the scrutinee its flags back.
+        let mut disowned = Vec::new();
         if let HirExprKind::Variable(name) = &scrutinee.kind {
             if arms.iter().any(|arm| !arm.bindings.is_empty()) {
                 let name = name.clone();
-                self.mark_held_moved_for_drop(&name);
+                disowned = self.mark_held_moved_for_drop(&name)?;
             }
         }
 
@@ -107,6 +114,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_conditional_branch(matched, body_bb, next_bb)?;
 
             self.builder.position_at_end(body_bb);
+            if arm.bindings.is_empty() {
+                for (flag_ptr, owned) in &disowned {
+                    self.builder.build_store(*flag_ptr, *owned)?;
+                }
+            }
             self.codegen_arm_body(
                 arm,
                 scrutinee,
@@ -312,8 +324,17 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_store(alloca, value)?;
 
             let payload = matches!(b.source, HirBindingSource::EnumPayload { .. });
-            if let (ArmOwnership::Arm { scrutinee }, true) = (ownership, payload) {
-                self.register_arm_payload(&b.name, alloca, &sem, scrutinee)?;
+            match (ownership, payload) {
+                (ArmOwnership::Arm { scrutinee }, true) => {
+                    self.register_arm_payload(&b.name, alloca, &sem, scrutinee)?;
+                }
+                (ArmOwnership::EnclosingString { scrutinee }, true)
+                    if matches!(sem, Type::String)
+                        && self.produces_owned_option_payload(scrutinee) =>
+                {
+                    let _ = self.register_local_drop(&b.name, alloca, DropTarget::HeapString)?;
+                }
+                _ => {}
             }
             saved.push(self.bind_name(&b.name, alloca, llvm_ty, sem));
         }

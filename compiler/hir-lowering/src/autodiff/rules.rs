@@ -10,7 +10,7 @@ use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{HirReduceOp, HirType};
 
 use super::emit::{tensor_parts, tensor_type, Emitter};
-use super::tape::{Entry, Leaf, Op};
+use super::tape::{literal_offset, Entry, Leaf, Op};
 use crate::LoweringError;
 
 #[derive(Default)]
@@ -196,14 +196,122 @@ pub(super) fn propagate(
             }
             Ok(())
         }
-        Op::Read { object, flat, .. } => {
-            if is_active(object) {
-                adjoints.add_element(object, *flat, adjoint.clone());
+        Op::Read { object, positions } if is_active(object) => {
+            match literal_offset(object.value_ty(), positions) {
+                Some(flat) => adjoints.add_element(object, flat, adjoint.clone()),
+                None => {
+                    let contribution = em.scatter(adjoint, positions, object.value_ty())?;
+                    adjoints.add(object, contribution);
+                }
             }
             Ok(())
         }
-        Op::Unary { .. } | Op::Constant(_) => Ok(()),
+        Op::Slice {
+            object, sources, ..
+        } if is_active(object) => {
+            for (offset, source) in sources.iter().enumerate() {
+                let element = em.element(adjoint, offset)?;
+                adjoints.add_element(object, *source, element);
+            }
+            Ok(())
+        }
+        Op::ShapeCast {
+            receiver,
+            permutation,
+        } if is_active(receiver) => {
+            let (element, extents) =
+                tensor_parts(receiver.value_ty()).ok_or_else(|| LoweringError::Malformed {
+                    detail: "derivative transform: a shape cast of a non-tensor".to_string(),
+                })?;
+            // Result axis `d` came from receiver axis `permutation[d]`, so the adjoint goes
+            // back through the inverse order.
+            let back = permutation.as_ref().map(|order| {
+                let mut inverse = vec![0; order.len()];
+                for (result_axis, source_axis) in order.iter().enumerate() {
+                    inverse[*source_axis] = result_axis;
+                }
+                inverse
+            });
+            let ty = tensor_type(element, &extents);
+            let contribution = em.shape_cast(adjoint, ty, back)?;
+            adjoints.add(receiver, contribution);
+            Ok(())
+        }
+        Op::Convert(operand) if is_active(operand) => {
+            let contribution = em.convert(adjoint, operand.value_ty());
+            adjoints.add(operand, contribution);
+            Ok(())
+        }
+        Op::Einsum {
+            operands,
+            inputs,
+            output,
+            extents,
+        } => {
+            for (index, operand) in operands.iter().enumerate() {
+                if is_active(operand) {
+                    let contribution =
+                        einsum(em, operands, inputs, output, extents, index, adjoint)?;
+                    adjoints.add(operand, contribution);
+                }
+            }
+            Ok(())
+        }
+        Op::Read { .. }
+        | Op::Slice { .. }
+        | Op::ShapeCast { .. }
+        | Op::Convert(_)
+        | Op::Unary { .. }
+        | Op::Constant(_) => Ok(()),
     }
+}
+
+/// The adjoint of operand `index` of `einsum(inputs -> output)`: the contraction of the
+/// result's adjoint with every OTHER operand, onto that operand's own letters. A letter
+/// the operand summed away alone appears in no input of it, so its adjoint is copied
+/// along that axis. An empty `output` makes the adjoint a scalar, which scales the rest.
+fn einsum(
+    em: &mut Emitter,
+    operands: &[Leaf],
+    inputs: &[Vec<usize>],
+    output: &[usize],
+    extents: &[usize],
+    index: usize,
+    adjoint: &Leaf,
+) -> Result<Leaf, LoweringError> {
+    let target = &operands[index];
+    let (element, _) = tensor_parts(target.value_ty()).ok_or_else(|| LoweringError::Malformed {
+        detail: "derivative transform: an `einsum` operand that is not a tensor".to_string(),
+    })?;
+    let letters = &inputs[index];
+    let ty = tensor_type(
+        element,
+        &letters
+            .iter()
+            .map(|letter| extents[*letter])
+            .collect::<Vec<_>>(),
+    );
+    let mut rest: Vec<&Leaf> = Vec::with_capacity(operands.len());
+    let mut rest_inputs = Vec::with_capacity(operands.len());
+    if !output.is_empty() {
+        rest.push(adjoint);
+        rest_inputs.push(output.to_vec());
+    }
+    for (other, (operand, subscript)) in operands.iter().zip(inputs).enumerate() {
+        if other != index {
+            rest.push(operand);
+            rest_inputs.push(subscript.clone());
+        }
+    }
+    if rest.is_empty() {
+        // A one-operand contraction to a scalar: every element fed the result once.
+        return em.fill(adjoint, &ty);
+    }
+    let product = em.einsum(&rest, rest_inputs, letters.clone(), extents.to_vec(), ty);
+    if output.is_empty() {
+        return em.binary(BinaryOp::Multiply, &product, adjoint);
+    }
+    Ok(product)
 }
 
 fn binary(
@@ -270,7 +378,7 @@ fn matmul(
     if is_active(left) {
         let ty = tensor_type(element, &[*m, *k]);
         let contribution = em.einsum(
-            [adjoint, right],
+            &[adjoint, right],
             vec![vec![0, 1], vec![2, 1]],
             vec![0, 2],
             extents.clone(),
@@ -281,7 +389,7 @@ fn matmul(
     if is_active(right) {
         let ty = tensor_type(element, &[*k, *n]);
         let contribution = em.einsum(
-            [left, adjoint],
+            &[left, adjoint],
             vec![vec![0, 2], vec![0, 1]],
             vec![2, 1],
             extents,

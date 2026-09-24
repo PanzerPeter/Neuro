@@ -137,18 +137,32 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     ));
 }
 
+/// A generic template is checked with its parameters abstract: a shape parameter is an
+/// extent every instance fixes, and the derivative is derived per instance.
 #[test]
-fn grad_on_a_generic_function_is_not_supported_yet() {
+fn a_shape_generic_function_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+@grad
+func loss<N>(w: &mut Tensor<f32, [N]>, scale: f32) -> Tensor<f32, []> {
+    val first = w[0]
+    Tensor::scalar(first * first * scale)
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+/// Its signature rules still hold: the parameter is `&mut`, as it is without generics.
+#[test]
+fn a_generic_function_is_held_to_the_signature_rules() {
     let src = r#"
 @grad
-func loss<T>(w: &mut Tensor<f32, [2]>, tag: T) -> Tensor<f32, []> {
-    Tensor::scalar(w.sum())
+func loss<N>(w: &Tensor<f32, [N]>) -> Tensor<f32, []> {
+    Tensor::scalar(w[0])
 }
 "#;
-    assert!(matches!(
-        single_error(src),
-        TypeError::GradFormUnsupported { .. }
-    ));
+    assert!(matches!(single_error(src), TypeError::GradSignature { .. }));
 }
 
 #[test]

@@ -158,7 +158,7 @@ the `len` contract). The frontend types the result as owned `String` even when a
 The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
 cannot be read off a value at runtime. It is decided at compile time instead, by
 `produces_owned_string` (`drops.rs`): an expression owns its buffer only if it is an
-`InterpString`, a `+` yielding `string`, `String::to_string`, or a call to a function
+`InterpString`, a `+` yielding `string`, `String::to_string`, a `string.clone()`, or a call to a function
 `codegen/string_ownership.rs` proved allocates on every return path. Everything else (a literal,
 a variable, a `slice`) answers `false` and is never freed. The asymmetry is deliberate: a missed
 `true` leaks a buffer, a wrong `true` hands `.rodata` to `free`.
@@ -178,6 +178,22 @@ Reassigning a registered binding releases the buffer it displaces and then re-de
 the assigned expression, so `s = s + "!"` frees the old buffer and keeps the new one while
 `s = "literal"` frees the old buffer and leaves the binding owning nothing.
 
+A bare binding name proves nothing about ownership, but the binding it names does, at run time:
+`load_owned_string_flag` reads its flag before the move clears it, and `val u = t` / `s = t`
+store that value into the target's flag, so the buffer changes owner rather than losing one. A
+binding that may ever own a buffer carries a `HeapString` entry: one whose initializer owns, one
+moved from a binding that may own, and every `mut` one (its flag starts clear for a literal, so
+`mut s = "x"` then `s = a + b` has a flag for the assignment to arm). An immutable binding holding
+a literal can never own and carries none. A holder moved whole does the same per position:
+`load_held_string_flags` reads every `string` position's flag off the source and
+`store_held_string_flags` writes them into the target's matching positions. A holder built from a
+literal collects the same thing per position while the declaration or assignment evaluates it
+(`literal_string_moves`): `codegen_literal_position` reads the flag of a `string` binding moved
+into a struct, tuple or array literal position (`Entry { label: t }`, nested literals included,
+each extending the path), and a functional update contributes its base's flags for the positions
+it takes. The collection is suspended inside any position that is not itself a literal, since a
+literal there (a call argument, a branch) builds some other value.
+
 A third kind of consumer STORES the fat pointer somewhere that outlives the expression. Ownership
 then belongs to the storage, and is tracked one of three ways:
 
@@ -192,11 +208,21 @@ then belongs to the storage, and is tracked one of three ways:
   generated, and collects the functions whose every exit (each `return`, plus an expression tail)
   allocates. The set is a fixpoint, because one producer can be another's only return path; it
   starts empty and grows, so a recursive cycle never enters it. A name a local binding shadows is
-  excluded, since `codegen_call_dispatch` may send that call through the indirect path.
+  excluded, since `codegen_call_dispatch` may send that call through the indirect path. A tail
+  `if` (with an `else`), `match` or block exits through each branch's own tail (`tail_exits`). A
+  `return` written inside an expression (a `loop` body, an `if` or `match` used as a value, a
+  block) is an exit `collect_returns` does not enumerate, so a body holding one is never a
+  producer: missing that exit once let a function that returned a literal through it be read as
+  allocating, and its caller freed the literal.
 - **A by-value argument.** The same pass records the `string` parameters whose callee provably only
   READS them, by a whitelist of positions that copy the bytes out (a `print`/`println` argument, an
-  interpolation hole, a binary operand, a `.len()` receiver, a `push_str` argument). Every other
-  occurrence is a retention. Which side then releases depends on where the argument came from. An
+  interpolation hole, a binary operand, a `.len()` or `.clone()` receiver, a `push_str` argument,
+  anything under an `as` cast, and an argument to another declared function whose parameter in
+  that position is itself read only). Every other occurrence is a retention. The last position
+  makes this summary a fixpoint too, growing from empty exactly like the return summary, and it
+  trusts no callee name a local binding shadows. `.clone()` qualifies only because a `string`
+  clone copies its bytes into a buffer of its own (`copy_string_bytes`) and is an owned producer;
+  it once handed back the receiver's fat pointer, which made every clone an alias. Which side then releases depends on where the argument came from. An
   argument that ALLOCATED in place owns no flag, so `release_owned_arguments` frees it right after
   the call, where the callee's frame is already gone. An argument that names a PLACE keeps the flag
   it already had and is released by that place's own scope: the argument loop skips the move's
@@ -224,12 +250,9 @@ then belongs to the storage, and is tracked one of three ways:
 
 **Known limits**: among the covered positions, three shapes stay unproven
 and leak: a holder a call built (the call proves nothing about its positions), a function with one
-literal-returning path, and a parameter the callee may store. A binding reassigned from another
-`string` binding is the same case: the source's flag is cleared by the move and the destination
-re-arms only for a producer that provably allocates. A collection read carried into a
-view-producing method (`v[0].slice(...)`, `.chars()`, `.clone()`) leaks its copy, as any other
-anonymous string does there, and a `val ... else` pattern over a fallible reader registers no
-owner for the payload it binds.
+literal-returning path, and a parameter the callee may store. A collection read carried into a
+view-producing method (`v[0].slice(...)`, `.chars()`) leaks its copy, as any other anonymous
+string does there.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:
@@ -246,7 +269,8 @@ rather than a live case (a cycle is impossible today: a field type must be decla
 Values live on the stack via `alloca`, initialised field-by-field with `insertvalue`; reads are
 `getelementptr`+`load`, writes `getelementptr`+`store`. A functional update
 (`Point { x: 1.0, ..p }`) seeds the aggregate from the base struct value rather than `get_undef()`
-and `insertvalue`s the explicit fields over it.
+and `insertvalue`s the explicit fields over it. Every field it does not write is moved out of the
+base, so those positions are disarmed there; the overridden ones stay the base's to release.
 
 `codegen_field_access` reads a field of a **non-place** object (a chain `o.inner.v`, a call result)
 with `extractvalue`, keeping the GEP-and-load path for a named binding.
@@ -730,9 +754,12 @@ scrutinee as soon as ANY arm binds — which arm ran is a runtime fact and the f
 so the arm's binding has to be what releases what it took. Each arm body therefore runs in a drop
 scope of its own, and `bind_arm` registers an owning payload binding in it (`owns_payload`); an
 arm that MOVES the payload out disarms the flag first, through the ordinary
-`mark_moved_for_drop` on the arm body, and the scope then releases nothing. An arm that takes an
-owning variant WITHOUT binding its payload still loses it: that is the safe direction, since the
-alternative is releasing a payload the arm moved out twice.
+`mark_moved_for_drop` on the arm body, and the scope then releases nothing. The disowning hands
+back each flag with the value it held, and an arm that binds NOTHING (`B(_)`, `_`) stores them
+back at its entry: it took nothing, so the scrutinee still owns the whole value and its scope
+releases it. What still leaks is the part of a variant an arm that binds did not bind
+(`A(x, _)` over two owning fields): that is the safe direction, since which part left is known
+only per pattern.
 
 `codegen_single_test`, `SavedBinding`, `bind_arm`, and `restore_bindings` are `pub(crate)` so
 `val_else.rs` can share them. `val_else` passes `owns_payload: false`: its binding belongs to the
@@ -742,7 +769,11 @@ enclosing block, which registers it, rather than to the pattern.
 `codegen/val_else.rs`. The scrutinee is stored once into an alloca, `codegen_single_test` picks
 the branch, and the else block runs in its own drop scope with its binding saved and restored. The
 success block's bindings are materialized by `bind_arm` and deliberately **not** restored: they
-belong to the enclosing block, which is the whole difference from a match arm. The else block is
+belong to the enclosing block, which is the whole difference from a match arm. For the same reason
+their ownership is `ArmOwnership::EnclosingString`: a `string` payload a collection's fallible
+reader copied out (`produces_owned_option_payload`) is registered in the ENCLOSING drop scope,
+where the binding lives, and every other payload is left unregistered, as the else binding's is.
+The else block is
 terminated with `unreachable` if it still falls through; the frontend has already rejected that
 case, so this only keeps the emitted function verifier-clean.
 
@@ -1064,11 +1095,15 @@ exists only where its own type proves ownership.
 Every aggregate literal disowns the places written into it: a struct literal per field, and a
 tuple or array literal per element (`codegen_tuple_literal`, `codegen_array_literal`). The tuple
 and array halves were missing until BUG-052, so `(weights, counts)` left both bindings armed and
-the value was released by its old binding and again by the holder.
+the value was released by its old binding and again by the holder. An enum construction disowns
+a payload whose type `holds_owner`, the payloads its drop releases under the tag switch; that half
+was missing until BUG-060, so `Some(xs)` released a `Vec` twice. A `string` payload is not
+released by the enum and keeps its source's ownership.
 
 Two conservative edges keep it sound rather than complete. A `match` whose arms bind disowns the
 scrutinee's entire plan (`mark_held_moved_for_drop`), because which payload left depends on a
-runtime tag, so an unbound variant leaks instead of being released twice. And
+runtime tag, so a part a binding arm left unbound leaks instead of being released twice (an arm
+that binds nothing restores the plan). And
 `collection_place_ptr` still copies a collection read out of something that is NOT a place (a
 `m.keys()` result, say) into a temporary; that copy aliases the holder's buffer, so
 `reads_a_held_place` keeps it from being registered as an owner in its own right.
@@ -1106,8 +1141,11 @@ behind a fat pointer, a tensor element behind a DLPack handle, an array element 
 bounds-guarded GEP.
 
 What IS shared is resolving the HOLDER, and that is `held_place_ptr` (`codegen/structs.rs`): a
-binding, a struct field at any depth, an array element, a tuple element, or a dereference,
-returning `None` for anything that is a temporary rather than storage. It loads through a
+binding, a struct field at any depth, an array element, a tuple element, a dereference, or an
+aggregate element of a `Vec` or a borrowed slice (`vec_element_place` / `slice_element_place`,
+bounds-checked like the element read), returning `None` for anything that is a temporary rather
+than storage. A `string` slot is never a holder: its read copies the bytes out, and handing its
+address on would let a consumer release the collection's own copy. It loads through a
 binding's slot when that slot holds an address, which covers a borrow of an aggregate and the
 `self` of a `&mut self` method; a borrowed slice is excluded because its slot holds the fat
 pointer by value, which is why the LLVM representation and not the semantic type alone decides.
@@ -1119,6 +1157,14 @@ compiled and changed nothing, and the same fallback under a method receiver was
 `docs/BUGS.md` BUG-036 (`registry.open.push(1)` mutated a copy). Both now route through
 `held_place_ptr` first, and `codegen_index_assignment` refuses the fallback outright with a
 diagnostic naming why. A resolver shared between reads and writes has to be told which it is.
+The checker now refuses a place rooted at a temporary itself, with a span, so the backend
+refusal is a guard that no checked program reaches.
+
+**Every element and field store evaluates its value before it takes an address.** The value may
+grow the `Vec` the element lives in, or reassign the tensor whose buffer the element is in, and
+an address taken first then points into memory the value just freed: `v[0] = { v.push(..); 42 }`
+wrote into the old buffer and lost the write. This is the assignment rule "the new value is evaluated first",
+applied to the address as much as to the displaced value.
 
 ## Pool Arena ABI
 `arena.rs` carries the allocator behind `pool { }`: two internal globals,

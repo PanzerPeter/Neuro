@@ -46,10 +46,12 @@ A `@grad` function:
 - returns its loss as a rank-0 `Tensor<f32, []>`. A bare `f32` is `Copy` and has no gradient
   to carry, and the reverse pass starts from a loss of that type with a seed of `1.0`;
 - differentiates **every** tensor parameter it takes, so each one must be borrowed
-  `&mut Tensor<f32 | f64, [...]>` with literal extents. The borrow is mutable because the
-  gradient belongs to the caller's tensor and will be written back to it;
+  `&mut Tensor<f32 | f64, [...]>` with literal extents, or shape parameters of a generic
+  function. The borrow is mutable because the gradient belongs to the caller's tensor and will
+  be written back to it;
 - may take other parameters of any type. They are constants and have no gradient;
-- is a free function that is not generic, with `@grad` written without arguments.
+- is a free function, with `@grad` written without arguments. A generic one is differentiated
+  once per instance the program uses, at that instance's concrete shapes.
 
 Breaking any of these rules is a type error at the offending parameter or return type.
 
@@ -65,7 +67,11 @@ expression. Its values may use:
 | `a @ b` on matrices | `dA = dC @ Bᵀ`, `dB = Aᵀ @ dC` |
 | `.sum()` and `.mean()`, over the whole tensor or along one `axis:` | the adjoint spread back over what was reduced |
 | a tensor literal or `Tensor::scalar(v)` built from values | each element's adjoint sent back to the value it came from |
-| an element read `t[i, j]` at literal positions | the adjoint lands on that one element |
+| an element read `t[i, j]`, at literal positions or ones computed at run time | the adjoint lands on that one element |
+| a slice `t[1..3, ..]` or `t[(0..3).rev(), 1]` at literal bounds | each element's adjoint lands where it was read from |
+| `.t()`, `.permute(...)`, `.reshape(...)`, `.flatten(...)` | the adjoint put back in the receiver's shape and axis order |
+| `einsum(...)` | each operand's adjoint is the contraction of the result's adjoint with the other operands |
+| `as` between integer and float types | the adjoint converted back; zero through an integer |
 | `Tensor::zeros()`, `ones()`, `identity()`, literals | constants |
 | comparisons, `&&`, `||`, `!`, and integer arithmetic | none: they decide which path runs, and carry no gradient |
 
@@ -76,7 +82,9 @@ The statements may be:
 - `if`, with any number of `else if` arms and an optional `else`, as a statement or as an
   expression. An arm of an `if` at the top level of the body may end in `return`: the rest of
   the body is then the other arm;
-- `while`, including loops whose trip count depends on the differentiated parameters.
+- `while`, including loops whose trip count depends on the differentiated parameters;
+- `for` over a range, `a..b` or `a..=b`, forwards, `.rev()` or `.enumerate()`. It is
+  differentiated as the counted `while` it is, with the bounds read once as the loop reads them.
 
 ```neuro
 @grad
@@ -100,10 +108,10 @@ func robust_fit(w: &mut Tensor<f32, [2, 1]>, limit: f32, sweeps: i32) -> Tensor<
 This function comes from [`examples/showcase/robust_fit.nr`](../../examples/showcase/robust_fit.nr).
 
 Any other construct in a `@grad` body is a compile error pointing at it: a function or method
-call, a `for` or `loop` loop, `break` and `continue`, `match`, a `return` inside a loop or
+call, a `for` over a collection, `loop`, `break` and `continue`, `match`, a `return` inside a loop or
 anywhere but the end of an `if` arm at the top of the body, an assignment to a parameter,
-`.max()` / `.min()`, `einsum`, reshapes and slices, and a read at a position computed at run
-time. A value that an `if` or a loop reassigns must be a float, integer or `bool`, or a float
+`.max()` / `.min()`, a slice at a position computed at run time, and an `einsum` operand that
+repeats a letter (a diagonal, as in a trace). A value that an `if` or a loop reassigns must be a float, integer or `bool`, or a float
 tensor.
 
 ### Control flow in the derivative

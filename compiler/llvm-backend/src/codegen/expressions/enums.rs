@@ -27,7 +27,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut fields = Vec::with_capacity(payload.len());
         for field in payload {
             let field_ty = Type::from_hir(&field.ty);
-            fields.push((self.codegen_expr(field)?, field_ty));
+            fields.push((self.codegen_expr(field)?, field_ty.clone()));
+            // A typed owner moved in is the enum's now: its drop releases the payload under
+            // the tag switch, so the place it came from must not. A `string` payload is
+            // not released by the enum and keeps its source's ownership.
+            if self.holds_owner(&field_ty) {
+                self.mark_moved_for_drop(field);
+            }
         }
         let borrowed: Vec<(BasicValueEnum<'ctx>, &Type)> =
             fields.iter().map(|(v, t)| (*v, t)).collect();

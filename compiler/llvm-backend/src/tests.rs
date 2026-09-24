@@ -1430,6 +1430,224 @@ fn regression_a_read_only_argument_releases_the_place_it_came_from() {
     }
 }
 
+/// A parameter handed on to another read-only parameter, read through `.clone()`, or read
+/// under an `as` cast is read only too, so the caller releases the buffer it passed once
+/// the call returns. Each shape was counted a retention, and each call leaked the argument.
+#[test]
+fn a_parameter_passed_on_to_a_read_only_one_is_read_only() {
+    let cases = [
+        r#"
+        func size(s: string) -> u64 { s.len() }
+        func relay(s: string) -> u64 { size(s) }
+        func main() -> i32 {
+            return relay("one" + "two") as i32
+        }
+        "#,
+        r#"
+        func size(s: string) -> i64 { s.clone().len() as i64 }
+        func main() -> i32 {
+            return size("one" + "two") as i32
+        }
+        "#,
+    ];
+    for case in cases {
+        let ir = module_ir(case, OptimizationLevelSetting::O0);
+        assert_eq!(
+            free_calls(&ir, "main"),
+            1,
+            "the argument is released once the call returns, in:\n{ir}"
+        );
+    }
+}
+
+/// `string.clone()` is a deep copy, so the clone is a buffer of its own that its binding
+/// releases, beside the original's.
+#[test]
+fn regression_bug_057_a_string_clone_is_an_owned_copy() {
+    let source = r#"
+        func main() -> i32 {
+            val a = "one" + "two"
+            val b = a.clone()
+            return b.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("str.dup"),
+        "a clone copies the bytes into a fresh buffer:\n{body}"
+    );
+    assert_eq!(
+        free_calls(&ir, "main"),
+        2,
+        "the original and the clone are each released, in:\n{body}"
+    );
+
+    // A receiver built only to be cloned is dead once its bytes are copied.
+    let temporary = r#"
+        func main() -> i32 {
+            val a = "one"
+            val c = (a + a).clone()
+            return c.len() as i32
+        }
+    "#;
+    let ir = module_ir(temporary, OptimizationLevelSetting::O0);
+    assert_eq!(
+        free_calls(&ir, "main"),
+        2,
+        "the temporary receiver and the clone are each released, in:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
+/// A `string` binding owns what a move hands it and what a reassignment hands it,
+/// whatever it was initialized from. `val u = t` and `s = t` carry the source's runtime
+/// flag over before the move clears it, and a `mut` binding initialized from a literal
+/// still has a flag for a later `s = a + b` to arm. Each shape used to leave the buffer
+/// owned by nobody.
+#[test]
+fn a_moved_or_reassigned_string_binding_owns_its_buffer() {
+    let moves = [
+        r#"
+        func main() -> i32 {
+            val a = "one"
+            val t = a + a
+            val u = t
+            return u.len() as i32
+        }
+        "#,
+        r#"
+        func main() -> i32 {
+            val a = "one"
+            mut s = a + a
+            val t = a + a
+            s = t
+            return s.len() as i32
+        }
+        "#,
+    ];
+    for case in moves {
+        let ir = module_ir(case, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("str.owns"),
+            "the move carries the source's ownership flag, in:\n{body}"
+        );
+    }
+    let reassigned = r#"
+        func main() -> i32 {
+            val a = "one"
+            mut s = "lit"
+            s = a + a
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(reassigned, OptimizationLevelSetting::O0);
+    assert!(
+        free_calls(&ir, "main") > 0,
+        "a `mut` binding begun from a literal releases what a reassignment gives it:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
+/// A holder moved whole (`val q = p`, `q = p`) hands each `string` position's runtime
+/// ownership flag to the holder that takes it. The positions were armed only from the
+/// initializer's literal shape, so a moved holder's buffers were owned by nobody.
+#[test]
+fn a_moved_holder_hands_over_its_string_positions() {
+    let cases = [
+        r#"
+        struct Entry { label: string }
+        func main() -> i32 {
+            val a = "one"
+            val p = Entry { label: a + a }
+            val q = p
+            return q.label.len() as i32
+        }
+        "#,
+        r#"
+        struct Entry { label: string }
+        func main() -> i32 {
+            val a = "one"
+            mut q = Entry { label: "x" }
+            val p = Entry { label: a + a }
+            q = p
+            return q.label.len() as i32
+        }
+        "#,
+    ];
+    for case in cases {
+        let ir = module_ir(case, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("held.str.owns"),
+            "the move carries the position's ownership flag, in:\n{body}"
+        );
+    }
+}
+
+/// A `string` binding moved into a literal position (`Entry { label: t }`, `(t, 1)`,
+/// `[t, u]`, a nested literal) hands its runtime ownership flag to the holder's position,
+/// and a functional update hands over the flags of the positions it takes from its base.
+/// The literal armed only positions whose own expression allocated, so each of these
+/// buffers was owned by nobody.
+#[test]
+fn a_string_moved_into_a_literal_position_is_owned_by_the_holder() {
+    let fields = [
+        r#"
+        struct Entry { label: string }
+        func main() -> i32 {
+            val a = "one"
+            val t = a + a
+            val e = Entry { label: t }
+            return e.label.len() as i32
+        }
+        "#,
+        r#"
+        func main() -> i32 {
+            val a = "one"
+            val t = a + a
+            val pair = (t, 1)
+            return pair.0.len() as i32
+        }
+        "#,
+        r#"
+        struct Entry { label: string }
+        struct Pair { left: Entry }
+        func main() -> i32 {
+            val a = "one"
+            val t = a + a
+            mut p = Pair { left: Entry { label: "x" } }
+            p = Pair { left: Entry { label: t } }
+            return p.left.label.len() as i32
+        }
+        "#,
+    ];
+    for case in fields {
+        let ir = module_ir(case, OptimizationLevelSetting::O0);
+        let body = function_body(&ir, "main");
+        assert!(
+            body.contains("%str.owns"),
+            "the move carries the source binding's ownership flag, in:\n{body}"
+        );
+    }
+    let update = r#"
+        struct Entry { id: i32, label: string }
+        func main() -> i32 {
+            val a = "one"
+            val base = Entry { id: 1, label: a + a }
+            val next = Entry { id: 2, ..base }
+            return next.label.len() as i32
+        }
+    "#;
+    let ir = module_ir(update, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("held.str.owns"),
+        "the update carries the base position's ownership flag, in:\n{body}"
+    );
+}
+
 /// `String::to_string` copies the builder's bytes into a buffer of their own on every
 /// call, so a binding initialized from it owns that buffer and releases it at scope
 /// exit, exactly as one initialized from `+` does. A user `to_string` on a struct is
@@ -1635,6 +1853,65 @@ fn a_call_that_allocates_on_every_path_hands_the_buffer_to_its_caller() {
         ),
         0,
         "one path returning `.rodata` disqualifies the function: freeing it would abort"
+    );
+}
+
+/// A tail `if`, `match` or block exits through each branch's tail, so a function whose
+/// every branch allocates is a producer like one whose every `return` does. One branch
+/// yielding a literal disqualifies it exactly as one literal `return` would.
+#[test]
+fn a_branching_tail_allocates_when_every_branch_does() {
+    let branches = [
+        r#"
+        func picked(a: string, flag: bool) -> string {
+            if flag { a + "x" } else if a.len() > 3 { a + a } else { "{a}!" }
+        }
+        func main() -> i32 {
+            val s = picked("l", true)
+            return s.len() as i32
+        }
+        "#,
+        r#"
+        func picked(a: string, n: i32) -> string {
+            match n {
+                0 => a + "0",
+                _ => {
+                    val k = n * 2
+                    a + "{k}"
+                }
+            }
+        }
+        func main() -> i32 {
+            val s = picked("l", 1)
+            return s.len() as i32
+        }
+        "#,
+    ];
+    for case in branches {
+        let ir = module_ir(case, OptimizationLevelSetting::O0);
+        assert_eq!(
+            free_calls(&ir, "main"),
+            1,
+            "the caller releases what every branch allocated:\n{}",
+            function_body(&ir, "main")
+        );
+    }
+    let one_literal = r#"
+        func picked(a: string, flag: bool) -> string {
+            if flag { "static" } else { a + a }
+        }
+        func main() -> i32 {
+            val s = picked("l", true)
+            return s.len() as i32
+        }
+    "#;
+    assert_eq!(
+        free_calls(
+            &module_ir(one_literal, OptimizationLevelSetting::O0),
+            "main"
+        ),
+        0,
+        "a literal branch disqualifies the function: freeing it would abort"
     );
 }
 

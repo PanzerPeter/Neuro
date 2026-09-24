@@ -54,28 +54,30 @@ func main() -> i32 {
     val c = true
     pool scratch {
         out = a.map(|x: i32| -> i32 { x * 10 })   // refused
-        s = if c { "a" } else { "b" }              // refused
     }
     0
 }
 ```
 
-Each store above is refused with "... outlives the pool". Written another way, the same
-values are accepted: `out = &a + &a` and `out = einsum("ij->ij", a)` compile, as does
-`s = "a"`. A store into a binding that outlives the block is emitted with the arena switched
-off, so none of these values can hold arena memory unless an operand already did.
+The store above is refused with "... outlives the pool". Written another way, the same
+value is accepted: `out = &a + &a` and `out = einsum("ij->ij", a)` compile. A store into a
+binding that outlives the block is emitted with the arena switched off, so none of these
+values can hold arena memory unless an operand already did.
 
 **Root cause**: confirmed in the code. `carries_no_arena` enumerates the expression shapes it
 can prove, and falls back to "may carry arena memory" for everything else. A closure literal
-argument, an `if` / `match` / block expression, and a method call such as `local.clone()` on a
-block-local receiver are not enumerated, so each is refused.
+argument, a method call such as `local.clone()` on a block-local receiver, and an `if` /
+`match` arm or a block that declares a binding of its own are not enumerated, so each is
+refused. Struct, tuple and array literals, and `if` / `match` whose arms are single
+expressions, are proven.
 
 **Workaround**: bind the value inside the block and copy out a scalar, or build it before the
 block.
 
-**Fix sketch**: walk an `if` / `match` / block through its result positions, and admit a
-closure literal argument whose captures are all admitted. Decide first whether the provenance
-walk is meant to grow these shapes or whether the refusal is the intended boundary.
+**Fix sketch**: admit a closure literal argument whose captures are all admitted. An arm that
+declares bindings needs the walk to run after the value is checked, so that its names are
+resolvable. Decide first whether the provenance walk is meant to grow these shapes or whether
+the refusal is the intended boundary.
 
 ## BUG-048: `&dyn Trait` as a struct field reports the trait as undeclared
 

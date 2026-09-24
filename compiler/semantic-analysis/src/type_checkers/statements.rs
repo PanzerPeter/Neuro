@@ -816,6 +816,8 @@ impl TypeChecker {
                 }
 
                 self.constants.insert(name.name.clone(), declared_ty);
+                self.constant_values
+                    .insert(name.name.clone(), value.clone());
                 Some(())
             }
 
@@ -903,9 +905,12 @@ impl TypeChecker {
                     return None;
                 };
                 if !self.place_is_writable(&obj_ty, place) {
-                    let root = place.root().map(|r| r.name.clone()).unwrap_or_default();
+                    let Some(root) = place.root().filter(|_| !self.root_is_mutable(place)) else {
+                        self.report_immutable_place(place);
+                        return None;
+                    };
                     self.record_error(TypeError::AssignToImmutableField {
-                        var_name: root,
+                        var_name: root.name.clone(),
                         field_name: field.name.clone(),
                         span: *field_span,
                     });
@@ -1040,28 +1045,110 @@ impl TypeChecker {
     ///
     /// Write permission through a borrow comes from the borrow, not the binding:
     /// `xs: &mut [T]` is an immutable binding holding a mutable view, and a `&[T]`
-    /// binding declared `mut` still may not write. Everything else inherits the
-    /// mutability of the binding the place is rooted at.
+    /// binding declared `mut` still may not write. The reference NEAREST the place
+    /// decides, however many projections lie between them: `r[0][1]` through
+    /// `r: &mut [[T; 2]]` may write, and through a `mut r: &[[T; 2]]` may not.
+    /// Only a path that crosses no reference inherits the mutability of the binding
+    /// the place is rooted at.
     fn place_is_writable(&self, object_ty: &Type, place: &Place) -> bool {
-        if let Type::Reference { mutable, .. } = object_ty {
-            return *mutable;
+        let through = match place {
+            Place::Field { object, .. }
+            | Place::Index { object, .. }
+            | Place::TensorIndex { object, .. } => self.nearest_reference(object, object_ty),
+            Place::Var(_) | Place::Deref { .. } => None,
+        };
+        if let Some(mutable) = through {
+            return mutable;
         }
-        match place.root() {
-            Some(root) => self
-                .symbols
-                .lookup(&root.name)
-                .map(|info| info.mutable)
-                .unwrap_or(false),
-            None => false,
+        self.root_is_mutable(place)
+    }
+
+    /// Whether the binding a place is rooted at was declared `mut`.
+    fn root_is_mutable(&self, place: &Place) -> bool {
+        place
+            .root()
+            .and_then(|root| self.symbols.lookup(&root.name))
+            .is_some_and(|info| info.mutable)
+    }
+
+    /// The mutability of the first reference met walking a place's object chain from
+    /// `expr` (of type `ty`) toward its root. `None` when the chain crosses none, or
+    /// passes through a projection whose type cannot be read without re-checking it.
+    fn nearest_reference(&self, expr: &Expr, ty: &Type) -> Option<bool> {
+        if let Type::Reference { mutable, .. } = ty {
+            return Some(*mutable);
+        }
+        let object = match expr {
+            Expr::Paren(inner, _) => return self.nearest_reference(inner, ty),
+            Expr::FieldAccess { object, .. }
+            | Expr::Index { object, .. }
+            | Expr::TupleIndex { object, .. } => object,
+            Expr::Deref { operand, .. } => operand,
+            _ => return None,
+        };
+        let object_ty = self.projection_type(object)?;
+        self.nearest_reference(object, &object_ty)
+    }
+
+    /// The type of one link of a place's object chain, read from the symbol table and
+    /// the declarations alone. `check_expr` would type it too, but it records moves and
+    /// borrows, and the chain has already been checked once as the place's object.
+    fn projection_type(&self, expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::Identifier(ident) => self.symbols.lookup(&ident.name).map(|s| s.ty.clone()),
+            Expr::Paren(inner, _) => self.projection_type(inner),
+            Expr::FieldAccess { object, field, .. } => {
+                let Type::Struct(name) = self.projection_type(object)?.referent().clone() else {
+                    return None;
+                };
+                self.struct_defs
+                    .get(&name)?
+                    .iter()
+                    .find(|(n, _)| n == &field.name)
+                    .map(|(_, t)| t.clone())
+            }
+            Expr::Index { object, .. } => {
+                let object_ty = self.projection_type(object)?;
+                if let Some(element) = self.collection_element(&object_ty) {
+                    return Some(element);
+                }
+                match object_ty.referent() {
+                    Type::Array { element, .. } | Type::Slice(element) => Some((**element).clone()),
+                    _ => None,
+                }
+            }
+            Expr::TupleIndex { object, index, .. } => {
+                match self.projection_type(object)?.referent() {
+                    Type::Tuple(elements) => elements.get(*index).cloned(),
+                    _ => None,
+                }
+            }
+            Expr::Deref { operand, .. } => match self.projection_type(operand)? {
+                Type::Reference { inner, .. } => Some(*inner),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
+    /// A refused write. A `mut` root that still may not write is reached through a
+    /// shared borrow, and saying the binding is immutable would contradict its `mut`.
     fn report_immutable_place(&mut self, place: &Place) {
-        let (name, span) = match place.root() {
-            Some(root) => (root.name.clone(), root.span),
-            None => (String::new(), place.span()),
+        if let (true, Some(root)) = (self.root_is_mutable(place), place.root()) {
+            self.record_error(TypeError::AssignThroughSharedBorrow {
+                name: root.name.clone(),
+                span: place.span(),
+            });
+            return;
+        }
+        let Some(root) = place.root() else {
+            self.record_error(TypeError::AssignToTemporary { span: place.span() });
+            return;
         };
-        self.record_error(TypeError::AssignToImmutable { name, span });
+        self.record_error(TypeError::AssignToImmutable {
+            name: root.name.clone(),
+            span: root.span,
+        });
     }
 
     /// Store `value` into an already-resolved place.

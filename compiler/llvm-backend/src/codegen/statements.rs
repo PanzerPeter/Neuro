@@ -37,26 +37,38 @@ impl<'ctx> CodegenContext<'ctx> {
         name: &str,
         ty: &HirType,
         init: Option<&HirExpr>,
+        mutable: bool,
     ) -> CodegenResult<()> {
         // Resolve whether this binding owns a `Drop` value before the initializer is
         // consumed, so its destructor can be scheduled for scope exit.
         //
         // A `string` owns nothing by type. The same fat pointer describes a `.rodata`
-        // literal and a heap buffer, so ownership comes from the initializer instead:
-        // a binding initialized by a producer that always allocates owns that buffer and
-        // frees it at scope exit, exactly as a collection binding frees its own.
+        // literal and a heap buffer, so ownership comes from the initializer instead,
+        // through a runtime flag: armed by a producer that always allocates, carried over
+        // from the binding a move takes the value from, and clear otherwise. A binding
+        // that can never own a buffer (an immutable one holding neither) carries none; a
+        // `mut` one always does, because a later reassignment may hand it a buffer
+        // whatever it started out holding.
+        let owns_initial_string = init.is_some_and(|expr| self.produces_owned_string(expr));
+        let may_own_string = owns_initial_string
+            || mutable
+            || init.is_some_and(|expr| self.names_an_owned_string(expr));
         let drop_target = self.drop_target(ty).or_else(|| {
-            let initialized_from_allocation =
-                init.is_some_and(|expr| self.produces_owned_string(expr));
-            (initialized_from_allocation && matches!(Type::from_hir(ty), Type::String))
+            (may_own_string && matches!(Type::from_hir(ty), Type::String))
                 .then_some(DropTarget::HeapString)
         });
 
-        let init_val = if let Some(expr) = init {
-            Some(self.codegen_expr(expr)?)
-        } else {
-            None
-        };
+        // A holder built from a literal collects the ownership of each `string` a binding
+        // moves into it, to hand to its positions once registered below.
+        let collecting = init
+            .is_some_and(Self::is_aggregate_literal)
+            .then(Default::default);
+        let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
+        let init_val = init.map(|expr| self.codegen_expr(expr)).transpose();
+        let literal_moves = std::mem::replace(&mut self.literal_string_moves, outer)
+            .map(|moves| moves.flags)
+            .unwrap_or_default();
+        let init_val = init_val?;
 
         if let Some(val) = init_val {
             let target_sem = Type::from_hir(ty);
@@ -85,6 +97,17 @@ impl<'ctx> CodegenContext<'ctx> {
             // block.
             self.note_pool_local(name);
 
+            // Read before the move below disarms it: whether the binding a `string` is
+            // moved out of owned the buffer is a runtime fact, and it moves with the value.
+            let moved_string_flag = match init {
+                Some(expr) if !owns_initial_string => self.load_owned_string_flag(expr)?,
+                _ => None,
+            };
+            // The same for every `string` position of a holder moved whole (`val q = p`).
+            let moved_position_flags = match init {
+                Some(expr) => self.load_held_string_flags(expr)?,
+                None => Vec::new(),
+            };
             // Binding a place into a new owner moves it (`val b = a`): clear the source's
             // drop flag so it is not also dropped. Then register the new binding.
             if let Some(expr) = init {
@@ -100,8 +123,13 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.register_pool_aware(name, &struct_name, alloca)?;
                 }
             } else if matches!(drop_target, Some(DropTarget::HeapString)) {
-                // The one target no type proves: it came from the initializer above.
-                self.register_local_drop(name, alloca, DropTarget::HeapString)?;
+                // The one target no type proves: its flag comes from the initializer.
+                let flag_ptr = self.register_local_drop(name, alloca, DropTarget::HeapString)?;
+                if !owns_initial_string {
+                    let owns =
+                        moved_string_flag.unwrap_or_else(|| self.context.bool_type().const_zero());
+                    self.builder.build_store(flag_ptr, owns)?;
+                }
             } else {
                 self.register_owned_binding(name, alloca, &target_sem)?;
                 // A `string` position the holder just took a fresh buffer into is armed
@@ -109,6 +137,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 if let Some(expr) = init {
                     self.arm_stored_string_positions(name, &[], expr)?;
                 }
+                self.store_held_string_flags(name, &moved_position_flags)?;
+                self.store_held_string_flags(name, &literal_moves)?;
             }
         }
 
@@ -182,7 +212,13 @@ impl<'ctx> CodegenContext<'ctx> {
     /// may read the binding it overwrites; only then does the prior value lose its owner
     /// and get released.
     pub(crate) fn codegen_assignment(&mut self, name: &str, value: &HirExpr) -> CodegenResult<()> {
-        let val = self.codegen_expr(value)?;
+        let collecting = Self::is_aggregate_literal(value).then(Default::default);
+        let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
+        let val = self.codegen_expr(value);
+        let literal_moves = std::mem::replace(&mut self.literal_string_moves, outer)
+            .map(|moves| moves.flags)
+            .unwrap_or_default();
+        let val = val?;
 
         // `p = p` changes no owner: the storage keeps the value it already held. Both
         // the release below and the move-marking would disown a value that is still
@@ -205,6 +241,19 @@ impl<'ctx> CodegenContext<'ctx> {
             CodegenError::LlvmError(format!("failed to store value in assignment: {}", e))
         })?;
 
+        // As at a declaration, a `string` moved out of an owning binding brings that
+        // binding's flag with it; read it before the move clears it.
+        let moved_string_flag = match &rearm {
+            Some((_, DropTarget::HeapString)) if !self.produces_owned_string(value) => {
+                self.load_owned_string_flag(value)?
+            }
+            _ => None,
+        };
+        let moved_position_flags = if rearm.is_some() && !assigns_from_itself {
+            self.load_held_string_flags(value)?
+        } else {
+            Vec::new()
+        };
         // Assigning a place moves it into the target, so the source stops being an owner
         // and the target starts being one.
         if !assigns_from_itself {
@@ -212,8 +261,13 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         if let Some((flag_ptr, target)) = rearm {
             self.rearm_drop_flag(flag_ptr, &target, value)?;
+            if let Some(owns) = moved_string_flag {
+                self.builder.build_store(flag_ptr, owns)?;
+            }
             self.rearm_held_drop_flags(name)?;
             self.arm_stored_string_positions(name, &[], value)?;
+            self.store_held_string_flags(name, &moved_position_flags)?;
+            self.store_held_string_flags(name, &literal_moves)?;
         }
 
         Ok(())
@@ -806,9 +860,13 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         match stmt {
-            HirStmt::VarDecl { name, ty, init, .. } => {
-                self.codegen_var_decl(name, ty, init.as_ref())
-            }
+            HirStmt::VarDecl {
+                name,
+                ty,
+                init,
+                mutable,
+                ..
+            } => self.codegen_var_decl(name, ty, init.as_ref(), *mutable),
             HirStmt::Assign { place, value, span } => {
                 self.store_outside_pool(place, |ctx| ctx.codegen_place_store(place, value, *span))
             }

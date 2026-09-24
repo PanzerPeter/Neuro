@@ -188,6 +188,16 @@ pub(crate) struct LoopTargets<'ctx> {
 /// `false` when the value is moved out, so the scope-exit drop is elided for a
 /// moved value, the runtime drop-flag mechanism that keeps conditional
 /// moves sound.
+/// See [`CodegenContext::literal_string_moves`].
+#[derive(Default)]
+pub(crate) struct LiteralStringMoves<'ctx> {
+    /// Where the literal being built sits below the holder.
+    pub(crate) path: Vec<String>,
+    /// Each moved position's path below the holder, and whether its source owned the
+    /// buffer at the move.
+    pub(crate) flags: Vec<(Vec<String>, IntValue<'ctx>)>,
+}
+
 pub(crate) struct DropEntry<'ctx> {
     /// Source binding name, used to clear the flag when the value is moved.
     pub(crate) name: String,
@@ -336,6 +346,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
     pub(crate) drop_scopes: Vec<Vec<DropEntry<'ctx>>>,
 
+    /// While a declaration or an assignment builds its holder from an aggregate literal,
+    /// the ownership each `string` binding moved into one of the literal's positions
+    /// carries, for the holder to take once it is registered. `None` everywhere else,
+    /// including while a position that is not itself a literal is evaluated.
+    pub(crate) literal_string_moves: Option<LiteralStringMoves<'ctx>>,
+
     /// Stack of lexical name scopes, innermost last and pushed in lockstep with
     /// `drop_scopes`. Each frame lists what the bindings declared in that scope
     /// displaced, so leaving the scope can restore the names it shadowed.
@@ -417,6 +433,7 @@ impl<'ctx> CodegenContext<'ctx> {
             consuming_self_methods: std::collections::HashSet::new(),
             pool_aware_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
+            literal_string_moves: None,
             name_scopes: Vec::new(),
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),

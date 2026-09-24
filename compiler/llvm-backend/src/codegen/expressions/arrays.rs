@@ -35,9 +35,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let mut agg = arr_llvm.get_undef();
         for (i, el) in elements.iter().enumerate() {
-            let val = self.codegen_expr(el)?;
             // Same move as a tuple element: the array holder owns it from here.
-            self.mark_moved_for_drop(el);
+            let val = self.codegen_literal_position(i.to_string(), el)?;
             let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
             agg = self
                 .builder
@@ -130,6 +129,11 @@ impl<'ctx> CodegenContext<'ctx> {
             )));
         };
         let element_ty = (*element).clone();
+        let elem_llvm = self.get_any_llvm_type(&element_ty)?;
+        // The value first (the language evaluates it before the place): when the array is an element of a `Vec`, the value may
+        // grow that `Vec` and free the buffer an address taken earlier would point into.
+        let val = self.codegen_expr(value)?;
+        let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
         // Deliberately NOT `array_place_ptr`: its fallback materialises a temporary,
         // which is the right answer for a read and a lost write here.
         let base_ptr = if matches!(obj_ty, Type::Reference { .. }) {
@@ -142,11 +146,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 )
             })?
         };
-        let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let elem_ptr =
             self.array_element_ptr(base_ptr, elem_llvm, size, index, index.span.start)?;
-        let val = self.codegen_expr(value)?;
-        let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
         self.builder.build_store(elem_ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store array element: {}", e))
         })?;

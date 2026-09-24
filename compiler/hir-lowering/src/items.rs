@@ -692,6 +692,8 @@ impl Lowerer {
     fn register_const(&mut self, def: &ConstDef) -> Result<(), LoweringError> {
         let ty = self.resolve_type(&def.ty)?;
         self.constants.insert(def.name.name.clone(), ty);
+        self.constant_values
+            .insert(def.name.name.clone(), def.value.clone());
         Ok(())
     }
 
@@ -755,6 +757,16 @@ impl Lowerer {
             }
             if let Some(instance) = self.mono_pending.pop() {
                 let hir_fn = self.lower_mono_instance(&instance)?;
+                // A `@grad` template's derivative is derived per instance, where the
+                // shapes the reverse pass builds its gradients from are concrete.
+                let grad = self
+                    .generic_templates
+                    .get(&instance.fn_name)
+                    .is_some_and(|template| crate::autodiff::is_grad(&template.attributes));
+                if grad {
+                    self.mono_items
+                        .extend(crate::autodiff::derive_reverse(&hir_fn)?);
+                }
                 self.mono_items.push(HirItem::Function(hir_fn));
                 continue;
             }

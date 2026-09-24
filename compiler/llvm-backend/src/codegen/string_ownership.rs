@@ -25,6 +25,8 @@ use neuro_hir::{
 /// The `String` builder method that copies its bytes out into an owned `string`, and
 /// the `string` methods that read their receiver without retaining it.
 const TO_OWNED_METHOD: &str = "to_string";
+/// `string.clone()`, which copies the bytes into a buffer of their own.
+const CLONE_METHOD: &str = "clone";
 const LEN_METHOD: &str = "len";
 const PUSH_STR_METHOD: &str = "push_str";
 
@@ -85,17 +87,35 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
         returns_owned.extend(grown);
     }
 
-    let mut read_only_params = HashSet::new();
-    for (name, params, body) in callables(items) {
-        for (index, param) in params.iter().enumerate() {
-            if !matches!(param.1, HirType::String) {
-                continue;
+    // A fixpoint for the same reason as the return summary: a parameter handed on to
+    // another function is read only when that function's parameter is. It starts empty
+    // and grows, so a parameter only ever passed around a cycle stays retained.
+    let callables = callables(items);
+    let mut read_only_params: HashSet<(String, usize)> = HashSet::new();
+    loop {
+        let mut grown = Vec::new();
+        for (name, params, body) in &callables {
+            for (index, param) in params.iter().enumerate() {
+                if !matches!(param.1, HirType::String)
+                    || read_only_params.contains(&(name.clone(), index))
+                {
+                    continue;
+                }
+                let probe = Param {
+                    name: param.0,
+                    read_only: &read_only_params,
+                    shadowed: &shadowed,
+                };
+                if body.iter().any(|stmt| stmt_retains(stmt, &probe)) {
+                    continue;
+                }
+                grown.push((name.clone(), index));
             }
-            if body.iter().any(|stmt| stmt_retains(stmt, param.0)) {
-                continue;
-            }
-            read_only_params.insert((name.clone(), index));
         }
+        if grown.is_empty() {
+            break;
+        }
+        read_only_params.extend(grown);
     }
 
     StringOwnership {
@@ -147,8 +167,10 @@ fn callables(items: &[HirItem]) -> Vec<Callable<'_>> {
 ///
 /// A callable with an exit this cannot enumerate gets an empty list and so never
 /// qualifies: the tail must be an expression statement, and every other exit an
-/// explicit `return`. A tail that is an `if` or a `match` yields whatever its branch
-/// yields, which is not a shape this reads through, so it answers the safe way.
+/// explicit `return` at statement level. A tail that is an `if`, a `match` or a block
+/// exits through each branch's own tail, which [`tail_exits`] reads through. A `return`
+/// inside an expression (a `loop` body, an `if` used as a value) is an exit
+/// [`collect_returns`] does not reach, so a body with one answers the safe way.
 fn string_returning_bodies(items: &[HirItem]) -> Vec<(&str, Vec<&HirExpr>)> {
     let mut out: Vec<(&str, Vec<&HirExpr>)> = Vec::new();
     for item in items {
@@ -160,13 +182,49 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(&str, Vec<&HirExpr>)> {
             continue;
         }
         let mut exits = Vec::new();
+        if returns_inside_expressions(body) {
+            out.push((name, exits));
+            continue;
+        }
         collect_returns(body, &mut exits);
         if let Some(HirStmt::Expr(tail)) = body.last() {
-            exits.push(tail);
+            if !tail_exits(tail, &mut exits) {
+                exits.clear();
+            }
         }
         out.push((name, exits));
     }
     out
+}
+
+/// The values a tail expression leaves through: itself, or for an `if` with an `else`, a
+/// `match` or a block, each branch's own tail. `false` when a branch ends in anything
+/// but an expression, whose value this cannot name.
+fn tail_exits<'a>(tail: &'a HirExpr, out: &mut Vec<&'a HirExpr>) -> bool {
+    let block_tail = |stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>| match stmts.last() {
+        Some(HirStmt::Expr(value)) => tail_exits(value, out),
+        _ => false,
+    };
+    match &tail.kind {
+        HirExprKind::If {
+            then_block,
+            else_if_blocks,
+            else_block: Some(else_block),
+            ..
+        } => {
+            block_tail(then_block, out)
+                && else_if_blocks
+                    .iter()
+                    .all(|(_, block)| block_tail(block, out))
+                && block_tail(else_block, out)
+        }
+        HirExprKind::Match { arms, .. } => arms.iter().all(|arm| tail_exits(&arm.body, out)),
+        HirExprKind::Block { stmts } => block_tail(stmts, out),
+        _ => {
+            out.push(tail);
+            true
+        }
+    }
 }
 
 /// Every `return value` in a statement list, including the nested blocks control can
@@ -200,6 +258,36 @@ fn collect_returns<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
     }
 }
 
+/// Whether a `return` sits in a statement list that belongs to an expression: a block,
+/// a `loop`, an `if` or a `match` arm written where a value goes.
+fn returns_inside_expressions(body: &[HirStmt]) -> bool {
+    let mut found = false;
+    walk_stmts(body, &mut |expr| {
+        let lists: Vec<&[HirStmt]> = match &expr.kind {
+            HirExprKind::If {
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => std::iter::once(then_block.as_slice())
+                .chain(else_if_blocks.iter().map(|(_, block)| block.as_slice()))
+                .chain(else_block.as_deref())
+                .collect(),
+            HirExprKind::Block { stmts }
+            | HirExprKind::Unsafe { stmts }
+            | HirExprKind::Pool { stmts, .. }
+            | HirExprKind::Loop { body: stmts, .. } => vec![stmts.as_slice()],
+            _ => Vec::new(),
+        };
+        for stmts in lists {
+            let mut returns = Vec::new();
+            collect_returns(stmts, &mut returns);
+            found |= !returns.is_empty();
+        }
+    });
+    found
+}
+
 /// Whether `expr` always yields a freshly allocated buffer, reading a call against the
 /// producers established so far.
 ///
@@ -225,7 +313,10 @@ fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
             // its own `to_string` may return a `.rodata` literal, and reading that as an
             // allocation would hand `.rodata` to `free`.
             HirExprKind::FieldAccess { object, field } => {
-                args.is_empty() && field == TO_OWNED_METHOD && is_builder(&object.ty)
+                args.is_empty()
+                    && ((field == TO_OWNED_METHOD && is_builder(&object.ty))
+                        || (field == CLONE_METHOD
+                            && matches!(object.ty.referent(), HirType::String)))
             }
             _ => false,
         },
@@ -317,10 +408,20 @@ fn collect_bound_names(stmts: &[HirStmt], out: &mut HashSet<String>) {
 
 /// Whether a statement may leave the buffer behind `name` reachable after it runs.
 ///
+/// The parameter a retention walk follows, and what it already knows about the
+/// program's other parameters.
+struct Param<'a> {
+    name: &'a str,
+    /// Parameters already proven read only, which a call may hand this one to.
+    read_only: &'a HashSet<(String, usize)>,
+    /// Top-level names a local binding shadows somewhere, which a call may not trust.
+    shadowed: &'a HashSet<String>,
+}
+
 /// A whitelist, not a blacklist: an occurrence of the parameter is safe only in a
 /// position that is known to copy the bytes out, and every unrecognised position is a
 /// retention. That is what makes an unhandled HIR shape leak rather than dangle.
-fn stmt_retains(stmt: &HirStmt, name: &str) -> bool {
+fn stmt_retains(stmt: &HirStmt, name: &Param) -> bool {
     let span = shared_types::Span::new(0, 0);
     match stmt {
         HirStmt::Expr(expr) => retains(expr, name),
@@ -332,7 +433,7 @@ fn stmt_retains(stmt: &HirStmt, name: &str) -> bool {
         }
         HirStmt::Assign { place, value, .. }
         | HirStmt::TensorCompoundAssign { place, value, .. } => {
-            mentions(&place.to_expr(span), name) || retains(value, name)
+            mentions(&place.to_expr(span), name.name) || retains(value, name)
         }
         HirStmt::If {
             condition,
@@ -372,10 +473,10 @@ fn stmt_retains(stmt: &HirStmt, name: &str) -> bool {
 }
 
 /// Whether `expr` retains the buffer behind `name`, per the whitelist above.
-fn retains(expr: &HirExpr, name: &str) -> bool {
+fn retains(expr: &HirExpr, name: &Param) -> bool {
     match &expr.kind {
         // A bare occurrence in a position this function's callers did not whitelist.
-        HirExprKind::Variable(other) => other == name,
+        HirExprKind::Variable(other) => other == name.name,
         // `+`, `==` and `!=` copy their operands' bytes into the result or read only
         // the comparison out, so an operand is dead at the operator.
         HirExprKind::Binary { left, right, .. } => {
@@ -387,6 +488,9 @@ fn retains(expr: &HirExpr, name: &str) -> bool {
             HirInterpPart::Formatted { expr, .. } => read_retains(expr, name),
         }),
         HirExprKind::Call { callee, args } => call_retains(callee, args, name),
+        // `as` converts between numeric types, so what it yields is never a buffer; only
+        // its operand can hold on to one.
+        HirExprKind::Cast { value } => retains(value, name),
         HirExprKind::Block { stmts } | HirExprKind::Unsafe { stmts } => {
             stmts.iter().any(|s| stmt_retains(s, name))
         }
@@ -410,12 +514,12 @@ fn retains(expr: &HirExpr, name: &str) -> bool {
         }
         // Every remaining shape may store the fat pointer or hand back a view into it,
         // so any mention of the parameter under one is a retention.
-        _ => mentions(expr, name),
+        _ => mentions(expr, name.name),
     }
 }
 
 /// Whether a call retains the buffer behind `name` through its callee or its arguments.
-fn call_retains(callee: &HirExpr, args: &[HirExpr], name: &str) -> bool {
+fn call_retains(callee: &HirExpr, args: &[HirExpr], name: &Param) -> bool {
     match &callee.kind {
         // `print(s)` / `println(s)`: `emit` has consumed the bytes when it returns.
         HirExprKind::Variable(func) if IO_BUILTINS.contains(&func.as_str()) => {
@@ -424,30 +528,42 @@ fn call_retains(callee: &HirExpr, args: &[HirExpr], name: &str) -> bool {
         // `s.len()` takes the length word out; `b.push_str(s)` appends a copy. Every
         // other method may hand back a view (`.slice`, `.chars`) or store the pointer.
         HirExprKind::FieldAccess { object, field } => {
-            let receiver_is_read = field == LEN_METHOD;
+            let receiver_is_read = field == LEN_METHOD || field == CLONE_METHOD;
             let args_are_reads = field == PUSH_STR_METHOD;
             let receiver = if receiver_is_read {
                 read_retains(object, name)
             } else {
-                mentions(object, name)
+                mentions(object, name.name)
             };
             receiver
                 || args.iter().any(|arg| {
                     if args_are_reads {
                         read_retains(arg, name)
                     } else {
-                        mentions(arg, name)
+                        mentions(arg, name.name)
                     }
                 })
         }
-        _ => mentions(callee, name) || args.iter().any(|arg| mentions(arg, name)),
+        // A function this program declares, whose own parameter in that position is
+        // already known to be read only: the bytes are read during the call and kept by
+        // nobody. A name a local shadows may be a closure, and is not trusted.
+        HirExprKind::Variable(func) if !name.shadowed.contains(func) => {
+            args.iter().enumerate().any(|(index, arg)| {
+                if name.read_only.contains(&(func.clone(), index)) {
+                    read_retains(arg, name)
+                } else {
+                    mentions(arg, name.name)
+                }
+            })
+        }
+        _ => mentions(callee, name.name) || args.iter().any(|arg| mentions(arg, name.name)),
     }
 }
 
 /// `retains`, for a slot whose direct occupant is read rather than stored: the
 /// parameter itself is fine there, anything built around it is judged on its own.
-fn read_retains(expr: &HirExpr, name: &str) -> bool {
-    if matches!(&expr.kind, HirExprKind::Variable(other) if other == name) {
+fn read_retains(expr: &HirExpr, name: &Param) -> bool {
+    if matches!(&expr.kind, HirExprKind::Variable(other) if other == name.name) {
         return false;
     }
     retains(expr, name)

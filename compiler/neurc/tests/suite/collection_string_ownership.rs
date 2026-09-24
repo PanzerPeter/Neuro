@@ -302,3 +302,64 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 11);
 }
+
+/// The `string` releases `main` emits for `source`, read off its textual IR. A
+/// collection's own buffer is released under another name, and once per exit path, so
+/// it is not counted.
+fn main_string_releases(test: &CompileTest, filename: &str, source: &str) -> usize {
+    let source_path = test.write_source(filename, source);
+    let ir_path = source_path.with_extension("ll");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_neurc"))
+        .args(["compile", "--emit", "llvm-ir", "-o"])
+        .arg(&ir_path)
+        .arg(&source_path)
+        .output()
+        .expect("run neurc");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ir = std::fs::read_to_string(&ir_path).expect("read IR");
+    let start = ir.find("@main(").expect("main is defined");
+    let body = &ir[start..];
+    let end = body.find("\n}\n").unwrap_or(body.len());
+    body[..end]
+        .matches("call void @__neuro_release(ptr %str.drop.buf")
+        .count()
+}
+
+/// `val Some(s) = v.get(0) else { ... }` takes the same copied payload a `match` arm
+/// does, and releases it the same way. The success binding registered no owner, and the
+/// copy `get` made leaked once per evaluation.
+#[test]
+fn a_val_else_string_payload_is_released_like_a_match_arms() {
+    let test = CompileTest::new();
+    let val_else = r#"
+func main() -> i32 {
+    mut v: Vec<string> = Vec::new()
+    v.push("x")
+    val Some(s) = v.get(0) else {
+        return 2
+    }
+    return s.len() as i32
+}
+"#;
+    let matched = r#"
+func main() -> i32 {
+    mut v: Vec<string> = Vec::new()
+    v.push("x")
+    return match v.get(0) {
+        Some(s) => s.len() as i32,
+        None => 2
+    }
+}
+"#;
+    let by_val_else = main_string_releases(&test, "val_else_payload.nr", val_else);
+    let by_match = main_string_releases(&test, "match_payload.nr", matched);
+    assert!(by_val_else > 0, "the payload is released at all");
+    assert_eq!(
+        by_val_else, by_match,
+        "the two forms release the payload alike"
+    );
+}

@@ -318,9 +318,12 @@ impl Lowerer {
                 span,
             } => {
                 let ty = self.resolve_type(ty)?;
+                let value_expr = value;
                 let value = self.lower_expr(value, Some(&ty))?;
                 // A function-scope const is visible to later statements.
                 self.constants.insert(name.name.clone(), ty.clone());
+                self.constant_values
+                    .insert(name.name.clone(), value_expr.clone());
                 Ok(HirStmt::Const {
                     name: name.name.clone(),
                     ty,

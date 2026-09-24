@@ -19,7 +19,7 @@ for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `poo
 | Owners held inside a destroyed value | A struct field, array or tuple element, enum payload or newtype inner value goes back with the value that holds it |
 | A value moved out of a position | Destroyed on the path it moved to, never twice |
 | Allocations inside a `pool` block | One bump region, released in reverse order at the closing brace. A type with a destructor implements `PoolAware` to live in one. An allocation stored into something that outlives the block is routed to the heap instead |
-| A heap `string` stored into a struct field, array element or tuple element | With the holder, when the store into that position provably allocated |
+| A heap `string` stored into a struct field, array element or tuple element | With the holder, when the store into that position provably allocated or moved in a buffer its source binding owned |
 | A heap `string` a function returns | By the caller, when every one of the function's return paths allocates |
 | A heap `string` passed by value to a parameter the callee only reads | At the call it was built for |
 | A `string` in a collection slot | By the collection, which owns a copy of the bytes rather than the operand's buffer |
@@ -51,12 +51,13 @@ Three shapes it cannot prove, each leaking one buffer rather than dangling one:
 Freeing a `.rodata` literal, or a buffer something else still holds, is a worse failure than
 holding one, so every unproven case answers the same way.
 
-A `string` a collection read hands into a view-producing method (`v[0].slice(...)`, `.chars()`,
-`.clone()`) leaks its copy, as any other anonymous string does there, and a
-`val PATTERN = m.get(k) else ...` binds a payload nothing releases.
+A `string` a collection read hands into a view-producing method (`v[0].slice(...)`, `.chars()`)
+leaks its copy, as any other anonymous string does there. `.clone()` is not such a method: it
+copies the bytes into a buffer of its own.
 
-A `match` arm that binds an enum payload also disowns the whole scrutinee, so a variant the arm
-did not take is not destroyed.
+A `match` arm that binds part of an enum payload disowns the whole scrutinee, so a part of that
+variant the arm did not bind is not destroyed. An arm that binds nothing leaves the scrutinee
+owning everything, and it is destroyed at its own scope exit.
 
 ## Status
 

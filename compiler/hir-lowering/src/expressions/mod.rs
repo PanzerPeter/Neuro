@@ -142,6 +142,7 @@ impl Lowerer {
                         .cloned(),
                     _ => None,
                 };
+                let left_src = left;
                 let left = self.lower_expr(left, left_expected.as_ref())?;
                 // Operator-trait dispatch on a user type: desugar `a OP b` into the
                 // impl method call `a.op(b)`. The checker validated the impl, so a lookup
@@ -160,7 +161,17 @@ impl Lowerer {
                 let right_expected = coercion::tensor_element(&left.ty)
                     .cloned()
                     .unwrap_or_else(|| left.ty.clone());
-                let right = self.lower_expr(right, Some(&right_expected))?;
+                let right_hir = self.lower_expr(right, Some(&right_expected))?;
+                // Mirrors the checker: a bare literal beside a tensor the lookahead could
+                // not see is the scalar broadcast, and takes the element type now.
+                let left = match coercion::tensor_element(&right_hir.ty) {
+                    Some(element) if left_expected.is_none() && is_bare_literal(left_src) => {
+                        let element = element.clone();
+                        self.lower_expr(left_src, Some(&element))?
+                    }
+                    _ => left,
+                };
+                let right = right_hir;
                 // `@derive(PartialEq)` equality: no method to dispatch to, so the node
                 // stays a binary one and the backend expands it over the fields. Handled
                 // before the shared result rule, which admits no aggregate operand.
@@ -732,5 +743,20 @@ impl Lowerer {
             .get(&mangled)
             .cloned()
             .ok_or(LoweringError::UnresolvedCall { target: mangled })
+    }
+}
+
+/// An unsuffixed numeric literal, possibly negated or parenthesised, as the checker's
+/// operator rule recognizes it: lowering it again has no effect beyond its type.
+fn is_bare_literal(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(Literal::Integer(_, None) | Literal::Float(_, None), _) => true,
+        Expr::Paren(inner, _) => is_bare_literal(inner),
+        Expr::Unary {
+            op: UnaryOp::Negate,
+            operand,
+            ..
+        } => is_bare_literal(operand),
+        _ => false,
     }
 }

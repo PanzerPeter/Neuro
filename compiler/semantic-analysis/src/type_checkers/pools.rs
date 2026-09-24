@@ -26,7 +26,7 @@
 
 use std::collections::HashSet;
 
-use ast_types::{Expr, InterpPart};
+use ast_types::{Expr, InterpPart, Stmt};
 use shared_types::Span;
 
 use crate::errors::TypeError;
@@ -180,6 +180,56 @@ impl TypeChecker {
                         .callee_operand(func)
                         .is_none_or(|obj| self.carries_no_arena(obj, emission))
                     && args.iter().all(|arg| self.carries_no_arena(arg, emission))
+            }
+            // A struct or tuple value is its fields laid side by side and allocates
+            // nothing of its own, so it carries arena memory only through a leaf.
+            Expr::StructLiteral { fields, base, .. } => {
+                fields
+                    .iter()
+                    .all(|field| self.carries_no_arena(&field.value, emission))
+                    && base
+                        .as_deref()
+                        .is_none_or(|base| self.carries_no_arena(base, emission))
+            }
+            Expr::TupleLiteral { elements, .. } => elements
+                .iter()
+                .all(|element| self.carries_no_arena(element, emission)),
+            // An array literal is a tensor literal when a tensor is expected, and that
+            // allocates its buffer where it is written, as an operator does.
+            Expr::ArrayLiteral { elements, .. } => {
+                emission == Emission::Routed
+                    && elements
+                        .iter()
+                        .all(|element| self.carries_no_arena(element, emission))
+            }
+            // A branch yields one of its arms' values. The walk runs before the value is
+            // checked, so a name an arm declares is unknown here and would read as "not a
+            // binding"; an arm is therefore walked only when it is a bare tail expression.
+            Expr::If {
+                then_block,
+                else_if_blocks,
+                else_block: Some(else_block),
+                ..
+            } => [then_block, else_block]
+                .into_iter()
+                .chain(else_if_blocks.iter().map(|(_, block)| block))
+                .all(|block| {
+                    tail_only(block).is_some_and(|tail| self.carries_no_arena(tail, emission))
+                }),
+            // An arm's pattern bindings are parts of the scrutinee, so once the scrutinee
+            // is proven off the arena, a binding the arm reads (unknown here, for the
+            // reason above) is too.
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.carries_no_arena(scrutinee, emission)
+                    && arms.iter().all(|arm| {
+                        let body = match arm.body.as_ref() {
+                            Expr::Block { stmts, .. } => tail_only(stmts),
+                            other => Some(other),
+                        };
+                        body.is_some_and(|body| self.carries_no_arena(body, emission))
+                    })
             }
             _ => false,
         }
@@ -630,6 +680,15 @@ fn callee_label(func: &Expr) -> String {
         _ => return "the callee".to_string(),
     };
     format!("'{name}'")
+}
+
+/// The tail expression of a block that declares nothing: the only block whose names are
+/// all resolvable before the block itself has been checked.
+fn tail_only(block: &[Stmt]) -> Option<&Expr> {
+    match block {
+        [Stmt::Expr(tail)] => Some(tail),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

@@ -203,6 +203,12 @@ Routing applies to the value the statement builds, never to one built earlier. B
 time `name = joined` runs, `joined`'s buffer is already in the bump region and no
 choice of allocator can move it, so that store is refused.
 
+The compiler has to *prove* a routed value holds nothing the block built earlier, and it
+proves it through a struct or tuple literal, an array literal, and an `if` / `match` whose
+every arm is a single expression (a `match` also needs its scrutinee proven). So
+`entry = Entry { label: "a" + "b", n: 1 }` and `name = if c { "x" } else { "y" }` cross
+the boundary. An arm that declares a binding of its own is not looked into, and is refused.
+
 An allocation the block keeps for itself is unaffected: `val joined = "a" + "b"` is
 owned by a binding that dies at the closing brace, so it takes the bump path, and a
 reassignment of such a binding does too.
