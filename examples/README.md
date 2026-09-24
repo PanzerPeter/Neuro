@@ -127,6 +127,7 @@ One line each. The program's own header comment is the full description.
 - [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` carrying a position through earlier features
 - [`render_settings.nr`](showcase/render_settings.nr): a render pipeline configured by named arguments
 - [`replay_buffer.nr`](showcase/replay_buffer.nr): range `.rev()` driving a replay buffer
+- [`robust_fit.nr`](showcase/robust_fit.nr): a `@grad` loss whose body loops a data-dependent number of times and branches on its own error, so the derived gradient follows the path each call takes, evaluated inside a `pool` over three trials collected in a `Vec` of `Copy` structs
 - [`running_stats.nr`](showcase/running_stats.nr): an online mean accumulator
 - [`sample_audit.nr`](showcase/sample_audit.nr): `?` error propagation threaded through earlier features
 - [`scan_guard.nr`](showcase/scan_guard.nr): deterministic `Drop` and labeled loop exit together

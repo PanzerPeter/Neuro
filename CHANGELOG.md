@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-09-24
+
+### Added
+
+- `@grad` differentiates through control flow. A `@grad` body may now use `mut` bindings,
+  assignment and compound assignment to its own bindings, `if` / `else if` / `else` as a
+  statement or an expression, an early `return` ending an arm of a top-level `if`, `while`
+  loops (including a trip count that depends on the parameters), comparisons, `&&` / `||` with
+  their short circuit, and integer arithmetic. The derivative follows the path the call takes:
+  an `if` sends the gradient through the arm that ran, and a `while` through exactly the
+  iterations that ran. Nothing is recorded at run time. The backward pass recomputes each
+  iteration from the loop's start, which costs about `n²/2` extra body evaluations for a loop
+  of `n` iterations.
+- The derivative at a kink is now specified: where the control flow is about to change (an
+  `if x > y` at `x == y`, a loop whose last test only just failed), the derivative is the
+  executed path's.
+- `tools/grad_differential.py`: tensor cases for both arms of a branch, an early return with an
+  `else if` and `&&`, a fixed and a data-dependent loop, nested loops around a branch, a loss
+  carried by a loop, a loop that never runs, shadowing inside an arm, and two kinks. A kink case
+  compares against finite differences of the executed path, which is smooth at the point.
+- `examples/showcase/robust_fit.nr`: a `@grad` loss that damps its prediction a
+  caller-chosen number of times and soft-clips its error with an `if` expression.
+
 ## [3.5.1] - 2026-09-23
 
 ### Fixed

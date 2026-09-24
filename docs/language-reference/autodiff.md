@@ -55,8 +55,8 @@ Breaking any of these rules is a type error at the offending parameter or return
 
 ## What a `@grad` body may contain
 
-The body is a sequence of `val` bindings that ends in the loss, either as `return` or as the
-tail expression. Each binding may use:
+The body is a sequence of statements that ends in the loss, either as `return` or as the tail
+expression. Its values may use:
 
 | Construct | Derivative |
 |---|---|
@@ -67,14 +67,67 @@ tail expression. Each binding may use:
 | a tensor literal or `Tensor::scalar(v)` built from values | each element's adjoint sent back to the value it came from |
 | an element read `t[i, j]` at literal positions | the adjoint lands on that one element |
 | `Tensor::zeros()`, `ones()`, `identity()`, literals | constants |
+| comparisons, `&&`, `||`, `!`, and integer arithmetic | none: they decide which path runs, and carry no gradient |
 
-Any other construct in a `@grad` body is a compile error pointing at it: a function or
-method call, a `mut` binding or assignment, a loop or branch, `.max()` / `.min()`, `einsum`,
-reshapes and slices, and a read at a position computed at run time.
+The statements may be:
+
+- `val` and `mut` bindings, assignment (`x = ...`), and compound assignment (`x += ...`) to a
+  binding the body declared;
+- `if`, with any number of `else if` arms and an optional `else`, as a statement or as an
+  expression. An arm of an `if` at the top level of the body may end in `return`: the rest of
+  the body is then the other arm;
+- `while`, including loops whose trip count depends on the differentiated parameters.
+
+```neuro
+@grad
+func robust_fit(w: &mut Tensor<f32, [2, 1]>, limit: f32, sweeps: i32) -> Tensor<f32, []> {
+    val x: Tensor<f32, [3, 2]> = [[1.0, 2.0], [2.0, 0.0], [0.0, 1.0]]
+    val y: Tensor<f32, [3, 1]> = [[5.0], [2.0], [2.0]]
+    mut prediction = x @ w
+    mut done = 0
+    while done < sweeps {
+        prediction = &prediction * 0.5
+        done += 1
+    }
+    val residual = prediction - y
+    val squares = &residual * &residual
+    val error = squares.mean()
+    val clipped = if error <= limit { error } else { limit + (error - limit) * 0.1 }
+    return Tensor::scalar(clipped)
+}
+```
+
+This function comes from [`examples/showcase/robust_fit.nr`](../../examples/showcase/robust_fit.nr).
+
+Any other construct in a `@grad` body is a compile error pointing at it: a function or method
+call, a `for` or `loop` loop, `break` and `continue`, `match`, a `return` inside a loop or
+anywhere but the end of an `if` arm at the top of the body, an assignment to a parameter,
+`.max()` / `.min()`, `einsum`, reshapes and slices, and a read at a position computed at run
+time. A value that an `if` or a loop reassigns must be a float, integer or `bool`, or a float
+tensor.
+
+### Control flow in the derivative
+
+The derivative follows the path the call takes. An `if` sends the gradient back through the
+arm that ran, and a `while` sends it back through exactly the iterations that ran, last one
+first. Nothing is recorded to do this. The forward pass only counts iterations, and the
+backward pass recomputes each iteration's values from the loop's starting point. A loop that
+runs `n` times therefore costs about `n²/2` extra evaluations of its body in the derivative.
+
+### Where the path changes
+
+At a point where the control flow is about to change, the derivative is the derivative of the
+path the call executes there. An `if x > y` evaluated at `x == y` takes its `else` arm, so the
+gradient there is the `else` arm's. A `while` whose last test only just failed gives the
+gradient of the iterations that ran. Neither is an average of the two sides, and neither is an
+error. This matches what the program computes: the loss at that point is the executed path's
+loss, and its gradient is that path's gradient.
 
 ## How the derivative is checked
 
 A derivative is trusted only once a second, independent computation agrees with it.
 `tools/grad_differential.py` calls each generated derivative on real inputs, then computes
 central finite differences of the compiled function at the same point, and requires the two
-to agree componentwise. It runs as `cargo test -p neurc --test grad_differential`.
+to agree componentwise. At a point where the path changes, a central difference would straddle
+both paths, so those cases compare against finite differences of the executed path alone. It
+runs as `cargo test -p neurc --test grad_differential`.

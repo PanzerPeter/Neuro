@@ -13,17 +13,24 @@
 //! `__f__rev` like any other function. The shapes are still in the types at this level,
 //! which is the reason the transform lives here rather than over LLVM IR.
 //!
-//! Three steps. [`tape::linearize`] flattens the body into single-operation bindings and
-//! marks which depend on a differentiated parameter. The forward replay emits those
-//! bindings again, reading every tensor operand through a borrow. The reverse sweep walks
-//! the tape backwards from a `1.0` seed at the loss, emitting each operation's adjoint
-//! rule ([`rules`]) and summing the adjoints of values used more than once.
+//! Three steps. [`tape::linearize`] flattens the body into single-operation bindings,
+//! keeping `if` and `while` as nested tapes, and marks which values depend on a
+//! differentiated parameter. [`sweep::forward`] emits those bindings again, reading every
+//! tensor operand through a borrow. [`sweep::reverse`] walks the tape backwards from a
+//! `1.0` seed at the loss, emitting each operation's adjoint rule ([`rules`]) and summing
+//! the adjoints of values used more than once.
+//!
+//! At a point where the primal's control flow changes (a condition on the edge of
+//! switching, a trip count about to change) the derivative is that of the path the primal
+//! executes there, because the reverse pass follows exactly that path. This is the
+//! language's rule, not an accident of the implementation.
 //!
 //! Every tensor parameter is differentiated: `wrt:` is a later item, and the checker has
 //! already required each tensor parameter to be `&mut` and the loss to be rank-0 `f32`.
 
 mod emit;
 mod rules;
+mod sweep;
 mod tape;
 
 use ast_types::Attribute;
@@ -34,7 +41,7 @@ use neuro_hir::{
 use crate::LoweringError;
 use emit::Emitter;
 use rules::Adjoints;
-use tape::{Leaf, Op};
+use tape::Leaf;
 
 /// The attribute asking for a derivative.
 const GRAD_ATTRIBUTE: &str = "grad";
@@ -67,33 +74,27 @@ pub(crate) fn derive_reverse(primal: &HirFunction) -> Result<[HirItem; 2], Lower
         .iter()
         .map(|param| param.name.as_str())
         .collect();
-    let tape = tape::linearize(&primal.name, &primal.body, &names)?;
+    let tape = tape::linearize(&primal.name, &primal.body, &names, &primal.return_type)?;
 
     let mut em = Emitter::new(primal.span);
-    for entry in &tape.entries {
-        let init = replay(entry, em.span());
-        em.declare(entry.name.clone(), init);
-    }
+    sweep::forward(&mut em, &tape.nodes)?;
 
-    let Leaf::Var {
-        name: loss,
-        ty: loss_ty,
-    } = &tape.loss
-    else {
+    let Leaf::Var { name, ty: loss_ty } = &tape.loss else {
         return Err(LoweringError::Malformed {
             detail: format!("`@grad` function '{}' returns a constant", primal.name),
         });
+    };
+    // Taken before the sweep, which rebuilds a loop's carried values in place.
+    let loss = if tape.slots.contains(name) {
+        em.snapshot(&tape.loss)?
+    } else {
+        tape.loss.clone()
     };
     let mut adjoints = Adjoints::default();
     let one = em.float(1.0, emit::element_type(loss_ty));
     let seed = em.literal(&[one], loss_ty);
     adjoints.add(&tape.loss, seed);
-    for entry in tape.entries.iter().rev().filter(|entry| entry.active) {
-        let Some(adjoint) = adjoints.materialize(&mut em, &entry.name, &entry.ty)? else {
-            continue;
-        };
-        rules::propagate(&mut em, entry, &adjoint, &tape.active, &mut adjoints)?;
-    }
+    sweep::reverse(&mut em, &tape.nodes, &mut adjoints, &tape.active)?;
 
     let bundle_name = format!("{BUNDLE_PREFIX}{}", primal.name);
     let mut fields = Vec::with_capacity(differentiated.len());
@@ -130,10 +131,7 @@ pub(crate) fn derive_reverse(primal: &HirFunction) -> Result<[HirItem; 2], Lower
     );
     let result = HirExpr::new(
         HirExprKind::TupleLiteral {
-            elements: vec![
-                HirExpr::new(HirExprKind::Variable(loss.clone()), loss_ty.clone(), span),
-                bundle,
-            ],
+            elements: vec![emit::operand_owned(&loss, span), bundle],
         },
         result_ty.clone(),
         span,
@@ -159,37 +157,4 @@ pub(crate) fn derive_reverse(primal: &HirFunction) -> Result<[HirItem; 2], Lower
             span,
         }),
     ])
-}
-
-/// The forward computation of one tape entry, with every operand borrowed.
-fn replay(entry: &tape::Entry, span: shared_types::Span) -> HirExpr {
-    let read = |leaf: &Leaf| Box::new(emit::operand(leaf, span));
-    let kind = match &entry.op {
-        Op::Binary { op, left, right } => HirExprKind::Binary {
-            op: *op,
-            left: read(left),
-            right: read(right),
-        },
-        Op::Negate(operand) => HirExprKind::Unary {
-            op: ast_types::UnaryOp::Negate,
-            operand: read(operand),
-        },
-        Op::Reduce { receiver, op, axis } => HirExprKind::TensorReduce {
-            receiver: read(receiver),
-            op: *op,
-            axis: *axis,
-        },
-        Op::Literal(elements) => HirExprKind::TensorLiteral {
-            elements: elements
-                .iter()
-                .map(|leaf| emit::operand(leaf, span))
-                .collect(),
-        },
-        Op::Read { object, axes, .. } => HirExprKind::TensorIndex {
-            object: read(object),
-            axes: axes.clone(),
-        },
-        Op::Constant(expr) => return expr.clone(),
-    };
-    HirExpr::new(kind, entry.ty.clone(), entry.span)
 }

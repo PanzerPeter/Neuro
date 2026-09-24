@@ -170,6 +170,7 @@ showcase/ranked_batch.nr             130
 showcase/ranked_finish.nr            176
 showcase/render_settings.nr          99
 showcase/replay_buffer.nr            79
+showcase/robust_fit.nr               23
 showcase/running_stats.nr            5
 showcase/sample_audit.nr             177
 showcase/scan_guard.nr               160

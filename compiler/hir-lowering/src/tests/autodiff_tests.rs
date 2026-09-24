@@ -141,22 +141,204 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     );
 }
 
-#[test]
-fn a_mutable_binding_is_refused_at_the_statement() {
-    let src = r#"
-@grad
-func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
-    mut total = w.sum()
-    return Tensor::scalar(total)
+/// Every statement of `body`, nested blocks included, in source order.
+fn all_stmts(body: &[HirStmt]) -> Vec<&HirStmt> {
+    let mut found = Vec::new();
+    for stmt in body {
+        found.push(stmt);
+        match stmt {
+            HirStmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                found.extend(all_stmts(then_block));
+                found.extend(all_stmts(else_block.as_deref().unwrap_or_default()));
+            }
+            HirStmt::While { body, .. } => found.extend(all_stmts(body)),
+            HirStmt::Expr(expr) => {
+                if let HirExprKind::Loop { body, .. } = &expr.kind {
+                    found.extend(all_stmts(body));
+                }
+            }
+            _ => {}
+        }
+    }
+    found
 }
-"#;
+
+fn refusal_at(src: &str, needle: &str) {
     let error = lowering_error(src);
     let LoweringError::NotDifferentiable { span, .. } = error else {
         panic!("expected NotDifferentiable, got {error:?}");
     };
+    assert_eq!(span.start, src.find(needle).expect("construct in source"));
+}
+
+const LOOPED_LOSS: &str = r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    mut step = 0
+    while step < 3 {
+        acc = &acc * w
+        step += 1
+    }
+    return Tensor::scalar(acc.sum())
+}
+"#;
+
+#[test]
+fn a_while_loop_is_counted_forward_and_undone_iteration_by_iteration() {
+    let program = lower(LOOPED_LOSS);
+    let reverse = item_function(&program, "__loss__rev");
+    let stmts = all_stmts(&reverse.body);
+    let forward_loops = stmts
+        .iter()
+        .filter(
+            |stmt| matches!(stmt, HirStmt::Expr(e) if matches!(e.kind, HirExprKind::Loop { .. })),
+        )
+        .count();
+    let counted_loops = stmts
+        .iter()
+        .filter(|stmt| matches!(stmt, HirStmt::While { .. }))
+        .count();
+    // One forward loop, then the backward walk and, inside it, the replay that rebuilds
+    // each iteration's carried values: no value is kept per iteration.
+    assert_eq!(forward_loops, 1);
+    assert_eq!(counted_loops, 2);
+}
+
+#[test]
+fn a_reassigned_binding_is_a_mutable_slot_of_the_derivative() {
+    let program = lower(LOOPED_LOSS);
+    let reverse = item_function(&program, "__loss__rev");
+    let slot = reverse.body.iter().any(
+        |stmt| matches!(stmt, HirStmt::VarDecl { mutable: true, ty, .. } if *ty == tensor(&[2])),
+    );
+    assert!(slot, "the carried tensor should live in a `mut` binding");
+}
+
+#[test]
+fn a_branch_is_taken_again_in_the_reverse_pass() {
+    let program = lower(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val x = w[0]
+    mut s = x * x
+    if x > 0.0 {
+        s = s * 3.0
+    }
+    return Tensor::scalar(s)
+}
+"#,
+    );
+    let reverse = item_function(&program, "__loss__rev");
+    let branches = all_stmts(&reverse.body)
+        .iter()
+        .filter(|stmt| {
+            matches!(
+                stmt,
+                HirStmt::If {
+                    else_block: Some(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(branches, 2, "one forward branch and its reverse");
+}
+
+#[test]
+fn an_inactive_branch_needs_no_reverse() {
+    let program = lower(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>, flag: bool) -> Tensor<f32, []> {
+    mut k: f32 = 1.0
+    if flag {
+        k = 2.0
+    }
+    return Tensor::scalar(w.sum() * k)
+}
+"#,
+    );
+    let reverse = item_function(&program, "__loss__rev");
+    let branches = all_stmts(&reverse.body)
+        .iter()
+        .filter(|stmt| matches!(stmt, HirStmt::If { .. }))
+        .count();
     assert_eq!(
-        span.start,
-        src.find("mut total").expect("binding in source")
+        branches, 1,
+        "only the forward branch: nothing active leaves it"
+    );
+}
+
+#[test]
+fn a_break_is_refused_at_the_statement() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    while true {
+        acc = &acc * w
+        break
+    }
+    return Tensor::scalar(acc.sum())
+}
+"#,
+        "break",
+    );
+}
+
+#[test]
+fn a_for_loop_is_refused_at_the_statement() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    for i in 0..2 {
+        acc = &acc * w
+    }
+    return Tensor::scalar(acc.sum())
+}
+"#,
+        "for i",
+    );
+}
+
+#[test]
+fn a_return_inside_a_loop_is_refused_at_the_return() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    while acc.sum() < 10.0 {
+        return Tensor::scalar(acc.sum())
+    }
+    return Tensor::scalar(acc.sum())
+}
+"#,
+        "return Tensor::scalar(acc.sum())
+    }",
+    );
+}
+
+#[test]
+fn an_assignment_to_a_parameter_is_refused() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    w *= 2.0
+    return Tensor::scalar(w.sum())
+}
+"#,
+        "w *= 2.0",
     );
 }
 

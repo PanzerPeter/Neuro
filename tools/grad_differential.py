@@ -283,15 +283,23 @@ class TensorCase:
     One differentiated parameter per case, because the bundle then holds one pointer and
     `__f__rev` returns two: the size the C ABIs return in registers (see
     `AGGREGATE_RETURN_MATCHES_C`).
+
+    `path`, when set, names a second function in `source` with the primal's signature that
+    computes only the path the primal executes at `point`. It exists for a point AT a kink,
+    where a central difference of the primal straddles two paths and measures neither: the
+    language rules that the derivative there is the executed path's, so the reference
+    becomes finite differences of that path, which is smooth at the point. The primal and
+    the path must agree on the loss there, which is what proves the path is the executed one.
     """
 
-    def __init__(self, name, source, shape, point, gradient, constants=()):
+    def __init__(self, name, source, shape, point, gradient, constants=(), path=None):
         self.name = name
         self.source = source
         self.shape = shape
         self.point = point
         self.gradient = gradient
         self.constants = constants
+        self.path = path
 
 
 def weighted_matmul_gradient(*a):
@@ -309,6 +317,37 @@ def right_matmul_gradient(*w):
     wm = [[w[2 * r], w[2 * r + 1]] for r in range(3)]
     p = [[sum(a[i][l] * wm[l][j] for l in range(3)) for j in range(2)] for i in range(2)]
     return [sum(a[i][l] * 2.0 * p[i][j] for i in range(2)) for l in range(3) for j in range(2)]
+
+
+# One branching body, differentiated at a point inside each arm.
+PIECEWISE = """
+@grad
+func taken_arm(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val x = w[0]
+    val y = w[1]
+    mut s = x * y
+    mut v = w * 2.0
+    if x > y {
+        s = s + (x * x * 3.0)
+        v = &v * w
+    } else {
+        s = s - y
+    }
+    return Tensor::scalar(s + v.sum())
+}
+"""
+
+# An early return, an `if` expression with an `else if`, and a short-circuit `&&`.
+EARLY_RETURN = """
+@grad
+func early_return(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val x = w[0]
+    val y = w[1]
+    val scale = if x > 1.0 && y > 0.0 { x * 0.0 + 2.0 } else if x > 0.0 { x } else { -x }
+    if y < 0.0 { return Tensor::scalar(scale * y) }
+    return Tensor::scalar(scale * x * y)
+}
+"""
 
 
 TENSOR_CASES = [
@@ -489,6 +528,203 @@ func unread_element(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
         (3.0, 11.0),
         # The tensor analogue of `unused_parameter`: an element nothing reads.
         lambda x, y: (2.0 * x, 0.0),
+    ),
+    TensorCase(
+        "taken_arm",
+        PIECEWISE,
+        (2,),
+        (2.0, 0.5),
+        # x > y: s = xy + 3x^2 and v = 2w * w, so the loss is xy + 5x^2 + 2y^2.
+        lambda x, y: (y + 10.0 * x, x + 4.0 * y),
+    ),
+    TensorCase(
+        "untaken_arm",
+        PIECEWISE.replace("taken_arm", "untaken_arm"),
+        (2,),
+        (0.5, 2.0),
+        # The same body in the other arm: s = xy - y and v = 2w, so xy + 2x + y. A transform
+        # that swept only the first arm would pass `taken_arm` and fail here.
+        lambda x, y: (y + 2.0, x + 1.0),
+    ),
+    TensorCase(
+        "early_return",
+        EARLY_RETURN,
+        (2,),
+        (1.5, 0.5),
+        # `x > 1 && y > 0` holds, so the scale is the constant 2 and the loss 2xy.
+        lambda x, y: (2.0 * y, 2.0 * x),
+    ),
+    TensorCase(
+        "early_return_other_path",
+        EARLY_RETURN.replace("early_return", "early_return_other_path"),
+        (2,),
+        (0.5, -1.5),
+        # The `&&` fails on its first operand, the `else if` takes x, and y < 0 returns
+        # early: the loss is x * y.
+        lambda x, y: (y, x),
+    ),
+    TensorCase(
+        "tensor_power_loop",
+        """
+@grad
+func tensor_power_loop(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    mut step = 0
+    while step < 3 {
+        acc = &acc * w
+        step += 1
+    }
+    return Tensor::scalar(acc.sum())
+}
+""",
+        (2,),
+        (1.1, -0.7),
+        # A tensor carried through three iterations: the loss is the sum of w^4.
+        lambda a, b: (4.0 * a**3, 4.0 * b**3),
+    ),
+    TensorCase(
+        "data_dependent_loop",
+        """
+@grad
+func data_dependent_loop(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut total = w[0]
+    while total < 10.0 {
+        total = total * w[1] + 1.0
+    }
+    return Tensor::scalar(total * w[0])
+}
+""",
+        (2,),
+        (1.5, 2.0),
+        # The trip count is decided by the parameter: 1.5 -> 4 -> 9 -> 19, three iterations,
+        # with the last test 9 < 10 far enough from the edge for the difference to stay on
+        # it. total = x y^3 + y^2 + y + 1, and the loss is total * x.
+        lambda x, y: (2.0 * x * y**3 + y * y + y + 1.0, 3.0 * x * x * y * y + 2.0 * x * y + x),
+    ),
+    TensorCase(
+        "nested_loops",
+        """
+@grad
+func nested_loops(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    mut outer = 0
+    while outer < 2 {
+        mut inner = 0
+        while inner < 2 {
+            if w[0] > 0.0 {
+                acc = &acc * w
+            } else {
+                acc = &acc + w
+            }
+            inner += 1
+        }
+        acc = &acc * 0.5
+        outer += 1
+    }
+    return Tensor::scalar(acc.sum())
+}
+""",
+        (2,),
+        (0.9, 1.2),
+        # Two outer iterations of (two multiplications by w, then a halving): 0.25 w^5.
+        lambda a, b: (1.25 * a**4, 1.25 * b**4),
+    ),
+    TensorCase(
+        "loop_carried_loss",
+        """
+@grad
+func loop_carried_loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut total: Tensor<f32, []> = Tensor::scalar(w[1])
+    mut remaining = 2
+    while remaining > 0 || total.sum() < 0.0 {
+        total *= w[0]
+        remaining -= 1
+    }
+    return total
+}
+""",
+        (2,),
+        (1.5, 0.8),
+        # The loss is the carried tensor itself, updated in place by `*=`, and the `||` runs
+        # its right operand only once the counter is spent: w1 * w0^2.
+        lambda x, y: (2.0 * x * y, x * x),
+    ),
+    TensorCase(
+        "skipped_loop_and_shadowing",
+        """
+@grad
+func skipped_loop_and_shadowing(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 3.0
+    mut count = 0
+    while count < 0 {
+        acc = &acc * w
+        count += 1
+    }
+    mut factor: f32 = 1.0
+    mut k = 0
+    while k < 3 {
+        factor = factor * 2.0
+        k += 1
+    }
+    val x = w[0]
+    if x > 0.0 {
+        val x = factor
+        acc = &acc * x
+    }
+    return Tensor::scalar(acc.sum() + x)
+}
+""",
+        (2,),
+        (0.5, -1.0),
+        # A loop that never runs, one whose carried float never depends on w, and an arm
+        # whose `x` shadows the outer one: 24 w summed, plus the OUTER x = w0.
+        lambda a, b: (25.0, 24.0),
+    ),
+    TensorCase(
+        "kink_branch",
+        """
+@grad
+func kink_branch(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val x = w[0]
+    val y = w[1]
+    if x > y { return Tensor::scalar(x * x) }
+    return Tensor::scalar(x * y)
+}
+
+func kink_branch_path(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    return Tensor::scalar(w[0] * w[1])
+}
+""",
+        (2,),
+        (1.5, 1.5),
+        # At x == y the condition is false, so the executed path is x * y. The two arms agree
+        # on the value there and disagree on the slope in x (2x against y): a kink.
+        lambda x, y: (y, x),
+        path="kink_branch_path",
+    ),
+    TensorCase(
+        "kink_trip_count",
+        """
+@grad
+func kink_trip_count(w: &mut Tensor<f32, [1]>) -> Tensor<f32, []> {
+    mut acc = w[0]
+    while acc < 4.0 {
+        acc = acc * w[0]
+    }
+    return Tensor::scalar(acc)
+}
+
+func kink_trip_count_path(w: &mut Tensor<f32, [1]>) -> Tensor<f32, []> {
+    return Tensor::scalar(w[0] * w[0])
+}
+""",
+        (1,),
+        (2.0,),
+        # At w = 2 the loop runs once (2 < 4, then 4 < 4 fails), so the executed path is w^2.
+        # Any w just below 2 runs a second iteration: the loss jumps, and a central
+        # difference of the primal would report a slope of hundreds.
+        lambda w: (2.0 * w,),
+        path="kink_trip_count_path",
     ),
 ]
 
@@ -720,14 +956,24 @@ class TensorEntry:
         self.primal = getattr(library, case.name)
         self.primal.restype = ctypes.c_void_p
         self.primal.argtypes = arguments
+        self.path = getattr(library, case.path or case.name)
+        self.path.restype = ctypes.c_void_p
+        self.path.argtypes = arguments
         self.reverse = getattr(library, f"__{case.name}__rev")
         self.reverse.restype = ReverseResult
         self.reverse.argtypes = arguments
 
     def loss(self, point):
         """The compiled primal at `point`, as the one element of its rank-0 result."""
+        return self.evaluate(self.primal, point)
+
+    def path_loss(self, point):
+        """The executed path at `point`: the primal itself unless the case names a path."""
+        return self.evaluate(self.path, point)
+
+    def evaluate(self, function, point):
         tensor = ctypes.c_void_p(self.make(*point))
-        result = self.primal(ctypes.byref(tensor), *self.case.constants)
+        result = function(ctypes.byref(tensor), *self.case.constants)
         try:
             (value,), _ = read_tensor(result, f"{self.case.name}'s loss")
         finally:
@@ -793,9 +1039,17 @@ def run_tensor_case(entry, corrupt):
         REVERSE_RELATIVE_TOLERANCE,
         REVERSE_ABSOLUTE_TOLERANCE,
     )
+    compare(
+        [entry.path_loss(point)],
+        [primal],
+        "the executed path's loss",
+        "the primal",
+        REVERSE_RELATIVE_TOLERANCE,
+        REVERSE_ABSOLUTE_TOLERANCE,
+    )
     if corrupt:
         produced = [partial + SELF_TEST_PERTURBATION for partial in produced]
-    finite = fd_gradient_f32(entry.loss, point)
+    finite = fd_gradient_f32(entry.path_loss, point)
     compare(
         finite,
         expected,

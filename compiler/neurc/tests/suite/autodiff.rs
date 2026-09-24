@@ -90,3 +90,58 @@ func loss(w: &Tensor<f32, [2]>) -> Tensor<f32, []> {
         .expect_err("a differentiated parameter must be `&mut`");
     assert!(diagnostics.contains("`&mut`"), "{diagnostics}");
 }
+
+#[test]
+fn a_grad_function_with_branches_and_loops_still_runs_as_its_primal() {
+    let test = CompileTest::new();
+    let source = r#"
+@grad
+func clipped_power(w: &mut Tensor<f32, [2]>, rounds: i32) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    mut done = 0
+    while done < rounds {
+        acc = &acc * w
+        done += 1
+    }
+    val total = acc.sum()
+    if total > 100.0 { return Tensor::scalar(100.0f32) }
+    return Tensor::scalar(total)
+}
+
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [2.0, 3.0]
+    val small = clipped_power(&mut w, 2)
+    val clipped = clipped_power(&mut w, 5)
+    (small.sum() + clipped.sum()) as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("grad_control_flow.nr", source)
+        .expect("compile/run failed");
+    // 2^3 + 3^3 = 35, and 2^6 + 3^6 = 793 clips to 100.
+    assert_eq!(exit, 135);
+}
+
+#[test]
+fn a_loop_jump_in_a_grad_body_is_reported_where_it_is() {
+    let test = CompileTest::new();
+    let source = r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    while acc.sum() < 10.0 {
+        acc = &acc * w
+        continue
+    }
+    return Tensor::scalar(acc.sum())
+}
+"#;
+    let diagnostics = test
+        .check("grad_loop_jump.nr", source)
+        .expect_err("a `continue` in a `@grad` body has no derivative rule");
+    assert!(
+        diagnostics.contains("cannot differentiate"),
+        "{diagnostics}"
+    );
+    assert!(diagnostics.contains(":7:9"), "{diagnostics}");
+}

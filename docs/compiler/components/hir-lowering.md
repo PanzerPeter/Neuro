@@ -63,6 +63,12 @@ flattened into one operation per binding, those bindings are emitted again with 
 operand borrowed, and a reverse sweep adds each operation's adjoint rule, summing contributions
 for values used more than once.
 
+Control flow keeps its structure. An `if` becomes a branch holding one flattened list per arm, a
+`while` a loop holding its condition and body, and a binding either of them reassigns becomes a
+`mut` binding of the derivative. The reverse pass of a branch runs the taken arm again and sweeps
+it. The reverse pass of a loop undoes the iterations last to first, rebuilding each one's values by
+replaying the iterations before it, so the forward pass keeps only an iteration count.
+
 This is the one place lowering reports a user error with a location. The transform owns its rule
 set, so a construct it has no rule for is a `LoweringError::NotDifferentiable` that carries the
 construct's span, and `neurc` renders it like a type error. See

@@ -8,7 +8,8 @@
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    static_shape, AxisNames, HirExpr, HirExprKind, HirReduceOp, HirStmt, HirTensorAxis, HirType,
+    static_shape, AxisNames, HirExpr, HirExprKind, HirPlace, HirReduceOp, HirStmt, HirTensorAxis,
+    HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -143,22 +144,150 @@ impl Emitter {
         self.span
     }
 
+    pub(super) fn push(&mut self, stmt: HirStmt) {
+        self.stmts.push(stmt);
+    }
+
+    /// Run `body` against an empty statement list and hand back what it emitted: the
+    /// statements of a nested block.
+    pub(super) fn nested<R>(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Result<R, LoweringError>,
+    ) -> Result<(Vec<HirStmt>, R), LoweringError> {
+        let outer = std::mem::take(&mut self.stmts);
+        let result = body(self);
+        let inner = std::mem::replace(&mut self.stmts, outer);
+        Ok((inner, result?))
+    }
+
     /// Declare `name` bound to `init`, the form every value of the function takes.
     pub(super) fn declare(&mut self, name: String, init: HirExpr) {
+        self.declare_as(name, init, false);
+    }
+
+    /// Declare the mutable binding `name`: a slot, a running adjoint, or a counter.
+    pub(super) fn declare_mut(&mut self, name: String, init: HirExpr) {
+        self.declare_as(name, init, true);
+    }
+
+    fn declare_as(&mut self, name: String, init: HirExpr, mutable: bool) {
         self.stmts.push(HirStmt::VarDecl {
             name,
             ty: init.ty.clone(),
             init: Some(init),
-            mutable: false,
+            mutable,
             span: self.span,
         });
     }
 
-    fn bind(&mut self, kind: HirExprKind, ty: HirType) -> Leaf {
+    /// `name = value`, for a binding `declare_mut` made.
+    pub(super) fn assign(&mut self, name: &str, ty: &HirType, value: HirExpr) {
+        self.stmts.push(HirStmt::Assign {
+            place: HirPlace::Var {
+                name: name.to_string(),
+                ty: ty.clone(),
+            },
+            value,
+            span: self.span,
+        });
+    }
+
+    pub(super) fn fresh(&mut self) -> String {
         let name = format!("{TEMP_PREFIX}{}", self.counter);
         self.counter += 1;
+        name
+    }
+
+    fn bind(&mut self, kind: HirExprKind, ty: HirType) -> Leaf {
+        let name = self.fresh();
         self.declare(name.clone(), HirExpr::new(kind, ty.clone(), self.span));
         Leaf::Var { name, ty }
+    }
+
+    /// A fresh binding holding `leaf`'s current value, for a value about to be moved or
+    /// about to change: a tensor is copied, a scalar read, a constant kept as written.
+    pub(super) fn snapshot(&mut self, leaf: &Leaf) -> Result<Leaf, LoweringError> {
+        match leaf {
+            Leaf::Const(_) => Ok(leaf.clone()),
+            Leaf::Var { .. } if tensor_parts(leaf.ty()).is_some() => self.copy(leaf),
+            Leaf::Var { name, ty } => {
+                let read = HirExprKind::Variable(name.clone());
+                Ok(self.bind(read, ty.clone()))
+            }
+        }
+    }
+
+    /// The zero of `ty`: the placeholder a slot starts from and the adjoint of a value
+    /// nothing reached.
+    pub(super) fn zero(&self, ty: &HirType) -> Result<HirExpr, LoweringError> {
+        let literal = |value: Literal, ty: &HirType| {
+            HirExpr::new(HirExprKind::Literal(value), ty.clone(), self.span)
+        };
+        let kind = match ty {
+            HirType::Tensor { element, .. } => HirExprKind::TensorFill {
+                value: Box::new(literal(Literal::Float(0.0, None), element)),
+            },
+            HirType::F32 | HirType::F64 => return Ok(literal(Literal::Float(0.0, None), ty)),
+            HirType::Bool => return Ok(literal(Literal::Boolean(false), ty)),
+            HirType::I8
+            | HirType::I16
+            | HirType::I32
+            | HirType::I64
+            | HirType::U8
+            | HirType::U16
+            | HirType::U32
+            | HirType::U64 => return Ok(literal(Literal::Integer(0, None), ty)),
+            _ => return Err(malformed("a zero of a type no slot holds")),
+        };
+        Ok(HirExpr::new(kind, ty.clone(), self.span))
+    }
+
+    /// An iteration counter's value `value`.
+    pub(super) fn count(&self, value: i128) -> HirExpr {
+        HirExpr::new(
+            HirExprKind::Literal(Literal::Integer(value, None)),
+            HirType::I64,
+            self.span,
+        )
+    }
+
+    fn counter(&self, name: &str) -> Box<HirExpr> {
+        Box::new(HirExpr::new(
+            HirExprKind::Variable(name.to_string()),
+            HirType::I64,
+            self.span,
+        ))
+    }
+
+    /// `name = name + step` on an iteration counter.
+    pub(super) fn step(&mut self, name: &str, step: i128) {
+        let next = HirExpr::new(
+            HirExprKind::Binary {
+                op: BinaryOp::Add,
+                left: self.counter(name),
+                right: Box::new(self.count(step)),
+            },
+            HirType::I64,
+            self.span,
+        );
+        self.assign(name, &HirType::I64, next);
+    }
+
+    /// `left op right` on two iteration counters, or on one and a constant.
+    pub(super) fn compare(&self, op: BinaryOp, left: &str, right: Option<&str>) -> HirExpr {
+        let right = match right {
+            Some(name) => self.counter(name),
+            None => Box::new(self.count(0)),
+        };
+        HirExpr::new(
+            HirExprKind::Binary {
+                op,
+                left: self.counter(left),
+                right,
+            },
+            HirType::Bool,
+            self.span,
+        )
     }
 
     fn read(&self, leaf: &Leaf) -> Box<HirExpr> {

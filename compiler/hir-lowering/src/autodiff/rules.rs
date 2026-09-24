@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ast_types::BinaryOp;
+use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{HirReduceOp, HirType};
 
 use super::emit::{tensor_parts, tensor_type, Emitter};
@@ -16,6 +16,8 @@ use crate::LoweringError;
 #[derive(Default)]
 pub(super) struct Adjoints {
     whole: HashMap<String, Vec<Leaf>>,
+    /// The value type of every target that has received a contribution.
+    types: HashMap<String, HirType>,
     /// Contributions to single elements of a tensor, from element reads, by offset.
     elements: HashMap<String, Vec<(usize, Leaf)>>,
     /// How many values each contribution was handed to. An add passes its own adjoint
@@ -26,14 +28,15 @@ pub(super) struct Adjoints {
 
 impl Adjoints {
     pub(super) fn add(&mut self, target: &Leaf, contribution: Leaf) {
-        let Some(target) = target.var_name() else {
+        let Some(name) = target.var_name() else {
             return;
         };
-        if let Some(name) = contribution.var_name() {
-            *self.owners.entry(name.to_string()).or_default() += 1;
+        self.note(target);
+        if let Some(held) = contribution.var_name() {
+            *self.owners.entry(held.to_string()).or_default() += 1;
         }
         self.whole
-            .entry(target.to_string())
+            .entry(name.to_string())
             .or_default()
             .push(contribution);
     }
@@ -54,7 +57,31 @@ impl Adjoints {
         }
     }
 
+    fn note(&mut self, target: &Leaf) {
+        if let Some(name) = target.var_name() {
+            let _ = self
+                .types
+                .entry(name.to_string())
+                .or_insert_with(|| target.value_ty().clone());
+        }
+    }
+
+    /// Every target still holding a contribution, with its value type, in name order.
+    /// After a nested sweep these are exactly the values defined outside it.
+    pub(super) fn pending(&self) -> Vec<(String, HirType)> {
+        let mut pending: Vec<(String, HirType)> = self
+            .whole
+            .keys()
+            .chain(self.elements.keys())
+            .filter_map(|name| Some((name.clone(), self.types.get(name)?.clone())))
+            .collect();
+        pending.sort_by(|a, b| a.0.cmp(&b.0));
+        pending.dedup_by(|a, b| a.0 == b.0);
+        pending
+    }
+
     fn add_element(&mut self, target: &Leaf, flat: usize, contribution: Leaf) {
+        self.note(target);
         let Some(target) = target.var_name() else {
             return;
         };
@@ -144,7 +171,10 @@ pub(super) fn propagate(
         Op::Binary { op, left, right } => {
             binary(em, *op, [left, right], adjoint, is_active, adjoints)
         }
-        Op::Negate(operand) => {
+        Op::Unary {
+            op: UnaryOp::Negate,
+            operand,
+        } => {
             if is_active(operand) {
                 let contribution = em.negate(adjoint)?;
                 adjoints.add(operand, contribution);
@@ -172,7 +202,7 @@ pub(super) fn propagate(
             }
             Ok(())
         }
-        Op::Constant(_) => Ok(()),
+        Op::Unary { .. } | Op::Constant(_) => Ok(()),
     }
 }
 
