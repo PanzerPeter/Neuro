@@ -664,3 +664,41 @@ func main() -> i32 { 0 }
         "`-> impl Source<Item = i32>` promises what `Tally` does not bind; got {errors:?}"
     );
 }
+
+/// A struct field's `dyn Trait` resolves whichever side of the struct the trait is
+/// declared on. Struct fields resolve in the pass before traits register, so the trait
+/// was reported as undeclared, and every construction then lost the field.
+#[test]
+fn test_bug_048_a_dyn_trait_struct_field_resolves_in_either_order() {
+    let trait_decl = "trait Namer {\n    func name(&self) -> i32\n}\n";
+    let rest = r#"
+struct Holder { d: &dyn Namer }
+struct Dog { age: i32 }
+impl Namer for Dog {
+    func name(&self) -> i32 { self.age }
+}
+func main() -> i32 {
+    val dog = Dog { age: 3 }
+    val h = Holder { d: &dog }
+    h.d.name()
+}
+"#;
+    for source in [format!("{trait_decl}{rest}"), format!("{rest}{trait_decl}")] {
+        let errors = semantic_errors(&source);
+        assert!(errors.is_empty(), "got {errors:?}\n{source}");
+    }
+    let unsafe_trait = r#"
+struct Holder { d: &dyn Maker }
+trait Maker {
+    func make() -> i32
+}
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(unsafe_trait);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TraitNotObjectSafe { .. })),
+        "a field's trait is still held to object safety; got {errors:?}"
+    );
+}

@@ -79,41 +79,6 @@ declares bindings needs the walk to run after the value is checked, so that its 
 resolvable. Decide first whether the provenance walk is meant to grow these shapes or whether
 the refusal is the intended boundary.
 
-## BUG-048: `&dyn Trait` as a struct field reports the trait as undeclared
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; pass ordering in `TypeChecker::check_program`
-- **Severity**: minor. Refused with a false diagnostic rather than miscompiled
-
-**Minimal repro**
-
-```neuro
-trait Namer {
-    func name(&self) -> i32
-}
-
-struct Holder { d: &dyn Namer }
-
-func main() -> i32 { 0 }
-```
-
-Expected: the trait resolves, since items may be declared in any order and `Namer` is even
-declared first. The same `&dyn Namer` is accepted as a function parameter. Observed:
-`error: unknown trait 'Namer': no trait Namer is declared`, then "struct 'Holder' has no field
-'d'" at every construction.
-
-**Root cause**: confirmed in the code. Struct field types are resolved in the pass that
-registers structs, which runs before the pass that registers traits. Enums and newtypes avoid
-the same trap by pre-registering their names first; traits have no such pass, and a
-`dyn Trait` field also needs the trait's object safety, which is only known once its methods
-are registered.
-
-**Workaround**: none for a struct field; pass the trait object as a parameter instead.
-
-**Fix sketch**: defer resolving a `dyn Trait` field type until traits are registered, or
-pre-register trait names and check object safety in a later pass. Either touches the pass
-order, so it wants a regression test with the trait declared both before and after the struct.
-
 ## BUG-047: a `Drop` value that is never bound is never destroyed
 
 - **Status**: open, confirmed
@@ -217,7 +182,7 @@ same body walk the pass already runs. Regression tests want the identity above, 
 forward (one exit a parameter, one an allocation, which must stay conservative), and a forward
 through two calls, so a wrong transfer would double-free rather than merely leak.
 
-## BUG-038 — a `string` passed by value to a closure is released by nobody
+## BUG-038 — a `string` passed by value to a closure, or returned by one, is released by nobody
 
 - **Status**: open, confirmed
 - **Area**: `llvm-backend`; `codegen/closures.rs` and the call-boundary summary in
@@ -261,61 +226,48 @@ summaries by function name; `shadowed_names` then removes every name a local bin
 A closure has no entry to begin with, so `param_is_read_only` answers `false` for it, which is
 the answer that means "the callee may have retained this".
 
-**Workaround**: give the stage a top-level `func` instead of a closure where it takes an owned
-`string`, or pass a borrow (`&string`), which is not a move and leaves the caller's flag alone.
+**The return half.** The return summary is keyed the same way, so an owned `string` a closure
+RETURNS is never recognised as the caller's either. Each call below leaks its result, while the
+same loop calling a top-level `func describe(n: i32) -> string { "total {n}" }` directly, or
+piping into it (`i |> describe`), releases every buffer:
+
+```neuro
+func describe(n: i32) -> string { "total {n}" }
+func keep(s: string) -> string { s + "" }
+
+func main() -> i32 {
+    val f = |n: i32| -> string { "total {n}" }
+    val twice = describe >> keep
+    mut i = 0
+    mut t: u64 = 0
+    while i < 10 {
+        val a = f(i)          // leaks
+        val b = i |> f        // leaks
+        val c = twice(i)      // leaks: a composition is a closure
+        t = t + a.len() + b.len() + c.len()
+        i = i + 1
+    }
+    if t != 210 { return 1 }
+    0
+}
+```
+
+**Workaround**: give the stage a top-level `func` instead of a closure where it takes or returns
+an owned `string`, or pass a borrow (`&string`), which is not a move and leaves the caller's flag
+alone.
 
 **Fix sketch**: the summary has to be keyed by something a closure has. Lowering gives each
 closure literal a generated name for its lifted body, so the cheap version is to record that
 body in the same walk under that name and have the indirect call path look it up when the
 callee is a binding whose initializer is a closure literal in scope. That covers the common
 case above and leaves a closure reached through a parameter or a struct field unprovable, which
-is the correct conservative answer for those. The reason this is filed rather than fixed: it
+is the correct conservative answer for those. The same lookup answers the return half, once
+the lifted body is also entered in the return summary under its generated name. The reason this is filed rather than fixed: it
 widens the summary from "top-level functions" to "every lowered body", and the indirect call
 path in `codegen_call_dispatch` has to carry enough of the callee's identity to key on, which
 is a change to what that path passes rather than a new arm in it. Regression tests want the
 repro above, the `|>` spelling, a closure stored in a struct field (must stay conservative),
 and a closure that DOES retain its argument, which must keep the current transfer.
-
-## BUG-037 — a moved binding read through a path reports the same error twice
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; the moved-value check in `type_checkers/moves.rs`
-- **Severity**: minor — diagnostic noise, no effect on the compiled program
-
-Reading a moved binding through a path (`hs[0].id`) emits two identical `use of moved value`
-errors for the one read: once against the index and once against the whole path. A bare read
-(`hs`) emits one. The error count the driver prints is therefore wrong, and a program with
-several such reads buries its other diagnostics.
-
-**Minimal repro**
-
-```neuro
-struct Handle { id: i32 }
-
-impl Drop for Handle {
-    func drop(&mut self) { }
-}
-
-func eat(a: [Handle; 2]) -> i32 { 0 }
-
-func main() -> i32 {
-    val hs = [Handle { id: 1 }, Handle { id: 2 }]
-    val gone = eat(hs)
-    return hs[0].id
-}
-```
-
-Expected: one `use of moved value 'hs'`. Observed: two, with identical text and the same
-`moved here` note, differing only in the width of the caret.
-
-**Root cause**: not yet confirmed in the code. The shape suggests the check runs once per
-place segment as the path is walked, with each level reporting against the same root binding
-rather than the innermost failing one.
-
-**Workaround**: none needed; the first diagnostic is correct and actionable.
-
-**Fix sketch**: report the moved-value error at the outermost place only, or record the
-`(binding, span)` pair already reported and suppress a repeat for the same use.
 
 ## BUG-035 — a borrow reaching a binding through a call return is not tracked
 

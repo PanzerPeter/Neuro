@@ -268,11 +268,12 @@ where a later requirement was slotted between two existing ones.
 |---|---|---|
 | 0a | Pre-register newtype *names* (`predeclare_newtype`) | a newtype may appear as a struct field, enum payload, or another newtype's inner before its own declaration |
 | 0 | Pre-register enum *names* (`predeclare_enum`), keeping a generic template under its base name for construction-site inference | an enum may be a struct field type, and vice versa |
+| 0b | Pre-register trait *names* (`trait_names`) | a struct field may be a `&dyn Trait` of a trait registered only in pass 1d |
 | 1 | Register struct definitions (generic ones via `register_generic_struct`); record `Copy`/`Clone` derive intent | type names must resolve in method signatures |
 | 1a | Resolve enum variant payloads (`resolve_enum_variants`) | a payload may name a struct, so it cannot be resolved until pass 1 has run |
 | 1c | Resolve and validate newtype inner types | every nominal name is known by now; rejects cycles, which is what makes every predicate recursing through an inner type terminate |
 | 1b | Validate `@derive(Copy)`, every field of a `Copy` struct is itself `Copy` | runs after 1c so a newtype field reports its real `Copy`-ness |
-| 1d | Register trait declarations | `impl Trait for T` conformance and generic trait bounds need the trait's method signatures |
+| 1d | Register trait declarations, then check the object safety of every `dyn Trait` a struct field named (`check_deferred_object_safety`) | `impl Trait for T` conformance and generic trait bounds need the trait's method signatures, and so does object safety |
 | 2 | Register `impl` method signatures (generic ones via `register_generic_impl`) | uses the struct types from pass 1 |
 | 2b | Operator-trait supertrait check (`check_operator_supertraits`) | all impls are registered, so `Comparable: PartialEq` is order-independent |
 | 3 | Register module-level constants | they must be visible in every function body |

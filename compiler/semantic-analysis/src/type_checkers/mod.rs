@@ -93,6 +93,13 @@ pub(crate) struct TypeChecker {
     /// User-declared traits keyed by name: each carries its method signatures so
     /// `impl Trait for Type` conformance and generic-body trait-method dispatch resolve.
     traits: HashMap<String, TraitInfo>,
+    /// Every declared trait name, known before any trait is registered. A struct field
+    /// is resolved in the pass that registers structs, which a trait's method signatures
+    /// need to run first, so a field's `dyn Trait` resolves against the name alone.
+    trait_names: HashSet<String>,
+    /// `dyn Trait` types resolved before their trait was registered, with where they
+    /// were written: object safety needs the methods, so it is checked once they exist.
+    deferred_object_safety: Vec<(String, shared_types::Span)>,
     /// Associated-type bindings in scope: the name after `Self::` → the type an impl
     /// bound it to. Non-empty only while an `impl` block's signatures and method bodies
     /// are checked, which is exactly the region where `Self::Item` denotes a type.
@@ -349,6 +356,8 @@ impl TypeChecker {
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
             traits: HashMap::new(),
+            trait_names: HashSet::new(),
+            deferred_object_safety: Vec::new(),
             self_assoc: HashMap::new(),
             trait_impls: HashSet::new(),
             impl_assoc: HashMap::new(),
@@ -729,6 +738,14 @@ impl TypeChecker {
             }
         }
 
+        // Pass 0b: pre-register trait NAMES, so a struct field's `dyn Trait` resolves
+        // although traits are registered after structs.
+        for item in items {
+            if let Item::Trait(def) = item {
+                self.trait_names.insert(def.name.name.clone());
+            }
+        }
+
         // Pass 1: register struct definitions so type names resolve in method signatures.
         // This also records each struct's Copy/Clone derivation intent.
         for item in items {
@@ -771,6 +788,7 @@ impl TypeChecker {
                 self.register_trait(def);
             }
         }
+        self.check_deferred_object_safety();
 
         // Pass 2: register impl method signatures (uses struct_defs from pass 1).
         for item in items {

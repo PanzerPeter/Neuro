@@ -210,7 +210,7 @@ impl TypeChecker {
             if let Some(ref expected_ty) = expected_field_ty {
                 self.reject_private_field(&name.name, &fname.name, *fspan);
                 if let Some(actual_ty) = self.check_expr(value, Some(expected_ty)) {
-                    if !actual_ty.is_compatible_with(expected_ty) {
+                    if !self.assignable(&actual_ty, expected_ty) {
                         self.record_error(TypeError::Mismatch {
                             expected: expected_ty.clone(),
                             found: actual_ty,

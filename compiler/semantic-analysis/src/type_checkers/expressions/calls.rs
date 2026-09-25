@@ -86,23 +86,7 @@ impl TypeChecker {
             }
         };
 
-        if args.len() != param_types.len() {
-            self.record_error(TypeError::ArgumentCountMismatch {
-                expected: param_types.len(),
-                found: args.len(),
-                span,
-            });
-        }
-
-        for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
-            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                if !self.assignable(&arg_ty, expected_ty) {
-                    self.record_type_mismatch(expected_ty, arg_ty, arg.span());
-                }
-            }
-            // By-value argument passing moves a non-Copy binding into the callee.
-            self.record_move(arg);
-        }
+        self.check_call_args(args, &param_types, span);
 
         Some(return_type)
     }
@@ -189,6 +173,19 @@ impl TypeChecker {
         visible_params: &[Type],
         span: Span,
     ) {
+        self.check_receiver_call_args(None, args, visible_params, span);
+    }
+
+    /// [`check_call_args`](TypeChecker::check_call_args) for a method, whose receiver
+    /// is reborrowed for the call alongside the arguments; `receiver` pairs it with
+    /// whether the method takes it `&mut`.
+    pub(super) fn check_receiver_call_args(
+        &mut self,
+        receiver: Option<(&ast_types::Expr, bool)>,
+        args: &[ast_types::Expr],
+        visible_params: &[Type],
+        span: Span,
+    ) {
         if args.len() != visible_params.len() {
             self.record_error(TypeError::ArgumentCountMismatch {
                 expected: visible_params.len(),
@@ -198,11 +195,64 @@ impl TypeChecker {
         }
         for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
             if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
+                let arg_ty = shared_reborrow(arg_ty, expected_ty);
                 if !self.assignable(&arg_ty, expected_ty) {
                     self.record_type_mismatch(expected_ty, arg_ty, arg.span());
                 }
             }
             self.record_move(arg);
+        }
+        self.check_reborrow_exclusivity(receiver, args, visible_params);
+    }
+
+    /// The `&mut` binding `arg` names bare. A call reborrows such a binding rather than
+    /// moving it, so it is not a borrow expression the transient counts see.
+    fn reborrowed_binding(&self, arg: &ast_types::Expr) -> Option<String> {
+        let mut place = arg;
+        while let ast_types::Expr::Paren(inner, _) = place {
+            place = inner;
+        }
+        let ast_types::Expr::Identifier(ident) = place else {
+            return None;
+        };
+        match self.symbols.lookup(&ident.name).map(|info| &info.ty) {
+            Some(Type::Reference { mutable: true, .. }) => Some(ident.name.clone()),
+            _ => None,
+        }
+    }
+
+    /// Reject one `&mut` binding reborrowed twice by a single call where either
+    /// reborrow is exclusive. Both live until the call returns, so the callee would hold
+    /// two paths to one place and write through one while reading through the other:
+    /// the one-`&mut`-at-a-time rule, which `g(&mut x, &mut x)` already meets at the
+    /// borrow site. Separate calls do not overlap, so this is per call, not per statement.
+    fn check_reborrow_exclusivity(
+        &mut self,
+        receiver: Option<(&ast_types::Expr, bool)>,
+        args: &[ast_types::Expr],
+        params: &[Type],
+    ) {
+        let mut seen: Vec<(String, bool)> = receiver
+            .and_then(|(expr, exclusive)| {
+                self.reborrowed_binding(expr).map(|name| (name, exclusive))
+            })
+            .into_iter()
+            .collect();
+        for (arg, param) in args.iter().zip(params) {
+            let Some(name) = self.reborrowed_binding(arg) else {
+                continue;
+            };
+            let exclusive = matches!(param, Type::Reference { mutable: true, .. });
+            if seen
+                .iter()
+                .any(|(prior, prior_exclusive)| *prior == name && (*prior_exclusive || exclusive))
+            {
+                self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
+                    name: name.clone(),
+                    span: arg.span(),
+                });
+            }
+            seen.push((name, exclusive));
         }
     }
 
@@ -332,7 +382,8 @@ impl TypeChecker {
         );
 
         for (arg, param) in args.iter().zip(sig.params.iter()) {
-            let arg_ty = self.check_expr(arg, None).unwrap_or(Type::Unknown);
+            let arg_ty =
+                shared_reborrow(self.check_expr(arg, None).unwrap_or(Type::Unknown), param);
             if !matches!(arg_ty, Type::Unknown)
                 && !declarations::unify_generic(param, &arg_ty, &mut subst)
             {
@@ -357,6 +408,7 @@ impl TypeChecker {
             // A by-value argument moves a non-Copy binding into the callee.
             self.record_move(arg);
         }
+        self.check_reborrow_exclusivity(None, args, &sig.params);
 
         // Every parameter must be bound, by inference or turbofish. A type argument is
         // unconstrained: the body was move-checked against an abstract `T` that is
@@ -514,7 +566,14 @@ impl TypeChecker {
                                 span: *fa_span,
                             });
                         }
-                        self.check_call_args(args, &sig.params, *span);
+                        let exclusive_receiver =
+                            matches!(sig.self_param, Some(ast_types::SelfParam::RefMut));
+                        self.check_receiver_call_args(
+                            Some((object, exclusive_receiver)),
+                            args,
+                            &sig.params,
+                            *span,
+                        );
                         return Some(sig.ret.clone());
                     }
                     _ => {
@@ -607,22 +666,13 @@ impl TypeChecker {
                     &param_types[1..]
                 };
 
-                if args.len() != visible_params.len() {
-                    self.record_error(TypeError::ArgumentCountMismatch {
-                        expected: visible_params.len(),
-                        found: args.len(),
-                        span: *span,
-                    });
-                }
-
-                for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
-                    if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                        if !self.assignable(&arg_ty, expected_ty) {
-                            self.record_type_mismatch(expected_ty, arg_ty, arg.span());
-                        }
-                    }
-                    self.record_move(arg);
-                }
+                let exclusive_receiver = self.mut_self_methods.contains(&mangled);
+                self.check_receiver_call_args(
+                    Some((object, exclusive_receiver)),
+                    args,
+                    visible_params,
+                    *span,
+                );
 
                 Some(return_type)
             }
@@ -688,22 +738,7 @@ impl TypeChecker {
                     _ => return Some(Type::Unknown),
                 };
 
-                if args.len() != param_types.len() {
-                    self.record_error(TypeError::ArgumentCountMismatch {
-                        expected: param_types.len(),
-                        found: args.len(),
-                        span: *span,
-                    });
-                }
-
-                for (arg, expected_ty) in args.iter().zip(param_types.iter()) {
-                    if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
-                        if !self.assignable(&arg_ty, expected_ty) {
-                            self.record_type_mismatch(expected_ty, arg_ty, arg.span());
-                        }
-                    }
-                    self.record_move(arg);
-                }
+                self.check_call_args(args, &param_types, *span);
 
                 Some(return_type)
             }
@@ -752,5 +787,23 @@ impl TypeChecker {
             });
             Some(Type::Unknown)
         }
+    }
+}
+
+/// A `&mut T` argument at a `&T` parameter, typed as the shared reborrow the call takes
+/// of it. Anything else is returned unchanged.
+fn shared_reborrow(found: Type, expected: &Type) -> Type {
+    match (found, expected) {
+        (
+            Type::Reference {
+                inner,
+                mutable: true,
+            },
+            Type::Reference { mutable: false, .. },
+        ) => Type::Reference {
+            inner,
+            mutable: false,
+        },
+        (found, _) => found,
     }
 }

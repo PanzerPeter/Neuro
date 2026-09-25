@@ -75,11 +75,11 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
     loop {
         let grown: Vec<String> = bodies
             .iter()
-            .filter(|(name, _)| !returns_owned.contains(*name) && !shadowed.contains(*name))
+            .filter(|(name, _)| !returns_owned.contains(name) && !shadowed.contains(name))
             .filter(|(_, exits)| {
                 !exits.is_empty() && exits.iter().all(|exit| allocates(exit, &returns_owned))
             })
-            .map(|(name, _)| (*name).to_string())
+            .map(|(name, _)| name.clone())
             .collect();
         if grown.is_empty() {
             break;
@@ -171,13 +171,25 @@ fn callables(items: &[HirItem]) -> Vec<Callable<'_>> {
 /// exits through each branch's own tail, which [`tail_exits`] reads through. A `return`
 /// inside an expression (a `loop` body, an `if` used as a value) is an exit
 /// [`collect_returns`] does not reach, so a body with one answers the safe way.
-fn string_returning_bodies(items: &[HirItem]) -> Vec<(&str, Vec<&HirExpr>)> {
-    let mut out: Vec<(&str, Vec<&HirExpr>)> = Vec::new();
+fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
+    let mut out: Vec<(String, Vec<&HirExpr>)> = Vec::new();
+    let mut returning: Vec<(String, &HirType, &[HirStmt])> = Vec::new();
     for item in items {
-        let (name, return_type, body) = match item {
-            HirItem::Function(func) => (func.name.as_str(), &func.return_type, &func.body),
-            _ => continue,
-        };
+        match item {
+            HirItem::Function(func) => {
+                returning.push((func.name.clone(), &func.return_type, &func.body))
+            }
+            HirItem::Impl(impl_def) => returning.extend(impl_def.methods.iter().map(|method| {
+                (
+                    format!("{}__{}", impl_def.type_name, method.name),
+                    &method.return_type,
+                    method.body.as_slice(),
+                )
+            })),
+            _ => {}
+        }
+    }
+    for (name, return_type, body) in returning {
         if !matches!(return_type, HirType::String) {
             continue;
         }
@@ -307,12 +319,19 @@ fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
             ..
         } => matches!(expr.ty, HirType::String),
         HirExprKind::Call { callee, args } => match &callee.kind {
-            HirExprKind::Variable(name) => args.is_empty() && producers.contains(name),
-            // `String::to_string` copies the builder's bytes into a buffer of their
-            // own. The receiver's type is what identifies it: a user type that declares
-            // its own `to_string` may return a `.rodata` literal, and reading that as an
-            // allocation would hand `.rodata` to `free`.
+            HirExprKind::Variable(name) => producers.contains(name),
+            HirExprKind::Path { type_name, member } => {
+                producers.contains(&format!("{}__{}", type_name, member))
+            }
+            // A user method is keyed by the `Type__method` its call site mangles.
             HirExprKind::FieldAccess { object, field } => {
+                if let HirType::Struct(type_name) = object.ty.referent() {
+                    return producers.contains(&format!("{}__{}", type_name, field));
+                }
+                // `String::to_string` copies the builder's bytes into a buffer of their
+                // own. The receiver's type is what identifies it: a user type that
+                // declares its own `to_string` may return a `.rodata` literal, and reading
+                // that as an allocation would hand `.rodata` to `free`.
                 args.is_empty()
                     && ((field == TO_OWNED_METHOD && is_builder(&object.ty))
                         || (field == CLONE_METHOD

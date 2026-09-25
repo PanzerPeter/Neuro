@@ -682,3 +682,43 @@ func main() -> i32 {{
         "a moved-out payload is destroyed once, by its new owner"
     );
 }
+
+/// Reading a `Copy` value through an index the compiler cannot evaluate moves nothing, so
+/// the holder keeps every owner it holds. A run-time index used to disown the whole
+/// binding at any move site, as if the element itself had left, so neither element's
+/// destructor ran; the same read at a literal index released both.
+#[test]
+fn test_bug_061_a_copy_read_through_a_runtime_index_keeps_the_holder_armed() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Tagged { id: i32, sink: &mut i32 }
+
+impl Drop for Tagged {
+    func drop(&mut self) { *self.sink = *self.sink + 1 }
+}
+
+func twice(x: i32) -> i32 { x * 2 }
+
+func main() -> i32 {
+    mut a: i32 = 0
+    mut b: i32 = 0
+    mut read: i32 = 0
+    {
+        val hs = [Tagged { id: 3, sink: &mut a }, Tagged { id: 4, sink: &mut b }]
+        mut k = 0
+        k = k + 1
+        val first = hs[k].id
+        read = hs[k].id
+        read = read + first + twice(hs[k].id)
+    }
+    return a * 100 + b * 10 + read
+}
+"#;
+    let exit = test
+        .compile_and_run("runtime_index_copy_read.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(
+        exit, 126,
+        "both elements destroyed once, and 4 + 4 + 8 read"
+    );
+}

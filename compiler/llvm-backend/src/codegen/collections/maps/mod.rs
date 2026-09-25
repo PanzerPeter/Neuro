@@ -166,13 +166,19 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<IntValue<'ctx>> {
         let key = self.lower_map_argument(args, 0, key_ty)?;
         let find = self.build_map_find_helper(kind, key_ty, value_ty)?;
-        Ok(self
+        let slot = self
             .builder
             .build_call(find, &[header.into(), key.into()], "map.find")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("map lookup returned void".into()))?
-            .into_int_value())
+            .into_int_value();
+        // The lookup only compared the key, so a key built for this call has no reader
+        // left; what follows works on the slot index alone.
+        if let Some(expr) = args.first() {
+            self.release_string_temporary(expr, key)?;
+        }
+        Ok(slot)
     }
 
     /// Whether a lookup result names a live slot.

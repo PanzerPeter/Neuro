@@ -950,6 +950,29 @@ func through_calls(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
         # Every callee binds a parameter named `x`, the caller's own `x` included.
         lambda a, b, c: (2.0 * a + 5.5, 4.0 * b + 0.5, 3.0 * c * c + 2.0 * c + 1.0),
     ),
+    TensorCase(
+        # A helper that only reads the parameter takes `&`, and the differentiated `&mut`
+        # is handed to it directly, as a shared reborrow, instead of through a copy.
+        "read_only_helper",
+        """
+func read_pair(t: &Tensor<f32, [2]>) -> f32 {
+    t[0] * t[1] + t[0]
+}
+
+func read_second<N>(t: &Tensor<f32, [N]>) -> f32 {
+    t[1] * 3.0
+}
+
+@grad
+func read_only_helper(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    return Tensor::scalar(read_pair(w) * 2.0 + read_second(w))
+}
+""",
+        (2,),
+        (1.5, -0.75),
+        # 2 (w0 w1 + w0) + 3 w1.
+        lambda a, b: (2.0 * (b + 1.0), 2.0 * a + 3.0),
+    ),
 ]
 
 

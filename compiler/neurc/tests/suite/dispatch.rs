@@ -350,3 +350,38 @@ func main() -> i32 { 0 }
         "`impl Trait` in a struct field must be rejected"
     );
 }
+
+#[test]
+fn test_bug_048_a_dyn_trait_struct_field_dispatches_dynamically() {
+    // The trait is declared after the struct that holds it, and the field is filled by
+    // unsizing a `&Dog` and a `&Cat`, as an argument would be. A `&[i32]` field is
+    // filled from an array the same way.
+    let test = CompileTest::new();
+    let source = r#"
+struct Holder { d: &dyn Namer }
+struct View { s: &[i32] }
+struct Dog { age: i32 }
+struct Cat { lives: i32 }
+impl Namer for Dog { func name(&self) -> i32 { self.age } }
+impl Namer for Cat { func name(&self) -> i32 { self.lives } }
+trait Namer {
+    func name(&self) -> i32
+}
+func main() -> i32 {
+    val dog = Dog { age: 3 }
+    val cat = Cat { lives: 5 }
+    val h = Holder { d: &dog }
+    val k = Holder { d: &cat }
+    val arr = [10, 20, 30]
+    val v = View { s: &arr }
+    h.d.name() + k.d.name() + v.s[2]
+}
+"#;
+    let exit = test
+        .compile_and_run("dyn_field.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(
+        exit, 38,
+        "3 through the dog, 5 through the cat, 30 through the view"
+    );
+}

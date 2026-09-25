@@ -2080,3 +2080,88 @@ fn an_insertion_adopts_a_buffer_built_for_it() {
         "a concatenation built for the push is stored as it is:\n{body}"
     );
 }
+
+/// A method and an associated function return a buffer to their caller exactly as a free
+/// function does, so the binding that takes it releases it. Only free functions were
+/// summarized, so each call through `value.method()` or `Type::f()` leaked its result.
+#[test]
+fn test_bug_062_a_method_returning_an_owned_string_hands_it_to_the_caller() {
+    let prelude = r#"
+        struct Tally { n: i32 }
+        impl Tally {
+            func render(&self) -> string { "n={self.n}" }
+            func make(n: i32) -> string { "n={n}" }
+            func relay(&self) -> string { return self.render() }
+        }
+    "#;
+    for call in ["t.render()", "Tally::make(7)", "t.relay()"] {
+        let source = format!(
+            "{prelude}
+            func main() -> i32 {{
+                val t = Tally {{ n: 7 }}
+                val s = {call}
+                return s.len() as i32
+            }}"
+        );
+        let ir = module_ir(&source, OptimizationLevelSetting::O0);
+        assert!(
+            free_calls(&ir, "main") > 0,
+            "`{call}` hands its caller a buffer the caller releases:\n{}",
+            function_body(&ir, "main")
+        );
+    }
+}
+
+/// A function whose only exit forwards another producer's result is itself a producer,
+/// whether or not that call takes arguments. The summary required an empty argument
+/// list, so `outer(n)` leaked each call while `outer0()` did not.
+#[test]
+fn test_bug_063_forwarding_a_producer_called_with_arguments_hands_the_buffer_on() {
+    let source = r#"
+        func inner(n: i32) -> string { "v{n}" }
+        func outer(n: i32) -> string { inner(n) }
+        func main() -> i32 {
+            val s = outer(1)
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert!(
+        free_calls(&ir, "main") > 0,
+        "the caller releases what `outer` forwarded:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
+/// A map lookup compares its key and keeps none of it, so a key built for the call has no
+/// reader left once the lookup returns. `insert` released such a key; `get`,
+/// `contains_key` and `remove` did not, so each lookup leaked one buffer. All three share
+/// one lookup path; `get` is left out only because its `Option` needs the prelude.
+#[test]
+fn test_bug_064_a_map_lookup_releases_a_key_built_for_it() {
+    for method in ["contains_key", "remove"] {
+        let lookup = |key: &str| {
+            format!(
+                r#"
+                func main() -> i32 {{
+                    mut m: HashMap<string, i32> = HashMap::new()
+                    val k = "a"
+                    val hit = m.{method}({key})
+                    return 0
+                }}
+                "#
+            )
+        };
+        let bound = free_calls(
+            &module_ir(&lookup("k"), OptimizationLevelSetting::O0),
+            "main",
+        );
+        let built_ir = module_ir(&lookup(r#"k + "b""#), OptimizationLevelSetting::O0);
+        assert_eq!(
+            free_calls(&built_ir, "main"),
+            bound + 1,
+            "`m.{method}(k + \"b\")` releases the key it built:\n{}",
+            function_body(&built_ir, "main")
+        );
+    }
+}

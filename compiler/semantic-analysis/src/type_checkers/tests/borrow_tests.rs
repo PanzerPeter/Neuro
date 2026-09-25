@@ -280,3 +280,73 @@ impl Wrapper {
         "a borrow of `&self` outlives the call; got {errors:?}"
     );
 }
+
+/// A `&mut` binding handed to one call twice gives the callee two live `&mut` of one place.
+/// The owner spelling `g(&mut x, &mut x)` was already refused; the reborrow spelling, and
+/// the same binding as both receiver and argument, were accepted and let the callee observe
+/// the aliasing.
+#[test]
+fn test_bug_065_one_mutable_reborrow_per_call() {
+    let conflicting = [
+        r#"
+func g(a: &mut i32, b: &mut i32) -> i32 { *a }
+func h(w: &mut i32) -> i32 { g(w, w) }
+func main() -> i32 { 0 }
+"#,
+        r#"
+func g(a: &i32, b: &mut i32) -> i32 { *a }
+func h(w: &mut i32) -> i32 { g(w, w) }
+func main() -> i32 { 0 }
+"#,
+        r#"
+struct C { v: i32 }
+impl C {
+    func take(&mut self, other: &mut C) -> i32 { self.v }
+}
+func h(w: &mut C) -> i32 { w.take(w) }
+func main() -> i32 { 0 }
+"#,
+    ];
+    for source in conflicting {
+        let errors = semantic_errors(source);
+        assert!(
+            errors.iter().any(is_borrow_conflict),
+            "two reborrows of one `&mut`, one of them exclusive, must be rejected; got {errors:?}\n{source}"
+        );
+    }
+    let sequential = r#"
+func g(a: &mut i32) -> i32 { *a }
+func r(a: &i32, b: &i32) -> i32 { *a + *b }
+func h(w: &mut i32) -> i32 { g(w) + g(w) + r(w, w) }
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(sequential);
+    assert!(
+        errors.is_empty(),
+        "reborrows in separate calls, or two shared ones, do not overlap; got {errors:?}"
+    );
+}
+
+/// A `&mut T` argument at a `&T` parameter is a shared reborrow for the call, as the
+/// `@grad` examples of the language reference assume (a differentiated parameter handed
+/// to a helper that only reads it).
+#[test]
+fn a_mutable_reference_is_accepted_at_a_shared_parameter() {
+    let errors = semantic_errors(
+        r#"
+struct P { v: i32 }
+impl P {
+    func read(&self, other: &P) -> i32 { self.v + other.v }
+    func make(p: &P) -> i32 { p.v }
+}
+func peek(x: &i32) -> i32 { *x }
+func pick<T>(x: &T) -> i32 { 1 }
+func h(w: &mut i32, p: &mut P) -> i32 { peek(w) + pick(w) + p.read(p) + P::make(p) }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a `&mut` argument coerces to a `&` parameter; got {errors:?}"
+    );
+}

@@ -149,20 +149,21 @@ func main() -> i32 {
 
 #[test]
 fn mutable_and_immutable_reference_types_are_distinct() {
-    // There is no implicit `&mut T` -> `&T` coercion; passing a `&mut i32`
-    // where a `&i32` is expected is a type mismatch.
+    // There is no `&T` -> `&mut T` strengthening: passing a `&i32` where a
+    // `&mut i32` is expected is a type mismatch. The other direction is a shared
+    // reborrow for the call (`a_mutable_reference_is_passed_where_a_shared_one_is_expected`).
     let source = r#"
-func read(r: &i32) -> i32 { *r }
+func bump(r: &mut i32) -> i32 { *r }
 func main() -> i32 {
     mut x: i32 = 5
-    val v: i32 = read(&mut x)
+    val v: i32 = bump(&x)
     return v
 }
 "#;
     let (success, stderr) = check_source(source);
-    assert!(!success, "&mut i32 should not satisfy a &i32 parameter");
+    assert!(!success, "&i32 should not satisfy a &mut i32 parameter");
     assert!(
-        stderr.contains("mismatch") || stderr.contains("&i32"),
+        stderr.contains("mismatch") || stderr.contains("&mut i32"),
         "expected a type-mismatch diagnostic, got: {stderr}"
     );
 }
@@ -180,4 +181,32 @@ func main() -> i32 {
 }
 "#;
     run_expecting(source, 99);
+}
+
+#[test]
+fn a_mutable_reference_is_passed_where_a_shared_one_is_expected() {
+    // A `&mut` handed to a `&` parameter is a shared reborrow for the call: a free
+    // function, a generic one, a method argument, an associated function. The binding
+    // stays writable afterwards, and the read after `bump` sees the write.
+    let source = r#"
+struct P { v: i32 }
+impl P {
+    func read(&self, other: &P) -> i32 { self.v + other.v }
+    func make(p: &P) -> i32 { p.v }
+}
+func peek(x: &i32) -> i32 { *x }
+func pick<T>(x: &T) -> i32 { 1 }
+func bump(x: &mut i32) { *x = *x + 1 }
+func h(w: &mut i32, p: &mut P) -> i32 {
+    val a = peek(w) + pick(w) + p.read(p) + P::make(p)
+    bump(w)
+    a + peek(w) + 5
+}
+func main() -> i32 {
+    mut x = 5
+    mut p = P { v: 7 }
+    h(&mut x, &mut p)
+}
+"#;
+    run_expecting(source, 38);
 }

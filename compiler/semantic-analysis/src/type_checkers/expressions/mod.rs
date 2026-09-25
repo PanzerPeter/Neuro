@@ -79,6 +79,15 @@ impl TypeChecker {
         let Some(root) = Self::place_root_name(expr) else {
             return;
         };
+        // The root name, read at the base of this chain, has already reported a move of
+        // the whole binding; this link reports only what moved beneath it.
+        if self
+            .symbols
+            .lookup(&root)
+            .is_some_and(|info| info.moves.whole.is_some())
+        {
+            return;
+        }
         let path = Self::place_path(expr).unwrap_or_default();
         let Some(moved_at) = self.symbols.place_moved_at(&root, &path) else {
             return;

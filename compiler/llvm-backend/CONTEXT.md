@@ -170,8 +170,9 @@ collection's storage, flag-guarded against a move. A consumer that copies the by
 none of them calls `release_string_temporary` instead, which frees the buffer on the spot when the
 operand produced one. This is what makes an *anonymous* heap string, one no binding ever names,
 reachable by a release at all. Those consumers are `print` / `println`'s argument, an interpolation
-hole, both `+` operands, both `==` / `!=` operands, a `.len()` receiver, a `push_str` argument, and
-a statement whose value nothing reads. The release goes through `__neuro_release`, so a temporary a
+hole, both `+` operands, both `==` / `!=` operands, a `.len()` receiver, a `push_str` argument, a
+map key (an `insert`, and a lookup: `get` / `contains_key` / `remove`), and a statement whose value
+nothing reads. The release goes through `__neuro_release`, so a temporary a
 `pool` block allocated from the arena is left to the arena's own sweep.
 
 Reassigning a registered binding releases the buffer it displaces and then re-derives ownership from
@@ -206,7 +207,8 @@ then belongs to the storage, and is tracked one of three ways:
   with no flag to guard it.
 - **A function's return value.** `codegen/string_ownership.rs` reads every body once, before any is
   generated, and collects the functions whose every exit (each `return`, plus an expression tail)
-  allocates. The set is a fixpoint, because one producer can be another's only return path; it
+  allocates. `impl` methods and associated functions are collected too, keyed by the
+  `Type__method` their call sites mangle, and a producer called with arguments is a producer. The set is a fixpoint, because one producer can be another's only return path; it
   starts empty and grows, so a recursive cycle never enters it. A name a local binding shadows is
   excluded, since `codegen_call_dispatch` may send that call through the indirect path. A tail
   `if` (with an `else`), `match` or block exits through each branch's own tail (`tail_exits`). A
@@ -1086,7 +1088,9 @@ slots through `emit_value_destructor` rather than through a static path.
 Per-position flags are what make a partial move sound. `mark_moved_for_drop` resolves the place
 an expression names (`moved_place`) into a binding plus a path, and clears that path's flag and
 every flag beneath it, leaving the siblings armed; a bare binding, or a place through an index
-the compiler cannot evaluate, clears everything. That is also what makes destructuring work, since
+the compiler cannot evaluate, clears everything. The index case clears nothing when the read moves
+nothing out (`read_moves_nothing`): a `Copy` value, or a collection's `string` element, whose read
+copies. Disarming the holder there left every owner in it unreleased. That is also what makes destructuring work, since
 the parser desugars it to a temporary plus one projection per leaf. `codegen_field_assignment`
 releases the displaced position (`drop_displaced_held_value`) and re-arms it, and a reassignment
 re-arms the whole plan (`rearm_held_drop_flags`), which is unconditional because a held position

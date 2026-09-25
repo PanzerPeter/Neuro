@@ -156,3 +156,35 @@ func main() -> i32 {
 }
 
 // --- Newtype declarations ---------------------------------------------
+
+/// Reading a moved binding through a path is one use and one error. The root name and
+/// the outermost link of the path each reported the whole-binding move, so the error
+/// count doubled for every such read.
+#[test]
+fn test_bug_037_a_moved_binding_read_through_a_path_is_reported_once() {
+    let errors = semantic_errors(
+        r#"
+struct Handle { id: i32 }
+
+impl Drop for Handle {
+    func drop(&mut self) { }
+}
+
+func eat(a: [Handle; 2]) -> i32 { 0 }
+
+func main() -> i32 {
+    val hs = [Handle { id: 1 }, Handle { id: 2 }]
+    val gone = eat(hs)
+    return hs[0].id
+}
+"#,
+    );
+    let moved = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::UseOfMovedValue { .. }))
+        .count();
+    assert_eq!(
+        moved, 1,
+        "one read of a moved binding, one error; got {errors:?}"
+    );
+}

@@ -40,7 +40,10 @@ module per declaration kind beside it. `tests/` is split by subject.
   (`UnknownDerive`, `UnimplementedDerive`, `DuplicateDerive`). **1b. `validate_copy_derive`** and
   **`validate_field_derives`** run per struct once all are registered, so a field that is another
   struct resolves regardless of declaration order.
-- **1d. `register_trait`** runs before impl registration.
+- **1d. `register_trait`** runs before impl registration. Trait NAMES are collected first
+  (pass 0b, `trait_names`), so a struct field's `&dyn Trait` resolves in pass 1; its object
+  safety needs the methods, so it is queued and checked right after 1d
+  (`check_deferred_object_safety`).
 - **2. impl method signatures** into `functions` (mangled `StructName__methodName`) and
   `impl_methods` (struct → method → mangled key).
 - **2b. `check_operator_supertraits`** enforces `Comparable: PartialEq` order-independently
@@ -436,6 +439,13 @@ At a `&place` site a `&mut` is rejected while any borrow is live
 its old borrow first. Transient borrows are dropped at the end of every statement
 (`clear_transient_borrows`), so a borrow never outlives the statement that took it.
 
+A `&mut` binding passed bare to a call is a reborrow, not a borrow expression, so the counts
+never see it. `check_reborrow_exclusivity` (in `expressions/calls.rs`, run by every call path)
+holds it to the same rule per call: the same binding named twice by one call's receiver and
+arguments is `CannotMutablyBorrowWhileBorrowed` unless both parameters are `&`. It is per call
+rather than per statement because two calls in one expression do not overlap. At a `&`
+parameter the reborrow is shared (`shared_reborrow`), the one `&mut T` → `&T` weakening.
+
 **Borrowee access** (`check_borrowee_read` in `expressions/places.rs`, `reject_move_of_borrowee`
 in `moves.rs`, the target check in `check_binding_store`). The rules above govern borrows against
 each other; these three govern the borrowed place itself. A read of a binding is
@@ -661,7 +671,7 @@ whose flag is set only by the `Reference` arm, so a bare `dyn Trait` is
 `DynTraitNotBehindReference` while `&dyn Trait` resolves after `trait_object_safety` checks every
 method takes `&self`/`&mut self` (`TraitNotObjectSafe`). `assignable(found, expected)` is ordinary
 compatibility **plus** the single implicit `&T` → `&dyn Trait` unsizing coercion, and backs the
-call-argument, return, and annotated-binding checks. A method call on a `DynObject` receiver types
+call-argument, return, annotated-binding and struct-literal field checks. A method call on a `DynObject` receiver types
 against the trait's declared signature. Return-position `impl Trait` resolves transparently in
 `check_function` via `resolve_impl_return`, which reads the concrete type structurally from the
 body's result expression (`shallow_result_type`: struct literal, enum value, newtype

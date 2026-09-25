@@ -1305,8 +1305,10 @@ val c = sum(&grown)                  // Vec, same signature
 - **`[T]` alone is unsized** and never appears outside a reference; annotating a parameter
   `[T]` is a compile error. The owned forms are `[T; N]` and `Vec<T>`.
 - **Unsizing**: `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]` parameter, and the
-  `&mut` forms a `&mut [T]` one. Mutability must match exactly: there is no `&T` → `&mut T`
-  strengthening, and no `&mut T` → `&T` weakening.
+  `&mut` forms a `&mut [T]` one. There is no `&T` → `&mut T` strengthening. The one
+  weakening is at a call: a `&mut` binding passed to a `&` parameter is a shared reborrow for
+  the call's duration, and one call may not reborrow the same `&mut` twice unless both
+  parameters are `&`.
 - **`.slice(range)`** on an array, a `Vec<T>`, or another slice yields a `&[T]` view over the
   named sub-range, copying nothing. It accepts `a..b` and `a..=b`. An out-of-range or reversed
   range panics in **every** build, debug and release alike: the call hands back a view that

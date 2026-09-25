@@ -52,6 +52,13 @@ impl TypeChecker {
                     });
                     return None;
                 }
+                if !self.traits.contains_key(&trait_name.name)
+                    && self.trait_names.contains(&trait_name.name)
+                {
+                    self.deferred_object_safety
+                        .push((trait_name.name.clone(), *span));
+                    return Some(Type::DynObject(trait_name.name.clone()));
+                }
                 if !self.traits.contains_key(&trait_name.name) {
                     self.record_error(TypeError::UnknownTrait {
                         trait_name: trait_name.name.clone(),
@@ -434,8 +441,9 @@ impl TypeChecker {
     /// This is ordinary type compatibility plus the two unsizing coercions the language
     /// has: `&T` → `&dyn Trait`, permitted when `T` implements `Trait`, and
     /// `&[T; N]` / `&Vec<T>` → `&[T]`, which forgets a compile-time length in favour of
-    /// a runtime one. Both require the reference mutabilities to agree: there is no
-    /// `&mut T` → `&T` weakening, so the mutability match is exact.
+    /// a runtime one. Both require the reference mutabilities to agree. The one
+    /// `&mut T` → `&T` weakening is a call argument's shared reborrow, which the call
+    /// checker applies before asking this.
     pub(crate) fn assignable(&self, found: &Type, expected: &Type) -> bool {
         if found.is_compatible_with(expected) {
             return true;
@@ -460,6 +468,20 @@ impl TypeChecker {
             Type::DynObject(trait_name) => self.type_implements_trait(found_inner, trait_name),
             Type::Slice(element) => Self::unsizes_to_slice(found_inner, element),
             _ => false,
+        }
+    }
+
+    /// Report each `dyn Trait` resolved ahead of its trait's registration whose trait
+    /// turned out not to be object-safe.
+    pub(crate) fn check_deferred_object_safety(&mut self) {
+        for (trait_name, span) in std::mem::take(&mut self.deferred_object_safety) {
+            if let Err(reason) = self.trait_object_safety(&trait_name) {
+                self.record_error(TypeError::TraitNotObjectSafe {
+                    trait_name,
+                    reason,
+                    span,
+                });
+            }
         }
     }
 

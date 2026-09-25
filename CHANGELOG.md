@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-09-25
+
+### Changed
+
+- A `&mut` binding may be passed where a `&` parameter is expected, as a shared reborrow for the
+  call: `peek(w)` with `w: &mut i32` and `func peek(x: &i32)`. This is what lets a `@grad` loss
+  hand a differentiated parameter to a helper that only reads it, instead of copying it first.
+- A struct literal field accepts the unsizing coercions a call argument does: `Holder { d: &dog }`
+  for a `&dyn Trait` field and `View { s: &arr }` for a `&[T]` field.
+
+### Fixed
+
+- BUG-061: reading a `Copy` value through an index the compiler cannot evaluate (`val n = hs[k].id`,
+  `f(v[k])`, `s = v[k]`) disowned the whole holder, so a `Vec` was never freed and an array of
+  `Drop` values never ran its destructors. A `Vec<string>` element read at a run-time index did
+  the same, although the read copies. All three AD showcase programs leaked their `Vec` this way.
+- BUG-062: a method or associated function returning an owned `string` (`t.render()`,
+  `Tally::make(7)`) leaked its result on every call; only free functions handed the buffer to
+  the caller.
+- BUG-063: a function whose exit forwards another producer called with arguments
+  (`func outer(n: i32) -> string { inner(n) }`) leaked its result on every call; the same
+  forward without arguments did not.
+- BUG-064: a map lookup (`get`, `contains_key`, `remove`) leaked a key built for the call
+  (`m.get(a + b)`), where `insert` released it.
+- BUG-065: one `&mut` binding passed twice to a single call (`g(w, w)`, `w.take(w)`) gave the
+  callee two live mutable paths to one place, and the callee could observe the aliasing. It is
+  now refused, as `g(&mut x, &mut x)` already was. Two shared reborrows, or reborrows in
+  separate calls, are unaffected.
+- BUG-048: a `&dyn Trait` struct field reported its trait as undeclared, because struct fields
+  resolve before traits register. The trait may now be declared on either side of the struct,
+  and is still held to object safety.
+- BUG-037: reading a moved binding through a path (`hs[0].id`) reported the same error twice.
+
 ## [3.7.0] - 2026-09-25
 
 ### Added

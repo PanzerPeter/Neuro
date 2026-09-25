@@ -303,8 +303,17 @@ impl<'ctx> CodegenContext<'ctx> {
             // declares its own `String` shadows the builder, and its receiver is then a
             // `Type::Struct` that this arm does not match.
             HirExprKind::Call { callee, args } => match &callee.kind {
+                HirExprKind::Path { type_name, member } => self
+                    .string_ownership
+                    .returns_owned(&format!("{}__{}", type_name, member)),
                 HirExprKind::FieldAccess { object, field } => {
                     let receiver = Type::from_hir(&object.ty);
+                    // A user method is summarized under the name its call mangles.
+                    if let Type::Struct(type_name) = receiver.referent() {
+                        return self
+                            .string_ownership
+                            .returns_owned(&format!("{}__{}", type_name, field));
+                    }
                     let builder_copy = field == TO_OWNED_METHOD
                         && matches!(
                             receiver.referent(),
@@ -606,6 +615,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let Some((name, path)) = Self::moved_place(expr) else {
             return;
         };
+        // The whole-binding collapse stands in for "some element left"; a read that moves
+        // nothing out must not disown the holder, or none of its owners is ever released.
+        if path.is_none() && self.read_moves_nothing(expr) {
+            return;
+        }
 
         let mut flags: Vec<PointerValue<'ctx>> = Vec::new();
         let entry = self
@@ -633,6 +647,21 @@ impl<'ctx> CodegenContext<'ctx> {
         for flag_ptr in flags {
             let _ = self.builder.build_store(flag_ptr, zero);
         }
+    }
+
+    /// Whether reading `expr` leaves its holder owning everything it owned: a `Copy`
+    /// value is copied out, and a collection's `string` element is copied into a buffer
+    /// of the reader's own.
+    fn read_moves_nothing(&self, expr: &HirExpr) -> bool {
+        let ty = Type::from_hir(&expr.ty);
+        if !matches!(ty, Type::String) {
+            return self.drop_target_of(&ty).is_none();
+        }
+        matches!(
+            &expr.kind,
+            HirExprKind::Index { object, .. }
+                if matches!(Type::from_hir(&object.ty).referent(), Type::Collection { .. })
+        )
     }
 
     /// Whether `expr` reads a value out of a position another binding already owns, so
