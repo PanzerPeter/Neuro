@@ -616,6 +616,10 @@ impl Lowerer {
         }
         let ret = self.declared_return_type(&func.return_type, &func.body)?;
         self.functions.insert(func.name.name.clone(), (params, ret));
+        if crate::autodiff::is_grad(&func.attributes) {
+            self.grad_params
+                .insert(func.name.name.clone(), crate::param_names(func));
+        }
         Ok(())
     }
 
@@ -1056,7 +1060,7 @@ impl Lowerer {
                     _ => {}
                 }
             }
-            out.push(self.lower_stmt(stmt)?);
+            self.lower_stmt_into(stmt, &mut out)?;
         }
         Ok(out)
     }

@@ -12,6 +12,11 @@ use super::{
 };
 use crate::{is_full_float, is_integer, Lowerer, LoweringError};
 
+/// The gradient slot's two surface accessors. `.backward()` is a statement the block
+/// lowering pairs with its `@grad` call, never an expression.
+const GRAD_METHOD: &str = "grad";
+const ZERO_GRAD_METHOD: &str = "zero_grad";
+
 impl Lowerer {
     /// Lower a call, dispatching on the callee shape: free/builtin function,
     /// instance method, or associated function.
@@ -307,6 +312,10 @@ impl Lowerer {
         self.const_subst = saved_c;
 
         let mangled = crate::mangle_instance(name, &template.generics, &subst, &const_subst);
+        if crate::autodiff::is_grad(&template.attributes) {
+            self.grad_params
+                .insert(mangled.clone(), crate::param_names(&template));
+        }
         if !self.mono_seen.contains(&mangled) {
             self.mono_seen.insert(mangled.clone());
             self.mono_pending.push(crate::MonoInstance {
@@ -665,6 +674,18 @@ impl Lowerer {
             (tensor @ HirType::Tensor { .. }, CLONE_METHOD) => {
                 let cloned = tensor.clone();
                 Ok((self.lower_args(args, &[])?, cloned))
+            }
+            // `tensor.grad()`: a shared borrow of the receiver's gradient, typed like the
+            // receiver's tensor, owned or borrowed.
+            (tensor @ HirType::Tensor { .. }, GRAD_METHOD) => {
+                let view = HirType::Reference {
+                    inner: Box::new(tensor.clone()),
+                    mutable: false,
+                };
+                Ok((self.lower_args(args, &[])?, view))
+            }
+            (HirType::Tensor { .. }, ZERO_GRAD_METHOD) => {
+                Ok((self.lower_args(args, &[])?, HirType::Void))
             }
             // `tensor.to(device)`: one `Device` argument, and the receiver's own type
             // back. A borrow cannot be consumed, so this matches `recv` rather than the

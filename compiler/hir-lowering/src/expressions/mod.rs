@@ -699,7 +699,8 @@ impl Lowerer {
         let mut ty = HirType::Void;
         let last = stmts.len().saturating_sub(1);
         for (i, stmt) in stmts.iter().enumerate() {
-            if i == last {
+            // A trailing `.backward()` is a statement, not the block's value.
+            if i == last && self.backward_statement(stmt).is_none() {
                 // An `if` written in statement position parses to `Stmt::If`, never
                 // `Stmt::Expr(Expr::If)`, so a trailing `if/else` has to be recognized
                 // here to carry the block's value.
@@ -727,7 +728,7 @@ impl Lowerer {
                     return Ok((out, ty));
                 }
             }
-            out.push(self.lower_stmt(stmt)?);
+            self.lower_stmt_into(stmt, &mut out)?;
         }
         Ok((out, ty))
     }

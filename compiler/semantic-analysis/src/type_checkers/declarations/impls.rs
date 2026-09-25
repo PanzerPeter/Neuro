@@ -416,6 +416,7 @@ impl TypeChecker {
             // `self` (`&self` or `&mut self`) and reference parameters outlive the
             // call, so a returned reference may borrow them (the receiver lifetime
             // is applied to method outputs).
+            self.backward_losses = crate::type_checkers::backward::backward_losses(&method.body);
             self.current_fn_outliving = method
                 .params
                 .iter()

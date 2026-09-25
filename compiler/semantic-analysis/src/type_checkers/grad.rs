@@ -118,6 +118,9 @@ impl TypeChecker {
             (params, *ret)
         };
         let name = &func.name.name;
+        // Recorded even when the signature below is refused: the call sites then check
+        // against the intent, and the refusal is reported once, here.
+        self.grad_functions.insert(name.clone());
 
         if !is_scalar_loss(&ret) {
             self.record_error(TypeError::GradSignature {

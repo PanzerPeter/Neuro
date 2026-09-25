@@ -81,6 +81,10 @@ pub(crate) struct TypeChecker {
     /// NOT placed in `functions`: calls to it route through generic inference, which
     /// substitutes concrete type arguments per call site (monomorphization).
     generic_funcs: HashMap<String, GenericFnSig>,
+    /// Functions carrying a well-formed `@grad`, generic templates included by name. A
+    /// `val` bound directly to a call of one holds that call's `&mut` borrows until its
+    /// `.backward()`.
+    grad_functions: HashSet<String>,
     /// Generic struct templates, keyed by name. A generic struct is NOT a
     /// usable type on its own; each distinct set of type arguments is monomorphized
     /// into a distinct nominal struct registered in `struct_defs` on demand. The
@@ -156,6 +160,8 @@ pub(crate) struct TypeChecker {
     /// A returned reference is only safe when it ultimately borrows one of these:
     /// borrowing any other (function-local) place dangles.
     current_fn_outliving: HashSet<String>,
+    /// The names the body being checked calls `.backward()` on (`backward::backward_losses`).
+    backward_losses: HashSet<String>,
     /// Whether the method body being checked took `self` by value. A consuming
     /// receiver owns its value, so its fields may be moved out; every other receiver
     /// is a borrow whose fields belong to the caller.
@@ -304,6 +310,7 @@ struct PoolContext {
     loop_floor: usize,
 }
 
+mod backward;
 mod closures;
 mod collections;
 mod declarations;
@@ -353,6 +360,7 @@ impl TypeChecker {
             mut_self_methods: HashSet::new(),
             consuming_self_methods: HashSet::new(),
             generic_funcs: HashMap::new(),
+            grad_functions: HashSet::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
             traits: HashMap::new(),
@@ -374,6 +382,7 @@ impl TypeChecker {
             warnings: Vec::new(),
             current_function_return_type: None,
             current_fn_outliving: HashSet::new(),
+            backward_losses: HashSet::new(),
             self_is_owned: false,
             loop_stack: Vec::new(),
             pool_stack: Vec::new(),

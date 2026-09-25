@@ -482,3 +482,87 @@ func loss(w: &mut Tensor<f32, [2, 2]>) -> Tensor<f32, []> {
         "einsum(",
     );
 }
+
+const TRAINING_STEP: &str = r#"
+@grad
+func loss(w: &mut Tensor<f32, [2, 3]>, b: &mut Tensor<f32, [3]>, scale: f32) -> Tensor<f32, []> {
+    val shifted = w + b
+    val total = shifted.sum()
+    return Tensor::scalar(total * scale)
+}
+
+func main() -> i32 {
+    mut w = Tensor::<f32, [2, 3]>::ones()
+    mut b = Tensor::<f32, [3]>::ones()
+    val l = loss(&mut w, &mut b, 2.0f32)
+    l.backward()
+    w -= 0.1f32 * w.grad()
+    val evaluated = loss(&mut w, &mut b, 1.0f32)
+    return 0
+}
+"#;
+
+/// The name a callee lowers to, when `expr` is a call by name.
+fn callee_name(expr: &neuro_hir::HirExpr) -> Option<&str> {
+    match &expr.kind {
+        HirExprKind::Call { callee, .. } => match &callee.kind {
+            HirExprKind::Variable(name) => Some(name),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn a_backward_runs_the_derivative_where_the_call_ran() {
+    let program = lower(TRAINING_STEP);
+    let body = &item_function(&program, "main").body;
+    let decls: Vec<(&str, Option<&str>)> = body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            HirStmt::VarDecl { name, init, .. } => {
+                Some((name.as_str(), init.as_ref().and_then(callee_name)))
+            }
+            _ => None,
+        })
+        .collect();
+    // The call a `.backward()` pairs with becomes the derivative, whose loss is unpacked
+    // into the original binding; a call nothing backpropagates stays the primal.
+    assert_eq!(
+        decls[2..],
+        [
+            ("__backward_1", Some("__loss__rev")),
+            ("l", None),
+            ("evaluated", Some("loss")),
+        ]
+    );
+}
+
+#[test]
+fn a_backward_moves_one_gradient_into_each_differentiated_argument() {
+    let program = lower(TRAINING_STEP);
+    let body = &item_function(&program, "main").body;
+    let writes: Vec<String> = body
+        .iter()
+        .filter_map(|stmt| {
+            let HirStmt::Expr(expr) = stmt else {
+                return None;
+            };
+            let HirExprKind::Call { callee, args } = &expr.kind else {
+                return None;
+            };
+            let HirExprKind::FieldAccess { field, .. } = &callee.kind else {
+                return None;
+            };
+            let [gradient] = args.as_slice() else {
+                return None;
+            };
+            let HirExprKind::FieldAccess { field: from, .. } = &gradient.kind else {
+                return None;
+            };
+            Some(format!("{field}({from})"))
+        })
+        .collect();
+    // `scale` is a plain number: nothing is written for it.
+    assert_eq!(writes, ["__set_grad(w)", "__set_grad(b)"]);
+}

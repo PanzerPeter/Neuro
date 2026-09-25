@@ -12,9 +12,10 @@
 // time, and follows every call into the callee's body to do so: the helpers need no
 // annotation of their own, and the rest of the program calls them as usual.
 //
-// The program cannot read that gradient yet (`.backward()` and `.grad()` are the
-// next layer), so what runs here is the primal. The compiler's own tests check the
-// derivative through calls against finite differences.
+// This program only evaluates the losses, so no derivative runs: a `@grad` call
+// runs its derivative only for a `.backward()`, as `gradient_loss.nr` does. The
+// compiler's own tests check the derivative through calls against finite
+// differences.
 
 func squared_distance(prediction: &Tensor<f32, [3, 1]>, target: &Tensor<f32, [3, 1]>) -> f32 {
     val residual = prediction - target

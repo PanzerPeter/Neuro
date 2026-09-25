@@ -158,6 +158,7 @@ impl TypeChecker {
         // Reference-typed parameters outlive the call, so a returned reference may
         // safely borrow one (single-input-reference elision). Owned
         // parameters and body locals do not outlive the call.
+        self.backward_losses = crate::type_checkers::backward::backward_losses(&func.body);
         self.current_fn_outliving = func
             .params
             .iter()

@@ -20,6 +20,7 @@ mod struct_eq;
 mod tensor_apply;
 mod tensor_arith;
 mod tensor_einsum;
+mod tensor_grad;
 mod tensor_index;
 mod tensor_reduce;
 mod tensor_rng;
@@ -391,6 +392,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 // borrows a `Vec`'s buffer, so it hands back a `&[T]` view rather than
                 // performing an operation on the collection header.
                 //
+                // The gradient slot's operations: two of the three are unit, which the
+                // builtin table's value-returning path cannot express.
+                if let Some(method) = tensor_grad::resolve_grad_slot_method(&recv_ty, field) {
+                    return self.codegen_grad_slot_method(method, object, args);
+                }
                 // `checked_*` builds an `Option<T>` instance, so the call's result type,
                 // which only the frontend can name, travels on the callee.
                 if let Some(kind) = resolve_builtin_method(&recv_ty, field) {

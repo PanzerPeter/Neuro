@@ -223,11 +223,20 @@ impl<'ctx> TypeMapper<'ctx> {
     ///
     /// It is compiler-private: DLPack fixes the field's width and nothing else, so a
     /// consumer may carry the pointer but may not read through it. Neuro reads it only on
-    /// handles it built itself, which is why the release path never touches it — a handle
-    /// arriving from a foreign producer carries that producer's context there.
+    /// handles it built itself (a handle arriving from a foreign producer carries that
+    /// producer's context there), and reaches it by its fixed offset in the storage block,
+    /// never through `manager_ctx`.
+    ///
+    /// `grad` is the gradient slot a `.backward()` fills: null, or a handle the slot owns.
     pub(crate) fn dlpack_control_block_type(&self) -> inkwell::types::StructType<'ctx> {
-        self.context
-            .struct_type(&[self.context.i64_type().into()], false)
+        let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
+        self.context.struct_type(
+            &[
+                self.context.i64_type().into(), // data_bytes
+                ptr_ty.into(),                  // grad
+            ],
+            false,
+        )
     }
 
     /// The block a tensor's handle is allocated out of: the exchange structure with the
@@ -607,10 +616,13 @@ mod tests {
             .get_field_type_at_index(1)
             .and_then(|field| field.try_into().ok())
             .expect("the second field is the control block");
-        // One field today: the element buffer's byte length.
-        assert_eq!(control.count_fields(), 1);
+        // The element buffer's byte length, then the gradient slot.
+        assert_eq!(control.count_fields(), 2);
         assert!(control
             .get_field_type_at_index(0)
             .is_some_and(|field| field.into_int_type().get_bit_width() == 64));
+        assert!(control
+            .get_field_type_at_index(1)
+            .is_some_and(|field| field.is_pointer_type()));
     }
 }

@@ -66,6 +66,26 @@ module per declaration kind beside it. `tests/` is split by subject.
   signature from `generic_funcs`, where a shape parameter is admitted as an extent since every
   instance fixes it; the derivative is derived per instance in `hir-lowering`.
 - **4. full check**: `check_function` / `check_impl` / `check_const_item`.
+
+### `.backward()`, `.grad()`, `.zero_grad()` (`type_checkers/backward.rs`)
+`.backward()` writes gradients into the `&mut` arguments of the `@grad` call its receiver came
+from, AFTER that call returned, so those borrows must reach it. Before each function or method
+body is checked, `backward_losses` collects the names the body calls `.backward()` on (through
+every block a statement opens; a `.backward()` hidden in a block nested in some other expression
+is not found and is then refused rather than left unchecked). A `val` bound directly to a
+`grad_functions` call whose name is in that set holds each differentiated argument's borrow
+(`hold_grad_call_borrows`: `attach_borrow` promotes a `&mut name`, `hold_reborrow` takes a
+`&mut` binding passed on; any other argument shape marks the loss `GradLoss::Untracked`), exactly
+as a reference binding holds its borrow, so the read / borrow / move / assign rules freeze the
+argument until the `.backward()` releases them (`finish_backward`). With no `.backward()` in the
+body the call borrows only for itself: evaluating a loss must not freeze its weights. A binding
+now holds a `Vec` of borrows. The `.backward()` itself, resolved as a tensor builtin, is refused
+(`BackwardUnavailable`) unless its receiver is such a binding, defined in the current scope (same
+block), not yet backpropagated. `.grad()` registers a shared borrow of the receiver and yields
+`&Tensor`; a binding initialized or assigned with it holds that borrow when the value's TYPE is a
+tensor view (`gradient_view_root`), so a user method called `grad` is never mistaken for one.
+`.zero_grad()` takes the receiver exclusively (`check_mut_self_receiver`). A tensor compound
+assignment now checks the target's borrows before its RHS, as `=` does.
 - **5. lints**: `run_lints` walks bodies collecting non-fatal `Warning`s
   (`prefer-loop-over-while-true` today, silenced by `@allow(prefer_loop_over_while_true)`;
   parenthesised `while (true)` deliberately not matched). Lints run independently of type errors.

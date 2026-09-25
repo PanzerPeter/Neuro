@@ -18,7 +18,7 @@ func squared_error(w: &mut Tensor<f32, [2, 1]>, b: &mut Tensor<f32, [1]>, scale:
 ```
 
 This function comes from [`examples/showcase/gradient_loss.nr`](../../examples/showcase/gradient_loss.nr),
-which runs it.
+which trains it by gradient descent.
 
 ## What `@grad` produces
 
@@ -34,10 +34,52 @@ backwards from the loss and adds up each value's contribution wherever it was us
 where tensor shapes matter: a `[1]` bias broadcast down four rows gets its gradient summed
 back over those rows.
 
-The derivative function cannot be called from Neuro source yet. `.backward()` and `.grad()`,
-which run it and put each gradient next to its tensor, come next. Until then the derivative
-can be reached as a C symbol from an object built with `neurc compile --emit obj`, which is
-how the compiler's own tests check it.
+## Running the derivative: `.backward()`, `.grad()`, `.zero_grad()`
+
+The derivative runs when the loss a `@grad` call returned is asked for it. `.backward()` runs
+it and moves each gradient into a slot beside the tensor it belongs to, `.grad()` reads that
+gradient, and `.zero_grad()` empties the slot. A training step from
+[`examples/showcase/gradient_loss.nr`](../../examples/showcase/gradient_loss.nr):
+
+```neuro
+        pool {
+            val loss = squared_error(&mut w, &mut b, 1.0f32)
+            // From the call to this line `w` and `b` stay mutably borrowed, because
+            // this is where their gradients are written.
+            loss.backward()
+            w -= RATE * w.grad()
+            b -= RATE * b.grad()
+            w.zero_grad()
+            b.zero_grad()
+            measured = loss.sum()
+        }
+```
+
+The spelling is familiar from tape-based frameworks, but there is no tape. The derivative runs
+where the call ran, on the arguments the call saw, and the loss is computed once. A `@grad`
+call whose result never meets a `.backward()` runs no derivative at all.
+
+- **`.backward()`** is called on a `val` bound directly to a `@grad` call's result, in the same
+  block as that call, once. Anything else is a compile error: a loss computed further
+  (`(loss * 2.0).backward()`), a `mut` binding, a call result used in place, a `.backward()`
+  inside an `if` arm below the call, a second `.backward()`. A second `@grad` call followed by
+  its own `.backward()` replaces a parameter's gradient; it does not add to it.
+- **The differentiated arguments stay borrowed until the `.backward()`.** The gradient is
+  written after the call has returned, so between the call and its `.backward()` nothing else
+  may read, borrow, move, assign or update `w`. The `.backward()` ends those borrows, which is
+  what lets the update line use `w` again. Each differentiated argument must therefore be
+  `&mut name` or a `&mut` binding passed on. A call with no `.backward()` borrows only for the
+  call, like any other.
+- **`.grad()`** borrows the gradient: `w.grad()` is a `&Tensor<T, S>` shaped like `w`, and no
+  copy is made. Reading a slot that no `.backward()` has filled, or one emptied since, panics
+  at run time. A live `.grad()` borrow blocks the `.zero_grad()` or `.backward()` that would
+  release what it points at.
+- **`.zero_grad()`** releases the gradient and empties the slot. It needs `w` mutably, like a
+  `&mut self` method.
+- **A gradient belongs to its tensor.** It is released when the tensor is, and it is never
+  taken from a `pool` arena, even when `.backward()` runs inside one: the slot's owner outlives
+  the block. A shape cast (`.reshape`, `.t()`, `.permute`, `.flatten`) consumes the tensor, and
+  its result starts with no gradient; `.clone()` does not copy one.
 
 ## Signature rules
 
@@ -47,8 +89,8 @@ A `@grad` function:
   to carry, and the reverse pass starts from a loss of that type with a seed of `1.0`;
 - differentiates **every** tensor parameter it takes, so each one must be borrowed
   `&mut Tensor<f32 | f64, [...]>` with literal extents, or shape parameters of a generic
-  function. The borrow is mutable because the gradient belongs to the caller's tensor and will
-  be written back to it;
+  function. The borrow is mutable because `.backward()` writes the gradient into the caller's
+  tensor;
 - may take other parameters of any type. They are constants and have no gradient;
 - is a free function, with `@grad` written without arguments. A generic one is differentiated
   once per instance the program uses, at that instance's concrete shapes.
@@ -165,8 +207,9 @@ loss, and its gradient is that path's gradient.
 ## How the derivative is checked
 
 A derivative is trusted only once a second, independent computation agrees with it.
-`tools/grad_differential.py` calls each generated derivative on real inputs, then computes
-central finite differences of the compiled function at the same point, and requires the two
-to agree componentwise. At a point where the path changes, a central difference would straddle
-both paths, so those cases compare against finite differences of the executed path alone. It
-runs as `cargo test -p neurc --test grad_differential`.
+`tools/grad_differential.py` runs each `@grad` case on real inputs through `.backward()` and
+reads every gradient back with `.grad()`, then computes central finite differences of the
+compiled function at the same point, and requires the two to agree componentwise. At a point
+where the path changes, a central difference would straddle both paths, so those cases compare
+against finite differences of the executed path alone. It runs as
+`cargo test -p neurc --test grad_differential`.

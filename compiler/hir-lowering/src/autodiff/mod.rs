@@ -28,6 +28,7 @@
 //! Every tensor parameter is differentiated: `wrt:` is a later item, and the checker has
 //! already required each tensor parameter to be `&mut` and the loss to be rank-0 `f32`.
 
+mod backward;
 mod emit;
 mod rules;
 mod sweep;
@@ -58,6 +59,17 @@ pub(crate) fn is_grad(attributes: &[Attribute]) -> bool {
     attributes
         .iter()
         .any(|attr| attr.name.name == GRAD_ATTRIBUTE)
+}
+
+/// The generated derivative of the lowered function `function`.
+pub(crate) fn reverse_name(function: &str) -> String {
+    format!("{REVERSE_PREFIX}{function}{REVERSE_SUFFIX}")
+}
+
+/// The generated struct holding `function`'s gradients, one field per differentiated
+/// parameter, named like that parameter.
+pub(crate) fn bundle_name(function: &str) -> String {
+    format!("{BUNDLE_PREFIX}{function}")
 }
 
 /// Whether a parameter of type `ty` is differentiated: a mutably borrowed tensor.
@@ -127,7 +139,7 @@ fn derive_reverse(
     adjoints.add(&tape.loss, seed);
     sweep::reverse(&mut em, &tape.nodes, &mut adjoints, &tape.active)?;
 
-    let bundle_name = format!("{BUNDLE_PREFIX}{}", primal.name);
+    let bundle_name = bundle_name(&primal.name);
     let mut fields = Vec::with_capacity(differentiated.len());
     let mut inits = Vec::with_capacity(differentiated.len());
     for param in &differentiated {
@@ -181,7 +193,7 @@ fn derive_reverse(
             span,
         }),
         HirItem::Function(HirFunction {
-            name: format!("{REVERSE_PREFIX}{}{REVERSE_SUFFIX}", primal.name),
+            name: reverse_name(&primal.name),
             params: primal.params.clone(),
             return_type: result_ty,
             body,

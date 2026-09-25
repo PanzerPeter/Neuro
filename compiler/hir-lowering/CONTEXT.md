@@ -67,6 +67,20 @@ reshape in an axis-reduction rule and the inverse cast in a shape-cast rule) or 
 both operands) is copied before either takes it (`Adjoints::owners`). A slot is only ever given a
 value its arm owns outright or a copy (`store`), and a nested sweep works on a copy of its seed.
 
+**`.backward()`** (`autodiff/backward.rs`) never reaches a backend. The three block loops
+(`lower_stmt_list`, `lower_body_stmts`, `lower_block_value_inner`) lower each statement through
+`lower_stmt_into`, which pairs a `loss.backward()` statement on a tensor binding with the
+`val loss = f(...)` already lowered into the SAME block (the checker guarantees it is there):
+the declaration becomes `val __backward_N = __f__rev(<same args>)` plus `val loss =
+__backward_N.0`, and the statement becomes one `(<arg>).__set_grad(__backward_N.1.<param>)` per
+`&mut Tensor` argument, re-evaluating the argument, which the checker restricted to `&mut name`
+or a `&mut` binding and held borrowed until here. So the derivative runs where the call ran and
+a call with no `.backward()` stays the primal. `grad_params` maps each lowered `@grad` name
+(concrete from `register_function`, instances from the monomorphization call site) to its
+parameter names, the bundle's field names. `.grad()` lowers as a builtin returning a
+`&Tensor<T, S>` like the receiver, `.zero_grad()` as a unit builtin; `reverse_name` /
+`bundle_name` are the one spelling of the generated names.
+
 At a point where the primal's control flow changes, the derivative is the executed path's: the
 reverse pass follows the path the forward pass took. That is the language's ruling on a kink, not
 an accident of the implementation.

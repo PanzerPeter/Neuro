@@ -13,9 +13,10 @@
 // where it loops, the derivative undoes exactly the iterations the call ran. Nothing
 // is recorded while the program runs: the backward pass recomputes what it needs.
 //
-// The program cannot read that gradient yet (`.backward()` and `.grad()` are the
-// next layer), so what runs here is the primal. The compiler's own tests check the
-// derivative of loops and branches like these against finite differences.
+// This program only evaluates the losses, so no derivative runs: a `@grad` call
+// runs its derivative only for a `.backward()`, as `gradient_loss.nr` does. The
+// compiler's own tests check the derivative of loops and branches like these
+// against finite differences.
 
 // Every tensor parameter is differentiated, so `w` is borrowed `&mut`. `limit` and
 // `sweeps` are plain numbers, constants as far as the derivative is concerned.

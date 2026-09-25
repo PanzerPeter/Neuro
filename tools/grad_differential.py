@@ -15,12 +15,14 @@ harness differentiates the compiled function numerically, and the result must ma
 derivative written out by hand on this side. That fixes the step size and the tolerance and
 proves the comparison has teeth, against compiled code rather than a model of it.
 
-The tensor cases are the pass condition of the reverse-mode transform. Each is a `@grad`
-function, so the module also holds its generated `__f__rev`, which returns the loss and a
-`GradsOf_f` bundle of owned gradient tensors. The harness calls `__f__rev`, reads the
-gradient straight out of the DLPack handle it returns, and requires it to agree with central
-finite differences of the compiled primal `f` at the same point. The analytic gradient stays
-as a third opinion, and the bundle's dtype and shape must be the parameter's own.
+The tensor cases are the pass condition of the reverse-mode transform and of the
+`.backward()` / `.grad()` layer that runs it. Each is a `@grad` function, and the module
+holds, beside it, a generated Neuro probe that builds the parameters, calls the function,
+runs `.backward()` and returns one element of one parameter's `.grad()` (or the loss) as an
+`f64`. The harness requires those gradients to agree with central finite differences of the
+compiled primal `f` at the same point; the analytic gradient stays as a third opinion.
+Every probe has a scalar signature, so no aggregate crosses the C boundary and the cases run
+on every platform, with any number of differentiated parameters.
 
 Pipeline: write one Neuro module holding every case's function, `neurc compile --emit obj`,
 link it into a shared library with the platform C compiler, `ctypes`-load it, and call each
@@ -81,11 +83,8 @@ F32_ABSOLUTE_TOLERANCE = 1e-3
 REVERSE_RELATIVE_TOLERANCE = 1e-5
 REVERSE_ABSOLUTE_TOLERANCE = 1e-5
 
-# `__f__rev` returns a two-pointer aggregate, and the tensor cases read it through ctypes as
-# the equivalent C struct. On the System V and AArch64 C ABIs that struct comes back in two
-# registers, as LLVM returns the aggregate. The Windows x64 C ABI returns it through a hidden
-# pointer instead, so ctypes would read garbage there and the tensor cases are skipped.
-AGGREGATE_RETURN_MATCHES_C = sys.platform != "win32"
+# The probe index that asks for the loss rather than a gradient element.
+PROBE_LOSS = -1
 
 
 def find_c_compiler():
@@ -273,16 +272,15 @@ func unused_parameter(x: f64, y: f64) -> f64 {
 
 
 class TensorCase:
-    """One `@grad` function of a single `f32` tensor, a point, and its true gradient.
+    """One `@grad` function of `f32` tensors, a point, and its true gradient.
 
-    `source` declares the function; its first parameter is the differentiated tensor, of
-    extents `shape`, and any further ones are the `f32` `constants`, which have no
-    gradient. `point` lists the tensor's elements in row-major order and `gradient`
-    recomputes the partials from `(*point, *constants)` by hand, in the same order.
-
-    One differentiated parameter per case, because the bundle then holds one pointer and
-    `__f__rev` returns two: the size the C ABIs return in registers (see
-    `AGGREGATE_RETURN_MATCHES_C`).
+    `source` declares the function; its leading parameters are the differentiated tensors,
+    the first of extents `shape` and any others of `more_shapes`, and the rest are the `f32`
+    `constants`, which have no gradient. `point` lists every tensor's elements in row-major
+    order, one tensor after another, and `gradient` recomputes the partials from
+    `(*point, *constants)` by hand, in the same order. `callee` is the name a call spells
+    when it differs from `name`, the compiled symbol: a generic instance is called by its
+    template's name.
 
     `path`, when set, names a second function in `source` with the primal's signature that
     computes only the path the primal executes at `point`. It exists for a point AT a kink,
@@ -292,14 +290,36 @@ class TensorCase:
     the path must agree on the loss there, which is what proves the path is the executed one.
     """
 
-    def __init__(self, name, source, shape, point, gradient, constants=(), path=None):
+    def __init__(
+        self,
+        name,
+        source,
+        shape,
+        point,
+        gradient,
+        constants=(),
+        path=None,
+        more_shapes=(),
+        callee=None,
+    ):
         self.name = name
         self.source = source
-        self.shape = shape
+        self.shapes = (shape, *more_shapes)
         self.point = point
         self.gradient = gradient
         self.constants = constants
         self.path = path
+        self.callee = callee or name
+
+    def split(self, point):
+        """`point` cut into one run of elements per differentiated tensor."""
+        runs = []
+        start = 0
+        for shape in self.shapes:
+            count = math.prod(shape)
+            runs.append(point[start : start + count])
+            start += count
+        return runs
 
 
 def weighted_matmul_gradient(*a):
@@ -401,6 +421,7 @@ func instantiate_shape_generic(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
         (1.5, -0.75, 2.0),
         lambda a, b, c, s: ((c + 1.0) * s, 0.0, a * s),
         constants=(2.5,),
+        callee="shape_generic",
     ),
     TensorCase(
         "element_quotient",
@@ -973,6 +994,32 @@ func read_only_helper(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
         # 2 (w0 w1 + w0) + 3 w1.
         lambda a, b: (2.0 * (b + 1.0), 2.0 * a + 3.0),
     ),
+    TensorCase(
+        # Two differentiated parameters, so the bundle holds two gradients and
+        # `.backward()` fills two slots; the broadcast bias gathers its partials
+        # from both rows.
+        "weight_and_bias",
+        """
+@grad
+func weight_and_bias(w: &mut Tensor<f32, [2, 2]>, b: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
+    val shifted = w + b
+    val squares = &shifted * &shifted
+    return Tensor::scalar(squares.sum() * scale)
+}
+""",
+        (2, 2),
+        (0.5, -1.0, 1.5, 2.0, 0.25, -0.5),
+        lambda w00, w01, w10, w11, b0, b1, s: (
+            2.0 * s * (w00 + b0),
+            2.0 * s * (w01 + b1),
+            2.0 * s * (w10 + b0),
+            2.0 * s * (w11 + b1),
+            2.0 * s * ((w00 + b0) + (w10 + b0)),
+            2.0 * s * ((w01 + b1) + (w11 + b1)),
+        ),
+        constants=(1.5,),
+        more_shapes=((2,),),
+    ),
 ]
 
 
@@ -1057,8 +1104,9 @@ def build_library(neurc, work_dir):
     # to compile. Keyed by source text, in declaration order.
     sources = dict.fromkeys(case.source for case in CASES)
     sources.update(dict.fromkeys(case.source for case in TENSOR_CASES))
-    shapes = dict.fromkeys(case.shape for case in TENSOR_CASES)
+    shapes = dict.fromkeys(shape for case in TENSOR_CASES for shape in case.shapes)
     sources.update(dict.fromkeys(constructor_source(shape) for shape in shapes))
+    sources.update(dict.fromkeys(probe_source(case) for case in TENSOR_CASES))
     source_path.write_text("".join(sources), encoding="utf-8")
 
     object_path = work_dir / "grad_cases.o"
@@ -1136,6 +1184,56 @@ def constructor_source(shape):
     )
 
 
+def probe_name(case):
+    return f"probe_{case.name}"
+
+
+def probe_source(case):
+    """A Neuro function running `case`'s `.backward()` and returning one number of it.
+
+    `probe_f(i, <elements>, <constants>) -> f64` builds each differentiated tensor from its
+    elements, calls the case's function, runs `.backward()`, and returns element `i` of the
+    parameters' gradients laid end to end, or the loss for `PROBE_LOSS`. Scalars in, a scalar
+    out: nothing about `GradsOf_f` or the slot's layout crosses the C boundary, which is the
+    point, since what is under test is exactly that machinery.
+    """
+    params = [f"a{k}: f64" for k in range(len(case.point))]
+    params += [f"c{k}: f32" for k in range(len(case.constants))]
+    lines = []
+    arguments = []
+    start = 0
+    for index, shape in enumerate(case.shapes):
+        count = math.prod(shape)
+        elements = ", ".join(f"a{start + k}" for k in range(count))
+        lines.append(f"    mut w{index} = {constructor_name(shape)}({elements})")
+        arguments.append(f"&mut w{index}")
+        start += count
+    arguments += [f"c{k}" for k in range(len(case.constants))]
+    lines.append(f"    val loss = {case.callee}({', '.join(arguments)})")
+    lines.append("    loss.backward()")
+    lines.append(f"    if i == {PROBE_LOSS} {{ return loss.sum() as f64 }}")
+    flat = 0
+    for index, shape in enumerate(case.shapes):
+        lines.append(f"    val g{index} = w{index}.grad()")
+        if not shape:
+            lines.append(f"    if i == {flat} {{ return g{index}.sum() as f64 }}")
+            flat += 1
+            continue
+        for position in range(math.prod(shape)):
+            coordinates = []
+            rest = position
+            for extent in reversed(shape):
+                coordinates.append(str(rest % extent))
+                rest //= extent
+            element = f"g{index}[{', '.join(reversed(coordinates))}]"
+            lines.append(f"    if i == {flat} {{ return {element} as f64 }}")
+            flat += 1
+    # Unreachable for an index the harness asks for; a NaN fails any comparison it reaches.
+    lines.append("    return 0.0 / 0.0")
+    body = "\n".join(lines)
+    return f"\nfunc {probe_name(case)}(i: i64, {', '.join(params)}) -> f64 {{\n{body}\n}}\n"
+
+
 class DLDevice(ctypes.Structure):
     _fields_ = [("device_type", ctypes.c_int32), ("device_id", ctypes.c_int32)]
 
@@ -1173,18 +1271,6 @@ class DLManagedTensorVersioned(ctypes.Structure):
     ]
 
 
-class GradientBundle(ctypes.Structure):
-    """`GradsOf_f` for a function of one tensor: one owned handle."""
-
-    _fields_ = [("gradient", ctypes.c_void_p)]
-
-
-class ReverseResult(ctypes.Structure):
-    """`(Tensor<f32, []>, GradsOf_f)`, the value `__f__rev` returns."""
-
-    _fields_ = [("loss", ctypes.c_void_p), ("grads", GradientBundle)]
-
-
 # `kDLFloat`, the type code every tensor here must carry.
 DLPACK_FLOAT = 2
 F32_BITS = 32
@@ -1212,23 +1298,31 @@ def release(handle):
 
 
 class TensorEntry:
-    """The compiled primal, derivative and input constructor of one tensor case."""
+    """The compiled primal, its `.backward()` probe and the input constructors of a case."""
 
     def __init__(self, library, case):
         self.case = case
-        self.make = getattr(library, constructor_name(case.shape))
-        self.make.restype = ctypes.c_void_p
-        self.make.argtypes = [ctypes.c_double] * math.prod(case.shape)
-        arguments = [ctypes.POINTER(ctypes.c_void_p)] + [ctypes.c_float] * len(case.constants)
+        self.makers = []
+        for shape in case.shapes:
+            make = getattr(library, constructor_name(shape))
+            make.restype = ctypes.c_void_p
+            make.argtypes = [ctypes.c_double] * math.prod(shape)
+            self.makers.append(make)
+        arguments = [ctypes.POINTER(ctypes.c_void_p)] * len(case.shapes)
+        arguments += [ctypes.c_float] * len(case.constants)
         self.primal = getattr(library, case.name)
         self.primal.restype = ctypes.c_void_p
         self.primal.argtypes = arguments
         self.path = getattr(library, case.path or case.name)
         self.path.restype = ctypes.c_void_p
         self.path.argtypes = arguments
-        self.reverse = getattr(library, f"__{case.name}__rev")
-        self.reverse.restype = ReverseResult
-        self.reverse.argtypes = arguments
+        self.probe = getattr(library, probe_name(case))
+        self.probe.restype = ctypes.c_double
+        self.probe.argtypes = (
+            [ctypes.c_int64]
+            + [ctypes.c_double] * len(case.point)
+            + [ctypes.c_float] * len(case.constants)
+        )
 
     def loss(self, point):
         """The compiled primal at `point`, as the one element of its rank-0 result."""
@@ -1239,33 +1333,24 @@ class TensorEntry:
         return self.evaluate(self.path, point)
 
     def evaluate(self, function, point):
-        tensor = ctypes.c_void_p(self.make(*point))
-        result = function(ctypes.byref(tensor), *self.case.constants)
+        tensors = [
+            ctypes.c_void_p(make(*run)) for make, run in zip(self.makers, self.case.split(point))
+        ]
+        result = function(*(ctypes.byref(tensor) for tensor in tensors), *self.case.constants)
         try:
             (value,), _ = read_tensor(result, f"{self.case.name}'s loss")
         finally:
             release(result)
-            release(tensor.value)
+            for tensor in tensors:
+                release(tensor.value)
         return value
 
     def derivative(self, point):
-        """`__f__rev` at `point`: the loss it reports and the gradient in its bundle."""
-        tensor = ctypes.c_void_p(self.make(*point))
-        result = self.reverse(ctypes.byref(tensor), *self.case.constants)
-        try:
-            loss, loss_extents = read_tensor(result.loss, "the reverse pass's loss")
-            gradient, extents = read_tensor(result.grads.gradient, "the bundle's gradient")
-        finally:
-            release(result.loss)
-            release(result.grads.gradient)
-            release(tensor.value)
-        if loss_extents != ():
-            raise Failure(f"the reverse pass returned a loss of extents {loss_extents}")
-        if extents != self.case.shape:
-            raise Failure(
-                f"the bundle's gradient has extents {extents}, the parameter {self.case.shape}"
-            )
-        return loss[0], gradient
+        """`.backward()` at `point`: the loss it leaves and every parameter's `.grad()`."""
+        arguments = (*point, *self.case.constants)
+        loss = self.probe(PROBE_LOSS, *arguments)
+        gradient = [self.probe(index, *arguments) for index in range(len(point))]
+        return loss, gradient
 
 
 def fd_gradient_f32(loss, point):
@@ -1301,7 +1386,7 @@ def run_tensor_case(entry, corrupt):
     compare(
         [reported],
         [primal],
-        "the reverse pass's loss",
+        "the loss `.backward()` left",
         "the primal",
         REVERSE_RELATIVE_TOLERANCE,
         REVERSE_ABSOLUTE_TOLERANCE,
@@ -1326,7 +1411,7 @@ def run_tensor_case(entry, corrupt):
     compare(
         produced,
         finite,
-        "`__f__rev`",
+        "`.backward()` / `.grad()`",
         "finite differences",
         F32_RELATIVE_TOLERANCE,
         F32_ABSOLUTE_TOLERANCE,
@@ -1334,7 +1419,7 @@ def run_tensor_case(entry, corrupt):
     compare(
         produced,
         expected,
-        "`__f__rev`",
+        "`.backward()` / `.grad()`",
         "the derivative rules",
         REVERSE_RELATIVE_TOLERANCE,
         REVERSE_ABSOLUTE_TOLERANCE,
@@ -1363,7 +1448,7 @@ def run(neurc, corrupt):
                 compare(produced, expected)
             except Failure as failure:
                 failures.append(f"{case.name}: {failure}")
-        for case in tensor_cases():
+        for case in TENSOR_CASES:
             try:
                 run_tensor_case(TensorEntry(library, case), corrupt)
             except Failure as failure:
@@ -1371,15 +1456,8 @@ def run(neurc, corrupt):
     return failures
 
 
-def tensor_cases():
-    """The tensor cases this platform can drive; see `AGGREGATE_RETURN_MATCHES_C`."""
-    if AGGREGATE_RETURN_MATCHES_C:
-        return TENSOR_CASES
-    return []
-
-
 def case_count():
-    return len(CASES) + len(tensor_cases())
+    return len(CASES) + len(TENSOR_CASES)
 
 
 def main():
@@ -1404,13 +1482,6 @@ def main():
     if not neurc.is_file():
         print(f"neurc not found at {neurc}", file=sys.stderr)
         return EXIT_SKIPPED
-
-    if not AGGREGATE_RETURN_MATCHES_C:
-        print(
-            "skipping the tensor cases: the Windows x64 C ABI returns `__f__rev`'s "
-            "aggregate through memory, not in the registers LLVM uses",
-            file=sys.stderr,
-        )
 
     try:
         failures = run(neurc, corrupt=args.self_test)

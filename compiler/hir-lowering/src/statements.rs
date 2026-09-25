@@ -354,7 +354,7 @@ impl Lowerer {
     ) -> Result<Vec<HirStmt>, LoweringError> {
         let mut out = Vec::with_capacity(stmts.len());
         for stmt in stmts {
-            out.push(self.lower_stmt(stmt)?);
+            self.lower_stmt_into(stmt, &mut out)?;
         }
         Ok(out)
     }

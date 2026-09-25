@@ -1,4 +1,5 @@
 mod array_tests;
+mod backward_tests;
 mod borrow_tests;
 mod builtin_tests;
 mod coalesce_tests;

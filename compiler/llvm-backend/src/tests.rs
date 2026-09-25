@@ -180,8 +180,13 @@ fn a_handle_carries_a_control_block_inside_its_own_allocation() {
         "the control block trails the handle:\n{body}"
     );
     assert!(
-        !body.contains("store ptr null, ptr %dlpack.field"),
-        "`manager_ctx` is no longer null:\n{body}"
+        body.contains("store ptr %dlpack.control, ptr %dlpack.field"),
+        "`manager_ctx` addresses the control block:\n{body}"
+    );
+    // The gradient slot starts empty: nothing owns a gradient until a `.backward()`.
+    assert!(
+        body.contains("store ptr null, ptr %dlpack.field"),
+        "the gradient slot starts null:\n{body}"
     );
     // Six f32 elements: the unpadded run the buffer holds.
     assert!(
@@ -272,11 +277,58 @@ fn a_tensor_is_released_through_its_own_deleter() {
     // The buffer is freed before the structure that names it.
     assert!(data_free < self_free);
 
-    // Two blocks, not three: the control block rides in the structure's allocation, so
-    // the deleter releases it without naming it. It also never READS `manager_ctx` —
-    // on a handle built elsewhere that field is a foreign producer's context.
-    assert!(!deleter.contains("dlpack.control"));
+    // The gradient the slot owns goes first, through its own deleter, so a gradient can
+    // never outlive its parameter. The slot is reached at its fixed offset: the deleter
+    // never READS `manager_ctx`, which on a handle built elsewhere is a foreign
+    // producer's context.
+    let grad_release = deleter
+        .find("call void %dlpack.deleter(ptr %dlpack.grad)")
+        .expect("the deleter releases the gradient it owns");
+    assert!(grad_release < data_free);
     assert!(!deleter.contains("manager"));
+}
+
+/// `.grad()` hands out the slot's own address once it has checked the slot is filled: a
+/// borrow of the gradient rather than a copy, and a panic rather than a null read when no
+/// `.backward()` has filled it.
+#[test]
+fn reading_a_gradient_checks_the_slot_and_borrows_it_in_place() {
+    let source = r#"
+        func main() -> i32 {
+            val w: Tensor<f32, [2]> = [1.0, 2.0]
+            val g = w.grad()
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(body.contains("%dlpack.grad.slot = getelementptr"), "{body}");
+    assert!(body.contains("%dlpack.grad.filled = icmp ne ptr"), "{body}");
+    assert!(body.contains("guard.fail"), "{body}");
+    assert!(
+        body.contains("store ptr %dlpack.grad.slot"),
+        "the view is the slot's address:\n{body}"
+    );
+    assert!(ir.contains("empty gradient slot"));
+}
+
+/// A shape cast consumes its receiver, and the gradient, shaped like the receiver, goes
+/// with it: the order-preserving path keeps the handle, so it releases the slot itself.
+#[test]
+fn a_shape_cast_releases_the_receivers_gradient() {
+    let source = r#"
+        func main() -> i32 {
+            val w: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+            val v = w.reshape([3, 2])
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("call void %dlpack.deleter(ptr %dlpack.grad)"),
+        "{body}"
+    );
 }
 
 /// A reduction's receiver that no binding owns is released once the fold has read it.

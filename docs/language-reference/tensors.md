@@ -152,7 +152,10 @@ PyTorch reads: nothing is wrapped or converted at the boundary. Release runs thr
 handle's own `deleter`, which is the single release path: a tensor leaving scope and a
 foreign owner of the handle call the same function. The handle's `manager_ctx` field carries
 a compiler-private control block that shares the handle's allocation and is released with it;
-a foreign consumer passes that pointer back to the deleter and never reads through it.
+a foreign consumer passes that pointer back to the deleter and never reads through it. The
+block holds the tensor's gradient slot, which `.backward()` fills and the deleter releases
+first, so a gradient never outlives its tensor (see
+[Automatic Differentiation](autodiff.md#running-the-derivative-backward-grad-zero_grad)).
 
 The buffer keeps one address for its whole life and is aligned to 64 bytes, which is what
 DLPack requires; a tensor of any size compiles at every optimization level. `.clone()`

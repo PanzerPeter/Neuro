@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-09-25
+
+### Added
+
+- `loss.backward()`, `w.grad()` and `w.zero_grad()`. `.backward()` on a `val` bound to a `@grad`
+  call runs that call's derivative and moves each gradient into a slot beside the tensor it
+  belongs to; `.grad()` borrows it as `&Tensor<T, S>`, shaped like the tensor, and panics on an
+  empty slot; `.zero_grad()` releases it. The derivative runs where the call ran, on the same
+  arguments, and a call whose result meets no `.backward()` runs none. The training loop of the
+  specification, `w -= rate * w.grad()` inside a `pool`, compiles and converges.
+- The gradient slot owns its gradient: a tensor's deleter releases it first, a second
+  `.backward()` replaces it, and a shape cast's result starts without one. A gradient is never
+  taken from a `pool` arena, even when `.backward()` runs inside one.
+- Between a `@grad` call and its `.backward()`, the differentiated arguments stay mutably
+  borrowed: reading, borrowing, moving, assigning or updating one is a compile error, and the
+  `.backward()` ends the borrow. A live `w.grad()` borrow blocks `w.zero_grad()`.
+- `.backward()` is refused, with a located diagnostic, on anything other than a `val` bound
+  directly to a `@grad` call's result in the same block, and a second time.
+- `tools/grad_differential.py` drives every tensor case through `.backward()` and `.grad()`, via
+  a generated scalar probe, so the cases no longer depend on how `__f__rev`'s aggregate return
+  crosses the C ABI: they now run on Windows, and a case may differentiate several parameters
+  (`weight_and_bias` differentiates two).
+
+### Changed
+
+- `examples/showcase/gradient_loss.nr` trains its least-squares fit by gradient descent instead
+  of evaluating three candidates.
+
+### Fixed
+
+- BUG-066: a tensor compound assignment (`w -= 1.0`) skipped the borrow check `=` makes, so it
+  updated a tensor while a `&mut` or `&` borrow of it was live.
+
 ## [3.7.1] - 2026-09-25
 
 ### Changed

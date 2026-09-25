@@ -77,6 +77,19 @@ fn is_path_related(moved: &str, path: &str) -> bool {
     contains(moved, path) || contains(path, moved)
 }
 
+/// Where a `@grad` call's result stands against the `.backward()` its borrows wait for.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum GradLoss {
+    /// Bound from a `@grad` call; holds every differentiated argument's borrow until its
+    /// `.backward()` runs.
+    Pending,
+    /// Bound from a `@grad` call whose differentiated argument at this position is not a
+    /// place the checker can hold a borrow on, so no `.backward()` may follow.
+    Untracked(usize),
+    /// Its `.backward()` has run and the borrows are released.
+    Done,
+}
+
 /// Information about a symbol (variable)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SymbolInfo {
@@ -93,9 +106,12 @@ pub(crate) struct SymbolInfo {
     /// statement so a transient borrow never leaks past the statement taking it.
     shared_transient: u32,
     exclusive_transient: u32,
-    /// Set when this binding is itself a reference that borrows another place
-    /// (`val r = &x`); drives release of the borrow when this binding dies.
-    borrows: Option<BorrowProvenance>,
+    /// The borrows this binding holds: the one place a reference binding borrows
+    /// (`val r = &x`), or every differentiated argument of the `@grad` call a loss came
+    /// from. Released when this binding dies.
+    borrows: Vec<BorrowProvenance>,
+    /// Set on a `val` bound directly to a `@grad` call's result.
+    pub(crate) grad_loss: Option<GradLoss>,
 }
 
 impl SymbolInfo {
@@ -108,7 +124,8 @@ impl SymbolInfo {
             exclusive_persistent: 0,
             shared_transient: 0,
             exclusive_transient: 0,
-            borrows: None,
+            borrows: Vec::new(),
+            grad_loss: None,
         }
     }
 }
@@ -146,7 +163,7 @@ impl SymbolTable {
             return;
         };
         for info in dying.values() {
-            if let Some(prov) = &info.borrows {
+            for prov in &info.borrows {
                 self.release_persistent(prov);
             }
         }
@@ -253,11 +270,39 @@ impl SymbolTable {
             }
         }
         if let Some(info) = self.lookup_mut(holder) {
-            info.borrows = Some(BorrowProvenance {
+            info.borrows.push(BorrowProvenance {
                 place: place.to_string(),
                 exclusive,
             });
         }
+    }
+
+    /// Make `holder` hold an exclusive borrow of the `&mut` binding `place`, a reborrow
+    /// that took no transient count to promote: a `&mut` binding passed bare to a call
+    /// is checked per call. Released when `holder` dies or runs its `.backward()`.
+    pub(crate) fn hold_reborrow(&mut self, holder: &str, place: &str) {
+        if let Some(info) = self.lookup_mut(place) {
+            info.exclusive_persistent = info.exclusive_persistent.saturating_add(1);
+        }
+        if let Some(info) = self.lookup_mut(holder) {
+            info.borrows.push(BorrowProvenance {
+                place: place.to_string(),
+                exclusive: true,
+            });
+        }
+    }
+
+    /// Record where `holder`, a `@grad` call's result, stands against its `.backward()`.
+    pub(crate) fn set_grad_loss(&mut self, holder: &str, state: GradLoss) {
+        if let Some(info) = self.lookup_mut(holder) {
+            info.grad_loss = Some(state);
+        }
+    }
+
+    /// Run `holder`'s `.backward()` in the checker's model: every borrow it holds ends.
+    pub(crate) fn finish_backward(&mut self, holder: &str) {
+        self.release_borrow_of(holder);
+        self.set_grad_loss(holder, GradLoss::Done);
     }
 
     /// The place `holder` borrows, if `holder` is a reference binding created by a
@@ -266,16 +311,19 @@ impl SymbolTable {
     /// it points into and reject it when that place is itself function-local.
     pub(crate) fn borrow_provenance(&self, holder: &str) -> Option<String> {
         self.lookup(holder)
-            .and_then(|info| info.borrows.as_ref().map(|prov| prov.place.clone()))
+            .and_then(|info| info.borrows.first().map(|prov| prov.place.clone()))
     }
 
     /// Release the persistent borrow held by `holder`, if any: used before a
     /// `mut` reference binding is reassigned, so its previous borrowee is freed
     /// before the new borrow is checked. No-op when `holder` holds no borrow.
     pub(crate) fn release_borrow_of(&mut self, holder: &str) {
-        let prov = self.lookup_mut(holder).and_then(|info| info.borrows.take());
-        if let Some(prov) = prov {
-            self.release_persistent(&prov);
+        let held = self
+            .lookup_mut(holder)
+            .map(|info| std::mem::take(&mut info.borrows))
+            .unwrap_or_default();
+        for prov in &held {
+            self.release_persistent(prov);
         }
     }
 

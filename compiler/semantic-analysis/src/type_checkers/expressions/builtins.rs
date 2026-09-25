@@ -5,6 +5,7 @@
 
 use super::{TypeChecker, CLONE_METHOD};
 use crate::errors::TypeError;
+use crate::type_checkers::backward::{BACKWARD_METHOD, GRAD_METHOD, ZERO_GRAD_METHOD};
 use crate::type_checkers::tensor_apply::is_apply_method;
 use crate::type_checkers::tensor_reduce::is_reduce_method;
 use crate::type_checkers::tensor_shape::is_shape_method;
@@ -208,6 +209,18 @@ impl TypeChecker {
                 }
                 Some(recv.referent().clone())
             }
+            // The gradient slot. `.backward()` pairs with the `@grad` call its receiver came
+            // from and ends that call's borrows; `.grad()` borrows the receiver's gradient;
+            // `.zero_grad()` releases it, so it needs the receiver exclusively.
+            (Type::Tensor { .. }, BACKWARD_METHOD) => {
+                Some(self.check_backward(object, args, call_span))
+            }
+            (Type::Tensor { .. }, GRAD_METHOD) => {
+                Some(self.check_grad_read(recv, object, args, call_span))
+            }
+            (Type::Tensor { .. }, ZERO_GRAD_METHOD) => {
+                Some(self.check_zero_grad(recv, object, args, call_span))
+            }
             // `.to(device)` CONSUMES the tensor: it hands back a tensor whose buffer lives
             // on the requested device and releases the source one, so the receiver is
             // moved rather than borrowed. Matched on `recv` rather than the referent
@@ -371,7 +384,7 @@ impl TypeChecker {
     /// sense the checker already models: it conflicts with a live `&mut`, and a `val`
     /// initializer promotes it to a persistent borrow that keeps the receiver frozen for
     /// as long as the slice binding lives.
-    fn register_slice_borrow(&mut self, object: &Expr, call_span: Span) {
+    pub(crate) fn register_slice_borrow(&mut self, object: &Expr, call_span: Span) {
         let Some(place) = Self::slice_borrow_root(object) else {
             return;
         };

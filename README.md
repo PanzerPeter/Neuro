@@ -171,7 +171,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |
 | **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` ([reference](docs/language-reference/types.md)) |
 | **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce` ([reference](docs/language-reference/tensors.md)) |
-| **Automatic differentiation** | `@grad` compiles a reverse-mode derivative of a tensor loss beside it, through branches, loops and calls, at compile time and with no gradient tape; every derivative is checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
+| **Automatic differentiation** | `@grad` compiles a reverse-mode derivative of a tensor loss beside it, through branches, loops and calls, at compile time and with no gradient tape; `loss.backward()` runs it and `w.grad()` / `.zero_grad()` read and clear each parameter's gradient, every one checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
 | **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `String` buffer ([reference](docs/language-reference/strings.md)) |
 | **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic reports overflow |
 | **Ownership** | Move-by-default, `Copy`, borrows with flow-sensitive exclusivity, lifetime elision, deterministic `Drop`, and `pool { }` arena blocks ([reference](docs/language-reference/memory-model.md)) |
@@ -232,9 +232,10 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 Phase 2 is complete: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
 lowering, **2D** the pool allocator, **2E** the value model and **2F** functional sugar — the
 `|>` and `>>` operators, Einstein notation, and the `.map` / `.zip` / `.reduce` traversals —
-all shipped. Phase 3 now compiles derivatives: `@grad` emits a reverse-mode gradient function
-over tensor arithmetic, `if`, `while` and calls to user functions, and every derivative the compiler generates is measured against
-central finite differences of the compiled function.
+all shipped. Phase 3 now trains: `@grad` emits a reverse-mode gradient function over tensor
+arithmetic, `if`, `while` and calls to user functions, `.backward()` runs it and parks each
+gradient beside its parameter for `.grad()` to read, and every derivative the compiler
+generates is measured against central finite differences of the compiled function.
 
 ---
 

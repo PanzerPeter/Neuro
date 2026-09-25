@@ -1,4 +1,6 @@
-step 0: loss 22.500
-step 1: loss  5.625
-step 2: loss  0.000
-best candidate: step 2
+step   0: loss 22.5000
+step  40: loss  0.0024
+step  80: loss  0.0007
+step 120: loss  0.0003
+step 160: loss  0.0001
+w = [1.00, 1.99], b = 1.02

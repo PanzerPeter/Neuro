@@ -241,6 +241,12 @@ struct Lowerer {
     /// protocol desugar introduces (`__iter_N` / `__iter_pos_N`), so nested loops over
     /// two iterators never shadow each other.
     protocol_counter: usize,
+    /// Lowered name of each `@grad` function, generic instances included → its parameter
+    /// names in order. A `.backward()` reads the gradient bundle's fields by these names.
+    grad_params: HashMap<String, Vec<String>>,
+    /// Monotonic counter naming the `(loss, gradients)` pair each `.backward()` unpacks
+    /// (`__backward_N`).
+    backward_counter: usize,
 }
 
 /// One trait method's lowering-visible signature, in declaration order.
@@ -357,6 +363,8 @@ impl Lowerer {
             coalesce_counter: 0,
             try_counter: 0,
             protocol_counter: 0,
+            grad_params: HashMap::new(),
+            backward_counter: 0,
         }
     }
 
@@ -403,6 +411,14 @@ impl Lowerer {
             .rev()
             .find_map(|scope| scope.get(name).cloned())
     }
+}
+
+/// A function's parameter names, in declaration order.
+fn param_names(func: &ast_types::FunctionDef) -> Vec<String> {
+    func.params
+        .iter()
+        .map(|param| param.name.name.clone())
+        .collect()
 }
 
 /// Whether `t` is a signed or unsigned integer type.

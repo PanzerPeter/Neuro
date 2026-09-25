@@ -1,3 +1,4 @@
+use super::backward::gradient_view_root;
 use super::{LoopContext, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::Type;
@@ -17,7 +18,7 @@ pub(crate) struct LoopExit {
 /// is not tracked as persistent: only a direct initializer creates a held borrow,
 /// which keeps the analysis free of false positives at the cost of missing some
 /// borrows that escape through compound expressions.
-fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
+pub(crate) fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
     let mut outer = expr;
     while let Expr::Paren(inner, _) = outer {
         outer = inner;
@@ -403,6 +404,9 @@ impl TypeChecker {
                     return Some(());
                 }
 
+                let view_root = init
+                    .as_ref()
+                    .and_then(|init_expr| gradient_view_root(init_expr, &final_ty));
                 if let Err(duplicate_name) =
                     self.symbols.define(name.name.clone(), final_ty, *mutable)
                 {
@@ -422,6 +426,14 @@ impl TypeChecker {
                     // the binding leaves scope.
                     if let Some((place, exclusive)) = borrow_target_of(init_expr) {
                         self.symbols.attach_borrow(&name.name, &place, exclusive);
+                    }
+                    if let Some(place) = view_root {
+                        self.symbols.attach_borrow(&name.name, &place, false);
+                    }
+                    // A `mut` loss could be reassigned, and the `.backward()` would then
+                    // run the derivative of a call its value no longer came from.
+                    if !*mutable {
+                        self.hold_grad_call_borrows(&name.name, init_expr);
                     }
                 }
 
@@ -1233,6 +1245,9 @@ impl TypeChecker {
         // persistent borrow of that place.
         if let Some((place, exclusive)) = borrow_target_of(value) {
             self.symbols.attach_borrow(&target.name, &place, exclusive);
+        }
+        if let Some(place) = gradient_view_root(value, &value_ty) {
+            self.symbols.attach_borrow(&target.name, &place, false);
         }
 
         let symbol_info = self.symbols.lookup(&target.name)?;

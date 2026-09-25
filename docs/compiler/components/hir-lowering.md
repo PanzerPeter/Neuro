@@ -74,6 +74,13 @@ flattened at the call, its parameters standing for the arguments, so its operati
 differentiated like the caller's own. That is why derivatives are built after every function,
 generic instances included, has been lowered. A recursive call cannot be inlined and is refused.
 
+`.backward()` is lowered here too, and never reaches a backend. A block's `loss.backward()`
+statement is paired with the `val loss = f(...)` lowered earlier in the same block: that
+declaration becomes a call of `__<f>__rev` whose loss is unpacked into `loss`, and the statement
+becomes one private slot write per differentiated argument, moving that argument's gradient out of
+the returned struct. The derivative therefore runs where the call ran, and a call with no
+`.backward()` stays the plain function. `.grad()` and `.zero_grad()` lower as tensor builtins.
+
 This is the one place lowering reports a user error with a location. The transform owns its rule
 set, so a construct it has no rule for is a `LoweringError::NotDifferentiable` that carries the
 construct's span, and `neurc` renders it like a type error. See

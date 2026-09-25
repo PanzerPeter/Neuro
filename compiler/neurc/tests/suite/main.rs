@@ -51,6 +51,7 @@ mod forward_references;
 mod functions;
 mod generic_structs;
 mod generics;
+mod gradient_slot;
 mod half_precision;
 mod hir_lowering;
 mod if_block_expressions;

@@ -91,9 +91,16 @@ func test() -> i32 {
 
 A function marked `@grad` has its signature held to the rules the derivative needs: a rank-0
 `Tensor<f32, []>` return, every tensor parameter borrowed `&mut` with a float element and literal
-extents, and a free, non-generic function with no attribute arguments. The pass runs after every
+extents, and a free function with no attribute arguments. The pass runs after every
 signature is registered, in `type_checkers/grad.rs`. Which constructs a `@grad` body may use is
 not checked here: that rule set belongs to the transform in [HIR lowering](hir-lowering.md).
+
+`.backward()` writes gradients into the `&mut` arguments of the `@grad` call its receiver came
+from after that call has returned, so a `val` bound to such a call holds those borrows until its
+`.backward()` releases them, in `type_checkers/backward.rs`. Only a body that calls `.backward()`
+on that name extends them; otherwise the call borrows for itself alone. The `.backward()` must be
+on that binding, in the same block, once. `.grad()` borrows its receiver and `.zero_grad()` takes
+it exclusively.
 
 #### 4. Variable Declaration Validation
 

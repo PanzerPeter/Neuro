@@ -1151,6 +1151,13 @@ pub enum TypeError {
         generated: String,
         span: Span,
     },
+
+    /// A `.backward()` the materialization layer cannot pair with the `@grad` call that
+    /// produced its receiver. The pairing is what ends that call's `&mut` borrows and
+    /// what tells the compiler which derivative to run, so without it there is nothing to
+    /// run.
+    #[error("`.backward()` {problem}")]
+    BackwardUnavailable { problem: String, span: Span },
 }
 
 impl TypeError {
@@ -1354,6 +1361,7 @@ impl TypeError {
             | Self::GradFormUnsupported { span, .. }
             | Self::GradSignature { span, .. }
             | Self::GradGeneratedNameTaken { span, .. }
+            | Self::BackwardUnavailable { span, .. }
             | Self::UnknownEnumVariant { span, .. }
             | Self::EnumVariantFormMismatch { span, .. }
             | Self::EnumVariantArityMismatch { span, .. }
