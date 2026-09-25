@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-09-25
+
+### Added
+
+- A `@grad` body may call user functions: free functions declared anywhere in the program,
+  generic ones included. The derivative goes through each callee, which may itself branch, loop
+  and call further helpers, and needs no annotation of its own. A recursive call, a method call,
+  a builtin call and a call through a function value are refused at the call, and a construct a
+  callee cannot use is reported inside the callee.
+- `tools/grad_differential.py`: a `through_calls` case covering shared, mutable and by-value
+  tensor helpers, a scalar helper with an early return, a looping helper called twice and a
+  shape-generic helper.
+- `examples/showcase/composed_loss.nr`: two `@grad` losses built from helper functions, one
+  shape-generic and branching.
+
+### Changed
+
+- The derivative of a `@grad` function is built after every function is lowered, and its
+  generated items follow the rest of the program.
+- The "cannot differentiate" diagnostic names the `@grad` function the construct was reached
+  from and points at the language reference instead of listing the accepted constructs.
+
 ## [3.6.1] - 2026-09-24
 
 ### Added

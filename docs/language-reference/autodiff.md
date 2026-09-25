@@ -107,8 +107,39 @@ func robust_fit(w: &mut Tensor<f32, [2, 1]>, limit: f32, sweeps: i32) -> Tensor<
 
 This function comes from [`examples/showcase/robust_fit.nr`](../../examples/showcase/robust_fit.nr).
 
-Any other construct in a `@grad` body is a compile error pointing at it: a function or method
-call, a `for` over a collection, `loop`, `break` and `continue`, `match`, a `return` inside a loop or
+### Calls
+
+A `@grad` body may call its own functions, declared anywhere in the program, generic ones
+included. The derivative goes through the callee: its body is differentiated where it is
+called, its parameters standing for the arguments, so it may use exactly what a `@grad` body
+may use, and a construct it cannot use is reported inside the callee. The callee needs no
+annotation, and it is still compiled and called as usual by everything else.
+
+```neuro
+func squared_distance(prediction: &Tensor<f32, [3, 1]>, target: &Tensor<f32, [3, 1]>) -> f32 {
+    val residual = prediction - target
+    val squares = &residual * &residual
+    return squares.sum()
+}
+
+@grad
+func fit(w: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {
+    val x: Tensor<f32, [3, 2]> = [[1.0, 2.0], [2.0, 0.0], [0.0, 1.0]]
+    val y: Tensor<f32, [3, 1]> = [[5.0], [2.0], [2.0]]
+    val prediction = x @ w
+    return Tensor::scalar(squared_distance(&prediction, &y))
+}
+```
+
+These functions come from [`examples/showcase/composed_loss.nr`](../../examples/showcase/composed_loss.nr),
+which also calls a shape-generic helper that branches.
+
+A callee may read a `&mut` parameter but not write through it, and it must return a value.
+Every call site gets its own copy of the callee in the derivative, so a function called in many
+places grows the derivative accordingly. A recursive call, a method call, a call to a builtin
+such as `println`, and a call through a closure or a function-typed value are refused.
+
+Any other construct in a `@grad` body is a compile error pointing at it: a `for` over a collection, `loop`, `break` and `continue`, `match`, a `return` inside a loop or
 anywhere but the end of an `if` arm at the top of the body, an assignment to a parameter,
 `.max()` / `.min()`, a slice at a position computed at run time, and an `einsum` operand that
 repeats a letter (a diagonal, as in a trace). A value that an `if` or a loop reassigns must be a float, integer or `bool`, or a float

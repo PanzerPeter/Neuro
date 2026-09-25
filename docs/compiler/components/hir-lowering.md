@@ -69,6 +69,11 @@ Control flow keeps its structure. An `if` becomes a branch holding one flattened
 it. The reverse pass of a loop undoes the iterations last to first, rebuilding each one's values by
 replaying the iterations before it, so the forward pass keeps only an iteration count.
 
+A call to a user function is inlined into the flattened body: the callee's lowered body is
+flattened at the call, its parameters standing for the arguments, so its operations are
+differentiated like the caller's own. That is why derivatives are built after every function,
+generic instances included, has been lowered. A recursive call cannot be inlined and is refused.
+
 This is the one place lowering reports a user error with a location. The transform owns its rule
 set, so a construct it has no rule for is a `LoweringError::NotDifferentiable` that carries the
 construct's span, and `neurc` renders it like a type error. See

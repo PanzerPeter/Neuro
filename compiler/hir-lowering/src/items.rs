@@ -700,6 +700,9 @@ impl Lowerer {
     /// Lower every top-level item to its HIR form.
     pub(crate) fn lower_program(&mut self, items: &[Item]) -> Result<HirProgram, LoweringError> {
         let mut hir_items = Vec::with_capacity(items.len());
+        // The `@grad` functions, concrete and instantiated, whose derivatives are derived
+        // once everything they might call has been lowered.
+        let mut grads = Vec::new();
         for item in items {
             match item {
                 // A generic template is not lowered directly; only its concrete
@@ -707,10 +710,8 @@ impl Lowerer {
                 Item::Function(func) if !func.generics.is_empty() => {}
                 Item::Function(func) => {
                     let lowered = self.lower_function(func)?;
-                    // `@grad` lowers to the function plus its derivative: the bundle struct
-                    // and `__f__rev`, derived from the lowered body.
                     if crate::autodiff::is_grad(&func.attributes) {
-                        hir_items.extend(crate::autodiff::derive_reverse(&lowered)?);
+                        grads.push(lowered.name.clone());
                     }
                     hir_items.push(HirItem::Function(lowered));
                 }
@@ -764,8 +765,7 @@ impl Lowerer {
                     .get(&instance.fn_name)
                     .is_some_and(|template| crate::autodiff::is_grad(&template.attributes));
                 if grad {
-                    self.mono_items
-                        .extend(crate::autodiff::derive_reverse(&hir_fn)?);
+                    grads.push(hir_fn.name.clone());
                 }
                 self.mono_items.push(HirItem::Function(hir_fn));
                 continue;
@@ -777,6 +777,10 @@ impl Lowerer {
         // backend pre-declares every function signature before emitting any body, so
         // position among the items does not matter.
         hir_items.append(&mut self.closure_items);
+        // `@grad` lowers to the function plus its derivative: the bundle struct and
+        // `__f__rev`, derived from the lowered bodies.
+        let derived = crate::autodiff::derive_reverses(&hir_items, &grads)?;
+        hir_items.extend(derived);
 
         Ok(HirProgram { items: hir_items })
     }

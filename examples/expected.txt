@@ -146,6 +146,7 @@ showcase/borrow_discipline.nr        48
 showcase/borrowed_text.nr            25
 showcase/buffered_report.nr          40
 showcase/closures.nr                 90
+showcase/composed_loss.nr            13
 showcase/config_manifest.nr          80
 showcase/derived_records.nr          122
 showcase/displaced_owners.nr         8

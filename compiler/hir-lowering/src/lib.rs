@@ -82,7 +82,7 @@ pub enum LoweringError {
     /// every other variant this is a user-facing limit of the transform, not a checker
     /// escape: the transform owns its rule set, so it is the one place that can say
     /// precisely what it cannot differentiate, and it says where.
-    #[error("cannot differentiate {construct} in `@grad` function '{function}'; a `@grad` body is `val` bindings over float and tensor arithmetic (`+`, `-`, `*`, `/`, unary `-`, `@`), `.sum()`, `.mean()`, tensor literals and element reads at literal positions, ending in the loss")]
+    #[error("cannot differentiate {construct}, reached from `@grad` function '{function}'; the language reference's automatic differentiation chapter lists what a `@grad` body, and every function it calls, may use")]
     NotDifferentiable {
         function: String,
         construct: String,

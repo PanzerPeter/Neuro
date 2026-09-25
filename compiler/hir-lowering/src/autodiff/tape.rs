@@ -20,7 +20,9 @@
 use std::collections::{HashMap, HashSet};
 
 use ast_types::{BinaryOp, UnaryOp};
-use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirReduceOp, HirStmt, HirTensorAxis, HirType};
+use neuro_hir::{
+    HirExpr, HirExprKind, HirFunction, HirPlace, HirReduceOp, HirStmt, HirTensorAxis, HirType,
+};
 use shared_types::{Literal, Span};
 
 use super::emit::tensor_parts;
@@ -195,24 +197,30 @@ pub(super) struct Tape {
     pub(super) slots: HashSet<String>,
 }
 
-/// Linearize `body`, whose final value has type `loss_ty`. `differentiated` names the
-/// parameters the derivative is taken with respect to; they seed the activity set.
-pub(super) fn linearize(
-    function: &str,
-    body: &[HirStmt],
+/// Every lowered function of the program by name, which is what a call inlines.
+pub(super) type Functions<'f> = HashMap<&'f str, &'f HirFunction>;
+
+/// Linearize `primal`'s body. `differentiated` names the parameters the derivative is
+/// taken with respect to; they seed the activity set. A call to one of `functions` is
+/// linearized in place, its parameters bound to the arguments' leaves.
+pub(super) fn linearize<'f>(
+    primal: &'f HirFunction,
     differentiated: &[&str],
-    loss_ty: &HirType,
+    functions: &'f Functions<'f>,
 ) -> Result<Tape, LoweringError> {
     let mut linearizer = Linearizer {
-        function,
+        function: &primal.name,
+        functions,
+        inlining: vec![primal.name.as_str()],
         nodes: Vec::new(),
         aliases: HashMap::new(),
+        params: HashMap::new(),
         scopes: Vec::new(),
         active: differentiated.iter().map(|name| name.to_string()).collect(),
         slots: HashSet::new(),
         next: 0,
     };
-    let loss = linearizer.body_value(body, loss_ty)?;
+    let loss = linearizer.body_value(&primal.body, &primal.return_type)?;
     Ok(Tape {
         nodes: linearizer.nodes,
         active: linearizer.active,
@@ -253,10 +261,18 @@ type ArmBody<'a, 'f> =
 
 struct Linearizer<'f> {
     function: &'f str,
+    functions: &'f Functions<'f>,
+    /// The functions being linearized, outermost first. A call to one of them is recursion,
+    /// which inlining cannot unfold.
+    inlining: Vec<&'f str>,
     nodes: Vec<Node>,
     /// Each body binding, resolved to the leaf that holds its current value. A binding is
     /// never a tape entry of its own: `val y = x` is `x` under a second name.
     aliases: HashMap<String, Leaf>,
+    /// The parameters of an inlined callee, bound to its arguments. Kept apart from
+    /// `aliases` so that assigning to one is refused, as it is for the `@grad` function's
+    /// own: through a `&mut` it would write the caller's value.
+    params: HashMap<String, Leaf>,
     scopes: Vec<Scope>,
     active: HashSet<String>,
     slots: HashSet<String>,
@@ -825,16 +841,15 @@ impl<'f> Linearizer<'f> {
     fn leaf(&mut self, expr: &HirExpr) -> Result<Leaf, LoweringError> {
         match &expr.kind {
             HirExprKind::Literal(_) if is_scalar(&expr.ty) => Ok(Leaf::Const(expr.clone())),
-            HirExprKind::Variable(name) => {
-                Ok(self
-                    .aliases
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| Leaf::Var {
-                        name: name.clone(),
-                        ty: expr.ty.clone(),
-                    }))
-            }
+            HirExprKind::Variable(name) => Ok(self
+                .aliases
+                .get(name)
+                .or_else(|| self.params.get(name))
+                .cloned()
+                .unwrap_or_else(|| Leaf::Var {
+                    name: name.clone(),
+                    ty: expr.ty.clone(),
+                })),
             // Reading through `&x` reads `x`; the replay borrows every tensor operand anyway.
             HirExprKind::Reference {
                 operand,
@@ -972,8 +987,55 @@ impl<'f> Linearizer<'f> {
                 };
                 Ok(self.push(&expr.ty, expr.span, op))
             }
+            HirExprKind::Call { callee, args } => self.call(callee, args, expr.span),
             _ => Err(self.refuse(describe_expr(expr), expr.span)),
         }
+    }
+
+    /// A call to a user function, linearized in place: its body runs at the call on the
+    /// arguments' leaves, so its operations take part in the tape like the caller's own.
+    // ponytail: every call site gets its own copy of the callee's tape, so the derivative
+    // grows with the call tree; a per-callee reverse function chained at each call is the
+    // upgrade if code size starts to matter.
+    fn call(
+        &mut self,
+        callee: &HirExpr,
+        args: &[HirExpr],
+        span: Span,
+    ) -> Result<Leaf, LoweringError> {
+        let HirExprKind::Variable(name) = &callee.kind else {
+            return Err(self.refuse("a method call", span));
+        };
+        // A local of function type shadows a top-level function of the same name.
+        if self.aliases.contains_key(name) || self.params.contains_key(name) {
+            return Err(self.refuse("a call through a function value", span));
+        }
+        let Some(function) = self.functions.get(name.as_str()).copied() else {
+            return Err(self.refuse("a call to a builtin or a method", span));
+        };
+        if self.inlining.contains(&function.name.as_str()) {
+            return Err(self.refuse("a recursive call", span));
+        }
+        if function.return_type == HirType::Void {
+            return Err(self.refuse("a call to a function that returns nothing", span));
+        }
+        if function.params.len() != args.len() {
+            return Err(self.malformed("a call whose argument count is not its callee's"));
+        }
+        let mut params = HashMap::with_capacity(args.len());
+        for (param, arg) in function.params.iter().zip(args) {
+            let _ = params.insert(param.name.clone(), self.leaf(arg)?);
+        }
+        let aliases = std::mem::take(&mut self.aliases);
+        let params = std::mem::replace(&mut self.params, params);
+        let scopes = std::mem::take(&mut self.scopes);
+        self.inlining.push(&function.name);
+        let value = self.body_value(&function.body, &function.return_type);
+        let _ = self.inlining.pop();
+        self.aliases = aliases;
+        self.params = params;
+        self.scopes = scopes;
+        value
     }
 
     /// `a && b` is `if a { b } else { false }` and `a || b` is `if a { true } else { b }`,
@@ -1203,7 +1265,6 @@ fn describe_stmt(stmt: &HirStmt) -> &'static str {
 
 fn describe_expr(expr: &HirExpr) -> &'static str {
     match &expr.kind {
-        HirExprKind::Call { .. } => "a call",
         HirExprKind::Binary { .. } | HirExprKind::Unary { .. } => {
             "an operator on a value that has no derivative"
         }

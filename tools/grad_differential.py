@@ -893,6 +893,63 @@ func counted_loops(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
         # add nothing; u = 2 w1 + 3 w2; the outer k = w0 survives the loop that shadows it.
         lambda a, b, c: (2.0 * a + 2.0, 2.0 * b + 3.5, 2.0 * c + 5.25),
     ),
+    TensorCase(
+        "through_calls",
+        """
+func squared_norm(x: &Tensor<f32, [3]>) -> f32 {
+    val squares = x * x
+    return squares.sum()
+}
+
+func weighted_ends(x: &mut Tensor<f32, [3]>, k: f32) -> f32 {
+    x[0] * k + x[2]
+}
+
+func stretched(x: Tensor<f32, [3]>, k: f32) -> Tensor<f32, [3]> {
+    x * k
+}
+
+func doubled(a: f32) -> f32 {
+    a * 2.0
+}
+
+func larger_doubled(a: f32, b: f32) -> f32 {
+    if a > b { return doubled(a) }
+    return b
+}
+
+func power(x: f32, n: i32) -> f32 {
+    mut acc = 1.0f32
+    mut i = 0
+    while i < n {
+        acc = acc * x
+        i = i + 1
+    }
+    acc
+}
+
+func leading_pair<N>(x: &Tensor<f32, [N]>) -> f32 {
+    x[0] + x[1]
+}
+
+@grad
+func through_calls(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    val h = w * 1.0
+    val x = squared_norm(&h)
+    val ends = weighted_ends(w, 3.0)
+    val t = stretched(w * 1.0, 0.5)
+    val lead = leading_pair(&t)
+    val larger = larger_doubled(w[0], w[1])
+    val powers = power(w[2], 3) + power(w[1], 2)
+    return Tensor::scalar(x + ends + lead + larger + powers)
+}
+""",
+        (3,),
+        (1.25, -0.5, 2.0),
+        # sum(w^2) + (3 w0 + w2) + (w0 + w1) / 2 + 2 w0 (w0 > w1 at the point) + w2^3 + w1^2.
+        # Every callee binds a parameter named `x`, the caller's own `x` included.
+        lambda a, b, c: (2.0 * a + 5.5, 4.0 * b + 0.5, 3.0 * c * c + 2.0 * c + 1.0),
+    ),
 ]
 
 

@@ -192,3 +192,75 @@ func main() -> i32 {
         .count();
     assert_eq!(derivatives, 2, "one derivative per instance:\n{ir}");
 }
+
+/// A `@grad` body may call user functions, declared before or after it, and the
+/// derivative is still emitted beside a primal that runs as written.
+#[test]
+fn a_grad_function_calling_helpers_runs_and_gets_a_derivative() {
+    let test = CompileTest::new();
+    let source = r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val h = w * 1.0
+    return Tensor::scalar(squared_norm(&h) + larger(w[0], w[1]))
+}
+
+func squared_norm(x: &Tensor<f32, [2]>) -> f32 {
+    val squares = x * x
+    return squares.sum()
+}
+
+func larger(a: f32, b: f32) -> f32 {
+    if a > b { return a }
+    return b
+}
+
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = loss(&mut w)
+    l.sum() as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("grad_calls.nr", source)
+        .expect("compile/run failed");
+    // 1 + 4, plus the larger element 2.
+    assert_eq!(exit, 7);
+
+    let source_path = test.write_source("grad_calls_ir.nr", source);
+    let ir_path = source_path.with_extension("ll");
+    let output = Command::new(env!("CARGO_BIN_EXE_neurc"))
+        .args(["compile", "--emit", "llvm-ir", "-o"])
+        .arg(&ir_path)
+        .arg(&source_path)
+        .output()
+        .expect("run neurc");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ir = std::fs::read_to_string(&ir_path).expect("read IR");
+    assert!(ir.contains("@__loss__rev("), "{ir}");
+}
+
+#[test]
+fn a_recursive_call_in_a_grad_body_is_reported_where_it_recurses() {
+    let test = CompileTest::new();
+    let source = r#"
+func halve(x: f32, n: i32) -> f32 {
+    if n > 0 { return halve(x * 0.5, n - 1) }
+    return x
+}
+
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    return Tensor::scalar(halve(w.sum(), 3))
+}
+"#;
+    let diagnostics = test
+        .check("grad_recursion.nr", source)
+        .expect_err("recursion cannot be inlined into a derivative");
+    assert!(diagnostics.contains("recursive call"), "{diagnostics}");
+    assert!(diagnostics.contains(":3:23"), "{diagnostics}");
+}

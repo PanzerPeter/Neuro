@@ -118,26 +118,92 @@ func loss(w: &mut Tensor<f32, [2]>, unused: &mut Tensor<f32, [4]>) -> Tensor<f32
     );
 }
 
+fn calls_in(expr: &neuro_hir::HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::Call { .. } => true,
+        HirExprKind::Binary { left, right, .. } => calls_in(left) || calls_in(right),
+        HirExprKind::Unary { operand, .. } | HirExprKind::Reference { operand, .. } => {
+            calls_in(operand)
+        }
+        _ => false,
+    }
+}
+
 #[test]
-fn a_call_in_the_body_is_refused_at_the_call() {
-    let src = r#"
-func helper(x: f32) -> f32 {
-    return x * 2.0
+fn a_call_is_differentiated_through_the_callee_body() {
+    // The callee is declared after the caller: derivatives are built once every function
+    // is lowered.
+    let program = lower(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val total = w.sum()
+    return Tensor::scalar(scaled(total) + scaled(w[0]))
+}
+
+func scaled(x: f32) -> f32 {
+    val y = x * 2.0
+    return y
+}
+"#,
+    );
+    let reverse = item_function(&program, "__loss__rev");
+    let calls = all_stmts(&reverse.body).into_iter().any(|stmt| match stmt {
+        HirStmt::VarDecl {
+            init: Some(init), ..
+        } => calls_in(init),
+        HirStmt::Assign { value, .. } => calls_in(value),
+        _ => false,
+    });
+    assert!(
+        !calls,
+        "the derivative should inline the callee, not call it"
+    );
+    // Each call site gets its own copy of the callee's `* 2.0`, and each copy its adjoint.
+    let doublings = all_stmts(&reverse.body)
+        .into_iter()
+        .filter(|stmt| {
+            matches!(stmt, HirStmt::VarDecl { init: Some(init), .. }
+                if matches!(&init.kind, HirExprKind::Binary { op: ast_types::BinaryOp::Multiply, right, .. }
+                    if matches!(right.kind, HirExprKind::Literal(shared_types::Literal::Float(v, _)) if v == 2.0)))
+        })
+        .count();
+    assert_eq!(doublings, 4, "two forward doublings and two adjoint ones");
+}
+
+#[test]
+fn a_recursive_call_is_refused_at_the_call() {
+    refusal_at(
+        r#"
+func halve(x: f32, n: i32) -> f32 {
+    if n > 0 { return halve(x * 0.5, n - 1) }
+    return x
 }
 
 @grad
 func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
-    val total = w.sum()
-    return Tensor::scalar(helper(total))
+    return Tensor::scalar(halve(w.sum(), 3))
 }
-"#;
-    let error = lowering_error(src);
-    let LoweringError::NotDifferentiable { span, .. } = error else {
-        panic!("expected NotDifferentiable, got {error:?}");
-    };
-    assert_eq!(
-        span.start,
-        src.find("helper(total)").expect("call in source")
+"#,
+        "halve(x * 0.5, n - 1)",
+    );
+}
+
+#[test]
+fn a_callee_writing_through_its_mut_parameter_is_refused_there() {
+    refusal_at(
+        r#"
+func doubled_sum(x: &mut Tensor<f32, [2]>) -> f32 {
+    x *= 2.0
+    return x.sum()
+}
+
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    return Tensor::scalar(doubled_sum(w))
+}
+"#,
+        "x *= 2.0",
     );
 }
 

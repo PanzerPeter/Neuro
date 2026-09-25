@@ -103,6 +103,7 @@ One line each. The program's own header comment is the full description.
 - [`borrowed_text.nr`](showcase/borrowed_text.nr): explicit lifetime annotations over borrowed text
 - [`buffered_report.nr`](showcase/buffered_report.nr): a shift report long enough to exercise buffered stdout
 - [`closures.nr`](showcase/closures.nr): closures and higher-order functions
+- [`composed_loss.nr`](showcase/composed_loss.nr): two `@grad` losses built from helper functions, one of them shape-generic and branching on the weights' size, so the derived gradient follows each call into the callee, evaluated inside a `pool` over three candidate weights collected in a `Vec` of `Copy` structs
 - [`config_manifest.nr`](showcase/config_manifest.nr): a config manifest rendered from typed records
 - [`derived_records.nr`](showcase/derived_records.nr): derived `Debug` and `PartialEq` over earlier features
 - [`displaced_owners.nr`](showcase/displaced_owners.nr): a reassigned binding releasing the value it displaces, across a `Drop` type, a heap `string` and a `Vec`

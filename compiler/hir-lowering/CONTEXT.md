@@ -37,12 +37,21 @@ loop-context stack.
 ### `@grad` and the derivative transform
 `autodiff/` lowers `@grad func f` to `f` plus a `GradsOf_f` struct (one owned field per `&mut
 Tensor` parameter, typed as that parameter's tensor) and `__f__rev(<f's params>) -> (loss,
-GradsOf_f)`, built from `f`'s already-lowered HIR by `derive_reverse`, called from
-`lower_program`'s function arm. A generic `@grad` template is derived per INSTANCE, from the
-monomorphization drain, so each instance `f_g_...` gets its own `GradsOf_f_g_...` and
-`__f_g_...__rev` over concrete shapes; an instance nothing calls is never emitted. `tape.rs` flattens the body into one-operation entries over
+GradsOf_f)`, built from `f`'s already-lowered HIR by `derive_reverses`, which `lower_program` calls last,
+once every function, generic instances and lifted closures included, is lowered: a `@grad` body
+may call any of them. `lower_program` only records the names of the `@grad` functions as it
+lowers them. A generic `@grad` template is derived per INSTANCE (recorded from the
+monomorphization drain), so each instance `f_g_...` gets its own `GradsOf_f_g_...` and
+`__f_g_...__rev` over concrete shapes; an instance nothing calls is never emitted. The
+generated items follow every other item. `tape.rs` flattens the body into one-operation entries over
 leaves and marks activity, keeping `if` as a `Branch` (one tape per arm) and `while` as a `Loop`
-(condition and body tapes); a reassigned binding is versioned (each assignment rebinds the name
+(condition and body tapes). A call to a user function is INLINED into the tape: the callee's
+lowered body is linearized at the call with its parameters bound to the arguments' leaves (in
+`params`, apart from `aliases`, so a callee assigning to its parameter is refused as the `@grad`
+function's own is; through a `&mut` it would write the caller's value), under empty aliases and
+scopes so nothing of the caller leaks in or out. Recursion (a callee already being inlined), a
+method or builtin call, a call through a function value and a callee returning nothing are
+refused. Every call site gets its own copy (`ponytail:` on `call`); a reassigned binding is versioned (each assignment rebinds the name
 to its new value's leaf), and one that leaves an arm or a loop body goes through a `Slot`, a `mut`
 binding of the derivative. `sweep.rs` holds the two passes: `forward` replays the tape with every
 tensor operand borrowed, `reverse` sweeps it backwards. A branch's reverse pass re-runs the taken
@@ -68,7 +77,7 @@ literal per tensor, a run-time one through a zero tensor and one element store),
 literal bounds, the four shape casts (replayed on a copy, since the node consumes its receiver;
 the adjoint goes back through the inverse permutation), `einsum` without a repeated letter in an
 operand, `as` between integer and float types, constant fills, scalar comparisons, integer arithmetic and logic (`&&` / `||` become branches, keeping the
-short circuit); `val` / `mut` bindings, assignment to a local, `if` / `else if` / `else` as a
+short circuit), calls to user functions (inlined); `val` / `mut` bindings, assignment to a local, `if` / `else if` / `else` as a
 statement or an expression, an early `return` ending an arm of a top-level `if`, `while`, and
 `for` over a range, which `for_range` rewrites into the counted `while` it is (bounds read once;
 an inclusive range stops on a flag rather than stepping past its end, and a reversed one counts up

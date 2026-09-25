@@ -14,8 +14,8 @@
 //! which is the reason the transform lives here rather than over LLVM IR.
 //!
 //! Three steps. [`tape::linearize`] flattens the body into single-operation bindings,
-//! keeping `if` and `while` as nested tapes, and marks which values depend on a
-//! differentiated parameter. [`sweep::forward`] emits those bindings again, reading every
+//! keeping `if` and `while` as nested tapes, inlining every call to a user function, and
+//! marks which values depend on a differentiated parameter. [`sweep::forward`] emits those bindings again, reading every
 //! tensor operand through a borrow. [`sweep::reverse`] walks the tape backwards from a
 //! `1.0` seed at the loss, emitting each operation's adjoint rule ([`rules`]) and summing
 //! the adjoints of values used more than once.
@@ -33,6 +33,8 @@ mod rules;
 mod sweep;
 mod tape;
 
+use std::collections::HashMap;
+
 use ast_types::Attribute;
 use neuro_hir::{
     HirExpr, HirExprKind, HirField, HirFieldInit, HirFunction, HirItem, HirStmt, HirStruct, HirType,
@@ -41,7 +43,7 @@ use neuro_hir::{
 use crate::LoweringError;
 use emit::Emitter;
 use rules::Adjoints;
-use tape::Leaf;
+use tape::{Functions, Leaf};
 
 /// The attribute asking for a derivative.
 const GRAD_ATTRIBUTE: &str = "grad";
@@ -63,8 +65,37 @@ fn is_differentiated(ty: &HirType) -> bool {
     matches!(ty, HirType::Reference { inner, mutable: true } if matches!(**inner, HirType::Tensor { .. }))
 }
 
+/// Build `GradsOf_f` and `__f__rev` for each `@grad` function named in `grads`, out of the
+/// fully lowered `items`. It runs once every function is lowered, generic instances
+/// included, because a `@grad` body may call any of them.
+pub(crate) fn derive_reverses(
+    items: &[HirItem],
+    grads: &[String],
+) -> Result<Vec<HirItem>, LoweringError> {
+    let functions: Functions<'_> = items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Function(function) => Some((function.name.as_str(), function)),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let mut derived = Vec::with_capacity(grads.len() * 2);
+    for name in grads {
+        let Some(primal) = functions.get(name.as_str()) else {
+            return Err(LoweringError::Malformed {
+                detail: format!("`@grad` function '{name}' was never lowered"),
+            });
+        };
+        derived.extend(derive_reverse(primal, &functions)?);
+    }
+    Ok(derived)
+}
+
 /// Build `GradsOf_f` and `__f__rev` for the lowered `@grad` function `primal`.
-pub(crate) fn derive_reverse(primal: &HirFunction) -> Result<[HirItem; 2], LoweringError> {
+fn derive_reverse(
+    primal: &HirFunction,
+    functions: &Functions<'_>,
+) -> Result<[HirItem; 2], LoweringError> {
     let differentiated: Vec<_> = primal
         .params
         .iter()
@@ -74,7 +105,7 @@ pub(crate) fn derive_reverse(primal: &HirFunction) -> Result<[HirItem; 2], Lower
         .iter()
         .map(|param| param.name.as_str())
         .collect();
-    let tape = tape::linearize(&primal.name, &primal.body, &names, &primal.return_type)?;
+    let tape = tape::linearize(primal, &names, functions)?;
 
     let mut em = Emitter::new(primal.span);
     sweep::forward(&mut em, &tape.nodes)?;
