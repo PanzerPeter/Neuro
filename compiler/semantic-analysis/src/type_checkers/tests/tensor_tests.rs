@@ -651,8 +651,8 @@ fn a_compound_assignment_rejects_an_element_type_without_arithmetic() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
-    mut w: Tensor<f16, [2]> = [1.0, 2.0]
-    val g: Tensor<f16, [2]> = [0.5, 0.5]
+    mut w: Tensor<bool, [2]> = [true, false]
+    val g: Tensor<bool, [2]> = [false, false]
     w += &g
     return 0
 }
@@ -662,7 +662,7 @@ func main() -> i32 {
         errors
             .iter()
             .any(|e| matches!(e, TypeError::TensorElementNotArithmetic { .. })),
-        "half precision stops short of arithmetic; got {errors:?}"
+        "a bool element has no arithmetic; got {errors:?}"
     );
 }
 
@@ -1457,14 +1457,38 @@ func main() -> i32 {
     );
 }
 
+/// A half-precision tensor has elementwise arithmetic, matmul, a half scalar broadcast,
+/// compound assignment and reductions, although its scalar has none: the scalar
+/// restriction stops at tensor ops. All of them were refused.
 #[test]
-fn a_half_precision_element_has_no_operator() {
+fn test_bug_073_a_half_precision_tensor_has_arithmetic_and_reductions() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
     val a: Tensor<f16, [2]> = [1.0f16, 2.0f16]
-    val b: Tensor<f16, [2]> = [1.0f16, 2.0f16]
-    val sum = &a + &b
+    mut w: Tensor<bf16, [2, 2]> = [[1.0bf16, 2.0bf16], [3.0bf16, 4.0bf16]]
+    val sum = &a + &a
+    val scaled = &a * 2.0f16
+    val product = &w @ &w
+    w += &product
+    val total: f16 = sum.sum()
+    val mean: bf16 = w.mean()
+    val rows = w.max(axis: 1)
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// Two half-precision SCALARS still have no arithmetic.
+#[test]
+fn a_half_precision_scalar_still_has_no_operator() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a = 1.0f16
+    val b = a + a
     return 0
 }
 "#,
@@ -1472,8 +1496,8 @@ func main() -> i32 {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::TensorElementNotArithmetic { .. })),
-        "the half-precision contract stops short of arithmetic; got {errors:?}"
+            .any(|e| matches!(e, TypeError::HalfFloatArithmetic { .. })),
+        "{errors:?}"
     );
 }
 
@@ -1763,4 +1787,29 @@ func main() -> i32 {
         .filter(|e| matches!(e, TypeError::UseOfMovedValue { .. }))
         .count();
     assert_eq!(moves, 2, "expected one per moved operand; got {errors:?}");
+}
+
+/// The by-value operators and the in-place update share one diagnostic; each names its own
+/// operator, where the message used to call `a + b` a compound assignment `+=`.
+#[test]
+fn test_bug_074_the_element_diagnostic_names_the_operator_written() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<bool, [2]> = [true, false]
+    mut w: Tensor<bool, [2]> = [true, true]
+    val c = &a + &a
+    w += &a
+    return 0
+}
+"#,
+    );
+    let ops: Vec<&str> = errors
+        .iter()
+        .filter_map(|e| match e {
+            TypeError::TensorElementNotArithmetic { op, .. } => Some(op.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ops, ["+", "+="], "got {errors:?}");
 }

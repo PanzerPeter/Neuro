@@ -349,8 +349,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .map(Some)
     }
 
-    /// Address of element `index` in a borrowed run, emitting the same debug-build
-    /// bounds guard the owning container gets; only the bound is a runtime length.
+    /// Address of element `index` in a borrowed run, emitting the same bounds guard the
+    /// owning container gets; only the bound is a runtime length.
     fn slice_element_ptr(
         &mut self,
         base: PointerValue<'ctx>,
@@ -363,17 +363,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let idx_val = self.codegen_expr(index)?.into_int_value();
         let idx64 = self.widen_index_to_i64(idx_val, &idx_sem)?;
 
-        if self.overflow_checks {
-            let ok = self
-                .builder
-                .build_int_compare(IntPredicate::ULT, idx64, len, "sl.bounds")?;
-            self.codegen_guard_or_panic(ok, "slice index out of bounds", offset)?;
-        }
+        let ok = self
+            .builder
+            .build_int_compare(IntPredicate::ULT, idx64, len, "sl.bounds")?;
+        self.codegen_guard_or_panic(ok, "slice index out of bounds", offset)?;
 
         let elem_llvm = self.get_any_llvm_type(element_ty)?;
-        // SAFETY: in debug builds the guard above panics unless `idx64 < len`; in
-        // release builds an out-of-range index is the documented behaviour of the
-        // bounds policy, matching arrays and the integer-overflow policy.
+        // SAFETY: the guard above panics unless `idx64 < len`, so the GEP stays inside
+        // the borrowed run.
         unsafe {
             self.builder
                 .build_in_bounds_gep(elem_llvm, base, &[idx64], "sl.slot")

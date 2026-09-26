@@ -111,8 +111,13 @@ the tuple-index parse, so it needs no expression grammar of its own.
   where a `{` cannot be a body block. Both restore the previous value on the error path too, so
   nesting composes: `if check(Point { x: 1 }) && flag { }` reads the literal inside the argument
   list and the trailing brace as the body.
-- **Statement boundaries.** `parse_expr_inner` treats a newline followed by `(`, `[`, `*`, or `@`
-  as a statement boundary. `@` is there because it spells both the matmul operator and the opening
+- **Statement boundaries.** `parse_expr_inner` treats a newline followed by `(`, `[`, `*`, `-`,
+  `&`, `|` or `@` as a statement boundary: each can also begin an expression. `-`, `&` and `|`
+  joined the set with BUG-069, before which a tail `-x` folded into the line above as a
+  subtraction. The boundary applies only at `delimiter_depth` 0: `inside_delimiters` raises the
+  depth, so inside an unclosed `(` or `[` every line continues, and `at_statement_level` resets it
+  for a block's statements and a match arm, where a newline ends a statement again even inside a
+  call's argument list. `@` is there because it spells both the matmul operator and the opening
   of an attribute: without it a module `const`'s initializer reads the `@derive` on the next line
   as a matrix product against `derive(Debug)`. The rule is that **the line that ENDED decides**: a continuing line ends
   with an operator, a comma, or an opening delimiter, all of which arrive here with no pending

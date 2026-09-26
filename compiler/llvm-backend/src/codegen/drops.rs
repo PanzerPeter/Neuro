@@ -10,8 +10,9 @@
 
 use ast_types::BinaryOp;
 use inkwell::basic_block::BasicBlock;
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{ArrayType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
+use inkwell::IntPredicate;
 use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirType};
 use shared_types::Literal;
 
@@ -19,6 +20,10 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
 
 use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
+
+/// The name an unbound temporary's drop entry is registered under. `__` is rejected in
+/// every declared name, so no move site can reach the entry.
+const UNBOUND_TEMPORARY: &str = "__unbound_temporary";
 
 /// The `String` builder method that copies its bytes out into an owned `string`.
 /// Matched by name here the way the builder type itself is matched by name.
@@ -142,6 +147,62 @@ impl<'ctx> CodegenContext<'ctx> {
                     .flatten()
                     .any(|field| self.holds_owner(field))
             })
+    }
+
+    /// Whether a value of `ty` runs a user destructor somewhere inside it.
+    fn holds_user_drop(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(name) => {
+                self.drop_types.contains(name)
+                    || self
+                        .struct_defs
+                        .get(name)
+                        .is_some_and(|fields| fields.iter().any(|(_, t)| self.holds_user_drop(t)))
+            }
+            Type::Enum(name) => self
+                .type_mapper
+                .enum_payload_types(name)
+                .is_some_and(|variants| variants.iter().flatten().any(|t| self.holds_user_drop(t))),
+            Type::Tuple(elements) => elements.iter().any(|t| self.holds_user_drop(t)),
+            Type::Array { element, .. } => self.holds_user_drop(element),
+            _ => false,
+        }
+    }
+
+    /// Destroy `value`, the result of `expr`, when it is a fresh value no binding owns
+    /// and it runs a user destructor: a statement nothing reads, or a temporary only read
+    /// from (`make().id`). No scope exit reaches such a value, so without this its
+    /// destructor never ran (BUG-047).
+    ///
+    /// Only a call, a struct literal or an enum construction is fresh; anything else may
+    /// be a read of a value some binding still owns. Inside a `pool` it does nothing: the
+    /// arena, not a scope, owns what the block allocates.
+    pub(crate) fn drop_unbound_temporary(
+        &mut self,
+        expr: &HirExpr,
+        value: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<()> {
+        let fresh = matches!(
+            expr.kind,
+            HirExprKind::Call { .. }
+                | HirExprKind::StructLiteral { .. }
+                | HirExprKind::EnumConstruct { .. }
+        );
+        let ty = Type::from_hir(&expr.ty);
+        if !fresh || self.pool_depth > 0 || !self.holds_user_drop(&ty) {
+            return Ok(());
+        }
+        if self.current_block_terminated() {
+            return Ok(());
+        }
+        let slot = self.entry_alloca(value.get_type(), "unbound.tmp")?;
+        self.builder.build_store(slot, value)?;
+        let depth = self.drop_scopes.len();
+        self.push_drop_scope();
+        self.register_owned_binding(UNBOUND_TEMPORARY, slot, &ty)?;
+        self.emit_drops_through(depth)?;
+        self.pop_drop_scope();
+        Ok(())
     }
 
     /// Plan the drops for every owner held inside a binding of `ty`, flattening the
@@ -492,17 +553,29 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(flag_ptr)
     }
 
+    /// The drop entry of the binding `name` resolves to at this point, if it owns one.
+    ///
+    /// Matched on the binding's storage as well as its name: a binding that owns
+    /// nothing (a borrow, a scalar) registers no entry, so a lookup by name alone would
+    /// fall through it to an outer owner it shadows, and a store or a move through the
+    /// inner name would then release or disown the outer value.
+    fn live_drop_entry(&self, name: &str) -> Option<&DropEntry<'ctx>> {
+        let storage = self.variables.get(name)?;
+        self.drop_scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter().rev())
+            .find(|entry| entry.name == name)
+            .filter(|entry| entry.storage_ptr == *storage)
+    }
+
     /// The drop flag of the binding `expr` names, when that binding may own a heap
     /// `string`.
     fn owned_string_flag_ptr(&self, expr: &HirExpr) -> Option<PointerValue<'ctx>> {
         let HirExprKind::Variable(name) = &expr.kind else {
             return None;
         };
-        self.drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| &entry.name == name)
+        self.live_drop_entry(name)
             .filter(|entry| matches!(entry.target, DropTarget::HeapString))
             .map(|entry| entry.flag_ptr)
     }
@@ -536,11 +609,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let HirExprKind::Variable(name) = &expr.kind else {
             return false;
         };
-        self.drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| &entry.name == name)
+        self.live_drop_entry(name)
             .is_some_and(|entry| matches!(entry.target, DropTarget::PoolRegistered))
     }
 
@@ -622,12 +691,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         let mut flags: Vec<PointerValue<'ctx>> = Vec::new();
-        let entry = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name);
+        let entry = self.live_drop_entry(name);
         let Some(entry) = entry else {
             return;
         };
@@ -679,11 +743,7 @@ impl<'ctx> CodegenContext<'ctx> {
             return false;
         }
         let prefix = path.unwrap_or_default();
-        self.drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name)
+        self.live_drop_entry(name)
             .is_some_and(|entry| entry.held.iter().any(|held| held.path.starts_with(&prefix)))
     }
 
@@ -722,11 +782,7 @@ impl<'ctx> CodegenContext<'ctx> {
         name: &str,
     ) -> CodegenResult<Vec<(PointerValue<'ctx>, IntValue<'ctx>)>> {
         let flags: Vec<PointerValue<'ctx>> = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name)
+            .live_drop_entry(name)
             .map(|entry| {
                 let mut flags: Vec<PointerValue<'ctx>> =
                     entry.held.iter().map(|held| held.flag_ptr).collect();
@@ -768,13 +824,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         name: &str,
     ) -> CodegenResult<Option<(PointerValue<'ctx>, DropTarget)>> {
-        let entry = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name)
-            .map(Self::snapshot_entry);
+        let entry = self.live_drop_entry(name).map(Self::snapshot_entry);
 
         let Some(pending) = entry else {
             return Ok(None);
@@ -807,11 +857,7 @@ impl<'ctx> CodegenContext<'ctx> {
         path: &[String],
     ) -> CodegenResult<()> {
         let pending: Vec<(PointerValue<'ctx>, PointerValue<'ctx>, DropTarget)> = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name)
+            .live_drop_entry(name)
             .map(|entry| {
                 entry
                     .held
@@ -829,6 +875,105 @@ impl<'ctx> CodegenContext<'ctx> {
                 continue;
             }
             self.builder.build_store(flag_ptr, armed)?;
+        }
+        Ok(())
+    }
+
+    /// Release what the position `object.segment` loses to a store, then arm it for
+    /// `value`. A segment is a field name or a literal array position, at any depth.
+    ///
+    /// Only a position inside a binding this frame owns has flags to consult; a place
+    /// reached through a borrow belongs to whoever lent it and is left alone here.
+    pub(crate) fn displace_held_position(
+        &mut self,
+        object: &HirExpr,
+        segment: &str,
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        let Some((root, Some(path))) = Self::extend_place(object, segment) else {
+            return Ok(());
+        };
+        let root = root.to_string();
+        self.drop_displaced_held_value(&root, &path)?;
+        // A `string` position the store hands a fresh buffer takes ownership of it here:
+        // the release above left every such position disarmed, because the type says
+        // nothing about what the incoming value owns.
+        self.arm_stored_string_positions(&root, &path, value)
+    }
+
+    /// [`displace_held_position`] for an array element whose position is known only at
+    /// run time: the address being written is compared against each element the owner
+    /// tracks, and the one it matches is released and re-armed.
+    pub(crate) fn displace_array_element(
+        &mut self,
+        object: &HirExpr,
+        array_llvm: ArrayType<'ctx>,
+        array_ptr: PointerValue<'ctx>,
+        element_ptr: PointerValue<'ctx>,
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        let Some((root, Some(prefix))) = Self::moved_place(object) else {
+            return Ok(());
+        };
+        let root = root.to_string();
+        let Some(entry) = self.live_drop_entry(&root) else {
+            return Ok(());
+        };
+        let tracked: Vec<Vec<String>> = (0..array_llvm.len())
+            .map(|k| {
+                let mut path = prefix.clone();
+                path.push(k.to_string());
+                path
+            })
+            .filter(|path| entry.held.iter().any(|held| held.path.starts_with(path)))
+            .collect();
+        if tracked.is_empty() {
+            return Ok(());
+        }
+
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("element store emitted outside a function".to_string())
+        })?;
+        let i64t = self.context.i64_type();
+        let written = self
+            .builder
+            .build_ptr_to_int(element_ptr, i64t, "elem.addr")?;
+        // ponytail: one compare per tracked element; switch on the index instead if
+        // arrays of owners grow large enough for the chain to matter.
+        for path in tracked {
+            let position: u64 = path
+                .last()
+                .and_then(|segment| segment.parse().ok())
+                .ok_or_else(|| {
+                    CodegenError::InternalError("array position is not a number".to_string())
+                })?;
+            // SAFETY: `position` is below the array's length, so the GEP stays inside it.
+            let position_ptr = unsafe {
+                self.builder.build_in_bounds_gep(
+                    array_llvm,
+                    array_ptr,
+                    &[i64t.const_zero(), i64t.const_int(position, false)],
+                    "held.elem.ptr",
+                )?
+            };
+            let position_addr =
+                self.builder
+                    .build_ptr_to_int(position_ptr, i64t, "held.elem.addr")?;
+            let hit = self.builder.build_int_compare(
+                IntPredicate::EQ,
+                written,
+                position_addr,
+                "held.elem.hit",
+            )?;
+            let release_bb = self.context.append_basic_block(parent_fn, "displace.elem");
+            let next_bb = self.context.append_basic_block(parent_fn, "displace.next");
+            self.builder
+                .build_conditional_branch(hit, release_bb, next_bb)?;
+            self.builder.position_at_end(release_bb);
+            self.drop_displaced_held_value(&root, &path)?;
+            self.arm_stored_string_positions(&root, &path, value)?;
+            self.builder.build_unconditional_branch(next_bb)?;
+            self.builder.position_at_end(next_bb);
         }
         Ok(())
     }
@@ -880,11 +1025,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// [`arm_stored_string_positions`] arms it from the incoming value instead.
     pub(crate) fn rearm_held_drop_flags(&mut self, name: &str) -> CodegenResult<()> {
         let flags: Vec<PointerValue<'ctx>> = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name)
+            .live_drop_entry(name)
             .map(|entry| {
                 entry
                     .held
@@ -923,11 +1064,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         let flags: Vec<PointerValue<'ctx>> = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name)
+            .live_drop_entry(name)
             .map(|entry| {
                 entry
                     .held
@@ -957,11 +1094,7 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok(Vec::new());
         };
         let positions: Vec<(Vec<String>, PointerValue<'ctx>)> = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| &entry.name == name)
+            .live_drop_entry(name)
             .map(|entry| {
                 entry
                     .held
@@ -991,11 +1124,7 @@ impl<'ctx> CodegenContext<'ctx> {
         flags: &[(Vec<String>, IntValue<'ctx>)],
     ) -> CodegenResult<()> {
         let targets: Vec<(PointerValue<'ctx>, IntValue<'ctx>)> = self
-            .drop_scopes
-            .iter()
-            .rev()
-            .flat_map(|scope| scope.iter().rev())
-            .find(|entry| entry.name == name)
+            .live_drop_entry(name)
             .map(|entry| {
                 flags
                     .iter()

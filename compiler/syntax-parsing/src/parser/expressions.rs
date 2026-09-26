@@ -39,22 +39,27 @@ impl Parser {
         let mut left = self.parse_prefix()?;
 
         while !self.is_at_end() {
-            // A new line beginning with `*`, `(`, or `[` starts a statement: a
-            // dereference (`*r = v`), a parenthesized expression, or an array literal,
-            // not a continuation of this one. The no-semicolon rule only continues an
-            // expression across a newline when the *previous* line ends with an
-            // operator, a comma, or an opening delimiter, and every one of those
+            // A new line beginning with a token that can also BEGIN an expression
+            // starts a statement: a dereference (`*r = v`), a negation (`-x`), a borrow
+            // (`&x`), a closure literal (`|x| ...`), a parenthesized expression, or an
+            // array literal, not a continuation of this one. The no-semicolon rule only
+            // continues an expression across a newline when the *previous* line ends
+            // with an operator, a comma, or an opening delimiter, and every one of those
             // reaches here with the newline already behind it. Skipping the newline
             // first instead let the NEXT line decide: `val a = f()` followed by a line
-            // `(2 + 3)` parsed as a call of `f()`'s result, and a following `[1, 2]` as
-            // an index of it. `@` joined that set when it became the matmul operator:
-            // a line opening with `@` is an attribute on the item below it, so a
-            // module `const` initializer must not swallow the `@derive` after it.
-            if matches!(self.peek_kind(), Some(TokenKind::Newline))
+            // `(2 + 3)` parsed as a call of `f()`'s result, and a tail `-x` as a
+            // subtraction from the line above. `@` is in the set because a line opening
+            // with it is an attribute on the item below. Inside `(` or `[` a newline
+            // ends nothing, so there the next line always continues.
+            if self.delimiter_depth == 0
+                && matches!(self.peek_kind(), Some(TokenKind::Newline))
                 && matches!(
                     self.peek_next_nonnewline_kind(),
                     Some(
                         TokenKind::Star
+                            | TokenKind::Minus
+                            | TokenKind::Amp
+                            | TokenKind::Pipe
                             | TokenKind::LeftParen
                             | TokenKind::LeftBracket
                             | TokenKind::At

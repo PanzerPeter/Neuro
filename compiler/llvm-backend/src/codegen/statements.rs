@@ -1043,6 +1043,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
                 if let Some(value) = value {
                     self.release_string_temporary(expr, value)?;
+                    self.drop_unbound_temporary(expr, value)?;
                 }
                 Ok(())
             }

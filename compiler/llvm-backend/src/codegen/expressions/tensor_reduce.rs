@@ -56,8 +56,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let source = self.load_dlpack_data(receiver_handle)?;
 
         // The accumulator doubles as the result of a whole-tensor reduction, which has
-        // exactly one run and so leaves its finished value here.
-        let accumulator = self.entry_alloca(elem_llvm, "tensor.reduce.acc")?;
+        // exactly one run and so leaves its finished value here. A half-precision run is
+        // folded in `f32` and rounded once at the end, so a long sum does not stall at the
+        // point where one more element no longer changes a 16-bit total.
+        let half =
+            elem_llvm.is_float_type() && self.is_half_float_type(elem_llvm.into_float_type());
+        let (acc_llvm, acc_element) = if half {
+            (self.context.f32_type().into(), Type::F32)
+        } else {
+            (elem_llvm, element.clone())
+        };
+        let accumulator = self.entry_alloca(acc_llvm, "tensor.reduce.acc")?;
         let target = match result_ty {
             Type::Tensor { .. } => {
                 let handle = self.alloc_dlpack_tensor(result_ty, "tensor.reduce")?;
@@ -99,25 +108,34 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(body);
         let base = self.run_base(r, &layout)?;
         let first = self.load_element(elem_llvm, source, base, "tensor.reduce.first")?;
+        let first = self.widen_element(first)?;
         self.builder.build_store(accumulator, first)?;
         self.fold_run(
-            elem_llvm,
+            (elem_llvm, acc_llvm),
             source,
             base,
             accumulator,
             &layout,
             op,
-            &element,
+            &acc_element,
             offset,
         )?;
 
         let mut value = self
             .builder
-            .build_load(elem_llvm, accumulator, "tensor.reduce.value")?;
+            .build_load(acc_llvm, accumulator, "tensor.reduce.value")?;
         if op == HirReduceOp::Mean {
             value = self.divide_by_run_length(value, layout.mid)?;
-            self.builder.build_store(accumulator, value)?;
         }
+        if half {
+            value = self
+                .narrow_float(value.into_float_value(), elem_llvm.into_float_type())?
+                .into();
+        }
+        // The finished value, at the element's own width, is the result of a whole-tensor
+        // reduction.
+        let result_slot = self.entry_alloca(elem_llvm, "tensor.reduce.out")?;
+        self.builder.build_store(result_slot, value)?;
         if let Some((_, data)) = target {
             let slot = self.tensor_buffer_slot(elem_llvm, data, r)?;
             self.builder.build_store(slot, value)?;
@@ -136,7 +154,7 @@ impl<'ctx> CodegenContext<'ctx> {
             Some((handle, _)) => Ok(handle.into()),
             None => self
                 .builder
-                .build_load(elem_llvm, accumulator, "tensor.reduce.result")
+                .build_load(elem_llvm, result_slot, "tensor.reduce.result")
                 .map_err(CodegenError::from),
         }
     }
@@ -167,7 +185,10 @@ impl<'ctx> CodegenContext<'ctx> {
     #[allow(clippy::too_many_arguments)]
     fn fold_run(
         &mut self,
-        elem_llvm: inkwell::types::BasicTypeEnum<'ctx>,
+        (elem_llvm, acc_llvm): (
+            inkwell::types::BasicTypeEnum<'ctx>,
+            inkwell::types::BasicTypeEnum<'ctx>,
+        ),
         source: PointerValue<'ctx>,
         base: IntValue<'ctx>,
         accumulator: PointerValue<'ctx>,
@@ -217,9 +238,10 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_int_add(base, stepped, "tensor.reduce.index")?;
         let value = self.load_element(elem_llvm, source, index, "tensor.reduce.elem")?;
+        let value = self.widen_element(value)?;
         let carried = self
             .builder
-            .build_load(elem_llvm, accumulator, "tensor.reduce.carried")?;
+            .build_load(acc_llvm, accumulator, "tensor.reduce.carried")?;
         let folded = self.fold_element(op, carried, value, element, offset)?;
         self.builder.build_store(accumulator, folded)?;
         let next =
@@ -298,6 +320,14 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_float_div(total, divisor, "tensor.reduce.mean")?
             .into())
+    }
+
+    /// A loaded element at the width it is folded at: `f32` for a half-precision one.
+    fn widen_element(&self, value: BasicValueEnum<'ctx>) -> CodegenResult<BasicValueEnum<'ctx>> {
+        match value {
+            BasicValueEnum::FloatValue(v) => Ok(self.widen_half(v)?.into()),
+            other => Ok(other),
+        }
     }
 
     fn load_element(

@@ -128,6 +128,12 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
 
         self.release_owned_arguments(mangled_name, args, &passed)?;
+        // A `&self` receiver built for the call (`make().get()`) is owned by nothing once
+        // the call returns. A consuming receiver belongs to the callee, and a `&mut self`
+        // one was addressed in place.
+        if !self_by_pointer && !self.consuming_self_methods.contains(mangled_name) {
+            self.drop_unbound_temporary(receiver, self_arg)?;
+        }
 
         Ok(call_result.try_as_basic_value().basic())
     }

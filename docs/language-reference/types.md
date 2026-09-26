@@ -250,7 +250,7 @@ func main() -> i32 {
 }
 ```
 
-As **tensor element types** (`Tensor<bf16, [...]>`, Phase 2) the restriction lifts entirely: elementwise math, matmul, and reductions lower through MLIR to the accelerator's native half-precision units. The split keeps half-precision where it pays off (bulk tensor compute) without committing the scalar layer to non-portable semantics.
+As **tensor element types** (`Tensor<bf16, [...]>`, Phase 2) the restriction lifts entirely: elementwise operators (with a tensor or a half-precision scalar on the other side), compound assignment, matmul, `einsum`, reductions and the elementwise math methods are all defined. On the CPU each element is computed in `f32` and rounded back once, and a reduction accumulates in `f32`, so a long `bf16` sum does not stall where a 16-bit running total would. The split keeps half-precision where it pays off (bulk tensor compute) without committing the scalar layer to non-portable semantics.
 
 ### Digit Separators
 
@@ -1268,9 +1268,9 @@ for x in &a {  }                     // iterate over a borrow
   see [Ownership of an element](#ownership-of-an-element) below.
 - **Literals** must be homogeneous; the length is the element count and, when a
   `[T; N]` annotation is present, must equal `N`.
-- **Bounds**: an out-of-range index panics with a located diagnostic in debug
-  builds (`-O0`); release builds omit the check (matching the integer-overflow
-  policy).
+- **Bounds**: an out-of-range index panics with a located diagnostic in every
+  build. Unlike integer overflow, which wraps in release builds, an index past the
+  end has no defined result to fall back on.
 - **Iteration**: `for x in arr` / `for x in &arr` bind each element in order, and
   `for (i, x) in arr.enumerate()` binds its `u64` position alongside it (see
   [Control Flow](control-flow.md)).
@@ -1317,8 +1317,8 @@ val c = sum(&grown)                  // Vec, same signature
   outlives the check, so there is no later point at which the mistake could still be caught.
 - **`.len()`** is O(1), read from the length word of the view: the borrowed run's length, not
   the container's.
-- **Indexing** is bounds-checked exactly as on the owning container: debug builds panic on an
-  out-of-range index, release builds omit the check. `xs[i] = v` requires a `&mut [T]`; the
+- **Indexing** is bounds-checked exactly as on the owning container: an out-of-range index
+  panics in every build. `xs[i] = v` requires a `&mut [T]`; the
   write reaches the buffer, so the owner sees it.
 - **Iteration**: `for x in xs` binds each element by value, and `.enumerate()` works on a
   slice like it does on an array.
@@ -1464,8 +1464,8 @@ val first = names[0]      // a copy of its own, valid after `names` is gone
 | `v.clear()` |, | Empties without releasing the buffer |
 | `for x in v` |, | Iterates the live elements in order |
 
-Unlike `[T; N]`, whose length is a compile-time constant, a `Vec`'s length is
-only known at run time, so its bounds check is never elided in release builds.
+A `Vec` index is checked in every build, like an array's; a `Vec`'s length is only
+known at run time, so the optimizer can rarely prove the check redundant.
 
 ### `HashMap<K, V>` and `BTreeMap<K, V>`
 

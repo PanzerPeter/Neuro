@@ -511,8 +511,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Run once, after every body is generated, because only then is it known whether the
     /// module prints at all. A program that never does keeps its exit paths untouched
     /// and reserves no buffer. The two paths are `main`'s returns and the panic runtime's
-    /// `abort`; the latter is recorded as it is emitted, since `abort` runs no exit hook a
-    /// buffer could register.
+    /// thunks, drained at their first instruction so the output precedes the diagnostic;
+    /// they are recorded as they are emitted, since `abort` runs no exit hook a buffer
+    /// could register.
     pub(crate) fn finalize_stdout_buffer(&mut self) -> CodegenResult<()> {
         if self.module.get_global(BUFFER_GLOBAL).is_none() {
             return Ok(());

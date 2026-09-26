@@ -100,6 +100,7 @@ impl TypeChecker {
         self.symbols.pop_scope();
         self.current_function_return_type = saved_return;
         self.loop_stack = saved_loops;
+        self.refuse_function_valued_return(&result_ret, span);
 
         Type::Function {
             params: param_types,

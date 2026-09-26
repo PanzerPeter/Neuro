@@ -151,6 +151,8 @@ impl TypeChecker {
             }
         };
 
+        self.refuse_function_valued_return(&return_type, func.name.span);
+
         // Enter function scope
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());

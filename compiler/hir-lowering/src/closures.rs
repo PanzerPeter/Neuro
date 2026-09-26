@@ -21,6 +21,9 @@ use crate::{Lowerer, LoweringError};
 /// The name of the parameter the composed closure binds its argument to. Not
 /// spellable in source, so it can never collide with a name the body reads.
 const COMPOSE_PARAM: &str = "__compose_arg";
+/// Prefix of the parameters of the closure a function named as a value lowers to; the
+/// `__` keeps them apart from every name a program can declare.
+const FUNCTION_VALUE_PARAM: &str = "__fn_value_arg";
 
 impl Lowerer {
     /// Lower a closure literal to its fat-pointer value, lifting the body to a
@@ -141,24 +144,71 @@ impl Lowerer {
                 arg_labels: Vec::new(),
                 span,
             });
+        self.lift_capture_free(vec![(COMPOSE_PARAM.to_string(), param_ty)], &body, span)
+    }
 
+    /// Lower a function named as a value (`val f = square`) to the capture-free closure
+    /// that forwards its arguments to it, the same shape a one-stage composition has.
+    pub(crate) fn lower_function_value(
+        &mut self,
+        function: &Identifier,
+    ) -> Result<HirExpr, LoweringError> {
+        let span = function.span;
+        let (param_types, _) = self.functions.get(&function.name).cloned().ok_or_else(|| {
+            LoweringError::UnresolvedBinding {
+                name: function.name.clone(),
+            }
+        })?;
+        let params: Vec<(String, HirType)> = param_types
+            .into_iter()
+            .enumerate()
+            .map(|(i, ty)| (format!("{FUNCTION_VALUE_PARAM}{i}"), ty))
+            .collect();
+        let body = Expr::Call {
+            func: Box::new(Expr::Identifier(function.clone())),
+            type_args: Vec::new(),
+            args: params
+                .iter()
+                .map(|(name, _)| {
+                    Expr::Identifier(Identifier {
+                        name: name.clone(),
+                        span,
+                    })
+                })
+                .collect(),
+            arg_labels: Vec::new(),
+            span,
+        };
+        self.lift_capture_free(params, &body, span)
+    }
+
+    /// Lift `body`, over `params`, into a closure item that captures nothing, and hand
+    /// back the value referencing it.
+    fn lift_capture_free(
+        &mut self,
+        params: Vec<(String, HirType)>,
+        body: &Expr,
+        span: Span,
+    ) -> Result<HirExpr, LoweringError> {
         self.push_scope();
-        self.define(COMPOSE_PARAM.to_string(), param_ty.clone());
-        let body = self.lower_expr(&body, None);
+        for (name, ty) in &params {
+            self.define(name.clone(), ty.clone());
+        }
+        let body = self.lower_expr(body, None);
         self.pop_scope();
         let body = body?;
 
         let return_type = body.ty.clone();
         let name = format!("__closure_{}", self.closure_counter);
         self.closure_counter += 1;
+        let param_types: Vec<HirType> = params.iter().map(|(_, ty)| ty.clone()).collect();
         self.closure_items.push(HirItem::Closure(HirClosure {
             name: name.clone(),
             captures: Vec::new(),
-            params: vec![HirParam {
-                name: COMPOSE_PARAM.to_string(),
-                ty: param_ty.clone(),
-                span,
-            }],
+            params: params
+                .into_iter()
+                .map(|(name, ty)| HirParam { name, ty, span })
+                .collect(),
             return_type: return_type.clone(),
             body: vec![HirStmt::Expr(body)],
             span,
@@ -170,7 +220,7 @@ impl Lowerer {
                 captures: Vec::new(),
             },
             HirType::Function {
-                params: vec![param_ty],
+                params: param_types,
                 ret: Box::new(return_type),
             },
             span,

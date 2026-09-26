@@ -350,3 +350,147 @@ func main() -> i32 { 0 }
         "a `&mut` argument coerces to a `&` parameter; got {errors:?}"
     );
 }
+
+/// A store into a field, an element or a tensor coordinate is refused while a shared
+/// borrow of the binding it is rooted at is live, as a store into the whole binding is.
+/// Only the whole-binding form consulted the borrow counts, so the view saw the write,
+/// and a displaced owned value was freed under it.
+#[test]
+fn test_bug_070_a_sub_place_store_is_refused_while_the_root_is_borrowed() {
+    let stores = [
+        (
+            "val view: &string = h.s.slice(0..7)",
+            "h.s = make(2)",
+            "println(view)",
+            "h",
+        ),
+        ("val r = &a", "a[0] = 9", "println(\"{r[0]}\")", "a"),
+        ("val r = &a", "a[0] += 5", "println(\"{r[0]}\")", "a"),
+        ("val r = &p", "p.x = 5", "println(\"{r.x}\")", "p"),
+        ("val r = &v", "v[0] = 3", "println(\"{r.len()}\")", "v"),
+        ("val r = &t", "t[0] = 4.0", "println(\"{r[0]}\")", "t"),
+        ("val r = &t", "t[0] += 4.0", "println(\"{r[0]}\")", "t"),
+    ];
+    for (borrow, store, read, root) in stores {
+        let source = format!(
+            r#"
+struct Holder {{ s: string }}
+struct P {{ x: i32 }}
+func make(n: i32) -> string {{ "value {{n}}" }}
+func main() -> i32 {{
+    mut h = Holder {{ s: make(1) }}
+    mut a: [i32; 2] = [1, 2]
+    mut p = P {{ x: 1 }}
+    mut t: Tensor<f32, [2]> = [1.0, 2.0]
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    {borrow}
+    {store}
+    {read}
+    0
+}}
+"#
+        );
+        let errors = semantic_errors(&source);
+        assert!(
+            errors.iter().any(
+                |e| matches!(e, TypeError::CannotAssignWhileBorrowed { name, .. } if name == root)
+            ),
+            "`{store}` under `{borrow}` must be refused; got {errors:?}"
+        );
+    }
+}
+
+/// With no borrow live, the same stores are accepted.
+#[test]
+fn test_bug_070_a_sub_place_store_with_no_live_borrow_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+struct P { x: i32 }
+func main() -> i32 {
+    mut a: [i32; 2] = [1, 2]
+    mut p = P { x: 1 }
+    {
+        val r = &a
+        println("{r[0]}")
+    }
+    a[0] = 9
+    p.x = 5
+    a[0] + p.x
+}
+"#,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+fn escapes(errors: &[TypeError]) -> usize {
+    errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::FunctionValueEscapes { .. }))
+        .count()
+}
+
+/// A closure reads its captures from the frame that wrote it, so a function value may
+/// not leave that frame: stored through a reference, or returned. Both were accepted, and
+/// the stored or returned closure then read a dead frame (`2 * 11` for `2 * 3`).
+#[test]
+fn test_bug_072_a_function_value_may_not_leave_its_frame() {
+    let prelude = r#"
+struct Holder { f: (f32) -> f32 }
+type F = (f32) -> f32
+"#;
+    let escaping = [
+        "func keep(h: &mut Holder, g: (f32) -> f32) { h.f = g }",
+        "func keep(s: &mut F, g: F) { *s = g }",
+        "impl Holder { func set(&mut self, g: (f32) -> f32) { self.f = g } }",
+        "func make(k: f32) -> (f32) -> f32 { |x: f32| -> f32 { x * k } }",
+        "func make(k: f32) -> Holder { Holder { f: |x: f32| -> f32 { x * k } } }",
+    ];
+    for item in escaping {
+        let errors = semantic_errors(&format!("{prelude}{item}\nfunc main() -> i32 {{ 0 }}\n"));
+        assert_eq!(
+            escapes(&errors),
+            1,
+            "`{item}` must be refused once; got {errors:?}"
+        );
+    }
+}
+
+/// Inside the frame that wrote it a function value may still be bound, stored into a
+/// local holder, passed down and called.
+#[test]
+fn test_bug_072_a_function_value_used_in_its_own_frame_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+struct Holder { f: (f32) -> f32 }
+func apply(g: (f32) -> f32, x: f32) -> f32 { g(x) }
+func main() -> i32 {
+    val k = 3.0f32
+    mut h = Holder { f: |x: f32| -> f32 { x } }
+    h.f = |x: f32| -> f32 { x * k }
+    val f = h.f
+    apply(f, 2.0) as i32
+}
+"#,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A callee cannot keep a function value any more, so a `pool` call handing one over
+/// beside an outer `&mut` is not a retention.
+#[test]
+fn test_bug_072_a_pool_call_may_pass_a_closure_beside_an_outer_mut() {
+    let errors = semantic_errors(
+        r#"
+func scale(w: &mut Tensor<f32, [2]>, g: (f32) -> f32) { w[0] = g(w[0]) }
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    pool {
+        scale(&mut w, |x: f32| -> f32 { x * 2.0 })
+    }
+    w[0] as i32
+}
+"#,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}

@@ -486,7 +486,11 @@ each other; these three govern the borrowed place itself. A read of a binding is
 `CannotUseWhileMutablyBorrowed` while an exclusive borrow is held by a live binding; a move out
 of it (or out of a field of it) is `CannotMoveWhileBorrowed` while ANY borrow is live; assigning
 to it is `CannotAssignWhileBorrowed` on the same ground, checked before the RHS so `r = &mut x`
-does not conflict with the borrow it installs.
+does not conflict with the borrow it installs. A store into part of a binding (a field, an
+element, a tensor coordinate, `=` or any `OP=`) is refused the same way through
+`refuse_store_while_borrowed`, naming the root binding: the counts are per binding, so a borrow
+of one field freezes the whole value. Only the whole-binding store consulted them until BUG-070,
+so a live `&` saw the write and a displaced owned value was freed under it.
 
 The read rule reads the **persistent** counts only, the other two read persistent plus transient.
 A `&mut` handed to a call is over when the call returns, but the transient counter survives to
@@ -692,8 +696,9 @@ same check for return-position `impl Trait<Assoc = U>`.
   through `+=`. The
   tensor path checks the operand **before** the target's mutability, which is the evaluation
   order the language specifies; requires the element to have arithmetic
-  (`TensorElementNotArithmetic` rejects `bool` and the half-precision types, matching their
-  scalar contract); and moves an owned operand, so a right-hand side that moved the target
+  (`TensorElementNotArithmetic` rejects `bool`; a half-precision element has tensor
+  arithmetic although its scalar has none, since BUG-073, as do the by-value operators,
+  a half scalar broadcast against a half tensor, and the reductions); and moves an owned operand, so a right-hand side that moved the target
   itself (`w += w`) is `UseOfMovedValue`. The operand is accepted by
   `compound_assign_operand_fits` (`tensor_broadcast.rs`), which takes the by-value operator's
   broadcast rule with one asymmetry the in-place write forces: the join has to come back as the
@@ -725,6 +730,17 @@ constants and functions are referenced directly, not captured. The body is check
 to the closure, and with `loop_stack` emptied for the same reason: an enclosing loop is not a
 `break` target from inside a closure, so one written there is `BreakOutsideLoop`. Both are restored
 afterwards. `check_plain_call` dispatches a call on a local binding of function type.
+
+A non-generic function's bare name types as its `Type::Function` (BUG-071); only a generic one
+is `FunctionUsedAsValue`, having no single type until its type arguments are named.
+
+A closure's environment lives in the frame that wrote it, so a function value stays there
+(`FunctionValueEscapes`, BUG-072). `holds_function_value` walks a type through struct fields,
+enum payloads, newtypes, arrays and tuples; a declared return type that holds one is refused at
+the function, method or closure (`refuse_function_valued_return`), and so is a store of one
+through a reference (`reached_through_reference`: a `*r`, a reference on the way to the root, or a
+borrowed `self`). A store into a local holder stays legal. Because no callee can keep a function
+value, `check_pool_retention` does not count a parameter holding one as a retainable handover.
 
 ### Composition
 `expressions/compose.rs`. `check_compose` types an `Expr::Compose` as

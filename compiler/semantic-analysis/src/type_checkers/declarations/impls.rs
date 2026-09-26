@@ -391,6 +391,7 @@ impl TypeChecker {
                 _ => continue,
             };
 
+            self.refuse_function_valued_return(&return_type, method.name.span);
             self.symbols.push_scope();
             self.current_function_return_type = Some(return_type.clone());
 

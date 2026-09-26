@@ -21,7 +21,7 @@ pub enum TypeError {
     #[error("undefined function '{name}'")]
     UndefinedFunction { name: String, span: Span },
 
-    #[error("'{name}' is a function, not a value; functions are not first-class here; wrap it in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
+    #[error("'{name}' is a generic function, and a bare name picks no instance to be a value of; wrap the call in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
     FunctionUsedAsValue { name: String, span: Span },
 
     #[error("generic type parameter '{name}' shadows a built-in type name")]
@@ -191,7 +191,7 @@ pub enum TypeError {
     #[error("`Tensor` has no constructor named '{ctor}'; it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
     UnknownTensorConstructor { ctor: String, span: Span },
 
-    #[error("compound assignment `{op}=` is not defined on a tensor of {element}: `{op}` requires an element type with arithmetic, so use an integer, `f32`, or `f64` tensor")]
+    #[error("`{op}` is not defined on a tensor of {element}: it requires an element type with arithmetic, so use an integer or a float tensor")]
     TensorElementNotArithmetic {
         op: String,
         element: Type,
@@ -348,7 +348,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`.{method}()` reduces a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
+    #[error("`.{method}()` reduces a tensor's elements, which requires an integer or float element type; this tensor holds {element}")]
     TensorReduceElementType {
         method: String,
         element: Type,
@@ -426,7 +426,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`einsum` contracts a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}")]
+    #[error("`einsum` contracts a tensor's elements, which requires an integer or float element type; this tensor holds {element}")]
     EinsumElementType { element: Type, span: Span },
 
     #[error("`einsum` binds '{letter}' to extent {first} and then to {second}; a repeated letter names one axis length, which is what makes the contraction well defined")]
@@ -855,6 +855,9 @@ pub enum TypeError {
 
     #[error("cannot assign to '{name}' while it is borrowed: the borrow would be left pointing at the replaced value; end the borrow first, or write through the borrow with `*`")]
     CannotAssignWhileBorrowed { name: String, span: Span },
+
+    #[error("a function value cannot {problem}: a closure reads its captures from the frame that built it, so it may not outlive that frame; call it where it is written, or pass it down as an argument")]
+    FunctionValueEscapes { problem: String, span: Span },
 
     #[error("cannot return a reference to '{name}': it is local to this function and does not outlive the call; return a reference derived from a parameter instead")]
     ReturnsReferenceToLocal { name: String, span: Span },
@@ -1335,6 +1338,7 @@ impl TypeError {
             | Self::CannotUseWhileMutablyBorrowed { span, .. }
             | Self::CannotMoveWhileBorrowed { span, .. }
             | Self::CannotAssignWhileBorrowed { span, .. }
+            | Self::FunctionValueEscapes { span, .. }
             | Self::ReturnsReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::SliceExpectsRange { span, .. }

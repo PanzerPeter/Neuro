@@ -115,6 +115,9 @@ impl Lowerer {
                     ty,
                     ident.span,
                 )),
+                None if self.functions.contains_key(&ident.name) => {
+                    self.lower_function_value(ident)
+                }
                 None => Err(LoweringError::UnresolvedBinding {
                     name: ident.name.clone(),
                 }),

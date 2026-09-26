@@ -361,23 +361,13 @@ impl TypeChecker {
         // borrowed binding refuses it exactly as it refuses `=`. Tested before the RHS, like
         // `=`: the `w.grad()` in `w -= lr * w.grad()` is a borrow this update does not
         // conflict with.
-        if let Place::Var(target) = place {
-            if let Some((shared, exclusive)) = self.symbols.borrow_counts(&target.name) {
-                if shared > 0 || exclusive > 0 {
-                    self.record_error(TypeError::CannotAssignWhileBorrowed {
-                        name: target.name.clone(),
-                        span: target.span,
-                    });
-                }
-            }
-        }
+        self.refuse_store_while_borrowed(place);
 
-        // The element carries the arithmetic, so the operator is defined exactly where
-        // it is defined on the scalar: `bool` has none, and the half-precision scalar
-        // contract stops short of it.
-        if !element.is_numeric() || element.is_half_float() {
+        // The element carries the arithmetic: `bool` has none. A half-precision element
+        // does, although its scalar does not: the scalar restriction stops at tensor ops.
+        if !element.is_numeric() && !element.is_half_float() {
             self.record_error(TypeError::TensorElementNotArithmetic {
-                op: op.to_string(),
+                op: format!("{op}="),
                 element: element.clone(),
                 span,
             });

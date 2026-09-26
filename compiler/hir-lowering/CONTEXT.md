@@ -352,6 +352,9 @@ shape: its parameter is the first stage's, named `__compose_arg`, and its body i
 the chain stands for, built as AST and lowered through the ordinary call path. So composition adds
 no HIR node, no backend arm, and nothing the closure machinery did not already do; it captures
 nothing because every stage is a named function the backend references directly.
+`lower_function_value` does the same for a function named as a value (`val f = square`, BUG-071):
+an identifier that is no local but names a function becomes a closure forwarding its
+`__fn_value_argN` parameters to it. Both share `lift_capture_free`.
 
 ### Dynamic dispatch
 A `traits` table (name → methods in declaration order, with their visible parameter and return

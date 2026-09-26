@@ -438,7 +438,7 @@ than assuming the prelude's declaration order.
   `codegen_tuple_index` reads element N with `extract_value`, auto-loading through a `&tuple`
   borrow pointer first. Tuples flow through parameters and returns.
 - **Arrays**: `map_type` → LLVM `[N x T]`. `expressions/arrays.rs` lowers array literals, index
-  read/write (with a debug-only bounds guard through `codegen_guard_or_panic`), and
+  read/write (with a bounds guard through `codegen_guard_or_panic`, in every build), and
   `for x in arr` / `for x in &arr`. `BuiltinMethod::ArrayLen` is a compile-time `u64`.
   `coerce_if_needed` has an element-wise array arm for typed `[i64; N] = [..]` literals.
 - **Array rest**: `codegen_array_rest` builds a fresh `[T; N - start]` aggregate by loading
@@ -500,6 +500,12 @@ than an instruction per element; a literal mentioning a runtime value is written
 `expressions/tensor_rng.rs` holds the xorshift64 generator `random_normal` draws from, and the
 float intrinsics its Box-Muller transform calls. Nothing else in the backend draws a random
 number.
+
+A half-precision tensor element is widened to `f32` for each operation and rounded back once
+(`widen_half` / `narrow_float` in `tensor_arith.rs`, used by `tensor_element_arith`, so by the
+elementwise operators, compound assignment and `@`), and a reduction over one folds in an `f32`
+accumulator and narrows the finished value (BUG-073). LLVM's own `half` / `bfloat` arithmetic is
+not relied on, for the reason `elementwise_math.rs` gives.
 
 `expressions/tensor_arith.rs` owns the binary operators, the broadcast machinery, the `@`
 contraction and the in-place compound assignment: everything that READS buffers that already
@@ -641,8 +647,9 @@ tensor owns its buffer and releases it through its own deleter, so a view sharin
 double free, and a copy is also what keeps the DLPack contract's contiguous `strides` and
 zero `byte_offset` true of every value. The copy loop walks the RESULT, whose linear index is its own buffer index,
 and recovers each source coordinate as `(i / result_stride) % extent`; both divisors are
-constants. A run-time position is guarded by `guard_tensor_position`, which is `overflow_checks`-
-gated: the debug tier an array index sits on. A slice's bounds were settled at compile time, so
+constants. A run-time position is guarded by `guard_tensor_position` in every build, as an array
+index is: `overflow_checks` gates integer overflow only, because wrapping gives an overflow a defined
+result and an index past the storage has none. A slice's bounds were settled at compile time, so
 nothing about them is checked here.
 
 ## DLPack Representation
@@ -933,8 +940,10 @@ That sequence is **not** emitted inline. See Error-Path Outlining. The `file:lin
 comes from the `Call` span start, resolved against the module text (empty when no source is
 supplied).
 `write` + `abort` are POSIX/libc (Linux, macOS; MSVC CRT on Windows). `abort` runs no exit hook, so
-`emit_abort_unreachable` takes `&mut self` and records its call for the standard-output drain. See
-Exit-path draining.
+`build_thunk_body` records each panic thunk's FIRST instruction for the standard-output drain,
+ahead of the diagnostic's first `write`. Recording the `abort` call instead (until BUG-067) put the
+drain after the diagnostic, so on a shared pipe the panic printed before the output leading up to
+it. See Exit-path draining.
 
 Because `panic` / `unreachable` terminate the block with `unreachable`, following statements are
 dead code: `codegen_stmt` early-returns when the block is already terminated, and `codegen_return`
@@ -1115,10 +1124,26 @@ every flag beneath it, leaving the siblings armed; a bare binding, or a place th
 the compiler cannot evaluate, clears everything. The index case clears nothing when the read moves
 nothing out (`read_moves_nothing`): a `Copy` value, or a collection's `string` element, whose read
 copies. Disarming the holder there left every owner in it unreleased. That is also what makes destructuring work, since
-the parser desugars it to a temporary plus one projection per leaf. `codegen_field_assignment`
-releases the displaced position (`drop_displaced_held_value`) and re-arms it, and a reassignment
-re-arms the whole plan (`rearm_held_drop_flags`), which is unconditional because a held position
-exists only where its own type proves ownership.
+the parser desugars it to a temporary plus one projection per leaf. A store into a field or an
+array element releases the displaced position and re-arms it (`displace_held_position`, at any
+depth; `displace_array_element` at a run-time index, which compares the written address against
+each tracked element). Until BUG-075 only a field of a named binding did, so a nested field or an
+element lost its old value without a destructor. A place reached through a borrow has no flags
+here and is not released (BUG-077). A reassignment re-arms the whole plan
+(`rearm_held_drop_flags`), which is unconditional because a held position exists only where its
+own type proves ownership.
+
+A fresh value that holds a user `Drop` type and that no binding ever owns is destroyed where it
+is last read (`drop_unbound_temporary`, BUG-047): a call, struct literal or enum construction whose
+statement value is discarded, one a field is read from (unless the field itself owns something and
+is moved out), and one passed as a `&self` receiver. It is stored to a slot, registered in a
+throwaway scope, and that scope's drops are emitted at once. Inside a `pool` it does nothing.
+
+Every lookup of a binding's drop entry goes through `live_drop_entry`, which matches the entry's
+storage against the alloca the name resolves to now. A binding that owns nothing registers no
+entry, so a lookup by name alone fell through a `&mut` shadowing an owner to the owner itself
+(BUG-076): a field store through the borrow released the outer value, which its scope exit then
+released again.
 
 Every aggregate literal disowns the places written into it: a struct literal per field, and a
 tuple or array literal per element (`codegen_tuple_literal`, `codegen_array_literal`). The tuple

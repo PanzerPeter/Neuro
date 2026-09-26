@@ -38,8 +38,9 @@ use signatures::{Lookup, SignatureTable};
 pub fn bind_arguments(items: &mut [Item]) -> Result<(), Vec<ArgumentError>> {
     let table = SignatureTable::build(items);
     let mut errors = Vec::new();
-    let mut visit = |expr: &mut Expr, errors: &mut Vec<ArgumentError>| match bind_call(expr, &table)
-    {
+    let mut visit = |expr: &mut Expr, local: bool, errors: &mut Vec<ArgumentError>| match bind_call(
+        expr, local, &table,
+    ) {
         Ok(bound) => bound,
         Err(error) => {
             errors.push(error);
@@ -56,7 +57,9 @@ pub fn bind_arguments(items: &mut [Item]) -> Result<(), Vec<ArgumentError>> {
 }
 
 /// Bind one `Expr::Call`, resolving its callee against the program's declarations.
-fn bind_call(expr: &mut Expr, table: &SignatureTable) -> Result<Bound, ArgumentError> {
+/// `local` marks a bare-name callee a local binding holds, which shadows any function
+/// of that name and declares no parameter names.
+fn bind_call(expr: &mut Expr, local: bool, table: &SignatureTable) -> Result<Bound, ArgumentError> {
     let Expr::Call {
         func,
         arg_labels,
@@ -67,6 +70,7 @@ fn bind_call(expr: &mut Expr, table: &SignatureTable) -> Result<Bound, ArgumentE
         return Ok(Bound::InPlace);
     };
     let (callee, lookup) = match func.as_ref() {
+        Expr::Identifier(ident) if local => (ident.name.clone(), Lookup::Unknown),
         Expr::Identifier(ident) => (ident.name.clone(), table.function(&ident.name)),
         Expr::Path {
             type_name, member, ..

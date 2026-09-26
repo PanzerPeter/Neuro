@@ -169,3 +169,33 @@ func main() -> i32 {
         .expect("Compilation or execution failed");
     assert_eq!(exit_code, 0, "a block ending in a unit call yields unit");
 }
+
+/// A line opening with `-` is a statement of its own, so a tail expression may start with
+/// a minus. It used to continue the line above: `-scaled` became part of `a * 2 - scaled`,
+/// and `x = 3` followed by a line `-x` assigned `3 - x`, returning -7 from the second
+/// function instead of 3.
+#[test]
+fn test_bug_069_a_leading_minus_is_a_new_statement() {
+    let test = CompileTest::new();
+    let source = r#"
+func negated_double(a: i32) -> i32 {
+    val scaled = a * 2
+    -scaled
+}
+
+func discarded() -> i32 {
+    mut x = 10
+    x = 3
+    -x
+    x
+}
+
+func main() -> i32 {
+    negated_double(3) + 10 + discarded()
+}
+"#;
+    let exit = test
+        .compile_and_run("leading_minus.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 7, "-6 + 10 + 3");
+}

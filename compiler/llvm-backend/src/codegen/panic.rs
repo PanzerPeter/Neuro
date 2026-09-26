@@ -164,7 +164,6 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn emit_abort_unreachable(&mut self) -> CodegenResult<()> {
         let abort_fn = self.get_or_declare_abort();
         self.builder.build_call(abort_fn, &[], "panic.abort")?;
-        self.record_process_exit();
         self.builder.build_unreachable()?;
         Ok(())
     }

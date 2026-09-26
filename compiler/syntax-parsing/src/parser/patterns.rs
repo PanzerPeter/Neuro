@@ -24,7 +24,7 @@ impl Parser {
 
         let mut arms = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            arms.push(self.parse_match_arm()?);
+            arms.push(self.at_statement_level(|p| p.parse_match_arm())?);
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();

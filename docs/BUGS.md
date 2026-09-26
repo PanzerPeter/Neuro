@@ -5,325 +5,70 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-074: the half-precision operator diagnostic calls `a + b` a compound assignment
+## BUG-077: a store through a borrow never destroys the value it displaces
 
 - **Status**: open, confirmed
-- **Area**: `semantic-analysis`; the `TensorElementNotArithmetic` message in
-  `compiler/semantic-analysis/src/errors.rs`
-- **Severity**: minor. The diagnostic is raised on the right span, only its wording is wrong
+- **Area**: `llvm-backend`; the displaced-value release in `codegen/drops.rs`
+  (`displace_held_position`) and the store paths in `structs.rs` and `statements.rs`
+- **Severity**: major. A destructor with a side effect silently never runs, and an owned
+  buffer the store displaces leaks
 
 **Minimal repro**
 
 ```neuro
-func main() -> i32 {
-    val a: Tensor<bf16, [2]> = [1.0bf16, 2.0bf16]
-    val c = &a + &a
-    return 0
-}
-```
+struct Tok { id: i32 }
 
-Expected: a diagnostic naming the operator `+`. Observed: `compound assignment `+=` is not
-defined on a tensor of bf16`. The variant is shared by the by-value operators and the
-in-place update, and its message was written for the second.
-
-**Fix sketch**: word the message for both uses (`` `{op}` is not defined on a tensor of
-{element} ``), or carry which of the two raised it. Regression test: the repro's message.
-
-## BUG-073: half-precision tensors refuse arithmetic and reductions
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; `TensorElementNotArithmetic` and `TensorReduceElementType`
-- **Severity**: major. A documented capability of `Tensor<f16, S>` / `Tensor<bf16, S>` is
-  missing, with no workaround short of converting element by element
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val a: Tensor<bf16, [2]> = [1.0bf16, 2.0bf16]
-    val b = &a * &a
-    val s = b.sum()
-    return 0
-}
-```
-
-Expected: both compile. The types reference says the scalar half-precision restriction lifts
-for tensor element types, whose elementwise arithmetic, matmul and reductions are supported;
-the elementwise math methods already accept a half-precision tensor. Observed: both lines are
-type errors, because the tensor operators and reductions apply the scalar `f16` / `bf16`
-contract to the element.
-
-**Fix sketch**: admit half-precision elements in the operator, compound-assignment and
-reduction checks, and in the backend widen each element to `f32` around the operation and
-narrow the result once, as `expressions/elementwise_math.rs` does. `.mean()` divides in `f32`
-too. Regression tests: the repro, `@`, and a compound assignment on a `bf16` tensor.
-
-## BUG-072: a function value can be stored past the frame that built it
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; the store rules for a place of function type
-- **Severity**: critical. A closure's environment lives in the frame that wrote the closure, so
-  a stored closure called after that frame returns reads dead stack memory: a silent wrong
-  answer
-
-**Minimal repro**
-
-```neuro
-struct Holder { f: (f32) -> f32 }
-
-func keep(h: &mut Holder, g: (f32) -> f32) { h.f = g }
-
-func install(h: &mut Holder, k: f32) {
-    keep(h, |x: f32| -> f32 { x * k })
+impl Drop for Tok {
+    func drop(&mut self) { println("drop {self.id}") }
 }
 
-func clobber(a: f32, b: f32, c: f32) -> f32 { a * b * c }
+struct Pair { a: Tok }
+
+impl Pair {
+    func set(&mut self, id: i32) { self.a = Tok { id: id } }
+}
+
+func put(p: &mut Pair, id: i32) { p.a = Tok { id: id } }
+
+func replace(t: &mut Tok, id: i32) { *t = Tok { id: id } }
 
 func main() -> i32 {
-    mut h = Holder { f: |x: f32| -> f32 { x } }
-    install(&mut h, 3.0)
-    val noise = clobber(7.0, 11.0, 13.0)
-    val f = h.f
-    println("{f(2.0)} {noise}")
+    mut p = Pair { a: Tok { id: 1 } }
+    put(&mut p, 2)
+    p.set(3)
+    mut t = Tok { id: 4 }
+    replace(&mut t, 5)
+    println("end")
     0
 }
 ```
 
-Expected: rejected at `h.f = g`. The language reference's closure restriction says a closure
-does not escape the scope that defines it: it is not returned or stored. Observed: type
-checking passes and the program prints `22.0 1001.0`. The closure reads `k` from
-`install`'s frame after `clobber` has reused that frame, so it computes `2 * 11` instead of
-`2 * 3`. `*slot = g` through a `&mut ((f32) -> f32)` is accepted the same way.
+Expected: `drop 1`, `drop 2` and `drop 4` at the stores that displace them, then `end`, then
+`drop 5` and `drop 3`. Assigning to a field drops the value it displaces there, and every
+position is destroyed exactly once. Observed: `end`, `drop 5`, `drop 3`. The three displaced
+values are never destroyed. The same store into a binding's own field, at any depth, or into
+one of its array elements does destroy what it displaces.
 
-**Root cause**: no store rule looks at a value of function type. A closure literal, or a
-function-typed parameter holding one, can be written into a struct field (the repro's
-`Holder { f: ... }` initializer is such a store too) or through a `&mut` as freely as a
-number.
+**Root cause**: confirmed in the code. The displaced value is found through the drop flags of
+the binding the place is rooted at, and a place reached through a borrow (a `&mut` parameter,
+a `&mut self` receiver, or a `*r` store) is rooted at a binding that owns nothing, so there are
+no flags to consult and nothing is released.
 
-**Knock-on**: the `pool` rule that refuses a call inside a block handing a callee "a value the
-block may have allocated" when the callee also takes an outer `&mut` has to count a
-function-typed argument as retainable, because of this hole. So `pool { f(&mut w, closure) }`
-is refused even when `w` is a tensor, which cannot hold a function.
+**Why this is filed rather than fixed**: the value behind a borrow is always live (nothing can
+be moved out of a borrow), so an unconditional release would be sound for a value whose type
+proves its ownership. It is not sound for everything a borrow can reach: a `string` position
+owns its buffer only when the store that filled it allocated one, which is a runtime flag of the
+caller's, and a tensor a `pool` block allocated belongs to the arena, not to its binding. The
+release through a borrow needs the flag to travel with the reference, or a rule that keeps both
+kinds of value out of such a store.
 
-**Workaround**: none needed to avoid the defect beyond not storing function values; for the
-`pool` refusal, make the call outside the block.
+**Workaround**: store through the owning binding (`p.a = ...` in the scope that owns `p`), or
+reassign the whole value through the borrow's owner.
 
-**Fix sketch**: refuse a store whose value has a function type into any place but a local
-binding of the same frame (field, element, `*r`, collection insert), and a function-typed
-return. Then exempt function-typed parameters in `check_pool_retention`
-(`compiler/semantic-analysis/src/type_checkers/pools.rs`), since no callee can keep one.
-Regression tests: the repro, the `*slot = g` form, and a `pool` call passing a closure beside
-an outer `&mut` tensor.
-
-## BUG-071: a function name is refused as a value outside `|>` and `>>`
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; `FunctionUsedAsValue` in
-  `compiler/semantic-analysis/src/type_checkers/expressions/mod.rs`
-- **Severity**: minor. A closure wrapping the call is the workaround, at the cost of
-  noise
-
-**Minimal repro**
-
-```neuro
-func square(x: f32) -> f32 { x * x }
-func apply(f: (f32) -> f32, x: f32) -> f32 { f(x) }
-
-func main() -> i32 {
-    val y = apply(square, 3.0)
-    y as i32
-}
-```
-
-Expected: `9`. The language reference's composition section says a plain function name is an
-ordinary value of type `(T) -> U`, and the automatic differentiation chapter uses
-`val f = square` as an example. Observed: `'square' is a function, not a value; functions are
-not first-class here`. `val f = square` is refused the same way. Only the `|>` target and the
-`>>` operands accept a bare name, because the parser rewrites both into calls.
-
-**Workaround**: `apply(|x: f32| -> f32 { square(x) }, 3.0)`.
-
-**Fix sketch**: type a bare function name as `(T) -> U` and lower it to a capture-free
-function value: the `{ fn_ptr, env_ptr }` pair with a null environment, which the backend
-already builds for `>>`. The `@grad` transform already resolves such a value to its function.
-Regression tests: the repro, `val f = square` then `f(3.0)`, and a generic function named
-without a turbofish, which stays refused.
-
-## BUG-070: a field or element store is accepted while the binding is borrowed
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; the place-store checks in
-  `compiler/semantic-analysis/src/type_checkers/statements.rs` and `tensors.rs`
-- **Severity**: critical. A shared borrow observes a write it should have frozen out, and a
-  store that displaces an owned value frees memory a live view still points into: a
-  heap-use-after-free in safe code, confirmed with AddressSanitizer
-
-**Minimal repro**
-
-```neuro
-struct Holder { s: string }
-
-func make(n: i32) -> string { "value {n}" }
-
-func main() -> i32 {
-    mut h = Holder { s: make(1) }
-    val view: &string = h.s.slice(0..7)
-    h.s = make(2)
-    println(view)
-    0
-}
-```
-
-Expected: rejected at `h.s = make(2)`, as `h = Holder { s: make(2) }` already is: while any
-borrow of a binding is live, the binding may not be written, because the borrow would be left
-pointing at the replaced value. Observed: type checking passes, the store releases the first
-string's buffer, and `println(view)` reads the freed bytes (garbage on stdout;
-`heap-use-after-free` under AddressSanitizer). The value-only shapes are accepted the same
-way: `val r = &a` then `a[0] = 9` (or `a[0] += 5`) makes `r[0]` read `9`, and the same holds for
-a struct field (`p.x = 5`), a `Vec` element and a tensor coordinate (`t[0] = 4.0`).
-
-**Root cause**: confirmed in the code. `check_binding_store`, the whole-binding store, asks
-`borrow_counts` for the target and refuses the write when any borrow is live. The stores into
-a field, an element or a tensor coordinate never consult the borrow counts of the binding the
-place is rooted at, and the tensor compound-assignment check does so only when the place is a
-bare `Place::Var`. A live `&mut` is caught anyway, because naming the binding at all is refused
-while it is mutably borrowed; a live shared borrow is not.
-
-**Workaround**: end the borrow before writing into the value (confine it to a block), or
-write through a `&mut` taken after the shared borrow's scope.
-
-**Fix sketch**: in every sub-place store (`=` and each `OP=`, scalar and tensor), look up the
-place's root binding and apply the same `CannotAssignWhileBorrowed` rule the whole-binding
-store applies, naming the root. It is conservative in the same way the whole-binding rule is:
-a borrow of one field freezes the whole value. Regression tests: the repro, and one each for a field, an
-array element, a `Vec` element and a tensor coordinate under a live `&`, with the `&mut` form
-confirmed still rejected.
-
-## BUG-069: a line opening with `-`, `&` or `|` is glued onto the statement above it
-
-- **Status**: open, confirmed
-- **Area**: `syntax-parsing`; the newline rule in `parse_expr_inner`
-  (`compiler/syntax-parsing/src/parser/expressions.rs`)
-- **Severity**: major. A silent wrong answer: a line that begins with `-` can change the value
-  of the statement above it, and a tail expression that starts with a minus cannot be written
-
-**Minimal repro**
-
-```neuro
-func negated_double(a: i32) -> i32 {
-    val scaled = a * 2
-    -scaled
-}
-
-func main() -> i32 {
-    negated_double(3) + 10
-}
-```
-
-Expected: `4`. A newline ends a statement unless the line that ended asks to continue (it
-ends with an operator, a comma or an opening delimiter) or the next line opens with a token
-that cannot begin an expression, such as a leading `.` or `|>`. `-scaled` begins an
-expression, so it is the tail. Observed: `error: undefined variable 'scaled'`, because the two
-lines parse as `val scaled = a * 2 - scaled`. With a `mut` binding the same shape compiles and
-answers wrong: in `mut x = 10`, `x = 3`, a line `-x`, then `x` as the tail, the middle lines
-parse as `x = 3 - x`, and the function returns `-7` instead of `3`.
-
-**Root cause**: before each infix operator the parser skips any newlines and lets the next
-line's first token decide. It refuses to continue only when that token is `*`, `(`, `[` or
-`@`. The other tokens that can also start an expression (`-` for negation, `&` for a borrow,
-`|` for a closure literal) are read as binary operators and continue the line above.
-
-**Workaround**: parenthesize the tail, `(-scaled)`: a line opening with `(` already begins a
-new statement.
-
-**Fix sketch**: add `Minus`, `Ampersand` and `Pipe` to the set of next-line tokens that end
-the expression in `parse_expr_inner`, beside `Star`, `LeftParen`, `LeftBracket` and `At`.
-Continuing across those operators stays possible by ending the line with them. Regression
-tests: the repro, the `mut` reassignment shape, and a line ending in `-` that must still
-continue. The statement-boundary section of the language reference lists the tokens that
-never continue a line and should name all seven.
-
-## BUG-068: release builds read and write past the end of arrays, slices and tensors
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; `arrays.rs`, `slices.rs` and `tensor_index.rs` under
-  `compiler/llvm-backend/src/codegen/expressions/`
-- **Severity**: critical. Memory unsafety in safe code: at any optimization level above
-  `-O0`, an out-of-range run-time index reads or writes memory the value does not own
-
-**Minimal repro**
-
-```neuro
-func far() -> u64 { 700000 }
-func just_past() -> u64 { 3 }
-
-func main() -> i32 {
-    mut a: [i32; 3] = [1, 2, 3]
-    a[just_past()] = 9
-    val t: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
-    val s: &[i32] = a.slice(0..2)
-    println("{a[far()]} {s[far()]} {t[far()]}")
-    0
-}
-```
-
-Expected: a panic naming the index, in every build. The language rule is that undefined
-behavior is not a valid outcome for well-formed input; integer overflow alone is exempt in
-release, because wrapping gives it a defined result, and an out-of-range index has none (the
-same reason a zero divisor already panics in release). Observed at `-O0`: the panic. Observed
-at `-O2`: the store writes one element past the array without complaint, and the reads print
-whatever the addresses hold. A `Vec` index is checked in release already, so the
-containers also disagree with each other.
-
-**Root cause**: the three index guards are emitted only when `overflow_checks` is set, the
-flag that selects debug-build integer overflow trapping, so they share its release omission.
-The `SAFETY` comment in `arrays.rs` calls the unchecked access "the documented wrapping
-behaviour"; it is not wrapping, it is an `inbounds` GEP past the object, which is undefined.
-
-**Workaround**: compile at `-O0`, or index a `Vec`.
-
-**Fix sketch**: emit the three bounds guards unconditionally and leave `overflow_checks` to
-integer arithmetic; LLVM already removes a guard it can prove redundant. Correct the `SAFETY`
-comments. Regression tests: each container read and written out of range at `-O2`, expecting
-the panic. The language reference documents the omission today, in the types page (the
-array bounds rule and the slice indexing rule) and the tensors page (the run-time position
-check), and all three sentences change with the fix.
-
-## BUG-067: a panic prints ahead of output written before it when both streams share a pipe
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; the panic runtime (`compiler/llvm-backend/src/codegen/panic.rs`)
-  and the standard-output buffer (`compiler/llvm-backend/src/codegen/io.rs`)
-- **Severity**: minor. No value is wrong, but a log that captures both streams (a CI job,
-  `2>&1 | tee`) shows the panic before the output that led up to it
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    println("before")
-    panic("boom")
-    0
-}
-```
-
-Run as `./prog 2>&1 | cat`. Expected: `before`, then the panic diagnostic. Standard output is
-buffered, and the buffer is emptied on every path out of the program so that text written
-before a panic appears ahead of the panic's own diagnostic. Observed: `panic: boom at ...`
-first, then `before`. On a terminal the order is right only because `println` flushes per line
-there.
-
-**Root cause**: `emit_abort_unreachable` records the `abort()` call as the process exit point,
-and `finalize_stdout_buffer` inserts the flush in front of that call. By then the diagnostic
-has already gone to stderr through `write(2, ...)`, so the flush lands after it. The module
-comment in `io.rs` describes the intended order.
-
-**Workaround**: none inside the program; read the two streams separately.
-
-**Fix sketch**: record the exit point at the start of each panic path, before its first
-stderr `write`, so the flush precedes the diagnostic; every panic-family builtin and runtime
-guard reaches that path through the outlined panic helpers. Regression test: run a binary
-with stderr merged into stdout and compare the order.
+**Fix sketch**: release unconditionally where the displaced type is proven to own what it holds
+(a user `Drop` type, a `Vec`, a map) and the store is outside any `pool`, and leave a `string`
+or tensor position to a follow-up that carries its ownership flag. Regression tests: the repro,
+one store per form, and a `string` field through a borrow that must not free a literal.
 
 ## BUG-050: calling a closure literal in place reports a function type as "non-function"
 
@@ -398,51 +143,6 @@ block.
 declares bindings needs the walk to run after the value is checked, so that its names are
 resolvable. Decide first whether the provenance walk is meant to grow these shapes or whether
 the refusal is the intended boundary.
-
-## BUG-047: a `Drop` value that is never bound is never destroyed
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; drop scheduling for expression temporaries
-- **Severity**: major. A destructor with a side effect (closing a handle, releasing a
-  resource) silently never runs
-
-**Minimal repro**
-
-```neuro
-struct Tok { id: i32 }
-
-impl Drop for Tok {
-    func drop(&mut self) { println("drop {self.id}") }
-}
-
-func make() -> Tok { Tok { id: 22 } }
-
-func main() -> i32 {
-    make()
-    val a = make().id
-    val b = Tok { id: 5 }.id
-    val t = make()
-    val c = t.id
-    println("end")
-    a + b + c - 49
-}
-```
-
-Expected: every `Tok` is destroyed exactly once, as the ownership rules require. Observed:
-only `t` is. The output is `end` then `drop 22`, once. The discarded `make()`, the temporary
-whose field `a` reads, and the struct literal whose field `b` reads are never dropped. Binding
-the value first (`val t = make()` then `t.id`) is the only form that runs the destructor.
-Passing a temporary by value to a function (`consume(make())`) does drop it, inside the callee.
-
-**Root cause**: not yet confirmed in the code. Drop flags are registered for bindings and for
-the positions a value is stored into; a temporary that is read from and then discarded has
-neither, so no scope exit reaches it.
-
-**Workaround**: bind the value to a `val` before reading from it.
-
-**Fix sketch**: give an unbound `Drop` temporary an owner for the rest of its statement and
-drop it at the statement's end, after the read. Regression tests want an expression
-statement, a field read, a method-call receiver and a struct literal receiver.
 
 ## BUG-039 — a function that hands back its own `string` parameter leaks the buffer
 
@@ -642,61 +342,6 @@ lifetime resolved to the argument it came from — the same input-to-output mapp
 the point where per-binding counters stop paying for themselves and a borrow set keyed by
 (place, region) starts to. Regression tests want the repro above, the `&mut` read variant, and a
 callee returning a reference derived from `self`.
-
-## BUG-034 — a local shadowing a labelled top-level `func` is checked against the function
-
-- **Status**: open, confirmed
-- **Area**: `argument-binding` (call-site signature table); the rest of the compiler already
-  honours the shadow
-- **Severity**: minor — the compiler rejects a valid program; it never miscompiles, and
-  renaming the local works
-
-A `val` binding may shadow a top-level `func` of the same name, and the type checker and the
-backend both honour it: the call reaches the local and the program runs. Argument binding runs
-before type checking and resolves a called name in its table of top-level functions alone. A
-function enters that table only if it declares an external parameter label, so the defect needs
-both halves: the shadowed function must be labelled, and its arity must differ from the local's.
-Then the call is validated against the *function's* signature and rejected.
-
-**Minimal repro**
-
-```neuro
-func scale(factor: i32, by amount: i32) -> i32 { factor * amount }
-
-func main() -> i32 {
-    val scale = |a: i32| -> i32 { a + 1 }
-    return scale(5)
-}
-```
-
-Expected: compiles and returns 6. Observed, before type checking runs at all:
-
-```
-Argument errors found:
-  1. 'scale' takes 2 argument(s), but 1 given
-```
-
-Two neighbouring programs show the shadow itself is supported and isolate the trigger. Drop the
-label (`func scale(value: i32)`) and the same shadowing program compiles and exits 6, because an
-unlabelled function never enters the table. Give the local the *same* arity as the labelled
-function and `scale(5, by: 2)` compiles and exits 7 — the label is checked against the function
-and then bound positionally to the closure, which takes no labels at all.
-
-**Root cause**: confirmed in the code, and already written down as a known property of the pass
-in `compiler/argument-binding/CONTEXT.md` ("Local bindings are not tracked"). The walk that
-validates calls looks a bare callee up in the table of labelled top-level declarations; nothing
-in it knows which names a local binding has taken over in the enclosing scope.
-
-**Workaround**: rename the local, or call the shadowed function with its own arity.
-
-**Fix sketch**: the pass needs a scope stack, not a flat table — push a frame per block, record
-every `val` / `mut` / closure parameter name in it, and skip label validation for a callee whose
-name a live local holds. That also closes the third shape above, where a label survives onto a
-closure call that cannot take one. It is the same scope walk module resolution needs for its own
-shadowing gap (it rewrites an imported name whether or not a local covers it), so the two are
-worth taking together rather than each growing a private half-version. Regression tests want the
-repro above, the same-arity labelled call, and a call placed after the local goes out of scope,
-which must still reach the function.
 
 ## BUG-033 — `&` does not accept a field or an element, only a bare variable
 

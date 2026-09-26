@@ -175,6 +175,13 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(entry);
 
         let result = emit(self);
+        // Every thunk is a panic path, and the process ends in it. Standard output is
+        // drained ahead of the thunk's FIRST instruction rather than ahead of its
+        // `abort`: the diagnostic is already on stderr by the abort, so text printed
+        // before the panic would reach a shared pipe after it.
+        if let Some(first) = entry.get_first_instruction() {
+            self.process_exit_points.push(first);
+        }
 
         if let Some(block) = resume_at {
             self.builder.position_at_end(block);

@@ -248,6 +248,10 @@ impl Parser {
     /// projection per leaf), so it is spliced in here rather than forcing the
     /// single-`Stmt` shape of [`Parser::parse_stmt`].
     pub(crate) fn parse_stmt_into(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {
+        self.at_statement_level(|p| p.parse_stmt_into_here(out))
+    }
+
+    fn parse_stmt_into_here(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {
         self.skip_newlines();
         if matches!(self.peek_kind(), Some(TokenKind::Val | TokenKind::Mut)) {
             let mutable = matches!(self.peek_kind(), Some(TokenKind::Mut));

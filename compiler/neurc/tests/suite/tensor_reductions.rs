@@ -183,7 +183,7 @@ func main() -> i32 {
 "#;
     let errors = rejection("tensor_reduce_bool.nr", source);
     assert!(
-        errors.contains("integer or `f32`/`f64` element type"),
+        errors.contains("integer or float element type"),
         "a bool tensor should be rejected: {errors}"
     );
 }

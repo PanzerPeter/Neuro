@@ -279,8 +279,9 @@ such as `println` are refused.
 A call through a function value is differentiated too, when the compiler can tell which
 function it calls. The derivative is built at compile time, and a function value carries no
 derivative with it at run time. That covers a closure (its captures enter the derivative like
-any other value the body reads), a `>>` composition, a `|>` pipeline stage, a helper's
-function-typed parameter, and the function given to `.map`, `.zip` and `.reduce`.
+any other value the body reads), a function named as a value (`val f = square`), a `>>`
+composition, a `|>` pipeline stage, a helper's function-typed parameter, and the function given
+to `.map`, `.zip` and `.reduce`.
 
 A function-typed parameter of the `@grad` function itself gets its function from the call that
 runs `.backward()`. Each distinct function passed there gets its own derivative, the way a

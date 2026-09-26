@@ -336,10 +336,14 @@ impl TypeChecker {
             return;
         };
         // Nothing the block owns is being handed over, so there is nothing to retain. A
-        // parameter of pointerless type receives no address, whatever computed the argument.
+        // parameter of pointerless type receives no address, whatever computed the argument,
+        // and one holding a function value cannot be stored through a reference or
+        // returned, so no callee can keep it.
         let params = self.declared_params(func).unwrap_or_default();
         let handed_over = args.iter().enumerate().any(|(i, arg)| {
-            !params.get(i).is_some_and(|param| self.pool_safe(param))
+            !params
+                .get(i)
+                .is_some_and(|param| self.pool_safe(param) || self.holds_function_value(param))
                 && !self.carries_no_arena(arg, Emission::InPlace)
         });
         if !handed_over {

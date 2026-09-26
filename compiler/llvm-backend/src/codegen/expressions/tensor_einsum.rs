@@ -323,10 +323,10 @@ impl<'ctx> CodegenContext<'ctx> {
         offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         if let (BasicValueEnum::FloatValue(a), BasicValueEnum::FloatValue(b)) = (lhs, rhs) {
-            return Ok(self
-                .builder
-                .build_float_mul(a, b, "tensor.einsum.mul")?
-                .into());
+            let narrow = a.get_type();
+            let (a, b) = (self.widen_half(a)?, self.widen_half(b)?);
+            let product = self.builder.build_float_mul(a, b, "tensor.einsum.mul")?;
+            return Ok(self.narrow_float(product, narrow)?.into());
         }
         let (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) = (lhs, rhs) else {
             return Err(CodegenError::InternalError(
@@ -355,10 +355,10 @@ impl<'ctx> CodegenContext<'ctx> {
         offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         if let (BasicValueEnum::FloatValue(a), BasicValueEnum::FloatValue(b)) = (lhs, rhs) {
-            return Ok(self
-                .builder
-                .build_float_add(a, b, "tensor.einsum.add")?
-                .into());
+            let narrow = a.get_type();
+            let (a, b) = (self.widen_half(a)?, self.widen_half(b)?);
+            let sum = self.builder.build_float_add(a, b, "tensor.einsum.add")?;
+            return Ok(self.narrow_float(sum, narrow)?.into());
         }
         let (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) = (lhs, rhs) else {
             return Err(CodegenError::InternalError(

@@ -129,3 +129,36 @@ func main() -> i32 {
         "half-precision arithmetic must be a compile error, got {result:?}"
     );
 }
+
+/// Half-precision tensors compute: elementwise operators, a half scalar broadcast, `@`,
+/// compound assignment and reductions, each element widened to `f32` for the operation.
+/// A reduction also accumulates in `f32`, so a `bf16` sum of a thousand ones is 1000 and
+/// not the 256 where a 16-bit running total stops growing.
+#[test]
+fn test_bug_073_half_precision_tensors_compute() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: Tensor<bf16, [2]> = [1.0bf16, 2.0bf16]
+    val s = (&a * &a).sum()
+    val m: Tensor<f16, [2, 2]> = [[1.0f16, 2.0f16], [3.0f16, 4.0f16]]
+    val p = &m @ &m
+    mut w: Tensor<bf16, [2]> = [4.0bf16, 8.0bf16]
+    w += &a
+    w -= &a * 2.0bf16
+    val ones: Tensor<bf16, [1000]> = Tensor::<bf16, [1000]>::ones()
+    val many = ones.sum()
+    val avg = m.mean()
+    if s as f32 != 5.0 { return 1 }
+    if p[1, 1] as f32 != 22.0 { return 2 }
+    if w[0] as f32 != 3.0 || w[1] as f32 != 6.0 { return 3 }
+    if many as f32 != 1000.0 { return 4 }
+    if avg as f32 != 2.5 { return 5 }
+    0
+}
+"#;
+    let exit = test
+        .compile_and_run("half_tensor_compute.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}

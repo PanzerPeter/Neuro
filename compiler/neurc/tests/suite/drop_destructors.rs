@@ -722,3 +722,135 @@ func main() -> i32 {
         "both elements destroyed once, and 4 + 4 + 8 read"
     );
 }
+
+/// A store into an array element or a nested field destroys the value it displaces, as a
+/// store into a binding's own field always did. Only that one shape consulted the
+/// holder's drop flags, so every other position lost its old value without a destructor.
+#[test]
+fn test_bug_075_a_displaced_element_or_nested_field_is_dropped() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+struct Pair {{ a: Probe }}
+struct Outer {{ p: Pair, xs: [Probe; 2] }}
+
+func main() -> i32 {{
+    mut c0: i32 = 0
+    mut c1: i32 = 0
+    mut c2: i32 = 0
+    mut c3: i32 = 0
+    mut c4: i32 = 0
+    mut c5: i32 = 0
+    mut c6: i32 = 0
+    mut c7: i32 = 0
+    {{
+        mut o = Outer {{
+            p: Pair {{ a: Probe {{ sink: &mut c0 }} }},
+            xs: [Probe {{ sink: &mut c1 }}, Probe {{ sink: &mut c2 }}]
+        }}
+        mut k = 0
+        k = k + 1
+        o.p.a = Probe {{ sink: &mut c3 }}
+        o.xs[0] = Probe {{ sink: &mut c4 }}
+        o.xs[k] = Probe {{ sink: &mut c5 }}
+        mut arr: [Probe; 1] = [Probe {{ sink: &mut c6 }}]
+        arr[0] = Probe {{ sink: &mut c7 }}
+    }}
+    if c0 == 1 && c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1 && c6 == 1 && c7 == 1 {{
+        return 8
+    }}
+    return c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_displaced_element.nr", &source)
+        .expect("Drop program should compile and run");
+    assert_eq!(
+        exit_code, 8,
+        "every displaced value and every replacement is destroyed exactly once"
+    );
+}
+
+/// A binding that owns nothing (here a `&mut`) shadowing an owner of the same name must
+/// hide it from the drop pass. The lookup matched on the name alone, so a field store
+/// through the inner borrow released the OUTER owner's field, which was then released
+/// again at its own scope exit.
+#[test]
+fn test_bug_076_a_borrow_shadowing_an_owner_leaves_the_owner_alone() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+struct Pair {{ a: Probe }}
+
+func main() -> i32 {{
+    mut outer: i32 = 0
+    mut other: i32 = 0
+    mut fresh: i32 = 0
+    {{
+        mut p = Pair {{ a: Probe {{ sink: &mut outer }} }}
+        mut q = Pair {{ a: Probe {{ sink: &mut other }} }}
+        if true {{
+            val p = &mut q
+            p.a = Probe {{ sink: &mut fresh }}
+        }}
+    }}
+    return outer * 100 + fresh * 10 + other
+}}
+"#
+    );
+    let exit_code = test
+        .compile_and_run("drop_shadowed_owner.nr", &source)
+        .expect("Drop program should compile and run");
+    // `other` is displaced through a borrow, which no pass destroys yet (BUG-077), so it
+    // stays 0 here; what this test pins is that `outer` is released once, not twice.
+    assert_eq!(
+        exit_code, 110,
+        "the outer owner is released once, at its scope exit"
+    );
+}
+
+/// A `Drop` value no binding ever owns is destroyed once it has been read: a call whose
+/// value is discarded, a temporary a field is read from, a struct literal read the same
+/// way, and a temporary `&self` receiver. None of them had an owner a scope exit could
+/// reach, so their destructors never ran.
+#[test]
+fn test_bug_047_an_unbound_drop_temporary_is_destroyed() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Tagged { id: i32, sink: &mut i32 }
+
+impl Drop for Tagged {
+    func drop(&mut self) { *self.sink = *self.sink + 1 }
+}
+
+impl Tagged {
+    func get(&self) -> i32 { self.id }
+}
+
+func make(id: i32, sink: &mut i32) -> Tagged { Tagged { id: id, sink: sink } }
+
+func main() -> i32 {
+    mut a: i32 = 0
+    mut b: i32 = 0
+    mut c: i32 = 0
+    mut d: i32 = 0
+    mut read: i32 = 0
+    {
+        make(1, &mut a)
+        read = read + make(2, &mut b).id
+        read = read + Tagged { id: 3, sink: &mut c }.id
+        read = read + make(4, &mut d).get()
+    }
+    if read != 9 { return 100 }
+    return a * 8 + b * 4 + c * 2 + d
+}
+"#;
+    let exit = test
+        .compile_and_run("unbound_drop_temporary.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(
+        exit, 15,
+        "each temporary destroyed exactly once, and 2 + 3 + 4 read"
+    );
+}

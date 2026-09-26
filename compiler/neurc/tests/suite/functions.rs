@@ -87,33 +87,27 @@ func main() -> i32 {
     assert_eq!(exit_code, 8, "Expected exit code 8");
 }
 
-// A function name in value position reported "undefined variable", denying a name the
-// program declares. Functions are a separate namespace with no coercion to a value, and
-// the diagnostic has to say so.
-
+/// A plain function name is an ordinary value of its function type: it may be passed to
+/// a function-typed parameter, bound, and called through the binding. It was refused
+/// everywhere but the `|>` target and the `>>` operands.
 #[test]
-fn regression_function_name_as_value_names_the_function() {
+fn test_bug_071_a_function_name_is_a_value() {
     let test = CompileTest::new();
     let source = r#"
 func apply_twice(f: (i32) -> i32, x: i32) -> i32 { f(f(x)) }
 func inc(x: i32) -> i32 { x + 3 }
+func add(a: i32, b: i32) -> i32 { a + b }
+func fold(f: (i32, i32) -> i32, a: i32, b: i32) -> i32 { f(a, b) }
 
 func main() -> i32 {
-    apply_twice(inc, 10)
+    val g = inc
+    apply_twice(inc, 10) + g(1) + fold(add, 2, 5)
 }
 "#;
-    let path = test.write_source("fn_as_value.nr", source);
-    let err = test
-        .compile(&path)
-        .expect_err("a function name in value position must not compile");
-    assert!(
-        err.contains("is a function, not a value"),
-        "expected the function-as-value diagnostic, got: {err}"
-    );
-    assert!(
-        !err.contains("undefined variable"),
-        "the misleading undefined-variable diagnostic must be gone, got: {err}"
-    );
+    let exit = test
+        .compile_and_run("fn_as_value.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 16 + 4 + 7);
 }
 
 #[test]
@@ -132,8 +126,8 @@ func main() -> i32 {
         .compile(&path)
         .expect_err("a generic function name in value position must not compile");
     assert!(
-        err.contains("is a function, not a value"),
-        "expected the function-as-value diagnostic, got: {err}"
+        err.contains("is a generic function"),
+        "expected the generic-function-as-value diagnostic, got: {err}"
     );
 }
 

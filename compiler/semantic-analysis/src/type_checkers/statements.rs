@@ -1175,6 +1175,17 @@ impl TypeChecker {
             return self.check_binding_store(target, place_ty, value, span);
         }
 
+        // A borrow of the binding the place is rooted at sees this write, and a store that
+        // displaces an owned value frees what the borrow points into. Tested before the RHS,
+        // like a whole-binding store.
+        self.refuse_store_while_borrowed(place);
+        if self.holds_function_value(place_ty) && self.reached_through_reference(place) {
+            self.record_error(TypeError::FunctionValueEscapes {
+                problem: "be stored through a reference".to_string(),
+                span,
+            });
+        }
+
         match place {
             Place::Deref { .. } => self.check_pool_ref_store(place_ty, value, span),
             _ => {
@@ -1198,6 +1209,99 @@ impl TypeChecker {
             });
         }
         Some(())
+    }
+
+    /// Refuse a write into any part of a binding while a borrow of it is live. It is as
+    /// coarse as the whole-binding rule: a borrow of one field freezes the whole value,
+    /// because the borrow counts are kept per binding.
+    pub(crate) fn refuse_store_while_borrowed(&mut self, place: &Place) {
+        let Some(root) = place.root() else {
+            return;
+        };
+        let Some((shared, exclusive)) = self.symbols.borrow_counts(&root.name) else {
+            return;
+        };
+        if shared > 0 || exclusive > 0 {
+            self.record_error(TypeError::CannotAssignWhileBorrowed {
+                name: root.name.clone(),
+                span: root.span,
+            });
+        }
+    }
+
+    /// Whether a store into `place` writes memory another frame owns: through a `*r`, a
+    /// reference met on the way to the root, or a borrowed `self`.
+    fn reached_through_reference(&self, place: &Place) -> bool {
+        let object = match place {
+            Place::Var(_) => return false,
+            Place::Deref { .. } => return true,
+            Place::Field { object, .. }
+            | Place::Index { object, .. }
+            | Place::TensorIndex { object, .. } => object,
+        };
+        if place
+            .root()
+            .is_some_and(|root| root.name == "self" && !self.self_is_owned)
+        {
+            return true;
+        }
+        self.projection_type(object)
+            .is_some_and(|ty| self.nearest_reference(object, &ty).is_some())
+    }
+
+    /// Whether a value of `ty` is, or holds, a function value. A closure's captures live
+    /// in the frame that wrote it, so the language keeps such a value inside that frame.
+    pub(crate) fn holds_function_value(&self, ty: &Type) -> bool {
+        self.holds_function_within(ty, &mut std::collections::HashSet::new())
+    }
+
+    fn holds_function_within(
+        &self,
+        ty: &Type,
+        seen: &mut std::collections::HashSet<std::string::String>,
+    ) -> bool {
+        match ty {
+            Type::Function { .. } => true,
+            Type::Struct(name) => {
+                seen.insert(name.clone())
+                    && self.struct_defs.get(name).is_some_and(|fields| {
+                        fields
+                            .iter()
+                            .any(|(_, field)| self.holds_function_within(field, seen))
+                    })
+            }
+            Type::Enum(name) => {
+                seen.insert(name.clone())
+                    && self.enum_defs.get(name).is_some_and(|variants| {
+                        variants
+                            .iter()
+                            .flat_map(|variant| variant.fields.iter())
+                            .any(|(_, payload)| self.holds_function_within(payload, seen))
+                    })
+            }
+            Type::Newtype(name) => {
+                seen.insert(name.clone())
+                    && self
+                        .newtype_defs
+                        .get(name)
+                        .is_some_and(|inner| self.holds_function_within(inner, seen))
+            }
+            Type::Array { element, .. } => self.holds_function_within(element, seen),
+            Type::Tuple(elements) => elements
+                .iter()
+                .any(|element| self.holds_function_within(element, seen)),
+            _ => false,
+        }
+    }
+
+    /// Refuse a declared return type that is or holds a function value.
+    pub(crate) fn refuse_function_valued_return(&mut self, return_type: &Type, span: Span) {
+        if self.holds_function_value(return_type) {
+            self.record_error(TypeError::FunctionValueEscapes {
+                problem: "be returned".to_string(),
+                span,
+            });
+        }
     }
 
     /// Store into a whole binding: the one place form that also replaces what the

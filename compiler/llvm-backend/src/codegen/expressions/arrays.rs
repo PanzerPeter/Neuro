@@ -1,12 +1,13 @@
 // Codegen for fixed-size arrays `[T; N]`: literals, indexing, element
 // assignment, and `for x in arr` iteration. Arrays lower to LLVM `[N x T]`
 // aggregates stored in an alloca; indexing is a `getelementptr` + load/store with
-// a debug-build bounds guard routed through the panic runtime.
+// a bounds guard routed through the panic runtime.
 
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
-use neuro_hir::{HirExpr, HirStmt};
+use neuro_hir::{HirExpr, HirExprKind, HirStmt};
+use shared_types::Literal;
 
 use crate::codegen::context::{CodegenContext, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
@@ -148,6 +149,20 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let elem_ptr =
             self.array_element_ptr(base_ptr, elem_llvm, size, index, index.span.start)?;
+        // The element this store displaces loses its owner once the new value exists, as
+        // a field's does.
+        match &index.kind {
+            HirExprKind::Literal(Literal::Integer(position, _)) if *position >= 0 => {
+                self.displace_held_position(object, &position.to_string(), value)?
+            }
+            _ => self.displace_array_element(
+                object,
+                elem_llvm.array_type(size as u32),
+                base_ptr,
+                elem_ptr,
+                value,
+            )?,
+        }
         self.builder.build_store(elem_ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store array element: {}", e))
         })?;
@@ -344,7 +359,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Compute the address of element `index` within an array at `base_ptr`, emitting
-    /// a debug-build bounds guard (`index < size`, unsigned) that panics on violation
+    /// a bounds guard (`index < size`, unsigned) that panics on violation;
     /// `offset` keys the panic diagnostic's source location.
     pub(crate) fn array_element_ptr(
         &mut self,
@@ -359,21 +374,19 @@ impl<'ctx> CodegenContext<'ctx> {
         let idx_val = self.codegen_expr(index)?.into_int_value();
         let idx64 = self.widen_index_to_i64(idx_val, &idx_sem)?;
 
-        // Debug builds trap an out-of-bounds access; release builds omit the check
-        // (matching the integer-overflow policy). A negative signed index
-        // sign-extends to a large unsigned value and so fails the `< size` test.
-        if self.overflow_checks {
-            let size_c = i64t.const_int(size as u64, false);
-            let ok =
-                self.builder
-                    .build_int_compare(IntPredicate::ULT, idx64, size_c, "arr.bounds")?;
-            self.codegen_guard_or_panic(ok, "array index out of bounds", offset)?;
-        }
+        // Checked in every build, unlike integer overflow: wrapping gives an overflow a
+        // defined result, and an index past the array has none. LLVM drops the guard
+        // where it can prove the index in range. A negative signed index sign-extends to
+        // a large unsigned value and so fails the `< size` test.
+        let size_c = i64t.const_int(size as u64, false);
+        let ok = self
+            .builder
+            .build_int_compare(IntPredicate::ULT, idx64, size_c, "arr.bounds")?;
+        self.codegen_guard_or_panic(ok, "array index out of bounds", offset)?;
 
         let arr_llvm = elem_llvm.array_type(size as u32);
-        // SAFETY: in debug builds the guard above panics unless `idx64 < size`; in
-        // release builds an out-of-range index is the documented wrapping behaviour
-        // of the array bounds policy, matching the integer-overflow policy.
+        // SAFETY: the guard above panics unless `idx64 < size`, so the GEP stays inside
+        // the array.
         unsafe {
             self.builder
                 .build_in_bounds_gep(

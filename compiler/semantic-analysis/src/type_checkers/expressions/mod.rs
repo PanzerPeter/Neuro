@@ -149,12 +149,13 @@ impl TypeChecker {
                     // A const generic parameter used as a value in a generic body
                     // has its declared integer type.
                     Some(const_param_ty)
-                } else if self.functions.contains_key(&ident.name)
-                    || self.generic_funcs.contains_key(&ident.name)
-                {
-                    // The name exists, it just is not usable as a value: functions live
-                    // in their own namespace and there is no fn-item-to-value coercion,
-                    // so "undefined variable" would deny a name the program declares.
+                } else if let Some(function_ty) = self.functions.get(&ident.name).cloned() {
+                    // A function named as a value is an ordinary value of its function
+                    // type; lowering wraps it in a closure that captures nothing.
+                    Some(function_ty)
+                } else if self.generic_funcs.contains_key(&ident.name) {
+                    // A generic function has no one type to be a value of until its type
+                    // arguments are named, and a bare name names none.
                     self.record_error(TypeError::FunctionUsedAsValue {
                         name: ident.name.clone(),
                         span: ident.span,

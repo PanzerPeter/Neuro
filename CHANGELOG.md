@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.1] - 2026-09-26
+
+### Fixed
+
+- A store into an array element or a nested field destroys the value it displaces, as a store
+  into a binding's own field already did. An element's old destructor never ran, and a
+  `[string; N]` element store leaked the displaced buffer (BUG-075).
+- A borrow shadowing an owner of the same name no longer lets a store through it release the
+  owner's value, which was then released again at its scope exit: a double free (BUG-076).
+- A `Drop` value no binding owns is destroyed once read: a discarded call result, a temporary a
+  field is read from, a struct literal read the same way, and a temporary `&self` receiver
+  (BUG-047).
+- Array, slice and tensor indices are bounds-checked in every build. Release builds dropped the
+  check and read or wrote past the storage (BUG-068).
+- A line opening with `-`, `&` or `|` begins a new statement, so a tail expression may start with
+  a minus. It used to continue the line above, and `x = 3` followed by `-x` assigned `3 - x`.
+  Inside an unclosed `(` or `[` every line continues, which also lets a line open with `*` there
+  (BUG-069).
+- A store into a field, an element or a tensor coordinate is refused while the binding it belongs
+  to is borrowed, as a store into the whole binding is. The borrow saw the write, and a
+  displaced `string` was freed under a live `.slice` view (BUG-070).
+- A function value may not be returned or stored through a reference, since a closure reads its
+  captures from the frame that built it. Both were accepted and read a dead frame. A `pool` call
+  may now pass a closure beside an outer `&mut` (BUG-072).
+- Output printed before a panic comes before the panic's diagnostic when both streams share a
+  pipe (BUG-067).
+- A local shadowing a labelled function takes the call, instead of the call being checked
+  against the function's labels and arity (BUG-034).
+- The element-type diagnostic names the operator written, not `+=` for every `+` (BUG-074).
+
+### Added
+
+- A plain function name is a value of its function type: `apply(square, 3.0)`, `val f = square`,
+  and `w.map(square)` in a `@grad` body. A generic function's bare name is still refused
+  (BUG-071).
+- Half-precision tensors compute: elementwise operators, a half scalar broadcast, compound
+  assignment, `@`, `einsum` and the four reductions, each element in `f32` and rounded back once,
+  and a reduction accumulating in `f32` (BUG-073).
+
+### Docs
+
+- `docs/BUGS.md` records BUG-077 (a store through a borrow never destroys the value it displaces)
+  and drops the ten entries fixed here.
+
 ## [3.12.0] - 2026-09-26
 
 ### Added

@@ -676,3 +676,29 @@ fn test_a_method_call_statement_is_still_an_expression() {
     let stmt = first_stmt("func test() {\n    q.translate(1, 2)\n}");
     assert!(matches!(stmt, Stmt::Expr(_)), "got {stmt:?}");
 }
+
+/// A line opening with `-`, `&` or `|` begins a new statement: a negation, a borrow or a
+/// closure literal, never a subtraction, a bitwise AND or a bitwise OR continuing the line
+/// above. `-scaled` used to fold into `val scaled = a * 2 - scaled`.
+#[test]
+fn test_bug_069_a_line_opening_with_minus_amp_or_pipe_is_a_new_statement() {
+    for opener in ["-scaled", "&scaled", "|x: i32| -> i32 { x }"] {
+        let source = format!("func f(a: i32) {{\n    val scaled = a * 2\n    {opener}\n}}\n");
+        assert_eq!(
+            first_fn_body_len(&source),
+            2,
+            "`{opener}` on its own line is a statement of its own"
+        );
+    }
+}
+
+/// The two ways to continue across one of those operators still work: end the line with
+/// it, or stay inside an unclosed `(` or `[`, where a newline ends nothing.
+#[test]
+fn test_bug_069_a_trailing_operator_or_an_open_delimiter_still_continues() {
+    let trailing = "func f(a: i32, b: i32) {\n    val t = a -\n        b\n}\n";
+    assert_eq!(first_fn_body_len(trailing), 1);
+    let parenthesized =
+        "func f(a: i32, b: i32) {\n    val t = (a\n        - b\n        * 2)\n    g(a,\n        b\n        - 1)\n}\n";
+    assert_eq!(first_fn_body_len(parenthesized), 2);
+}

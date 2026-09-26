@@ -236,7 +236,10 @@ impl TypeChecker {
         let operand_element = (**operand_element).clone();
         match element {
             None => {
-                if !operand_element.is_integer() && !operand_element.is_float() {
+                if !operand_element.is_integer()
+                    && !operand_element.is_float()
+                    && !operand_element.is_half_float()
+                {
                     self.record_error(TypeError::EinsumElementType {
                         element: operand_element,
                         span,

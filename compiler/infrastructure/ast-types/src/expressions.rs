@@ -254,8 +254,8 @@ pub enum Expr {
     /// argument to `f`, that result to `g`, and so on left to right.
     ///
     /// The chain is flattened by the parser, so `functions` is never shorter than two
-    /// and the node holds no sub-expressions: composition takes *named* functions, and
-    /// a name is not a value in this language. That is also why the operands are
+    /// and the node holds no sub-expressions: composition takes *named* functions, never
+    /// an arbitrary function-valued expression. That is also why the operands are
     /// [`Identifier`]s rather than boxed [`Expr`]s — a walker over expressions has
     /// nothing here to descend into.
     Compose {

@@ -344,9 +344,8 @@ the extent it produces is part of the result's type, and a type cannot wait for 
 `t[0..k]` with a `mut k` is therefore a compile error naming that rule.
 
 A constant position outside its axis, a range whose start is past its end, and a range
-reaching past the extent are all compile errors. A run-time position is bounds-checked on the debug tier,
-the same tier an array index sits on: it panics in a debug build and the check is omitted
-under `-O 1` and above.
+reaching past the extent are all compile errors. A run-time position is bounds-checked in every
+build, as an array index is: out of range, it panics.
 
 A range argument may wear `.rev()`, which reads that axis back to front. Only the order
 changes: the surviving extent is the range's either way, and a sub-range reverses within

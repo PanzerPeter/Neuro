@@ -31,6 +31,10 @@ pub(crate) struct Parser {
     /// Set to true inside if/while/for conditions to prevent consuming the block's `{`.
     /// Cleared again inside a delimiter pair: see [`Parser::inside_delimiters`].
     pub(super) no_struct_lit: bool,
+    /// How many `(` / `[` pairs enclose the current position since the innermost
+    /// statement or match arm began. Inside one a newline never ends the expression,
+    /// so a line opening with a token that could begin an expression still continues.
+    pub(super) delimiter_depth: u32,
     /// Loop labels in scope at the current parse position, innermost last.
     /// `break`/`continue` labels and value-carrying `break v` share bare-identifier
     /// syntax, so an identifier after `break` is read as a label only when it names
@@ -54,6 +58,7 @@ impl Parser {
             current: 0,
             expr_depth: 0,
             no_struct_lit: false,
+            delimiter_depth: 0,
             active_labels: Vec::new(),
             destructure_counter: 0,
             pipe_counter: 0,
@@ -153,7 +158,22 @@ impl Parser {
         &mut self,
         f: impl FnOnce(&mut Self) -> ParseResult<T>,
     ) -> ParseResult<T> {
-        self.with_struct_lit_guard(false, f)
+        self.delimiter_depth += 1;
+        let result = self.with_struct_lit_guard(false, f);
+        self.delimiter_depth -= 1;
+        result
+    }
+
+    /// Parse `f` where a newline ends a statement again: a block's statements or a
+    /// match arm, even when the block itself sits inside a delimiter pair.
+    pub(super) fn at_statement_level<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> ParseResult<T>,
+    ) -> ParseResult<T> {
+        let saved = std::mem::replace(&mut self.delimiter_depth, 0);
+        let result = f(self);
+        self.delimiter_depth = saved;
+        result
     }
 
     /// Run `f` with [`Parser::no_struct_lit`] forced to `guarded`, restoring the

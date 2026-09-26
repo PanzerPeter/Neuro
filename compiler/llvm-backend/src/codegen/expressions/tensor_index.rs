@@ -172,18 +172,15 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(base)
     }
 
-    /// Trap a position outside its axis on the debug tier, where an array index's
-    /// bounds check also lives. A negative signed index sign-extends to a large
-    /// unsigned value and so fails the same unsigned test.
+    /// Trap a position outside its axis, in every build, as an array index is. A
+    /// negative signed index sign-extends to a large unsigned value and so fails the
+    /// same unsigned test.
     fn guard_tensor_position(
         &mut self,
         position: IntValue<'ctx>,
         extent: usize,
         offset: usize,
     ) -> CodegenResult<()> {
-        if !self.overflow_checks {
-            return Ok(());
-        }
         let extent = self.context.i64_type().const_int(extent as u64, false);
         let ok = self.builder.build_int_compare(
             IntPredicate::ULT,
@@ -337,9 +334,8 @@ impl<'ctx> CodegenContext<'ctx> {
         buffer: PointerValue<'ctx>,
         index: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        // SAFETY: every position is bounds-guarded on the debug tier and every range was
-        // proved to lie inside its axis at compile time, so the offset stays inside the
-        // buffer under the same policy an array index carries.
+        // SAFETY: every run-time position is bounds-guarded and every range was proved to
+        // lie inside its axis at compile time, so the offset stays inside the buffer.
         unsafe {
             self.builder
                 .build_in_bounds_gep(elem_llvm, buffer, &[index], "tensor.index.ptr")

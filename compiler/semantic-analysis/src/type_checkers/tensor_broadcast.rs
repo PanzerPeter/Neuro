@@ -111,7 +111,9 @@ fn classify(ty: &Type) -> Option<Operand> {
             owned: !matches!(ty, Type::Reference { .. }),
         });
     }
-    ty.is_numeric().then(|| Operand::Scalar(ty.clone()))
+    // A half-precision scalar broadcasts against a tensor like any other: the operation
+    // is the tensor's, and only two half scalars fall back to the scalar rule.
+    (ty.is_numeric() || ty.is_half_float()).then(|| Operand::Scalar(ty.clone()))
 }
 
 impl TypeChecker {
@@ -290,10 +292,9 @@ impl TypeChecker {
             element: Box::new(element.clone()),
             shape,
         };
-        // The element carries the arithmetic, so the operator is defined exactly where it
-        // is defined on the scalar: `bool` has none, and the half-precision scalar
-        // contract stops short of it.
-        if !element.is_numeric() || element.is_half_float() {
+        // The element carries the arithmetic: `bool` has none. A half-precision element
+        // does, although its scalar does not: the scalar restriction stops at tensor ops.
+        if !element.is_numeric() && !element.is_half_float() {
             self.record_error(TypeError::TensorElementNotArithmetic {
                 op: op.to_string(),
                 element,

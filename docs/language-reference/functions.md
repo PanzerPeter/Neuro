@@ -1084,8 +1084,23 @@ func main() -> i32 {
 }
 ```
 
+A function's own name is a value of its function type too, so `apply(5, double)` passes
+`func double(x: i32) -> i32` directly, and `val f = double` binds it. A generic function
+has no single type until its type arguments are named, so its bare name is refused.
+
 Each closure compiles to a `{ function pointer, environment pointer }` value with
 no heap allocation; a call dispatches indirectly through it.
+
+Because the environment lives in the frame that wrote the closure, a function value
+stays in that frame. It may be bound, stored into a local struct or array, passed down
+to a callee and called, but a function whose return type is or holds a function type is
+an error, and so is storing one through a reference (`h.f = g` with `h: &mut Holder`,
+`*slot = g`, or `self.f = g` in a `&mut self` method):
+
+```text
+error: a function value cannot be returned: a closure reads its captures from the frame
+that built it, so it may not outlive that frame
+```
 
 ### Not yet supported
 

@@ -144,10 +144,22 @@ impl<'ctx> CodegenContext<'ctx> {
                     struct_name
                 )));
             };
-            return self
+            let field = self
                 .builder
                 .build_extract_value(struct_val, idx as u32, field_name)
-                .map_err(|e| CodegenError::LlvmError(format!("failed to read field: {}", e)));
+                .map_err(|e| CodegenError::LlvmError(format!("failed to read field: {}", e)))?;
+            // A temporary only read from is destroyed once the field is copied out. A
+            // field that owns something is moved out instead, and destroying the rest
+            // would need a partial drop, so that temporary is left alone.
+            let field_owns = self
+                .struct_defs
+                .get(struct_name)
+                .and_then(|def| def.get(idx))
+                .is_some_and(|(_, ty)| self.drop_target_of(ty).is_some());
+            if !field_owns {
+                self.drop_unbound_temporary(object, aggregate)?;
+            }
+            return Ok(field);
         }
 
         let (ptr, llvm_ty) = self.get_struct_ptr_and_type(object, struct_name)?;
@@ -231,17 +243,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // Ordered as a binding's reassignment is: the field may be read on the way to
         // replacing itself, so its prior value loses its owner only once the new one
-        // has been built. Drop tracking is keyed by binding, so only a field of a named
-        // holder has a prior value it can find.
-        if let HirExprKind::Variable(object_name) = &object.kind {
-            let object_name = object_name.clone();
-            let path = [field_name.to_string()];
-            self.drop_displaced_held_value(&object_name, &path)?;
-            // A `string` position the assignment hands a fresh buffer takes ownership
-            // of it here: the release above left every such position disarmed, because
-            // the type says nothing about what the incoming value owns.
-            self.arm_stored_string_positions(&object_name, &path, value)?;
-        }
+        // has been built.
+        self.displace_held_position(object, field_name, value)?;
         self.builder
             .build_store(field_ptr, val)
             .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;

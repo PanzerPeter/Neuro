@@ -398,7 +398,25 @@ func main() -> i32 {
 "#;
     let diagnostics = rejection("einsum_bool.nr", source);
     assert!(
-        diagnostics.contains("integer or `f32`/`f64` element type"),
+        diagnostics.contains("integer or float element type"),
         "expected an element-type diagnostic, got: {diagnostics}"
     );
+}
+
+/// A half-precision operand contracts like any float one, each product and sum computed in
+/// `f32` and rounded back.
+#[test]
+fn a_half_precision_contraction_computes() {
+    let test = crate::compile_harness::CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val m: Tensor<bf16, [2, 2]> = [[1.0bf16, 2.0bf16], [3.0bf16, 4.0bf16]]
+    val t = einsum("ij,jk->ik", m, m)
+    t[1, 1] as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("einsum_bf16.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 22);
 }

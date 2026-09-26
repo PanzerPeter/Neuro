@@ -102,13 +102,13 @@ Reads and rewrites the AST it is handed; touches no files.
   `LabelsUnsupported`, and a positional call passes through. Attribute arguments
   (`@grad(wrt: [...])`) follow the same call-site syntax in the spec but are a separate
   grammar (`Attribute.args`) and are not handled here.
-- **Local bindings are not tracked**, the same limitation module resolution documents for
-  rewriting. A closure named `f` shadowing a top-level `func f` is looked up as the function,
-  so a label declared on that function is enforced against the closure call. Only a program
-  that shadows a *labelled* function by name can notice, since an unlabelled one never enters
-  the table. Filed as BUG-034 in `docs/BUGS.md`: when the two arities differ the call is
-  rejected outright, which is the compiler refusing a program the rest of it compiles
-  correctly.
+- **Local names are tracked.** The walk (`walk.rs`, a small `Walker`) keeps a scope stack of
+  every local a body binds: parameters and `self`, `val` / `mut` / `const`, loop variables,
+  `val ... else` and match-arm pattern bindings, closure parameters. A call whose bare-name
+  callee a live local holds is treated as a call through a value, `Lookup::Unknown`: no
+  signature is consulted, and a label on it is `LabelsUnsupported`. Until BUG-034 a closure
+  shadowing a labelled `func` was checked against the function's labels and arity. Module
+  resolution still rewrites an imported name without this scope walk.
 - **A missed call would be silent, so it is made loud.** If this walk failed to reach a call,
   its labels would survive and the arguments would stay in written order, the one way a named
   argument could bind to the wrong parameter instead of failing. `hir-lowering` refuses a call

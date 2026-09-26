@@ -11,8 +11,8 @@
 // tensor's handle across an in-place update.
 
 use ast_types::BinaryOp;
-use inkwell::types::BasicTypeEnum;
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
+use inkwell::types::{BasicTypeEnum, FloatType};
+use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue};
 use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
@@ -728,6 +728,8 @@ impl<'ctx> CodegenContext<'ctx> {
         offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         if let (BasicValueEnum::FloatValue(a), BasicValueEnum::FloatValue(b)) = (lhs, rhs) {
+            let narrow = a.get_type();
+            let (a, b) = (self.widen_half(a)?, self.widen_half(b)?);
             let value = match op {
                 BinaryOp::Add => self.builder.build_float_add(a, b, "tensor.op.add"),
                 BinaryOp::Subtract => self.builder.build_float_sub(a, b, "tensor.op.sub"),
@@ -739,8 +741,8 @@ impl<'ctx> CodegenContext<'ctx> {
                         "a compound assignment carries an arithmetic operator".to_string(),
                     ))
                 }
-            };
-            return Ok(value?.into());
+            }?;
+            return Ok(self.narrow_float(value, narrow)?.into());
         }
         let (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) = (lhs, rhs) else {
             return Err(CodegenError::InternalError(
@@ -762,5 +764,36 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
         Ok(value.into())
+    }
+
+    /// A half-precision float widened to `f32`; any other float unchanged. Half-precision
+    /// elements are computed in `f32` and rounded once on the way back, since their own
+    /// arithmetic is not portably defined.
+    pub(crate) fn widen_half(&self, value: FloatValue<'ctx>) -> CodegenResult<FloatValue<'ctx>> {
+        let f32_type = self.context.f32_type();
+        if !self.is_half_float_type(value.get_type()) {
+            return Ok(value);
+        }
+        Ok(self
+            .builder
+            .build_float_ext(value, f32_type, "half.widen")?)
+    }
+
+    /// `value` rounded back to `target`, when `target` is narrower than it.
+    pub(crate) fn narrow_float(
+        &self,
+        value: FloatValue<'ctx>,
+        target: FloatType<'ctx>,
+    ) -> CodegenResult<FloatValue<'ctx>> {
+        if value.get_type() == target {
+            return Ok(value);
+        }
+        Ok(self
+            .builder
+            .build_float_trunc(value, target, "half.narrow")?)
+    }
+
+    pub(crate) fn is_half_float_type(&self, ty: FloatType<'ctx>) -> bool {
+        ty != self.context.f32_type() && ty != self.context.f64_type()
     }
 }

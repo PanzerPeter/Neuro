@@ -173,6 +173,64 @@ func main() -> i32 {
     );
 }
 
+/// An out-of-range run-time index panics at every optimization level. The guards were
+/// emitted only with debug-build overflow trapping, so `-O2` read and wrote past the end
+/// of the storage, an undefined result that wrapping arithmetic never excuses.
+#[test]
+fn test_bug_068_out_of_range_index_panics_in_release_build() {
+    let cases = [
+        (
+            "array read",
+            "val a: [i32; 3] = [1, 2, 3]\n    a[far()] as i32",
+            "array index out of bounds",
+        ),
+        (
+            "array write",
+            "mut a: [i32; 3] = [1, 2, 3]\n    a[far()] = 9\n    a[0]",
+            "array index out of bounds",
+        ),
+        (
+            "slice read",
+            "val a: [i32; 3] = [1, 2, 3]\n    val s: &[i32] = a.slice(0..2)\n    s[far()]",
+            "slice index out of bounds",
+        ),
+        (
+            "tensor read",
+            "val t: Tensor<i32, [3]> = [1, 2, 3]\n    t[far()]",
+            "tensor index out of bounds",
+        ),
+    ];
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    for (i, (shape, body, message)) in cases.iter().enumerate() {
+        let src = dir.path().join(format!("oob_release_{i}.nr"));
+        let exe = dir.path().join(format!("oob_release_{i}"));
+        std::fs::write(
+            &src,
+            format!("func far() -> u64 {{ 700000 }}\n\nfunc main() -> i32 {{\n    {body}\n}}\n"),
+        )
+        .expect("write source");
+        let compile = Command::new(neurc_path())
+            .arg("compile")
+            .arg(&src)
+            .args(["-O", "2", "-o"])
+            .arg(&exe)
+            .output()
+            .expect("run neurc");
+        assert!(
+            compile.status.success(),
+            "{shape}: compile failed: {}",
+            String::from_utf8_lossy(&compile.stderr)
+        );
+        let run = Command::new(&exe).output().expect("run executable");
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(
+            !run.status.success() && stderr.contains(message),
+            "{shape}: an out-of-range index must panic at -O2, got status {:?} and: {stderr}",
+            run.status.code()
+        );
+    }
+}
+
 /// Path to the `neurc` binary Cargo built for this test run.
 ///
 /// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`

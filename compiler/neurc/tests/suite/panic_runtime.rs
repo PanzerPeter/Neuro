@@ -186,3 +186,34 @@ fn panic_in_tail_position_compiles_and_aborts() {
         stderr(&output)
     );
 }
+
+/// With both streams on one pipe, output printed before a panic comes before the panic's
+/// diagnostic. The buffer used to be drained in front of the `abort`, after the diagnostic
+/// had already been written, so a log capturing `2>&1` showed the panic first.
+#[test]
+fn test_bug_067_buffered_output_precedes_the_panic_on_a_shared_stream() {
+    let exe = compile_source(
+        r#"
+func main() -> i32 {
+    println("before")
+    panic("boom")
+    0
+}
+"#,
+        "shared_stream",
+    );
+    let log = std::env::temp_dir().join("neuro_panic_shared_stream.log");
+    let file = std::fs::File::create(&log).expect("create log");
+    let status = Command::new(&exe)
+        .stdout(file.try_clone().expect("clone log handle"))
+        .stderr(file)
+        .status()
+        .expect("run executable");
+    assert!(!status.success(), "the panic must abort");
+    let merged = std::fs::read_to_string(&log).expect("read log");
+    let before = merged.find("before").expect("stdout text in the log");
+    let panic = merged
+        .find("panic: boom")
+        .expect("panic diagnostic in the log");
+    assert!(before < panic, "stdout must come first, got:\n{merged}");
+}

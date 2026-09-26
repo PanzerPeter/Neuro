@@ -349,3 +349,49 @@ fn a_reordered_named_call_types_its_arguments_by_their_parameters() {
         0,
     );
 }
+
+/// A local binding shadowing a labelled top-level function takes the call, so the call is
+/// not checked against the function's labels or arity. Argument binding looked the name up
+/// among top-level functions alone and refused `scale(5)` as one argument short. Once the
+/// local's block ends, the name reaches the function again.
+#[test]
+fn test_bug_034_a_local_shadowing_a_labelled_function_takes_the_call() {
+    let test = CompileTest::new();
+    let source = r#"
+func scale(factor: i32, by amount: i32) -> i32 { factor * amount }
+
+func main() -> i32 {
+    mut t = 0
+    if true {
+        val scale = |a: i32| -> i32 { a + 1 }
+        t = scale(5)
+    }
+    t + scale(2, by: 3)
+}
+"#;
+    let exit = test
+        .compile_and_run("shadowed_labelled_fn.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 12, "the closure gives 6, the function 6");
+}
+
+/// A label written on a call that reaches a closure is refused: a closure declares no
+/// parameter names. It used to be checked against the shadowed function and then bound
+/// positionally to the closure.
+#[test]
+fn test_bug_034_a_label_on_a_shadowing_closure_call_is_refused() {
+    let test = CompileTest::new();
+    let source = r#"
+func scale(factor: i32, by amount: i32) -> i32 { factor * amount }
+
+func main() -> i32 {
+    val scale = |a: i32, b: i32| -> i32 { a + b }
+    scale(5, by: 2)
+}
+"#;
+    let path = test.write_source("shadowed_label.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("a label on a closure call must not compile");
+    assert!(err.contains("has no declared parameter names"), "{err}");
+}

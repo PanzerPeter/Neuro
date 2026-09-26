@@ -38,7 +38,7 @@ impl TypeChecker {
         args: &[Expr],
         call_span: Span,
     ) -> Type {
-        if !element.is_integer() && !element.is_float() {
+        if !element.is_integer() && !element.is_float() && !element.is_half_float() {
             self.record_error(TypeError::TensorReduceElementType {
                 method: method.to_string(),
                 element: element.clone(),
@@ -46,7 +46,7 @@ impl TypeChecker {
             });
             return Type::Unknown;
         }
-        if method == MEAN_METHOD && !element.is_float() {
+        if method == MEAN_METHOD && !element.is_float() && !element.is_half_float() {
             self.record_error(TypeError::TensorReduceMeanNotFloat {
                 element: element.clone(),
                 span: call_span,

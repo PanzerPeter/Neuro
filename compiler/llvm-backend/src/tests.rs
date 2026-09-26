@@ -1201,14 +1201,18 @@ fn every_exit_path_drains_the_output_buffer() {
         "main must drain before it returns:\n{}",
         function_body(&ir, "main")
     );
-    let drained = ir
+    // The drain comes before the diagnostic's first `write`, not merely before the
+    // `abort`: on a shared pipe the diagnostic would otherwise precede the output.
+    let panic_path = ir
         .split("call void @abort()")
         .next()
-        .map(|head| head.trim_end().ends_with("call void @neuro.print.flush()"))
-        .unwrap_or(false);
+        .and_then(|head| head.rsplit("define private").next())
+        .unwrap_or_default();
+    let flush = panic_path.find("call void @neuro.print.flush()");
+    let write = panic_path.find("@write(");
     assert!(
-        drained,
-        "the panic runtime must drain the buffer first:\n{}",
+        matches!((flush, write), (Some(f), Some(w)) if f < w),
+        "the panic runtime must drain the buffer before writing its diagnostic:\n{}",
         ir
     );
 }
@@ -1811,6 +1815,28 @@ fn an_element_and_a_nested_field_release_their_buffers() {
         4,
         "one release per stored buffer: a tuple element, two array elements, and a \
          field one level down:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
+/// An array element store is a drop site like a field's: the displaced buffer goes.
+#[test]
+fn test_bug_075_an_element_assignment_releases_what_it_displaces() {
+    let source = r#"
+        func main() -> i32 {
+            val a = "x"
+            mut arr: [string; 1] = [a + a]
+            arr[0] = a + a + a
+            return arr[0].len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    // The displaced buffer, the intermediate the second concatenation built, and the
+    // final value the array carries to its scope exit.
+    assert_eq!(
+        free_calls(&ir, "main"),
+        3,
+        "the displaced buffer and the replacement are both released:\n{}",
         function_body(&ir, "main")
     );
 }

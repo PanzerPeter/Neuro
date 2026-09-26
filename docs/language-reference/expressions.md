@@ -399,13 +399,24 @@ val chained: i32 = cell
 ```
 
 The decision belongs to the line that ended, never to the line that follows. A line
-*starting* with `(`, `[`, or `*` therefore begins a new statement: a parenthesized
-expression, an array literal, or a dereference. It can never be a call, an index,
-or a multiplication continuing the line above:
+*starting* with a token that can also begin an expression therefore begins a new
+statement: `(` a parenthesized expression, `[` an array literal, `*` a dereference,
+`-` a negation, `&` a borrow, `|` a closure literal, and `@` an attribute. It can never
+be a call, an index, a multiplication, a subtraction, a bitwise AND or OR, or a matrix
+product continuing the line above. To continue across one of those operators, end the
+line with it, or keep the expression inside an unclosed `(` or `[`:
 
 ```neuro
 val a: i32 = f()
 (2 + 3)                  // a new statement, not `f()(2 + 3)`
+
+func negated_double(a: i32) -> i32 {
+    val scaled = a * 2
+    -scaled              // the tail expression, not `a * 2 - scaled`
+}
+
+val total = base -
+    offset               // continues: the line ends with `-`
 ```
 
 ## Type Checking

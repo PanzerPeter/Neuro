@@ -444,22 +444,6 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Record the call just emitted as a point where the process stops running, so the
-    /// standard-output buffer is drained in front of it.
-    ///
-    /// Takes the block's last instruction rather than the call's own value: inkwell's
-    /// `CallSiteValue` does not convert to an `InstructionValue`, and a call is the last
-    /// thing in its block at the moment it is built.
-    pub(crate) fn record_process_exit(&mut self) {
-        let last = self
-            .builder
-            .get_insert_block()
-            .and_then(|block| block.get_last_instruction());
-        if let Some(instruction) = last {
-            self.process_exit_points.push(instruction);
-        }
-    }
-
     /// Allocate a fixed-size stack slot in the current function's **entry block**.
     ///
     /// Every local binding and every result/scratch slot must go through this. An
