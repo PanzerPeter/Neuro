@@ -280,7 +280,9 @@ class TensorCase:
     order, one tensor after another, and `gradient` recomputes the partials from
     `(*point, *constants)` by hand, in the same order. `callee` is the name a call spells
     when it differs from `name`, the compiled symbol: a generic instance is called by its
-    template's name.
+    template's name. `receiver`, when set, is the expression a `@grad` method is called on:
+    the probe binds it and calls `callee` as its method, while `name` is a free function
+    doing the same, which is what the finite differences evaluate.
 
     `path`, when set, names a second function in `source` with the primal's signature that
     computes only the path the primal executes at `point`. It exists for a point AT a kink,
@@ -301,6 +303,7 @@ class TensorCase:
         path=None,
         more_shapes=(),
         callee=None,
+        receiver=None,
     ):
         self.name = name
         self.source = source
@@ -310,6 +313,7 @@ class TensorCase:
         self.constants = constants
         self.path = path
         self.callee = callee or name
+        self.receiver = receiver
 
     def split(self, point):
         """`point` cut into one run of elements per differentiated tensor."""
@@ -368,6 +372,13 @@ func early_return(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     return Tensor::scalar(scale * x * y)
 }
 """
+
+
+# The receiver `method_receiver` is called on, written once for its wrapper and its probe.
+WEIGHTING = (
+    "Weighting { gain: 1.5, rounds: 2, offsets: [1.0, -2.0, 0.5], "
+    "damping: Damping { factor: 0.5 } }"
+)
 
 
 TENSOR_CASES = [
@@ -1020,6 +1031,56 @@ func weight_and_bias(w: &mut Tensor<f32, [2, 2]>, b: &mut Tensor<f32, [2]>, scal
         constants=(1.5,),
         more_shapes=((2,),),
     ),
+    TensorCase(
+        # A `@grad` method under rule 3: the receiver is a constant, read for a number, a
+        # nested struct's number, a loop bound, and a tensor field's element and sum.
+        "method_receiver",
+        """
+struct Damping {
+    factor: f32
+}
+
+struct Weighting {
+    gain: f32,
+    rounds: i32,
+    offsets: Tensor<f32, [3]>,
+    damping: Damping
+}
+
+impl Weighting {
+    @grad
+    func loss(&self, w: &mut Tensor<f32, [3]>, scale: f32) -> Tensor<f32, []> {
+        mut value = w * 1.0
+        mut done = 0
+        while done < self.rounds {
+            value = &value * self.damping.factor
+            done += 1
+        }
+        val shifted = value - self.offsets[1]
+        val squares = &shifted * &shifted
+        return Tensor::scalar(squares.sum() * self.gain * scale + w[0] * self.offsets.sum())
+    }
+}
+
+func method_receiver(w: &mut Tensor<f32, [3]>, scale: f32) -> Tensor<f32, []> {
+    val weighting = """
+        + WEIGHTING
+        + """
+    weighting.loss(w, scale)
+}
+""",
+        (3,),
+        (1.5, -0.75, 2.0),
+        # gain * scale * sum((w / 4 + 2)^2) + w0 * (1 - 2 + 0.5), with gain 1.5.
+        lambda a, b, c, s: (
+            0.75 * s * (0.25 * a + 2.0) - 0.5,
+            0.75 * s * (0.25 * b + 2.0),
+            0.75 * s * (0.25 * c + 2.0),
+        ),
+        constants=(2.0,),
+        callee="loss",
+        receiver=WEIGHTING,
+    ),
 ]
 
 
@@ -1209,7 +1270,11 @@ def probe_source(case):
         arguments.append(f"&mut w{index}")
         start += count
     arguments += [f"c{k}" for k in range(len(case.constants))]
-    lines.append(f"    val loss = {case.callee}({', '.join(arguments)})")
+    callee = case.callee
+    if case.receiver:
+        lines.append(f"    val receiver = {case.receiver}")
+        callee = f"receiver.{callee}"
+    lines.append(f"    val loss = {callee}({', '.join(arguments)})")
     lines.append("    loss.backward()")
     lines.append(f"    if i == {PROBE_LOSS} {{ return loss.sum() as f64 }}")
     flat = 0

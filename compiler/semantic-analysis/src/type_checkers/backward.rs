@@ -165,9 +165,12 @@ pub(crate) fn gradient_view_root(expr: &Expr, ty: &Type) -> Option<String> {
 
 impl TypeChecker {
     /// Make `holder`, a `val` just bound to `init`, hold the `&mut` borrows of the `@grad`
-    /// call `init` is, when it is one and a `.backward()` on `holder` follows. Each differentiated argument has to be a place the
-    /// borrow can be held on: `&mut name`, or a `&mut` binding passed on. Anything else
-    /// leaves the loss unable to run a `.backward()`, which reports it there.
+    /// call `init` is, when it is one and a `.backward()` on `holder` follows. A method's
+    /// receiver is a constant when nothing selects it with `wrt:`, so it is borrowed for
+    /// the call alone, like any other argument that is not differentiated. Each
+    /// differentiated argument has to be a place the borrow can be held on: `&mut name`,
+    /// or a `&mut` binding passed on. Anything else leaves the loss unable to run a
+    /// `.backward()`, which reports it there.
     pub(crate) fn hold_grad_call_borrows(&mut self, holder: &str, init: &Expr) {
         if !self.backward_losses.contains(holder) {
             return;
@@ -175,22 +178,8 @@ impl TypeChecker {
         let Expr::Call { func, args, .. } = peel_parens(init) else {
             return;
         };
-        let Expr::Identifier(callee) = func.as_ref() else {
+        let Some(params) = self.grad_call_params(func) else {
             return;
-        };
-        // A local of function type named like the function shadows it, and a call
-        // through a function value runs no derivative.
-        if !self.grad_functions.contains(&callee.name)
-            || self.symbols.lookup(&callee.name).is_some()
-        {
-            return;
-        }
-        let params = match self.functions.get(&callee.name) {
-            Some(Type::Function { params, .. }) => params.clone(),
-            _ => match self.generic_funcs.get(&callee.name) {
-                Some(sig) => sig.params.clone(),
-                None => return,
-            },
         };
 
         let mut state = GradLoss::Pending;
@@ -215,6 +204,39 @@ impl TypeChecker {
             }
         }
         self.symbols.set_grad_loss(holder, state);
+    }
+
+    /// The declared parameters of the `@grad` function or method `func` calls, the
+    /// receiver excluded, or `None` when `func` names no derivative. A method is known
+    /// only through its receiver's static type, so a call through a trait object is none.
+    fn grad_call_params(&self, func: &Expr) -> Option<Vec<Type>> {
+        match func {
+            Expr::Identifier(callee) => {
+                // A local of function type named like the function shadows it, and a call
+                // through a function value runs no derivative.
+                if !self.grad_functions.contains(&callee.name)
+                    || self.symbols.lookup(&callee.name).is_some()
+                {
+                    return None;
+                }
+                match self.functions.get(&callee.name) {
+                    Some(Type::Function { params, .. }) => Some(params.clone()),
+                    _ => Some(self.generic_funcs.get(&callee.name)?.params.clone()),
+                }
+            }
+            Expr::FieldAccess { .. } => {
+                let key = self.callee_key(func)?;
+                if !self.grad_functions.contains(&key) {
+                    return None;
+                }
+                // A method's registered signature carries its receiver first.
+                match self.functions.get(&key)? {
+                    Type::Function { params, .. } => params.get(1..).map(<[Type]>::to_vec),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Check `object.backward()`, whose receiver type-checked as a tensor, and end the

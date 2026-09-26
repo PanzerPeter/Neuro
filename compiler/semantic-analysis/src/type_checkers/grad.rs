@@ -8,9 +8,11 @@
 //
 // Without `wrt:` (a later item) every tensor parameter is differentiated, so every tensor
 // parameter is held to the differentiated-parameter rule: borrowed `&mut`, because the
-// materialization layer writes each one's gradient slot after the call returns.
+// materialization layer writes each one's gradient slot after the call returns. A method
+// follows the same rules over the parameters after its receiver, which is a constant.
 
-use ast_types::{Attribute, FunctionDef, Item};
+use ast_types::{Attribute, FunctionDef, ImplDef, Item, MethodDef, Parameter, SelfParam};
+use shared_types::Span;
 
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, Type};
@@ -34,6 +36,16 @@ fn grad_attribute(attributes: &[Attribute]) -> Option<&Attribute> {
 /// pass seeds with `1.0` at that type, which is why no seed parameter exists.
 fn is_scalar_loss(ty: &Type) -> bool {
     matches!(ty, Type::Tensor { element, shape } if **element == Type::F32 && shape.is_empty())
+}
+
+/// What a signature rule reports against: the name a diagnostic spells, where it points,
+/// and the declared parameters, the receiver excluded.
+struct SignatureSite<'a> {
+    name: &'a str,
+    name_span: Span,
+    return_span: Option<Span>,
+    params: &'a [Parameter],
+    generic: bool,
 }
 
 /// Why a tensor parameter cannot be differentiated, or `None` when it can.
@@ -77,12 +89,7 @@ impl TypeChecker {
                 Item::Function(func) => self.check_grad_function(func),
                 Item::Impl(def) => {
                     for method in &def.methods {
-                        if let Some(attr) = grad_attribute(&method.attributes) {
-                            self.record_error(TypeError::GradFormUnsupported {
-                                form: "on a method".to_string(),
-                                span: attr.span,
-                            });
-                        }
+                        self.check_grad_method(def, method);
                     }
                 }
                 _ => {}
@@ -121,39 +128,14 @@ impl TypeChecker {
         // Recorded even when the signature below is refused: the call sites then check
         // against the intent, and the refusal is reported once, here.
         self.grad_functions.insert(name.clone());
-
-        if !is_scalar_loss(&ret) {
-            self.record_error(TypeError::GradSignature {
-                function: name.clone(),
-                problem: format!("returns '{ret}'; a differentiated function returns its loss as a rank-0 `Tensor<f32, []>`"),
-                span: func
-                    .return_type
-                    .as_ref()
-                    .map_or(func.name.span, |ty| ty.span()),
-            });
-        }
-
-        let mut differentiated = 0usize;
-        for (param, ty) in func.params.iter().zip(params.iter()) {
-            if !matches!(ty.referent(), Type::Tensor { .. }) {
-                continue;
-            }
-            differentiated += 1;
-            if let Some(problem) = differentiated_param_problem(ty, generic) {
-                self.record_error(TypeError::GradSignature {
-                    function: name.clone(),
-                    problem: format!("takes '{}' as '{ty}', which {problem}", param.name.name),
-                    span: param.name.span,
-                });
-            }
-        }
-        if differentiated == 0 {
-            self.record_error(TypeError::GradSignature {
-                function: name.clone(),
-                problem: "has no tensor parameter to differentiate with respect to".to_string(),
-                span: func.name.span,
-            });
-        }
+        let signature = SignatureSite {
+            name,
+            name_span: func.name.span,
+            return_span: func.return_type.as_ref().map(|ty| ty.span()),
+            params: &func.params,
+            generic,
+        };
+        self.check_grad_signature(&signature, &params, &ret);
 
         // `__f__rev` needs no such test: declared names may not contain `__` at all.
         let bundle = format!("{BUNDLE_PREFIX}{name}");
@@ -162,6 +144,106 @@ impl TypeChecker {
                 function: name.clone(),
                 generated: bundle,
                 span: func.name.span,
+            });
+        }
+    }
+
+    /// A `@grad` method. Without `wrt:` every tensor parameter is differentiated and the
+    /// receiver is a constant, so the signature rules are a free function's, applied to
+    /// the parameters after `self`. Its generated names carry the `Type__method` key,
+    /// whose `__` no declared name can contain, so they cannot clash with anything the
+    /// program declares.
+    fn check_grad_method(&mut self, def: &ImplDef, method: &MethodDef) {
+        let Some(attr) = grad_attribute(&method.attributes) else {
+            return;
+        };
+        let form = if !attr.args.is_empty() {
+            Some("with arguments")
+        } else if def.trait_name.is_some() {
+            Some("on a method of a trait `impl`")
+        } else if !def.generics.is_empty() || !def.type_args.is_empty() {
+            Some("on a method of a generic `impl`")
+        } else if method.self_param.is_none() {
+            Some("on an associated function")
+        } else {
+            None
+        };
+        if let Some(form) = form {
+            self.record_error(TypeError::GradFormUnsupported {
+                form: form.to_string(),
+                span: attr.span,
+            });
+            return;
+        }
+        let type_name = &def.type_name.name;
+        let name = format!("{type_name}.{}", method.name.name);
+        // A signature that failed to register was already reported.
+        let Some(key) = self
+            .impl_methods
+            .get(type_name)
+            .and_then(|methods| methods.get(&method.name.name))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(Type::Function { params, ret }) = self.functions.get(&key).cloned() else {
+            return;
+        };
+        self.grad_functions.insert(key);
+
+        // A `wrt:` naming a field, or a `@model` receiver, writes gradient slots reachable
+        // through the receiver after the call returns, and a receiver the call consumed
+        // has nowhere to keep them. A constant receiver holds to the same form, so adding
+        // a `wrt:` later never changes which receivers are legal.
+        if matches!(method.self_param, Some(SelfParam::Owned)) {
+            self.record_error(TypeError::GradSignature {
+                function: name.clone(),
+                problem: "takes `self` by value; a `@grad` method borrows its receiver, as `&self` or `&mut self`".to_string(),
+                span: method.name.span,
+            });
+        }
+        // The registered signature carries the receiver as its first parameter.
+        let signature = SignatureSite {
+            name: &name,
+            name_span: method.name.span,
+            return_span: method.return_type.as_ref().map(|ty| ty.span()),
+            params: &method.params,
+            generic: false,
+        };
+        self.check_grad_signature(&signature, params.get(1..).unwrap_or_default(), &ret);
+    }
+
+    /// The rules every `@grad` signature obeys, whatever declares it: the loss is a
+    /// rank-0 `f32` tensor, and every tensor parameter is a differentiable `&mut` borrow.
+    fn check_grad_signature(&mut self, signature: &SignatureSite<'_>, params: &[Type], ret: &Type) {
+        let name = signature.name;
+        if !is_scalar_loss(ret) {
+            self.record_error(TypeError::GradSignature {
+                function: name.to_string(),
+                problem: format!("returns '{ret}'; a differentiated function returns its loss as a rank-0 `Tensor<f32, []>`"),
+                span: signature.return_span.unwrap_or(signature.name_span),
+            });
+        }
+
+        let mut differentiated = 0usize;
+        for (param, ty) in signature.params.iter().zip(params.iter()) {
+            if !matches!(ty.referent(), Type::Tensor { .. }) {
+                continue;
+            }
+            differentiated += 1;
+            if let Some(problem) = differentiated_param_problem(ty, signature.generic) {
+                self.record_error(TypeError::GradSignature {
+                    function: name.to_string(),
+                    problem: format!("takes '{}' as '{ty}', which {problem}", param.name.name),
+                    span: param.name.span,
+                });
+            }
+        }
+        if differentiated == 0 {
+            self.record_error(TypeError::GradSignature {
+                function: name.to_string(),
+                problem: "has no tensor parameter to differentiate with respect to".to_string(),
+                span: signature.name_span,
             });
         }
     }

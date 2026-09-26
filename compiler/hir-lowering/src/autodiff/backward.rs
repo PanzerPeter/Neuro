@@ -17,6 +17,9 @@
 //! (&mut w).__set_grad(__backward_N.1.w)     // one per differentiated argument
 //! ```
 //!
+//! A method call `m.f(x, &mut w)` becomes `m.__f__rev(x, &mut w)` the same way: the
+//! derivative of a `@grad` method is a method of the same type.
+//!
 //! The derivative runs where the call ran, so it sees exactly the arguments the primal
 //! would have, and the loss is computed once: `__f__rev` returns the same loss `f` does.
 //! No derivative runs for a call with no `.backward()`.
@@ -56,6 +59,40 @@ fn backward_receiver(stmt: &Stmt) -> Option<(&str, Span)> {
         Expr::Identifier(ident) if field.name == BACKWARD_METHOD => Some((&ident.name, *span)),
         _ => None,
     }
+}
+
+/// The callee of the derivative call replacing a call through `callee`: `__f__rev` for a
+/// function, or the receiver's `__m__rev` method, which takes the receiver as `m` does.
+fn reverse_callee(callee: &HirExpr, pair_ty: &HirType) -> Result<HirExpr, LoweringError> {
+    let kind = match &callee.kind {
+        HirExprKind::Variable(function) => {
+            let HirType::Function { params, .. } = &callee.ty else {
+                return Err(LoweringError::Malformed {
+                    detail: format!("'{function}' is not typed as a function"),
+                });
+            };
+            let ty = HirType::Function {
+                params: params.clone(),
+                ret: Box::new(pair_ty.clone()),
+            };
+            return Ok(HirExpr::new(
+                HirExprKind::Variable(reverse_name(function)),
+                ty,
+                callee.span,
+            ));
+        }
+        // The method-name callee carries the call's result type, as every method call's does.
+        HirExprKind::FieldAccess { object, field } => HirExprKind::FieldAccess {
+            object: object.clone(),
+            field: reverse_name(field),
+        },
+        _ => {
+            return Err(LoweringError::Malformed {
+                detail: "a `@grad` call through neither a name nor a method".to_string(),
+            })
+        }
+    };
+    Ok(HirExpr::new(kind, pair_ty.clone(), callee.span))
 }
 
 impl Lowerer {
@@ -116,38 +153,23 @@ impl Lowerer {
                 "`.backward()` on '{loss}', which was not bound to a call"
             )));
         };
-        let HirExprKind::Variable(function) = &callee.kind else {
-            return Err(malformed(format!(
-                "`.backward()` on '{loss}', which was not bound to a call by name"
-            )));
-        };
-        let params = self.grad_params.get(function).cloned().ok_or_else(|| {
+        let key = self.grad_key(callee).ok_or_else(|| {
             malformed(format!(
-                "`.backward()` on '{loss}', the result of '{function}', which has no derivative"
+                "`.backward()` on '{loss}', which was not bound to a call of a function or method by name"
             ))
         })?;
-        let HirType::Function {
-            params: param_tys, ..
-        } = &callee.ty
-        else {
-            return Err(malformed(format!(
-                "'{function}' is not typed as a function"
-            )));
-        };
+        let params = self.grad_params.get(&key).cloned().ok_or_else(|| {
+            malformed(format!(
+                "`.backward()` on '{loss}', the result of '{key}', which has no derivative"
+            ))
+        })?;
 
         let (loss_ty, mutable, decl_span) = (loss_ty.clone(), *mutable, *decl_span);
         let args = args.clone();
         let pair = self.next_backward_binding();
-        let bundle_ty = HirType::Struct(bundle_name(function));
+        let bundle_ty = HirType::Struct(bundle_name(&key));
         let pair_ty = HirType::Tuple(vec![loss_ty.clone(), bundle_ty.clone()]);
-        let reverse = HirExpr::new(
-            HirExprKind::Variable(reverse_name(function)),
-            HirType::Function {
-                params: param_tys.clone(),
-                ret: Box::new(pair_ty.clone()),
-            },
-            callee.span,
-        );
+        let reverse = reverse_callee(callee, &pair_ty)?;
         let call = HirExpr::new(
             HirExprKind::Call {
                 callee: Box::new(reverse),
@@ -223,6 +245,19 @@ impl Lowerer {
             )));
         }
         Ok(())
+    }
+
+    /// The key `callee` names a derivative under: a function's own name, or the
+    /// `Type__method` key of a method called on a receiver of a known struct type.
+    fn grad_key(&self, callee: &HirExpr) -> Option<String> {
+        match &callee.kind {
+            HirExprKind::Variable(function) => Some(function.clone()),
+            HirExprKind::FieldAccess { object, field } => match object.ty.referent() {
+                HirType::Struct(type_name) => self.impl_methods.get(type_name)?.get(field).cloned(),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// A fresh name for the `(loss, gradients)` pair one `.backward()` unpacks.

@@ -25,6 +25,11 @@
 //! executes there, because the reverse pass follows exactly that path. This is the
 //! language's rule, not an accident of the implementation.
 //!
+//! A `@grad` method is derived the same way, keyed `Type__method`: `GradsOf_Type__method`
+//! and a method `__method__rev` in the same `impl`, taking the receiver as the primal
+//! does. The receiver is a constant, so the tape reads its fields and never differentiates
+//! them.
+//!
 //! Every tensor parameter is differentiated: `wrt:` is a later item, and the checker has
 //! already required each tensor parameter to be `&mut` and the loss to be rank-0 `f32`.
 
@@ -38,7 +43,8 @@ use std::collections::HashMap;
 
 use ast_types::Attribute;
 use neuro_hir::{
-    HirExpr, HirExprKind, HirField, HirFieldInit, HirFunction, HirItem, HirStmt, HirStruct, HirType,
+    HirExpr, HirExprKind, HirField, HirFieldInit, HirFunction, HirItem, HirMethod, HirStmt,
+    HirStruct, HirType,
 };
 
 use crate::LoweringError;
@@ -54,6 +60,10 @@ const GRAD_ATTRIBUTE: &str = "grad";
 const BUNDLE_PREFIX: &str = "GradsOf_";
 const REVERSE_PREFIX: &str = "__";
 const REVERSE_SUFFIX: &str = "__rev";
+
+/// How a method's key joins its type and name, the mangling every slice uses for
+/// `Type__method`.
+pub(crate) const METHOD_SEPARATOR: &str = "__";
 
 pub(crate) fn is_grad(attributes: &[Attribute]) -> bool {
     attributes
@@ -98,14 +108,100 @@ pub(crate) fn derive_reverses(
                 detail: format!("`@grad` function '{name}' was never lowered"),
             });
         };
-        derived.extend(derive_reverse(primal, &functions)?);
+        derived.extend(derive_reverse(primal, name, &functions)?);
     }
     Ok(derived)
 }
 
-/// Build `GradsOf_f` and `__f__rev` for the lowered `@grad` function `primal`.
+/// Give each `@grad` method in `methods`, named as (type, method), a `GradsOf_T__m`
+/// struct and a derivative method `__m__rev` in the `impl` that declares it. The
+/// derivative is a method so that it takes the receiver exactly as the primal does, and
+/// every backend dispatches it like any other method of the type.
+pub(crate) fn derive_method_reverses(
+    items: &mut Vec<HirItem>,
+    methods: &[(String, String)],
+) -> Result<(), LoweringError> {
+    let mut derived = Vec::with_capacity(methods.len());
+    {
+        let functions: Functions<'_> = items
+            .iter()
+            .filter_map(|item| match item {
+                HirItem::Function(function) => Some((function.name.as_str(), function)),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+        for (type_name, method_name) in methods {
+            let Some((index, method)) = find_method(items, type_name, method_name) else {
+                return Err(LoweringError::Malformed {
+                    detail: format!("`@grad` method '{type_name}.{method_name}' was never lowered"),
+                });
+            };
+            // The primal as the transform reads it: named for diagnostics as the program
+            // spells it, with `self` left a free variable of the body, which the replay
+            // re-reads exactly as the primal did.
+            let primal = HirFunction {
+                name: format!("{type_name}.{method_name}"),
+                params: method.params.clone(),
+                return_type: method.return_type.clone(),
+                body: method.body.clone(),
+                span: method.span,
+            };
+            let key = format!("{type_name}{METHOD_SEPARATOR}{method_name}");
+            let [bundle, reverse] = derive_reverse(&primal, &key, &functions)?;
+            let HirItem::Function(reverse) = reverse else {
+                return Err(LoweringError::Malformed {
+                    detail: format!(
+                        "the derivative of '{type_name}.{method_name}' is not a function"
+                    ),
+                });
+            };
+            let reverse = HirMethod {
+                name: reverse_name(method_name),
+                self_param: method.self_param.clone(),
+                params: reverse.params,
+                return_type: reverse.return_type,
+                body: reverse.body,
+                span: reverse.span,
+            };
+            derived.push((index, bundle, reverse));
+        }
+    }
+    for (index, bundle, reverse) in derived {
+        if let Some(HirItem::Impl(block)) = items.get_mut(index) {
+            block.methods.push(reverse);
+        }
+        items.push(bundle);
+    }
+    Ok(())
+}
+
+/// The inherent `impl` of `type_name` declaring `method_name`, by position in `items`.
+fn find_method<'i>(
+    items: &'i [HirItem],
+    type_name: &str,
+    method_name: &str,
+) -> Option<(usize, &'i HirMethod)> {
+    items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| match item {
+            HirItem::Impl(block) if block.type_name == type_name && block.trait_name.is_none() => {
+                block
+                    .methods
+                    .iter()
+                    .find(|method| method.name == method_name)
+                    .map(|method| (index, method))
+            }
+            _ => None,
+        })
+}
+
+/// Build `GradsOf_<key>` and `__<key>__rev` for the lowered `@grad` function `primal`,
+/// where `key` is the name its generated items are derived from: the function's own name,
+/// or `Type__method` for a method.
 fn derive_reverse(
     primal: &HirFunction,
+    key: &str,
     functions: &Functions<'_>,
 ) -> Result<[HirItem; 2], LoweringError> {
     let differentiated: Vec<_> = primal
@@ -139,7 +235,7 @@ fn derive_reverse(
     adjoints.add(&tape.loss, seed);
     sweep::reverse(&mut em, &tape.nodes, &mut adjoints, &tape.active)?;
 
-    let bundle_name = bundle_name(&primal.name);
+    let bundle_name = bundle_name(key);
     let mut fields = Vec::with_capacity(differentiated.len());
     let mut inits = Vec::with_capacity(differentiated.len());
     for param in &differentiated {
@@ -193,7 +289,7 @@ fn derive_reverse(
             span,
         }),
         HirItem::Function(HirFunction {
-            name: reverse_name(&primal.name),
+            name: reverse_name(key),
             params: primal.params.clone(),
             return_type: result_ty,
             body,

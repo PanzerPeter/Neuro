@@ -508,6 +508,10 @@ impl Lowerer {
             let mangled = format!("{}__{}", struct_name, method.name.name);
             let (params, ret) = self.method_signature(struct_name, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
+            if crate::autodiff::is_grad(&method.attributes) {
+                let names = method.params.iter().map(|p| p.name.name.clone()).collect();
+                self.grad_params.insert(mangled.clone(), names);
+            }
             self.impl_methods
                 .entry(struct_name.to_string())
                 .or_default()
@@ -707,6 +711,8 @@ impl Lowerer {
         // The `@grad` functions, concrete and instantiated, whose derivatives are derived
         // once everything they might call has been lowered.
         let mut grads = Vec::new();
+        // The `@grad` methods, as (type, method): each gains a derivative method of its own.
+        let mut grad_methods = Vec::new();
         for item in items {
             match item {
                 // A generic template is not lowered directly; only its concrete
@@ -726,7 +732,16 @@ impl Lowerer {
                 Item::Impl(def) if !def.generics.is_empty() || !def.type_args.is_empty() => {}
                 Item::Struct(def) => hir_items.push(HirItem::Struct(self.lower_struct(def)?)),
                 Item::Enum(def) => hir_items.push(HirItem::Enum(self.lower_enum(def)?)),
-                Item::Impl(def) => hir_items.push(HirItem::Impl(self.lower_impl(def)?)),
+                Item::Impl(def) => {
+                    let lowered = self.lower_impl(def)?;
+                    for method in &def.methods {
+                        if crate::autodiff::is_grad(&method.attributes) {
+                            grad_methods
+                                .push((lowered.type_name.clone(), method.name.name.clone()));
+                        }
+                    }
+                    hir_items.push(HirItem::Impl(lowered));
+                }
                 Item::Const(def) => hir_items.push(HirItem::Const(self.lower_const(def)?)),
                 // A newtype is transparent at runtime and produces no HIR item; it
                 // survives only as the `HirType::Newtype` its annotations resolve to.
@@ -785,6 +800,7 @@ impl Lowerer {
         // `__f__rev`, derived from the lowered bodies.
         let derived = crate::autodiff::derive_reverses(&hir_items, &grads)?;
         hir_items.extend(derived);
+        crate::autodiff::derive_method_reverses(&mut hir_items, &grad_methods)?;
 
         Ok(HirProgram { items: hir_items })
     }

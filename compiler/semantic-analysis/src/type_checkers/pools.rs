@@ -282,7 +282,7 @@ impl TypeChecker {
     /// The key into `functions` for a callee the program declares, or `None` where the
     /// callee is a trait object, a builtin, or a generic template (which is not in
     /// `functions` at all, since each call site monomorphizes its own instance).
-    fn callee_key(&self, func: &Expr) -> Option<String> {
+    pub(crate) fn callee_key(&self, func: &Expr) -> Option<String> {
         match func {
             Expr::Identifier(id) => self
                 .functions

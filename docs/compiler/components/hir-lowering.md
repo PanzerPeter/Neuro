@@ -74,9 +74,15 @@ flattened at the call, its parameters standing for the arguments, so its operati
 differentiated like the caller's own. That is why derivatives are built after every function,
 generic instances included, has been lowered. A recursive call cannot be inlined and is refused.
 
+A `@grad` method is derived the same way. Its derivative is a method of the same type,
+`__<m>__rev`, added to the `impl` that declares it so it takes the receiver as the primal does,
+and its struct is `GradsOf_<Type>__<m>`. The receiver is a constant: a field of it is read into
+the derivative (a number by value, a tensor as a copy) and never differentiated.
+
 `.backward()` is lowered here too, and never reaches a backend. A block's `loss.backward()`
 statement is paired with the `val loss = f(...)` lowered earlier in the same block: that
-declaration becomes a call of `__<f>__rev` whose loss is unpacked into `loss`, and the statement
+declaration becomes a call of `__<f>__rev` (or of the receiver's `__<m>__rev` for a method
+call) whose loss is unpacked into `loss`, and the statement
 becomes one private slot write per differentiated argument, moving that argument's gradient out of
 the returned struct. The derivative therefore runs where the call ran, and a call with no
 `.backward()` stays the plain function. `.grad()` and `.zero_grad()` lower as tensor builtins.

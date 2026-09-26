@@ -1135,7 +1135,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`@grad` {form} is not supported yet; annotate a free, non-generic function with a bare `@grad`")]
+    #[error("`@grad` {form} is not supported yet; annotate a free function, or an instance method of a non-generic inherent `impl`, with a bare `@grad`")]
     GradFormUnsupported { form: String, span: Span },
 
     #[error("`@grad` function '{function}' {problem}")]

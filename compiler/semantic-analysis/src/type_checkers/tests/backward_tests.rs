@@ -264,3 +264,79 @@ func main() -> i32 {
         "got {errors:?}"
     );
 }
+
+const METHOD: &str = r#"
+struct Weighted { scale: f32 }
+impl Weighted {
+    @grad
+    func loss(&self, w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+        Tensor::scalar(w.sum() * self.scale)
+    }
+}
+"#;
+
+fn method_errors(body: &str) -> Vec<TypeError> {
+    semantic_errors(&format!(
+        "{METHOD}\nfunc main() -> i32 {{\n    val weighted = Weighted {{ scale: 2.0 }}\n{body}\n    return 0\n}}\n"
+    ))
+}
+
+/// The AD scope rule holds for a method call's result as for a function's.
+#[test]
+fn a_backward_on_a_method_calls_result_is_accepted_and_ends_the_borrow() {
+    let errors = method_errors(
+        r#"
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = weighted.loss(&mut w)
+    l.backward()
+    w -= 0.1f32 * w.grad()"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+#[test]
+fn a_method_calls_differentiated_argument_is_borrowed_until_the_backward() {
+    let errors = method_errors(
+        r#"
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = weighted.loss(&mut w)
+    val r = &w
+    l.backward()"#,
+    );
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [TypeError::CannotBorrowWhileMutablyBorrowed { .. }]
+        ),
+        "got {errors:?}"
+    );
+}
+
+/// Under rule 3 the receiver is a constant, borrowed for the call alone.
+#[test]
+fn the_receiver_is_not_held_until_the_backward() {
+    let errors = method_errors(
+        r#"
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = weighted.loss(&mut w)
+    val again = &weighted
+    l.backward()"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+#[test]
+fn a_backward_in_another_block_than_the_method_call_is_refused() {
+    let errors = method_errors(
+        r#"
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = weighted.loss(&mut w)
+    if true {
+        l.backward()
+    }"#,
+    );
+    assert!(
+        matches!(errors.as_slice(), [TypeError::BackwardUnavailable { .. }]),
+        "got {errors:?}"
+    );
+}

@@ -566,3 +566,154 @@ fn a_backward_moves_one_gradient_into_each_differentiated_argument() {
     // `scale` is a plain number: nothing is written for it.
     assert_eq!(writes, ["__set_grad(w)", "__set_grad(b)"]);
 }
+
+const METHOD_LOSS: &str = r#"
+struct Damping { factor: f32 }
+
+struct Fit {
+    y: Tensor<f32, [2]>,
+    damping: Damping
+}
+
+impl Fit {
+    @grad
+    func loss(&self, w: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
+        val damped = w * self.damping.factor
+        val squares = &damped * &damped
+        return Tensor::scalar(squares.sum() * scale + self.y.sum())
+    }
+}
+
+func main() -> i32 {
+    val fit = Fit { y: [1.0, 2.0], damping: Damping { factor: 0.5 } }
+    mut w = Tensor::<f32, [2]>::ones()
+    val l = fit.loss(&mut w, 2.0f32)
+    l.backward()
+    return 0
+}
+"#;
+
+fn inherent_method<'a>(
+    program: &'a HirProgram,
+    type_name: &str,
+    name: &str,
+) -> &'a neuro_hir::HirMethod {
+    program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Impl(block) if block.type_name == type_name => {
+                block.methods.iter().find(|method| method.name == name)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("method '{type_name}.{name}' not found"))
+}
+
+/// A method's derivative is a method of the same type, so it takes the receiver the way
+/// the primal does; its bundle is named for the `Type__method` key.
+#[test]
+fn a_grad_method_gains_a_derivative_method_beside_it() {
+    let program = lower(METHOD_LOSS);
+    let primal = inherent_method(&program, "Fit", "loss");
+    let reverse = inherent_method(&program, "Fit", "__loss__rev");
+    assert_eq!(reverse.self_param, primal.self_param);
+    assert_eq!(reverse.params, primal.params);
+    assert_eq!(
+        reverse.return_type,
+        HirType::Tuple(vec![
+            tensor(&[]),
+            HirType::Struct("GradsOf_Fit__loss".to_string())
+        ])
+    );
+    let bundle = item_struct(&program, "GradsOf_Fit__loss");
+    let fields: Vec<_> = bundle
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    assert_eq!(fields, ["w"]);
+}
+
+/// The receiver is a constant: a number field is read by value, and a tensor field, which
+/// the primal can only read in place, is copied into a binding of the derivative's own.
+#[test]
+fn a_constant_receivers_fields_are_read_into_the_derivative() {
+    let program = lower(METHOD_LOSS);
+    let reverse = inherent_method(&program, "Fit", "__loss__rev");
+    let reads: Vec<String> = reverse
+        .body
+        .iter()
+        .filter_map(|stmt| match stmt {
+            HirStmt::VarDecl {
+                init: Some(init), ..
+            } => match &init.kind {
+                HirExprKind::FieldAccess { field, .. } => Some(field.clone()),
+                HirExprKind::Call { callee, .. } => match &callee.kind {
+                    HirExprKind::FieldAccess { object, field } => match &object.kind {
+                        HirExprKind::FieldAccess { field: of, .. } => Some(format!("{of}.{field}")),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reads, ["factor", "y.clone"]);
+}
+
+#[test]
+fn a_backward_on_a_method_call_runs_the_derivative_method() {
+    let program = lower(METHOD_LOSS);
+    let body = &item_function(&program, "main").body;
+    let reverse = body
+        .iter()
+        .find_map(|stmt| match stmt {
+            HirStmt::VarDecl {
+                name,
+                init: Some(init),
+                ..
+            } if name == "__backward_1" => match &init.kind {
+                HirExprKind::Call { callee, .. } => match &callee.kind {
+                    HirExprKind::FieldAccess { object, field } => {
+                        Some((object.ty.clone(), field.clone()))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("the paired call becomes a call of the derivative method");
+    assert_eq!(
+        reverse,
+        (
+            HirType::Struct("Fit".to_string()),
+            "__loss__rev".to_string()
+        )
+    );
+}
+
+/// A field whose value is neither a number nor a tensor has no copy the replay can take.
+#[test]
+fn a_field_holding_a_string_is_refused() {
+    let error = lowering_error(
+        r#"
+struct Named { label: string }
+
+impl Named {
+    @grad
+    func loss(&self, w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+        val label = self.label
+        return Tensor::scalar(w.sum())
+    }
+}
+"#,
+    );
+    assert!(
+        matches!(error, LoweringError::NotDifferentiable { ref construct, .. } if construct.contains("field")),
+        "got {error:?}"
+    );
+}

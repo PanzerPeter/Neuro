@@ -32,6 +32,9 @@ use crate::LoweringError;
 /// generated name can shadow a binding the body declared.
 const ENTRY_PREFIX: &str = "__ad_v";
 
+/// The tensor method that copies a buffer into a fresh handle, as every backend spells it.
+const CLONE_METHOD: &str = "clone";
+
 /// A tape operand.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Leaf {
@@ -855,6 +858,13 @@ impl<'f> Linearizer<'f> {
                 operand,
                 mutable: false,
             } if matches!(operand.kind, HirExprKind::Variable(_)) => self.leaf(operand),
+            HirExprKind::FieldAccess { .. } if is_copied_field(&expr.ty) => {
+                let place = self.rebase_place(expr)?;
+                Ok(self.push(&expr.ty, expr.span, Op::Constant(place)))
+            }
+            HirExprKind::FieldAccess { .. } if matches!(expr.ty, HirType::Tensor { .. }) => {
+                self.field_copy(expr)
+            }
             HirExprKind::Binary {
                 op: op @ (BinaryOp::And | BinaryOp::Or),
                 left,
@@ -992,6 +1002,59 @@ impl<'f> Linearizer<'f> {
         }
     }
 
+    /// A copy of the tensor field `place` names, taken once where the body reads it. The
+    /// primal can only read such a field in place (a reduction's receiver, an element
+    /// read's object), since it is reached through a borrow. The replay and the reverse
+    /// pass read an operand wherever their rules need it, and only a binding of the
+    /// derivative's own can be read that way without moving the field out of the receiver.
+    // ponytail: one buffer copy per read of the field; a borrow of the field instead once
+    // `&self.field` is a place the checker and backends accept (BUG-033).
+    fn field_copy(&mut self, place: &HirExpr) -> Result<Leaf, LoweringError> {
+        let place = self.rebase_place(place)?;
+        let (ty, span) = (place.ty.clone(), place.span);
+        let method = HirExpr::new(
+            HirExprKind::FieldAccess {
+                object: Box::new(place),
+                field: CLONE_METHOD.to_string(),
+            },
+            ty.clone(),
+            span,
+        );
+        let copy = HirExpr::new(
+            HirExprKind::Call {
+                callee: Box::new(method),
+                args: Vec::new(),
+            },
+            ty.clone(),
+            span,
+        );
+        Ok(self.push(&ty, span, Op::Constant(copy)))
+    }
+
+    /// The field chain `place` with its root renamed to the binding that holds it in the
+    /// derivative function: `self` or a parameter as written, or, inside an inlined callee,
+    /// the caller's value the parameter stands for.
+    ///
+    /// The root is a constant by construction. The tape builds no struct value and never
+    /// differentiates one, so a struct it can reach is the receiver or a parameter, and the
+    /// body cannot assign to either; every field it reads is the same value at every read.
+    fn rebase_place(&mut self, place: &HirExpr) -> Result<HirExpr, LoweringError> {
+        let kind = match &place.kind {
+            HirExprKind::FieldAccess { object, field } => HirExprKind::FieldAccess {
+                object: Box::new(self.rebase_place(object)?),
+                field: field.clone(),
+            },
+            HirExprKind::Variable(_) => match self.leaf(place)? {
+                Leaf::Var { name, ty } if matches!(ty.referent(), HirType::Struct(_)) => {
+                    return Ok(HirExpr::new(HirExprKind::Variable(name), ty, place.span));
+                }
+                _ => return Err(self.refuse("a field of a value that is not a struct", place.span)),
+            },
+            _ => return Err(self.refuse("a field of a computed value", place.span)),
+        };
+        Ok(HirExpr::new(kind, place.ty.clone(), place.span))
+    }
+
     /// A call to a user function, linearized in place: its body runs at the call on the
     /// arguments' leaves, so its operations take part in the tape like the caller's own.
     // ponytail: every call site gets its own copy of the callee's tape, so the derivative
@@ -1115,6 +1178,12 @@ fn is_integer(ty: &HirType) -> bool {
 
 fn is_numeric(ty: &HirType) -> bool {
     is_float(ty) || is_integer(ty)
+}
+
+/// Whether a field read of `ty` is a copy the replay can take as the primal did: a
+/// number, a `bool` or a `char`, all `Copy`.
+fn is_copied_field(ty: &HirType) -> bool {
+    is_numeric(ty) || matches!(ty, HirType::Bool | HirType::Char)
 }
 
 fn repeats(letters: &[usize]) -> bool {
@@ -1276,6 +1345,7 @@ fn describe_expr(expr: &HirExpr) -> &'static str {
         HirExprKind::TensorSort { .. } => "a sort",
         HirExprKind::TensorRandomNormal { .. } => "a random tensor",
         HirExprKind::Cast { .. } => "a cast",
+        HirExprKind::FieldAccess { .. } => "a field that is neither a number nor a tensor",
         HirExprKind::Match { .. } => "a `match`",
         HirExprKind::Loop { .. } => "a `loop`",
         HirExprKind::Block { .. } | HirExprKind::Unsafe { .. } | HirExprKind::Pool { .. } => {

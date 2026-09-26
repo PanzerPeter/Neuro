@@ -92,10 +92,59 @@ A `@grad` function:
   function. The borrow is mutable because `.backward()` writes the gradient into the caller's
   tensor;
 - may take other parameters of any type. They are constants and have no gradient;
-- is a free function, with `@grad` written without arguments. A generic one is differentiated
-  once per instance the program uses, at that instance's concrete shapes.
+- is a free function or a method (see [Methods](#methods)), with `@grad` written without
+  arguments. A generic function is differentiated once per instance the program uses, at that
+  instance's concrete shapes.
 
 Breaking any of these rules is a type error at the offending parameter or return type.
+
+## Methods
+
+`@grad` on a method differentiates the method's tensor parameters, under the same rules as a
+function's. The receiver is a **constant**: the body may read its fields, and they steer the
+gradient without receiving one. A method's loss runs its derivative through `.backward()`
+exactly as a function's does, and only the differentiated arguments stay borrowed until then;
+the receiver is borrowed for the call alone.
+
+```neuro
+struct Penalty {
+    strength: f32
+}
+
+struct Objective {
+    penalty: Penalty,
+    steps: i32
+}
+
+impl Objective {
+    @grad
+    func loss(&self, w: &mut Tensor<f32, [2, 1]>, b: &mut Tensor<f32, [1]>) -> Tensor<f32, []> {
+        val x: Tensor<f32, [4, 2]> = [[1.0, 2.0], [2.0, 0.0], [0.0, 1.0], [3.0, 1.0]]
+        val y: Tensor<f32, [4, 1]> = [[6.0], [3.0], [3.0], [6.0]]
+        val prediction = x @ w
+        val shifted = prediction + b
+        val residual = shifted - y
+        val squares = &residual * &residual
+        val ridge = w * w
+        return Tensor::scalar(squares.mean() + ridge.sum() * self.penalty.strength)
+    }
+}
+```
+
+This method comes from [`examples/showcase/ridge_objective.nr`](../../examples/showcase/ridge_objective.nr),
+where an ordinary method of the same type trains it with `self.loss(&mut w, &mut b)` and
+`loss.backward()`.
+
+- The method borrows its receiver, as `&self` or `&mut self`. A method taking `self` by value is
+  a type error. Differentiating a receiver's own fields writes their gradients into the receiver
+  after the call returns, which a consumed receiver could not hold, so every `@grad` method keeps
+  its receiver borrowed.
+- The body may read a field of the receiver, or of a struct parameter, that is a number, a
+  `bool`, a `char` or a tensor, through any chain of struct fields (`self.penalty.strength`). A
+  tensor field is read the ways a borrowed receiver allows: its elements, and reductions such as
+  `.sum()`. Any other field is refused.
+- `@grad` is not yet accepted on an associated function (one without `self`), on a method of a
+  trait `impl`, or on a method of a generic `impl`. A `@grad` body still cannot call a method.
 
 ## What a `@grad` body may contain
 

@@ -1,0 +1,4 @@
+penalty  0.0: loss  0.000, second weight  1.999
+penalty  0.1: loss  0.406, second weight  1.606
+penalty  1.0: loss  1.528, second weight  0.566
+2 of 2 stronger penalties shrank the weight

@@ -42,8 +42,18 @@ once every function, generic instances and lifted closures included, is lowered:
 may call any of them. `lower_program` only records the names of the `@grad` functions as it
 lowers them. A generic `@grad` template is derived per INSTANCE (recorded from the
 monomorphization drain), so each instance `f_g_...` gets its own `GradsOf_f_g_...` and
-`__f_g_...__rev` over concrete shapes; an instance nothing calls is never emitted. The
-generated items follow every other item. `tape.rs` flattens the body into one-operation entries over
+`__f_g_...__rev` over concrete shapes; an instance nothing calls is never emitted. A `@grad`
+METHOD (inherent, non-generic `impl`, borrowed receiver; the checker refuses every other form) is
+recorded as `(type, method)` by `lower_program` and derived by `derive_method_reverses` under the
+key `Type__method`: `GradsOf_Type__method` joins the items, and `__method__rev` is pushed into the
+same `impl` as a `HirMethod` with the primal's `self_param`, so every backend dispatches it as a
+method and no HIR node changed. The transform reads the method body as a function whose `self` is
+a free variable. The receiver is a constant: a field chain rooted in a struct the tape reaches
+(`self`, a parameter, or the caller's value an inlined callee's parameter stands for;
+`rebase_place` renames the root) is read into an inactive entry, by value for a number, `bool`
+or `char`, and as a `.clone()` for a tensor (`field_copy`), since the primal can only read a
+tensor field in place and `&self.field` is not a place yet (BUG-033). Any other field is refused.
+The generated items follow every other item. `tape.rs` flattens the body into one-operation entries over
 leaves and marks activity, keeping `if` as a `Branch` (one tape per arm) and `while` as a `Loop`
 (condition and body tapes). A call to a user function is INLINED into the tape: the callee's
 lowered body is linearized at the call with its parameters bound to the arguments' leaves (in
@@ -75,9 +85,11 @@ the declaration becomes `val __backward_N = __f__rev(<same args>)` plus `val los
 __backward_N.0`, and the statement becomes one `(<arg>).__set_grad(__backward_N.1.<param>)` per
 `&mut Tensor` argument, re-evaluating the argument, which the checker restricted to `&mut name`
 or a `&mut` binding and held borrowed until here. So the derivative runs where the call ran and
-a call with no `.backward()` stays the primal. `grad_params` maps each lowered `@grad` name
-(concrete from `register_function`, instances from the monomorphization call site) to its
-parameter names, the bundle's field names. `.grad()` lowers as a builtin returning a
+a call with no `.backward()` stays the primal. A method call pairs the same way: `grad_key`
+reads the `Type__method` key off the receiver's struct type, and the call becomes
+`<receiver>.__method__rev(<same args>)`. `grad_params` maps each lowered `@grad` name or method
+key (concrete from `register_function` / `register_impl_methods`, instances from the
+monomorphization call site) to its parameter names, the bundle's field names. `.grad()` lowers as a builtin returning a
 `&Tensor<T, S>` like the receiver, `.zero_grad()` as a unit builtin; `reverse_name` /
 `bundle_name` are the one spelling of the generated names.
 

@@ -170,3 +170,49 @@ func main() -> i32 {
         .expect_err("w is mutably borrowed until the backward");
     assert!(diagnostics.contains("mutably borrowed"), "{diagnostics}");
 }
+
+/// A `@grad` method with no `wrt:` differentiates its tensor parameters and reads its
+/// receiver as a constant, a nested number, a loop bound and a tensor field included.
+#[test]
+fn a_grad_method_backpropagates_with_its_receiver_as_a_constant() {
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "grad_method.nr",
+            r#"
+struct Gain { value: f32 }
+
+struct Objective {
+    gain: Gain,
+    rounds: i32,
+    offsets: Tensor<f32, [3]>
+}
+
+impl Objective {
+    @grad
+    func loss(&self, w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+        mut total = 0.0f32
+        mut round = 0
+        while round < self.rounds {
+            val squares = w * w
+            total = total + squares.sum() * self.gain.value
+            round += 1
+        }
+        return Tensor::scalar(total + w[0] * self.offsets.sum())
+    }
+}
+
+func main() -> i32 {
+    val objective = Objective { gain: Gain { value: 2.0 }, rounds: 3, offsets: [1.0, 2.0, 4.0] }
+    mut w: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
+    val l = objective.loss(&mut w)
+    l.backward()
+    val g = w.grad()
+    // Loss 3 * 2 * 14 + 1 * 7 = 91; gradient 12 * w + [7, 0, 0] = [19, 24, 36].
+    return l.sum() as i32 + (g[0] + g[1] + g[2]) as i32
+}
+"#,
+        )
+        .expect("compile/run failed");
+    assert_eq!(exit, 91 + 79);
+}

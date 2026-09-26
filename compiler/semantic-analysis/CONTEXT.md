@@ -57,10 +57,14 @@ module per declaration kind beside it. `tests/` is split by subject.
   `lookup_registered_signature` rather than resolving it twice.
 - **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
   signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every tensor
-  parameter `&mut` over a float element with literal extents (`GradSignature`), a free
-  function with a bare attribute (`GradFormUnsupported`), and no declared struct
-  named `GradsOf_<f>` (`GradGeneratedNameTaken`; `__<f>__rev` cannot clash, pass 0z reserves
-  `__`). The bundle prefix is duplicated from `hir-lowering`, which emits it. Which constructs
+  parameter `&mut` over a float element with literal extents (`GradSignature`), a bare
+  attribute (`GradFormUnsupported`), and no declared struct named `GradsOf_<f>`
+  (`GradGeneratedNameTaken`; `__<f>__rev` cannot clash, pass 0z reserves `__`). A `@grad`
+  method (`check_grad_method`) must be an instance method of a non-generic inherent `impl`
+  (trait impls, generic impls and associated functions are `GradFormUnsupported`) that borrows
+  its receiver (`self` by value is `GradSignature`); the same signature rules then apply to the
+  parameters after `self`, and its `Type__method` key joins `grad_functions`. Its generated
+  names carry `__`, so they need no clash test. The bundle prefix is duplicated from `hir-lowering`, which emits it. Which constructs
   a `@grad` BODY may use is deliberately not checked here: the transform owns that rule set
   and reports it with a span itself. A generic function is checked once, on the template
   signature from `generic_funcs`, where a shape parameter is admitted as an extent since every
@@ -74,6 +78,9 @@ body is checked, `backward_losses` collects the names the body calls `.backward(
 every block a statement opens; a `.backward()` hidden in a block nested in some other expression
 is not found and is then refused rather than left unchecked). A `val` bound directly to a
 `grad_functions` call whose name is in that set holds each differentiated argument's borrow
+(a method call is resolved through `callee_key` on the receiver's static struct type and its
+parameters are read after the registered `self`; the receiver itself is a constant and is not
+held)
 (`hold_grad_call_borrows`: `attach_borrow` promotes a `&mut name`, `hold_reborrow` takes a
 `&mut` binding passed on; any other argument shape marks the loss `GradLoss::Untracked`), exactly
 as a reference binding holds its borrow, so the read / borrow / move / assign rules freeze the

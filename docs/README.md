@@ -36,7 +36,7 @@ Design goals:
 | [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, borrows, type inference |
 | [Strings](language-reference/strings.md) | The `string` slice type, the growable `String` buffer, interpolation, triple-quoted literals, codepoint iteration |
 | [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, dynamic shapes, devices |
-| [Automatic Differentiation](language-reference/autodiff.md) | `@grad`, the derivative function it generates, `.backward()` / `.grad()` / `.zero_grad()` and the borrows they end, its signature rules, which constructs a differentiated body may use, and how the derivative follows branches, loops and calls |
+| [Automatic Differentiation](language-reference/autodiff.md) | `@grad` on functions and methods, the derivative it generates, `.backward()` / `.grad()` / `.zero_grad()` and the borrows they end, its signature rules, which constructs a differentiated body may use, and how the derivative follows branches, loops and calls |
 | [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |
 | [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, generics, dispatch, closures |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |

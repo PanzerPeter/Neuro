@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-09-26
+
+### Added
+
+- `@grad` on a method. The method differentiates its tensor parameters under a function's
+  signature rules, and its receiver is a constant: the body may read the receiver's number,
+  `bool`, `char` and tensor fields, through nested structs, and they steer the gradient without
+  receiving one. `.backward()` on a `val` bound to a `@grad` method call runs the method's
+  derivative, a generated method of the same type, and ends the differentiated arguments'
+  borrows exactly as for a function; the receiver is borrowed for the call alone.
+- A `@grad` method taking `self` by value is a type error at the method's name: differentiating
+  a receiver's fields writes gradients into it after the call, which a consumed receiver could
+  not hold. `@grad` on an associated function, a trait `impl` method or a generic `impl` method
+  is refused at the attribute.
+- `examples/showcase/ridge_objective.nr`: an objective carried as a value, its loss a `@grad`
+  method reading a nested ridge penalty, trained by an ordinary method of the same type.
+- `tools/grad_differential.py` gains a method case, checked against finite differences.
+
+### Changed
+
+- The `@grad` form diagnostic names what is accepted: a free function, or an instance method of
+  a non-generic inherent `impl`.
+
 ## [3.8.0] - 2026-09-25
 
 ### Added
