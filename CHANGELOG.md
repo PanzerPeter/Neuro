@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-09-26
+
+### Added
+
+- A `@grad` body may call through a function value whose target the compiler can name: a
+  closure (its captures enter the derivative like any value the body reads), a `>>`
+  composition, a `|>` stage into a closure, and a helper's function-typed parameter. `.map`,
+  `.zip` and `.reduce` in a `@grad` body are differentiated too, unrolled one call per
+  element, up to 1024 elements over a static shape.
+- A `@grad` function may take a function-typed parameter. Each distinct function a
+  `.backward()` call passes there, a closure or a composition written at the call, gets a
+  derivative of its own; a closure's captures are read where the call is.
+- A function value chosen at run time (an `if` whose arms give different functions, one
+  reassigned in a branch or loop, or an ordinary function's parameter passed on into a
+  `@grad` call) is refused where the choice is made, with a hint to call each function
+  directly.
+- `examples/showcase/activation_fit.nr`: one neuron trained under two activations passed
+  into the same `@grad` loss.
+- `tools/grad_differential.py` gains two cases, checked against finite differences.
+
+### Documentation
+
+- Recorded BUG-071 (a function name is refused as a value outside `|>` and `>>`) and BUG-072
+  (a function value can be stored into a struct field or through a `&mut`, and a `pool` refuses
+  every call handing one to a callee that also takes an outer `&mut`).
+
 ## [3.9.2] - 2026-09-26
 
 ### Documentation

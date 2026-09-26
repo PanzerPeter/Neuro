@@ -717,3 +717,146 @@ impl Named {
         "got {error:?}"
     );
 }
+
+/// Whether any binding of `body` is initialized by a call or a traversal: what inlining a
+/// function value and unrolling a traversal must leave none of.
+fn runs_a_function_value(body: &[HirStmt]) -> bool {
+    all_stmts(body).into_iter().any(|stmt| {
+        matches!(stmt, HirStmt::VarDecl { init: Some(init), .. }
+            if calls_in(init) || matches!(init.kind, HirExprKind::TensorApply { .. }))
+    })
+}
+
+#[test]
+fn a_call_through_a_closure_or_a_composition_is_inlined() {
+    let program = lower(
+        r#"
+func square(x: f32) -> f32 { x * x }
+func cube(x: f32) -> f32 { x * x * x }
+func apply(f: (f32) -> f32, x: f32) -> f32 { f(x) }
+
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val s = w[1] * 2.0
+    val scaled = |x: f32| -> f32 { x * s }
+    val both = square >> cube
+    val piped = w[0] |> |v: f32| -> f32 { v * 3.0 }
+    return Tensor::scalar(scaled(w[0]) + both(w[1]) + apply(scaled, w[1]) + piped)
+}
+"#,
+    );
+    let reverse = item_function(&program, "__loss__rev");
+    assert!(
+        !runs_a_function_value(&reverse.body),
+        "the derivative should inline every target, not call it"
+    );
+}
+
+#[test]
+fn a_traversal_is_unrolled_one_call_per_element() {
+    let program = lower(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2, 2]>) -> Tensor<f32, []> {
+    val squares = w.map(|x: f32| -> f32 { x * x })
+    val products = w.zip(squares, |a: f32, b: f32| -> f32 { a * b })
+    return Tensor::scalar(products.reduce(0.0f32, |acc: f32, x: f32| -> f32 { acc + x }))
+}
+"#,
+    );
+    let reverse = item_function(&program, "__loss__rev");
+    assert!(!runs_a_function_value(&reverse.body));
+}
+
+#[test]
+fn a_function_value_chosen_at_run_time_is_refused_at_the_choice() {
+    refusal_at(
+        r#"
+func square(x: f32) -> f32 { x * x }
+func cube(x: f32) -> f32 { x * x * x }
+
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val f = if w[0] > 1.0 { square >> cube } else { cube >> square }
+    return Tensor::scalar(f(w[1]))
+}
+"#,
+        "if w[0] > 1.0",
+    );
+}
+
+#[test]
+fn a_traversal_past_the_unrolling_limit_is_refused() {
+    refusal_at(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [40, 40]>) -> Tensor<f32, []> {
+    return Tensor::scalar(w.reduce(0.0f32, |acc: f32, x: f32| -> f32 { acc + x }))
+}
+"#,
+        "w.reduce",
+    );
+}
+
+const PASSED_FUNCTIONS: &str = r#"
+func square(x: f32) -> f32 { x * x }
+func cube(x: f32) -> f32 { x * x * x }
+
+@grad
+func shaped(w: &mut Tensor<f32, [2]>, f: (f32) -> f32) -> Tensor<f32, []> {
+    return Tensor::scalar(f(w[0]) + f(w[1]))
+}
+
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val k = 3.0f32
+    val a = shaped(&mut w, |x: f32| -> f32 { x * k })
+    a.backward()
+    val composed = square >> cube
+    val b = shaped(&mut w, composed)
+    b.backward()
+    val c = shaped(&mut w, composed)
+    c.backward()
+    return 0
+}
+"#;
+
+#[test]
+fn a_function_parameter_is_derived_once_per_target_passed_to_it() {
+    let program = lower(PASSED_FUNCTIONS);
+    let derivatives: Vec<String> = function_names(&program)
+        .into_iter()
+        .filter(|name| name.ends_with("__rev"))
+        .collect();
+    // Nothing derives `shaped` on its own: only a call site knows what `f` calls. The
+    // composition passed twice is one derivative.
+    assert_eq!(
+        derivatives,
+        ["__shaped__with0__rev", "__shaped__with1__rev"]
+    );
+    // The closure's capture `k` is one more parameter, which the call site passes.
+    let captured = item_function(&program, "__shaped__with0__rev");
+    let extra: Vec<&HirType> = captured.params[2..].iter().map(|p| &p.ty).collect();
+    assert_eq!(extra, [&HirType::F32]);
+    assert!(!runs_a_function_value(&captured.body));
+}
+
+#[test]
+fn a_function_parameter_forwarded_into_a_grad_call_is_refused_there() {
+    refusal_at(
+        r#"
+@grad
+func shaped(w: &mut Tensor<f32, [2]>, f: (f32) -> f32) -> Tensor<f32, []> {
+    return Tensor::scalar(f(w[0]))
+}
+
+func outer(g: (f32) -> f32) -> f32 {
+    mut w: Tensor<f32, [2]> = [2.0, 3.0]
+    val a = shaped(&mut w, g)
+    a.backward()
+    return w.grad()[0]
+}
+"#,
+        "g)",
+    );
+}

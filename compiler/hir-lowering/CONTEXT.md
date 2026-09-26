@@ -59,9 +59,28 @@ leaves and marks activity, keeping `if` as a `Branch` (one tape per arm) and `wh
 lowered body is linearized at the call with its parameters bound to the arguments' leaves (in
 `params`, apart from `aliases`, so a callee assigning to its parameter is refused as the `@grad`
 function's own is; through a `&mut` it would write the caller's value), under empty aliases and
-scopes so nothing of the caller leaks in or out. Recursion (a callee already being inlined), a
-method or builtin call, a call through a function value and a callee returning nothing are
-refused. Every call site gets its own copy (`ponytail:` on `call`); a reassigned binding is versioned (each assignment rebinds the name
+scopes so nothing of the caller leaks in or out. A function value whose target is known is a
+`Leaf::Function` (a function or lifted closure by name, each capture bound to the leaf it
+snapshots where the closure was written), so aliases, parameters and scoping carry it like any
+value; a call through one inlines the target, a closure's captures bound beside its parameters.
+`Functions` is the tape's view of every lowered function and closure. A slot of function type is
+refused (`RUN_TIME_TARGET`): that is how a target chosen by a branch or a loop is refused. A
+`.map` / `.zip` / `.reduce` is unrolled (`traverse`): one literal-position element read and one
+inlined call per element, in row-major order, the results rebuilt by a tensor literal; over
+`MAX_UNROLLED_ELEMENTS` or a dynamic axis it is refused (`ponytail:` on `traverse`). A plain block
+value is linearized in a scope of its own, which is what `x |> |v| ...` desugars to. Recursion (a
+callee already being inlined), a method or builtin call and a callee returning nothing are
+refused.
+
+A `@grad` function with a function-typed parameter is never derived on its own
+(`derive_reverses` skips it): only a call site knows the target. `lower_backward` resolves each
+function-typed argument (`call_site_target`: a closure literal, a function by name, or a local of
+the same block bound to a capture-free one; anything else is `NotDifferentiable` at the argument)
+and records a `Specialization` per distinct set of targets in `grad_specializations`, keyed
+`<f>__with<N>`. Its derivative `__<f>__with<N>__rev` takes `f`'s parameters plus one
+`__ad_capture<i>` per capture, which the call passes by reading the captured binding, and the
+tape binds the parameter to the target through `linearize`'s `bound`. A `@grad` method's
+function-typed parameter is never bound, so a call through it is refused. Every call site gets its own copy (`ponytail:` on `call`); a reassigned binding is versioned (each assignment rebinds the name
 to its new value's leaf), and one that leaves an arm or a loop body goes through a `Slot`, a `mut`
 binding of the derivative. `sweep.rs` holds the two passes: `forward` replays the tape with every
 tensor operand borrowed, `reverse` sweeps it backwards. A branch's reverse pass re-runs the taken
@@ -103,7 +122,8 @@ literal per tensor, a run-time one through a zero tensor and one element store),
 literal bounds, the four shape casts (replayed on a copy, since the node consumes its receiver;
 the adjoint goes back through the inverse permutation), `einsum` without a repeated letter in an
 operand, `as` between integer and float types, constant fills, scalar comparisons, integer arithmetic and logic (`&&` / `||` become branches, keeping the
-short circuit), calls to user functions (inlined); `val` / `mut` bindings, assignment to a local, `if` / `else if` / `else` as a
+short circuit), calls to user functions and through function values with a known target
+(inlined), `.map` / `.zip` / `.reduce` (unrolled), plain block values; `val` / `mut` bindings, assignment to a local, `if` / `else if` / `else` as a
 statement or an expression, an early `return` ending an arm of a top-level `if`, `while`, and
 `for` over a range, which `for_range` rewrites into the counted `while` it is (bounds read once;
 an inclusive range stops on a flag rather than stepping past its end, and a reversed one counts up

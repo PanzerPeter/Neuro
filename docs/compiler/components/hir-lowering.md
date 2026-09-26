@@ -74,6 +74,14 @@ flattened at the call, its parameters standing for the arguments, so its operati
 differentiated like the caller's own. That is why derivatives are built after every function,
 generic instances included, has been lowered. A recursive call cannot be inlined and is refused.
 
+A call through a function value is inlined the same way once its target is known: a closure
+(its captures bound to the values they snapshot), a `>>` composition, or a callee's
+function-typed parameter bound to the argument. A `.map` / `.zip` / `.reduce` is unrolled into
+one element read and one inlined call per element. A `@grad` function with a function-typed
+parameter is never derived on its own: each `.backward()` call records the targets it passes,
+and gets a derivative `__<f>__with<N>__rev` for them that takes a closure's captures as extra
+arguments. A function value whose target a branch or a loop decides is refused.
+
 A `@grad` method is derived the same way. Its derivative is a method of the same type,
 `__<m>__rev`, added to the `impl` that declares it so it takes the receiver as the primal does,
 and its struct is `GradsOf_<Type>__<m>`. The receiver is a constant: a field of it is read into

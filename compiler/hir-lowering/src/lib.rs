@@ -244,6 +244,9 @@ struct Lowerer {
     /// Lowered name of each `@grad` function, generic instances included → its parameter
     /// names in order. A `.backward()` reads the gradient bundle's fields by these names.
     grad_params: HashMap<String, Vec<String>>,
+    /// The derivatives `.backward()` calls passing function values asked for, one per
+    /// `@grad` function and distinct set of targets; derived once everything is lowered.
+    grad_specializations: Vec<autodiff::Specialization>,
     /// Monotonic counter naming the `(loss, gradients)` pair each `.backward()` unpacks
     /// (`__backward_N`).
     backward_counter: usize,
@@ -364,6 +367,7 @@ impl Lowerer {
             try_counter: 0,
             protocol_counter: 0,
             grad_params: HashMap::new(),
+            grad_specializations: Vec::new(),
             backward_counter: 0,
         }
     }

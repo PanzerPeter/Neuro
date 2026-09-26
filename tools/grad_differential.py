@@ -282,7 +282,10 @@ class TensorCase:
     when it differs from `name`, the compiled symbol: a generic instance is called by its
     template's name. `receiver`, when set, is the expression a `@grad` method is called on:
     the probe binds it and calls `callee` as its method, while `name` is a free function
-    doing the same, which is what the finite differences evaluate.
+    doing the same, which is what the finite differences evaluate. `extra_arguments` are
+    Neuro expressions the probe's call passes after the tensors and before the constants,
+    such as a closure for a function-typed parameter; `name` is then a free function passing
+    the same, for the same reason.
 
     `path`, when set, names a second function in `source` with the primal's signature that
     computes only the path the primal executes at `point`. It exists for a point AT a kink,
@@ -304,6 +307,7 @@ class TensorCase:
         more_shapes=(),
         callee=None,
         receiver=None,
+        extra_arguments=(),
     ):
         self.name = name
         self.source = source
@@ -314,6 +318,7 @@ class TensorCase:
         self.path = path
         self.callee = callee or name
         self.receiver = receiver
+        self.extra_arguments = extra_arguments
 
     def split(self, point):
         """`point` cut into one run of elements per differentiated tensor."""
@@ -1081,6 +1086,93 @@ func method_receiver(w: &mut Tensor<f32, [3]>, scale: f32) -> Tensor<f32, []> {
         callee="loss",
         receiver=WEIGHTING,
     ),
+    TensorCase(
+        # Calls through function values, each target known at compile time: a closure
+        # capturing a differentiated value, a composition, a pipeline into a closure, a
+        # helper taking a function (given a closure, then a composition whose second stage
+        # branches), and the three traversals. The fold is order-dependent on purpose.
+        "function_values",
+        """
+func cube(x: f32) -> f32 { x * x * x }
+
+func halved(x: f32) -> f32 { x * 0.5 }
+
+func larger(x: f32) -> f32 {
+    if x > 0.0 { return x * 3.0 }
+    return x
+}
+
+func twice(f: (f32) -> f32, x: f32) -> f32 {
+    f(f(x))
+}
+
+@grad
+func function_values(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    val s = w[1] * 2.0
+    val scaled = |x: f32| -> f32 { x * s }
+    val shrink = halved >> cube
+    val piped = w[2] |> |v: f32| -> f32 { v * v }
+    val nested = twice(scaled, w[0])
+    val composed = twice(halved >> larger, w[2])
+    val mapped = w.map(|x: f32| -> f32 { x * x * s })
+    val zipped = w.zip(mapped, |x: f32, y: f32| -> f32 { x * y })
+    val folded = w.reduce(1.0f32, |acc: f32, x: f32| -> f32 { acc * x + x })
+    val direct = scaled(w[0]) + shrink(w[2]) + piped + nested + composed
+    return Tensor::scalar(direct + mapped.sum() + zipped.sum() + folded)
+}
+""",
+        (3,),
+        (1.25, -0.5, 2.0),
+        # s = 2 w1. 2 w0 w1 + w2^3 / 8 + w2^2 + 4 w0 w1^2 + 2.25 w2 (both stages of
+        # `halved >> larger` in its positive arm), s sum(w^2) from the map, s sum(w^3) from
+        # the zip, and the fold 2 w0 w1 w2 + w1 w2 + w2.
+        lambda a, b, c: (
+            2.0 * b + 4.0 * b * b + 4.0 * a * b + 6.0 * a * a * b + 2.0 * b * c,
+            2.0 * a
+            + 8.0 * a * b
+            + 4.0 * b * b
+            + 2.0 * (a * a + b * b + c * c)
+            + 2.0 * (a**3 + b**3 + c**3)
+            + 6.0 * b**3
+            + 2.0 * a * c
+            + c,
+            3.0 * c * c / 8.0
+            + 2.0 * c
+            + 2.25
+            + 4.0 * b * c
+            + 6.0 * b * c * c
+            + 2.0 * a * b
+            + b
+            + 1.0,
+        ),
+    ),
+    TensorCase(
+        # A function-typed parameter of the `@grad` function itself: the `.backward()` call
+        # passes a closure capturing one of its own locals, and the derivative it runs is
+        # specialized to that closure, the capture passed along as an argument.
+        "passed_function",
+        """
+@grad
+func passed_inner(w: &mut Tensor<f32, [2]>, f: (f32) -> f32, scale: f32) -> Tensor<f32, []> {
+    val mapped = w.map(f)
+    return Tensor::scalar(mapped.sum() * scale + f(w[0] * w[1]))
+}
+
+func passed_function(w: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
+    passed_inner(w, |x: f32| -> f32 { x * x * scale }, scale)
+}
+""",
+        (2,),
+        (0.75, -1.25),
+        # f(x) = k x^2, so k^2 (w0^2 + w1^2) + k w0^2 w1^2.
+        lambda a, b, k: (
+            2.0 * k * k * a + 2.0 * k * a * b * b,
+            2.0 * k * k * b + 2.0 * k * a * a * b,
+        ),
+        constants=(1.5,),
+        callee="passed_inner",
+        extra_arguments=("|x: f32| -> f32 { x * x * c0 }",),
+    ),
 ]
 
 
@@ -1269,6 +1361,7 @@ def probe_source(case):
         lines.append(f"    mut w{index} = {constructor_name(shape)}({elements})")
         arguments.append(f"&mut w{index}")
         start += count
+    arguments += list(case.extra_arguments)
     arguments += [f"c{k}" for k in range(len(case.constants))]
     callee = case.callee
     if case.receiver:

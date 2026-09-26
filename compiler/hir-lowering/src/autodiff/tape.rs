@@ -21,7 +21,8 @@ use std::collections::{HashMap, HashSet};
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    HirExpr, HirExprKind, HirFunction, HirPlace, HirReduceOp, HirStmt, HirTensorAxis, HirType,
+    HirCapture, HirClosure, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirPlace,
+    HirReduceOp, HirStmt, HirTensorApply, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -35,6 +36,15 @@ const ENTRY_PREFIX: &str = "__ad_v";
 /// The tensor method that copies a buffer into a fresh handle, as every backend spells it.
 const CLONE_METHOD: &str = "clone";
 
+/// The most elements a `.map` / `.zip` / `.reduce` in a `@grad` body may walk. Each element
+/// is its own inlined call in the forward replay and the reverse sweep, so the derivative's
+/// size grows with the tensor's.
+const MAX_UNROLLED_ELEMENTS: usize = 1024;
+
+/// What a function value chosen at run time is refused as.
+const RUN_TIME_TARGET: &str =
+    "a function value chosen at run time; call each function directly where the choice is made";
+
 /// A tape operand.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Leaf {
@@ -43,12 +53,21 @@ pub(super) enum Leaf {
     Var { name: String, ty: HirType },
     /// A scalar literal, which is `Copy` and can be written wherever it is needed.
     Const(HirExpr),
+    /// A function value whose target is known here: a function or a lifted closure by
+    /// name, each capture bound to the leaf it snapshots where the closure was written.
+    /// It is never an operand. A call through it inlines the target, and a slot refuses
+    /// it, which is what refuses a target chosen at run time.
+    Function {
+        target: String,
+        captures: Vec<(String, Leaf)>,
+        ty: HirType,
+    },
 }
 
 impl Leaf {
     pub(super) fn ty(&self) -> &HirType {
         match self {
-            Leaf::Var { ty, .. } => ty,
+            Leaf::Var { ty, .. } | Leaf::Function { ty, .. } => ty,
             Leaf::Const(expr) => &expr.ty,
         }
     }
@@ -61,7 +80,7 @@ impl Leaf {
     pub(super) fn var_name(&self) -> Option<&str> {
         match self {
             Leaf::Var { name, .. } => Some(name),
-            Leaf::Const(_) => None,
+            Leaf::Const(_) | Leaf::Function { .. } => None,
         }
     }
 }
@@ -200,24 +219,102 @@ pub(super) struct Tape {
     pub(super) slots: HashSet<String>,
 }
 
-/// Every lowered function of the program by name, which is what a call inlines.
-pub(super) type Functions<'f> = HashMap<&'f str, &'f HirFunction>;
+/// Every lowered function and lifted closure of the program by name: what a call inlines.
+pub(super) struct Functions<'f> {
+    named: HashMap<&'f str, &'f HirFunction>,
+    closures: HashMap<&'f str, &'f HirClosure>,
+}
+
+impl<'f> Functions<'f> {
+    pub(super) fn of(items: &'f [HirItem]) -> Self {
+        let mut functions = Functions {
+            named: HashMap::new(),
+            closures: HashMap::new(),
+        };
+        for item in items {
+            match item {
+                HirItem::Function(function) => {
+                    let _ = functions.named.insert(function.name.as_str(), function);
+                }
+                HirItem::Closure(closure) => {
+                    let _ = functions.closures.insert(closure.name.as_str(), closure);
+                }
+                _ => {}
+            }
+        }
+        functions
+    }
+
+    pub(super) fn function(&self, name: &str) -> Option<&'f HirFunction> {
+        self.named.get(name).copied()
+    }
+
+    fn callee(&self, name: &str) -> Option<Callee<'f>> {
+        if let Some(function) = self.function(name) {
+            return Some(Callee {
+                name: &function.name,
+                captures: &[],
+                params: &function.params,
+                return_type: &function.return_type,
+                body: &function.body,
+            });
+        }
+        let closure = self.closures.get(name)?;
+        Some(Callee {
+            name: &closure.name,
+            captures: &closure.captures,
+            params: &closure.params,
+            return_type: &closure.return_type,
+            body: &closure.body,
+        })
+    }
+}
+
+/// What inlining reads of a function or a closure: a closure's captures are parameters
+/// bound where the closure was written rather than where it is called.
+struct Callee<'f> {
+    name: &'f str,
+    captures: &'f [HirCapture],
+    params: &'f [HirParam],
+    return_type: &'f HirType,
+    body: &'f [HirStmt],
+}
 
 /// Linearize `primal`'s body. `differentiated` names the parameters the derivative is
 /// taken with respect to; they seed the activity set. A call to one of `functions` is
-/// linearized in place, its parameters bound to the arguments' leaves.
+/// linearized in place, its parameters bound to the arguments' leaves. `bound` gives a
+/// function-typed parameter of `primal` the target a call site passed it; one it does not
+/// name has no known target, and a call through it is refused.
 pub(super) fn linearize<'f>(
     primal: &'f HirFunction,
     differentiated: &[&str],
     functions: &'f Functions<'f>,
+    bound: &HashMap<String, Leaf>,
 ) -> Result<Tape, LoweringError> {
+    // Every function-typed parameter is bound in `params`, so it takes precedence over a
+    // top-level function of the same name, as it does in the primal.
+    let params = primal
+        .params
+        .iter()
+        .filter(|param| matches!(param.ty, HirType::Function { .. }))
+        .map(|param| {
+            let leaf = bound
+                .get(&param.name)
+                .cloned()
+                .unwrap_or_else(|| Leaf::Var {
+                    name: param.name.clone(),
+                    ty: param.ty.clone(),
+                });
+            (param.name.clone(), leaf)
+        })
+        .collect();
     let mut linearizer = Linearizer {
         function: &primal.name,
         functions,
         inlining: vec![primal.name.as_str()],
         nodes: Vec::new(),
         aliases: HashMap::new(),
-        params: HashMap::new(),
+        params,
         scopes: Vec::new(),
         active: differentiated.iter().map(|name| name.to_string()).collect(),
         slots: HashSet::new(),
@@ -353,6 +450,10 @@ impl<'f> Linearizer<'f> {
 
     /// A new slot of type `ty` holding one of `values`, active when any of them is.
     fn slot(&mut self, ty: &HirType, values: &[&Leaf], span: Span) -> Result<Slot, LoweringError> {
+        // A function value leaving a branch or a loop is one whose target the path decides.
+        if matches!(ty, HirType::Function { .. }) {
+            return Err(self.refuse(RUN_TIME_TARGET, span));
+        }
         if !is_slot_type(ty) {
             return Err(self.refuse(
                 "a value of this type carried out of a branch or a loop",
@@ -844,15 +945,45 @@ impl<'f> Linearizer<'f> {
     fn leaf(&mut self, expr: &HirExpr) -> Result<Leaf, LoweringError> {
         match &expr.kind {
             HirExprKind::Literal(_) if is_scalar(&expr.ty) => Ok(Leaf::Const(expr.clone())),
-            HirExprKind::Variable(name) => Ok(self
-                .aliases
-                .get(name)
-                .or_else(|| self.params.get(name))
-                .cloned()
-                .unwrap_or_else(|| Leaf::Var {
+            HirExprKind::Variable(name) => {
+                if let Some(leaf) = self.aliases.get(name).or_else(|| self.params.get(name)) {
+                    return Ok(leaf.clone());
+                }
+                if matches!(expr.ty, HirType::Function { .. })
+                    && self.functions.callee(name).is_some()
+                {
+                    return Ok(Leaf::Function {
+                        target: name.clone(),
+                        captures: Vec::new(),
+                        ty: expr.ty.clone(),
+                    });
+                }
+                Ok(Leaf::Var {
                     name: name.clone(),
                     ty: expr.ty.clone(),
-                })),
+                })
+            }
+            HirExprKind::Closure { name, captures } => {
+                let mut bound = Vec::with_capacity(captures.len());
+                for capture in captures {
+                    let read = HirExprKind::Variable(capture.name.clone());
+                    let read = HirExpr::new(read, capture.ty.clone(), expr.span);
+                    bound.push((capture.name.clone(), self.leaf(&read)?));
+                }
+                Ok(Leaf::Function {
+                    target: name.clone(),
+                    captures: bound,
+                    ty: expr.ty.clone(),
+                })
+            }
+            // `x |> |v| ...` desugars to a block binding the closure and calling it.
+            HirExprKind::Block { stmts } => self.block_value(stmts, &expr.ty),
+            HirExprKind::TensorApply {
+                kind,
+                receiver,
+                operand,
+                callee,
+            } => self.traverse(*kind, receiver, operand.as_deref(), callee, expr),
             // Reading through `&x` reads `x`; the replay borrows every tensor operand anyway.
             HirExprKind::Reference {
                 operand,
@@ -1055,50 +1186,158 @@ impl<'f> Linearizer<'f> {
         Ok(HirExpr::new(kind, place.ty.clone(), place.span))
     }
 
-    /// A call to a user function, linearized in place: its body runs at the call on the
-    /// arguments' leaves, so its operations take part in the tape like the caller's own.
-    // ponytail: every call site gets its own copy of the callee's tape, so the derivative
-    // grows with the call tree; a per-callee reverse function chained at each call is the
-    // upgrade if code size starts to matter.
+    /// A call to a user function, or through a function value whose target is known here,
+    /// linearized in place.
     fn call(
         &mut self,
         callee: &HirExpr,
         args: &[HirExpr],
         span: Span,
     ) -> Result<Leaf, LoweringError> {
-        let HirExprKind::Variable(name) = &callee.kind else {
-            return Err(self.refuse("a method call", span));
+        let target = match &callee.kind {
+            HirExprKind::Variable(_) | HirExprKind::Closure { .. } => self.leaf(callee)?,
+            _ => return Err(self.refuse("a method call", span)),
         };
-        // A local of function type shadows a top-level function of the same name.
-        if self.aliases.contains_key(name) || self.params.contains_key(name) {
-            return Err(self.refuse("a call through a function value", span));
-        }
-        let Some(function) = self.functions.get(name.as_str()).copied() else {
+        let Leaf::Function {
+            target, captures, ..
+        } = target
+        else {
+            // A local or a parameter of function type with no known target.
+            let bound = matches!(&callee.kind, HirExprKind::Variable(name)
+                if self.aliases.contains_key(name) || self.params.contains_key(name));
+            if bound {
+                return Err(self.refuse(RUN_TIME_TARGET, span));
+            }
             return Err(self.refuse("a call to a builtin or a method", span));
         };
-        if self.inlining.contains(&function.name.as_str()) {
+        let mut leaves = Vec::with_capacity(args.len());
+        for arg in args {
+            leaves.push(self.leaf(arg)?);
+        }
+        self.inline(&target, captures, leaves, span)
+    }
+
+    /// The body of the function or closure `target` run at the call on `args`, under
+    /// empty aliases and scopes so nothing of the caller leaks in or out. A closure's
+    /// `captures` are bound beside its parameters.
+    // ponytail: every call site gets its own copy of the callee's tape, so the derivative
+    // grows with the call tree; a per-callee reverse function chained at each call is the
+    // upgrade if code size starts to matter.
+    fn inline(
+        &mut self,
+        target: &str,
+        captures: Vec<(String, Leaf)>,
+        args: Vec<Leaf>,
+        span: Span,
+    ) -> Result<Leaf, LoweringError> {
+        let Some(callee) = self.functions.callee(target) else {
+            return Err(self.malformed("a function value names no function"));
+        };
+        if self.inlining.contains(&callee.name) {
             return Err(self.refuse("a recursive call", span));
         }
-        if function.return_type == HirType::Void {
+        if *callee.return_type == HirType::Void {
             return Err(self.refuse("a call to a function that returns nothing", span));
         }
-        if function.params.len() != args.len() {
+        if callee.params.len() != args.len() || callee.captures.len() != captures.len() {
             return Err(self.malformed("a call whose argument count is not its callee's"));
         }
-        let mut params = HashMap::with_capacity(args.len());
-        for (param, arg) in function.params.iter().zip(args) {
-            let _ = params.insert(param.name.clone(), self.leaf(arg)?);
+        let mut params: HashMap<String, Leaf> = captures.into_iter().collect();
+        for (param, arg) in callee.params.iter().zip(args) {
+            let _ = params.insert(param.name.clone(), arg);
         }
         let aliases = std::mem::take(&mut self.aliases);
         let params = std::mem::replace(&mut self.params, params);
         let scopes = std::mem::take(&mut self.scopes);
-        self.inlining.push(&function.name);
-        let value = self.body_value(&function.body, &function.return_type);
+        self.inlining.push(callee.name);
+        let value = self.body_value(callee.body, callee.return_type);
         let _ = self.inlining.pop();
         self.aliases = aliases;
         self.params = params;
         self.scopes = scopes;
         value
+    }
+
+    /// A block's value: its statements in a scope of their own, then its tail.
+    fn block_value(&mut self, stmts: &[HirStmt], ty: &HirType) -> Result<Leaf, LoweringError> {
+        let before = self.aliases.clone();
+        let inner = self.scoped(&before, &mut |this: &mut Self| this.arm(stmts, Some(ty)))?;
+        self.nodes.extend(inner.nodes);
+        self.aliases = inner.exit;
+        inner
+            .value
+            .ok_or_else(|| self.malformed("a block value has no tail"))
+    }
+
+    /// `.map(f)`, `.zip(other, f)` or `.reduce(init, f)`, unrolled: one element read per
+    /// position and one inlined call of `f` per element, in the row-major order the backend
+    /// walks, so a `.reduce` folds in the same order and rounds the same way.
+    // ponytail: unrolled per element, hence MAX_UNROLLED_ELEMENTS; a rule per traversal,
+    // with `f`'s derivative as a traversal of its own, is the upgrade for large tensors.
+    fn traverse(
+        &mut self,
+        kind: HirTensorApply,
+        receiver: &HirExpr,
+        operand: Option<&HirExpr>,
+        callee: &HirExpr,
+        expr: &HirExpr,
+    ) -> Result<Leaf, LoweringError> {
+        let span = expr.span;
+        let Some((element, extents)) = tensor_parts(&receiver.ty) else {
+            return Err(self.refuse(
+                "a `.map` / `.zip` / `.reduce` over a tensor of dynamic shape",
+                span,
+            ));
+        };
+        let element = element.clone();
+        let count = extents
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .filter(|count| *count <= MAX_UNROLLED_ELEMENTS);
+        let Some(count) = count else {
+            let construct = format!(
+                "a `.map` / `.zip` / `.reduce` over more than the {MAX_UNROLLED_ELEMENTS} elements a traversal is unrolled for"
+            );
+            return Err(self.refuse(&construct, span));
+        };
+        let Leaf::Function {
+            target, captures, ..
+        } = self.leaf(callee)?
+        else {
+            return Err(self.refuse(RUN_TIME_TARGET, span));
+        };
+        let object = self.leaf(receiver)?;
+        let operand = operand.map(|operand| self.leaf(operand)).transpose()?;
+        let read = |this: &mut Self, object: &Leaf, element: &HirType, flat: usize| {
+            let positions = coordinates(flat, &extents, span);
+            let object = object.clone();
+            this.push(element, span, Op::Read { object, positions })
+        };
+
+        if kind == HirTensorApply::Reduce {
+            let mut acc = operand.ok_or_else(|| self.malformed("a `.reduce` with no seed"))?;
+            for flat in 0..count {
+                let value = read(self, &object, &element, flat);
+                acc = self.inline(&target, captures.clone(), vec![acc, value], span)?;
+            }
+            return Ok(acc);
+        }
+        let other = match operand {
+            Some(other) => match tensor_parts(other.ty()) {
+                Some((element, _)) => Some((element.clone(), other)),
+                None => return Err(self.malformed("a `.zip` over a non-tensor operand")),
+            },
+            None => None,
+        };
+        let mut results = Vec::with_capacity(count);
+        for flat in 0..count {
+            let mut args = vec![read(self, &object, &element, flat)];
+            if let Some((element, other)) = &other {
+                args.push(read(self, other, element, flat));
+            }
+            results.push(self.inline(&target, captures.clone(), args, span)?);
+        }
+        Ok(self.push(&expr.ty, span, Op::Literal(results)))
     }
 
     /// `a && b` is `if a { b } else { false }` and `a || b` is `if a { true } else { b }`,
@@ -1242,6 +1481,26 @@ pub(super) fn literal_offset(object_ty: &HirType, positions: &[Leaf]) -> Option<
     Some(flat)
 }
 
+/// The literal position, one per axis, of the element at row-major offset `flat`.
+fn coordinates(mut flat: usize, extents: &[usize], span: Span) -> Vec<Leaf> {
+    let mut positions = vec![0usize; extents.len()];
+    for (position, extent) in positions.iter_mut().zip(extents).rev() {
+        *position = flat % extent;
+        flat /= extent;
+    }
+    positions
+        .into_iter()
+        .map(|position| {
+            let literal = Literal::Integer(position as i128, None);
+            Leaf::Const(HirExpr::new(
+                HirExprKind::Literal(literal),
+                HirType::U64,
+                span,
+            ))
+        })
+        .collect()
+}
+
 fn literal_index(position: &Leaf) -> Option<Option<usize>> {
     let Leaf::Const(HirExpr {
         kind: HirExprKind::Literal(Literal::Integer(value, _)),
@@ -1341,16 +1600,13 @@ fn describe_expr(expr: &HirExpr) -> &'static str {
         HirExprKind::TensorEinsum { .. } => "an `einsum` contraction",
         HirExprKind::TensorShapeCast { .. } => "a shape change",
         HirExprKind::TensorIndex { .. } => "a tensor slice at a computed position",
-        HirExprKind::TensorApply { .. } => "a `.map` / `.zip` / `.reduce` traversal",
         HirExprKind::TensorSort { .. } => "a sort",
         HirExprKind::TensorRandomNormal { .. } => "a random tensor",
         HirExprKind::Cast { .. } => "a cast",
         HirExprKind::FieldAccess { .. } => "a field that is neither a number nor a tensor",
         HirExprKind::Match { .. } => "a `match`",
         HirExprKind::Loop { .. } => "a `loop`",
-        HirExprKind::Block { .. } | HirExprKind::Unsafe { .. } | HirExprKind::Pool { .. } => {
-            "a block"
-        }
+        HirExprKind::Unsafe { .. } | HirExprKind::Pool { .. } => "an `unsafe` or `pool` block",
         HirExprKind::Reference { .. } | HirExprKind::Deref { .. } => {
             "a borrow of anything but a binding"
         }

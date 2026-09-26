@@ -140,6 +140,7 @@ modules/shapes/area.nr  module
 modules/shapes/mod.nr   module
 
 # --- showcase: bigger programs proving features work together ---------------
+showcase/activation_fit.nr           22
 showcase/attention_head.nr           7
 showcase/batch_arena.nr              4
 showcase/borrow_discipline.nr        48

@@ -32,6 +32,11 @@
 //! The gradients come out of `__f__rev`, which allocates them in its own body, never inside
 //! a `pool` block's arena, so the slot a gradient lands in always holds heap memory, even
 //! when the `.backward()` runs inside a `pool`.
+//!
+//! A call passing a function value to a function-typed parameter runs a derivative
+//! specialized to the targets the call names, `__f__with<N>__rev`, which takes a closure's
+//! captures as trailing arguments read where the call is: the closure literal itself would
+//! snapshot the same values there.
 
 use ast_types::{Expr, Stmt};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
@@ -39,13 +44,20 @@ use shared_types::Span;
 
 use crate::{Lowerer, LoweringError};
 
-use super::{bundle_name, is_differentiated, reverse_name};
+use super::{bundle_name, is_differentiated, reverse_name, Specialization, Target};
 
 const BACKWARD_METHOD: &str = "backward";
 
 /// The private slot write each differentiated argument's gradient moves through. The
 /// checker reserves `__` in every declared name, so no program can spell it.
 const SET_GRAD_METHOD: &str = "__set_grad";
+
+/// Joins a `@grad` function's name to a specialization's number in the derivative's key.
+const SPECIALIZATION_INFIX: &str = "__with";
+
+/// What a function value passed to a `@grad` call is refused as when the call does not
+/// name its target.
+const UNNAMED_TARGET: &str = "a function value passed to a `@grad` call without naming its target; pass the function or the closure at the call, or a local bound to one that captures nothing";
 
 /// The binding a `.backward()` statement is called on, and the statement's span.
 fn backward_receiver(stmt: &Stmt) -> Option<(&str, Span)> {
@@ -61,9 +73,15 @@ fn backward_receiver(stmt: &Stmt) -> Option<(&str, Span)> {
     }
 }
 
-/// The callee of the derivative call replacing a call through `callee`: `__f__rev` for a
-/// function, or the receiver's `__m__rev` method, which takes the receiver as `m` does.
-fn reverse_callee(callee: &HirExpr, pair_ty: &HirType) -> Result<HirExpr, LoweringError> {
+/// The callee of the derivative call replacing a call through `callee`: `__<key>__rev` for
+/// a function, taking `extra` after its own parameters, or the receiver's `__m__rev`
+/// method, which takes the receiver as `m` does.
+fn reverse_callee(
+    callee: &HirExpr,
+    key: &str,
+    extra: &[HirType],
+    pair_ty: &HirType,
+) -> Result<HirExpr, LoweringError> {
     let kind = match &callee.kind {
         HirExprKind::Variable(function) => {
             let HirType::Function { params, .. } = &callee.ty else {
@@ -72,11 +90,11 @@ fn reverse_callee(callee: &HirExpr, pair_ty: &HirType) -> Result<HirExpr, Loweri
                 });
             };
             let ty = HirType::Function {
-                params: params.clone(),
+                params: params.iter().chain(extra).cloned().collect(),
                 ret: Box::new(pair_ty.clone()),
             };
             return Ok(HirExpr::new(
-                HirExprKind::Variable(reverse_name(function)),
+                HirExprKind::Variable(reverse_name(key)),
                 ty,
                 callee.span,
             ));
@@ -166,14 +184,23 @@ impl Lowerer {
 
         let (loss_ty, mutable, decl_span) = (loss_ty.clone(), *mutable, *decl_span);
         let args = args.clone();
+        let (key, captured) = if args
+            .iter()
+            .any(|arg| matches!(arg.ty, HirType::Function { .. }))
+        {
+            self.specialize(&key, callee, &args, &params, out)?
+        } else {
+            (key, Vec::new())
+        };
+        let extra: Vec<HirType> = captured.iter().map(|read| read.ty.clone()).collect();
         let pair = self.next_backward_binding();
         let bundle_ty = HirType::Struct(bundle_name(&key));
         let pair_ty = HirType::Tuple(vec![loss_ty.clone(), bundle_ty.clone()]);
-        let reverse = reverse_callee(callee, &pair_ty)?;
+        let reverse = reverse_callee(callee, &key, &extra, &pair_ty)?;
         let call = HirExpr::new(
             HirExprKind::Call {
                 callee: Box::new(reverse),
-                args: args.clone(),
+                args: args.iter().cloned().chain(captured).collect(),
             },
             pair_ty.clone(),
             init.span,
@@ -245,6 +272,96 @@ impl Lowerer {
             )));
         }
         Ok(())
+    }
+
+    /// The derivative a call of `function` passing function values runs, keyed by the
+    /// targets it passes, and the reads of the captured bindings it takes after `args`.
+    /// Recorded once per distinct set of targets; `lower_program` derives each.
+    fn specialize(
+        &mut self,
+        function: &str,
+        callee: &HirExpr,
+        args: &[HirExpr],
+        params: &[String],
+        block: &[HirStmt],
+    ) -> Result<(String, Vec<HirExpr>), LoweringError> {
+        let refuse = |construct: &str, span: Span| LoweringError::NotDifferentiable {
+            function: function.to_string(),
+            construct: construct.to_string(),
+            span,
+        };
+        if !matches!(callee.kind, HirExprKind::Variable(_)) {
+            return Err(refuse(
+                "a function value passed to a `@grad` method",
+                callee.span,
+            ));
+        }
+        let mut targets = Vec::new();
+        let mut captured = Vec::new();
+        for (arg, param) in args.iter().zip(params) {
+            if !matches!(arg.ty, HirType::Function { .. }) {
+                continue;
+            }
+            let target = self
+                .call_site_target(arg, block)
+                .ok_or_else(|| refuse(UNNAMED_TARGET, arg.span))?;
+            for capture in &target.captures {
+                let read = HirExprKind::Variable(capture.name.clone());
+                captured.push(HirExpr::new(read, capture.ty.clone(), arg.span));
+            }
+            targets.push((param.clone(), target));
+        }
+        let known = self
+            .grad_specializations
+            .iter()
+            .find(|known| known.function == function && known.targets == targets);
+        if let Some(known) = known {
+            return Ok((known.key.clone(), captured));
+        }
+        let key = format!(
+            "{function}{SPECIALIZATION_INFIX}{}",
+            self.grad_specializations.len()
+        );
+        self.grad_specializations.push(Specialization {
+            function: function.to_string(),
+            key: key.clone(),
+            targets,
+        });
+        Ok((key, captured))
+    }
+
+    /// The target of the function value `arg` as the call site writes it: a closure
+    /// literal, a function by name, or a local of `block` bound to one of those. Through a
+    /// local only a target capturing nothing counts, since reading its captures at the call
+    /// would read their bindings' current values, not the ones the closure took.
+    fn call_site_target(&self, arg: &HirExpr, block: &[HirStmt]) -> Option<Target> {
+        match &arg.kind {
+            HirExprKind::Closure { name, captures } => Some(Target {
+                name: name.clone(),
+                captures: captures.clone(),
+            }),
+            HirExprKind::Variable(name) if self.lookup_local(name).is_none() => {
+                self.functions.contains_key(name).then(|| Target {
+                    name: name.clone(),
+                    captures: Vec::new(),
+                })
+            }
+            HirExprKind::Variable(name) => block
+                .iter()
+                .rev()
+                .find_map(|stmt| match stmt {
+                    HirStmt::VarDecl {
+                        name: declared,
+                        init: Some(init),
+                        mutable: false,
+                        ..
+                    } if declared == name => Some(init),
+                    _ => None,
+                })
+                .and_then(|init| self.call_site_target(init, block))
+                .filter(|target| target.captures.is_empty()),
+            _ => None,
+        }
     }
 
     /// The key `callee` names a derivative under: a function's own name, or the

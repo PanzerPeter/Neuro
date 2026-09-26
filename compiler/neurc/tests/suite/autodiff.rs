@@ -264,3 +264,58 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     assert!(diagnostics.contains("recursive call"), "{diagnostics}");
     assert!(diagnostics.contains(":3:23"), "{diagnostics}");
 }
+
+/// A `@grad` body may call a closure, a composition, a helper taking a function, and a
+/// traversal, and a function-typed parameter of the `@grad` function gets the target each
+/// `.backward()` call passes it.
+#[test]
+fn a_grad_body_calling_function_values_backpropagates_through_them() {
+    let test = CompileTest::new();
+    let source = r#"
+func square(x: f32) -> f32 { x * x }
+func apply(f: (f32) -> f32, x: f32) -> f32 { f(x) }
+
+@grad
+func loss(w: &mut Tensor<f32, [2]>, f: (f32) -> f32) -> Tensor<f32, []> {
+    val s = w[1] * 2.0
+    val scaled = |x: f32| -> f32 { x * s }
+    val both = square >> square
+    val squares = w.map(|x: f32| -> f32 { x * x })
+    val total = squares.reduce(0.0f32, |acc: f32, x: f32| -> f32 { acc + x })
+    return Tensor::scalar(scaled(w[0]) + both(w[0]) + apply(f, w[1]) + total)
+}
+
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val k = 3.0f32
+    val l = loss(&mut w, |x: f32| -> f32 { x * k })
+    l.backward()
+    val g = w.grad()
+    // l = 4 + 1 + 6 + 5; dl/dw0 = s + 4 w0^3 + 2 w0 = 10, dl/dw1 = 2 w0 + k + 2 w1 = 9.
+    (l.sum() + g[0] * 10.0 + g[1]) as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("grad_function_values.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 16 + 100 + 9);
+}
+
+#[test]
+fn a_function_value_chosen_at_run_time_is_reported_where_it_is_chosen() {
+    let test = CompileTest::new();
+    let source = r#"
+func square(x: f32) -> f32 { x * x }
+
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val f = if w[0] > 1.0 { square >> square } else { |x: f32| -> f32 { x } }
+    return Tensor::scalar(f(w[1]))
+}
+"#;
+    let diagnostics = test
+        .check("grad_run_time_target.nr", source)
+        .expect_err("a derivative cannot follow a target chosen at run time");
+    assert!(diagnostics.contains("chosen at run time"), "{diagnostics}");
+    assert!(diagnostics.contains(":6:13"), "{diagnostics}");
+}

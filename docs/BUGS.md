@@ -5,6 +5,97 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-072: a function value can be stored past the frame that built it
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; the store rules for a place of function type
+- **Severity**: critical. A closure's environment lives in the frame that wrote the closure, so
+  a stored closure called after that frame returns reads dead stack memory: a silent wrong
+  answer
+
+**Minimal repro**
+
+```neuro
+struct Holder { f: (f32) -> f32 }
+
+func keep(h: &mut Holder, g: (f32) -> f32) { h.f = g }
+
+func install(h: &mut Holder, k: f32) {
+    keep(h, |x: f32| -> f32 { x * k })
+}
+
+func clobber(a: f32, b: f32, c: f32) -> f32 { a * b * c }
+
+func main() -> i32 {
+    mut h = Holder { f: |x: f32| -> f32 { x } }
+    install(&mut h, 3.0)
+    val noise = clobber(7.0, 11.0, 13.0)
+    val f = h.f
+    println("{f(2.0)} {noise}")
+    0
+}
+```
+
+Expected: rejected at `h.f = g`. The language reference's closure restriction says a closure
+does not escape the scope that defines it: it is not returned or stored. Observed: type
+checking passes and the program prints `22.0 1001.0`. The closure reads `k` from
+`install`'s frame after `clobber` has reused that frame, so it computes `2 * 11` instead of
+`2 * 3`. `*slot = g` through a `&mut ((f32) -> f32)` is accepted the same way.
+
+**Root cause**: no store rule looks at a value of function type. A closure literal, or a
+function-typed parameter holding one, can be written into a struct field (the repro's
+`Holder { f: ... }` initializer is such a store too) or through a `&mut` as freely as a
+number.
+
+**Knock-on**: the `pool` rule that refuses a call inside a block handing a callee "a value the
+block may have allocated" when the callee also takes an outer `&mut` has to count a
+function-typed argument as retainable, because of this hole. So `pool { f(&mut w, closure) }`
+is refused even when `w` is a tensor, which cannot hold a function.
+
+**Workaround**: none needed to avoid the defect beyond not storing function values; for the
+`pool` refusal, make the call outside the block.
+
+**Fix sketch**: refuse a store whose value has a function type into any place but a local
+binding of the same frame (field, element, `*r`, collection insert), and a function-typed
+return. Then exempt function-typed parameters in `check_pool_retention`
+(`compiler/semantic-analysis/src/type_checkers/pools.rs`), since no callee can keep one.
+Regression tests: the repro, the `*slot = g` form, and a `pool` call passing a closure beside
+an outer `&mut` tensor.
+
+## BUG-071: a function name is refused as a value outside `|>` and `>>`
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; `FunctionUsedAsValue` in
+  `compiler/semantic-analysis/src/type_checkers/expressions/mod.rs`
+- **Severity**: minor. A closure wrapping the call is the workaround, at the cost of
+  noise
+
+**Minimal repro**
+
+```neuro
+func square(x: f32) -> f32 { x * x }
+func apply(f: (f32) -> f32, x: f32) -> f32 { f(x) }
+
+func main() -> i32 {
+    val y = apply(square, 3.0)
+    y as i32
+}
+```
+
+Expected: `9`. The language reference's composition section says a plain function name is an
+ordinary value of type `(T) -> U`, and the automatic differentiation chapter uses
+`val f = square` as an example. Observed: `'square' is a function, not a value; functions are
+not first-class here`. `val f = square` is refused the same way. Only the `|>` target and the
+`>>` operands accept a bare name, because the parser rewrites both into calls.
+
+**Workaround**: `apply(|x: f32| -> f32 { square(x) }, 3.0)`.
+
+**Fix sketch**: type a bare function name as `(T) -> U` and lower it to a capture-free
+function value: the `{ fn_ptr, env_ptr }` pair with a null environment, which the backend
+already builds for `>>`. The `@grad` transform already resolves such a value to its function.
+Regression tests: the repro, `val f = square` then `f(3.0)`, and a generic function named
+without a turbofish, which stays refused.
+
 ## BUG-070: a field or element store is accepted while the binding is borrowed
 
 - **Status**: open, confirmed

@@ -227,8 +227,46 @@ which also calls a shape-generic helper that branches.
 
 A callee may read a `&mut` parameter but not write through it, and it must return a value.
 Every call site gets its own copy of the callee in the derivative, so a function called in many
-places grows the derivative accordingly. A recursive call, a method call, a call to a builtin
-such as `println`, and a call through a closure or a function-typed value are refused.
+places grows the derivative accordingly. A recursive call, a method call and a call to a builtin
+such as `println` are refused.
+
+### Function values
+
+A call through a function value is differentiated too, when the compiler can tell which
+function it calls. The derivative is built at compile time, and a function value carries no
+derivative with it at run time. That covers a closure (its captures enter the derivative like
+any other value the body reads), a `>>` composition, a `|>` pipeline stage, a helper's
+function-typed parameter, and the function given to `.map`, `.zip` and `.reduce`.
+
+A function-typed parameter of the `@grad` function itself gets its function from the call that
+runs `.backward()`. Each distinct function passed there gets its own derivative, the way a
+generic function gets one per type argument:
+
+```neuro
+@grad
+func activated_error(w: &mut Tensor<f32, [2, 1]>, activate: (f32) -> f32) -> Tensor<f32, []> {
+    val x: Tensor<f32, [4, 2]> = [[1.0, 2.0], [2.0, 0.0], [0.0, 1.0], [3.0, 1.0]]
+    val y: Tensor<f32, [4, 1]> = [[5.0], [2.0], [2.0], [5.0]]
+    val prediction = (x @ w).map(activate)
+    val residual = prediction - y
+    val squares = residual.map(|r: f32| -> f32 { r * r })
+    return Tensor::scalar(squares.reduce(0.0f32, |acc: f32, s: f32| -> f32 { acc + s }) * 0.25)
+}
+```
+
+`activated_error(&mut w, |v: f32| -> f32 { v * gain })` and
+`activated_error(&mut w, lift >> soften)` each run a derivative made for the function they
+pass. Both calls come from [`examples/showcase/activation_fit.nr`](../../examples/showcase/activation_fit.nr).
+
+The function passed there must be written at the call: a closure or a composition, or a local
+bound to one that captures nothing. A function chosen at run time is refused. That includes a
+binding set by an `if` whose arms give different functions, a function reassigned inside a
+branch or a loop, and a function-typed parameter of an ordinary function passed on into a
+`@grad` call. Write the choice as an `if` around two direct calls instead.
+
+`.map`, `.zip` and `.reduce` are unrolled in the derivative, one call per element, in the
+order the traversal runs. A traversal over more than 1024 elements, or over a tensor with a
+dynamic axis, is refused.
 
 Any other construct in a `@grad` body is a compile error pointing at it: a `for` over a collection, `loop`, `break` and `continue`, `match`, a `return` inside a loop or
 anywhere but the end of an `if` arm at the top of the body, an assignment to a parameter,

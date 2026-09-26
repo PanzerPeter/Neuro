@@ -1,0 +1,4 @@
+activation 0: loss 14.5000 ->  0.0224
+activation 1: loss 11.2575 ->  0.8099
+scaled   w = [1.07, 1.86]
+softened w = [1.13, 1.67]

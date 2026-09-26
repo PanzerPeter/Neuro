@@ -798,7 +798,8 @@ impl Lowerer {
         hir_items.append(&mut self.closure_items);
         // `@grad` lowers to the function plus its derivative: the bundle struct and
         // `__f__rev`, derived from the lowered bodies.
-        let derived = crate::autodiff::derive_reverses(&hir_items, &grads)?;
+        let derived =
+            crate::autodiff::derive_reverses(&hir_items, &grads, &self.grad_specializations)?;
         hir_items.extend(derived);
         crate::autodiff::derive_method_reverses(&mut hir_items, &grad_methods)?;
 

@@ -24,6 +24,11 @@ const TEMP_PREFIX: &str = "__ad_t";
 pub(super) fn operand(leaf: &Leaf, span: Span) -> HirExpr {
     match leaf {
         Leaf::Const(expr) => expr.clone(),
+        // No rule reads a function value (a call through one is inlined, and a slot
+        // refuses one), so this only keeps the match total. It names the target.
+        Leaf::Function { target, ty, .. } => {
+            HirExpr::new(HirExprKind::Variable(target.clone()), ty.clone(), span)
+        }
         Leaf::Var { name, ty } => {
             let read = HirExpr::new(HirExprKind::Variable(name.clone()), ty.clone(), span);
             if !matches!(ty, HirType::Tensor { .. }) {
@@ -49,6 +54,9 @@ pub(super) fn operand(leaf: &Leaf, span: Span) -> HirExpr {
 pub(super) fn operand_owned(leaf: &Leaf, span: Span) -> HirExpr {
     match leaf {
         Leaf::Const(expr) => expr.clone(),
+        Leaf::Function { target, ty, .. } => {
+            HirExpr::new(HirExprKind::Variable(target.clone()), ty.clone(), span)
+        }
         Leaf::Var { name, ty } => {
             HirExpr::new(HirExprKind::Variable(name.clone()), ty.clone(), span)
         }
@@ -208,7 +216,7 @@ impl Emitter {
     /// about to change: a tensor is copied, a scalar read, a constant kept as written.
     pub(super) fn snapshot(&mut self, leaf: &Leaf) -> Result<Leaf, LoweringError> {
         match leaf {
-            Leaf::Const(_) => Ok(leaf.clone()),
+            Leaf::Const(_) | Leaf::Function { .. } => Ok(leaf.clone()),
             Leaf::Var { .. } if tensor_parts(leaf.ty()).is_some() => self.copy(leaf),
             Leaf::Var { name, ty } => {
                 let read = HirExprKind::Variable(name.clone());

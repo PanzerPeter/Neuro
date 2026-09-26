@@ -97,6 +97,7 @@ No Rust edits are needed: discovery is automatic.
 
 One line each. The program's own header comment is the full description.
 
+- [`activation_fit.nr`](showcase/activation_fit.nr): one neuron trained under two activations passed into the same `@grad` loss, a closure capturing a local and a `>>` composition, which the loss applies with `.map` and sums with `.reduce`, so each `.backward()` call gets a derivative made for the function it passes
 - [`attention_head.nr`](showcase/attention_head.nr): one attention head written as two `einsum` contractions, with a `>>` composition rescaling every score through `.map` and `.reduce` folding the context
 - [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas, with a `PoolAware` scratch type the arena sweeps in reverse construction order, a headline the compiler routes off the arena because the binding it is stored into outlives the block, and a summary line a declared function builds so a `&mut self` method may store it past the block
 - [`borrow_discipline.nr`](showcase/borrow_discipline.nr): `&mut self` methods, arrays and interpolation written around a live borrow, which freezes the borrowee's own name and forbids moving out from under it

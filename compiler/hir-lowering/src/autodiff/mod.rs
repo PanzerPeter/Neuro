@@ -30,6 +30,11 @@
 //! does. The receiver is a constant, so the tape reads its fields and never differentiates
 //! them.
 //!
+//! A call through a function value is inlined like any other call, so its target must be
+//! known here. A function-typed parameter of the `@grad` function itself has no target of
+//! its own: the function is derived once per distinct set of targets its `.backward()`
+//! call sites pass ([`Specialization`]), and never on its own.
+//!
 //! Every tensor parameter is differentiated: `wrt:` is a later item, and the checker has
 //! already required each tensor parameter to be `&mut` and the loss to be rank-0 `f32`.
 
@@ -43,8 +48,8 @@ use std::collections::HashMap;
 
 use ast_types::Attribute;
 use neuro_hir::{
-    HirExpr, HirExprKind, HirField, HirFieldInit, HirFunction, HirItem, HirMethod, HirStmt,
-    HirStruct, HirType,
+    HirCapture, HirExpr, HirExprKind, HirField, HirFieldInit, HirFunction, HirItem, HirMethod,
+    HirParam, HirStmt, HirStruct, HirType,
 };
 
 use crate::LoweringError;
@@ -60,6 +65,10 @@ const GRAD_ATTRIBUTE: &str = "grad";
 const BUNDLE_PREFIX: &str = "GradsOf_";
 const REVERSE_PREFIX: &str = "__";
 const REVERSE_SUFFIX: &str = "__rev";
+
+/// The prefix of the parameters a specialized derivative takes a closure's captures by.
+/// No user name contains `__`, and the tape's own names continue with a digit.
+const CAPTURE_PREFIX: &str = "__ad_capture";
 
 /// How a method's key joins its type and name, the mangling every slice uses for
 /// `Type__method`.
@@ -87,28 +96,102 @@ fn is_differentiated(ty: &HirType) -> bool {
     matches!(ty, HirType::Reference { inner, mutable: true } if matches!(**inner, HirType::Tensor { .. }))
 }
 
-/// Build `GradsOf_f` and `__f__rev` for each `@grad` function named in `grads`, out of the
-/// fully lowered `items`. It runs once every function is lowered, generic instances
-/// included, because a `@grad` body may call any of them.
+/// A `@grad` function taking function-typed parameters, derived for the targets one
+/// `.backward()` call site passes them.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Specialization {
+    /// The lowered `@grad` function.
+    pub(crate) function: String,
+    /// What the derivative is named after: `GradsOf_<key>` and `__<key>__rev`.
+    pub(crate) key: String,
+    /// Each function-typed parameter, by name, with its target.
+    pub(crate) targets: Vec<(String, Target)>,
+}
+
+/// A function value's target as a call site writes it: a function or a lifted closure by
+/// name, and the closure's captures in its layout order. The derivative takes each capture
+/// as one more parameter, which the call site passes by reading the captured binding.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Target {
+    pub(crate) name: String,
+    pub(crate) captures: Vec<HirCapture>,
+}
+
+/// Build `GradsOf_f` and `__f__rev` for each `@grad` function named in `grads`, and one
+/// pair per entry of `specializations`, out of the fully lowered `items`. It runs once
+/// every function is lowered, generic instances and closures included, because a `@grad`
+/// body may call any of them. A function taking a function-typed parameter is derived
+/// only through its specializations.
 pub(crate) fn derive_reverses(
     items: &[HirItem],
     grads: &[String],
+    specializations: &[Specialization],
 ) -> Result<Vec<HirItem>, LoweringError> {
-    let functions: Functions<'_> = items
-        .iter()
-        .filter_map(|item| match item {
-            HirItem::Function(function) => Some((function.name.as_str(), function)),
-            _ => None,
-        })
-        .collect::<HashMap<_, _>>();
-    let mut derived = Vec::with_capacity(grads.len() * 2);
-    for name in grads {
-        let Some(primal) = functions.get(name.as_str()) else {
-            return Err(LoweringError::Malformed {
+    let functions = Functions::of(items);
+    let primal = |name: &str| {
+        functions
+            .function(name)
+            .ok_or_else(|| LoweringError::Malformed {
                 detail: format!("`@grad` function '{name}' was never lowered"),
-            });
-        };
-        derived.extend(derive_reverse(primal, name, &functions)?);
+            })
+    };
+    let mut derived = Vec::with_capacity((grads.len() + specializations.len()) * 2);
+    for name in grads {
+        let primal = primal(name)?;
+        // Only a call site knows what a function-typed parameter calls.
+        if primal
+            .params
+            .iter()
+            .any(|param| matches!(param.ty, HirType::Function { .. }))
+        {
+            continue;
+        }
+        derived.extend(derive_reverse(
+            primal,
+            name,
+            &functions,
+            &HashMap::new(),
+            Vec::new(),
+        )?);
+    }
+    for specialization in specializations {
+        let primal = primal(&specialization.function)?;
+        let mut bound = HashMap::with_capacity(specialization.targets.len());
+        let mut extra = Vec::new();
+        for (param, target) in &specialization.targets {
+            let Some(declared) = primal.params.iter().find(|p| p.name == *param) else {
+                return Err(LoweringError::Malformed {
+                    detail: format!("'{}' has no parameter '{param}'", primal.name),
+                });
+            };
+            let mut captures = Vec::with_capacity(target.captures.len());
+            for capture in &target.captures {
+                let name = format!("{CAPTURE_PREFIX}{}", extra.len());
+                let leaf = Leaf::Var {
+                    name: name.clone(),
+                    ty: capture.ty.clone(),
+                };
+                captures.push((capture.name.clone(), leaf));
+                extra.push(HirParam {
+                    name,
+                    ty: capture.ty.clone(),
+                    span: primal.span,
+                });
+            }
+            let leaf = Leaf::Function {
+                target: target.name.clone(),
+                captures,
+                ty: declared.ty.clone(),
+            };
+            let _ = bound.insert(param.clone(), leaf);
+        }
+        derived.extend(derive_reverse(
+            primal,
+            &specialization.key,
+            &functions,
+            &bound,
+            extra,
+        )?);
     }
     Ok(derived)
 }
@@ -123,13 +206,7 @@ pub(crate) fn derive_method_reverses(
 ) -> Result<(), LoweringError> {
     let mut derived = Vec::with_capacity(methods.len());
     {
-        let functions: Functions<'_> = items
-            .iter()
-            .filter_map(|item| match item {
-                HirItem::Function(function) => Some((function.name.as_str(), function)),
-                _ => None,
-            })
-            .collect::<HashMap<_, _>>();
+        let functions = Functions::of(items);
         for (type_name, method_name) in methods {
             let Some((index, method)) = find_method(items, type_name, method_name) else {
                 return Err(LoweringError::Malformed {
@@ -147,7 +224,8 @@ pub(crate) fn derive_method_reverses(
                 span: method.span,
             };
             let key = format!("{type_name}{METHOD_SEPARATOR}{method_name}");
-            let [bundle, reverse] = derive_reverse(&primal, &key, &functions)?;
+            let [bundle, reverse] =
+                derive_reverse(&primal, &key, &functions, &HashMap::new(), Vec::new())?;
             let HirItem::Function(reverse) = reverse else {
                 return Err(LoweringError::Malformed {
                     detail: format!(
@@ -198,11 +276,15 @@ fn find_method<'i>(
 
 /// Build `GradsOf_<key>` and `__<key>__rev` for the lowered `@grad` function `primal`,
 /// where `key` is the name its generated items are derived from: the function's own name,
-/// or `Type__method` for a method.
+/// a specialization's key, or `Type__method` for a method. `bound` gives function-typed
+/// parameters their targets, and `extra` are the parameters the derivative takes after
+/// `primal`'s, for the captures those targets read.
 fn derive_reverse(
     primal: &HirFunction,
     key: &str,
     functions: &Functions<'_>,
+    bound: &HashMap<String, Leaf>,
+    extra: Vec<HirParam>,
 ) -> Result<[HirItem; 2], LoweringError> {
     let differentiated: Vec<_> = primal
         .params
@@ -213,7 +295,7 @@ fn derive_reverse(
         .iter()
         .map(|param| param.name.as_str())
         .collect();
-    let tape = tape::linearize(primal, &names, functions)?;
+    let tape = tape::linearize(primal, &names, functions, bound)?;
 
     let mut em = Emitter::new(primal.span);
     sweep::forward(&mut em, &tape.nodes)?;
@@ -257,6 +339,8 @@ fn derive_reverse(
     }
 
     let span = primal.span;
+    let mut params = primal.params.clone();
+    params.extend(extra);
     let bundle_ty = HirType::Struct(bundle_name.clone());
     let result_ty = HirType::Tuple(vec![loss_ty.clone(), bundle_ty.clone()]);
     let bundle = HirExpr::new(
@@ -290,7 +374,7 @@ fn derive_reverse(
         }),
         HirItem::Function(HirFunction {
             name: reverse_name(key),
-            params: primal.params.clone(),
+            params,
             return_type: result_ty,
             body,
             span,
