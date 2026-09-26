@@ -860,3 +860,120 @@ func outer(g: (f32) -> f32) -> f32 {
         "g)",
     );
 }
+
+const SELECTED: &str = r#"
+struct Layer { export w: Tensor<f32, [2]> }
+
+struct Net {
+    export layer: Layer,
+    export heads: [Tensor<f32, [2]>; 2]
+}
+
+impl Net {
+    @grad(wrt: [self.layer.w, self.heads[1], k])
+    func loss(&mut self, k: &mut Tensor<f32, [2]>, frozen: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+        val w = self.layer.w.clone()
+        val p = w * k
+        return Tensor::scalar(p.sum() + self.heads[1].sum() + frozen.sum())
+    }
+}
+
+func main() -> i32 {
+    mut net = Net { layer: Layer { w: [1.0, 2.0] }, heads: [[1.0, 1.0], [3.0, 4.0]] }
+    mut k: Tensor<f32, [2]> = [1.0, 2.0]
+    mut frozen: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = net.loss(&mut k, &mut frozen)
+    l.backward()
+    return 0
+}
+"#;
+
+/// A place as the program would spell it, `net.heads[1]`, looking through `&mut`.
+fn place_text(expr: &neuro_hir::HirExpr) -> String {
+    match &expr.kind {
+        HirExprKind::Variable(name) => name.clone(),
+        HirExprKind::FieldAccess { object, field } => format!("{}.{field}", place_text(object)),
+        HirExprKind::Index { object, index } => {
+            format!("{}[{}]", place_text(object), place_text(index))
+        }
+        HirExprKind::Reference { operand, .. } => place_text(operand),
+        HirExprKind::Literal(shared_types::Literal::Integer(value, _)) => value.to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// Every `target.__set_grad(bundle.field)` in `body`, as `target <- field`.
+fn slot_writes(body: &[HirStmt]) -> Vec<String> {
+    body.iter()
+        .filter_map(|stmt| {
+            let HirStmt::Expr(expr) = stmt else {
+                return None;
+            };
+            let HirExprKind::Call { callee, args } = &expr.kind else {
+                return None;
+            };
+            let HirExprKind::FieldAccess { object, field } = &callee.kind else {
+                return None;
+            };
+            let [gradient] = args.as_slice() else {
+                return None;
+            };
+            let HirExprKind::FieldAccess { field: from, .. } = &gradient.kind else {
+                return None;
+            };
+            (field == "__set_grad").then(|| format!("{} <- {from}", place_text(object)))
+        })
+        .collect()
+}
+
+#[test]
+fn wrt_puts_only_what_it_lists_in_the_bundle() {
+    let program = lower(SELECTED);
+    let bundle = item_struct(&program, "GradsOf_Net__loss");
+    let fields: Vec<_> = bundle
+        .fields
+        .iter()
+        .map(|field| (field.name.as_str(), field.ty.clone()))
+        .collect();
+    // `frozen` is a `&mut` tensor `wrt:` leaves out, so it is a constant. A field path's
+    // gradient is named after its steps, which no declared name can spell.
+    assert_eq!(
+        fields,
+        vec![
+            ("k", tensor(&[2])),
+            ("self__layer__w", tensor(&[2])),
+            ("self__heads__1", tensor(&[2])),
+        ]
+    );
+}
+
+#[test]
+fn a_backward_writes_a_field_paths_gradient_into_the_receivers_field() {
+    let program = lower(SELECTED);
+    let body = &item_function(&program, "main").body;
+    assert_eq!(
+        slot_writes(body),
+        [
+            "k <- k",
+            "net.layer.w <- self__layer__w",
+            "net.heads[1] <- self__heads__1",
+        ]
+    );
+}
+
+#[test]
+fn an_array_element_at_a_computed_position_is_refused_at_the_position() {
+    refusal_at(
+        r#"
+struct Net { export heads: [Tensor<f32, [2]>; 2] }
+
+impl Net {
+    @grad(wrt: [self.heads[0]])
+    func loss(&mut self, at: i32) -> Tensor<f32, []> {
+        return Tensor::scalar(self.heads[at].sum())
+    }
+}
+"#,
+        "at]",
+    );
+}

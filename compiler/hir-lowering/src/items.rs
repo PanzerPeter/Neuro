@@ -510,7 +510,9 @@ impl Lowerer {
             self.functions.insert(mangled.clone(), (params, ret));
             if crate::autodiff::is_grad(&method.attributes) {
                 let names = method.params.iter().map(|p| p.name.name.clone()).collect();
-                self.grad_params.insert(mangled.clone(), names);
+                let wrt = crate::autodiff::Wrt::of(&method.attributes)?;
+                self.grad_params
+                    .insert(mangled.clone(), crate::autodiff::GradParams { names, wrt });
             }
             self.impl_methods
                 .entry(struct_name.to_string())
@@ -621,8 +623,11 @@ impl Lowerer {
         let ret = self.declared_return_type(&func.return_type, &func.body)?;
         self.functions.insert(func.name.name.clone(), (params, ret));
         if crate::autodiff::is_grad(&func.attributes) {
-            self.grad_params
-                .insert(func.name.name.clone(), crate::param_names(func));
+            let grad = crate::autodiff::GradParams {
+                names: crate::param_names(func),
+                wrt: crate::autodiff::Wrt::of(&func.attributes)?,
+            };
+            self.grad_params.insert(func.name.name.clone(), grad);
         }
         Ok(())
     }
@@ -798,10 +803,19 @@ impl Lowerer {
         hir_items.append(&mut self.closure_items);
         // `@grad` lowers to the function plus its derivative: the bundle struct and
         // `__f__rev`, derived from the lowered bodies.
-        let derived =
-            crate::autodiff::derive_reverses(&hir_items, &grads, &self.grad_specializations)?;
+        let derived = crate::autodiff::derive_reverses(
+            &hir_items,
+            &grads,
+            &self.grad_specializations,
+            &self.grad_params,
+        )?;
         hir_items.extend(derived);
-        crate::autodiff::derive_method_reverses(&mut hir_items, &grad_methods)?;
+        crate::autodiff::derive_method_reverses(
+            &mut hir_items,
+            &grad_methods,
+            &self.grad_params,
+            &self.structs,
+        )?;
 
         Ok(HirProgram { items: hir_items })
     }

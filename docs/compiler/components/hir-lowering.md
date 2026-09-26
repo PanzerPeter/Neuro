@@ -85,14 +85,16 @@ arguments. A function value whose target a branch or a loop decides is refused.
 A `@grad` method is derived the same way. Its derivative is a method of the same type,
 `__<m>__rev`, added to the `impl` that declares it so it takes the receiver as the primal does,
 and its struct is `GradsOf_<Type>__<m>`. The receiver is a constant: a field of it is read into
-the derivative (a number by value, a tensor as a copy) and never differentiated.
+the derivative (a number by value, a tensor as a copy) and never differentiated, except a tensor
+its `wrt:` names by path. That one is copied once at the top of the derivative, every read of
+it is that copy, and the copy's gradient goes in the struct under a name built from the path.
 
 `.backward()` is lowered here too, and never reaches a backend. A block's `loss.backward()`
 statement is paired with the `val loss = f(...)` lowered earlier in the same block: that
 declaration becomes a call of `__<f>__rev` (or of the receiver's `__<m>__rev` for a method
 call) whose loss is unpacked into `loss`, and the statement
-becomes one private slot write per differentiated argument, moving that argument's gradient out of
-the returned struct. The derivative therefore runs where the call ran, and a call with no
+becomes one private slot write per differentiated argument or `wrt:` field of the receiver,
+moving that gradient out of the returned struct. The derivative therefore runs where the call ran, and a call with no
 `.backward()` stays the plain function. `.grad()` and `.zero_grad()` lower as tensor builtins.
 
 This is the one place lowering reports a user error with a location. The transform owns its rule

@@ -340,3 +340,50 @@ fn a_backward_in_another_block_than_the_method_call_is_refused() {
         "got {errors:?}"
     );
 }
+
+const SELECTIVE: &str = r#"
+struct Net { export w: Tensor<f32, [2]> }
+impl Net {
+    @grad(wrt: [self.w, k])
+    func loss(&mut self, k: &mut Tensor<f32, [2]>, f: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+        Tensor::scalar(self.w.sum() + k.sum() + f.sum())
+    }
+}
+"#;
+
+fn selective_errors(body: &str) -> Vec<TypeError> {
+    semantic_errors(&format!(
+        "{SELECTIVE}\nfunc main() -> i32 {{\n    mut net = Net {{ w: [1.0, 2.0] }}\n    mut k: Tensor<f32, [2]> = [1.0, 2.0]\n    mut f: Tensor<f32, [2]> = [1.0, 2.0]\n    val l = net.loss(&mut k, &mut f)\n{body}\n    return 0\n}}\n"
+    ))
+}
+
+/// A `wrt:` path reaching through the receiver makes `.backward()` write through it, so
+/// the receiver is held like a differentiated argument.
+#[test]
+fn a_receiver_a_wrt_path_reaches_through_is_borrowed_until_the_backward() {
+    let errors = selective_errors("    val r = &net\n    l.backward()");
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [TypeError::CannotBorrowWhileMutablyBorrowed { .. }]
+        ),
+        "got {errors:?}"
+    );
+    let errors = selective_errors("    l.backward()\n    val g = net.w.grad()\n    val r = &k");
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+/// What `wrt:` leaves out is a constant: its borrow ends at the call, even a `&mut` one.
+#[test]
+fn an_argument_wrt_leaves_out_is_not_held() {
+    let errors = selective_errors("    val r = &f\n    l.backward()");
+    assert!(errors.is_empty(), "got {errors:?}");
+    let errors = selective_errors("    val r = &k\n    l.backward()");
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [TypeError::CannotBorrowWhileMutablyBorrowed { .. }]
+        ),
+        "got {errors:?}"
+    );
+}

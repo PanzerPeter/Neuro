@@ -342,6 +342,34 @@ fn test_parse_function_with_multi_arg_attribute() {
 }
 
 #[test]
+fn test_parse_attribute_with_a_labelled_argument() {
+    use syntax_parsing::{Expr, Item};
+
+    let source = r#"
+        @grad(wrt: [w, self.layer.w, self.heads[1]], fast)
+        func loss() -> i32 { 0 }
+    "#;
+    let items = parse(source).expect("parse should succeed");
+    let func = match &items[0] {
+        Item::Function(f) => f,
+        _ => panic!("expected function"),
+    };
+    let attr = &func.attributes[0];
+    let positional: Vec<_> = attr.args.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(positional, vec!["fast"]);
+    let [wrt] = attr.named.as_slice() else {
+        panic!("expected one labelled argument, got {:?}", attr.named);
+    };
+    assert_eq!(wrt.label.name, "wrt");
+    let Expr::ArrayLiteral { elements, .. } = &wrt.value else {
+        panic!("expected a list, got {:?}", wrt.value);
+    };
+    assert!(matches!(elements[0], Expr::Identifier(_)));
+    assert!(matches!(elements[1], Expr::FieldAccess { .. }));
+    assert!(matches!(elements[2], Expr::Index { .. }));
+}
+
+#[test]
 fn test_parse_method_with_allow_attribute() {
     use syntax_parsing::Item;
 

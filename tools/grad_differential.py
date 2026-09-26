@@ -285,7 +285,10 @@ class TensorCase:
     doing the same, which is what the finite differences evaluate. `extra_arguments` are
     Neuro expressions the probe's call passes after the tensors and before the constants,
     such as a closure for a function-typed parameter; `name` is then a free function passing
-    the same, for the same reason.
+    the same, for the same reason. `fields` maps a tensor's index to the field path it
+    occupies in `receiver` (`"layer.w"`), for a method whose `wrt:` names that path: the
+    receiver expression moves the tensor `w<index>` in, the call does not pass it, and its
+    gradient is read back through the receiver.
 
     `path`, when set, names a second function in `source` with the primal's signature that
     computes only the path the primal executes at `point`. It exists for a point AT a kink,
@@ -308,6 +311,7 @@ class TensorCase:
         callee=None,
         receiver=None,
         extra_arguments=(),
+        fields=(),
     ):
         self.name = name
         self.source = source
@@ -319,6 +323,7 @@ class TensorCase:
         self.callee = callee or name
         self.receiver = receiver
         self.extra_arguments = extra_arguments
+        self.fields = dict(fields)
 
     def split(self, point):
         """`point` cut into one run of elements per differentiated tensor."""
@@ -1087,6 +1092,92 @@ func method_receiver(w: &mut Tensor<f32, [3]>, scale: f32) -> Tensor<f32, []> {
         receiver=WEIGHTING,
     ),
     TensorCase(
+        # `wrt:` naming one parameter: the tensor it leaves out is a constant passed by
+        # value, and gets no gradient.
+        "selected_params",
+        """
+@grad(wrt: [b])
+func selective(b: &mut Tensor<f32, [2]>, frozen: Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
+    val p = b * &frozen
+    val q = &p * b
+    return Tensor::scalar(q.sum() * scale + frozen.sum())
+}
+
+func selected_params(b: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
+    selective(b, make_tensor_2(0.5, -1.0), scale)
+}
+""",
+        (2,),
+        (1.25, -0.5),
+        # scale * sum(b^2 * frozen) + sum(frozen), with frozen [0.5, -1].
+        lambda b0, b1, s: (2.0 * b0 * 0.5 * s, 2.0 * b1 * -1.0 * s),
+        constants=(2.0,),
+        callee="selective",
+        extra_arguments=("make_tensor_2(0.5, -1.0)",),
+    ),
+    TensorCase(
+        # `wrt:` field paths: a nested struct's tensor copied with
+        # `.clone()`, an array element read in place inside a branch, and a parameter. The
+        # array's other element is read too and stays a constant.
+        "selected_fields",
+        """
+struct Gauge {
+    export w: Tensor<f32, [2]>,
+    export gain: f32
+}
+
+struct Stack {
+    export gauge: Gauge,
+    export heads: [Tensor<f32, [2]>; 2]
+}
+
+impl Stack {
+    @grad(wrt: [self.gauge.w, self.heads[1], k])
+    func loss(&mut self, k: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
+        val w = self.gauge.w.clone()
+        val p = w * k
+        mut total = p.sum() * self.gauge.gain
+        if total > 0.0 {
+            total = total + self.heads[1][0] * self.heads[1][1]
+        }
+        return Tensor::scalar(total * scale + self.heads[0].sum() * self.heads[1][0])
+    }
+}
+
+func selected_fields(
+    w: &mut Tensor<f32, [2]>,
+    h: &mut Tensor<f32, [2]>,
+    k: &mut Tensor<f32, [2]>,
+    scale: f32
+) -> Tensor<f32, []> {
+    mut stack = Stack {
+        gauge: Gauge { w: w.clone(), gain: 1.5 },
+        heads: [make_tensor_2(0.5, -1.0), h.clone()]
+    }
+    stack.loss(k, scale)
+}
+""",
+        (2,),
+        (1.25, -0.5, 2.0, 0.75, 1.5, 0.5),
+        # scale * (1.5 * w.k + h0 * h1) - 0.5 * h0, inside the `total > 0` arm.
+        lambda w0, w1, h0, h1, k0, k1, s: (
+            1.5 * s * k0,
+            1.5 * s * k1,
+            s * h1 - 0.5,
+            s * h0,
+            1.5 * s * w0,
+            1.5 * s * w1,
+        ),
+        constants=(2.0,),
+        more_shapes=((2,), (2,)),
+        callee="loss",
+        receiver=(
+            "Stack { gauge: Gauge { w: w0, gain: 1.5 }, "
+            "heads: [make_tensor_2(0.5, -1.0), w1] }"
+        ),
+        fields={0: "gauge.w", 1: "heads[1]"},
+    ),
+    TensorCase(
         # Calls through function values, each target known at compile time: a closure
         # capturing a differentiated value, a composition, a pipeline into a closure, a
         # helper taking a function (given a closure, then a composition whose second stage
@@ -1359,20 +1450,24 @@ def probe_source(case):
         count = math.prod(shape)
         elements = ", ".join(f"a{start + k}" for k in range(count))
         lines.append(f"    mut w{index} = {constructor_name(shape)}({elements})")
-        arguments.append(f"&mut w{index}")
+        if index not in case.fields:
+            arguments.append(f"&mut w{index}")
         start += count
     arguments += list(case.extra_arguments)
     arguments += [f"c{k}" for k in range(len(case.constants))]
     callee = case.callee
     if case.receiver:
-        lines.append(f"    val receiver = {case.receiver}")
+        # A receiver holding a differentiated field is borrowed `&mut` by the call.
+        binding = "mut" if case.fields else "val"
+        lines.append(f"    {binding} receiver = {case.receiver}")
         callee = f"receiver.{callee}"
     lines.append(f"    val loss = {callee}({', '.join(arguments)})")
     lines.append("    loss.backward()")
     lines.append(f"    if i == {PROBE_LOSS} {{ return loss.sum() as f64 }}")
     flat = 0
     for index, shape in enumerate(case.shapes):
-        lines.append(f"    val g{index} = w{index}.grad()")
+        source = f"receiver.{case.fields[index]}" if index in case.fields else f"w{index}"
+        lines.append(f"    val g{index} = {source}.grad()")
         if not shape:
             lines.append(f"    if i == {flat} {{ return g{index}.sum() as f64 }}")
             flat += 1

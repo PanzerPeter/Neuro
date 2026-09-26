@@ -96,16 +96,28 @@ pub struct FunctionDef {
     pub span: Span,
 }
 
-/// A single `@name(arg1, arg2)` attribute attached to a function or method.
+/// A single `@name(arg1, arg2, label: value)` attribute attached to a function or method.
 ///
 /// The semantics of an attribute are interpreted by later passes (e.g. the
 /// `@allow(prefer_loop_over_while_true)` lint suppression in semantic analysis).
 /// Unknown attributes are accepted by the parser to keep the surface forward
-/// compatible with future passes such as `@grad`, `@gpu`, and `@no_prelude`.
+/// compatible with future passes such as `@gpu` and `@no_prelude`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     pub name: Identifier,
+    /// The bare-identifier arguments, `@derive(Copy, Clone)`.
     pub args: Vec<Identifier>,
+    /// The labelled arguments, `@grad(wrt: [w, self.head])`, in source order.
+    pub named: Vec<AttributeNamedArg>,
+    pub span: Span,
+}
+
+/// A `label: value` attribute argument. The value is an ordinary expression; which
+/// shapes of it mean anything is the pass reading the attribute's rule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttributeNamedArg {
+    pub label: Identifier,
+    pub value: Expr,
     pub span: Span,
 }
 

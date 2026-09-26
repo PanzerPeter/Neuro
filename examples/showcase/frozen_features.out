@@ -1,0 +1,5 @@
+head after 400 steps: w = [2.02, -0.97], b = 0.46
+  10 steps: loss  0.40525
+  40 steps: loss  0.00605
+ 400 steps: loss  0.00016
+2 of 2 longer budgets lowered the loss

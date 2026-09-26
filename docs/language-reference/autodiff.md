@@ -68,7 +68,8 @@ call whose result never meets a `.backward()` runs no derivative at all.
   written after the call has returned, so between the call and its `.backward()` nothing else
   may read, borrow, move, assign or update `w`. The `.backward()` ends those borrows, which is
   what lets the update line use `w` again. Each differentiated argument must therefore be
-  `&mut name` or a `&mut` binding passed on. A call with no `.backward()` borrows only for the
+  `&mut name` or a `&mut` binding passed on. When a method's `wrt:` names one of its receiver's
+  fields, the receiver is held the same way. A call with no `.backward()` borrows only for the
   call, like any other.
 - **`.grad()`** borrows the gradient: `w.grad()` is a `&Tensor<T, S>` shaped like `w`, and no
   copy is made. Reading a slot that no `.backward()` has filled, or one emptied since, panics
@@ -87,24 +88,63 @@ A `@grad` function:
 
 - returns its loss as a rank-0 `Tensor<f32, []>`. A bare `f32` is `Copy` and has no gradient
   to carry, and the reverse pass starts from a loss of that type with a seed of `1.0`;
-- differentiates **every** tensor parameter it takes, so each one must be borrowed
+- differentiates **every** tensor parameter it takes, unless a [`wrt:`](#choosing-what-is-differentiated-wrt)
+  list says otherwise. Each differentiated parameter must be borrowed
   `&mut Tensor<f32 | f64, [...]>` with literal extents, or shape parameters of a generic
   function. The borrow is mutable because `.backward()` writes the gradient into the caller's
   tensor;
-- may take other parameters of any type. They are constants and have no gradient;
-- is a free function or a method (see [Methods](#methods)), with `@grad` written without
-  arguments. A generic function is differentiated once per instance the program uses, at that
-  instance's concrete shapes.
+- may take other parameters of any type, passed however it likes. They are constants and have
+  no gradient;
+- is a free function or a method (see [Methods](#methods)). A generic function is
+  differentiated once per instance the program uses, at that instance's concrete shapes.
 
 Breaking any of these rules is a type error at the offending parameter or return type.
+
+## Choosing what is differentiated: `wrt:`
+
+`@grad(wrt: [...])` lists what the derivative is taken with respect to. Everything left out is
+a constant: it has no gradient, `.backward()` leaves its slot alone, and it may be passed by
+value or by `&`, since nothing is written back to it. `@grad(wrt: [w, b])` over
+`(w: &mut ..., b: &mut ..., data: &Tensor<...>)` differentiates `w` and `b` and reads `data`.
+
+An entry is either a parameter's name or, on a method, a path from `self` to a tensor: through
+fields (`self.head.w`) and array elements at a literal position (`self.heads[1]`). A path may
+pass only through **exported** fields. Naming a private one would tie the annotation to a
+layout the type does not promise. A method whose `wrt:` names a path must take `&mut self`,
+because `.backward()` writes that field's gradient slot, and the receiver stays mutably
+borrowed from the call to its `.backward()`. From
+[`examples/showcase/frozen_features.nr`](../../examples/showcase/frozen_features.nr), where only
+the head of a model learns:
+
+```neuro
+    @grad(wrt: [self.head.w, self.head.b])
+    func loss(&mut self, x: &Tensor<f32, [4, 2]>, y: &Tensor<f32, [4, 1]>) -> Tensor<f32, []> {
+        val features = self.features.clone()
+        val hidden = x @ features
+        val w = self.head.w.clone()
+        val out = hidden @ w
+        val shifted = out + self.head.b.clone()
+        val residual = shifted - y
+        val squares = &residual * &residual
+        return Tensor::scalar(squares.mean())
+    }
+```
+
+After `loss.backward()`, `model.head.w.grad()` and `model.head.b.grad()` hold the gradients,
+and `model.features` has none. Every read of a listed field, in a branch, a loop or a function
+the body calls, adds to that field's one gradient.
+
+A `wrt:` entry that is not a parameter, is not a tensor, is listed twice, reaches through a
+private field, indexes past an array's end, or names `self` in a function without a receiver
+is a type error at that entry, and so is an empty list.
 
 ## Methods
 
 `@grad` on a method differentiates the method's tensor parameters, under the same rules as a
-function's. The receiver is a **constant**: the body may read its fields, and they steer the
-gradient without receiving one. A method's loss runs its derivative through `.backward()`
-exactly as a function's does, and only the differentiated arguments stay borrowed until then;
-the receiver is borrowed for the call alone.
+function's. Without a `wrt:` path the receiver is a **constant**: the body may read its fields,
+and they steer the gradient without receiving one. A method's loss runs its derivative through
+`.backward()` exactly as a function's does, and only the differentiated arguments stay borrowed
+until then; a constant receiver is borrowed for the call alone.
 
 ```neuro
 struct Penalty {
@@ -140,9 +180,11 @@ where an ordinary method of the same type trains it with `self.loss(&mut w, &mut
   after the call returns, which a consumed receiver could not hold, so every `@grad` method keeps
   its receiver borrowed.
 - The body may read a field of the receiver, or of a struct parameter, that is a number, a
-  `bool`, a `char` or a tensor, through any chain of struct fields (`self.penalty.strength`). A
-  tensor field is read the ways a borrowed receiver allows: its elements, and reductions such as
-  `.sum()`. Any other field is refused.
+  `bool`, a `char` or a tensor, through any chain of struct fields and literal array positions
+  (`self.penalty.strength`, `self.heads[1]`). A tensor field is read the ways a borrowed
+  receiver allows: its elements, reductions such as `.sum()`, and `.clone()`, which is how it
+  becomes an operand of `@` or `*`. Any other field, and an array element at a position
+  computed at run time, is refused.
 - `@grad` is not yet accepted on an associated function (one without `self`), on a method of a
   trait `impl`, or on a method of a generic `impl`. A `@grad` body still cannot call a method.
 
@@ -163,6 +205,7 @@ expression. Its values may use:
 | `.t()`, `.permute(...)`, `.reshape(...)`, `.flatten(...)` | the adjoint put back in the receiver's shape and axis order |
 | `einsum(...)` | each operand's adjoint is the contraction of the result's adjoint with the other operands |
 | `as` between integer and float types | the adjoint converted back; zero through an integer |
+| `.clone()` of a tensor | the copy's adjoint goes to the original |
 | `Tensor::zeros()`, `ones()`, `identity()`, literals | constants |
 | comparisons, `&&`, `||`, `!`, and integer arithmetic | none: they decide which path runs, and carry no gradient |
 

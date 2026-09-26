@@ -4,8 +4,8 @@ use shared_types::Identifier;
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 use ast_types::{
-    Attribute, ConstDef, GenericParam, GenericParamKind, Item, MethodDef, ModuleDef, NewtypeDef,
-    TraitBound, TraitMethod, Type,
+    Attribute, AttributeNamedArg, ConstDef, GenericParam, GenericParamKind, Item, MethodDef,
+    ModuleDef, NewtypeDef, TraitBound, TraitMethod, Type,
 };
 
 use super::type_aliases::{expand_type_aliases, TypeAliasDecl};
@@ -227,26 +227,14 @@ impl Parser {
         Ok(attributes)
     }
 
-    /// Parse a single `@name` or `@name(arg, ...)` attribute. Assumes the
+    /// Parse a single `@name` or `@name(arg, label: value, ...)` attribute. Assumes the
     /// current token is `@`.
     pub(super) fn parse_attribute(&mut self) -> ParseResult<Attribute> {
         let at = self.consume(TokenKind::At, "'@'")?;
-
-        let name_token = self.consume(TokenKind::Identifier(String::new()), "attribute name")?;
-        let name = if let TokenKind::Identifier(n) = name_token.kind {
-            Identifier {
-                name: n,
-                span: name_token.span,
-            }
-        } else {
-            return Err(ParseError::UnexpectedToken {
-                found: name_token.kind,
-                expected: "attribute name".to_string(),
-                span: name_token.span,
-            });
-        };
+        let name = self.consume_identifier("attribute name")?;
 
         let mut args: Vec<Identifier> = Vec::new();
+        let mut named: Vec<AttributeNamedArg> = Vec::new();
         let mut end_span = name.span;
 
         if self.check(&TokenKind::LeftParen) {
@@ -255,21 +243,26 @@ impl Parser {
 
             if !self.check(&TokenKind::RightParen) {
                 loop {
-                    let arg_token =
-                        self.consume(TokenKind::Identifier(String::new()), "attribute argument")?;
-                    let arg = if let TokenKind::Identifier(n) = arg_token.kind {
-                        Identifier {
-                            name: n,
-                            span: arg_token.span,
-                        }
-                    } else {
-                        return Err(ParseError::UnexpectedToken {
-                            found: arg_token.kind,
-                            expected: "attribute argument".to_string(),
-                            span: arg_token.span,
+                    // An identifier followed by `:` is a label, as in a call's argument
+                    // list; a bare identifier is a positional argument.
+                    let labelled = matches!(
+                        self.tokens.get(self.current + 1).map(|t| &t.kind),
+                        Some(TokenKind::Colon)
+                    );
+                    let arg = self.consume_identifier("attribute argument")?;
+                    if labelled {
+                        self.consume(TokenKind::Colon, "':'")?;
+                        self.skip_newlines();
+                        let value = self.parse_expr(Precedence::Lowest)?;
+                        let span = arg.span.merge(value.span());
+                        named.push(AttributeNamedArg {
+                            label: arg,
+                            value,
+                            span,
                         });
-                    };
-                    args.push(arg);
+                    } else {
+                        args.push(arg);
+                    }
                     self.skip_newlines();
                     if !self.check(&TokenKind::Comma) {
                         break;
@@ -286,6 +279,7 @@ impl Parser {
         Ok(Attribute {
             name,
             args,
+            named,
             span: at.span.merge(end_span),
         })
     }

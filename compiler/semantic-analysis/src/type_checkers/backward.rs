@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use ast_types::{Expr, Stmt};
 use shared_types::Span;
 
+use super::grad::GradSelection;
 use super::statements::borrow_target_of;
 use super::TypeChecker;
 use crate::errors::TypeError;
@@ -26,12 +27,6 @@ use crate::types::Type;
 pub(crate) const BACKWARD_METHOD: &str = "backward";
 pub(crate) const GRAD_METHOD: &str = "grad";
 pub(crate) const ZERO_GRAD_METHOD: &str = "zero_grad";
-
-/// Whether a parameter of type `ty` is differentiated: a mutably borrowed tensor, which
-/// the signature rules already require of every tensor parameter.
-fn is_differentiated(ty: &Type) -> bool {
-    matches!(ty, Type::Reference { inner, mutable: true } if matches!(**inner, Type::Tensor { .. }))
-}
 
 fn peel_parens(mut expr: &Expr) -> &Expr {
     while let Expr::Paren(inner, _) = expr {
@@ -164,13 +159,13 @@ pub(crate) fn gradient_view_root(expr: &Expr, ty: &Type) -> Option<String> {
 }
 
 impl TypeChecker {
-    /// Make `holder`, a `val` just bound to `init`, hold the `&mut` borrows of the `@grad`
-    /// call `init` is, when it is one and a `.backward()` on `holder` follows. A method's
-    /// receiver is a constant when nothing selects it with `wrt:`, so it is borrowed for
-    /// the call alone, like any other argument that is not differentiated. Each
-    /// differentiated argument has to be a place the borrow can be held on: `&mut name`,
-    /// or a `&mut` binding passed on. Anything else leaves the loss unable to run a
-    /// `.backward()`, which reports it there.
+    /// Make `holder`, a `val` just bound to `init`, hold the borrows of the `@grad` call
+    /// `init` is, when it is one and a `.backward()` on `holder` follows: each argument the
+    /// call differentiates, and a method's receiver when a `wrt:` path reaches through it.
+    /// Anything not differentiated is a constant, borrowed for the call alone. Each held
+    /// argument has to be a place the borrow can be held on: `&mut name`, or a `&mut`
+    /// binding passed on. Anything else leaves the loss unable to run a `.backward()`,
+    /// which reports it there.
     pub(crate) fn hold_grad_call_borrows(&mut self, holder: &str, init: &Expr) {
         if !self.backward_losses.contains(holder) {
             return;
@@ -178,24 +173,30 @@ impl TypeChecker {
         let Expr::Call { func, args, .. } = peel_parens(init) else {
             return;
         };
-        let Some(params) = self.grad_call_params(func) else {
+        let Some(selection) = self.grad_call_selection(func) else {
             return;
         };
 
+        // `callee_key` resolves a method only through a receiver rooted at a binding, so a
+        // selected receiver always has a root to hold.
+        let receiver = match func.as_ref() {
+            Expr::FieldAccess { object, .. } if selection.receiver => Self::place_root_name(object),
+            _ => None,
+        };
+        if let Some(root) = receiver {
+            self.hold_place(holder, &root);
+        }
         let mut state = GradLoss::Pending;
-        for (position, (arg, param)) in args.iter().zip(&params).enumerate() {
-            if !is_differentiated(param) {
-                continue;
-            }
+        for (position, (arg, _)) in args
+            .iter()
+            .zip(&selection.params)
+            .enumerate()
+            .filter(|(_, (_, selected))| **selected)
+        {
             match borrow_target_of(arg) {
                 Some((place, true)) => self.symbols.attach_borrow(holder, &place, true),
                 _ => match peel_parens(arg) {
-                    Expr::Identifier(binding)
-                        if matches!(
-                            self.symbols.lookup(&binding.name).map(|info| &info.ty),
-                            Some(Type::Reference { mutable: true, .. })
-                        ) =>
-                    {
+                    Expr::Identifier(binding) if self.is_mut_binding(&binding.name) => {
                         self.symbols.hold_reborrow(holder, &binding.name)
                     }
                     _ if state == GradLoss::Pending => state = GradLoss::Untracked(position),
@@ -206,37 +207,36 @@ impl TypeChecker {
         self.symbols.set_grad_loss(holder, state);
     }
 
-    /// The declared parameters of the `@grad` function or method `func` calls, the
-    /// receiver excluded, or `None` when `func` names no derivative. A method is known
-    /// only through its receiver's static type, so a call through a trait object is none.
-    fn grad_call_params(&self, func: &Expr) -> Option<Vec<Type>> {
-        match func {
-            Expr::Identifier(callee) => {
-                // A local of function type named like the function shadows it, and a call
-                // through a function value runs no derivative.
-                if !self.grad_functions.contains(&callee.name)
-                    || self.symbols.lookup(&callee.name).is_some()
-                {
-                    return None;
-                }
-                match self.functions.get(&callee.name) {
-                    Some(Type::Function { params, .. }) => Some(params.clone()),
-                    _ => Some(self.generic_funcs.get(&callee.name)?.params.clone()),
-                }
-            }
-            Expr::FieldAccess { .. } => {
-                let key = self.callee_key(func)?;
-                if !self.grad_functions.contains(&key) {
-                    return None;
-                }
-                // A method's registered signature carries its receiver first.
-                match self.functions.get(&key)? {
-                    Type::Function { params, .. } => params.get(1..).map(<[Type]>::to_vec),
-                    _ => None,
-                }
-            }
-            _ => None,
+    fn is_mut_binding(&self, name: &str) -> bool {
+        matches!(
+            self.symbols.lookup(name).map(|info| &info.ty),
+            Some(Type::Reference { mutable: true, .. })
+        )
+    }
+
+    /// Hold `root` exclusively for `holder`: through the binding when `root` is itself a
+    /// `&mut`, else as a borrow of the place.
+    fn hold_place(&mut self, holder: &str, root: &str) {
+        if self.is_mut_binding(root) {
+            self.symbols.hold_reborrow(holder, root);
+        } else {
+            self.symbols.attach_borrow(holder, root, true);
         }
+    }
+
+    /// What the `@grad` function or method `func` calls differentiates, or `None` when
+    /// `func` names no derivative. A method is known only through its receiver's static
+    /// type, so a call through a trait object is none.
+    fn grad_call_selection(&self, func: &Expr) -> Option<GradSelection> {
+        let key = match func {
+            // A local of function type named like the function shadows it, and a call
+            // through a function value runs no derivative.
+            Expr::Identifier(callee) if self.symbols.lookup(&callee.name).is_some() => return None,
+            Expr::Identifier(callee) => callee.name.clone(),
+            Expr::FieldAccess { .. } => self.callee_key(func)?,
+            _ => return None,
+        };
+        self.grad_functions.get(&key).cloned()
     }
 
     /// Check `object.backward()`, whose receiver type-checked as a tensor, and end the
@@ -268,6 +268,7 @@ impl TypeChecker {
                 "cannot run for '{name}': argument {} of the `@grad` call that produced it is neither `&mut name` nor a `&mut` binding, so its borrow cannot be held until here",
                 position + 1
             ),
+
             Some(GradLoss::Done) => format!(
                 "already ran for '{name}'; the result of a `@grad` call is backpropagated once"
             ),

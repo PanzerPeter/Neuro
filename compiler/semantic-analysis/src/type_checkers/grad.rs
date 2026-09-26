@@ -6,13 +6,18 @@
 // signature is what is checked here; which operations the body may use is the transform's
 // own rule set, and the transform reports a construct it cannot differentiate itself.
 //
-// Without `wrt:` (a later item) every tensor parameter is differentiated, so every tensor
-// parameter is held to the differentiated-parameter rule: borrowed `&mut`, because the
-// materialization layer writes each one's gradient slot after the call returns. A method
-// follows the same rules over the parameters after its receiver, which is a constant.
+// `wrt: [...]` picks what is differentiated: a parameter by name, or
+// a tensor reached from a method's receiver through exported fields and literal array
+// positions, `self.encoder.w` or `self.heads[1]`. Without it every tensor parameter is
+// differentiated and a method's receiver is a constant. Whatever is differentiated is held
+// to one rule: `.backward()` writes its gradient slot after the call returns, so a
+// parameter is borrowed `&mut`, and a path through the receiver needs `&mut self`.
+// Everything else is a constant and may be passed however the function wants.
 
-use ast_types::{Attribute, FunctionDef, ImplDef, Item, MethodDef, Parameter, SelfParam};
-use shared_types::Span;
+use ast_types::{
+    Attribute, AttributeNamedArg, Expr, FunctionDef, ImplDef, Item, MethodDef, Parameter, SelfParam,
+};
+use shared_types::{Literal, Span};
 
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, Type};
@@ -25,6 +30,28 @@ const GRAD_ATTRIBUTE: &str = "grad";
 /// The generated bundle's name prefix. Duplicated in `hir-lowering`, which emits the
 /// struct; the two slices must agree, and a clash is caught here, where it has a span.
 const BUNDLE_PREFIX: &str = "GradsOf_";
+
+/// The one argument `@grad` takes today. `order:` is the higher-order derivatives item's.
+const WRT_LABEL: &str = "wrt";
+
+/// The receiver's name, the root of every field path a method's `wrt:` may list.
+const RECEIVER: &str = "self";
+
+/// Which of a `@grad` function's arguments its `.backward()` writes a gradient slot through,
+/// and so holds borrowed from the call to the `.backward()`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct GradSelection {
+    /// One flag per declared parameter, the receiver excluded.
+    pub(crate) params: Vec<bool>,
+    /// Whether a `wrt:` path reaches a tensor through the receiver.
+    pub(crate) receiver: bool,
+}
+
+/// The receiver a method's `wrt:` paths start from.
+struct Receiver<'a> {
+    type_name: &'a str,
+    self_param: Option<&'a SelfParam>,
+}
 
 fn grad_attribute(attributes: &[Attribute]) -> Option<&Attribute> {
     attributes
@@ -48,19 +75,24 @@ struct SignatureSite<'a> {
     generic: bool,
 }
 
-/// Why a tensor parameter cannot be differentiated, or `None` when it can.
-///
-/// A shape parameter is an extent every instance fixes, so a generic function's template
-/// may name one; only a dynamic `?` axis has no static shape to give a gradient buffer.
+/// Why a differentiated parameter cannot be differentiated, or `None` when it can.
 fn differentiated_param_problem(ty: &Type, generic: bool) -> Option<&'static str> {
     let Type::Reference {
         inner,
         mutable: true,
     } = ty
     else {
-        return Some("must be borrowed `&mut`, because every tensor parameter is differentiated and its gradient is written after the call returns");
+        return Some("must be borrowed `&mut`, because it is differentiated and its gradient is written after the call returns");
     };
-    let Type::Tensor { element, shape } = &**inner else {
+    differentiated_tensor_problem(inner, generic)
+}
+
+/// Why a tensor cannot be differentiated, or `None` when it can.
+///
+/// A shape parameter is an extent every instance fixes, so a generic function's template
+/// may name one; only a dynamic `?` axis has no static shape to give a gradient buffer.
+fn differentiated_tensor_problem(ty: &Type, generic: bool) -> Option<&'static str> {
+    let Type::Tensor { element, shape } = ty else {
         return None;
     };
     if !element.is_float() {
@@ -101,13 +133,9 @@ impl TypeChecker {
         let Some(attr) = grad_attribute(&func.attributes) else {
             return;
         };
-        if !attr.args.is_empty() {
-            self.record_error(TypeError::GradFormUnsupported {
-                form: "with arguments".to_string(),
-                span: attr.span,
-            });
+        let Some(wrt) = self.grad_wrt(attr) else {
             return;
-        }
+        };
         // A generic template is checked once, with its parameters abstract; the
         // derivative itself is derived per instance, where every extent is concrete.
         let generic = !func.generics.is_empty();
@@ -125,9 +153,6 @@ impl TypeChecker {
             (params, *ret)
         };
         let name = &func.name.name;
-        // Recorded even when the signature below is refused: the call sites then check
-        // against the intent, and the refusal is reported once, here.
-        self.grad_functions.insert(name.clone());
         let signature = SignatureSite {
             name,
             name_span: func.name.span,
@@ -135,7 +160,10 @@ impl TypeChecker {
             params: &func.params,
             generic,
         };
-        self.check_grad_signature(&signature, &params, &ret);
+        // Recorded even when the signature is refused: the call sites then check against
+        // the intent, and the refusal is reported once, here.
+        let selection = self.check_grad_signature(&signature, &params, &ret, wrt, None);
+        self.grad_functions.insert(name.clone(), selection);
 
         // `__f__rev` needs no such test: declared names may not contain `__` at all.
         let bundle = format!("{BUNDLE_PREFIX}{name}");
@@ -148,18 +176,18 @@ impl TypeChecker {
         }
     }
 
-    /// A `@grad` method. Without `wrt:` every tensor parameter is differentiated and the
-    /// receiver is a constant, so the signature rules are a free function's, applied to
-    /// the parameters after `self`. Its generated names carry the `Type__method` key,
-    /// whose `__` no declared name can contain, so they cannot clash with anything the
-    /// program declares.
+    /// A `@grad` method. Its signature rules are a free function's, applied to the
+    /// parameters after `self`, and its `wrt:` may also list tensors reached through the
+    /// receiver. Its generated names carry the `Type__method` key, whose `__` no declared
+    /// name can contain, so they cannot clash with anything the program declares.
     fn check_grad_method(&mut self, def: &ImplDef, method: &MethodDef) {
         let Some(attr) = grad_attribute(&method.attributes) else {
             return;
         };
-        let form = if !attr.args.is_empty() {
-            Some("with arguments")
-        } else if def.trait_name.is_some() {
+        let Some(wrt) = self.grad_wrt(attr) else {
+            return;
+        };
+        let form = if def.trait_name.is_some() {
             Some("on a method of a trait `impl`")
         } else if !def.generics.is_empty() || !def.type_args.is_empty() {
             Some("on a method of a generic `impl`")
@@ -189,12 +217,11 @@ impl TypeChecker {
         let Some(Type::Function { params, ret }) = self.functions.get(&key).cloned() else {
             return;
         };
-        self.grad_functions.insert(key);
 
         // A `wrt:` naming a field, or a `@model` receiver, writes gradient slots reachable
         // through the receiver after the call returns, and a receiver the call consumed
         // has nowhere to keep them. A constant receiver holds to the same form, so adding
-        // a `wrt:` later never changes which receivers are legal.
+        // a `wrt:` never changes which receivers are legal.
         if matches!(method.self_param, Some(SelfParam::Owned)) {
             self.record_error(TypeError::GradSignature {
                 function: name.clone(),
@@ -210,12 +237,60 @@ impl TypeChecker {
             params: &method.params,
             generic: false,
         };
-        self.check_grad_signature(&signature, params.get(1..).unwrap_or_default(), &ret);
+        let receiver = Receiver {
+            type_name,
+            self_param: method.self_param.as_ref(),
+        };
+        let selection = self.check_grad_signature(
+            &signature,
+            params.get(1..).unwrap_or_default(),
+            &ret,
+            wrt,
+            Some(&receiver),
+        );
+        self.grad_functions.insert(key, selection);
+    }
+
+    /// The `wrt:` argument of `attr`, `Some(None)` when it has none, or `None` when the
+    /// attribute takes an argument `@grad` does not, which is reported here.
+    fn grad_wrt<'a>(&mut self, attr: &'a Attribute) -> Option<Option<&'a AttributeNamedArg>> {
+        if let Some(arg) = attr.args.first() {
+            self.record_error(TypeError::GradFormUnsupported {
+                form: format!("with the bare argument '{}'", arg.name),
+                span: arg.span,
+            });
+            return None;
+        }
+        let mut wrt = None;
+        for arg in &attr.named {
+            let form = if arg.label.name != WRT_LABEL {
+                format!("with `{}:`", arg.label.name)
+            } else if wrt.is_some() {
+                "with `wrt:` given twice".to_string()
+            } else {
+                wrt = Some(arg);
+                continue;
+            };
+            self.record_error(TypeError::GradFormUnsupported {
+                form,
+                span: arg.label.span,
+            });
+            return None;
+        }
+        Some(wrt)
     }
 
     /// The rules every `@grad` signature obeys, whatever declares it: the loss is a
-    /// rank-0 `f32` tensor, and every tensor parameter is a differentiable `&mut` borrow.
-    fn check_grad_signature(&mut self, signature: &SignatureSite<'_>, params: &[Type], ret: &Type) {
+    /// rank-0 `f32` tensor, and everything differentiated is a differentiable tensor that
+    /// `.backward()` can write a gradient slot through. Returns what is differentiated.
+    fn check_grad_signature(
+        &mut self,
+        signature: &SignatureSite<'_>,
+        params: &[Type],
+        ret: &Type,
+        wrt: Option<&AttributeNamedArg>,
+        receiver: Option<&Receiver<'_>>,
+    ) -> GradSelection {
         let name = signature.name;
         if !is_scalar_loss(ret) {
             self.record_error(TypeError::GradSignature {
@@ -225,12 +300,27 @@ impl TypeChecker {
             });
         }
 
-        let mut differentiated = 0usize;
-        for (param, ty) in signature.params.iter().zip(params.iter()) {
-            if !matches!(ty.referent(), Type::Tensor { .. }) {
-                continue;
-            }
-            differentiated += 1;
+        let selection = match wrt {
+            None => GradSelection {
+                params: params
+                    .iter()
+                    .map(|ty| matches!(ty.referent(), Type::Tensor { .. }))
+                    .collect(),
+                receiver: false,
+            },
+            Some(wrt) => match self.wrt_selection(signature, params, wrt, receiver) {
+                Some(selection) => selection,
+                None => return GradSelection::default(),
+            },
+        };
+
+        for ((param, ty), _) in signature
+            .params
+            .iter()
+            .zip(params.iter())
+            .zip(&selection.params)
+            .filter(|(_, selected)| **selected)
+        {
             if let Some(problem) = differentiated_param_problem(ty, signature.generic) {
                 self.record_error(TypeError::GradSignature {
                     function: name.to_string(),
@@ -239,12 +329,221 @@ impl TypeChecker {
                 });
             }
         }
-        if differentiated == 0 {
+        if wrt.is_none() && !selection.params.contains(&true) {
             self.record_error(TypeError::GradSignature {
                 function: name.to_string(),
                 problem: "has no tensor parameter to differentiate with respect to".to_string(),
                 span: signature.name_span,
             });
         }
+        selection
+    }
+
+    /// What a `wrt:` list selects, or `None` when it is not a list at all. Every entry it
+    /// cannot select is reported with its own span.
+    fn wrt_selection(
+        &mut self,
+        signature: &SignatureSite<'_>,
+        params: &[Type],
+        wrt: &AttributeNamedArg,
+        receiver: Option<&Receiver<'_>>,
+    ) -> Option<GradSelection> {
+        let name = signature.name;
+        let report = |this: &mut Self, problem: String, span: Span| {
+            this.record_error(TypeError::GradSignature {
+                function: name.to_string(),
+                problem,
+                span,
+            });
+        };
+        let Expr::ArrayLiteral { elements, .. } = &wrt.value else {
+            report(
+                self,
+                "gives `wrt:` something other than a list; write `wrt: [w, self.field]`"
+                    .to_string(),
+                wrt.value.span(),
+            );
+            return None;
+        };
+        if elements.is_empty() {
+            report(
+                self,
+                "lists nothing in `wrt:`, so there is nothing to differentiate".to_string(),
+                wrt.value.span(),
+            );
+            return None;
+        }
+
+        let mut selection = GradSelection {
+            params: vec![false; params.len()],
+            receiver: false,
+        };
+        let mut paths: Vec<String> = Vec::new();
+        for entry in elements {
+            let span = entry.span();
+            if let Expr::Identifier(ident) = entry {
+                if ident.name != RECEIVER {
+                    let problem = self.select_param(signature, params, &ident.name, &mut selection);
+                    if let Some(problem) = problem {
+                        report(self, problem, span);
+                    }
+                    continue;
+                }
+            }
+            let Some(path) = field_path_text(entry) else {
+                report(self, "lists an entry in `wrt:` that is neither a parameter name nor a field path rooted at `self`".to_string(), span);
+                continue;
+            };
+            let problem = match receiver {
+                None => Some(format!("lists '{path}' in `wrt:`, but only a method's `wrt:` may name a field of `self`")),
+                Some(receiver) => self.select_field(&path, entry, receiver, signature.generic),
+            };
+            if let Some(problem) = problem {
+                report(self, problem, span);
+            } else if paths.contains(&path) {
+                report(self, format!("lists '{path}' in `wrt:` twice"), span);
+            } else {
+                paths.push(path);
+                selection.receiver = true;
+            }
+        }
+        Some(selection)
+    }
+
+    /// Select the parameter `name`, or say why it cannot be.
+    fn select_param(
+        &self,
+        signature: &SignatureSite<'_>,
+        params: &[Type],
+        name: &str,
+        selection: &mut GradSelection,
+    ) -> Option<String> {
+        let Some(position) = signature.params.iter().position(|p| p.name.name == name) else {
+            return Some(format!(
+                "lists '{name}' in `wrt:`, which is not one of its parameters"
+            ));
+        };
+        if selection.params[position] {
+            return Some(format!("lists '{name}' in `wrt:` twice"));
+        }
+        let ty = params.get(position)?;
+        if !matches!(ty.referent(), Type::Tensor { .. }) {
+            return Some(format!(
+                "lists '{name}' in `wrt:`, which is a '{ty}'; only a tensor has a gradient"
+            ));
+        }
+        selection.params[position] = true;
+        None
+    }
+
+    /// Why the field path `entry` (rendered as `path`) cannot be differentiated through
+    /// `receiver`, or `None` when it can.
+    fn select_field(
+        &self,
+        path: &str,
+        entry: &Expr,
+        receiver: &Receiver<'_>,
+        generic: bool,
+    ) -> Option<String> {
+        let leaf = match self.field_path_type(entry, receiver.type_name) {
+            Ok(leaf) => leaf,
+            Err(problem) => return Some(format!("lists '{path}' in `wrt:`, which {problem}")),
+        };
+        if !matches!(leaf, Type::Tensor { .. }) {
+            return Some(format!(
+                "lists '{path}' in `wrt:`, which is a '{leaf}'; only a tensor has a gradient"
+            ));
+        }
+        if let Some(problem) = differentiated_tensor_problem(&leaf, generic) {
+            return Some(format!("lists '{path}' in `wrt:`, which {problem}"));
+        }
+        if !matches!(receiver.self_param, Some(SelfParam::RefMut)) {
+            return Some(format!("lists '{path}' in `wrt:`, reached through the receiver, so it must take `&mut self`: `.backward()` writes that field's gradient slot after the call returns"));
+        }
+        None
+    }
+
+    /// The type a `wrt:` field path reaches from a receiver of type `type_name`, or why it
+    /// reaches nothing. A private field is refused wherever the path is written, because
+    /// naming one would tie the annotation to a layout the type does not promise.
+    fn field_path_type(&self, path: &Expr, type_name: &str) -> Result<Type, String> {
+        match path {
+            Expr::Identifier(ident) if ident.name == RECEIVER => {
+                Ok(Type::Struct(type_name.to_string()))
+            }
+            Expr::FieldAccess { object, field, .. } => {
+                let object = self.field_path_type(object, type_name)?;
+                let Type::Struct(owner) = &object else {
+                    return Err(format!(
+                        "reads field '{}' of a '{object}', which has no fields",
+                        field.name
+                    ));
+                };
+                let Some((_, ty)) = self
+                    .struct_defs
+                    .get(owner)
+                    .and_then(|fields| fields.iter().find(|(name, _)| *name == field.name))
+                else {
+                    return Err(format!(
+                        "names a field '{}' that '{owner}' does not have",
+                        field.name
+                    ));
+                };
+                if self
+                    .private_fields
+                    .get(owner)
+                    .is_some_and(|private| private.contains(&field.name))
+                {
+                    return Err(format!("reaches through the private field '{owner}.{}'; `wrt:` may name only exported fields", field.name));
+                }
+                Ok(ty.clone())
+            }
+            Expr::Index { object, index, .. } => {
+                let object = self.field_path_type(object, type_name)?;
+                let Type::Array {
+                    element,
+                    size: ArrayLen::Fixed(len),
+                } = &object
+                else {
+                    return Err(format!(
+                        "indexes a '{object}', which is not a fixed-length array"
+                    ));
+                };
+                match literal_position(index) {
+                    Some(position) if position < *len => Ok((**element).clone()),
+                    Some(position) => {
+                        Err(format!("reads position {position} of an array of {len}"))
+                    }
+                    None => Err(
+                        "indexes an array at a position that is not an integer literal".to_string(),
+                    ),
+                }
+            }
+            _ => Err("is not a field path rooted at `self`".to_string()),
+        }
+    }
+}
+
+/// `entry` as a field path is written, `self.a.b[1]`, when it has that shape.
+fn field_path_text(entry: &Expr) -> Option<String> {
+    match entry {
+        Expr::Identifier(ident) if ident.name == RECEIVER => Some(ident.name.clone()),
+        Expr::FieldAccess { object, field, .. } => {
+            Some(format!("{}.{}", field_path_text(object)?, field.name))
+        }
+        Expr::Index { object, index, .. } => Some(format!(
+            "{}[{}]",
+            field_path_text(object)?,
+            literal_position(index)?
+        )),
+        _ => None,
+    }
+}
+
+/// The value of an integer literal array position.
+fn literal_position(index: &Expr) -> Option<usize> {
+    match index {
+        Expr::Literal(Literal::Integer(value, _), _) => usize::try_from(*value).ok(),
+        _ => None,
     }
 }

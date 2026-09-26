@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-09-26
+
+### Added
+
+- `@grad(wrt: [...])` picks what a derivative is taken with respect to. An entry is a
+  parameter's name, or on a method a path from `self` through exported fields and literal
+  array positions to a tensor (`self.head.w`, `self.heads[1]`). What the list leaves out is a
+  constant with no gradient and may be passed by value or by `&`; `.backward()` fills only the
+  listed slots, the receiver's fields included, and holds the receiver mutably borrowed until
+  it runs when a path goes through it.
+- A `wrt:` entry that selects nothing is a type error at the entry: an unknown or non-tensor
+  name, a duplicate, a private field, an index past the array's end, a `self` path in a
+  function or on a `&self` method, and an empty list.
+- Attributes take labelled arguments, `@name(label: expression)`, beside bare identifiers.
+- A `@grad` body may `.clone()` a tensor, which is how a tensor field becomes an operand of
+  `@` or `*`, and may read an element of a fixed-length array field at a literal position.
+- `examples/showcase/frozen_features.nr`: a model whose head is fine-tuned through a
+  `wrt:`-selected `@grad` method while its feature layer stays frozen.
+- `tools/grad_differential.py` gains two cases, checked against finite differences: one
+  selecting parameters, one selecting receiver fields.
+
+### Changed
+
+- `@grad(order: ...)` and any other argument are refused by name, as not supported yet.
+
 ## [3.10.0] - 2026-09-26
 
 ### Added

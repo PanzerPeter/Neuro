@@ -200,9 +200,12 @@ walkers.
   lifetimes are a distinct namespace and do not drive monomorphization. Both are validated and
   then erased: a reference type's identity does not depend on its lifetime. `EnumDef` has no
   `lifetimes` field at all; the parser rejects a lifetime parameter on an enum.
-- **Attributes.** `Attribute { name, args, span }` on `FunctionDef` / `MethodDef` / `StructDef`.
+- **Attributes.** `Attribute { name, args, named, span }` on `FunctionDef` / `MethodDef` /
+  `StructDef`: `args` are the bare identifiers (`@derive(Copy, Clone)`), `named` the
+  `AttributeNamedArg { label, value: Expr, span }` pairs (`@grad(wrt: [w, self.head.w])`). A
+  value is an ordinary expression; which shapes mean anything is the reading pass's rule.
   Unknown names are accepted so the surface stays forward-compatible; semantics are interpreted
-  by later passes (`@derive(Copy, Clone)`, `@allow(...)`, and eventually `@grad` / `@gpu`).
+  by later passes (`@derive`, `@allow(...)`, `@grad`, and eventually `@gpu`).
 - **Const generics.** `GenericParamKind` (`Type` / `Const`) on `GenericParam`, `ArraySize`
   (`Literal` / `Const`) on `Type::Array`, `TensorExtent` (`Literal` / `Param` / `Dynamic`) inside each
   `TensorDim` of `Type::Tensor.shape`, `GenericArg` (`Type` / `Const`) in `Type::Generic.args`,

@@ -35,8 +35,9 @@ trait method order, and module constants. Bodies then lower under a lexical scop
 loop-context stack.
 
 ### `@grad` and the derivative transform
-`autodiff/` lowers `@grad func f` to `f` plus a `GradsOf_f` struct (one owned field per `&mut
-Tensor` parameter, typed as that parameter's tensor) and `__f__rev(<f's params>) -> (loss,
+`autodiff/` lowers `@grad func f` to `f` plus a `GradsOf_f` struct (one owned field per
+differentiated parameter, typed as that parameter's tensor; `Wrt` is what the attribute selects:
+every `&mut Tensor` parameter without `wrt:`, else the listed names and `self` field paths) and `__f__rev(<f's params>) -> (loss,
 GradsOf_f)`, built from `f`'s already-lowered HIR by `derive_reverses`, which `lower_program` calls last,
 once every function, generic instances and lifted closures included, is lowered: a `@grad` body
 may call any of them. `lower_program` only records the names of the `@grad` functions as it
@@ -52,7 +53,15 @@ a free variable. The receiver is a constant: a field chain rooted in a struct th
 (`self`, a parameter, or the caller's value an inlined callee's parameter stands for;
 `rebase_place` renames the root) is read into an inactive entry, by value for a number, `bool`
 or `char`, and as a `.clone()` for a tensor (`field_copy`), since the primal can only read a
-tensor field in place and `&self.field` is not a place yet (BUG-033). Any other field is refused.
+tensor field in place and `&self.field` is not a place yet (BUG-033). A literal array position
+(`self.heads[1]`) is a step of the chain like a field; a computed one is refused. Any other field
+is refused. A `wrt:` field path is the exception to "constant": `derive_method_reverses` builds
+its place (`field_place`, typed from `Lowerer::structs`), `linearize` copies it once ahead of the
+body into an entry whose NAME seeds the activity set while the entry itself stays inactive, so
+the sweep leaves its adjoint for the bundle, and `field_copy` hands every read whose rebased place
+has that path (`receiver_path`) the same copy. Its bundle field is `self__<step>__...`
+(`field_key`), a name no declaration can spell. `x.clone()` of a tensor is `x` itself on the tape
+(`cloned_tensor`): tape values are never written after they are made.
 The generated items follow every other item. `tape.rs` flattens the body into one-operation entries over
 leaves and marks activity, keeping `if` as a `Branch` (one tape per arm) and `while` as a `Loop`
 (condition and body tapes). A call to a user function is INLINED into the tape: the callee's
@@ -102,13 +111,15 @@ value its arm owns outright or a copy (`store`), and a nested sweep works on a c
 `val loss = f(...)` already lowered into the SAME block (the checker guarantees it is there):
 the declaration becomes `val __backward_N = __f__rev(<same args>)` plus `val loss =
 __backward_N.0`, and the statement becomes one `(<arg>).__set_grad(__backward_N.1.<param>)` per
-`&mut Tensor` argument, re-evaluating the argument, which the checker restricted to `&mut name`
+differentiated argument, plus one `<receiver>.<path>.__set_grad(__backward_N.1.self__...)` per
+`wrt:` field path of a method, re-evaluating the argument or receiver, which the checker restricted to `&mut name`
 or a `&mut` binding and held borrowed until here. So the derivative runs where the call ran and
 a call with no `.backward()` stays the primal. A method call pairs the same way: `grad_key`
 reads the `Type__method` key off the receiver's struct type, and the call becomes
 `<receiver>.__method__rev(<same args>)`. `grad_params` maps each lowered `@grad` name or method
 key (concrete from `register_function` / `register_impl_methods`, instances from the
-monomorphization call site) to its parameter names, the bundle's field names. `.grad()` lowers as a builtin returning a
+monomorphization call site) to its `GradParams`: the parameter names, the bundle's field
+names, and its `Wrt` (`Wrt::of` reads the checked attribute). `.grad()` lowers as a builtin returning a
 `&Tensor<T, S>` like the receiver, `.zero_grad()` as a unit builtin; `reverse_name` /
 `bundle_name` are the one spelling of the generated names.
 

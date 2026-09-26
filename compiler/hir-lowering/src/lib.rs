@@ -242,8 +242,8 @@ struct Lowerer {
     /// two iterators never shadow each other.
     protocol_counter: usize,
     /// Lowered name of each `@grad` function, generic instances included → its parameter
-    /// names in order. A `.backward()` reads the gradient bundle's fields by these names.
-    grad_params: HashMap<String, Vec<String>>,
+    /// names in order and what it differentiates.
+    grad_params: HashMap<String, autodiff::GradParams>,
     /// The derivatives `.backward()` calls passing function values asked for, one per
     /// `@grad` function and distinct set of targets; derived once everything is lowered.
     grad_specializations: Vec<autodiff::Specialization>,

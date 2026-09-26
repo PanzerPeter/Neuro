@@ -264,9 +264,11 @@ it survives to reach another module), and on a `module` block (an inline module'
 only from the file declaring it), all through `ParseError::ExportNotAllowed`. Nothing here
 *enforces* visibility: the parser records what was written.
 
-`parse_attributes` collects `@name` / `@name(arg, ...)` ahead of every `func` (free and impl
-methods) and `struct`. Any attribute name is accepted, so future `@grad` / `@gpu` need no grammar
-churn; semantics live in semantic-analysis. An attribute preceding neither is rejected
+`parse_attributes` collects `@name` / `@name(arg, label: value, ...)` ahead of every `func`
+(free and impl methods) and `struct`. An identifier followed by `:` is a label and its value any
+expression (`parse_expr`), the same test a call's argument list uses; a bare identifier is a
+positional argument. Any attribute name is accepted, so a future `@gpu` needs no grammar churn;
+semantics live in semantic-analysis. An attribute preceding neither is rejected
 (`UnexpectedToken`).
 
 `parse_import` (`parser/item_imports.rs`) reads all five surface forms into one `Item::Import`: an

@@ -90,11 +90,14 @@ func test() -> i32 {
 - Forward references are supported
 
 A function marked `@grad` has its signature held to the rules the derivative needs: a rank-0
-`Tensor<f32, []>` return, every tensor parameter borrowed `&mut` with a float element and literal
-extents, and no attribute arguments. A `@grad` method must be an instance method of a
-non-generic inherent `impl` that borrows its receiver, and the same rules apply to the
-parameters after `self`; a `val` bound to its call pairs with `.backward()` exactly as a
-function's does, while the receiver is borrowed for the call only. The pass runs after every
+`Tensor<f32, []>` return, every differentiated parameter borrowed `&mut` with a float element
+and literal extents, and no attribute argument but `wrt:`. Without `wrt:` every tensor parameter
+is differentiated; with it, only the parameters it names and, on a method, the tensors it
+reaches from `self` through exported fields and literal array positions, which needs
+`&mut self`. A `@grad` method must be an instance method of a non-generic inherent `impl` that
+borrows its receiver, and the same rules apply to the parameters after `self`; a `val` bound to
+its call pairs with `.backward()` exactly as a function's does, holding what the call
+differentiates, the receiver included when a `wrt:` path goes through it. The pass runs after every
 signature is registered, in `type_checkers/grad.rs`. Which constructs a `@grad` body may use is
 not checked here: that rule set belongs to the transform in [HIR lowering](hir-lowering.md).
 

@@ -56,14 +56,20 @@ module per declaration kind beside it. `tests/` is split by subject.
   functions can name each other. `check_function` reads the signature back via
   `lookup_registered_signature` rather than resolving it twice.
 - **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
-  signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every tensor
-  parameter `&mut` over a float element with literal extents (`GradSignature`), a bare
-  attribute (`GradFormUnsupported`), and no declared struct named `GradsOf_<f>`
+  signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every
+  differentiated parameter `&mut` over a float element with literal extents (`GradSignature`),
+  no argument but one `wrt:` (`GradFormUnsupported`, `order:` included), and no declared struct named `GradsOf_<f>`
   (`GradGeneratedNameTaken`; `__<f>__rev` cannot clash, pass 0z reserves `__`). A `@grad`
   method (`check_grad_method`) must be an instance method of a non-generic inherent `impl`
   (trait impls, generic impls and associated functions are `GradFormUnsupported`) that borrows
   its receiver (`self` by value is `GradSignature`); the same signature rules then apply to the
-  parameters after `self`, and its `Type__method` key joins `grad_functions`. Its generated
+  parameters after `self`, and its `Type__method` key joins `grad_functions`. Without `wrt:`
+  every tensor parameter is differentiated. With it (`wrt_selection`), only what it lists: a
+  parameter by name (a tensor), or on a method a path from `self` through EXPORTED fields and
+  literal array positions to a float tensor with a static shape (`field_path_type`), which
+  requires `&mut self`; every other entry, a duplicate and an empty list are `GradSignature` at
+  the entry. `grad_functions` maps each key to its `GradSelection` (one flag per parameter, and
+  whether a path reaches through the receiver). Its generated
   names carry `__`, so they need no clash test. The bundle prefix is duplicated from `hir-lowering`, which emits it. Which constructs
   a `@grad` BODY may use is deliberately not checked here: the transform owns that rule set
   and reports it with a span itself. A generic function is checked once, on the template
@@ -77,10 +83,11 @@ from, AFTER that call returned, so those borrows must reach it. Before each func
 body is checked, `backward_losses` collects the names the body calls `.backward()` on (through
 every block a statement opens; a `.backward()` hidden in a block nested in some other expression
 is not found and is then refused rather than left unchecked). A `val` bound directly to a
-`grad_functions` call whose name is in that set holds each differentiated argument's borrow
-(a method call is resolved through `callee_key` on the receiver's static struct type and its
-parameters are read after the registered `self`; the receiver itself is a constant and is not
-held)
+`grad_functions` call whose name is in that set holds the borrow of each argument its
+`GradSelection` differentiates (a method call is resolved through `callee_key` on the receiver's
+static struct type and its parameters are read after the registered `self`; the receiver is held
+too, by its root binding, when a `wrt:` path reaches through it, and is otherwise a constant
+borrowed for the call alone)
 (`hold_grad_call_borrows`: `attach_borrow` promotes a `&mut name`, `hold_reborrow` takes a
 `&mut` binding passed on; any other argument shape marks the loss `GradLoss::Untracked`), exactly
 as a reference binding holds its borrow, so the read / borrow / move / assign rules freeze the

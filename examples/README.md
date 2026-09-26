@@ -110,6 +110,7 @@ One line each. The program's own header comment is the full description.
 - [`displaced_owners.nr`](showcase/displaced_owners.nr): a reassigned binding releasing the value it displaces, across a `Drop` type, a heap `string` and a `Vec`
 - [`enum_records.nr`](showcase/enum_records.nr): pattern matching over enums, structs, methods and arrays
 - [`field_report.nr`](showcase/field_report.nr): standard I/O driving a field report
+- [`frozen_features.nr`](showcase/frozen_features.nr): a model fine-tuned through a `@grad(wrt: [self.head.w, self.head.b])` method, so `.backward()` fills only the head's gradient slots and the feature layer stays a constant, each step inside a `pool`, three budgets compared in a `Vec` of `Copy` structs
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together, plus a non-`Copy` type argument and `Drop` across a generic boundary
 - [`gradient_loss.nr`](showcase/gradient_loss.nr): a least-squares fit over `@` and broadcasting trained by gradient descent, each step a `@grad` call, `.backward()`, a `w -= rate * w.grad()` update and `.zero_grad()` inside a `pool`, with progress collected in a `Vec` of `Copy` structs
 - [`grid_update.nr`](showcase/grid_update.nr): a heat grid whose every mutation names the storage it writes to: a field, a field of a field, a nested array element, a `Vec` element and a tensor coordinate

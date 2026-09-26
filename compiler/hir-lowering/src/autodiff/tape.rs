@@ -27,6 +27,7 @@ use neuro_hir::{
 use shared_types::{Literal, Span};
 
 use super::emit::tensor_parts;
+use super::{FieldPath, PathStep, WrtField, RECEIVER};
 use crate::LoweringError;
 
 /// The prefix of every name the tape generates. User names may not contain `__`, so no
@@ -217,6 +218,9 @@ pub(super) struct Tape {
     /// Every slot's name. A slot is reassigned after the forward pass (a loop's reverse
     /// pass rebuilds its carried values in place), so a loss held in one must be copied.
     pub(super) slots: HashSet<String>,
+    /// The copy of each `wrt:` field, in the order `linearize` was given them: the value
+    /// whose adjoint is that field's gradient.
+    pub(super) fields: Vec<Leaf>,
 }
 
 /// Every lowered function and lifted closure of the program by name: what a call inlines.
@@ -285,11 +289,16 @@ struct Callee<'f> {
 /// linearized in place, its parameters bound to the arguments' leaves. `bound` gives a
 /// function-typed parameter of `primal` the target a call site passed it; one it does not
 /// name has no known target, and a call through it is refused.
+///
+/// Each of `fields` is copied once, ahead of the body, and that copy seeds the activity
+/// set too: every read of the field, in a branch, a loop or an inlined callee, is that one
+/// value, so all of their adjoints meet in it.
 pub(super) fn linearize<'f>(
     primal: &'f HirFunction,
     differentiated: &[&str],
     functions: &'f Functions<'f>,
     bound: &HashMap<String, Leaf>,
+    fields: &[WrtField],
 ) -> Result<Tape, LoweringError> {
     // Every function-typed parameter is bound in `params`, so it takes precedence over a
     // top-level function of the same name, as it does in the primal.
@@ -318,14 +327,25 @@ pub(super) fn linearize<'f>(
         scopes: Vec::new(),
         active: differentiated.iter().map(|name| name.to_string()).collect(),
         slots: HashSet::new(),
+        wrt: Vec::with_capacity(fields.len()),
         next: 0,
     };
+    for field in fields {
+        let copy = linearizer.copy_of(field.place.clone());
+        // Active by name only: the entry itself stays inactive, so the reverse sweep leaves
+        // its adjoint in place for the bundle to take, as it does a parameter's.
+        if let Some(name) = copy.var_name() {
+            let _ = linearizer.active.insert(name.to_string());
+        }
+        linearizer.wrt.push((field.path.clone(), copy));
+    }
     let loss = linearizer.body_value(&primal.body, &primal.return_type)?;
     Ok(Tape {
         nodes: linearizer.nodes,
         active: linearizer.active,
         loss,
         slots: linearizer.slots,
+        fields: linearizer.wrt.into_iter().map(|(_, copy)| copy).collect(),
     })
 }
 
@@ -376,6 +396,8 @@ struct Linearizer<'f> {
     scopes: Vec<Scope>,
     active: HashSet<String>,
     slots: HashSet<String>,
+    /// The copy each `wrt:` field path is read through.
+    wrt: Vec<(FieldPath, Leaf)>,
     next: usize,
 }
 
@@ -943,6 +965,11 @@ impl<'f> Linearizer<'f> {
     }
 
     fn leaf(&mut self, expr: &HirExpr) -> Result<Leaf, LoweringError> {
+        // A tape value is never written after it is made (mutation is versioning), so a
+        // copy of one is the value itself. Through a field, the copy is the field's.
+        if let Some(receiver) = cloned_tensor(expr) {
+            return self.leaf(receiver);
+        }
         match &expr.kind {
             HirExprKind::Literal(_) if is_scalar(&expr.ty) => Ok(Leaf::Const(expr.clone())),
             HirExprKind::Variable(name) => {
@@ -994,6 +1021,16 @@ impl<'f> Linearizer<'f> {
                 Ok(self.push(&expr.ty, expr.span, Op::Constant(place)))
             }
             HirExprKind::FieldAccess { .. } if matches!(expr.ty, HirType::Tensor { .. }) => {
+                self.field_copy(expr)
+            }
+            HirExprKind::Index { object, .. } if is_array(&object.ty) => {
+                if is_copied_field(&expr.ty) {
+                    let place = self.rebase_place(expr)?;
+                    return Ok(self.push(&expr.ty, expr.span, Op::Constant(place)));
+                }
+                if !matches!(expr.ty, HirType::Tensor { .. }) {
+                    return Err(self.refuse(describe_expr(expr), expr.span));
+                }
                 self.field_copy(expr)
             }
             HirExprKind::Binary {
@@ -1142,6 +1179,17 @@ impl<'f> Linearizer<'f> {
     // `&self.field` is a place the checker and backends accept (BUG-033).
     fn field_copy(&mut self, place: &HirExpr) -> Result<Leaf, LoweringError> {
         let place = self.rebase_place(place)?;
+        let listed = receiver_path(&place)
+            .and_then(|path| self.wrt.iter().find(|(listed, _)| *listed == path));
+        if let Some((_, copy)) = listed {
+            return Ok(copy.clone());
+        }
+        Ok(self.copy_of(place))
+    }
+
+    /// A fresh copy of the tensor at `place`, which is already rooted at a binding of the
+    /// derivative function.
+    fn copy_of(&mut self, place: HirExpr) -> Leaf {
         let (ty, span) = (place.ty.clone(), place.span);
         let method = HirExpr::new(
             HirExprKind::FieldAccess {
@@ -1159,27 +1207,45 @@ impl<'f> Linearizer<'f> {
             ty.clone(),
             span,
         );
-        Ok(self.push(&ty, span, Op::Constant(copy)))
+        self.push(&ty, span, Op::Constant(copy))
     }
 
     /// The field chain `place` with its root renamed to the binding that holds it in the
     /// derivative function: `self` or a parameter as written, or, inside an inlined callee,
     /// the caller's value the parameter stands for.
     ///
-    /// The root is a constant by construction. The tape builds no struct value and never
-    /// differentiates one, so a struct it can reach is the receiver or a parameter, and the
+    /// The root is a constant by construction. The tape builds no struct or array value and
+    /// never differentiates one, so one it can reach is the receiver or a parameter, and the
     /// body cannot assign to either; every field it reads is the same value at every read.
+    /// An array position must be a literal, so that a read of a `wrt:` element is known to
+    /// be that element.
     fn rebase_place(&mut self, place: &HirExpr) -> Result<HirExpr, LoweringError> {
         let kind = match &place.kind {
             HirExprKind::FieldAccess { object, field } => HirExprKind::FieldAccess {
                 object: Box::new(self.rebase_place(object)?),
                 field: field.clone(),
             },
+            HirExprKind::Index { object, index } => {
+                if literal_position(index).is_none() {
+                    return Err(self.refuse("an array element at a computed position", index.span));
+                }
+                HirExprKind::Index {
+                    object: Box::new(self.rebase_place(object)?),
+                    index: index.clone(),
+                }
+            }
             HirExprKind::Variable(_) => match self.leaf(place)? {
-                Leaf::Var { name, ty } if matches!(ty.referent(), HirType::Struct(_)) => {
+                Leaf::Var { name, ty }
+                    if matches!(ty.referent(), HirType::Struct(_) | HirType::Array { .. }) =>
+                {
                     return Ok(HirExpr::new(HirExprKind::Variable(name), ty, place.span));
                 }
-                _ => return Err(self.refuse("a field of a value that is not a struct", place.span)),
+                _ => {
+                    return Err(self.refuse(
+                        "a field or element of a value that is neither a struct nor an array",
+                        place.span,
+                    ))
+                }
             },
             _ => return Err(self.refuse("a field of a computed value", place.span)),
         };
@@ -1421,6 +1487,47 @@ fn is_numeric(ty: &HirType) -> bool {
 
 /// Whether a field read of `ty` is a copy the replay can take as the primal did: a
 /// number, a `bool` or a `char`, all `Copy`.
+/// The receiver of `expr` when `expr` is `receiver.clone()` on a tensor.
+fn cloned_tensor(expr: &HirExpr) -> Option<&HirExpr> {
+    let HirExprKind::Call { callee, args } = &expr.kind else {
+        return None;
+    };
+    match &callee.kind {
+        HirExprKind::FieldAccess { object, field }
+            if field == CLONE_METHOD
+                && args.is_empty()
+                && matches!(object.ty.referent(), HirType::Tensor { .. }) =>
+        {
+            Some(object)
+        }
+        _ => None,
+    }
+}
+
+fn is_array(ty: &HirType) -> bool {
+    matches!(ty.referent(), HirType::Array { .. })
+}
+
+/// The steps from the receiver to `place`, when `place` is rooted at the receiver and every
+/// array position in it is a literal.
+fn receiver_path(place: &HirExpr) -> Option<FieldPath> {
+    match &place.kind {
+        HirExprKind::Variable(name) if name == RECEIVER => Some(Vec::new()),
+        HirExprKind::FieldAccess { object, field } => {
+            let mut path = receiver_path(object)?;
+            path.push(PathStep::Field(field.clone()));
+            Some(path)
+        }
+        HirExprKind::Index { object, index } => {
+            let position = literal_position(index)?;
+            let mut path = receiver_path(object)?;
+            path.push(PathStep::Element(position));
+            Some(path)
+        }
+        _ => None,
+    }
+}
+
 fn is_copied_field(ty: &HirType) -> bool {
     is_numeric(ty) || matches!(ty, HirType::Bool | HirType::Char)
 }
@@ -1499,6 +1606,14 @@ fn coordinates(mut flat: usize, extents: &[usize], span: Span) -> Vec<Leaf> {
             ))
         })
         .collect()
+}
+
+/// The value of an integer literal array position.
+fn literal_position(index: &HirExpr) -> Option<usize> {
+    match &index.kind {
+        HirExprKind::Literal(Literal::Integer(value, _)) => usize::try_from(*value).ok(),
+        _ => None,
+    }
 }
 
 fn literal_index(position: &Leaf) -> Option<Option<usize>> {

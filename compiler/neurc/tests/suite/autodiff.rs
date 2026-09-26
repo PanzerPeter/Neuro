@@ -319,3 +319,98 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     assert!(diagnostics.contains("chosen at run time"), "{diagnostics}");
     assert!(diagnostics.contains(":6:13"), "{diagnostics}");
 }
+
+#[test]
+fn wrt_fills_the_slots_of_what_it_lists_and_no_others() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Layer { export w: Tensor<f32, [2]> }
+
+struct Net {
+    export layer: Layer,
+    export heads: [Tensor<f32, [2]>; 2]
+}
+
+impl Net {
+    @grad(wrt: [self.layer.w, self.heads[1], k])
+    func loss(&mut self, k: &mut Tensor<f32, [2]>, frozen: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+        val w = self.layer.w.clone()
+        val p = w * k
+        return Tensor::scalar(p.sum() + self.heads[1][0] * frozen.sum())
+    }
+}
+
+func main() -> i32 {
+    mut net = Net { layer: Layer { w: [1.0, 2.0] }, heads: [[0.0, 0.0], [3.0, 4.0]] }
+    mut k: Tensor<f32, [2]> = [5.0, 6.0]
+    mut frozen: Tensor<f32, [2]> = [1.0, 1.0]
+    val l = net.loss(&mut k, &mut frozen)
+    l.backward()
+    val w = net.layer.w.grad()
+    val h = net.heads[1].grad()
+    val g = k.grad()
+    // l = 17 + 6; dl/dw = k, dl/dheads[1] = [2, 0], dl/dk = w.
+    assert(w[0] == 5.0f32 && w[1] == 6.0f32)
+    assert(h[0] == 2.0f32 && h[1] == 0.0f32)
+    assert(g[0] == 1.0f32 && g[1] == 2.0f32)
+    l.sum() as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("grad_wrt.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 23);
+}
+
+#[test]
+fn a_tensor_wrt_leaves_out_has_an_empty_slot() {
+    let test = CompileTest::new();
+    let source = r#"
+@grad(wrt: [b])
+func loss(w: &mut Tensor<f32, [2]>, b: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val p = w * b
+    return Tensor::scalar(p.sum())
+}
+
+func main() -> i32 {
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    mut b: Tensor<f32, [2]> = [3.0, 4.0]
+    val l = loss(&mut w, &mut b)
+    l.backward()
+    val g = w.grad()
+    0
+}
+"#;
+    let exe = test.write_source("grad_wrt_empty.nr", source);
+    let exe = test.compile(&exe).expect("compile failed");
+    let output = Command::new(&exe).output().expect("run");
+    assert!(
+        !output.status.success(),
+        "reading an unlisted gradient must panic"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("empty gradient slot"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn a_wrt_path_through_a_private_field_is_reported_at_the_entry() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Net { w: Tensor<f32, [2]> }
+
+impl Net {
+    @grad(wrt: [self.w])
+    func loss(&mut self) -> Tensor<f32, []> {
+        return Tensor::scalar(self.w.sum())
+    }
+}
+"#;
+    let diagnostics = test
+        .check("grad_wrt_private.nr", source)
+        .expect_err("a private field cannot be named in `wrt:`");
+    assert!(diagnostics.contains("private field"), "{diagnostics}");
+    assert!(diagnostics.contains(":5:17"), "{diagnostics}");
+}

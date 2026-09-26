@@ -12,10 +12,10 @@ pub use expressions::{
     MatchArm, Pattern, TensorIndexArg, UnaryOp,
 };
 pub use items::{
-    Attribute, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef, GenericParam,
-    GenericParamKind, ImplDef, ImportDef, ImportName, ImportSelection, Item, MethodDef, ModuleDef,
-    ModuleId, NewtypeDef, ParamLabel, Parameter, SelfParam, StructDef, TraitBound, TraitDef,
-    TraitMethod, VariantPayload, PRELUDE_MODULE,
+    Attribute, AttributeNamedArg, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef,
+    GenericParam, GenericParamKind, ImplDef, ImportDef, ImportName, ImportSelection, Item,
+    MethodDef, ModuleDef, ModuleId, NewtypeDef, ParamLabel, Parameter, SelfParam, StructDef,
+    TraitBound, TraitDef, TraitMethod, VariantPayload, PRELUDE_MODULE,
 };
 pub use statements::{LoopAdapter, LoopAdapterKind, Place, Stmt};
 pub use types::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};

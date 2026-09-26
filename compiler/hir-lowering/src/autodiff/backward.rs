@@ -17,6 +17,9 @@
 //! (&mut w).__set_grad(__backward_N.1.w)     // one per differentiated argument
 //! ```
 //!
+//! and a method whose `wrt:` names `self.layer.w` adds `m.layer.w.__set_grad(...)` for the
+//! receiver `m` the call was made on.
+//!
 //! A method call `m.f(x, &mut w)` becomes `m.__f__rev(x, &mut w)` the same way: the
 //! derivative of a `@grad` method is a method of the same type.
 //!
@@ -24,10 +27,10 @@
 //! would have, and the loss is computed once: `__f__rev` returns the same loss `f` does.
 //! No derivative runs for a call with no `.backward()`.
 //!
-//! The `&mut` argument is evaluated a second time at the `.backward()`. That is sound because
-//! the checker accepted this pairing only for an argument that is `&mut name` or a `&mut`
-//! binding, and held its borrow from the call to here, so nothing can have moved or
-//! reassigned it in between.
+//! The `&mut` argument, or the receiver, is evaluated a second time at the `.backward()`.
+//! That is sound because the checker accepted this pairing only for an argument that is
+//! `&mut name` or a `&mut` binding and a receiver rooted at a binding, and held its borrow
+//! from the call to here, so nothing can have moved or reassigned it in between.
 //!
 //! The gradients come out of `__f__rev`, which allocates them in its own body, never inside
 //! a `pool` block's arena, so the slot a gradient lands in always holds heap memory, even
@@ -44,7 +47,7 @@ use shared_types::Span;
 
 use crate::{Lowerer, LoweringError};
 
-use super::{bundle_name, is_differentiated, reverse_name, Specialization, Target};
+use super::{bundle_name, field_key, field_place, reverse_name, Specialization, Target};
 
 const BACKWARD_METHOD: &str = "backward";
 
@@ -113,6 +116,35 @@ fn reverse_callee(
     Ok(HirExpr::new(kind, pair_ty.clone(), callee.span))
 }
 
+/// `target.__set_grad(bundle.field)`: move one gradient out of the bundle into the slot of
+/// the tensor `target` names, owned or borrowed.
+fn set_grad(target: HirExpr, bundle: &HirExpr, field: &str, span: Span) -> HirStmt {
+    let gradient = HirExpr::new(
+        HirExprKind::FieldAccess {
+            object: Box::new(bundle.clone()),
+            field: field.to_string(),
+        },
+        target.ty.referent().clone(),
+        span,
+    );
+    let slot = HirExpr::new(
+        HirExprKind::FieldAccess {
+            object: Box::new(target),
+            field: SET_GRAD_METHOD.to_string(),
+        },
+        HirType::Void,
+        span,
+    );
+    HirStmt::Expr(HirExpr::new(
+        HirExprKind::Call {
+            callee: Box::new(slot),
+            args: vec![gradient],
+        },
+        HirType::Void,
+        span,
+    ))
+}
+
 impl Lowerer {
     /// The loss a `.backward()` statement is called on, and the statement's span. A struct
     /// with a method of its own called `backward` makes an ordinary call instead.
@@ -176,7 +208,7 @@ impl Lowerer {
                 "`.backward()` on '{loss}', which was not bound to a call of a function or method by name"
             ))
         })?;
-        let params = self.grad_params.get(&key).cloned().ok_or_else(|| {
+        let grad = self.grad_params.get(&key).cloned().ok_or_else(|| {
             malformed(format!(
                 "`.backward()` on '{loss}', the result of '{key}', which has no derivative"
             ))
@@ -184,11 +216,16 @@ impl Lowerer {
 
         let (loss_ty, mutable, decl_span) = (loss_ty.clone(), *mutable, *decl_span);
         let args = args.clone();
+        // A method's receiver, where the slots of the fields its `wrt:` names are.
+        let receiver = match &callee.kind {
+            HirExprKind::FieldAccess { object, .. } => Some((**object).clone()),
+            _ => None,
+        };
         let (key, captured) = if args
             .iter()
             .any(|arg| matches!(arg.ty, HirType::Function { .. }))
         {
-            self.specialize(&key, callee, &args, &params, out)?
+            self.specialize(&key, callee, &args, &grad.names, out)?
         } else {
             (key, Vec::new())
         };
@@ -242,34 +279,16 @@ impl Lowerer {
             bundle_ty,
             span,
         );
-        for (arg, param) in args.into_iter().zip(&params) {
-            if !is_differentiated(&arg.ty) {
-                continue;
+        for (arg, param) in args.into_iter().zip(&grad.names) {
+            if grad.wrt.selects(param, &arg.ty) {
+                out.push(set_grad(arg, &bundle, param, span));
             }
-            let gradient = HirExpr::new(
-                HirExprKind::FieldAccess {
-                    object: Box::new(bundle.clone()),
-                    field: param.clone(),
-                },
-                arg.ty.referent().clone(),
-                span,
-            );
-            let slot = HirExpr::new(
-                HirExprKind::FieldAccess {
-                    object: Box::new(arg),
-                    field: SET_GRAD_METHOD.to_string(),
-                },
-                HirType::Void,
-                span,
-            );
-            out.push(HirStmt::Expr(HirExpr::new(
-                HirExprKind::Call {
-                    callee: Box::new(slot),
-                    args: vec![gradient],
-                },
-                HirType::Void,
-                span,
-            )));
+        }
+        if let Some(receiver) = receiver {
+            for path in grad.wrt.fields() {
+                let place = field_place(receiver.clone(), path, &self.structs, span)?;
+                out.push(set_grad(place, &bundle, &field_key(path), span));
+            }
         }
         Ok(())
     }

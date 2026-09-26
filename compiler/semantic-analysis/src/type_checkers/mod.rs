@@ -81,10 +81,10 @@ pub(crate) struct TypeChecker {
     /// NOT placed in `functions`: calls to it route through generic inference, which
     /// substitutes concrete type arguments per call site (monomorphization).
     generic_funcs: HashMap<String, GenericFnSig>,
-    /// Functions carrying a well-formed `@grad`, generic templates included by name. A
-    /// `val` bound directly to a call of one holds that call's `&mut` borrows until its
-    /// `.backward()`.
-    grad_functions: HashSet<String>,
+    /// Functions carrying a `@grad`, generic templates included by name, with what each
+    /// differentiates. A `val` bound directly to a call of one holds the borrows of those
+    /// arguments until its `.backward()`.
+    grad_functions: HashMap<String, grad::GradSelection>,
     /// Generic struct templates, keyed by name. A generic struct is NOT a
     /// usable type on its own; each distinct set of type arguments is monomorphized
     /// into a distinct nominal struct registered in `struct_defs` on demand. The
@@ -360,7 +360,7 @@ impl TypeChecker {
             mut_self_methods: HashSet::new(),
             consuming_self_methods: HashSet::new(),
             generic_funcs: HashMap::new(),
-            grad_functions: HashSet::new(),
+            grad_functions: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
             traits: HashMap::new(),

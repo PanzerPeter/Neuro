@@ -313,8 +313,11 @@ impl Lowerer {
 
         let mangled = crate::mangle_instance(name, &template.generics, &subst, &const_subst);
         if crate::autodiff::is_grad(&template.attributes) {
-            self.grad_params
-                .insert(mangled.clone(), crate::param_names(&template));
+            let grad = crate::autodiff::GradParams {
+                names: crate::param_names(&template),
+                wrt: crate::autodiff::Wrt::of(&template.attributes)?,
+            };
+            self.grad_params.insert(mangled.clone(), grad);
         }
         if !self.mono_seen.contains(&mangled) {
             self.mono_seen.insert(mangled.clone());
