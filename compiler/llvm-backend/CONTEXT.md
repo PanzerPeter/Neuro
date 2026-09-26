@@ -603,6 +603,16 @@ also why a fold produces a scalar rather than a handle. Nothing is moved here; t
 and a `.zip`'s operand are each freed through the same `release_receiver_temporary` the
 reduction uses, so a chained `t.map(..).map(..)` releases its intermediate.
 
+`expressions/elementwise_math.rs` owns `HirExprKind::Math`. A scalar is one application; a
+tensor is the `.map` loop with the function inlined, reusing `tensor_apply.rs`'s walk helpers
+(`walk_tensor`, `element_count`, `load_walked`, `buffer_slot`), and releases a temporary
+receiver the same way. Each function is its LLVM intrinsic (`llvm.exp`, `llvm.log`,
+`llvm.sqrt`, `llvm.tanh`, `llvm.fabs`, `llvm.pow`), resolved to libm by the `-lm` the driver
+links; `Sign` is two ordered compares and two selects, so NaN passes through. A half-precision
+element is widened to `f32` around the function and narrowed once after it, because the
+intrinsics' `half` / `bfloat` overloads are not ones every target lowers. `Math` is one of
+`builds_its_own_buffer`'s shapes.
+
 `expressions/tensor_einsum.rs` owns `HirExprKind::TensorEinsum`, the Einstein-notation
 contraction. The notation is gone by this point: HIR supplies one extent per subscript letter
 and, per operand, which letter each of its axes carries, which reduces the whole construct to

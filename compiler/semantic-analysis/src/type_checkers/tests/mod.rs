@@ -7,6 +7,7 @@ mod comparison_tests;
 mod decl_tests;
 mod derive_tests;
 mod drop_tests;
+mod elementwise_math_tests;
 mod enum_expr_tests;
 mod enum_tests;
 mod generic_tests;

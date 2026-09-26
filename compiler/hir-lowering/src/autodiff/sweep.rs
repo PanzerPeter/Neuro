@@ -112,6 +112,15 @@ fn replay(em: &mut Emitter, entry: &Entry) -> Result<HirExpr, LoweringError> {
         Op::Convert(operand) => HirExprKind::Cast {
             value: read(operand),
         },
+        Op::Math {
+            op,
+            operand,
+            exponent,
+        } => HirExprKind::Math {
+            op: *op,
+            operand: read(operand),
+            exponent: exponent.as_ref().map(read),
+        },
         Op::Einsum {
             operands,
             inputs,

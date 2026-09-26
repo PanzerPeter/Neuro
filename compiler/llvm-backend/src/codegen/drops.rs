@@ -1441,6 +1441,7 @@ fn builds_its_own_buffer(kind: &HirExprKind) -> bool {
             | HirExprKind::TensorEinsum { .. }
             | HirExprKind::TensorApply { .. }
             | HirExprKind::TensorSort { .. }
+            | HirExprKind::Math { .. }
     )
 }
 

@@ -88,6 +88,12 @@ it the *typed* contract:
    the receiver's shape over the callee's return type for the first two and the seed's type
    for `.reduce` — a scalar, the way the whole-tensor reductions answer one. It READS every
    operand like the reduction does.
+   `HirExprKind::Math { op, operand, exponent }` is elementwise math (`HirMathOp`: `.exp()`,
+   `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)`), one node for a scalar and a tensor
+   operand: its `ty` is the operand's value type either way, so a backend reads the scalar or
+   per-element form off it. `exponent` is `Some` exactly for `Pow`, a scalar of the element
+   type. `HirMathOp::Sign` has no method: it is the derivative of `Abs`, which only the
+   derivative transform emits, and it is 0 at either zero. A tensor operand is READ.
    `HirStmt::TensorCompoundAssign { place, op, value, ty, span }` is the in-place update
    beside them: `ty` is the target's tensor type and `value` is either that same type or a
    reference to it, an owned operand being consumed by the update and a borrowed one only

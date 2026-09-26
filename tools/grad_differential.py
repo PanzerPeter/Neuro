@@ -1264,6 +1264,97 @@ func passed_function(w: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
         callee="passed_inner",
         extra_arguments=("|x: f32| -> f32 { x * x * c0 }",),
     ),
+    TensorCase(
+        "elementwise_math",
+        """
+@grad
+func elementwise_math(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    val grown = w.exp() * 0.25
+    val curved = w.tanh() + w.log()
+    val rooted = w.sqrt() - w.pow(3.0) * 0.5
+    return Tensor::scalar(grown.sum() + curved.sum() + rooted.sum())
+}
+""",
+        (3,),
+        (0.5, 1.25, 2.0),
+        # Every tensor rule at once, each element on its own: exp(x) / 4, 1 - tanh(x)^2,
+        # 1 / x, 1 / (2 sqrt x) and -1.5 x^2.
+        lambda *w: tuple(
+            0.25 * math.exp(x)
+            + 1.0
+            - math.tanh(x) ** 2
+            + 1.0 / x
+            + 0.5 / math.sqrt(x)
+            - 1.5 * x * x
+            for x in w
+        ),
+    ),
+    TensorCase(
+        # The scalar forms, reached through element reads, with an exponent that is a
+        # constant argument rather than a literal: it is read by the rule, never
+        # differentiated.
+        "scalar_math",
+        """
+@grad
+func scalar_math(w: &mut Tensor<f32, [2]>, p: f32) -> Tensor<f32, []> {
+    val x = w[0]
+    val y = w[1]
+    return Tensor::scalar(x.pow(p) + y.abs() * x.sqrt() + (x * y).exp().log())
+}
+""",
+        (2,),
+        (1.5, -0.75),
+        lambda x, y, p: (
+            p * x ** (p - 1.0) + abs(y) / (2.0 * math.sqrt(x)) + y,
+            -math.sqrt(x) + x,
+        ),
+        constants=(2.5,),
+    ),
+    TensorCase(
+        # `.abs()` at exactly zero. Its derivative there is 0 by the language's rule, and a
+        # central difference of |x| at 0 is 0 too, since it averages the two slopes.
+        "abs_at_zero",
+        """
+@grad
+func abs_at_zero(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val weights: Tensor<f32, [2]> = [3.0, 2.0]
+    val scaled = w.abs() * weights
+    return Tensor::scalar(scaled.sum())
+}
+""",
+        (2,),
+        (0.0, -1.5),
+        lambda x, y: (0.0, -2.0),
+    ),
+    TensorCase(
+        # Math whose own value its rule reads (`tanh`, `exp`), inside a loop the reverse pass
+        # replays and a branch it re-runs, so the value has to be rebuilt where it is read.
+        "math_in_control_flow",
+        """
+@grad
+func math_in_control_flow(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    mut step = 0
+    while step < 2 {
+        acc = (&acc * w).tanh()
+        step += 1
+    }
+    if w[0] > 0.0 {
+        acc = acc.exp()
+    }
+    return Tensor::scalar(acc.sum())
+}
+""",
+        (2,),
+        (0.6, 0.9),
+        # Per element: a1 = tanh(w^2), a2 = tanh(a1 w), loss exp(a2).
+        lambda *w: tuple(
+            math.exp(math.tanh(math.tanh(x * x) * x))
+            * (1.0 - math.tanh(math.tanh(x * x) * x) ** 2)
+            * (math.tanh(x * x) + x * (1.0 - math.tanh(x * x) ** 2) * 2.0 * x)
+            for x in w
+        ),
+    ),
 ]
 
 

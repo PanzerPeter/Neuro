@@ -938,6 +938,17 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   number here (`TensorShapeCastSymbolicExtent`), the result buffer being built from it.
   There is deliberately no `.filter`: its output length depends on the values in the buffer,
   so its result would have no shape to name.
+- **Elementwise math, in `type_checkers/expressions/builtins.rs`.** `.exp()`, `.log()`,
+  `.sqrt()`, `.tanh()`, `.abs()` and `.pow(p)` are two arms of `resolve_builtin_method`. On a
+  tensor they match the REFERENT, as the reductions do, and only a float element (half
+  precision included: the scalar `f16` / `bf16` restriction does not reach inside a tensor
+  operation); the answer is the receiver's own tensor type and no move is recorded. On a
+  scalar they match `recv` and `is_float` (`f32` / `f64` values only, as `is_nan` does). Every
+  other receiver falls through to `MethodNotFound`, integers and half scalars among them.
+  `.pow` checks one exponent of the element type and the rest none, through
+  `check_call_args`; the arguments are checked there rather than in a module of their own
+  because that helper is private to `expressions`. Out-of-domain inputs are IEEE 754 values,
+  not diagnostics.
 - **Einstein notation, in `type_checkers/tensor_einsum.rs`.** `einsum("bij,bjk->bik", a, b)`
   reaches `resolve_einsum_builtin` from the free-function arm of `check_plain_call`, beside
   `resolve_panic_builtin` and `resolve_io_builtin` and inside the same

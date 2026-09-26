@@ -706,6 +706,14 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
                 walk(operand, visit);
             }
         }
+        HirExprKind::Math {
+            operand, exponent, ..
+        } => {
+            walk(operand, visit);
+            if let Some(exponent) = exponent {
+                walk(exponent, visit);
+            }
+        }
         HirExprKind::EnumConstruct { payload, .. } => {
             for field in payload {
                 walk(field, visit);

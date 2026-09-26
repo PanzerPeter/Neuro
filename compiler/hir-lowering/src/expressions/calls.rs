@@ -455,6 +455,14 @@ impl Lowerer {
             return self.lower_tensor_reduce(object, method, args, span);
         }
 
+        // Elementwise math reads a tensor receiver too, and takes a float scalar by value,
+        // as the checker does.
+        if let Some(op) = crate::elementwise_math::math_op(method) {
+            if matches!(recv.referent(), HirType::Tensor { .. }) || is_full_float(&recv) {
+                return self.lower_elementwise_math(object, op, args, span);
+            }
+        }
+
         // A functional traversal reads its receiver too. Every argument IS a value here,
         // so they are lowered by the shared path rather than read as syntax.
         if crate::tensor_apply::is_apply_method(method)

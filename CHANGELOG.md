@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-09-26
+
+### Added
+
+- Elementwise math: `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` and `.pow(p)` on `f32` /
+  `f64` scalars and on float tensors of any element type, half precision included. A tensor
+  receiver is read, not moved, and the result has its shape; `.pow` takes its exponent as a
+  scalar of the element type. Out-of-domain inputs give IEEE 754 values (`-inf`, NaN), not
+  diagnostics. Integers and half-precision scalars have none of them.
+- Each is differentiated in a `@grad` body: `exp(x)`, `1/x`, `1/(2 sqrt(x))`, `1 - tanh(x)^2`,
+  `p x^(p-1)` with the exponent held constant, and `sign(x)` for `.abs()`, which is 0 at
+  exactly 0. Half-precision math in a `@grad` body is refused at the call.
+- `examples/tensors/tensor_math.nr`, and `examples/showcase/logistic_fit.nr`: logistic
+  regression with an elastic-net penalty trained by its own derivative.
+- `tools/grad_differential.py` gains four cases, checked against finite differences: every
+  tensor rule, the scalar forms with an argument as the exponent, `.abs()` at zero, and math
+  inside a loop and a branch.
+
+### Docs
+
+- `docs/BUGS.md` records BUG-073 (half-precision tensors refuse arithmetic and reductions) and
+  BUG-074 (that diagnostic calls `a + b` a compound assignment).
+
 ## [3.11.0] - 2026-09-26
 
 ### Added

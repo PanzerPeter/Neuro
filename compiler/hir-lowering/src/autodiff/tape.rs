@@ -21,8 +21,8 @@ use std::collections::{HashMap, HashSet};
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    HirCapture, HirClosure, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirPlace,
-    HirReduceOp, HirStmt, HirTensorApply, HirTensorAxis, HirType,
+    HirCapture, HirClosure, HirExpr, HirExprKind, HirFunction, HirItem, HirMathOp, HirParam,
+    HirPlace, HirReduceOp, HirStmt, HirTensorApply, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -125,6 +125,13 @@ pub(super) enum Op {
     },
     /// `value as T` between two integer or float types.
     Convert(Leaf),
+    /// An elementwise math function of a scalar or a tensor. The exponent of a `Pow` is
+    /// read but never differentiated.
+    Math {
+        op: HirMathOp,
+        operand: Leaf,
+        exponent: Option<Leaf>,
+    },
     /// An `einsum` contraction, with the HIR node's letter tables.
     Einsum {
         operands: Vec<Leaf>,
@@ -436,7 +443,7 @@ impl<'f> Linearizer<'f> {
                 Op::Literal(elements) => elements.iter().any(|leaf| self.is_active(leaf)),
                 Op::Read { object, .. } | Op::Slice { object, .. } => self.is_active(object),
                 Op::ShapeCast { receiver, .. } => self.is_active(receiver),
-                Op::Convert(operand) => self.is_active(operand),
+                Op::Convert(operand) | Op::Math { operand, .. } => self.is_active(operand),
                 Op::Einsum { operands, .. } => operands.iter().any(|leaf| self.is_active(leaf)),
                 Op::Constant(_) => false,
             };
@@ -1142,6 +1149,23 @@ impl<'f> Linearizer<'f> {
                 let operand = self.leaf(value)?;
                 Ok(self.push(&expr.ty, expr.span, Op::Convert(operand)))
             }
+            HirExprKind::Math {
+                op,
+                operand,
+                exponent,
+            } if is_float_valued(&expr.ty) => {
+                let operand = self.leaf(operand)?;
+                let exponent = exponent
+                    .as_deref()
+                    .map(|exponent| self.leaf(exponent))
+                    .transpose()?;
+                let op = Op::Math {
+                    op: *op,
+                    operand,
+                    exponent,
+                };
+                Ok(self.push(&expr.ty, expr.span, op))
+            }
             HirExprKind::TensorEinsum {
                 operands,
                 inputs,
@@ -1718,6 +1742,7 @@ fn describe_expr(expr: &HirExpr) -> &'static str {
         HirExprKind::TensorSort { .. } => "a sort",
         HirExprKind::TensorRandomNormal { .. } => "a random tensor",
         HirExprKind::Cast { .. } => "a cast",
+        HirExprKind::Math { .. } => "elementwise math on half-precision elements",
         HirExprKind::FieldAccess { .. } => "a field that is neither a number nor a tensor",
         HirExprKind::Match { .. } => "a `match`",
         HirExprKind::Loop { .. } => "a `loop`",

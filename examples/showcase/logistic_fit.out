@@ -1,0 +1,4 @@
+loss 0.6931 -> 0.0821
+weights [1.557, 1.492], bias -0.115, norm 2.159
+perplexity 1.086
+correct 6 of 6

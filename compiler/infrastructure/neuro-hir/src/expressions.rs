@@ -275,6 +275,20 @@ pub enum HirExprKind {
         operand: Option<Box<HirExpr>>,
         callee: Box<HirExpr>,
     },
+    /// Elementwise math: `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)`.
+    ///
+    /// One node for a scalar and a tensor `operand`: the expression's own `ty` is the
+    /// operand's value type either way, so a backend picks the scalar or the per-element
+    /// form from it. `exponent` is `Some` exactly for [`HirMathOp::Pow`], a scalar of the
+    /// operand's element type.
+    ///
+    /// A tensor operand is READ, not consumed: the result is a fresh buffer of the
+    /// operand's shape, so the tensor it was computed from stays alive and usable.
+    Math {
+        op: HirMathOp,
+        operand: Box<HirExpr>,
+        exponent: Option<Box<HirExpr>>,
+    },
     /// Tuple literal `(e0, e1, ...)`. The element types live on the elements;
     /// this expression's `ty` is the [`HirType::Tuple`] of them.
     TupleLiteral {
@@ -448,6 +462,22 @@ pub enum HirTensorApply {
     /// `.reduce(init, f)`: the carried accumulator and the element, answering the next
     /// accumulator. Nothing is written to a buffer.
     Reduce,
+}
+
+/// Which function a [`HirExprKind::Math`] applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirMathOp {
+    Exp,
+    /// The natural logarithm.
+    Log,
+    Sqrt,
+    Tanh,
+    Abs,
+    Pow,
+    /// `1` above zero, `-1` below, `0` at either zero, and NaN for NaN. No method spells
+    /// it: it is the derivative of [`HirMathOp::Abs`], which the derivative transform
+    /// emits, and zero at zero is the language's rule for that derivative.
+    Sign,
 }
 
 /// What a [`HirExprKind::TensorSort`] writes out of the ordering it computes.

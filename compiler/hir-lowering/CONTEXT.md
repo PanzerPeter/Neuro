@@ -132,7 +132,10 @@ whole or along one axis, tensor literals, element reads (a literal position scat
 literal per tensor, a run-time one through a zero tensor and one element store), slices at
 literal bounds, the four shape casts (replayed on a copy, since the node consumes its receiver;
 the adjoint goes back through the inverse permutation), `einsum` without a repeated letter in an
-operand, `as` between integer and float types, constant fills, scalar comparisons, integer arithmetic and logic (`&&` / `||` become branches, keeping the
+operand, `as` between integer and float types, elementwise math (`Op::Math`: `exp` and `tanh`
+read their own value, `log` and `sqrt` divide, `abs` multiplies by an emitted `Sign`, which is 0
+at 0 and sends nothing back itself, and `pow` emits `p * x^(p - 1)` without differentiating the
+exponent; half-precision math is refused), constant fills, scalar comparisons, integer arithmetic and logic (`&&` / `||` become branches, keeping the
 short circuit), calls to user functions and through function values with a known target
 (inlined), `.map` / `.zip` / `.reduce` (unrolled), plain block values; `val` / `mut` bindings, assignment to a local, `if` / `else if` / `else` as a
 statement or an expression, an early `return` ending an arm of a top-level `if`, `while`, and
@@ -463,6 +466,10 @@ compiler bug, not a diagnostic.
   callee's return type for the first two (neither changes which axis is which), and the
   seed's own type for `.reduce`. The receiver is read, not moved, so a borrowed one lowers
   here too.
+  Elementwise math lives in `elementwise_math.rs`: `math_op` maps `.exp()` / `.log()` /
+  `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)` to a `HirMathOp`, and a tensor receiver (owned
+  or borrowed) or an `f32` / `f64` value lowers to one `HirExprKind::Math` typed as the
+  receiver's value, `.pow`'s exponent lowered against the element type.
   Einstein notation lives in `tensor_einsum.rs`: `einsum("bij,bjk->bik", a, b)` is intercepted
   in `lower_plain_call` AFTER the user-declared functions, so a program's own `einsum` shadows
   it the way it shadows the panic and standard-output builtins. `lower_tensor_einsum` re-reads

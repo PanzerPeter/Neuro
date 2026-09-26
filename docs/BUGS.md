@@ -5,6 +5,59 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-074: the half-precision operator diagnostic calls `a + b` a compound assignment
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; the `TensorElementNotArithmetic` message in
+  `compiler/semantic-analysis/src/errors.rs`
+- **Severity**: minor. The diagnostic is raised on the right span, only its wording is wrong
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val a: Tensor<bf16, [2]> = [1.0bf16, 2.0bf16]
+    val c = &a + &a
+    return 0
+}
+```
+
+Expected: a diagnostic naming the operator `+`. Observed: `compound assignment `+=` is not
+defined on a tensor of bf16`. The variant is shared by the by-value operators and the
+in-place update, and its message was written for the second.
+
+**Fix sketch**: word the message for both uses (`` `{op}` is not defined on a tensor of
+{element} ``), or carry which of the two raised it. Regression test: the repro's message.
+
+## BUG-073: half-precision tensors refuse arithmetic and reductions
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; `TensorElementNotArithmetic` and `TensorReduceElementType`
+- **Severity**: major. A documented capability of `Tensor<f16, S>` / `Tensor<bf16, S>` is
+  missing, with no workaround short of converting element by element
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val a: Tensor<bf16, [2]> = [1.0bf16, 2.0bf16]
+    val b = &a * &a
+    val s = b.sum()
+    return 0
+}
+```
+
+Expected: both compile. The types reference says the scalar half-precision restriction lifts
+for tensor element types, whose elementwise arithmetic, matmul and reductions are supported;
+the elementwise math methods already accept a half-precision tensor. Observed: both lines are
+type errors, because the tensor operators and reductions apply the scalar `f16` / `bf16`
+contract to the element.
+
+**Fix sketch**: admit half-precision elements in the operator, compound-assignment and
+reduction checks, and in the backend widen each element to `f32` around the operation and
+narrow the result once, as `expressions/elementwise_math.rs` does. `.mean()` divides in `f32`
+too. Regression tests: the repro, `@`, and a compound assignment on a `bf16` tensor.
+
 ## BUG-072: a function value can be stored past the frame that built it
 
 - **Status**: open, confirmed

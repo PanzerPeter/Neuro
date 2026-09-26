@@ -1,0 +1,8 @@
+hypotenuse 5.0
+e^1 = 2.718282, ln 10 = 2.302585, 2^10 = 1024.0
+abs   [1.0, 0.0, 2.0]
+tanh  [-0.7616, 0.0000, 0.9640]
+x^2   [1.0, 0.0, 4.0]
+softplus total 3.1333, x still sums to 1.0
+bf16 roots [3.0, 5.0]
+log 0 = -inf, sqrt -1 is NaN: true

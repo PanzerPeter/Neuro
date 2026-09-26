@@ -8,8 +8,8 @@
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    static_shape, AxisNames, HirExpr, HirExprKind, HirPlace, HirReduceOp, HirStmt, HirTensorAxis,
-    HirType,
+    static_shape, AxisNames, HirExpr, HirExprKind, HirMathOp, HirPlace, HirReduceOp, HirStmt,
+    HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -395,6 +395,17 @@ impl Emitter {
             permutation,
         };
         Ok(self.bind(kind, ty))
+    }
+
+    /// `op` applied to `operand`, a float scalar or a float tensor, raised to `exponent`
+    /// for a `Pow`. The result has the operand's value type.
+    pub(super) fn math(&mut self, op: HirMathOp, operand: &Leaf, exponent: Option<&Leaf>) -> Leaf {
+        let kind = HirExprKind::Math {
+            op,
+            operand: self.read(operand),
+            exponent: exponent.map(|exponent| self.read(exponent)),
+        };
+        self.bind(kind, operand.value_ty().clone())
     }
 
     /// `value as ty`, between two integer or float types.

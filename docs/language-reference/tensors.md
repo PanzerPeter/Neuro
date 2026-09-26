@@ -805,6 +805,37 @@ genuinely what you want. The shape-preserving alternative is a boolean mask, and
 `.zip`, nothing yet produces one: a traversal may not answer `bool`, and `a > b` is not
 defined on two tensors, so a mask has to be written out by hand today.
 
+## Elementwise math
+
+`.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` and `.pow(p)` apply a function to every
+element and hand back a fresh tensor of the receiver's shape and element type. The same six
+are methods on an `f32` or `f64` scalar, where they hand back that scalar type. None needs an
+import.
+
+```neuro
+val x: Tensor<f64, [3]> = [-1.0, 0.0, 2.0]
+val magnitude = x.abs()
+val squashed = x.tanh()
+val squared = x.pow(2.0)
+
+val a: f64 = 3.0
+val b: f64 = 4.0
+val hypotenuse = (a * a + b * b).sqrt()
+```
+
+`.pow` takes its exponent as a **scalar of the element type**, so an `f32` tensor takes an
+`f32` and a `bf16` one a `bf16` (`h.pow(0.5bf16)`). Any float element type has the methods,
+half precision included; a half-precision *scalar* has none, for the reason it has no
+arithmetic operators. An integer receiver, scalar or tensor, has none either.
+
+Like a reduction, each method **reads** its receiver, so it is offered on `&Tensor<T, S>`
+and the receiver stays usable afterwards. Out-of-domain inputs follow IEEE 754 and are not
+diagnosed: `.log()` of `0.0` is `-inf`, of a negative number NaN, and `.sqrt()` of a negative
+number NaN.
+
+In a `@grad` body each one is differentiated by its own rule; see
+[automatic differentiation](autodiff.md#what-a-grad-body-may-contain).
+
 ## Dynamic shapes
 
 An axis written `?` has no compile-time extent. It opts that one axis out of
@@ -860,8 +891,9 @@ A tensor can be built, bound, moved, cloned, passed, returned, transferred with
 rules, multiplied as a matrix with `@`, updated in place, stored in a struct, indexed, written
 through an index (`t[i, j] = v`), sliced, reshaped with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
-`.sum()` / `.mean()` / `.max()` / `.min()`, contracted with `einsum`, and traversed
-elementwise with `.map(f)` / `.zip(other, f)` / `.reduce(init, f)`. What is still later work
+`.sum()` / `.mean()` / `.max()` / `.min()`, contracted with `einsum`, traversed
+elementwise with `.map(f)` / `.zip(other, f)` / `.reduce(init, f)`, and passed through
+`.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`. What is still later work
 is the step index form
 (`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse
 form `t[(0..n).rev()]` is implemented. A dynamic `?` axis is accepted, but only as a widening: nothing that needs

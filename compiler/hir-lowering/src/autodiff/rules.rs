@@ -7,9 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use ast_types::{BinaryOp, UnaryOp};
-use neuro_hir::{HirReduceOp, HirType};
+use neuro_hir::{HirMathOp, HirReduceOp, HirType};
 
-use super::emit::{tensor_parts, tensor_type, Emitter};
+use super::emit::{element_type, tensor_parts, tensor_type, Emitter};
 use super::tape::{literal_offset, Entry, Leaf, Op};
 use crate::LoweringError;
 
@@ -242,6 +242,20 @@ pub(super) fn propagate(
             adjoints.add(operand, contribution);
             Ok(())
         }
+        // `sign` is flat wherever it has a derivative, so it sends nothing back.
+        Op::Math {
+            op,
+            operand,
+            exponent,
+        } if is_active(operand) && *op != HirMathOp::Sign => {
+            let value = Leaf::Var {
+                name: entry.name.clone(),
+                ty: entry.ty.clone(),
+            };
+            let contribution = math(em, *op, operand, exponent.as_ref(), &value, adjoint)?;
+            adjoints.add(operand, contribution);
+            Ok(())
+        }
         Op::Einsum {
             operands,
             inputs,
@@ -261,8 +275,59 @@ pub(super) fn propagate(
         | Op::Slice { .. }
         | Op::ShapeCast { .. }
         | Op::Convert(_)
+        | Op::Math { .. }
         | Op::Unary { .. }
         | Op::Constant(_) => Ok(()),
+    }
+}
+
+/// The adjoint of `x`, the operand of `op`, from the function's value `y` and the result's
+/// `adjoint`. Where the rule can be written in `y`, it is, so the reverse pass does not
+/// evaluate the function a second time.
+fn math(
+    em: &mut Emitter,
+    op: HirMathOp,
+    x: &Leaf,
+    exponent: Option<&Leaf>,
+    y: &Leaf,
+    adjoint: &Leaf,
+) -> Result<Leaf, LoweringError> {
+    let element = element_type(x.ty()).clone();
+    match op {
+        HirMathOp::Exp => em.binary(BinaryOp::Multiply, adjoint, y),
+        HirMathOp::Log => em.binary(BinaryOp::Divide, adjoint, x),
+        HirMathOp::Sqrt => {
+            let two = em.float(2.0, &element);
+            let twice = em.binary(BinaryOp::Multiply, y, &two)?;
+            em.binary(BinaryOp::Divide, adjoint, &twice)
+        }
+        // `1 - tanh(x)^2`, spread as `adjoint - adjoint * y * y` so no scalar stands on the
+        // left of a tensor.
+        HirMathOp::Tanh => {
+            let scaled = em.binary(BinaryOp::Multiply, adjoint, y)?;
+            let squared = em.binary(BinaryOp::Multiply, &scaled, y)?;
+            em.binary(BinaryOp::Subtract, adjoint, &squared)
+        }
+        // `sign(x)`, which the language fixes at 0 for exactly 0. `abs` is a primitive, not a
+        // branch, so the executed-path rule does not pick a side there.
+        HirMathOp::Abs => {
+            let sign = em.math(HirMathOp::Sign, x, None);
+            em.binary(BinaryOp::Multiply, adjoint, &sign)
+        }
+        // `p * x^(p - 1)` with respect to the base; the exponent is not differentiated.
+        HirMathOp::Pow => {
+            let p = exponent.ok_or_else(|| LoweringError::Malformed {
+                detail: "derivative transform: a `.pow` without an exponent".to_string(),
+            })?;
+            let one = em.float(1.0, &element);
+            let lowered = em.binary(BinaryOp::Subtract, p, &one)?;
+            let power = em.math(HirMathOp::Pow, x, Some(&lowered));
+            let slope = em.binary(BinaryOp::Multiply, &power, p)?;
+            em.binary(BinaryOp::Multiply, adjoint, &slope)
+        }
+        HirMathOp::Sign => Err(LoweringError::Malformed {
+            detail: "derivative transform: `sign` reached its own rule".to_string(),
+        }),
     }
 }
 

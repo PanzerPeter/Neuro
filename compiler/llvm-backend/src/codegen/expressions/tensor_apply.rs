@@ -21,10 +21,10 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 /// One buffer a traversal walks: where its elements are and how wide one is.
-struct Walked<'ctx> {
-    handle: PointerValue<'ctx>,
+pub(super) struct Walked<'ctx> {
+    pub(super) handle: PointerValue<'ctx>,
     data: PointerValue<'ctx>,
-    elem_llvm: inkwell::types::BasicTypeEnum<'ctx>,
+    pub(super) elem_llvm: inkwell::types::BasicTypeEnum<'ctx>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -174,7 +174,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The handle, buffer, and element width of one tensor a traversal walks.
-    fn walk_tensor(&mut self, expr: &HirExpr) -> CodegenResult<Walked<'ctx>> {
+    pub(super) fn walk_tensor(&mut self, expr: &HirExpr) -> CodegenResult<Walked<'ctx>> {
         let ty = Type::from_hir(&expr.ty);
         let Type::Tensor { element, .. } = ty.referent().clone() else {
             return Err(CodegenError::InternalError(
@@ -192,7 +192,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// How many elements one traversal steps over, which is the receiver's whole buffer.
-    fn element_count(&self, receiver: &HirExpr) -> CodegenResult<usize> {
+    pub(super) fn element_count(&self, receiver: &HirExpr) -> CodegenResult<usize> {
         let Type::Tensor { shape, .. } = Type::from_hir(&receiver.ty).referent().clone() else {
             return Err(CodegenError::InternalError(
                 "a tensor traversal does not carry a tensor receiver".to_string(),
@@ -201,7 +201,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(crate::types::static_extents(&shape)?.iter().product())
     }
 
-    fn load_walked(
+    pub(super) fn load_walked(
         &self,
         walked: &Walked<'ctx>,
         index: IntValue<'ctx>,
@@ -213,7 +213,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The address of one element of a tensor buffer, `index` elements in.
-    fn buffer_slot(
+    pub(super) fn buffer_slot(
         &self,
         elem_llvm: inkwell::types::BasicTypeEnum<'ctx>,
         buffer: PointerValue<'ctx>,

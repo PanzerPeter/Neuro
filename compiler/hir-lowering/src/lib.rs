@@ -32,6 +32,7 @@ use shared_types::Span;
 mod autodiff;
 mod closures;
 mod collections;
+mod elementwise_math;
 mod expressions;
 mod items;
 mod iteration;

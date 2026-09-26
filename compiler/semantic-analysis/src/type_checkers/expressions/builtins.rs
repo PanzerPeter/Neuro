@@ -31,6 +31,14 @@ pub(crate) const CHAR_AT_METHOD: &str = "__char_at";
 /// The consuming device transfer `tensor.to(device)`.
 pub(crate) const TENSOR_TO_METHOD: &str = "to";
 
+/// The one elementwise math method with an argument, its exponent.
+const POW_METHOD: &str = "pow";
+
+/// Whether `method` names an elementwise math method, on a float scalar or a float tensor.
+fn is_math_method(method: &str) -> bool {
+    matches!(method, "exp" | "log" | "sqrt" | "tanh" | "abs" | POW_METHOD)
+}
+
 impl TypeChecker {
     /// Resolve a compiler-known intrinsic method on a builtin (non-struct) receiver.
     ///
@@ -254,6 +262,27 @@ impl TypeChecker {
                 }
                 Some(self.check_tensor_reduce(&element, &shape, m, args, call_span))
             }
+            // Elementwise math reads the receiver for the same reason a reduction does: the
+            // result is a fresh buffer of the receiver's shape, so `&Tensor<T, S>` is
+            // accepted and nothing is moved. Half-precision elements are included, because
+            // the scalar `f16` / `bf16` restriction does not reach inside a tensor operation.
+            (Type::Tensor { element, shape }, m)
+                if is_math_method(m) && (element.is_float() || element.is_half_float()) =>
+            {
+                let (element, shape) = (element.clone(), shape.clone());
+                let referent = recv.referent().clone();
+                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
+                    return Some(Type::Unknown);
+                }
+                self.check_math_args(&element, m, args, call_span);
+                Some(referent)
+            }
+            // On a scalar, a value receiver only, as with `is_nan`. `is_float` leaves out
+            // `f16` / `bf16`, whose scalar contract has no arithmetic to compute one in.
+            (_, m) if is_math_method(m) && recv.is_float() => {
+                self.check_math_args(recv, m, args, call_span);
+                Some(recv.clone())
+            }
             // The functional traversals read the receiver for the same reason the
             // reductions do: `.map` and `.zip` allocate their own result and `.reduce`
             // allocates nothing, so `&Tensor<T, S>` is an acceptable receiver and no move
@@ -293,6 +322,17 @@ impl TypeChecker {
             }
             _ => None,
         }
+    }
+
+    /// `.pow` takes its exponent as a scalar of `element`; every other math method takes
+    /// nothing.
+    fn check_math_args(&mut self, element: &Type, method: &str, args: &[Expr], call_span: Span) {
+        let params = if method == POW_METHOD {
+            std::slice::from_ref(element)
+        } else {
+            &[]
+        };
+        self.check_call_args(args, params, call_span);
     }
 
     /// The `Chars` iterator type `.chars()` yields, with the receiver's borrow recorded.

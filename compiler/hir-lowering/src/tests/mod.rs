@@ -2,6 +2,7 @@ mod autodiff_tests;
 mod closure_tests;
 mod coalesce_tests;
 mod derive_tests;
+mod elementwise_math_tests;
 mod enum_tests;
 mod expr_tests;
 mod generic_tests;

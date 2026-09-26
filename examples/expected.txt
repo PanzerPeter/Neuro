@@ -79,6 +79,7 @@ tensors/tensor_shape_manipulation.nr  44
 tensors/tensor_sorting.nr             21
 tensors/tensor_einsum.nr              40
 tensors/tensor_functional.nr          24
+tensors/tensor_math.nr                10
 
 # --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
 ownership/borrow_exclusivity.nr  31
@@ -161,6 +162,7 @@ showcase/held_destruction.nr         5
 showcase/inventory_ledger.nr         181
 showcase/job_queue.nr                139
 showcase/log_builder.nr              64
+showcase/logistic_fit.nr             6
 showcase/model_shapes.nr             232
 showcase/mutable_borrows.nr          47
 showcase/named_axes.nr               70

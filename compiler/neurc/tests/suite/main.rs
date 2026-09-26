@@ -40,6 +40,7 @@ mod dispatch;
 mod divergent_arms;
 mod dlpack;
 mod drop_destructors;
+mod elementwise_math;
 mod enumerate;
 mod enums;
 mod error_propagation;

@@ -7,6 +7,7 @@ mod binary;
 mod char_at;
 mod char_slice;
 mod control_flow;
+mod elementwise_math;
 mod enums;
 mod format_float;
 mod format_helpers;
@@ -247,6 +248,15 @@ impl<'ctx> CodegenContext<'ctx> {
             } => {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_apply(*kind, receiver, operand.as_deref(), callee, &result_ty)
+            }
+            // `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`.
+            HirExprKind::Math {
+                op,
+                operand,
+                exponent,
+            } => {
+                let result_ty = Type::from_hir(&expr.ty);
+                self.codegen_math(*op, operand, exponent.as_deref(), &result_ty)
             }
             // `.sort()` / `.argsort()` / `.topk()`, along one axis.
             HirExprKind::TensorSort {

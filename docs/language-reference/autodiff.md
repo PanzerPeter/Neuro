@@ -205,6 +205,7 @@ expression. Its values may use:
 | `.t()`, `.permute(...)`, `.reshape(...)`, `.flatten(...)` | the adjoint put back in the receiver's shape and axis order |
 | `einsum(...)` | each operand's adjoint is the contraction of the result's adjoint with the other operands |
 | `as` between integer and float types | the adjoint converted back; zero through an integer |
+| `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)` on a float or a float tensor | `exp(x)`, `1/x`, `1/(2·sqrt(x))`, `1 - tanh(x)²`, `sign(x)` (0 at exactly 0), and `p·x^(p-1)` with the exponent not differentiated |
 | `.clone()` of a tensor | the copy's adjoint goes to the original |
 | `Tensor::zeros()`, `ones()`, `identity()`, literals | constants |
 | comparisons, `&&`, `||`, `!`, and integer arithmetic | none: they decide which path runs, and carry no gradient |

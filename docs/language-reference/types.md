@@ -197,6 +197,8 @@ Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the
 | Method | Returns | Behavior |
 |--------|---------|----------|
 | `.is_nan()` | `bool` | `true` when the receiver is NaN, `false` for every other value including `Inf` and `-Inf`. Nullary; defined on `f32` and `f64` only. |
+| `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` | the receiver's type | The function of the receiver, IEEE 754 out of domain (`.log()` of `0.0` is `-inf`). Nullary; `f32` and `f64` only. Float tensors have them too, see [tensors](tensors.md#elementwise-math). |
+| `.pow(p)` | the receiver's type | The receiver raised to `p`, a value of the receiver's type. |
 
 Floats follow IEEE 754 in full, so **every** comparison against NaN is false: `NaN == NaN`
 and `NaN != NaN` alike. That makes NaN undetectable with the comparison operators, and
