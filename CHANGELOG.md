@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.2] - 2026-09-26
+
+### Documentation
+
+- README roadmap table: SGD leaves Phase 3 and ships with Phase 5's optimizer trait, where
+  the optimizer design already lives; Phase 3 lists elementwise math (`exp`, `log`, `sqrt`,
+  `tanh`, `abs`, `pow` as methods, each with a derivative rule) in its place.
+
 ## [3.9.1] - 2026-09-26
 
 ### Documentation

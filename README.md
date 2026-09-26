@@ -221,7 +221,7 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 |:---:|---|:---:|
 | **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits, closures, enums and pattern matching, error handling, modules | Complete |
 | **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value model they need | Complete |
-| **3** | **Automatic differentiation**: a reverse-mode source-to-source transform over Neuro's own typed HIR, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, SGD | In progress |
+| **3** | **Automatic differentiation**: a reverse-mode source-to-source transform over Neuro's own typed HIR, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, elementwise math | In progress |
 | **4** | **GPU acceleration**: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
 | **5** | **Neural network standard library**: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
 | **6** | **Async runtime**: `async func`, `Future<T>`, `spawn`, `join` / `race`, an executor for data-loader and I/O overlap | Planned |
