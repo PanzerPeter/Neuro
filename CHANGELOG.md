@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.1] - 2026-09-26
+
+### Documentation
+
+- Recorded four open defects in `docs/BUGS.md`, each with a verified repro, root cause and fix
+  sketch: BUG-070 (a field or element store is accepted while the binding is borrowed, which
+  reaches a heap-use-after-free through a live string view), BUG-069 (a line opening with `-`,
+  `&` or `|` continues the statement above it, so `x = 3` followed by `-x` assigns `3 - x`),
+  BUG-068 (release builds omit the array, slice and tensor bounds checks) and BUG-067 (a panic
+  diagnostic prints ahead of earlier buffered output when stdout and stderr share a pipe).
+- BUG-031 (`.step(n)` on a range) is now scheduled as a roadmap item; its entry says so.
+
 ## [3.9.0] - 2026-09-26
 
 ### Added

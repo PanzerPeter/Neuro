@@ -5,6 +5,182 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-070: a field or element store is accepted while the binding is borrowed
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; the place-store checks in
+  `compiler/semantic-analysis/src/type_checkers/statements.rs` and `tensors.rs`
+- **Severity**: critical. A shared borrow observes a write it should have frozen out, and a
+  store that displaces an owned value frees memory a live view still points into: a
+  heap-use-after-free in safe code, confirmed with AddressSanitizer
+
+**Minimal repro**
+
+```neuro
+struct Holder { s: string }
+
+func make(n: i32) -> string { "value {n}" }
+
+func main() -> i32 {
+    mut h = Holder { s: make(1) }
+    val view: &string = h.s.slice(0..7)
+    h.s = make(2)
+    println(view)
+    0
+}
+```
+
+Expected: rejected at `h.s = make(2)`, as `h = Holder { s: make(2) }` already is: while any
+borrow of a binding is live, the binding may not be written, because the borrow would be left
+pointing at the replaced value. Observed: type checking passes, the store releases the first
+string's buffer, and `println(view)` reads the freed bytes (garbage on stdout;
+`heap-use-after-free` under AddressSanitizer). The value-only shapes are accepted the same
+way: `val r = &a` then `a[0] = 9` (or `a[0] += 5`) makes `r[0]` read `9`, and the same holds for
+a struct field (`p.x = 5`), a `Vec` element and a tensor coordinate (`t[0] = 4.0`).
+
+**Root cause**: confirmed in the code. `check_binding_store`, the whole-binding store, asks
+`borrow_counts` for the target and refuses the write when any borrow is live. The stores into
+a field, an element or a tensor coordinate never consult the borrow counts of the binding the
+place is rooted at, and the tensor compound-assignment check does so only when the place is a
+bare `Place::Var`. A live `&mut` is caught anyway, because naming the binding at all is refused
+while it is mutably borrowed; a live shared borrow is not.
+
+**Workaround**: end the borrow before writing into the value (confine it to a block), or
+write through a `&mut` taken after the shared borrow's scope.
+
+**Fix sketch**: in every sub-place store (`=` and each `OP=`, scalar and tensor), look up the
+place's root binding and apply the same `CannotAssignWhileBorrowed` rule the whole-binding
+store applies, naming the root. It is conservative in the same way the whole-binding rule is:
+a borrow of one field freezes the whole value. Regression tests: the repro, and one each for a field, an
+array element, a `Vec` element and a tensor coordinate under a live `&`, with the `&mut` form
+confirmed still rejected.
+
+## BUG-069: a line opening with `-`, `&` or `|` is glued onto the statement above it
+
+- **Status**: open, confirmed
+- **Area**: `syntax-parsing`; the newline rule in `parse_expr_inner`
+  (`compiler/syntax-parsing/src/parser/expressions.rs`)
+- **Severity**: major. A silent wrong answer: a line that begins with `-` can change the value
+  of the statement above it, and a tail expression that starts with a minus cannot be written
+
+**Minimal repro**
+
+```neuro
+func negated_double(a: i32) -> i32 {
+    val scaled = a * 2
+    -scaled
+}
+
+func main() -> i32 {
+    negated_double(3) + 10
+}
+```
+
+Expected: `4`. A newline ends a statement unless the line that ended asks to continue (it
+ends with an operator, a comma or an opening delimiter) or the next line opens with a token
+that cannot begin an expression, such as a leading `.` or `|>`. `-scaled` begins an
+expression, so it is the tail. Observed: `error: undefined variable 'scaled'`, because the two
+lines parse as `val scaled = a * 2 - scaled`. With a `mut` binding the same shape compiles and
+answers wrong: in `mut x = 10`, `x = 3`, a line `-x`, then `x` as the tail, the middle lines
+parse as `x = 3 - x`, and the function returns `-7` instead of `3`.
+
+**Root cause**: before each infix operator the parser skips any newlines and lets the next
+line's first token decide. It refuses to continue only when that token is `*`, `(`, `[` or
+`@`. The other tokens that can also start an expression (`-` for negation, `&` for a borrow,
+`|` for a closure literal) are read as binary operators and continue the line above.
+
+**Workaround**: parenthesize the tail, `(-scaled)`: a line opening with `(` already begins a
+new statement.
+
+**Fix sketch**: add `Minus`, `Ampersand` and `Pipe` to the set of next-line tokens that end
+the expression in `parse_expr_inner`, beside `Star`, `LeftParen`, `LeftBracket` and `At`.
+Continuing across those operators stays possible by ending the line with them. Regression
+tests: the repro, the `mut` reassignment shape, and a line ending in `-` that must still
+continue. The statement-boundary section of the language reference lists the tokens that
+never continue a line and should name all seven.
+
+## BUG-068: release builds read and write past the end of arrays, slices and tensors
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; `arrays.rs`, `slices.rs` and `tensor_index.rs` under
+  `compiler/llvm-backend/src/codegen/expressions/`
+- **Severity**: critical. Memory unsafety in safe code: at any optimization level above
+  `-O0`, an out-of-range run-time index reads or writes memory the value does not own
+
+**Minimal repro**
+
+```neuro
+func far() -> u64 { 700000 }
+func just_past() -> u64 { 3 }
+
+func main() -> i32 {
+    mut a: [i32; 3] = [1, 2, 3]
+    a[just_past()] = 9
+    val t: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
+    val s: &[i32] = a.slice(0..2)
+    println("{a[far()]} {s[far()]} {t[far()]}")
+    0
+}
+```
+
+Expected: a panic naming the index, in every build. The language rule is that undefined
+behavior is not a valid outcome for well-formed input; integer overflow alone is exempt in
+release, because wrapping gives it a defined result, and an out-of-range index has none (the
+same reason a zero divisor already panics in release). Observed at `-O0`: the panic. Observed
+at `-O2`: the store writes one element past the array without complaint, and the reads print
+whatever the addresses hold. A `Vec` index is checked in release already, so the
+containers also disagree with each other.
+
+**Root cause**: the three index guards are emitted only when `overflow_checks` is set, the
+flag that selects debug-build integer overflow trapping, so they share its release omission.
+The `SAFETY` comment in `arrays.rs` calls the unchecked access "the documented wrapping
+behaviour"; it is not wrapping, it is an `inbounds` GEP past the object, which is undefined.
+
+**Workaround**: compile at `-O0`, or index a `Vec`.
+
+**Fix sketch**: emit the three bounds guards unconditionally and leave `overflow_checks` to
+integer arithmetic; LLVM already removes a guard it can prove redundant. Correct the `SAFETY`
+comments. Regression tests: each container read and written out of range at `-O2`, expecting
+the panic. The language reference documents the omission today, in the types page (the
+array bounds rule and the slice indexing rule) and the tensors page (the run-time position
+check), and all three sentences change with the fix.
+
+## BUG-067: a panic prints ahead of output written before it when both streams share a pipe
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; the panic runtime (`compiler/llvm-backend/src/codegen/panic.rs`)
+  and the standard-output buffer (`compiler/llvm-backend/src/codegen/io.rs`)
+- **Severity**: minor. No value is wrong, but a log that captures both streams (a CI job,
+  `2>&1 | tee`) shows the panic before the output that led up to it
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    println("before")
+    panic("boom")
+    0
+}
+```
+
+Run as `./prog 2>&1 | cat`. Expected: `before`, then the panic diagnostic. Standard output is
+buffered, and the buffer is emptied on every path out of the program so that text written
+before a panic appears ahead of the panic's own diagnostic. Observed: `panic: boom at ...`
+first, then `before`. On a terminal the order is right only because `println` flushes per line
+there.
+
+**Root cause**: `emit_abort_unreachable` records the `abort()` call as the process exit point,
+and `finalize_stdout_buffer` inserts the flush in front of that call. By then the diagnostic
+has already gone to stderr through `write(2, ...)`, so the flush lands after it. The module
+comment in `io.rs` describes the intended order.
+
+**Workaround**: none inside the program; read the two streams separately.
+
+**Fix sketch**: record the exit point at the start of each panic path, before its first
+stderr `write`, so the flush precedes the diagnostic; every panic-family builtin and runtime
+guard reaches that path through the outlined panic helpers. Regression test: run a binary
+with stderr merged into stdout and compare the order.
+
 ## BUG-050: calling a closure literal in place reports a function type as "non-function"
 
 - **Status**: open, specification gap plus a wrong diagnostic
@@ -486,14 +662,14 @@ a sub-phase that closed long before that, and the tensor-index half was deferred
 internal notes archive to an item whose text never grew to cover it. The roadmap's own
 spec-coverage rule says a deferral written in the prose of a closed item is not tracking,
 and that every construct a spec section names needs either an implementation or a checkbox
-of its own. `.step(n)` has neither.
+of its own. `.step(n)` had neither until it was given a roadmap line of its own, which is
+where it is now scheduled.
 
 **Workaround**: write the stride into the loop body or the index arithmetic
 (`for i in 0..3 { val j = i * 2 ... }`).
 
-**Fix sketch**: feature-sized, not a surgical fix, and it wants a checkbox before it is
-worked. Which line it goes on is a scheduling decision; a 2B line of its own, directly
-after the shipped `.rev()` one, is the natural place. Most of the shape is already there:
+**Fix sketch**: feature-sized, not a surgical fix, so it is built from its roadmap line
+rather than in a bug-fix pass. Most of the shape is already there:
 `.rev()` is peeled in the parser as an innermost range form, ridden through as a flag on
 `Stmt::ForRange` and on `TensorIndexArg::Range`, and honoured by the counted-loop lowering
 and the tensor slice path. `.step(n)` is the same route with a stride instead of a flag,
