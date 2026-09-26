@@ -37,6 +37,13 @@
 //! its own: the function is derived once per distinct set of targets its `.backward()`
 //! call sites pass ([`Specialization`]), and never on its own.
 //!
+//! `@grad(order: 2)` also yields each differentiated parameter's Hessian, shaped `S ++ S`
+//! for a parameter of shape `S`, in the bundle field `<param>__hessian`. It is the same
+//! transform applied twice: the first derivative's body, extended to return
+//! `<gradient, v>` for a direction parameter `v`, is itself linearized and swept, giving
+//! `__f__hvp__<param>`, the Hessian-vector product `H v`. `__f__rev` runs it once per unit
+//! direction, one row at a time ([`hessian_vector_product`], [`assemble_hessian`]).
+//!
 //! Without `wrt:` every tensor parameter is differentiated; with it, what it lists ([`Wrt`]).
 //! The checker has already required each differentiated parameter to be a `&mut` tensor,
 //! each path to end in a tensor, and the loss to be rank-0 `f32`.
@@ -49,10 +56,10 @@ mod tape;
 
 use std::collections::HashMap;
 
-use ast_types::{Attribute, Expr};
+use ast_types::{Attribute, BinaryOp, Expr};
 use neuro_hir::{
     HirCapture, HirExpr, HirExprKind, HirField, HirFieldInit, HirFunction, HirItem, HirMethod,
-    HirParam, HirStmt, HirStruct, HirType,
+    HirParam, HirPlace, HirStmt, HirStruct, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -81,6 +88,22 @@ pub(crate) const METHOD_SEPARATOR: &str = "__";
 /// The `@grad` argument selecting what is differentiated.
 const WRT_LABEL: &str = "wrt";
 
+/// The `@grad` argument selecting how many derivatives `.backward()` fills, and the one
+/// value of it above the default that the checker accepts.
+const ORDER_LABEL: &str = "order";
+const SECOND_ORDER: i128 = 2;
+
+/// Ends the bundle field holding a parameter's second derivative, `<param>__hessian`. No
+/// parameter name contains `__`, so it cannot clash with a gradient's field.
+const HESSIAN_SUFFIX: &str = "__hessian";
+
+/// Joins a derivative's key to a parameter in the name of that parameter's Hessian-vector
+/// product, `__<key>__hvp__<param>`.
+const HVP_INFIX: &str = "__hvp__";
+
+/// The direction a Hessian-vector product multiplies the Hessian by.
+const DIRECTION: &str = "__ad_direction";
+
 /// The receiver, the root of every `wrt:` field path.
 const RECEIVER: &str = "self";
 
@@ -97,6 +120,31 @@ pub(crate) type StructFields = HashMap<String, Vec<(String, HirType)>>;
 pub(crate) struct GradParams {
     pub(crate) names: Vec<String>,
     pub(crate) wrt: Wrt,
+    /// Whether `.backward()` also fills each differentiated parameter's `.hessian()`.
+    pub(crate) hessian: bool,
+}
+
+impl GradParams {
+    /// What the `@grad` attribute among `attributes` asks of a function whose parameters
+    /// are named `names`. The checker has refused every `order:` but 1 and 2.
+    pub(crate) fn of(names: Vec<String>, attributes: &[Attribute]) -> Result<Self, LoweringError> {
+        let hessian = attributes
+            .iter()
+            .filter(|attr| attr.name.name == GRAD_ATTRIBUTE)
+            .flat_map(|attr| &attr.named)
+            .any(|arg| {
+                arg.label.name == ORDER_LABEL
+                    && matches!(
+                        arg.value,
+                        Expr::Literal(Literal::Integer(SECOND_ORDER, _), _)
+                    )
+            });
+        Ok(Self {
+            names,
+            wrt: Wrt::of(attributes)?,
+            hessian,
+        })
+    }
 }
 
 /// What a `@grad` function differentiates.
@@ -267,6 +315,20 @@ pub(crate) fn bundle_name(function: &str) -> String {
     format!("{BUNDLE_PREFIX}{function}")
 }
 
+/// The bundle field holding the second derivative of the parameter `param`.
+pub(crate) fn hessian_field(param: &str) -> String {
+    format!("{param}{HESSIAN_SUFFIX}")
+}
+
+/// The type of the second derivative of a tensor of type `ty`: its shape twice over, the
+/// derivative of every element along every element. The axes carry no names, since each
+/// would appear twice.
+pub(crate) fn hessian_type(ty: &HirType) -> Option<HirType> {
+    let (element, mut extents) = emit::tensor_parts(ty)?;
+    extents.extend_from_within(..);
+    Some(emit::tensor_type(element, &extents))
+}
+
 /// Whether a parameter of type `ty` is differentiated: a mutably borrowed tensor.
 fn is_differentiated(ty: &HirType) -> bool {
     matches!(ty, HirType::Reference { inner, mutable: true } if matches!(**inner, HirType::Tensor { .. }))
@@ -337,7 +399,7 @@ pub(crate) fn derive_reverses(
             &functions,
             &HashMap::new(),
             Vec::new(),
-            wrt_of(grad_params, name)?,
+            grad_of(grad_params, name)?,
             &[],
         )?);
     }
@@ -378,20 +440,19 @@ pub(crate) fn derive_reverses(
             &functions,
             &bound,
             extra,
-            wrt_of(grad_params, &specialization.function)?,
+            grad_of(grad_params, &specialization.function)?,
             &[],
         )?);
     }
     Ok(derived)
 }
 
-fn wrt_of<'g>(
+fn grad_of<'g>(
     grad_params: &'g HashMap<String, GradParams>,
     key: &str,
-) -> Result<&'g Wrt, LoweringError> {
+) -> Result<&'g GradParams, LoweringError> {
     grad_params
         .get(key)
-        .map(|params| &params.wrt)
         .ok_or_else(|| LoweringError::Malformed {
             detail: format!("`@grad` function '{key}' was never registered"),
         })
@@ -427,7 +488,8 @@ pub(crate) fn derive_method_reverses(
                 span: method.span,
             };
             let key = format!("{type_name}{METHOD_SEPARATOR}{method_name}");
-            let wrt = wrt_of(grad_params, &key)?;
+            let grad = grad_of(grad_params, &key)?;
+            let wrt = &grad.wrt;
             let receiver = HirExpr::new(
                 HirExprKind::Variable(RECEIVER.to_string()),
                 HirType::Struct(type_name.clone()),
@@ -441,15 +503,22 @@ pub(crate) fn derive_method_reverses(
                     place: field_place(receiver.clone(), path, structs, method.span)?,
                 });
             }
-            let [bundle, reverse] = derive_reverse(
+            let generated = derive_reverse(
                 &primal,
                 &key,
                 &functions,
                 &HashMap::new(),
                 Vec::new(),
-                wrt,
+                grad,
                 &fields,
             )?;
+            let Ok([bundle, reverse]) = <[HirItem; 2]>::try_from(generated) else {
+                return Err(LoweringError::Malformed {
+                    detail: format!(
+                        "the derivative of '{type_name}.{method_name}' is not one bundle and one function"
+                    ),
+                });
+            };
             let HirItem::Function(reverse) = reverse else {
                 return Err(LoweringError::Malformed {
                     detail: format!(
@@ -498,21 +567,37 @@ fn find_method<'i>(
         })
 }
 
-/// Build `GradsOf_<key>` and `__<key>__rev` for the lowered `@grad` function `primal`,
-/// where `key` is the name its generated items are derived from: the function's own name,
-/// a specialization's key, or `Type__method` for a method. `bound` gives function-typed
-/// parameters their targets, and `extra` are the parameters the derivative takes after
-/// `primal`'s, for the captures those targets read. `wrt` picks the parameters
-/// differentiated, and `fields` are the receiver's tensors it picks.
-fn derive_reverse(
+/// A first derivative's body, up to the gradients it takes.
+struct Derivative {
+    em: Emitter,
+    /// The loss, held where the reverse sweep cannot overwrite it.
+    loss: Leaf,
+    loss_ty: HirType,
+    gradients: Vec<Gradient>,
+    /// Where the first element read at a position known only at run time is, whose adjoint
+    /// is an element store no tape can read back.
+    run_time_read: Option<Span>,
+}
+
+/// One gradient a derivative takes: the bundle field it goes in, the value holding it,
+/// its tensor type, and where the differentiated value was named.
+struct Gradient {
+    field: String,
+    value: Leaf,
+    ty: HirType,
+    span: Span,
+}
+
+/// The first derivative of `primal`: its forward replay and reverse sweep, and each
+/// gradient `wrt` and `fields` select, materialized. `bound` gives function-typed
+/// parameters their targets.
+fn differentiate(
     primal: &HirFunction,
-    key: &str,
     functions: &Functions<'_>,
     bound: &HashMap<String, Leaf>,
-    extra: Vec<HirParam>,
     wrt: &Wrt,
     fields: &[WrtField],
-) -> Result<[HirItem; 2], LoweringError> {
+) -> Result<Derivative, LoweringError> {
     let differentiated: Vec<_> = primal
         .params
         .iter()
@@ -562,31 +647,91 @@ fn derive_reverse(
         targets.push((&field.name, copy, field.place.ty.clone(), field.place.span));
     }
 
-    let bundle_name = bundle_name(key);
-    let mut bundle_fields = Vec::with_capacity(targets.len());
-    let mut inits = Vec::with_capacity(targets.len());
+    let mut gradients = Vec::with_capacity(targets.len());
     for (field, target, ty, span) in targets {
-        let gradient = match adjoints.materialize(&mut em, target, &ty)? {
+        let value = match adjoints.materialize(&mut em, target, &ty)? {
             Some(gradient) => gradient,
             None => em.zeros(&ty),
         };
-        bundle_fields.push(HirField {
-            name: field.to_string(),
+        gradients.push(Gradient {
+            field: field.to_string(),
+            value,
             ty,
             span,
         });
-        inits.push(HirFieldInit {
-            name: field.to_string(),
-            value: Box::new(emit::operand_owned(&gradient, span)),
-            span,
-        });
+    }
+    Ok(Derivative {
+        em,
+        loss,
+        loss_ty: loss_ty.clone(),
+        gradients,
+        run_time_read: tape::run_time_read(&tape.nodes),
+    })
+}
+
+/// Build `GradsOf_<key>` and `__<key>__rev` for the lowered `@grad` function `primal`,
+/// where `key` is the name its generated items are derived from: the function's own name,
+/// a specialization's key, or `Type__method` for a method. `bound` gives function-typed
+/// parameters their targets, and `extra` are the parameters the derivative takes after
+/// `primal`'s, for the captures those targets read. `grad` says what is differentiated and
+/// whether second derivatives are taken, and `fields` are the receiver's tensors it picks.
+/// Second derivatives add one `__<key>__hvp__<param>` per differentiated parameter.
+fn derive_reverse(
+    primal: &HirFunction,
+    key: &str,
+    functions: &Functions<'_>,
+    bound: &HashMap<String, Leaf>,
+    extra: Vec<HirParam>,
+    grad: &GradParams,
+    fields: &[WrtField],
+) -> Result<Vec<HirItem>, LoweringError> {
+    let mut derivative = differentiate(primal, functions, bound, &grad.wrt, fields)?;
+    let span = primal.span;
+    let mut hessians = Vec::new();
+    if grad.hessian {
+        if !fields.is_empty() {
+            return Err(LoweringError::Malformed {
+                detail: format!(
+                    "second derivatives of '{}' through its receiver",
+                    primal.name
+                ),
+            });
+        }
+        for gradient in &derivative.gradients {
+            let hvp =
+                hessian_vector_product(primal, key, functions, &derivative, gradient, &extra)?;
+            hessians.push((hessian_field(&gradient.field), gradient.ty.clone(), hvp));
+        }
     }
 
-    let span = primal.span;
+    let bundle_name = bundle_name(key);
+    let mut bundle_fields = Vec::with_capacity(derivative.gradients.len() + hessians.len());
+    let mut inits = Vec::with_capacity(bundle_fields.capacity());
+    let mut field = |name: String, value: &Leaf, ty: HirType, span: Span| {
+        inits.push(HirFieldInit {
+            name: name.clone(),
+            value: Box::new(emit::operand_owned(value, span)),
+            span,
+        });
+        bundle_fields.push(HirField { name, ty, span });
+    };
+    for gradient in &derivative.gradients {
+        field(
+            gradient.field.clone(),
+            &gradient.value,
+            gradient.ty.clone(),
+            gradient.span,
+        );
+    }
+    for (name, ty, hvp) in &hessians {
+        let hessian = assemble_hessian(&mut derivative.em, primal, hvp, ty)?;
+        field(name.clone(), &hessian, hessian.ty().clone(), span);
+    }
+
     let mut params = primal.params.clone();
     params.extend(extra);
     let bundle_ty = HirType::Struct(bundle_name.clone());
-    let result_ty = HirType::Tuple(vec![loss_ty.clone(), bundle_ty.clone()]);
+    let result_ty = HirType::Tuple(vec![derivative.loss_ty.clone(), bundle_ty.clone()]);
     let bundle = HirExpr::new(
         HirExprKind::StructLiteral {
             name: bundle_name.clone(),
@@ -598,18 +743,18 @@ fn derive_reverse(
     );
     let result = HirExpr::new(
         HirExprKind::TupleLiteral {
-            elements: vec![emit::operand_owned(&loss, span), bundle],
+            elements: vec![emit::operand_owned(&derivative.loss, span), bundle],
         },
         result_ty.clone(),
         span,
     );
-    let mut body = em.stmts;
+    let mut body = derivative.em.stmts;
     body.push(HirStmt::Return {
         value: Some(result),
         span,
     });
 
-    Ok([
+    let mut items = vec![
         HirItem::Struct(HirStruct {
             name: bundle_name.clone(),
             written_name: bundle_name,
@@ -623,5 +768,289 @@ fn derive_reverse(
             body,
             span,
         }),
-    ])
+    ];
+    items.extend(
+        hessians
+            .into_iter()
+            .map(|(_, _, hvp)| HirItem::Function(hvp)),
+    );
+    Ok(items)
+}
+
+/// `__<key>__hvp__<param>`: the product of `gradient`'s parameter's Hessian with a
+/// direction `v`, taking `primal`'s parameters (function-typed ones aside, which the
+/// derivative has already inlined), `extra`, and `v` last.
+///
+/// It is reverse mode applied to reverse mode. `derivative`'s body, followed by
+/// `<gradient, v>`, is a function of the parameters whose gradient is `H v`, since the
+/// Hessian is symmetric; that body is linearized and swept exactly as a `@grad` body is.
+fn hessian_vector_product(
+    primal: &HirFunction,
+    key: &str,
+    functions: &Functions<'_>,
+    derivative: &Derivative,
+    gradient: &Gradient,
+    extra: &[HirParam],
+) -> Result<HirFunction, LoweringError> {
+    if let Some(span) = derivative.run_time_read {
+        return Err(LoweringError::NotDifferentiable {
+            function: primal.name.clone(),
+            construct: "an element read at a position known only at run time, under `order: 2`"
+                .to_string(),
+            span,
+        });
+    }
+    let span = primal.span;
+    let Some((element, _)) = emit::tensor_parts(&gradient.ty) else {
+        return Err(LoweringError::Malformed {
+            detail: format!("the gradient of '{}' is not a tensor", gradient.field),
+        });
+    };
+    let direction_ty = HirType::Reference {
+        inner: Box::new(gradient.ty.clone()),
+        mutable: false,
+    };
+    let direction = Leaf::Var {
+        name: DIRECTION.to_string(),
+        ty: direction_ty.clone(),
+    };
+    let mut em = derivative.em.clone();
+    let product = em.binary(BinaryOp::Multiply, &gradient.value, &direction)?;
+    let total = em.sum_all(&product);
+    let loss_ty = emit::tensor_type(element, &[]);
+    let projected = em.literal(&[total], &loss_ty);
+    let mut body = em.stmts;
+    body.push(HirStmt::Return {
+        value: Some(emit::operand_owned(&projected, span)),
+        span,
+    });
+
+    let mut params: Vec<HirParam> = primal
+        .params
+        .iter()
+        .filter(|param| !matches!(param.ty, HirType::Function { .. }))
+        .cloned()
+        .collect();
+    params.extend_from_slice(extra);
+    params.push(HirParam {
+        name: DIRECTION.to_string(),
+        ty: direction_ty,
+        span,
+    });
+    // Named as the primal, so a construct the second sweep refuses is reported against it.
+    let projection = HirFunction {
+        name: primal.name.clone(),
+        params,
+        return_type: loss_ty,
+        body,
+        span,
+    };
+    let wrt = Wrt::Listed {
+        params: vec![gradient.field.clone()],
+        fields: Vec::new(),
+    };
+    let second = differentiate(&projection, functions, &HashMap::new(), &wrt, &[])?;
+    let [hvp] = second.gradients.as_slice() else {
+        return Err(LoweringError::Malformed {
+            detail: format!("the Hessian of '{}' took other gradients", gradient.field),
+        });
+    };
+    let mut body = second.em.stmts;
+    body.push(HirStmt::Return {
+        value: Some(emit::operand_owned(&hvp.value, span)),
+        span,
+    });
+    Ok(HirFunction {
+        name: format!("{REVERSE_PREFIX}{key}{HVP_INFIX}{}", gradient.field),
+        params: projection.params,
+        return_type: gradient.ty.clone(),
+        body,
+        span,
+    })
+}
+
+/// Emit into `em` the Hessian of a parameter of tensor type `ty`, one row per element:
+/// row `i` is `hvp` along the `i`-th unit direction. The rows are written into an `[n, n]`
+/// tensor, which is then re-described at `S ++ S`.
+// ponytail: n Hessian-vector products, each a full second sweep, so the Hessian costs n
+// times the derivative; a forward-over-reverse sweep carrying n tangents at once is the
+// upgrade if large Hessians need it.
+fn assemble_hessian(
+    em: &mut Emitter,
+    primal: &HirFunction,
+    hvp: &HirFunction,
+    ty: &HirType,
+) -> Result<Leaf, LoweringError> {
+    let span = em.span();
+    let (Some((element, extents)), Some(hessian_ty)) = (emit::tensor_parts(ty), hessian_type(ty))
+    else {
+        return Err(LoweringError::Malformed {
+            detail: format!("the Hessian of a non-tensor in '{}'", primal.name),
+        });
+    };
+    let element = element.clone();
+    let count = extents.iter().product::<usize>();
+    let flat_ty = emit::tensor_type(&element, &[count]);
+    let square_ty = emit::tensor_type(&element, &[count, count]);
+
+    let mut args = Vec::with_capacity(hvp.params.len());
+    for param in &hvp.params[..hvp.params.len().saturating_sub(1)] {
+        args.push(repeated_argument(primal, param)?);
+    }
+    let callee = HirExpr::new(
+        HirExprKind::Variable(hvp.name.clone()),
+        HirType::Function {
+            params: hvp.params.iter().map(|param| param.ty.clone()).collect(),
+            ret: Box::new(ty.clone()),
+        },
+        span,
+    );
+    let variable = |name: &str, ty: &HirType| {
+        HirExpr::new(HirExprKind::Variable(name.to_string()), ty.clone(), span)
+    };
+
+    let size = em.fresh();
+    em.declare(
+        size.clone(),
+        em.count(i128::try_from(count).unwrap_or(i128::MAX)),
+    );
+    let square = em.fresh();
+    let zero = em.zero(&square_ty)?;
+    em.declare_mut(square.clone(), zero);
+    let row = em.fresh();
+    em.declare_mut(row.clone(), em.count(0));
+    let (rows, ()) = em.nested(|em| {
+        let unit = em.fresh();
+        let zero = em.zero(&flat_ty)?;
+        em.declare_mut(unit.clone(), zero);
+        em.push(HirStmt::Assign {
+            place: HirPlace::TensorIndex {
+                object: Box::new(variable(&unit, &flat_ty)),
+                axes: vec![HirTensorAxis::Position(variable(&row, &HirType::I64))],
+                ty: element.clone(),
+            },
+            value: HirExpr::new(
+                HirExprKind::Literal(Literal::Float(1.0, None)),
+                element.clone(),
+                span,
+            ),
+            span,
+        });
+        let unit = Leaf::Var {
+            name: unit,
+            ty: flat_ty.clone(),
+        };
+        let direction = em.reshape(&unit, ty.clone())?;
+        let mut call_args = args.clone();
+        call_args.push(emit::operand(&direction, span));
+        let product = em.fresh();
+        em.declare(
+            product.clone(),
+            HirExpr::new(
+                HirExprKind::Call {
+                    callee: Box::new(callee.clone()),
+                    args: call_args,
+                },
+                ty.clone(),
+                span,
+            ),
+        );
+        let product = Leaf::Var {
+            name: product,
+            ty: ty.clone(),
+        };
+        let flat = em.reshape(&product, flat_ty.clone())?;
+        let column = em.fresh();
+        em.declare_mut(column.clone(), em.count(0));
+        let (columns, ()) = em.nested(|em| {
+            let at = |name: &str| HirTensorAxis::Position(variable(name, &HirType::I64));
+            em.push(HirStmt::Assign {
+                place: HirPlace::TensorIndex {
+                    object: Box::new(variable(&square, &square_ty)),
+                    axes: vec![at(&row), at(&column)],
+                    ty: element.clone(),
+                },
+                value: HirExpr::new(
+                    HirExprKind::TensorIndex {
+                        object: Box::new(emit::operand(&flat, span)),
+                        axes: vec![at(&column)],
+                    },
+                    element.clone(),
+                    span,
+                ),
+                span,
+            });
+            em.step(&column, 1);
+            Ok(())
+        })?;
+        em.push(HirStmt::While {
+            label: None,
+            condition: em.compare(BinaryOp::Less, &column, Some(&size)),
+            body: columns,
+            span,
+        });
+        em.step(&row, 1);
+        Ok(())
+    })?;
+    em.push(HirStmt::While {
+        label: None,
+        condition: em.compare(BinaryOp::Less, &row, Some(&size)),
+        body: rows,
+        span,
+    });
+    let square = Leaf::Var {
+        name: square,
+        ty: square_ty,
+    };
+    em.reshape(&square, hessian_ty)
+}
+
+/// What the Hessian's loop passes for `param` on every one of its calls. A borrow or a
+/// number is passed as it is; an owned tensor is copied, since each call consumes one. Any
+/// other value passed by value is refused, having no copy the compiler can make.
+fn repeated_argument(primal: &HirFunction, param: &HirParam) -> Result<HirExpr, LoweringError> {
+    let span = param.span;
+    let read = HirExpr::new(
+        HirExprKind::Variable(param.name.clone()),
+        param.ty.clone(),
+        span,
+    );
+    match &param.ty {
+        HirType::Reference { .. }
+        | HirType::F32
+        | HirType::F64
+        | HirType::Bool
+        | HirType::Char
+        | HirType::I8
+        | HirType::I16
+        | HirType::I32
+        | HirType::I64
+        | HirType::U8
+        | HirType::U16
+        | HirType::U32
+        | HirType::U64 => Ok(read),
+        HirType::Tensor { .. } => {
+            let method = HirExpr::new(
+                HirExprKind::FieldAccess {
+                    object: Box::new(read),
+                    field: tape::CLONE_METHOD.to_string(),
+                },
+                param.ty.clone(),
+                span,
+            );
+            Ok(HirExpr::new(
+                HirExprKind::Call {
+                    callee: Box::new(method),
+                    args: Vec::new(),
+                },
+                param.ty.clone(),
+                span,
+            ))
+        }
+        _ => Err(LoweringError::NotDifferentiable {
+            function: primal.name.clone(),
+            construct: "a parameter passed by value that is neither a number nor a tensor, under `order: 2`, whose Hessian calls its derivative once per element".to_string(),
+            span,
+        }),
+    }
 }

@@ -18,7 +18,9 @@
 //! ```
 //!
 //! and a method whose `wrt:` names `self.layer.w` adds `m.layer.w.__set_grad(...)` for the
-//! receiver `m` the call was made on.
+//! receiver `m` the call was made on. Under `order: 2` each argument's `__set_grad` is
+//! followed by `(&mut w).__set_hessian(__backward_N.1.w__hessian)`: the gradient write empties
+//! the Hessian slot, so the order matters.
 //!
 //! A method call `m.f(x, &mut w)` becomes `m.__f__rev(x, &mut w)` the same way: the
 //! derivative of a `@grad` method is a method of the same type.
@@ -47,13 +49,19 @@ use shared_types::Span;
 
 use crate::{Lowerer, LoweringError};
 
-use super::{bundle_name, field_key, field_place, reverse_name, Specialization, Target};
+use super::{
+    bundle_name, field_key, field_place, hessian_field, hessian_type, reverse_name, Specialization,
+    Target,
+};
 
 const BACKWARD_METHOD: &str = "backward";
 
 /// The private slot write each differentiated argument's gradient moves through. The
 /// checker reserves `__` in every declared name, so no program can spell it.
 const SET_GRAD_METHOD: &str = "__set_grad";
+
+/// The private slot write each differentiated argument's second derivative moves through.
+const SET_HESSIAN_METHOD: &str = "__set_hessian";
 
 /// Joins a `@grad` function's name to a specialization's number in the derivative's key.
 const SPECIALIZATION_INFIX: &str = "__with";
@@ -119,18 +127,32 @@ fn reverse_callee(
 /// `target.__set_grad(bundle.field)`: move one gradient out of the bundle into the slot of
 /// the tensor `target` names, owned or borrowed.
 fn set_grad(target: HirExpr, bundle: &HirExpr, field: &str, span: Span) -> HirStmt {
-    let gradient = HirExpr::new(
+    let ty = target.ty.referent().clone();
+    fill_slot(target, bundle, field, SET_GRAD_METHOD, ty, span)
+}
+
+/// `target.<method>(bundle.field)`: move the derivative of type `ty` in the bundle's `field`
+/// into the slot `method` writes.
+fn fill_slot(
+    target: HirExpr,
+    bundle: &HirExpr,
+    field: &str,
+    method: &str,
+    ty: HirType,
+    span: Span,
+) -> HirStmt {
+    let derivative = HirExpr::new(
         HirExprKind::FieldAccess {
             object: Box::new(bundle.clone()),
             field: field.to_string(),
         },
-        target.ty.referent().clone(),
+        ty,
         span,
     );
     let slot = HirExpr::new(
         HirExprKind::FieldAccess {
             object: Box::new(target),
-            field: SET_GRAD_METHOD.to_string(),
+            field: method.to_string(),
         },
         HirType::Void,
         span,
@@ -138,7 +160,7 @@ fn set_grad(target: HirExpr, bundle: &HirExpr, field: &str, span: Span) -> HirSt
     HirStmt::Expr(HirExpr::new(
         HirExprKind::Call {
             callee: Box::new(slot),
-            args: vec![gradient],
+            args: vec![derivative],
         },
         HirType::Void,
         span,
@@ -280,9 +302,28 @@ impl Lowerer {
             span,
         );
         for (arg, param) in args.into_iter().zip(&grad.names) {
-            if grad.wrt.selects(param, &arg.ty) {
-                out.push(set_grad(arg, &bundle, param, span));
+            if !grad.wrt.selects(param, &arg.ty) {
+                continue;
             }
+            let hessian = grad.hessian.then(|| arg.clone());
+            out.push(set_grad(arg, &bundle, param, span));
+            let Some(arg) = hessian else {
+                continue;
+            };
+            let ty = hessian_type(&arg.ty).ok_or_else(|| {
+                malformed(format!(
+                    "the Hessian of '{param}', which is not a static tensor"
+                ))
+            })?;
+            let field = hessian_field(param);
+            out.push(fill_slot(
+                arg,
+                &bundle,
+                &field,
+                SET_HESSIAN_METHOD,
+                ty,
+                span,
+            ));
         }
         if let Some(receiver) = receiver {
             for path in grad.wrt.fields() {

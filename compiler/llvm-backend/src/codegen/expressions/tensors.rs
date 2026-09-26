@@ -361,9 +361,10 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let Some(permutation) = permutation else {
             self.build_dlpack_redescribe(source, result_ty)?;
-            // The gradient belonged to the consumed receiver and is shaped like it, so the
-            // result starts without one, exactly as the permuting path's fresh handle does.
-            self.release_grad_slot(source)?;
+            // The derivatives belonged to the consumed receiver and are shaped like it, so
+            // the result starts without them, exactly as the permuting path's fresh handle
+            // does.
+            self.release_derivatives(source)?;
             return Ok(source.into());
         };
 

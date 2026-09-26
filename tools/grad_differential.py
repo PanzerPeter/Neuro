@@ -24,6 +24,13 @@ compiled primal `f` at the same point; the analytic gradient stays as a third op
 Every probe has a scalar signature, so no aggregate crosses the C boundary and the cases run
 on every platform, with any number of differentiated parameters.
 
+The Hessian cases extend that to `@grad(order: 2)`. Each is a tensor case (its gradient is
+checked exactly as above) whose probe also reads `.hessian()`, and the second derivatives
+must agree with central differences of the compiled `.grad()` and with a Hessian written out
+by hand. Differencing the gradient, rather than taking second differences of the loss, keeps
+four to five digits in `f32` where a second difference would keep two, and the gradient it
+differences has just been checked against the primal.
+
 Pipeline: write one Neuro module holding every case's function, `neurc compile --emit obj`,
 link it into a shared library with the platform C compiler, `ctypes`-load it, and call each
 function at the perturbed points. NumPy is deliberately NOT a dependency — the oracle here
@@ -1378,6 +1385,266 @@ def contracted_gradient(*w):
     )
 
 
+class HessianCase(TensorCase):
+    """A `@grad(order: 2)` function of one `f32` tensor, a point, its gradient and Hessian.
+
+    Everything a `TensorCase` holds means the same here, with one differentiated tensor.
+    `hessian` recomputes the second partials by hand from `(*point, *constants)`, row-major:
+    `H[i][j]`, the derivative of partial `i` along element `j`, at `i * n + j`.
+    """
+
+    def __init__(self, name, source, shape, point, gradient, hessian, constants=(), callee=None):
+        super().__init__(name, source, shape, point, gradient, constants=constants, callee=callee)
+        self.hessian = hessian
+
+
+def spec_total_hessian(*x):
+    # (sum x)^2: every second partial is 2.
+    return [2.0] * (len(x) * len(x))
+
+
+def matrix_quadratic_gradient(*w):
+    # sum((A @ W)^2) with W the [2, 2] parameter, so dW = 2 A^T (A @ W).
+    a = [[1.0, 2.0], [3.0, -1.0]]
+    wm = [[w[0], w[1]], [w[2], w[3]]]
+    p = [[sum(a[i][l] * wm[l][j] for l in range(2)) for j in range(2)] for i in range(2)]
+    return [sum(2.0 * a[i][k] * p[i][j] for i in range(2)) for k in range(2) for j in range(2)]
+
+
+def matrix_quadratic_hessian(*w):
+    # sum((A @ W)^2) with W the [2, 2] parameter: d2/dW_kj dW_lm = 2 (A^T A)_kl delta_jm.
+    a = [[1.0, 2.0], [3.0, -1.0]]
+    ata = [[sum(a[i][k] * a[i][l] for i in range(2)) for l in range(2)] for k in range(2)]
+    return [
+        2.0 * ata[k][l] * (1.0 if j == m else 0.0)
+        for k in range(2)
+        for j in range(2)
+        for l in range(2)
+        for m in range(2)
+    ]
+
+
+def smooth_math_second(x):
+    # e^x tanh x + ln x / sqrt x, differentiated twice.
+    t = math.tanh(x)
+    sech2 = 1.0 - t * t
+    exp_part = math.exp(x) * (t + 2.0 * sech2 - 2.0 * sech2 * t)
+    log_part = x ** -2.5 * (0.75 * math.log(x) - 2.0)
+    return exp_part + log_part
+
+
+def smooth_math_first(x):
+    t = math.tanh(x)
+    return math.exp(x) * (t + 1.0 - t * t) + x ** -1.5 * (1.0 - 0.5 * math.log(x))
+
+
+def diagonal(entries):
+    n = len(entries)
+    return [entries[i] if i == j else 0.0 for i in range(n) for j in range(n)]
+
+
+# One branching `@grad(order: 2)` body, differentiated twice at a point inside each arm.
+SECOND_ORDER_BRANCH = """
+@grad(order: 2)
+func branch_taken(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val a = w[0]
+    val b = w[1]
+    if a > b {
+        return Tensor::scalar(a * a * b)
+    }
+    return Tensor::scalar(b * b * b)
+}
+"""
+
+
+HESSIAN_CASES = [
+    HessianCase(
+        # The specification's example, verbatim.
+        "spec_squared_total",
+        """
+@grad(order: 2)
+func spec_squared_total(x: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    x.sum(axis: 0) * x.sum(axis: 0)
+}
+""",
+        (3,),
+        (0.5, -1.25, 2.0),
+        lambda a, b, c: (2.0 * (a + b + c),) * 3,
+        spec_total_hessian,
+    ),
+    HessianCase(
+        # Element reads at literal positions and a scaling constant: the Hessian depends on
+        # the point, so a constant answer cannot pass.
+        "scaled_cubic",
+        """
+@grad(order: 2)
+func scaled_cubic(w: &mut Tensor<f32, [2]>, s: f32) -> Tensor<f32, []> {
+    val a = w[0]
+    val b = w[1]
+    return Tensor::scalar((a * a * a + a * b * b) * s)
+}
+""",
+        (2,),
+        (1.5, -0.75),
+        lambda a, b, s: ((3.0 * a * a + b * b) * s, 2.0 * a * b * s),
+        lambda a, b, s: [6.0 * a * s, 2.0 * b * s, 2.0 * b * s, 2.0 * a * s],
+        constants=(2.5,),
+    ),
+    HessianCase(
+        # A rank-2 parameter through `@`: the Hessian is `[2, 2, 2, 2]`.
+        "matrix_quadratic",
+        """
+@grad(order: 2)
+func matrix_quadratic(w: &mut Tensor<f32, [2, 2]>) -> Tensor<f32, []> {
+    val a: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, -1.0]]
+    val p = a @ w
+    val s = &p * &p
+    return Tensor::scalar(s.sum())
+}
+""",
+        (2, 2),
+        (0.5, -1.0, 1.5, 0.25),
+        matrix_quadratic_gradient,
+        matrix_quadratic_hessian,
+    ),
+    HessianCase(
+        # A `while` loop, differentiated twice: sum(w^3).
+        "looped_cube",
+        """
+@grad(order: 2)
+func looped_cube(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut p = w * 1.0
+    mut k = 0
+    while k < 2 {
+        p = &p * w
+        k = k + 1
+    }
+    return Tensor::scalar(p.sum())
+}
+""",
+        (2,),
+        (1.25, -0.5),
+        lambda a, b: (3.0 * a * a, 3.0 * b * b),
+        lambda a, b: diagonal([6.0 * a, 6.0 * b]),
+    ),
+    HessianCase(
+        # A branch, at a point inside each arm.
+        "branch_taken",
+        SECOND_ORDER_BRANCH,
+        (2,),
+        (2.0, 0.5),
+        lambda a, b: (2.0 * a * b, a * a),
+        lambda a, b: [2.0 * b, 2.0 * a, 2.0 * a, 0.0],
+    ),
+    HessianCase(
+        "branch_untaken",
+        SECOND_ORDER_BRANCH.replace("branch_taken", "branch_untaken"),
+        (2,),
+        (0.5, 1.5),
+        lambda a, b: (0.0, 3.0 * b * b),
+        lambda a, b: [0.0, 0.0, 0.0, 6.0 * b],
+    ),
+    HessianCase(
+        # exp, tanh, log and sqrt, whose first-derivative rules read their own value.
+        "smooth_math",
+        """
+@grad(order: 2)
+func smooth_math(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val e = w.exp()
+    val t = w.tanh()
+    val l = w.log()
+    val r = w.sqrt()
+    val m = &e * &t
+    val q = &l / &r
+    return Tensor::scalar(m.sum() + q.sum())
+}
+""",
+        (2,),
+        (0.5, 1.25),
+        lambda a, b: (smooth_math_first(a), smooth_math_first(b)),
+        lambda a, b: diagonal([smooth_math_second(a), smooth_math_second(b)]),
+    ),
+    HessianCase(
+        # `pow`, whose rule raises to a computed exponent, and `abs`, whose rule multiplies
+        # by a `sign` that sends nothing back: d2(|x| x)/dx2 = 2 sign(x).
+        "power_and_magnitude",
+        """
+@grad(order: 2)
+func power_and_magnitude(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val cubed = w.pow(3.0)
+    val magnitude = w.abs()
+    val signed_square = &magnitude * w
+    return Tensor::scalar(cubed.sum() + signed_square.sum())
+}
+""",
+        (2,),
+        (1.25, -0.5),
+        lambda a, b: (3.0 * a * a + 2.0 * abs(a), 3.0 * b * b + 2.0 * abs(b)),
+        lambda a, b: diagonal(
+            [6.0 * a + math.copysign(2.0, a), 6.0 * b + math.copysign(2.0, b)]
+        ),
+    ),
+    HessianCase(
+        # A shape-generic `@grad(order: 2)` function, derived for its `[2]` instance.
+        "generic_cross_g_c2",
+        """
+@grad(order: 2)
+func generic_cross<N>(w: &mut Tensor<f32, [N]>) -> Tensor<f32, []> {
+    val first = w[0]
+    val last = w[1]
+    return Tensor::scalar(first * first * last)
+}
+
+func instantiate_generic_cross(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    generic_cross(w)
+}
+""",
+        (2,),
+        (1.5, -2.0),
+        lambda a, b: (2.0 * a * b, a * a),
+        lambda a, b: [2.0 * b, 2.0 * a, 2.0 * a, 0.0],
+        callee="generic_cross",
+    ),
+]
+
+
+def hessian_probe_name(case):
+    return f"probe_hessian_{case.name}"
+
+
+def element_coordinates(position, shape):
+    """The row-major coordinates of the element at flat `position` of a tensor of `shape`."""
+    coordinates = []
+    for extent in reversed(shape):
+        coordinates.append(str(position % extent))
+        position //= extent
+    return ", ".join(reversed(coordinates))
+
+
+def hessian_probe_source(case):
+    """`probe_hessian_f(i, <elements>, <constants>) -> f64`: element `i` of the one
+    parameter's `.hessian()` after `.backward()`, in row-major order."""
+    (shape,) = case.shapes
+    count = math.prod(shape)
+    params = [f"a{k}: f64" for k in range(count)]
+    params += [f"c{k}: f32" for k in range(len(case.constants))]
+    arguments = ["&mut w0"] + [f"c{k}" for k in range(len(case.constants))]
+    elements = ", ".join(f"a{k}" for k in range(count))
+    lines = [
+        f"    mut w0 = {constructor_name(shape)}({elements})",
+        f"    val loss = {case.callee}({', '.join(arguments)})",
+        "    loss.backward()",
+        "    val h = w0.hessian()",
+    ]
+    for position in range(count * count):
+        element = f"h[{element_coordinates(position, (*shape, *shape))}]"
+        lines.append(f"    if i == {position} {{ return {element} as f64 }}")
+    lines.append("    return 0.0 / 0.0")
+    body = "\n".join(lines)
+    name = hessian_probe_name(case)
+    return f"\nfunc {name}(i: i64, {', '.join(params)}) -> f64 {{\n{body}\n}}\n"
+
+
 class Failure(Exception):
     """A case whose gradient disagreed with the oracle, carrying the report to print."""
 
@@ -1438,10 +1705,12 @@ def build_library(neurc, work_dir):
     # not be emitted twice: the module would declare the same function name twice and fail
     # to compile. Keyed by source text, in declaration order.
     sources = dict.fromkeys(case.source for case in CASES)
-    sources.update(dict.fromkeys(case.source for case in TENSOR_CASES))
-    shapes = dict.fromkeys(shape for case in TENSOR_CASES for shape in case.shapes)
+    tensor_cases = [*TENSOR_CASES, *HESSIAN_CASES]
+    sources.update(dict.fromkeys(case.source for case in tensor_cases))
+    shapes = dict.fromkeys(shape for case in tensor_cases for shape in case.shapes)
     sources.update(dict.fromkeys(constructor_source(shape) for shape in shapes))
-    sources.update(dict.fromkeys(probe_source(case) for case in TENSOR_CASES))
+    sources.update(dict.fromkeys(probe_source(case) for case in tensor_cases))
+    sources.update(dict.fromkeys(hessian_probe_source(case) for case in HESSIAN_CASES))
     source_path.write_text("".join(sources), encoding="utf-8")
 
     object_path = work_dir / "grad_cases.o"
@@ -1697,6 +1966,84 @@ class TensorEntry:
         return loss, gradient
 
 
+class HessianEntry(TensorEntry):
+    """A tensor entry whose case also has its `.hessian()` probed."""
+
+    def __init__(self, library, case):
+        super().__init__(library, case)
+        self.hessian_probe = getattr(library, hessian_probe_name(case))
+        self.hessian_probe.restype = ctypes.c_double
+        self.hessian_probe.argtypes = self.probe.argtypes
+
+    def gradient(self, point):
+        """The compiled `.grad()` at `point`."""
+        arguments = (*point, *self.case.constants)
+        return [self.probe(index, *arguments) for index in range(len(point))]
+
+    def hessian(self, point):
+        """The compiled `.hessian()` at `point`, row-major."""
+        arguments = (*point, *self.case.constants)
+        return [self.hessian_probe(index, *arguments) for index in range(len(point) ** 2)]
+
+
+def fd_hessian_f32(gradient, point):
+    """Central differences of the compiled gradient, row-major: `H[i][j]` is partial `i`
+    differenced along element `j`, at the `f32` step `fd_gradient_f32` takes."""
+    columns = []
+    for axis, coordinate in enumerate(point):
+        step = F32_STEP_SCALE * max(abs(coordinate), 1.0)
+        forward = list(point)
+        backward = list(point)
+        forward[axis] = to_f32(coordinate + step)
+        backward[axis] = to_f32(coordinate - step)
+        span = forward[axis] - backward[axis]
+        columns.append(
+            [(ahead - behind) / span for ahead, behind in zip(gradient(forward), gradient(backward))]
+        )
+    count = len(point)
+    return [columns[j][i] for i in range(count) for j in range(count)]
+
+
+def run_hessian_case(entry, corrupt):
+    """The Hessian of a case whose gradient `run_tensor_case` has already accepted."""
+    case = entry.case
+    point = [to_f32(value) for value in case.point]
+    expected = list(case.hessian(*point, *case.constants))
+    if not detectable(expected):
+        raise Failure(
+            f"every second partial at {case.point} is zero, so the case cannot tell a "
+            "correct Hessian from one that returns zeros"
+        )
+    produced = entry.hessian(point)
+    if corrupt:
+        produced = [partial + SELF_TEST_PERTURBATION for partial in produced]
+    finite = fd_hessian_f32(entry.gradient, point)
+    compare(
+        finite,
+        expected,
+        "finite differences of `.grad()`",
+        "the second-derivative rules",
+        F32_RELATIVE_TOLERANCE,
+        F32_ABSOLUTE_TOLERANCE,
+    )
+    compare(
+        produced,
+        finite,
+        "`.hessian()`",
+        "finite differences of `.grad()`",
+        F32_RELATIVE_TOLERANCE,
+        F32_ABSOLUTE_TOLERANCE,
+    )
+    compare(
+        produced,
+        expected,
+        "`.hessian()`",
+        "the second-derivative rules",
+        REVERSE_RELATIVE_TOLERANCE,
+        REVERSE_ABSOLUTE_TOLERANCE,
+    )
+
+
 def fd_gradient_f32(loss, point):
     """Central differences of an `f32` function, stepping each element in `f32`.
 
@@ -1797,11 +2144,20 @@ def run(neurc, corrupt):
                 run_tensor_case(TensorEntry(library, case), corrupt)
             except Failure as failure:
                 failures.append(f"{case.name}: {failure}")
+        # The gradient is checked unshifted, so a self-test run rejects each of these on
+        # its Hessian alone: the comparison under test is the second-order one.
+        for case in HESSIAN_CASES:
+            try:
+                entry = HessianEntry(library, case)
+                run_tensor_case(entry, corrupt=False)
+                run_hessian_case(entry, corrupt)
+            except Failure as failure:
+                failures.append(f"{case.name}: {failure}")
     return failures
 
 
 def case_count():
-    return len(CASES) + len(TENSOR_CASES)
+    return len(CASES) + len(TENSOR_CASES) + len(HESSIAN_CASES)
 
 
 def main():

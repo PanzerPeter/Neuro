@@ -227,13 +227,15 @@ impl<'ctx> TypeMapper<'ctx> {
     /// producer's context there), and reaches it by its fixed offset in the storage block,
     /// never through `manager_ctx`.
     ///
-    /// `grad` is the gradient slot a `.backward()` fills: null, or a handle the slot owns.
+    /// `grad` and `hessian` are the slots a `.backward()` fills, the second only under
+    /// `@grad(order: 2)`: each null, or a handle the slot owns.
     pub(crate) fn dlpack_control_block_type(&self) -> inkwell::types::StructType<'ctx> {
         let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
         self.context.struct_type(
             &[
                 self.context.i64_type().into(), // data_bytes
                 ptr_ty.into(),                  // grad
+                ptr_ty.into(),                  // hessian
             ],
             false,
         )
@@ -616,13 +618,15 @@ mod tests {
             .get_field_type_at_index(1)
             .and_then(|field| field.try_into().ok())
             .expect("the second field is the control block");
-        // The element buffer's byte length, then the gradient slot.
-        assert_eq!(control.count_fields(), 2);
+        // The element buffer's byte length, then the gradient and Hessian slots.
+        assert_eq!(control.count_fields(), 3);
         assert!(control
             .get_field_type_at_index(0)
             .is_some_and(|field| field.into_int_type().get_bit_width() == 64));
-        assert!(control
-            .get_field_type_at_index(1)
-            .is_some_and(|field| field.is_pointer_type()));
+        for slot in [1, 2] {
+            assert!(control
+                .get_field_type_at_index(slot)
+                .is_some_and(|field| field.is_pointer_type()));
+        }
     }
 }

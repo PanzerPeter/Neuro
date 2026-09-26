@@ -285,7 +285,38 @@ fn a_tensor_is_released_through_its_own_deleter() {
         .find("call void %dlpack.deleter(ptr %dlpack.grad)")
         .expect("the deleter releases the gradient it owns");
     assert!(grad_release < data_free);
+    let hessian_release = deleter
+        .find("(ptr %dlpack.hessian)")
+        .expect("the deleter releases the Hessian it owns");
+    assert!(hessian_release < data_free);
     assert!(!deleter.contains("manager"));
+}
+
+/// `.hessian()` reads a slot of its own, checked and borrowed in place like the gradient's.
+#[test]
+fn reading_a_hessian_checks_its_own_slot_and_borrows_it_in_place() {
+    let source = r#"
+        func main() -> i32 {
+            val w: Tensor<f32, [2]> = [1.0, 2.0]
+            val h = w.hessian()
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("%dlpack.hessian.slot = getelementptr"),
+        "{body}"
+    );
+    assert!(
+        body.contains("%dlpack.hessian.filled = icmp ne ptr"),
+        "{body}"
+    );
+    assert!(
+        body.contains("store ptr %dlpack.hessian.slot"),
+        "the view is the slot's address:\n{body}"
+    );
+    assert!(ir.contains("empty Hessian slot"));
 }
 
 /// `.grad()` hands out the slot's own address once it has checked the slot is filled: a

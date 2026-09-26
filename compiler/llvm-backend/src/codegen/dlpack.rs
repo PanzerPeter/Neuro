@@ -53,6 +53,33 @@ const FIELD_CONTROL: u32 = 1;
 /// Field indices into the control block.
 const FIELD_DATA_BYTES: u32 = 0;
 const FIELD_GRAD: u32 = 1;
+const FIELD_HESSIAN: u32 = 2;
+
+/// One of a tensor's derivative slots, each a `ptr` cell holding null or a handle it owns.
+#[derive(Clone, Copy)]
+pub(crate) enum DerivativeSlot {
+    /// What `.grad()` reads.
+    Gradient,
+    /// What `.hessian()` reads, filled only under `@grad(order: 2)`.
+    Hessian,
+}
+
+impl DerivativeSlot {
+    fn field(self) -> u32 {
+        match self {
+            DerivativeSlot::Gradient => FIELD_GRAD,
+            DerivativeSlot::Hessian => FIELD_HESSIAN,
+        }
+    }
+
+    /// The name of the slot's address in the IR, `dlpack.grad.slot` or `dlpack.hessian.slot`.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            DerivativeSlot::Gradient => "dlpack.grad",
+            DerivativeSlot::Hessian => "dlpack.hessian",
+        }
+    }
+}
 
 /// Field indices into the nested `DLTensor`.
 const FIELD_DATA: u32 = 0;
@@ -266,27 +293,26 @@ impl<'ctx> CodegenContext<'ctx> {
             &[FIELD_DATA_BYTES],
             self.context.i64_type().const_int(data_bytes, false).into(),
         )?;
-        self.store_handle_field(
-            control_ty,
-            control,
-            &[FIELD_GRAD],
-            self.context
-                .ptr_type(inkwell::AddressSpace::default())
-                .const_null()
-                .into(),
-        )?;
+        let null = self
+            .context
+            .ptr_type(inkwell::AddressSpace::default())
+            .const_null();
+        for field in [FIELD_GRAD, FIELD_HESSIAN] {
+            self.store_handle_field(control_ty, control, &[field], null.into())?;
+        }
         Ok(control)
     }
 
-    /// The address of `handle`'s gradient slot: a `ptr` cell holding null or the gradient
-    /// handle the slot owns.
+    /// The address of `handle`'s derivative slot `slot`: a `ptr` cell holding null or the
+    /// derivative handle the slot owns.
     ///
     /// Reached by the slot's fixed offset in the storage block rather than by loading
     /// `manager_ctx`, which is only this compiler's context on a handle it built. Every
     /// handle a program can hold today is one: nothing imports a foreign tensor yet.
-    pub(crate) fn dlpack_grad_slot(
+    pub(crate) fn dlpack_derivative_slot(
         &self,
         handle: PointerValue<'ctx>,
+        slot: DerivativeSlot,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let storage_ty = self.type_mapper.dlpack_tensor_storage_type();
         let control_ty = self.type_mapper.dlpack_control_block_type();
@@ -299,16 +325,35 @@ impl<'ctx> CodegenContext<'ctx> {
                 )
             })?;
         self.builder
-            .build_struct_gep(control_ty, control, FIELD_GRAD, "dlpack.grad.slot")
+            .build_struct_gep(
+                control_ty,
+                control,
+                slot.field(),
+                &format!("{}.slot", slot.label()),
+            )
             .map_err(|_| {
-                CodegenError::InternalError("the DLPack control block has no grad slot".to_string())
+                CodegenError::InternalError(format!(
+                    "the DLPack control block has no {} slot",
+                    slot.label()
+                ))
             })
     }
 
-    /// Release whatever gradient `handle`'s slot owns, through the gradient's own deleter,
-    /// and leave the slot null. A null slot is left alone, so this is safe on every handle
-    /// this compiler built, filled or not.
-    pub(crate) fn release_grad_slot(&self, handle: PointerValue<'ctx>) -> CodegenResult<()> {
+    /// Release every derivative `handle`'s slots own and leave them null: the gradient and
+    /// the Hessian belong to the value together, so whatever ends one ends both.
+    pub(crate) fn release_derivatives(&self, handle: PointerValue<'ctx>) -> CodegenResult<()> {
+        self.release_derivative_slot(handle, DerivativeSlot::Gradient)?;
+        self.release_derivative_slot(handle, DerivativeSlot::Hessian)
+    }
+
+    /// Release whatever derivative `handle`'s slot `slot` owns, through the derivative's own
+    /// deleter, and leave the slot null. A null slot is left alone, so this is safe on
+    /// every handle this compiler built, filled or not.
+    pub(crate) fn release_derivative_slot(
+        &self,
+        handle: PointerValue<'ctx>,
+        slot: DerivativeSlot,
+    ) -> CodegenResult<()> {
         // The builder's own function, not `current_function`: the deleter emits this into
         // its body while a user function is the one being generated.
         let function = self
@@ -316,22 +361,29 @@ impl<'ctx> CodegenContext<'ctx> {
             .get_insert_block()
             .and_then(|block| block.get_parent())
             .ok_or_else(|| {
-                CodegenError::InternalError("a gradient release outside a function".to_string())
+                CodegenError::InternalError("a derivative release outside a function".to_string())
             })?;
         let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        let slot = self.dlpack_grad_slot(handle)?;
-        let grad = self
+        let label = slot.label();
+        let cell = self.dlpack_derivative_slot(handle, slot)?;
+        let held = self
             .builder
-            .build_load(ptr_type, slot, "dlpack.grad")?
+            .build_load(ptr_type, cell, label)?
             .into_pointer_value();
-        let filled = self.builder.build_is_not_null(grad, "dlpack.grad.filled")?;
-        let release_bb = self.context.append_basic_block(function, "grad.release");
-        let done_bb = self.context.append_basic_block(function, "grad.released");
+        let filled = self
+            .builder
+            .build_is_not_null(held, &format!("{label}.filled"))?;
+        let release_bb = self
+            .context
+            .append_basic_block(function, &format!("{label}.release"));
+        let done_bb = self
+            .context
+            .append_basic_block(function, &format!("{label}.released"));
         self.builder
             .build_conditional_branch(filled, release_bb, done_bb)?;
         self.builder.position_at_end(release_bb);
-        self.build_dlpack_release(grad)?;
-        self.builder.build_store(slot, ptr_type.const_null())?;
+        self.build_dlpack_release(held)?;
+        self.builder.build_store(cell, ptr_type.const_null())?;
         self.builder.build_unconditional_branch(done_bb)?;
         self.builder.position_at_end(done_bb);
         Ok(())
@@ -501,8 +553,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 CodegenError::InternalError("the DLPack deleter takes its handle".to_string())
             })?
             .into_pointer_value();
-        // A gradient cannot outlive the parameter it belongs to: the slot owns it.
-        self.release_grad_slot(handle)?;
+        // A derivative cannot outlive the parameter it belongs to: the slot owns it.
+        self.release_derivatives(handle)?;
         let data = self.load_dlpack_data(handle)?;
         // The buffer goes back to the release paired with the over-aligned allocation and
         // the structure to plain `free`: the two blocks come from different allocators on

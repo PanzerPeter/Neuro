@@ -122,6 +122,7 @@ One line each. The program's own header comment is the full description.
 - [`model_shapes.nr`](showcase/model_shapes.nr): a network's layer stack declared with real tensor parameters
 - [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`
 - [`named_axes.nr`](showcase/named_axes.nr): a batch of token embeddings with every tensor axis named
+- [`newton_fit.nr`](showcase/newton_fit.nr): one logistic fit solved by Newton's method and by gradient descent, the Newton step read off the `.hessian()` a `@grad(order: 2)` loss fills beside `.grad()`, its `.exp()` / `.log()` body differentiated twice, each step inside a `pool` and each run a `Copy` struct
 - [`num_algorithms.nr`](showcase/num_algorithms.nr): a tiny integer-math toolkit
 - [`optimizer_step.nr`](showcase/optimizer_step.nr): a weight update written in place and by value, all three broadcast forms, plus the forward pass `@` makes of it
 - [`owned_aggregates.nr`](showcase/owned_aggregates.nr): arrays, tuples, enum payloads, newtypes and a generic struct all holding an owned `string`, destructured element by element

@@ -58,7 +58,9 @@ module per declaration kind beside it. `tests/` is split by subject.
 - **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
   signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every
   differentiated parameter `&mut` over a float element with literal extents (`GradSignature`),
-  no argument but one `wrt:` (`GradFormUnsupported`, `order:` included), and no declared struct named `GradsOf_<f>`
+  no argument but one `wrt:` and one `order:` (`GradFormUnsupported`, as is `order: 2` on a
+  method), an `order:` that is the literal 1 or 2 (`GradOrderUnsupported` at the value: only
+  those two orders have an accessor), and no declared struct named `GradsOf_<f>`
   (`GradGeneratedNameTaken`; `__<f>__rev` cannot clash, pass 0z reserves `__`). A `@grad`
   method (`check_grad_method`) must be an instance method of a non-generic inherent `impl`
   (trait impls, generic impls and associated functions are `GradFormUnsupported`) that borrows
@@ -77,7 +79,7 @@ module per declaration kind beside it. `tests/` is split by subject.
   instance fixes it; the derivative is derived per instance in `hir-lowering`.
 - **4. full check**: `check_function` / `check_impl` / `check_const_item`.
 
-### `.backward()`, `.grad()`, `.zero_grad()` (`type_checkers/backward.rs`)
+### `.backward()`, `.grad()`, `.hessian()`, `.zero_grad()` (`type_checkers/backward.rs`)
 `.backward()` writes gradients into the `&mut` arguments of the `@grad` call its receiver came
 from, AFTER that call returned, so those borrows must reach it. Before each function or method
 body is checked, `backward_losses` collects the names the body calls `.backward()` on (through
@@ -98,6 +100,9 @@ now holds a `Vec` of borrows. The `.backward()` itself, resolved as a tensor bui
 block), not yet backpropagated. `.grad()` registers a shared borrow of the receiver and yields
 `&Tensor`; a binding initialized or assigned with it holds that borrow when the value's TYPE is a
 tensor view (`gradient_view_root`), so a user method called `grad` is never mistaken for one.
+`.hessian()` is the same borrow, typed `&Tensor<T, S ++ S>` for a receiver of shape `S`, its axes
+unnamed since each name would appear twice (`check_hessian_read`); whether the slot is filled is a
+run-time question, as it is for `.grad()`.
 `.zero_grad()` takes the receiver exclusively (`check_mut_self_receiver`). A tensor compound
 assignment now checks the target's borrows before its RHS, as `=` does.
 - **5. lints**: `run_lints` walks bodies collecting non-fatal `Warning`s

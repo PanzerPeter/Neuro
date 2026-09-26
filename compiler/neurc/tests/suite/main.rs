@@ -54,6 +54,7 @@ mod generic_structs;
 mod generics;
 mod gradient_slot;
 mod half_precision;
+mod higher_order_derivatives;
 mod hir_lowering;
 mod if_block_expressions;
 mod immutable_borrows;

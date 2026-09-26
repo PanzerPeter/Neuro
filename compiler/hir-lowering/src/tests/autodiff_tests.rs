@@ -977,3 +977,167 @@ impl Net {
         "at]",
     );
 }
+
+const SECOND_ORDER_LOSS: &str = r#"
+@grad(order: 2)
+func loss(w: &mut Tensor<f32, [2, 3]>, b: &mut Tensor<f32, [3]>, scale: f32) -> Tensor<f32, []> {
+    val shifted = w + b
+    val squared = &shifted * &shifted
+    return Tensor::scalar(squared.sum() * scale)
+}
+
+func main() -> i32 {
+    mut w: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    mut b: Tensor<f32, [3]> = [1.0, 0.0, -1.0]
+    val l = loss(&mut w, &mut b, 0.5f32)
+    l.backward()
+    return 0
+}
+"#;
+
+/// `order: 2` adds each parameter's Hessian to the bundle, shaped like the parameter twice
+/// over, and one Hessian-vector product per parameter taking the primal's parameters and a
+/// direction shaped like that parameter.
+#[test]
+fn order_two_adds_a_hessian_shaped_twice_like_each_parameter() {
+    let program = lower(SECOND_ORDER_LOSS);
+    let bundle = item_struct(&program, "GradsOf_loss");
+    let fields: Vec<_> = bundle
+        .fields
+        .iter()
+        .map(|field| (field.name.as_str(), field.ty.clone()))
+        .collect();
+    assert_eq!(
+        fields,
+        vec![
+            ("w", tensor(&[2, 3])),
+            ("b", tensor(&[3])),
+            ("w__hessian", tensor(&[2, 3, 2, 3])),
+            ("b__hessian", tensor(&[3, 3])),
+        ]
+    );
+    let primal = item_function(&program, "loss");
+    for (name, direction) in [
+        ("__loss__hvp__w", tensor(&[2, 3])),
+        ("__loss__hvp__b", tensor(&[3])),
+    ] {
+        let hvp = item_function(&program, name);
+        let mut params: Vec<HirType> = primal.params.iter().map(|p| p.ty.clone()).collect();
+        params.push(HirType::Reference {
+            inner: Box::new(direction.clone()),
+            mutable: false,
+        });
+        let taken: Vec<HirType> = hvp.params.iter().map(|p| p.ty.clone()).collect();
+        assert_eq!(taken, params, "{name}");
+        assert_eq!(hvp.return_type, direction, "{name}");
+    }
+}
+
+/// The gradient write empties the Hessian slot, so each argument's Hessian is written after
+/// its gradient.
+#[test]
+fn an_order_two_backward_writes_the_hessian_after_the_gradient() {
+    let program = lower(SECOND_ORDER_LOSS);
+    let body = &item_function(&program, "main").body;
+    let writes: Vec<String> = body
+        .iter()
+        .filter_map(|stmt| {
+            let HirStmt::Expr(expr) = stmt else {
+                return None;
+            };
+            let HirExprKind::Call { callee, args } = &expr.kind else {
+                return None;
+            };
+            let (HirExprKind::FieldAccess { field, .. }, [derivative]) =
+                (&callee.kind, args.as_slice())
+            else {
+                return None;
+            };
+            let HirExprKind::FieldAccess { field: from, .. } = &derivative.kind else {
+                return None;
+            };
+            Some(format!("{field}({from})"))
+        })
+        .collect();
+    assert_eq!(
+        writes,
+        [
+            "__set_grad(w)",
+            "__set_hessian(w__hessian)",
+            "__set_grad(b)",
+            "__set_hessian(b__hessian)"
+        ]
+    );
+}
+
+/// A second derivative differentiates the first derivative's own body, whose forward replay
+/// turns every `while` into a `loop` exiting on the negated condition. The tape reads that
+/// form back as the `while` it is, so a loop is differentiated twice.
+#[test]
+fn a_loop_is_differentiated_twice_under_order_two() {
+    let program = lower(&LOOPED_LOSS.replace("@grad", "@grad(order: 2)"));
+    let hvp = item_function(&program, "__loss__hvp__w");
+    assert!(all_stmts(&hvp.body)
+        .iter()
+        .any(|stmt| matches!(stmt, HirStmt::While { .. })));
+}
+
+/// A `loop` whose first exit is `if !condition { break }` is the `while` it spells, in a
+/// first derivative too.
+#[test]
+fn a_loop_guarded_by_its_negated_condition_is_a_while() {
+    let program = lower(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    mut acc = w * 1.0
+    mut step = 0
+    loop {
+        if !(step < 3) { break }
+        acc = &acc * w
+        step += 1
+    }
+    return Tensor::scalar(acc.sum())
+}
+"#,
+    );
+    let _ = item_function(&program, "__loss__rev");
+}
+
+/// The adjoint of an element read at a run-time position is an element store, which the
+/// second sweep would have to read back; it is refused at the read.
+#[test]
+fn a_run_time_element_read_is_refused_under_order_two() {
+    refusal_at(
+        r#"
+@grad(order: 2)
+func loss(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
+    mut s = 0.0f32
+    for i in 0..3 {
+        val x = w[i]
+        s = s + x * x
+    }
+    return Tensor::scalar(s)
+}
+"#,
+        "w[i]",
+    );
+}
+
+/// The Hessian calls the derivative once per element, so a value passed by value must be
+/// passed again each time: a number is, a tensor is copied, anything else is refused.
+#[test]
+fn a_struct_passed_by_value_is_refused_under_order_two() {
+    refusal_at(
+        r#"
+struct Config { scale: f32 }
+
+@grad(order: 2)
+func loss(w: &mut Tensor<f32, [2]>, config: Config) -> Tensor<f32, []> {
+    val s = w * w
+    return Tensor::scalar(s.sum() * config.scale)
+}
+"#,
+        "config: Config",
+    );
+}

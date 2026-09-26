@@ -387,3 +387,48 @@ fn an_argument_wrt_leaves_out_is_not_held() {
         "got {errors:?}"
     );
 }
+
+/// `.hessian()` of a `[2]` tensor is a borrow shaped `[2, 2]`, whatever the `@grad`
+/// function's order: an empty slot is a run-time panic, like `.grad()`'s.
+#[test]
+fn the_hessian_is_a_borrow_shaped_twice_like_its_tensor() {
+    let errors = errors_in_main(
+        r#"
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = loss(&mut w, 2.0f32)
+    l.backward()
+    val h: &Tensor<f32, [2, 2]> = w.hessian()
+    val corner = h[1, 0]"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+
+    let errors = errors_in_main(
+        r#"
+    val w: Tensor<f32, [2, 3]> = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    val h: &Tensor<f32, [2, 3]> = w.hessian()"#,
+    );
+    assert!(
+        matches!(errors.as_slice(), [TypeError::Mismatch { .. }]),
+        "got {errors:?}"
+    );
+}
+
+#[test]
+fn a_live_hessian_view_blocks_zero_grad() {
+    let errors = errors_in_main(
+        r#"
+    mut w: Tensor<f32, [2]> = [1.0, 2.0]
+    val l = loss(&mut w, 2.0f32)
+    l.backward()
+    val h = w.hessian()
+    w.zero_grad()
+    val first = h[0, 0]"#,
+    );
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [TypeError::CannotMutablyBorrowWhileBorrowed { .. }]
+        ),
+        "got {errors:?}"
+    );
+}

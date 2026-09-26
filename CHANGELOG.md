@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-09-26
+
+### Added
+
+- `@grad(order: 2)` takes second derivatives: after `.backward()`, `w.hessian()` borrows the
+  Hessian of each differentiated parameter beside `w.grad()`, shaped `S ++ S` for a parameter
+  of shape `S`. It is reverse mode applied to the derivative itself, so branches, loops,
+  calls, function values, `@`, reductions and elementwise math are differentiated twice at
+  compile time. `order: 1` is the default spelled out; any other order, and `order: 2` on a
+  method, is refused at the argument.
+- The Hessian has a slot of its own in each tensor's control block. Reading it empty panics;
+  `.zero_grad()`, a shape cast and a first-order `.backward()` empty it; it is released with
+  its tensor and never taken from a `pool` arena.
+- Under `order: 2`, an element read at a run-time position and a by-value parameter that is
+  neither a number nor a tensor are refused at the construct.
+- A `loop` whose first way out is `if !condition { break }` is differentiated as the `while` it
+  spells, in any `@grad` body.
+- `examples/showcase/newton_fit.nr`: one logistic fit solved by Newton's method, its step read
+  off `.hessian()`, and by gradient descent.
+- `tools/grad_differential.py` gains nine Hessian cases, each compared against central finite
+  differences of the compiled `.grad()` and against a Hessian written out by hand.
+
 ## [3.12.1] - 2026-09-26
 
 ### Fixed

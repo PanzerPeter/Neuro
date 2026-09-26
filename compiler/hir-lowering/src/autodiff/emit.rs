@@ -133,6 +133,8 @@ fn arithmetic_type(
     }
 }
 
+/// Clonable so that a second derivative can extend a copy of the first's body.
+#[derive(Clone)]
 pub(super) struct Emitter {
     pub(super) stmts: Vec<HirStmt>,
     counter: usize,

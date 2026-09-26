@@ -105,6 +105,28 @@ reshape in an axis-reduction rule and the inverse cast in a shape-cast rule) or 
 both operands) is copied before either takes it (`Adjoints::owners`). A slot is only ever given a
 value its arm owns outright or a copy (`store`), and a nested sweep works on a copy of its seed.
 
+**`@grad(order: 2)`** is the same transform applied twice (`GradParams::hessian`, read off
+the attribute by `GradParams::of`). `derive_reverse` splits into `differentiate` (the tape,
+forward replay, reverse sweep and materialized gradients, as a `Derivative` whose `Emitter` is
+`Clone`) and the bundling around it. For each differentiated parameter `p`,
+`hessian_vector_product` extends a CLONE of the first derivative's body with `<gradient_p, v>`
+over a direction parameter `__ad_direction: &Tensor` shaped like `p`, and runs `differentiate`
+again on that synthetic function (function-typed parameters dropped: the first derivative
+already inlined their targets), wrt `p` alone: its gradient is `H v`, since the Hessian is
+symmetric. That is `__<key>__hvp__<p>(<params>, <captures>, v) -> Tensor<S>`, one more item.
+`assemble_hessian` then emits into `__<key>__rev` a counted `while` over the `n` elements of `p`:
+a unit tensor built by one element store, re-described at `S`, one call of the HVP (a borrowed
+or numeric parameter passed as it is, an owned tensor as a `.clone()` per call, anything else by
+value refused, `repeated_argument`), and an inner `while` copying the row into an `[n, n]`
+tensor, re-described at `S ++ S` at the end (`hessian_type`) and bundled as `<p>__hessian`
+(`hessian_field`). For the second pass to read the first derivative back, the tape accepts
+the one construct the forward replay emits that a user rarely writes: `loop { C; if !t { break
+}; B }` is linearized as `while { C; t } { B }` (`guarded_loop`), in any `@grad` body. The
+one first-derivative construct the tape cannot read back is the element STORE a run-time element
+read's adjoint scatters through, so under `order: 2` such a read is refused at the read
+(`run_time_read`). A method's `wrt:` fields are never reached here: the checker refuses
+`order: 2` on a method.
+
 **`.backward()`** (`autodiff/backward.rs`) never reaches a backend. The three block loops
 (`lower_stmt_list`, `lower_body_stmts`, `lower_block_value_inner`) lower each statement through
 `lower_stmt_into`, which pairs a `loss.backward()` statement on a tensor binding with the
@@ -112,15 +134,17 @@ value its arm owns outright or a copy (`store`), and a nested sweep works on a c
 the declaration becomes `val __backward_N = __f__rev(<same args>)` plus `val loss =
 __backward_N.0`, and the statement becomes one `(<arg>).__set_grad(__backward_N.1.<param>)` per
 differentiated argument, plus one `<receiver>.<path>.__set_grad(__backward_N.1.self__...)` per
-`wrt:` field path of a method, re-evaluating the argument or receiver, which the checker restricted to `&mut name`
+`wrt:` field path of a method, each gradient write followed under `order: 2` by
+`(<arg>).__set_hessian(__backward_N.1.<param>__hessian)` (after it, because the gradient write
+empties the Hessian slot), re-evaluating the argument or receiver, which the checker restricted to `&mut name`
 or a `&mut` binding and held borrowed until here. So the derivative runs where the call ran and
 a call with no `.backward()` stays the primal. A method call pairs the same way: `grad_key`
 reads the `Type__method` key off the receiver's struct type, and the call becomes
 `<receiver>.__method__rev(<same args>)`. `grad_params` maps each lowered `@grad` name or method
 key (concrete from `register_function` / `register_impl_methods`, instances from the
 monomorphization call site) to its `GradParams`: the parameter names, the bundle's field
-names, and its `Wrt` (`Wrt::of` reads the checked attribute). `.grad()` lowers as a builtin returning a
-`&Tensor<T, S>` like the receiver, `.zero_grad()` as a unit builtin; `reverse_name` /
+names, its `Wrt` (`Wrt::of` reads the checked attribute) and whether it takes second derivatives. `.grad()` lowers as a builtin returning a
+`&Tensor<T, S>` like the receiver, `.hessian()` one returning `&Tensor<T, S ++ S>`, `.zero_grad()` as a unit builtin; `reverse_name` /
 `bundle_name` are the one spelling of the generated names.
 
 At a point where the primal's control flow changes, the derivative is the executed path's: the

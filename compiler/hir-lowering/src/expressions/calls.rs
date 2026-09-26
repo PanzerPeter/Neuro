@@ -4,7 +4,7 @@
 //! Every file here adds methods to the same `impl Lowerer` block.
 
 use ast_types::Expr;
-use neuro_hir::{HirExpr, HirExprKind, HirFieldInit, HirType};
+use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirFieldInit, HirType};
 
 use super::{
     CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT, CHAR_AT_METHOD,
@@ -15,6 +15,7 @@ use crate::{is_full_float, is_integer, Lowerer, LoweringError};
 /// The gradient slot's two surface accessors. `.backward()` is a statement the block
 /// lowering pairs with its `@grad` call, never an expression.
 const GRAD_METHOD: &str = "grad";
+const HESSIAN_METHOD: &str = "hessian";
 const ZERO_GRAD_METHOD: &str = "zero_grad";
 
 impl Lowerer {
@@ -313,10 +314,10 @@ impl Lowerer {
 
         let mangled = crate::mangle_instance(name, &template.generics, &subst, &const_subst);
         if crate::autodiff::is_grad(&template.attributes) {
-            let grad = crate::autodiff::GradParams {
-                names: crate::param_names(&template),
-                wrt: crate::autodiff::Wrt::of(&template.attributes)?,
-            };
+            let grad = crate::autodiff::GradParams::of(
+                crate::param_names(&template),
+                &template.attributes,
+            )?;
             self.grad_params.insert(mangled.clone(), grad);
         }
         if !self.mono_seen.contains(&mangled) {
@@ -691,6 +692,20 @@ impl Lowerer {
             (tensor @ HirType::Tensor { .. }, GRAD_METHOD) => {
                 let view = HirType::Reference {
                     inner: Box::new(tensor.clone()),
+                    mutable: false,
+                };
+                Ok((self.lower_args(args, &[])?, view))
+            }
+            // `tensor.hessian()`: a shared borrow of the receiver's second derivative,
+            // shaped like the receiver twice over.
+            (HirType::Tensor { element, shape, .. }, HESSIAN_METHOD) => {
+                let hessian = HirType::Tensor {
+                    element: element.clone(),
+                    shape: shape.iter().chain(shape).copied().collect(),
+                    names: AxisNames::default(),
+                };
+                let view = HirType::Reference {
+                    inner: Box::new(hessian),
                     mutable: false,
                 };
                 Ok((self.lower_args(args, &[])?, view))

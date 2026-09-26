@@ -510,9 +510,8 @@ impl Lowerer {
             self.functions.insert(mangled.clone(), (params, ret));
             if crate::autodiff::is_grad(&method.attributes) {
                 let names = method.params.iter().map(|p| p.name.name.clone()).collect();
-                let wrt = crate::autodiff::Wrt::of(&method.attributes)?;
-                self.grad_params
-                    .insert(mangled.clone(), crate::autodiff::GradParams { names, wrt });
+                let grad = crate::autodiff::GradParams::of(names, &method.attributes)?;
+                self.grad_params.insert(mangled.clone(), grad);
             }
             self.impl_methods
                 .entry(struct_name.to_string())
@@ -623,10 +622,7 @@ impl Lowerer {
         let ret = self.declared_return_type(&func.return_type, &func.body)?;
         self.functions.insert(func.name.name.clone(), (params, ret));
         if crate::autodiff::is_grad(&func.attributes) {
-            let grad = crate::autodiff::GradParams {
-                names: crate::param_names(func),
-                wrt: crate::autodiff::Wrt::of(&func.attributes)?,
-            };
+            let grad = crate::autodiff::GradParams::of(crate::param_names(func), &func.attributes)?;
             self.grad_params.insert(func.name.name.clone(), grad);
         }
         Ok(())

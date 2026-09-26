@@ -5,7 +5,9 @@
 
 use super::{TypeChecker, CLONE_METHOD};
 use crate::errors::TypeError;
-use crate::type_checkers::backward::{BACKWARD_METHOD, GRAD_METHOD, ZERO_GRAD_METHOD};
+use crate::type_checkers::backward::{
+    BACKWARD_METHOD, GRAD_METHOD, HESSIAN_METHOD, ZERO_GRAD_METHOD,
+};
 use crate::type_checkers::tensor_apply::is_apply_method;
 use crate::type_checkers::tensor_reduce::is_reduce_method;
 use crate::type_checkers::tensor_shape::is_shape_method;
@@ -218,13 +220,17 @@ impl TypeChecker {
                 Some(recv.referent().clone())
             }
             // The gradient slot. `.backward()` pairs with the `@grad` call its receiver came
-            // from and ends that call's borrows; `.grad()` borrows the receiver's gradient;
-            // `.zero_grad()` releases it, so it needs the receiver exclusively.
+            // from and ends that call's borrows; `.grad()` and `.hessian()` borrow the
+            // receiver's derivatives; `.zero_grad()` releases both, so it needs the receiver
+            // exclusively.
             (Type::Tensor { .. }, BACKWARD_METHOD) => {
                 Some(self.check_backward(object, args, call_span))
             }
             (Type::Tensor { .. }, GRAD_METHOD) => {
                 Some(self.check_grad_read(recv, object, args, call_span))
+            }
+            (Type::Tensor { .. }, HESSIAN_METHOD) => {
+                Some(self.check_hessian_read(recv, object, args, call_span))
             }
             (Type::Tensor { .. }, ZERO_GRAD_METHOD) => {
                 Some(self.check_zero_grad(recv, object, args, call_span))

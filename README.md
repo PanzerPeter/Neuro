@@ -171,7 +171,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |
 | **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` ([reference](docs/language-reference/types.md)) |
 | **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce`, `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)` ([reference](docs/language-reference/tensors.md)) |
-| **Automatic differentiation** | `@grad` on a function or method compiles a reverse-mode derivative of a tensor loss beside it, through branches, loops, calls, function values and elementwise math, at compile time and with no gradient tape; `@grad(wrt: [w, self.head.w])` picks the parameters and receiver fields it differentiates; `loss.backward()` runs it and `w.grad()` / `.zero_grad()` read and clear each parameter's gradient, every one checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
+| **Automatic differentiation** | `@grad` on a function or method compiles a reverse-mode derivative of a tensor loss beside it, through branches, loops, calls, function values and elementwise math, at compile time and with no gradient tape; `@grad(wrt: [w, self.head.w])` picks the parameters and receiver fields it differentiates; `loss.backward()` runs it and `w.grad()` / `.zero_grad()` read and clear each parameter's gradient; `@grad(order: 2)` adds `w.hessian()`; every one checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
 | **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `String` buffer ([reference](docs/language-reference/strings.md)) |
 | **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic reports overflow |
 | **Ownership** | Move-by-default, `Copy`, borrows with flow-sensitive exclusivity, lifetime elision, deterministic `Drop`, and `pool { }` arena blocks ([reference](docs/language-reference/memory-model.md)) |
@@ -235,7 +235,8 @@ lowering, **2D** the pool allocator, **2E** the value model and **2F** functiona
 all shipped. Phase 3 now trains: `@grad` on a function or a method emits a reverse-mode
 gradient function over tensor arithmetic, `if`, `while`, calls to user functions and function values, `wrt:` picks what
 it differentiates down to a model's own fields, `.backward()` runs it and parks each
-gradient beside its parameter for `.grad()` to read, and every derivative the compiler
+gradient beside its parameter for `.grad()` to read, `order: 2` adds the Hessian for
+`.hessian()`, and every derivative the compiler
 generates is measured against central finite differences of the compiled function.
 
 ---

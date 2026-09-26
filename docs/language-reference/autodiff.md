@@ -187,6 +187,68 @@ where an ordinary method of the same type trains it with `self.loss(&mut w, &mut
   computed at run time, is refused.
 - `@grad` is not yet accepted on an associated function (one without `self`), on a method of a
   trait `impl`, or on a method of a generic `impl`. A `@grad` body still cannot call a method.
+- A method takes first derivatives only: `@grad(order: 2)` on a method is refused at `order`.
+
+## Second derivatives: `order: 2`
+
+`@grad(order: 2)` asks for each differentiated parameter's second derivative as well. After
+`.backward()`, `w.hessian()` borrows it beside `w.grad()`. For a parameter of shape `S` it is a
+`&Tensor<T, S ++ S>`: a `[2]` parameter's Hessian is `[2, 2]`, a `[2, 3]` one's is
+`[2, 3, 2, 3]`, and the element at `[i..., j...]` is how gradient element `i` changes along
+parameter element `j`. `.grad()` keeps meaning the first derivative, so adding `order: 2` to a
+function never changes what code already written against it reads. `order: 1` is the default
+spelled out, and any other order is a type error at the value.
+
+```neuro
+@grad(order: 2)
+func logistic_loss(theta: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val x: Tensor<f32, [6]> = [-2.0, -1.0, -0.5, 0.5, 1.0, 2.5]
+    val y: Tensor<f32, [6]> = [-1.0, -1.0, 1.0, -1.0, 1.0, 1.0]
+    val weight = theta[0]
+    val bias = theta[1]
+    val margin = (x * weight + bias) * y
+    val loss = ((margin * -1.0).exp() + 1.0).log()
+    val ridge = theta * theta
+    return Tensor::scalar(loss.mean() + ridge.sum() * 0.05)
+}
+```
+
+Its caller takes Newton steps, solving `H d = g` with the curvature `.hessian()` reads:
+
+```neuro
+        pool {
+            val l = logistic_loss(&mut theta)
+            l.backward()
+            loss = l.sum()
+            val (g0, g1) = (theta.grad()[0], theta.grad()[1])
+            val (a, b) = (theta.hessian()[0, 0], theta.hessian()[0, 1])
+            val (c, d) = (theta.hessian()[1, 0], theta.hessian()[1, 1])
+            slope = g0.abs() + g1.abs()
+            // The inverse of a 2 x 2 matrix, applied to the gradient.
+            val det = a * d - b * c
+            val step: Tensor<f32, [2]> = [(d * g0 - b * g1) / det, (a * g1 - c * g0) / det]
+            theta -= step
+        }
+```
+
+Both come from [`examples/showcase/newton_fit.nr`](../../examples/showcase/newton_fit.nr), which
+reaches the minimum in a tenth of the steps gradient descent takes.
+
+- **The Hessian has a slot of its own**, beside the gradient's, and follows the gradient's rules:
+  it is a borrow, reading it before an `order: 2` `.backward()` has filled it panics, it is
+  released with its tensor, and it is never taken from a `pool` arena. `.zero_grad()` empties
+  both slots, and so does a shape cast. A first-order `.backward()` empties the Hessian slot as
+  it replaces the gradient, so a Hessian taken at an earlier point is never left behind.
+- **Each parameter gets the Hessian with respect to itself.** With two differentiated
+  parameters `w` and `b`, `w.hessian()` and `b.hessian()` are filled; the mixed derivatives
+  between `w` and `b` are not computed.
+- **The cost grows with the parameter.** The Hessian of an `n`-element parameter is built one
+  row at a time, each row a derivative of the derivative, so it costs about `n` times what the
+  derivative does, and its buffer holds `n²` elements.
+- Under `order: 2`, an element read at a position computed at run time (`w[i]` in a `for` loop)
+  is refused at the read, and so is a parameter passed by value that is neither a number nor a
+  tensor.
+
 
 ## What a `@grad` body may contain
 
@@ -313,7 +375,7 @@ branch or a loop, and a function-typed parameter of an ordinary function passed 
 order the traversal runs. A traversal over more than 1024 elements, or over a tensor with a
 dynamic axis, is refused.
 
-Any other construct in a `@grad` body is a compile error pointing at it: a `for` over a collection, `loop`, `break` and `continue`, `match`, a `return` inside a loop or
+Any other construct in a `@grad` body is a compile error pointing at it: a `for` over a collection, a `loop` (unless its first way out is `if !condition { break }`, which makes it the `while` it spells), `break` and `continue`, `match`, a `return` inside a loop or
 anywhere but the end of an `if` arm at the top of the body, an assignment to a parameter,
 `.max()` / `.min()`, a slice at a position computed at run time, and an `einsum` operand that
 repeats a letter (a diagonal, as in a trace). A value that an `if` or a loop reassigns must be a float, integer or `bool`, or a float
@@ -343,5 +405,7 @@ A derivative is trusted only once a second, independent computation agrees with 
 reads every gradient back with `.grad()`, then computes central finite differences of the
 compiled function at the same point, and requires the two to agree componentwise. At a point
 where the path changes, a central difference would straddle both paths, so those cases compare
-against finite differences of the executed path alone. It runs as
+against finite differences of the executed path alone. A second derivative is read back with
+`.hessian()` and compared against central finite differences of the compiled `.grad()`, which
+has itself just been checked against the loss. It runs as
 `cargo test -p neurc --test grad_differential`.

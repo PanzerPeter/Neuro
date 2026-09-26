@@ -95,7 +95,14 @@ declaration becomes a call of `__<f>__rev` (or of the receiver's `__<m>__rev` fo
 call) whose loss is unpacked into `loss`, and the statement
 becomes one private slot write per differentiated argument or `wrt:` field of the receiver,
 moving that gradient out of the returned struct. The derivative therefore runs where the call ran, and a call with no
-`.backward()` stays the plain function. `.grad()` and `.zero_grad()` lower as tensor builtins.
+`.backward()` stays the plain function. `.grad()`, `.hessian()` and `.zero_grad()` lower as
+tensor builtins.
+
+`@grad(order: 2)` applies the same transform twice. The first derivative's body, extended to
+return the gradient's dot product with a direction `v`, is itself differentiated, giving a
+generated `__<f>__hvp__<param>` that computes the Hessian times `v`. The first derivative calls it
+once per element of the parameter, along each unit direction, to build the Hessian row by row, and
+its `.backward()` moves the Hessian into its own slot after the gradient.
 
 This is the one place lowering reports a user error with a location. The transform owns its rule
 set, so a construct it has no rule for is a `LoweringError::NotDifferentiable` that carries the

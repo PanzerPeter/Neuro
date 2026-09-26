@@ -6,6 +6,9 @@
 // signature is what is checked here; which operations the body may use is the transform's
 // own rule set, and the transform reports a construct it cannot differentiate itself.
 //
+// `order: 2` asks for second derivatives as well (`.hessian()`), `order: 1` is the default
+// spelled out, and no other order has an accessor. A method takes first derivatives only.
+//
 // `wrt: [...]` picks what is differentiated: a parameter by name, or
 // a tensor reached from a method's receiver through exported fields and literal array
 // positions, `self.encoder.w` or `self.heads[1]`. Without it every tensor parameter is
@@ -31,8 +34,15 @@ const GRAD_ATTRIBUTE: &str = "grad";
 /// struct; the two slices must agree, and a clash is caught here, where it has a span.
 const BUNDLE_PREFIX: &str = "GradsOf_";
 
-/// The one argument `@grad` takes today. `order:` is the higher-order derivatives item's.
+/// The argument selecting what is differentiated.
 const WRT_LABEL: &str = "wrt";
+
+/// The argument selecting how many derivatives `.backward()` fills.
+const ORDER_LABEL: &str = "order";
+
+/// The orders with an accessor: `.grad()` reads the first, `.hessian()` the second.
+const FIRST_ORDER: i128 = 1;
+const SECOND_ORDER: i128 = 2;
 
 /// The receiver's name, the root of every field path a method's `wrt:` may list.
 const RECEIVER: &str = "self";
@@ -45,6 +55,13 @@ pub(crate) struct GradSelection {
     pub(crate) params: Vec<bool>,
     /// Whether a `wrt:` path reaches a tensor through the receiver.
     pub(crate) receiver: bool,
+}
+
+/// A `@grad` attribute's arguments.
+struct GradArguments<'a> {
+    wrt: Option<&'a AttributeNamedArg>,
+    /// The `order: 2` argument, when the attribute asks for second derivatives.
+    second_order: Option<&'a AttributeNamedArg>,
 }
 
 /// The receiver a method's `wrt:` paths start from.
@@ -133,7 +150,7 @@ impl TypeChecker {
         let Some(attr) = grad_attribute(&func.attributes) else {
             return;
         };
-        let Some(wrt) = self.grad_wrt(attr) else {
+        let Some(GradArguments { wrt, .. }) = self.grad_arguments(attr) else {
             return;
         };
         // A generic template is checked once, with its parameters abstract; the
@@ -184,9 +201,19 @@ impl TypeChecker {
         let Some(attr) = grad_attribute(&method.attributes) else {
             return;
         };
-        let Some(wrt) = self.grad_wrt(attr) else {
+        let Some(GradArguments { wrt, second_order }) = self.grad_arguments(attr) else {
             return;
         };
+        // The second derivative is taken over the first derivative's body, a function of
+        // the parameters alone; a method's `wrt:` fields would have to be threaded through
+        // it as well.
+        if let Some(order) = second_order {
+            self.record_error(TypeError::GradFormUnsupported {
+                form: "with `order: 2` on a method".to_string(),
+                span: order.label.span,
+            });
+            return;
+        }
         let form = if def.trait_name.is_some() {
             Some("on a method of a trait `impl`")
         } else if !def.generics.is_empty() || !def.type_args.is_empty() {
@@ -251,9 +278,9 @@ impl TypeChecker {
         self.grad_functions.insert(key, selection);
     }
 
-    /// The `wrt:` argument of `attr`, `Some(None)` when it has none, or `None` when the
-    /// attribute takes an argument `@grad` does not, which is reported here.
-    fn grad_wrt<'a>(&mut self, attr: &'a Attribute) -> Option<Option<&'a AttributeNamedArg>> {
+    /// The arguments of `attr`, or `None` when it takes one `@grad` does not, or an
+    /// `order:` no accessor reads, which is reported here.
+    fn grad_arguments<'a>(&mut self, attr: &'a Attribute) -> Option<GradArguments<'a>> {
         if let Some(arg) = attr.args.first() {
             self.record_error(TypeError::GradFormUnsupported {
                 form: format!("with the bare argument '{}'", arg.name),
@@ -261,23 +288,47 @@ impl TypeChecker {
             });
             return None;
         }
-        let mut wrt = None;
+        let (mut wrt, mut order) = (None, None);
         for arg in &attr.named {
-            let form = if arg.label.name != WRT_LABEL {
-                format!("with `{}:`", arg.label.name)
-            } else if wrt.is_some() {
-                "with `wrt:` given twice".to_string()
-            } else {
-                wrt = Some(arg);
-                continue;
+            let seen = match arg.label.name.as_str() {
+                WRT_LABEL => &mut wrt,
+                ORDER_LABEL => &mut order,
+                other => {
+                    self.record_error(TypeError::GradFormUnsupported {
+                        form: format!("with `{other}:`"),
+                        span: arg.label.span,
+                    });
+                    return None;
+                }
             };
-            self.record_error(TypeError::GradFormUnsupported {
-                form,
-                span: arg.label.span,
-            });
-            return None;
+            if seen.is_some() {
+                self.record_error(TypeError::GradFormUnsupported {
+                    form: format!("with `{}:` given twice", arg.label.name),
+                    span: arg.label.span,
+                });
+                return None;
+            }
+            *seen = Some(arg);
         }
-        Some(wrt)
+        let second_order = match order {
+            None => None,
+            Some(arg) => match &arg.value {
+                Expr::Literal(Literal::Integer(FIRST_ORDER, _), _) => None,
+                Expr::Literal(Literal::Integer(SECOND_ORDER, _), _) => Some(arg),
+                other => {
+                    let found = match other {
+                        Expr::Literal(Literal::Integer(value, _), _) => format!("order {value}"),
+                        _ => "an order that is not an integer literal".to_string(),
+                    };
+                    self.record_error(TypeError::GradOrderUnsupported {
+                        found,
+                        span: other.span(),
+                    });
+                    return None;
+                }
+            },
+        };
+        Some(GradArguments { wrt, second_order })
     }
 
     /// The rules every `@grad` signature obeys, whatever declares it: the loss is a

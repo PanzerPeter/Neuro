@@ -1141,6 +1141,12 @@ pub enum TypeError {
     #[error("`@grad` {form} is not supported yet; annotate a free function, or an instance method of a non-generic inherent `impl`, with `@grad` or `@grad(wrt: [...])`")]
     GradFormUnsupported { form: String, span: Span },
 
+    /// An `order:` naming no derivative the language has an accessor for. `.grad()` reads
+    /// the first and `.hessian()` the second; a third would need an `S ++ S ++ S` buffer
+    /// nothing reads yet.
+    #[error("`@grad` asks for {found}, a derivative order the language does not have; write `order: 1` or `order: 2`")]
+    GradOrderUnsupported { found: String, span: Span },
+
     #[error("`@grad` function '{function}' {problem}")]
     GradSignature {
         function: String,
@@ -1363,6 +1369,7 @@ impl TypeError {
             | Self::CyclicNewtype { span, .. }
             | Self::UnsupportedEnumPayload { span, .. }
             | Self::GradFormUnsupported { span, .. }
+            | Self::GradOrderUnsupported { span, .. }
             | Self::GradSignature { span, .. }
             | Self::GradGeneratedNameTaken { span, .. }
             | Self::BackwardUnavailable { span, .. }

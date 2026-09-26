@@ -1,4 +1,5 @@
-// The materialization layer's rules: `.backward()`, `.grad()` and `.zero_grad()`.
+// The materialization layer's rules: `.backward()`, `.grad()`, `.hessian()` and
+// `.zero_grad()`.
 //
 // `.backward()` runs the derivative of the `@grad` call its receiver came from and moves
 // each gradient into the slot of the tensor that call borrowed `&mut`. That write happens
@@ -22,10 +23,11 @@ use super::statements::borrow_target_of;
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::symbol_table::GradLoss;
-use crate::types::Type;
+use crate::types::{TensorAxis, Type};
 
 pub(crate) const BACKWARD_METHOD: &str = "backward";
 pub(crate) const GRAD_METHOD: &str = "grad";
+pub(crate) const HESSIAN_METHOD: &str = "hessian";
 pub(crate) const ZERO_GRAD_METHOD: &str = "zero_grad";
 
 fn peel_parens(mut expr: &Expr) -> &Expr {
@@ -132,9 +134,9 @@ fn backward_receiver(expr: &Expr) -> Option<&str> {
     }
 }
 
-/// The binding a `.grad()` value borrows from, when `ty` shows `expr` really is the
-/// gradient view, a shared borrow of a tensor, and not a user method that happens to be
-/// called `grad`. A binding initialized with it holds that borrow, so the view blocks the
+/// The binding a `.grad()` or `.hessian()` value borrows from, when `ty` shows `expr`
+/// really is a derivative view, a shared borrow of a tensor, and not a user method that
+/// happens to share the name. A binding initialized with it holds that borrow, so the view blocks the
 /// `.zero_grad()` or `.backward()` that would release what it points at.
 pub(crate) fn gradient_view_root(expr: &Expr, ty: &Type) -> Option<String> {
     let Type::Reference {
@@ -151,7 +153,9 @@ pub(crate) fn gradient_view_root(expr: &Expr, ty: &Type) -> Option<String> {
         return None;
     };
     match func.as_ref() {
-        Expr::FieldAccess { object, field, .. } if field.name == GRAD_METHOD => {
+        Expr::FieldAccess { object, field, .. }
+            if field.name == GRAD_METHOD || field.name == HESSIAN_METHOD =>
+        {
             TypeChecker::place_root_name(object)
         }
         _ => None,
@@ -304,6 +308,41 @@ impl TypeChecker {
         self.register_slice_borrow(object, span);
         Type::Reference {
             inner: Box::new(recv.referent().clone()),
+            mutable: false,
+        }
+    }
+
+    /// Check `object.hessian()`: a shared borrow of the receiver's second derivative. For a
+    /// receiver of shape `S` it is shaped `S ++ S`, one row of the parameter's shape per
+    /// element, and it borrows the receiver as `.grad()` does. The axes carry no names: a
+    /// name would appear twice.
+    pub(crate) fn check_hessian_read(
+        &mut self,
+        recv: &Type,
+        object: &Expr,
+        args: &[Expr],
+        span: Span,
+    ) -> Type {
+        if !args.is_empty() {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 0,
+                found: args.len(),
+                span,
+            });
+        }
+        self.register_slice_borrow(object, span);
+        let Type::Tensor { element, shape } = recv.referent() else {
+            return Type::Unknown;
+        };
+        let axes = shape.iter().map(|axis| TensorAxis {
+            name: None,
+            extent: axis.extent.clone(),
+        });
+        Type::Reference {
+            inner: Box::new(Type::Tensor {
+                element: element.clone(),
+                shape: axes.clone().chain(axes).collect(),
+            }),
             mutable: false,
         }
     }

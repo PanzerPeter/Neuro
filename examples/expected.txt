@@ -166,6 +166,7 @@ showcase/logistic_fit.nr             6
 showcase/model_shapes.nr             232
 showcase/mutable_borrows.nr          47
 showcase/named_axes.nr               70
+showcase/newton_fit.nr               240
 showcase/num_algorithms.nr           33
 showcase/optimizer_step.nr           32
 showcase/owned_aggregates.nr         34

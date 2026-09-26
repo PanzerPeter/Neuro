@@ -105,8 +105,9 @@ not checked here: that rule set belongs to the transform in [HIR lowering](hir-l
 from after that call has returned, so a `val` bound to such a call holds those borrows until its
 `.backward()` releases them, in `type_checkers/backward.rs`. Only a body that calls `.backward()`
 on that name extends them; otherwise the call borrows for itself alone. The `.backward()` must be
-on that binding, in the same block, once. `.grad()` borrows its receiver and `.zero_grad()` takes
-it exclusively.
+on that binding, in the same block, once. `.grad()` and `.hessian()` borrow their receiver, the
+second typed `&Tensor<T, S ++ S>`, and `.zero_grad()` takes it exclusively. `order:` must be the
+literal 1 or 2, and 2 is refused on a method.
 
 #### 4. Variable Declaration Validation
 

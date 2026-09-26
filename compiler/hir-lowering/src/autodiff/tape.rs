@@ -35,7 +35,7 @@ use crate::LoweringError;
 const ENTRY_PREFIX: &str = "__ad_v";
 
 /// The tensor method that copies a buffer into a fresh handle, as every backend spells it.
-const CLONE_METHOD: &str = "clone";
+pub(super) const CLONE_METHOD: &str = "clone";
 
 /// The most elements a `.map` / `.zip` / `.reduce` in a `@grad` body may walk. Each element
 /// is its own inlined call in the forward replay and the reverse sweep, so the derivative's
@@ -692,6 +692,16 @@ impl<'f> Linearizer<'f> {
                 body,
                 *span,
             ),
+            HirStmt::Expr(HirExpr {
+                kind: HirExprKind::Loop { label: None, body },
+                ty: HirType::Void,
+                span,
+            }) => {
+                let Some((condition, body)) = guarded_loop(body, *span) else {
+                    return Err(self.refuse("a `loop`", *span));
+                };
+                self.while_loop(&condition, body, *span)
+            }
             other => Err(self.refuse(describe_stmt(other), stmt_span(other))),
         }
     }
@@ -1455,6 +1465,76 @@ impl<'f> Linearizer<'f> {
         let value = self.fork(condition, Some(&expr.ty), arms, expr.span)?;
         value.ok_or_else(|| self.malformed("a short-circuit operator has no value"))
     }
+}
+
+/// `loop { C; if !t { break }; B }` as the `while { C; t } { B }` it is: the condition, a
+/// block value when `C` is not empty, and the body `B`. It is the form a derivative's own
+/// forward replay gives a `while`, so a second derivative reads one back through it. Any
+/// other `loop` is `None`.
+fn guarded_loop(body: &[HirStmt], span: Span) -> Option<(HirExpr, &[HirStmt])> {
+    let exit = body.iter().position(is_loop_exit)?;
+    let HirStmt::If { condition, .. } = &body[exit] else {
+        return None;
+    };
+    let HirExprKind::Unary { operand: test, .. } = &condition.kind else {
+        return None;
+    };
+    let prelude = &body[..exit];
+    if prelude.is_empty() {
+        return Some(((**test).clone(), &body[exit + 1..]));
+    }
+    let mut stmts = prelude.to_vec();
+    stmts.push(HirStmt::Expr((**test).clone()));
+    let condition = HirExpr::new(HirExprKind::Block { stmts }, HirType::Bool, span);
+    Some((condition, &body[exit + 1..]))
+}
+
+/// `if !t { break }`, with no label, value or other arm.
+fn is_loop_exit(stmt: &HirStmt) -> bool {
+    let HirStmt::If {
+        condition,
+        then_block,
+        else_if_blocks,
+        else_block: None,
+        ..
+    } = stmt
+    else {
+        return false;
+    };
+    matches!(
+        condition.kind,
+        HirExprKind::Unary {
+            op: UnaryOp::Not,
+            ..
+        }
+    ) && else_if_blocks.is_empty()
+        && matches!(
+            then_block.as_slice(),
+            [HirStmt::Break {
+                label: None,
+                value: None,
+                ..
+            }]
+        )
+}
+
+/// Where the first active element read at a position known only at run time is in
+/// `nodes`. Its adjoint is an element store into a zero tensor, which a second derivative
+/// would have to read back, and a tape has no element store.
+pub(super) fn run_time_read(nodes: &[Node]) -> Option<Span> {
+    nodes.iter().find_map(|node| match node {
+        Node::Entry(Entry {
+            op: Op::Read { object, positions },
+            active: true,
+            span,
+            ..
+        }) if literal_offset(object.value_ty(), positions).is_none() => Some(*span),
+        Node::Entry(_) => None,
+        Node::Branch(branch) => branch.arms.iter().find_map(|arm| run_time_read(&arm.nodes)),
+        Node::Loop(looped) => {
+            run_time_read(&looped.condition).or_else(|| run_time_read(&looped.body))
+        }
+    })
 }
 
 /// The bindings of `before`, in name order, that some exit rebinds, with the leaf each

@@ -673,25 +673,29 @@ fields, so dynamic shapes can later supply a per-value vector without changing t
 (`dlpack_tensor_storage_type`): a struct's first field sits at offset 0, so the allocation's
 address is already the `DLManagedTensorVersioned*` a foreign consumer takes, and `deleter`'s one
 `free(self)` releases both. Reserving the field therefore costs a store, not an allocation. Its
-fields are `data_bytes`, the unpadded element-buffer length, and `grad`, the gradient slot:
-null, or a handle the slot OWNS. The block is reached at its fixed offset in the storage block
-(`dlpack_grad_slot`), never by loading `manager_ctx`, because a handle built by a foreign
-producer carries that producer's context in the field. The deleter reads the slot and releases a
-filled one through the gradient's own deleter before the buffer (`release_grad_slot`), which is
+fields are `data_bytes`, the unpadded element-buffer length, and the two derivative slots
+(`DerivativeSlot`): `grad`, and `hessian`, which only a `@grad(order: 2)` `.backward()` fills.
+Each is null, or a handle the slot OWNS. The block is reached at its fixed offset in the storage
+block (`dlpack_derivative_slot`), never by loading `manager_ctx`, because a handle built by a
+foreign producer carries that producer's context in the field. The deleter reads both slots and
+releases each filled one through the derivative's own deleter before the buffer
+(`release_derivatives`), which is
 sound because `__neuro_dlpack_deleter` only ever runs on a handle whose `deleter` field names it,
 and only this compiler writes that name; `a_tensor_is_released_through_its_own_deleter` pins the
 order and that `manager_ctx` is never read.
 
-**The gradient slot's operations** (`codegen/expressions/tensor_grad.rs`), dispatched ahead of
-the builtin table because two of the three are unit: `.grad()` checks the slot and panics on an
-empty one, then yields the slot's own ADDRESS as the `&Tensor` (a `&Tensor` is the address of a
+**The derivative slots' operations** (`codegen/expressions/tensor_grad.rs`), dispatched ahead of
+the builtin table because most are unit: `.grad()` / `.hessian()` check their slot and panic on
+an empty one, then yield the slot's own ADDRESS as the `&Tensor` (a `&Tensor` is the address of a
 cell holding the handle, and the slot is one, so no copy); `.zero_grad()` is
-`release_grad_slot`; `__set_grad(g)`, the private method a `.backward()` lowers to, releases what
-the slot held and stores `g` (marked moved). `.backward()` itself never reaches the backend. An
-order-preserving shape cast keeps the handle, so it releases the slot: its result starts without
-the consumed receiver's gradient, exactly as the permuting path's fresh handle does. The slot
-assumes a handle this compiler built, which every handle is while nothing imports a foreign
-tensor.
+`release_derivatives`, emptying both; `__set_grad(g)`, the private method a `.backward()` lowers
+to, releases BOTH slots and stores `g` (marked moved), so a first-order `.backward()` never leaves
+a Hessian of an earlier point behind; `__set_hessian(h)`, which the lowering emits after it under
+`order: 2`, releases and fills the Hessian slot alone. `.backward()` itself never reaches the
+backend. An order-preserving shape cast keeps the handle, so it releases both slots: its result
+starts without the consumed receiver's derivatives, exactly as the permuting path's fresh handle
+does. The slots assume a handle this compiler built, which every handle is while nothing imports
+a foreign tensor.
 
 Two allocations for the tensor, not one: the structure and its control block come from `malloc`,
 the elements from the over-aligned allocator at 64 bytes, because DLPack requires a 64-byte-aligned `data` and `malloc`
@@ -713,7 +717,7 @@ corrupts the heap rather than leaking. Codegen targets the host
 
 Release goes through the handle's own `deleter` field (`build_dlpack_release`), never through a
 direct free, so the release a scope exit performs is provably the one a foreign owner performs.
-`__neuro_dlpack_deleter` releases the gradient, then `data`, then the structure, in that order: reading `data` out
+`__neuro_dlpack_deleter` releases the gradient and the Hessian, then `data`, then the structure, in that order: reading `data` out
 of a block it had already freed would be a use-after-free.
 
 `codegen_reference` returns the borrowed place's storage pointer: mutability is compile-time
