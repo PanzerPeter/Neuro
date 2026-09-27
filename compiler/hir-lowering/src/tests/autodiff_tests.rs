@@ -1141,3 +1141,99 @@ func loss(w: &mut Tensor<f32, [2]>, config: Config) -> Tensor<f32, []> {
         "config: Config",
     );
 }
+
+fn detaches_in(expr: &neuro_hir::HirExpr) -> bool {
+    matches!(expr.kind, HirExprKind::TensorDetach { .. })
+}
+
+fn calls_named(expr: &neuro_hir::HirExpr, name: &str) -> bool {
+    matches!(&expr.kind, HirExprKind::Call { callee, .. }
+        if matches!(&callee.kind, HirExprKind::Variable(callee) if callee == name))
+}
+
+fn initializers(body: &[HirStmt]) -> Vec<&neuro_hir::HirExpr> {
+    all_stmts(body)
+        .into_iter()
+        .filter_map(|stmt| match stmt {
+            HirStmt::VarDecl {
+                init: Some(init), ..
+            } => Some(init),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A `@no_grad` callee is not inlined: the derivative calls it as the primal does, and its
+/// body (a `.max()`, which the transform would refuse) is never linearized.
+#[test]
+fn a_no_grad_call_is_run_as_written() {
+    let program = lower(
+        r#"
+@no_grad
+func peak(x: &Tensor<f32, [2]>) -> f32 {
+    x.max()
+}
+
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val squares = w * w
+    return Tensor::scalar(squares.sum() * peak(w))
+}
+"#,
+    );
+    let reverse = item_function(&program, "__loss__rev");
+    assert!(
+        initializers(&reverse.body)
+            .into_iter()
+            .any(|init| calls_named(init, "peak")),
+        "the derivative should call the `@no_grad` function"
+    );
+}
+
+/// The replay detaches a copy of the receiver, so a second pass over the derivative meets
+/// the fence again rather than a plain copy it would differentiate through.
+#[test]
+fn a_detach_is_replayed_as_a_detach() {
+    let program = lower(
+        r#"
+@grad
+func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val squares = w * w
+    val frozen = squares.detach()
+    val mixed = &frozen * w
+    return Tensor::scalar(mixed.sum())
+}
+"#,
+    );
+    let primal = item_function(&program, "loss");
+    assert!(initializers(&primal.body).into_iter().any(detaches_in));
+    let reverse = item_function(&program, "__loss__rev");
+    let replayed = initializers(&reverse.body).into_iter().any(
+        |init| matches!(&init.kind, HirExprKind::TensorDetach { receiver } if calls_in(receiver)),
+    );
+    assert!(
+        replayed,
+        "the derivative should detach a copy of the receiver"
+    );
+}
+
+/// The reverse pass reads a tape value again after the call, so a `@no_grad` callee may not
+/// write through its argument.
+#[test]
+fn a_no_grad_call_borrowing_mutably_is_refused_at_the_argument() {
+    refusal_at(
+        r#"
+@no_grad
+func bump(x: &mut Tensor<f32, [2]>) -> f32 {
+    x.sum()
+}
+
+@grad
+func loss(t: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val squares = t * t
+    return Tensor::scalar(squares.sum() * bump(t) * 2.0)
+}
+"#,
+        "t) * 2.0",
+    );
+}

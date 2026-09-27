@@ -1,0 +1,3 @@
+TD, .detach():      v(s) = 0.729 + 0.262 s/3, residual 0.0000637
+TD, @no_grad:       v(s) = 0.729 + 0.262 s/3, residual 0.0000637
+residual gradient:  v(s) = 0.729 + 0.271 s/3, residual 0.0000411

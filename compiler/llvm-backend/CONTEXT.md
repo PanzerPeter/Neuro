@@ -694,7 +694,9 @@ a Hessian of an earlier point behind; `__set_hessian(h)`, which the lowering emi
 `order: 2`, releases and fills the Hessian slot alone. `.backward()` itself never reaches the
 backend. An order-preserving shape cast keeps the handle, so it releases both slots: its result
 starts without the consumed receiver's derivatives, exactly as the permuting path's fresh handle
-does. The slots assume a handle this compiler built, which every handle is while nothing imports
+does. `HirExprKind::TensorDetach` (`.detach()`, `codegen_tensor_detach`) is that same move
+without the re-description: the handle, marked moved, with both slots released. The gradient
+fence it stands for is the derivative transform's; at run time it only forgets derivatives. The slots assume a handle this compiler built, which every handle is while nothing imports
 a foreign tensor.
 
 Two allocations for the tensor, not one: the structure and its control block come from `malloc`,

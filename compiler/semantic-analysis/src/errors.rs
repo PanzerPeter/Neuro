@@ -1147,6 +1147,9 @@ pub enum TypeError {
     #[error("`@grad` asks for {found}, a derivative order the language does not have; write `order: 1` or `order: 2`")]
     GradOrderUnsupported { found: String, span: Span },
 
+    #[error("`@no_grad` {problem}")]
+    NoGradForm { problem: String, span: Span },
+
     #[error("`@grad` function '{function}' {problem}")]
     GradSignature {
         function: String,
@@ -1370,6 +1373,7 @@ impl TypeError {
             | Self::UnsupportedEnumPayload { span, .. }
             | Self::GradFormUnsupported { span, .. }
             | Self::GradOrderUnsupported { span, .. }
+            | Self::NoGradForm { span, .. }
             | Self::GradSignature { span, .. }
             | Self::GradGeneratedNameTaken { span, .. }
             | Self::BackwardUnavailable { span, .. }

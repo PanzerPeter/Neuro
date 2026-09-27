@@ -33,6 +33,9 @@ pub(crate) const CHAR_AT_METHOD: &str = "__char_at";
 /// The consuming device transfer `tensor.to(device)`.
 pub(crate) const TENSOR_TO_METHOD: &str = "to";
 
+/// `tensor.detach()`, the value-level gradient fence.
+const DETACH_METHOD: &str = "detach";
+
 /// The one elementwise math method with an argument, its exponent.
 const POW_METHOD: &str = "pow";
 
@@ -323,6 +326,14 @@ impl TypeChecker {
                     return Some(recv.clone());
                 }
                 self.check_call_args(args, &[Type::Enum(DEVICE_TYPE_NAME.to_string())], call_span);
+                self.record_move(object);
+                Some(recv.clone())
+            }
+            // `.detach()` CONSUMES the receiver as a shape cast does: its buffer is handed
+            // on with empty derivative slots rather than shared, because two tensors owning
+            // one buffer would release it twice. A borrow falls through, as for `.to`.
+            (Type::Tensor { .. }, DETACH_METHOD) if !matches!(recv, Type::Reference { .. }) => {
+                self.check_call_args(args, &[], call_span);
                 self.record_move(object);
                 Some(recv.clone())
             }

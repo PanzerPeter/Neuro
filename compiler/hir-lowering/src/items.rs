@@ -1,5 +1,7 @@
 //! Top-level item registration and lowering.
 
+use std::collections::HashSet;
+
 use ast_types::{
     ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef, VariantPayload,
 };
@@ -714,6 +716,9 @@ impl Lowerer {
         let mut grads = Vec::new();
         // The `@grad` methods, as (type, method): each gains a derivative method of its own.
         let mut grad_methods = Vec::new();
+        // The `@no_grad` functions, concrete and instantiated: a constant to every
+        // derivative that calls them.
+        let mut no_grad = HashSet::new();
         for item in items {
             match item {
                 // A generic template is not lowered directly; only its concrete
@@ -723,6 +728,9 @@ impl Lowerer {
                     let lowered = self.lower_function(func)?;
                     if crate::autodiff::is_grad(&func.attributes) {
                         grads.push(lowered.name.clone());
+                    }
+                    if crate::autodiff::is_no_grad(&func.attributes) {
+                        let _ = no_grad.insert(lowered.name.clone());
                     }
                     hir_items.push(HirItem::Function(lowered));
                 }
@@ -780,12 +788,16 @@ impl Lowerer {
                 let hir_fn = self.lower_mono_instance(&instance)?;
                 // A `@grad` template's derivative is derived per instance, where the
                 // shapes the reverse pass builds its gradients from are concrete.
-                let grad = self
+                let attributes = self
                     .generic_templates
                     .get(&instance.fn_name)
-                    .is_some_and(|template| crate::autodiff::is_grad(&template.attributes));
-                if grad {
+                    .map(|template| template.attributes.as_slice())
+                    .unwrap_or_default();
+                if crate::autodiff::is_grad(attributes) {
                     grads.push(hir_fn.name.clone());
+                }
+                if crate::autodiff::is_no_grad(attributes) {
+                    let _ = no_grad.insert(hir_fn.name.clone());
                 }
                 self.mono_items.push(HirItem::Function(hir_fn));
                 continue;
@@ -804,6 +816,7 @@ impl Lowerer {
             &grads,
             &self.grad_specializations,
             &self.grad_params,
+            &no_grad,
         )?;
         hir_items.extend(derived);
         crate::autodiff::derive_method_reverses(
@@ -811,6 +824,7 @@ impl Lowerer {
             &grad_methods,
             &self.grad_params,
             &self.structs,
+            &no_grad,
         )?;
 
         Ok(HirProgram { items: hir_items })

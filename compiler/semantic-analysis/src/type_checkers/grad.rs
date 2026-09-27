@@ -30,6 +30,9 @@ use super::TypeChecker;
 /// The attribute that asks for a derivative.
 const GRAD_ATTRIBUTE: &str = "grad";
 
+/// The attribute declaring a function a constant to every derivative that calls it.
+const NO_GRAD_ATTRIBUTE: &str = "no_grad";
+
 /// The generated bundle's name prefix. Duplicated in `hir-lowering`, which emits the
 /// struct; the two slices must agree, and a clash is caught here, where it has a span.
 const BUNDLE_PREFIX: &str = "GradsOf_";
@@ -135,15 +138,45 @@ impl TypeChecker {
     pub(crate) fn check_grad_attributes(&mut self, items: &[Item]) {
         for item in items {
             match item {
-                Item::Function(func) => self.check_grad_function(func),
+                Item::Function(func) => {
+                    self.check_no_grad(&func.attributes, false);
+                    self.check_grad_function(func);
+                }
                 Item::Impl(def) => {
                     for method in &def.methods {
+                        self.check_no_grad(&method.attributes, true);
                         self.check_grad_method(def, method);
                     }
                 }
                 _ => {}
             }
         }
+    }
+
+    /// `@no_grad` is bare and annotates a free function, never one that is `@grad` too: a
+    /// function is either differentiated or a constant to every derivative that calls it.
+    /// A method call is not differentiated through at all, so on a method it would promise
+    /// nothing.
+    fn check_no_grad(&mut self, attributes: &[Attribute], on_method: bool) {
+        let Some(attr) = attributes
+            .iter()
+            .find(|attr| attr.name.name == NO_GRAD_ATTRIBUTE)
+        else {
+            return;
+        };
+        let problem = if on_method {
+            "on a method is not supported yet; move the work into a free `@no_grad` function"
+        } else if !attr.args.is_empty() || !attr.named.is_empty() {
+            "takes no arguments"
+        } else if grad_attribute(attributes).is_some() {
+            "cannot share a function with `@grad`: a function is either differentiated or a constant to every derivative that calls it"
+        } else {
+            return;
+        };
+        self.record_error(TypeError::NoGradForm {
+            problem: problem.to_string(),
+            span: attr.span,
+        });
     }
 
     fn check_grad_function(&mut self, func: &FunctionDef) {

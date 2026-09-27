@@ -81,6 +81,17 @@ value is linearized in a scope of its own, which is what `x |> |v| ...` desugars
 callee already being inlined), a method or builtin call and a callee returning nothing are
 refused.
 
+The two gradient fences are constants on the tape (`Op::Constant`, never active), so no adjoint
+passes them. `.detach()` lowers to `HirExprKind::TensorDetach` (a node of its own so a reshape to
+the same shape still carries a gradient); the tape replays it as a detach of a `.clone()` of its
+receiver's leaf, since the reverse pass reads the receiver again and a second pass over the
+derivative (`order: 2`) must meet the fence rather than a copy it differentiates through. A call
+to a `@no_grad` function (`lower_program` collects their lowered names, instances included, and
+hands them to `derive_reverses` / `derive_method_reverses`, which put them in `Functions`) is not
+inlined: `constant_call` replays the call as written, an owned tensor argument as a `.clone()`
+of its leaf, a `&T` argument as a shared borrow, a number as it is. A `&mut` argument, or one
+taken by value that is neither, is refused at the argument: the reverse pass reads it again.
+
 A `@grad` function with a function-typed parameter is never derived on its own
 (`derive_reverses` skips it): only a call site knows the target. `lower_backward` resolves each
 function-typed argument (`call_site_target`: a closure literal, a function by name, or a local of

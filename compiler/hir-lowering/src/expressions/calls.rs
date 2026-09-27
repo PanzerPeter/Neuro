@@ -17,6 +17,7 @@ use crate::{is_full_float, is_integer, Lowerer, LoweringError};
 const GRAD_METHOD: &str = "grad";
 const HESSIAN_METHOD: &str = "hessian";
 const ZERO_GRAD_METHOD: &str = "zero_grad";
+const DETACH_METHOD: &str = "detach";
 
 impl Lowerer {
     /// Lower a call, dispatching on the callee shape: free/builtin function,
@@ -445,6 +446,15 @@ impl Lowerer {
         // names an axis, not a variable.
         if crate::tensor_shape::is_shape_method(method) && matches!(recv, HirType::Tensor { .. }) {
             return self.lower_tensor_shape_cast(object, method, args, span);
+        }
+
+        // `.detach()` consumes an owned tensor, as the checker makes it; a borrowed receiver
+        // falls through like a shape cast's.
+        if method == DETACH_METHOD && matches!(recv, HirType::Tensor { .. }) {
+            let kind = HirExprKind::TensorDetach {
+                receiver: Box::new(object),
+            };
+            return Ok(HirExpr::new(kind, recv, span));
         }
 
         // A reduction reads its receiver rather than consuming it, so a borrowed one is

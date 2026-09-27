@@ -201,6 +201,14 @@ pub enum HirExprKind {
         receiver: Box<HirExpr>,
         permutation: Option<Vec<usize>>,
     },
+    /// `.detach()`: the receiver's buffer, handed on with empty derivative slots. It
+    /// CONSUMES the receiver like an order-preserving shape cast, since two tensors owning
+    /// one buffer would release it twice. It is its own node rather than a shape cast to
+    /// the same type because the derivative transform must tell the two apart: a gradient
+    /// flows back through a reshape and never through a detach.
+    TensorDetach {
+        receiver: Box<HirExpr>,
+    },
     /// A reduction over a tensor's elements: `.sum()`, `.mean()`, `.max()`, `.min()`.
     ///
     /// `axis` is `None` for a whole-tensor reduction, whose type is the element type,

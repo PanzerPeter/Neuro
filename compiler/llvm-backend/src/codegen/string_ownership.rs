@@ -687,6 +687,7 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
             }
         }
         HirExprKind::TensorShapeCast { receiver, .. }
+        | HirExprKind::TensorDetach { receiver }
         | HirExprKind::TensorReduce { receiver, .. }
         | HirExprKind::TensorSort { receiver, .. } => walk(receiver, visit),
         HirExprKind::TensorApply {

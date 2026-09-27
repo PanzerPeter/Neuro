@@ -160,7 +160,9 @@ first, so a gradient never outlives its tensor (see
 The buffer keeps one address for its whole life and is aligned to 64 bytes, which is what
 DLPack requires; a tensor of any size compiles at every optimization level. `.clone()`
 allocates a second handle and a second buffer and copies into it, so the copy is independent
-of the original. The buffer is host memory: the handle reports the `kDLCPU` device, and
+of the original. `.detach()` is the opposite: it consumes the tensor and hands the same buffer
+on with an empty gradient slot, the value-level gradient fence of
+[Automatic Differentiation](autodiff.md#stopping-the-gradient-detach-and-no_grad). The buffer is host memory: the handle reports the `kDLCPU` device, and
 device placement is later work.
 
 A tensor moves like any other non-`Copy` value, and the move hands the buffer on rather than

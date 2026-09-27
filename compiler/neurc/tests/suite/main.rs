@@ -52,6 +52,7 @@ mod forward_references;
 mod functions;
 mod generic_structs;
 mod generics;
+mod gradient_control;
 mod gradient_slot;
 mod half_precision;
 mod higher_order_derivatives;

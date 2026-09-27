@@ -276,6 +276,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let result_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_shape_cast(receiver, permutation.as_deref(), &result_ty)
             }
+            HirExprKind::TensorDetach { receiver } => self.codegen_tensor_detach(receiver),
 
             HirExprKind::Index { object, index } => {
                 let obj_ty = Type::from_hir(&object.ty);

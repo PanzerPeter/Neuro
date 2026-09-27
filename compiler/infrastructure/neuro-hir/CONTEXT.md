@@ -55,6 +55,10 @@ it the *typed* contract:
    the result. `permutation` is `Some(order)` only when the element order changes, and then
    `order[d]` is the receiver axis result axis `d` came from; `None` is the order-preserving
    case, which is pure metadata over the same buffer.
+   `HirExprKind::TensorDetach { receiver }` is `.detach()`: the same buffer, consumed and
+   handed on with empty derivative slots, exactly what a backend does for an order-preserving
+   shape cast. It is a node of its own only so the derivative transform can stop a gradient
+   at it.
    `HirExprKind::TensorReduce { receiver, op, axis }` is the reduction beside them:
    `HirReduceOp::{Sum, Mean, Max, Min}` says which fold, `axis` is `None` for a
    whole-tensor reduction (whose `ty` is the element type) and `Some(k)` for one along an

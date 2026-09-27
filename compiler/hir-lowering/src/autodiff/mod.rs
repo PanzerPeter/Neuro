@@ -54,7 +54,7 @@ mod rules;
 mod sweep;
 mod tape;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ast_types::{Attribute, BinaryOp, Expr};
 use neuro_hir::{
@@ -70,6 +70,9 @@ use tape::{Functions, Leaf};
 
 /// The attribute asking for a derivative.
 const GRAD_ATTRIBUTE: &str = "grad";
+
+/// The attribute making a function a constant to every derivative that calls it.
+const NO_GRAD_ATTRIBUTE: &str = "no_grad";
 
 /// The generated names. Duplicated in `semantic-analysis`, which rejects a program whose
 /// own declarations would collide with them.
@@ -304,6 +307,12 @@ pub(crate) fn is_grad(attributes: &[Attribute]) -> bool {
         .any(|attr| attr.name.name == GRAD_ATTRIBUTE)
 }
 
+pub(crate) fn is_no_grad(attributes: &[Attribute]) -> bool {
+    attributes
+        .iter()
+        .any(|attr| attr.name.name == NO_GRAD_ATTRIBUTE)
+}
+
 /// The generated derivative of the lowered function `function`.
 pub(crate) fn reverse_name(function: &str) -> String {
     format!("{REVERSE_PREFIX}{function}{REVERSE_SUFFIX}")
@@ -367,14 +376,16 @@ pub(crate) struct Target {
 /// pair per entry of `specializations`, out of the fully lowered `items`. It runs once
 /// every function is lowered, generic instances and closures included, because a `@grad`
 /// body may call any of them. A function taking a function-typed parameter is derived
-/// only through its specializations.
+/// only through its specializations. A call to one of `no_grad` is a constant to every
+/// derivative.
 pub(crate) fn derive_reverses(
     items: &[HirItem],
     grads: &[String],
     specializations: &[Specialization],
     grad_params: &HashMap<String, GradParams>,
+    no_grad: &HashSet<String>,
 ) -> Result<Vec<HirItem>, LoweringError> {
-    let functions = Functions::of(items);
+    let functions = Functions::of(items, no_grad);
     let primal = |name: &str| {
         functions
             .function(name)
@@ -467,10 +478,11 @@ pub(crate) fn derive_method_reverses(
     methods: &[(String, String)],
     grad_params: &HashMap<String, GradParams>,
     structs: &StructFields,
+    no_grad: &HashSet<String>,
 ) -> Result<(), LoweringError> {
     let mut derived = Vec::with_capacity(methods.len());
     {
-        let functions = Functions::of(items);
+        let functions = Functions::of(items, no_grad);
         for (type_name, method_name) in methods {
             let Some((index, method)) = find_method(items, type_name, method_name) else {
                 return Err(LoweringError::Malformed {

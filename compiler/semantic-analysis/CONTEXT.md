@@ -77,6 +77,11 @@ module per declaration kind beside it. `tests/` is split by subject.
   and reports it with a span itself. A generic function is checked once, on the template
   signature from `generic_funcs`, where a shape parameter is admitted as an extent since every
   instance fixes it; the derivative is derived per instance in `hir-lowering`.
+  `check_no_grad` holds `@no_grad` to its one form: bare, on a free function that is not also
+  `@grad` (`NoGradForm` at the attribute otherwise, a method included). What a call to one
+  may pass inside a `@grad` body is the transform's rule, like the rest of the body.
+  `.detach()` (`expressions/builtins.rs`) consumes an owned tensor like `.to` (`record_move`)
+  and keeps its type; a borrowed receiver falls through to `MethodNotFound`.
 - **4. full check**: `check_function` / `check_impl` / `check_const_item`.
 
 ### `.backward()`, `.grad()`, `.hessian()`, `.zero_grad()` (`type_checkers/backward.rs`)

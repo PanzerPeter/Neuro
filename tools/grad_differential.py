@@ -303,6 +303,9 @@ class TensorCase:
     language rules that the derivative there is the executed path's, so the reference
     becomes finite differences of that path, which is smooth at the point. The primal and
     the path must agree on the loss there, which is what proves the path is the executed one.
+    A gradient fence (`.detach()`, a `@no_grad` call) uses the same hook: the primal's own
+    finite differences see through the fence, so the reference is the function with every
+    fenced value frozen, written as a literal of its value at `point`.
     """
 
     def __init__(
@@ -1361,6 +1364,80 @@ func math_in_control_flow(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
             * (math.tanh(x * x) + x * (1.0 - math.tanh(x * x) ** 2) * 2.0 * x)
             for x in w
         ),
+    ),
+    TensorCase(
+        # `.detach()` before a loop that keeps multiplying by `w`, inside a branch arm, and
+        # on a plain value: each fenced value enters the derivative as a constant. The
+        # reference freezes them at the point: 2w^3 after the loop and the arm, and w^2.
+        "detached",
+        """
+@grad
+func detached(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val doubled = w * 2.0
+    mut acc = doubled.detach()
+    mut step = 0
+    while step < 2 {
+        acc = &acc * w
+        step += 1
+    }
+    if w[0] > 0.0 {
+        acc = acc.detach() * w
+    }
+    val squared = w * w
+    val frozen = squared.detach()
+    val tail = &frozen * w
+    return Tensor::scalar(acc.sum() + tail.sum())
+}
+
+func detached_frozen(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val cubed: Tensor<f32, [2]> = [0.84375, -3.90625]
+    val frozen: Tensor<f32, [2]> = [0.5625, 1.5625]
+    val acc = &cubed * w
+    val tail = &frozen * w
+    return Tensor::scalar(acc.sum() + tail.sum())
+}
+""",
+        (2,),
+        (0.75, -1.25),
+        lambda a, b: (2.0 * a**3 + a * a, 2.0 * b**3 + b * b),
+        path="detached_frozen",
+    ),
+    TensorCase(
+        # Calls to `@no_grad` functions, one returning a scalar and a generic one returning
+        # a tensor, each run as written: `.max()` would be refused in a `@grad` body, and
+        # neither result carries a gradient back to `w`.
+        "no_grad_calls",
+        """
+@no_grad
+func peak(w: &Tensor<f32, [2]>) -> f32 {
+    w.max()
+}
+
+@no_grad
+func rescaled<N>(w: &Tensor<f32, [N]>, k: f32) -> Tensor<f32, [N]> {
+    w * k
+}
+
+@grad
+func no_grad_calls(w: &mut Tensor<f32, [2]>, k: f32) -> Tensor<f32, []> {
+    val m = peak(w)
+    val r = rescaled(w, k)
+    val mixed = &r * w
+    return Tensor::scalar(mixed.sum() * m + w[0] * w[1])
+}
+
+func no_grad_calls_frozen(w: &mut Tensor<f32, [2]>, k: f32) -> Tensor<f32, []> {
+    val m = 0.75f32
+    val r: Tensor<f32, [2]> = [1.125, -1.875]
+    val mixed = &r * w
+    return Tensor::scalar(mixed.sum() * m + w[0] * w[1])
+}
+""",
+        (2,),
+        (0.75, -1.25),
+        lambda a, b, k: (max(a, b) * k * a + b, max(a, b) * k * b + a),
+        constants=(1.5,),
+        path="no_grad_calls_frozen",
     ),
 ]
 

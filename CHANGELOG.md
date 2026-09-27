@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-09-27
+
+### Added
+
+- `t.detach()` hands back a tensor's data cut out of the gradient: inside a `@grad` body the
+  result is a constant to the derivative. It consumes `t`, like a shape cast, and the result
+  starts with an empty gradient slot; `t.clone().detach()` keeps `t`. A borrowed tensor cannot
+  be detached.
+- `@no_grad` on a free function makes every call to it from a `@grad` body a constant: the call
+  runs as written and its body is never differentiated, so it may use `.max()`, method calls and
+  anything else a derivative would refuse. Outside a derivative it is an ordinary function. It
+  takes no arguments, cannot share a function with `@grad`, and is refused on a method. A
+  `@no_grad` call inside a `@grad` body may not borrow its argument `&mut`, and may pass only
+  numbers, tensors and shared borrows.
+- Both fences hold under `@grad(order: 2)`: `.hessian()` differentiates the gradient with the
+  fenced values held fixed.
+- `examples/showcase/td_value_fit.nr`: temporal-difference value learning whose bootstrapped
+  target is fenced by `.detach()` and by a `@no_grad` function, which train identically, against
+  the unfenced residual gradient.
+
 ## [3.13.0] - 2026-09-26
 
 ### Added

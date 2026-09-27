@@ -465,3 +465,75 @@ impl Net {
     );
     assert_eq!(error.span().start, offset_of(src, "order"));
 }
+
+#[test]
+fn a_bare_no_grad_on_a_free_function_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+@no_grad
+func eval(x: &Tensor<f32, [2]>) -> f32 {
+    x.max()
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+#[test]
+fn no_grad_is_refused_beside_grad_with_arguments_and_on_a_method() {
+    for src in [
+        "@grad\n@no_grad\nfunc loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {\n    Tensor::scalar(w.sum())\n}\n",
+        "@no_grad(fast)\nfunc eval(x: f32) -> f32 {\n    x\n}\n",
+        "@no_grad(fast: true)\nfunc eval(x: f32) -> f32 {\n    x\n}\n",
+        "struct S { x: f32 }\nimpl S {\n    @no_grad\n    func get(&self) -> f32 {\n        self.x\n    }\n}\n",
+    ] {
+        let error = single_error(src);
+        assert!(
+            matches!(error, TypeError::NoGradForm { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(error.span().start, offset_of(src, "@no_grad"));
+    }
+}
+
+#[test]
+fn detach_consumes_an_owned_tensor_and_keeps_its_type() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val t: Tensor<f32, [2]> = [1.0, 2.0]
+    val d: Tensor<f32, [2]> = t.detach()
+    return d[0] as i32
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+    let error = single_error(
+        r#"
+func main() -> i32 {
+    val t: Tensor<f32, [2]> = [1.0, 2.0]
+    val d = t.detach()
+    return (t[0] + d[0]) as i32
+}
+"#,
+    );
+    assert!(
+        matches!(error, TypeError::UseOfMovedValue { .. }),
+        "got {error:?}"
+    );
+}
+
+#[test]
+fn a_borrowed_tensor_cannot_be_detached() {
+    let error = single_error(
+        r#"
+func fence(t: &Tensor<f32, [2]>) -> Tensor<f32, [2]> {
+    t.detach()
+}
+"#,
+    );
+    assert!(
+        matches!(error, TypeError::MethodNotFound { .. }),
+        "got {error:?}"
+    );
+}

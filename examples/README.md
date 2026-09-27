@@ -144,6 +144,7 @@ One line each. The program's own header comment is the full description.
 - [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings
 - [`stored_text.nr`](showcase/stored_text.nr): text stored into a struct field, an array or tuple element, a call's argument and a call's return value, each released by whoever stored it
 - [`stream_pipeline.nr`](showcase/stream_pipeline.nr): the iteration protocol with the `|>` and `>>` operators carrying a small stream pipeline
+- [`td_value_fit.nr`](showcase/td_value_fit.nr): temporal-difference value learning whose bootstrapped target is fenced two ways, by `.detach()` and by a `@no_grad` function, which train identically, against the unfenced residual gradient that settles elsewhere, each step inside a `pool` and each run a `Copy` struct in a `Vec`
 - [`telemetry/main.nr`](showcase/telemetry/main.nr): multi-file compilation and `import` over prior features
 - [`transient_text.nr`](showcase/transient_text.nr): headings, rows and comparisons built from strings nothing ever binds, released where they are read
 - [`typed_channels.nr`](showcase/typed_channels.nr): associated types, one trait with three implementors

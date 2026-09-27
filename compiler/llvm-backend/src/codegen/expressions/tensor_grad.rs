@@ -1,5 +1,5 @@
-// The derivative slots' operations: `.grad()`, `.hessian()`, `.zero_grad()`, and the moves a
-// `.backward()` lowers to.
+// The derivative slots' operations: `.grad()`, `.hessian()`, `.zero_grad()`, `.detach()`, and
+// the moves a `.backward()` lowers to.
 //
 // `.backward()` itself never reaches the backend. The lowering turns the `@grad` call it
 // pairs with into a call of the derivative, `__f__rev`, and the `.backward()` statement into
@@ -113,5 +113,22 @@ impl<'ctx> CodegenContext<'ctx> {
                 Ok(None)
             }
         }
+    }
+
+    /// `.detach()`: the receiver's handle, consumed and handed on with empty derivative
+    /// slots, as an order-preserving shape cast hands it on. The gradient fence itself is
+    /// the derivative transform's; at run time a detach only forgets the derivatives.
+    pub(crate) fn codegen_tensor_detach(
+        &mut self,
+        receiver: &HirExpr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let BasicValueEnum::PointerValue(handle) = self.codegen_expr(receiver)? else {
+            return Err(CodegenError::InternalError(
+                "a detached receiver does not lower to a tensor handle".to_string(),
+            ));
+        };
+        self.mark_moved_for_drop(receiver);
+        self.release_derivatives(handle)?;
+        Ok(handle.into())
     }
 }

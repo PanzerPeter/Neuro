@@ -249,6 +249,63 @@ reaches the minimum in a tenth of the steps gradient descent takes.
   is refused at the read, and so is a parameter passed by value that is neither a number nor a
   tensor.
 
+## Stopping the gradient: `.detach()` and `@no_grad`
+
+Two fences keep a value out of the derivative, at two granularities. `t.detach()` hands back
+`t`'s data cut out of the gradient: the derivative treats the result as a constant, however it
+was computed. `@no_grad` on a function makes every call to it from a `@grad` body a constant:
+the call runs as written, and its body is never differentiated, so it may use anything,
+`.max()` and method calls included.
+
+Semi-gradient temporal-difference learning needs exactly this. Its target is built from the
+weights being trained, and must not be trained itself. Either fence does it:
+
+```neuro
+// The bootstrapped target, in a function no derivative looks into.
+@no_grad
+func bootstrap(w: &Tensor<f32, [2, 1]>) -> Tensor<f32, [4, 1]> {
+    return rewards() + (successors() @ w) * GAMMA
+}
+```
+
+```neuro
+@grad
+func td_detached(w: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {
+    val target = rewards() + (successors() @ w) * GAMMA
+    val fixed = target.detach()
+    val error = features() @ w - fixed
+    val squares = &error * &error
+    return Tensor::scalar(squares.mean())
+}
+
+@grad
+func td_no_grad(w: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {
+    val error = features() @ w - bootstrap(w)
+    val squares = &error * &error
+    return Tensor::scalar(squares.mean())
+}
+```
+
+Both come from [`examples/showcase/td_value_fit.nr`](../../examples/showcase/td_value_fit.nr),
+where the two train to the same weights bit for bit, and the same loss without a fence (the
+residual gradient) settles on a different line.
+
+- **`.detach()` consumes its receiver**, like a shape cast: the buffer is handed on, not
+  shared, and the result starts with an empty gradient slot. Write `t.clone().detach()` to
+  keep `t`. A borrowed tensor cannot be detached. Outside a `@grad` body it only moves the
+  tensor and forgets its gradient.
+- **`@no_grad` annotates a free function** and takes no arguments. It cannot share a function
+  with `@grad`, and it is not accepted on a method yet. Outside a derivative the function is
+  an ordinary one.
+- **A `@no_grad` call only reads its arguments.** The derivative reads them again after the
+  call, so an owned tensor argument is passed as a copy, and an argument the function borrows
+  `&mut`, or takes by value when it is neither a number nor a tensor, is refused at that
+  argument. Like any call in a `@grad` body, it must return a value, and inside a branch or a
+  loop the derivative may run it more than once.
+- **Both fences hold at every order.** Under `order: 2` a fenced value is a constant to the
+  second derivative too, so `.hessian()` is the derivative of the gradient with the fenced
+  values held fixed.
+
 
 ## What a `@grad` body may contain
 
@@ -269,6 +326,7 @@ expression. Its values may use:
 | `as` between integer and float types | the adjoint converted back; zero through an integer |
 | `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)` on a float or a float tensor | `exp(x)`, `1/x`, `1/(2·sqrt(x))`, `1 - tanh(x)²`, `sign(x)` (0 at exactly 0), and `p·x^(p-1)` with the exponent not differentiated |
 | `.clone()` of a tensor | the copy's adjoint goes to the original |
+| `.detach()`, and a call to a `@no_grad` function | none: the value is a constant ([Stopping the gradient](#stopping-the-gradient-detach-and-no_grad)) |
 | `Tensor::zeros()`, `ones()`, `identity()`, literals | constants |
 | comparisons, `&&`, `||`, `!`, and integer arithmetic | none: they decide which path runs, and carry no gradient |
 
@@ -334,7 +392,8 @@ which also calls a shape-generic helper that branches.
 A callee may read a `&mut` parameter but not write through it, and it must return a value.
 Every call site gets its own copy of the callee in the derivative, so a function called in many
 places grows the derivative accordingly. A recursive call, a method call and a call to a builtin
-such as `println` are refused.
+such as `println` are refused. A call to a `@no_grad` function is not differentiated through at
+all: it is a constant.
 
 ### Function values
 
@@ -405,7 +464,9 @@ A derivative is trusted only once a second, independent computation agrees with 
 reads every gradient back with `.grad()`, then computes central finite differences of the
 compiled function at the same point, and requires the two to agree componentwise. At a point
 where the path changes, a central difference would straddle both paths, so those cases compare
-against finite differences of the executed path alone. A second derivative is read back with
+against finite differences of the executed path alone, and a case with a `.detach()` or a
+`@no_grad` call against finite differences of the function with the fenced values frozen at
+the point. A second derivative is read back with
 `.hessian()` and compared against central finite differences of the compiled `.grad()`, which
 has itself just been checked against the loss. It runs as
 `cargo test -p neurc --test grad_differential`.

@@ -26,7 +26,7 @@ use neuro_hir::{
 };
 use shared_types::{Literal, Span};
 
-use super::emit::tensor_parts;
+use super::emit::{self, tensor_parts};
 use super::{FieldPath, PathStep, WrtField, RECEIVER};
 use crate::LoweringError;
 
@@ -234,13 +234,16 @@ pub(super) struct Tape {
 pub(super) struct Functions<'f> {
     named: HashMap<&'f str, &'f HirFunction>,
     closures: HashMap<&'f str, &'f HirClosure>,
+    /// The `@no_grad` functions, which a call runs as written instead of inlining.
+    no_grad: &'f HashSet<String>,
 }
 
 impl<'f> Functions<'f> {
-    pub(super) fn of(items: &'f [HirItem]) -> Self {
+    pub(super) fn of(items: &'f [HirItem], no_grad: &'f HashSet<String>) -> Self {
         let mut functions = Functions {
             named: HashMap::new(),
             closures: HashMap::new(),
+            no_grad,
         };
         for item in items {
             match item {
@@ -1199,6 +1202,18 @@ impl<'f> Linearizer<'f> {
                 };
                 Ok(self.push(&expr.ty, expr.span, op))
             }
+            // The value is the receiver's, but the entry is a constant, so no adjoint reaches
+            // the receiver through it. The replay detaches a copy: the reverse pass reads the
+            // receiver again, and a second pass over this derivative must meet the fence too.
+            HirExprKind::TensorDetach { receiver } => {
+                let receiver = self.leaf(receiver)?;
+                let copy = clone_call(emit::operand_owned(&receiver, expr.span), &expr.ty);
+                let kind = HirExprKind::TensorDetach {
+                    receiver: Box::new(copy),
+                };
+                let detached = HirExpr::new(kind, expr.ty.clone(), expr.span);
+                Ok(self.push(&expr.ty, expr.span, Op::Constant(detached)))
+            }
             HirExprKind::Call { callee, args } => self.call(callee, args, expr.span),
             _ => Err(self.refuse(describe_expr(expr), expr.span)),
         }
@@ -1225,22 +1240,7 @@ impl<'f> Linearizer<'f> {
     /// derivative function.
     fn copy_of(&mut self, place: HirExpr) -> Leaf {
         let (ty, span) = (place.ty.clone(), place.span);
-        let method = HirExpr::new(
-            HirExprKind::FieldAccess {
-                object: Box::new(place),
-                field: CLONE_METHOD.to_string(),
-            },
-            ty.clone(),
-            span,
-        );
-        let copy = HirExpr::new(
-            HirExprKind::Call {
-                callee: Box::new(method),
-                args: Vec::new(),
-            },
-            ty.clone(),
-            span,
-        );
+        let copy = clone_call(place, &ty);
         self.push(&ty, span, Op::Constant(copy))
     }
 
@@ -1299,7 +1299,9 @@ impl<'f> Linearizer<'f> {
             _ => return Err(self.refuse("a method call", span)),
         };
         let Leaf::Function {
-            target, captures, ..
+            target,
+            captures,
+            ty,
         } = target
         else {
             // A local or a parameter of function type with no known target.
@@ -1310,11 +1312,70 @@ impl<'f> Linearizer<'f> {
             }
             return Err(self.refuse("a call to a builtin or a method", span));
         };
+        if self.functions.no_grad.contains(&target) {
+            return self.constant_call(&target, &ty, args, span);
+        }
         let mut leaves = Vec::with_capacity(args.len());
         for arg in args {
             leaves.push(self.leaf(arg)?);
         }
         self.inline(&target, captures, leaves, span)
+    }
+
+    /// A call to the `@no_grad` function `target`, run as written and a constant to the
+    /// derivative. Its arguments are read, never consumed or written: the reverse pass reads
+    /// a tape value again after the call, so an owned tensor is passed as a copy, a borrow
+    /// as a shared one, a number as it is, and anything else is refused.
+    fn constant_call(
+        &mut self,
+        target: &str,
+        ty: &HirType,
+        args: &[HirExpr],
+        span: Span,
+    ) -> Result<Leaf, LoweringError> {
+        let Some(function) = self.functions.function(target) else {
+            return Err(self.malformed("a `@no_grad` call names no function"));
+        };
+        if function.return_type == HirType::Void {
+            return Err(self.refuse("a call to a function that returns nothing", span));
+        }
+        if function.params.len() != args.len() {
+            return Err(self.malformed("a call whose argument count is not its callee's"));
+        }
+        let mut operands = Vec::with_capacity(args.len());
+        for (param, arg) in function.params.iter().zip(args) {
+            let leaf = self.leaf(arg)?;
+            let read = emit::operand_owned(&leaf, arg.span);
+            let operand = match &param.ty {
+                HirType::Tensor { .. } => clone_call(read, &param.ty),
+                HirType::Reference { mutable: false, .. } if !matches!(leaf.ty(), HirType::Reference { .. }) => {
+                    HirExpr::new(
+                        HirExprKind::Reference {
+                            operand: Box::new(read),
+                            mutable: false,
+                        },
+                        param.ty.clone(),
+                        arg.span,
+                    )
+                }
+                HirType::Reference { mutable: false, .. } => read,
+                other if is_copied_field(other) => read,
+                _ => {
+                    return Err(self.refuse(
+                        "an argument a `@no_grad` call borrows mutably, or takes by value when it is neither a number nor a tensor",
+                        arg.span,
+                    ))
+                }
+            };
+            operands.push(operand);
+        }
+        let callee = HirExpr::new(HirExprKind::Variable(target.to_string()), ty.clone(), span);
+        let call = HirExprKind::Call {
+            callee: Box::new(callee),
+            args: operands,
+        };
+        let call = HirExpr::new(call, function.return_type.clone(), span);
+        Ok(self.push(&function.return_type, span, Op::Constant(call)))
     }
 
     /// The body of the function or closure `target` run at the call on `args`, under
@@ -1630,6 +1691,24 @@ fn receiver_path(place: &HirExpr) -> Option<FieldPath> {
         }
         _ => None,
     }
+}
+
+/// `place.clone()`, a fresh copy of the tensor at `place`, owned at `ty`.
+fn clone_call(place: HirExpr, ty: &HirType) -> HirExpr {
+    let span = place.span;
+    let method = HirExpr::new(
+        HirExprKind::FieldAccess {
+            object: Box::new(place),
+            field: CLONE_METHOD.to_string(),
+        },
+        ty.clone(),
+        span,
+    );
+    let call = HirExprKind::Call {
+        callee: Box::new(method),
+        args: Vec::new(),
+    };
+    HirExpr::new(call, ty.clone(), span)
 }
 
 fn is_copied_field(ty: &HirType) -> bool {
