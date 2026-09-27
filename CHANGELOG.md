@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.0] - 2026-09-27
+
+### Changed
+
+- The compiler builds against LLVM 22 (inkwell's `llvm22-1` feature). Export
+  `LLVM_SYS_221_PREFIX` instead of `LLVM_SYS_201_PREFIX`: `/usr` with Arch's stock `llvm`,
+  `/usr/lib/llvm-22` from apt.llvm.org, `$(brew --prefix llvm@22)` on macOS. See the
+  [installation guide](docs/getting-started/installation.md).
+- The optional MLIR backend moves to melior 0.27.8 and mlir-sys 220.0.2 (MLIR 22). Its variables
+  are now `MLIR_SYS_220_PREFIX` and `TABLEGEN_220_PREFIX`, and they must name the same prefix as
+  `LLVM_SYS_221_PREFIX`. A libclang 20 is no longer needed.
+- Windows builds use LLVM's official `clang+llvm-22.1.8-x86_64-pc-windows-msvc` archive.
+  `.cargo/config.toml` builds the compiler with the static CRT on that target to match it, and
+  the archive's `xml2s.lib` reference is met with a static libxml2 copied into its `lib`
+  directory.
+
+### Fixed
+
+- Four end-to-end tests failed on Windows because they expected an exit status truncated to
+  one byte, which only POSIX does. The test programs now reduce the value themselves.
+
 ## [3.18.1] - 2026-09-27
 
 ### Fixed

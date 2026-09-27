@@ -4,7 +4,7 @@
 //
 // A slice is a `{ ptr, i64 }` fat pointer held by value: the buffer address of the
 // borrowed run and its element count. Every operation here re-derives the element
-// stride from the slice's semantic element type, because LLVM 20 pointers are untyped.
+// stride from the slice's semantic element type, because LLVM pointers are untyped.
 
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;

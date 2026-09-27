@@ -7,7 +7,7 @@ detail lives in [CONTRIBUTING.md](CONTRIBUTING.md), [VSA.md](VSA.md) and
 ## Project Overview
 
 Neuro is an AOT-compiled language for high-performance AI development. Source
-files (`.nr`) compile to native binaries through LLVM 20. The compiler is
+files (`.nr`) compile to native binaries through LLVM 22. The compiler is
 written in Rust and laid out as a Cargo workspace.
 
 Pipeline:
@@ -30,7 +30,7 @@ Workspace layout (`compiler/`):
 | `argument-binding` | Named/positional argument binding |
 | `semantic-analysis` | Type checking, scope resolution |
 | `hir-lowering` | AST → typed HIR |
-| `llvm-backend` | Codegen via inkwell 0.10.0 (LLVM 20) |
+| `llvm-backend` | Codegen via inkwell 0.10.0 (LLVM 22) |
 | `mlir-backend` | MLIR/melior codegen, behind the off-by-default `mlir` feature |
 | `neurc` | CLI driver; the only crate allowed to depend on every slice |
 
@@ -56,13 +56,13 @@ Never restate it elsewhere. It goes stale.
 
 ## Build and Test Commands
 
-LLVM 20 must be installed and `LLVM_SYS_201_PREFIX` exported before anything
+LLVM 22 must be installed and `LLVM_SYS_221_PREFIX` exported before anything
 builds:
 
 ```bash
-export LLVM_SYS_201_PREFIX=/usr/lib/llvm20            # Arch / CachyOS
-export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20           # Ubuntu / Debian
-export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)   # macOS
+export LLVM_SYS_221_PREFIX=/usr                       # Arch / CachyOS
+export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22           # Ubuntu / Debian
+export LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)   # macOS
 ```
 
 ```bash
@@ -89,9 +89,9 @@ cargo run -p neurc -- compile examples/basics/hello.nr   # compile to a binary
 cargo run -p neurc -- compile examples/basics/hello.nr -O2 -o hello
 ```
 
-The MLIR backend is optional and off by default. It needs an LLVM 20 install
-that includes MLIR plus a matching libclang 20
-(`MLIR_SYS_200_PREFIX`, `TABLEGEN_200_PREFIX`, `LIBCLANG_PATH`); see
+The MLIR backend is optional and off by default. It needs MLIR 22 installed
+into the same prefix as LLVM 22, with `LLVM_SYS_221_PREFIX`,
+`MLIR_SYS_220_PREFIX` and `TABLEGEN_220_PREFIX` all pointing at it; see
 [installation](docs/getting-started/installation.md#optional-mlir-backend).
 Then: `cargo test -p mlir-backend --features mlir`.
 

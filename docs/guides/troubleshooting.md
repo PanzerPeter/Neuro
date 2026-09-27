@@ -9,33 +9,33 @@ Common problems and solutions when working with Neuro.
 **Symptoms**:
 ```text
 error: No suitable version of LLVM was found system-wide or pointed
-       to by LLVM_SYS_201_PREFIX.
+       to by LLVM_SYS_221_PREFIX.
 ```
 
-**Cause**: LLVM_SYS_201_PREFIX not set or points to wrong location. Neuro requires LLVM 20.
+**Cause**: LLVM_SYS_221_PREFIX not set or points to wrong location. Neuro requires LLVM 22.
 
 **Solution**:
 
 **Windows**:
 ```powershell
-# Set environment variable (adjust path to your LLVM 20 install)
-[System.Environment]::SetEnvironmentVariable('LLVM_SYS_201_PREFIX', 'C:\LLVM-20', 'Machine')
+# Set environment variable (adjust path to your LLVM 22 install)
+[System.Environment]::SetEnvironmentVariable('LLVM_SYS_221_PREFIX', 'C:\LLVM', 'Machine')
 
 # Restart terminal and verify
-$env:LLVM_SYS_201_PREFIX
+$env:LLVM_SYS_221_PREFIX
 ```
 
 **Unix**:
 ```bash
 # Add to ~/.bashrc or ~/.zshrc (path varies by distro)
-export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20   # Ubuntu/Debian
-# export LLVM_SYS_201_PREFIX=/usr/lib/llvm20  # Arch/CachyOS
+export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22   # Ubuntu/Debian
+# export LLVM_SYS_221_PREFIX=/usr             # Arch/CachyOS
 
 # Reload shell config
 source ~/.bashrc
 
 # Verify
-echo $LLVM_SYS_201_PREFIX
+echo $LLVM_SYS_221_PREFIX
 ```
 
 ### "LLVMConfig.cmake not found"
@@ -50,35 +50,27 @@ Could not find LLVMConfig.cmake
 **Solution**:
 
 Download and extract the full development package:
-- Windows: the LLVM 20 `clang+llvm-20.*-x86_64-pc-windows-msvc.tar.xz` archive
+- Windows: the LLVM 22 `clang+llvm-22.*-x86_64-pc-windows-msvc.tar.xz` archive
 - URL: https://github.com/llvm/llvm-project/releases
 
 **DO NOT** use the `.exe` installer - it lacks required development files.
 
-### "cannot open input file 'libxml2s.lib'" (Windows)
+### "cannot open input file 'xml2s.lib'" (Windows)
 
 **Symptoms**:
 ```text
-LINK : fatal error LNK1181: cannot open input file 'libxml2s.lib'
+LINK : fatal error LNK1181: cannot open input file 'xml2s.lib'
 ```
 
-**Cause**: your LLVM package links against libxml2 and vcpkg has not provided it.
+**Cause**: LLVM's `llvm-config.exe --system-libs` names `xml2s.lib`, because LLVM's
+Windows manifest merger uses libxml2. Nothing Neuro calls reaches it, so no libxml2 code
+is linked, but the linker still stops when a named library is missing.
 
-**Solution**:
+**Solution**: copy any static libxml2 into the LLVM `lib` directory under that name:
 ```powershell
-cd C:\vcpkg
-# The -md triplet builds against the dynamic CRT (/MD), matching Rust's
-# x86_64-pc-windows-msvc target. The plain x64-windows-static triplet is /MT
-# and will produce CRT conflicts in a default Rust build.
-.\vcpkg install libxml2:x64-windows-static-md
-.\vcpkg integrate install
-
-# Verify installation
-.\vcpkg list | findstr libxml2
+vcpkg install "libxml2[core]:x64-windows-static"
+Copy-Item "<vcpkg-root>\installed\x64-windows-static\lib\libxml2s.lib" "$env:LLVM_SYS_221_PREFIX\lib\xml2s.lib"
 ```
-
-`.cargo/config.toml` already puts both vcpkg library directories on the MSVC link
-search path, so no further configuration is needed once the package is installed.
 
 ### Build fails with linker errors (Unix)
 
@@ -109,46 +101,38 @@ xcode-select --install
 
 ### `cargo build --features mlir` fails
 
-The `mlir-backend` slice's `mlir` feature is opt-in and needs more than stock LLVM 20.
+The `mlir-backend` slice's `mlir` feature is opt-in and needs MLIR 22 on top of LLVM 22.
 Default builds compile a placeholder and need none of this.
 
 **Symptoms**:
 ```text
-mlir-sys: MLIR_SYS_200_PREFIX not set
+failed to run `".../bin/llvm-config" ...`
 # or
-error: evaluation of constant value failed: attempt to compute `0_usize - 8_usize`
+fatal error: 'mlir-c/IR.h' file not found
+# or, at link time
+unable to find library -lMLIR-C
 ```
 
-**Cause**: two separate gaps.
+**Cause**: `mlir-sys` finds MLIR by running `$MLIR_SYS_220_PREFIX/bin/llvm-config` and
+reading its `lib/` and `include/`. MLIR has to live in the same prefix as that
+`llvm-config`, and a prefix with no static LLVM libraries makes `mlir-sys` link the shared
+`MLIR-C` library, which distro packages (Arch's `aur/mlir` included) do not build.
 
-1. Most distro LLVM 20 packages (Arch/CachyOS `llvm20` included) ship **no MLIR**: no
-   `mlir-c` headers, no `libMLIR*`. Check with `ls $LLVM_SYS_201_PREFIX/include/mlir-c`.
-2. `mlir-sys` runs bindgen over the MLIR-C headers. A **newer libclang than 20** misparses
-   LLVM 20's `DEFINE_C_API_STRUCT` macro, yielding opaque 1-byte structs and the
-   `0_usize - 8_usize` const-eval underflow above. Rolling distros ship libclang 22.
-
-**Solution**: build LLVM 20 with MLIR enabled, and point bindgen at a libclang 20.
+**Solution**: use a prefix that holds LLVM and MLIR together: apt.llvm.org's
+`/usr/lib/llvm-22` with `libmlir-22-dev` installed, or a source build of LLVM 22 with
+`-DLLVM_ENABLE_PROJECTS=mlir`. Point all three variables at it. See
+[Installation → Optional: MLIR Backend](../getting-started/installation.md#optional-mlir-backend).
 
 ```bash
-# 1. LLVM 20 + MLIR, installed to a prefix of your choosing
-cmake -S llvm -B build -DLLVM_ENABLE_PROJECTS=mlir -DCMAKE_INSTALL_PREFIX=<mlir-prefix> ...
-
-# 2. libclang 20, unpacked anywhere (no system downgrade needed)
-#    needs libclang.so* plus the clang/20/include resource headers
-
-# 3. Point every binding at them
-export LLVM_SYS_201_PREFIX=<mlir-prefix>   # inkwell
-export MLIR_SYS_200_PREFIX=<mlir-prefix>   # melior
-export TABLEGEN_200_PREFIX=<mlir-prefix>   # mlir-tblgen
-export LIBCLANG_PATH=<libclang-20-dir>
-export BINDGEN_EXTRA_CLANG_ARGS="-resource-dir=<libclang-20-dir>/clang/20"
-
+export LLVM_SYS_221_PREFIX=<prefix>   # inkwell
+export MLIR_SYS_220_PREFIX=<prefix>   # melior
+export TABLEGEN_220_PREFIX=<prefix>   # melior's TableGen macros
 cargo test -p mlir-backend --features mlir
 ```
 
-If the distro libclang 20 is linked against the distro's own versioned `libLLVM.so.20.1`,
-put that package's `lib/` first on `LD_LIBRARY_PATH` so bindgen can load it, and the
-MLIR prefix's `lib/` second for the runtime `libMLIR`.
+If bindgen reports opaque 1-byte structs (`attempt to compute 0_usize - 8_usize`), the
+libclang it loaded is a different major version from the MLIR headers. Point
+`LIBCLANG_PATH` at a libclang 22.
 
 ## Compilation Errors
 

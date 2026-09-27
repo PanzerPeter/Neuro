@@ -16,7 +16,7 @@ use melior::{
 /// It defines `func.func @neuro_smoke(index, index) -> index` returning the sum of
 /// its arguments, which exercises dialect registration (`func`, `arith`) and the
 /// MLIR verifier end-to-end and so confirms `melior` is wired correctly against the
-/// active MLIR 20 toolchain. The context is the caller's so `bridge` can carry this
+/// active MLIR 22 toolchain. The context is the caller's so `bridge` can carry this
 /// module, which has a real *body* rather than only declarations, across to LLVM IR.
 pub(crate) fn build_smoke_module(context: &Context) -> Result<Module<'_>, MlirError> {
     let location = Location::unknown(context);

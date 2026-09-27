@@ -83,8 +83,8 @@ body:
     id: environment
     attributes:
       label: OS, Rust, and LLVM
-      description: Output of `rustc -vV` in one line plus your LLVM 20 install path.
-      placeholder: CachyOS, rustc 1.85.0, LLVM_SYS_201_PREFIX=/usr/lib/llvm20
+      description: Output of `rustc -vV` in one line plus your LLVM 22 install path.
+      placeholder: CachyOS, rustc 1.85.0, LLVM_SYS_221_PREFIX=/usr
     validations:
       required: true
 

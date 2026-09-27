@@ -177,7 +177,7 @@ impl<'ctx> TypeMapper<'ctx> {
     /// The LLVM layout of a borrowed slice `&[T]` / `&mut [T]`:
     /// `{ ptr buffer, i64 len }`. The buffer pointer addresses the first element of the
     /// borrowed run and `len` counts the elements in it; the element type is erased,
-    /// since LLVM 20 pointers are untyped and every access re-derives the stride from
+    /// since LLVM pointers are untyped and every access re-derives the stride from
     /// the slice's semantic element type.
     pub(crate) fn slice_ref_type(&self) -> inkwell::types::StructType<'ctx> {
         let ptr = self.context.ptr_type(inkwell::AddressSpace::default());
@@ -337,7 +337,7 @@ impl<'ctx> TypeMapper<'ctx> {
     /// The byte size of one tensor element.
     ///
     /// Computed in Rust rather than from `size_of()` because the element buffer's
-    /// allocation size has to be rounded up to the DLPack alignment, and LLVM 20 has
+    /// allocation size has to be rounded up to the DLPack alignment, and LLVM has
     /// been withdrawing the constant-expression arithmetic that would take.
     pub(crate) fn tensor_element_bytes(&self, element: &Type) -> CodegenResult<u64> {
         Ok(u64::from(self.dlpack_dtype(element)?.bits) / 8)
@@ -431,7 +431,7 @@ impl<'ctx> TypeMapper<'ctx> {
                 Ok(self.slice_ref_type().into())
             }
             // Every other borrow `&T` / `&mut T` is an opaque pointer to the referent's
-            // storage. LLVM 20 pointers are untyped, so they all map to the same `ptr`.
+            // storage. LLVM pointers are untyped, so they all map to the same `ptr`.
             Type::Reference { .. } => Ok(self
                 .context
                 .ptr_type(inkwell::AddressSpace::default())

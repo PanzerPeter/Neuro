@@ -503,7 +503,7 @@ func main() -> i32 {
     v[0].inc()
     mut t = (C { n: 30 }, 3)
     t.0.inc()
-    arr[0].n * 1000 + arr[1].n * 100 + p.c.n + v[0].n + t.0.n
+    (arr[0].n * 1000 + arr[1].n * 100 + p.c.n + v[0].n + t.0.n) % 256
 }
 "#;
     let exit = test

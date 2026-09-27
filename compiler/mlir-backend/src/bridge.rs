@@ -20,9 +20,11 @@ use neuro_hir::HirProgram;
 /// any that survive.
 ///
 /// It is named in text rather than assembled from `melior`'s typed pass
-/// constructors because `one-shot-bufferize` has none: `melior 0.25` wraps the
-/// conversion and linalg passes but not the bufferization ones. Half the pipeline
-/// typed and half in text would be two spellings of one sequence.
+/// constructors because two entries have no usable one: melior's
+/// `one-shot-bufferize` constructor takes no options, so it cannot set
+/// `bufferize-function-boundaries`, and `buffer-deallocation-pipeline` is a
+/// pipeline, not a pass. Half the pipeline typed and half in text would be two
+/// spellings of one sequence.
 const LLVM_LOWERING_PIPELINE: &str = "builtin.module(\
     one-shot-bufferize{bufferize-function-boundaries=true},\
     buffer-deallocation-pipeline,\
@@ -43,7 +45,7 @@ const LLVM_LOWERING_PIPELINE: &str = "builtin.module(\
 ///
 /// This is what makes the two independent bindings one pipeline: `mlir-sys` builds
 /// the LLVM module *inside* an `LLVMContext` that inkwell owns, so a mismatched
-/// `libLLVM-20` between them cannot go unnoticed: the handoff fails here rather
+/// `libLLVM` between them cannot go unnoticed: the handoff fails here rather
 /// than miscompiling downstream.
 ///
 /// # Errors

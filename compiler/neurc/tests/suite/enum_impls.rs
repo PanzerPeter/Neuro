@@ -55,7 +55,7 @@ func main() -> i32 {{
     l.advance()
     mut stop = 0
     if l.is_stop() {{ stop = 100 }}
-    return first * 10 + second + stop + l.code() * 1000
+    return (first * 10 + second + stop + l.code() * 1000) % 256
 }}
 "
     );

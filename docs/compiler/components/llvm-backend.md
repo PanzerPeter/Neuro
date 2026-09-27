@@ -1,12 +1,12 @@
 # LLVM Backend
 
 **Crate**: `compiler/llvm-backend`
-**Library**: inkwell 0.10.0 (LLVM 20 bindings)
-**Build requirement**: `LLVM_SYS_201_PREFIX=/usr/lib/llvm20`
+**Library**: inkwell 0.10.0 (LLVM 22 bindings)
+**Build requirement**: `LLVM_SYS_221_PREFIX` pointing at an LLVM 22 install
 
 ## Overview
 
-The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`), not the AST. Since 1D the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 20) to produce optimized machine code for the host platform.
+The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`), not the AST. Since 1D the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 22) to produce optimized machine code for the host platform.
 
 **Entry point:**
 ```rust
@@ -42,7 +42,7 @@ bounds, slice boundaries).
 | `char` | `i32` (a Unicode scalar value) |
 | `string` | anonymous struct `{ ptr, i64 }`, a fat pointer: data pointer + byte length |
 | `&string` | the `{ ptr, i64 }` fat pointer **by value**; `&mut string` is the referent's address |
-| `&T` / `&mut T` (other `T`) | `ptr` (opaque, LLVM 20) |
+| `&T` / `&mut T` (other `T`) | `ptr` (opaque) |
 | `&dyn Trait` | `{ data ptr, vtable ptr }` fat pointer |
 | user struct | anonymous LLVM struct `{ T0, T1, ... }`, fields in declaration order |
 | tuple | anonymous LLVM struct, elements in position order |
@@ -93,7 +93,7 @@ Integer instructions are selected based on signedness:
    b. Allocate parameters on stack (alloca + store)
    c. Generate body statements
 5. Verify LLVM module (catches malformed IR)
-6. Initialize native target (LLVM_SYS_201_PREFIX)
+6. Initialize native target (LLVM_SYS_221_PREFIX)
 7. Create target machine for the host triple
 8. Emit object code to memory buffer
 ```
@@ -187,7 +187,7 @@ func add(a: i32, b: i32) -> i32 {
 }
 ```
 
-**Generated LLVM IR (simplified, LLVM 20 opaque pointers):**
+**Generated LLVM IR (simplified, opaque pointers):**
 ```llvm
 define i32 @add(i32 %0, i32 %1) {
 entry:
@@ -212,14 +212,14 @@ program with variable declarations and calls, and `OptimizationLevelSetting::fro
 
 Run with:
 ```bash
-LLVM_SYS_201_PREFIX=/usr/lib/llvm20 cargo test -p llvm-backend
+LLVM_SYS_221_PREFIX=/usr cargo test -p llvm-backend
 ```
 
 ## Design Decisions
 
 ### Why inkwell?
 
-inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alternative, calling `llvm-sys` (raw unsafe bindings) directly, would require manual lifetime management and is significantly more error-prone. inkwell compiles against the exact LLVM version specified by the feature flag (`llvm20-1`), preventing version mismatch at link time.
+inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alternative, calling `llvm-sys` (raw unsafe bindings) directly, would require manual lifetime management and is significantly more error-prone. inkwell compiles against the exact LLVM version specified by the feature flag (`llvm22-1`), preventing version mismatch at link time.
 
 ### Stack Allocation for All Locals
 
@@ -239,7 +239,7 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 ## Future: MLIR Integration
 
 The `mlir-backend` slice already lowers the same typed HIR this backend consumes to MLIR
-`linalg`, behind the off-by-default `mlir` feature, and both link against the same LLVM 20
+`linalg`, behind the off-by-default `mlir` feature, and both link against the same LLVM 22
 libraries. The driver does not route through it yet; that routing, and the GPU dialects after
 it, are Phase 4 work. inkwell remains the terminal code-emission layer on every path. See
 [MLIR Backend](mlir-backend.md).

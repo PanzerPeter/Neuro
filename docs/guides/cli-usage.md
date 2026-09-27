@@ -191,19 +191,19 @@ RUST_LOG=info neurc compile program.nr    # Standard output
 RUST_LOG=debug neurc compile program.nr   # Detailed diagnostics
 ```
 
-### LLVM_SYS_201_PREFIX
+### LLVM_SYS_221_PREFIX
 
-Path to the LLVM 20 installation (required to build the compiler):
+Path to the LLVM 22 installation (required to build the compiler):
 
 ```bash
 # Arch / CachyOS
-export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
+export LLVM_SYS_221_PREFIX=/usr
 
 # Ubuntu / Debian
-export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
+export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22
 
 # macOS (Homebrew)
-export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
+export LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)
 ```
 
 See the [Installation Guide](../getting-started/installation.md) for full setup.
@@ -359,8 +359,8 @@ itself is slower:
 
 **Requirements**:
 - MSVC Build Tools 2022 OR MinGW-w64
-- LLVM 20 (full development package)
-- vcpkg with libxml2, only if your LLVM package needs it (see
+- LLVM 22 (the `clang+llvm-*-x86_64-pc-windows-msvc` development archive)
+- a static libxml2 copied in as `xml2s.lib` (see
   [troubleshooting](troubleshooting.md))
 
 **Executable extension**: Always `.exe`
@@ -377,7 +377,7 @@ neurc compile examples/basics/hello.nr
 
 **Requirements**:
 - GCC or Clang
-- LLVM 20
+- LLVM 22
 - Build essentials (make, cmake, etc.)
 
 **Executable extension**: None (no extension)
@@ -392,7 +392,7 @@ chmod +x ./program
 
 **Requirements**:
 - Xcode Command Line Tools
-- LLVM 20 (via Homebrew, `llvm@20`)
+- LLVM 22 (via Homebrew, `llvm@22`)
 
 **Apple Silicon**: Fully supported
 

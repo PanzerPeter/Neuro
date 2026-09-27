@@ -6,7 +6,7 @@
 //! belongs to the LLVM backend alone and must not exist twice.
 //!
 //! The MLIR path is gated behind the off-by-default `mlir` feature so the
-//! workspace still builds and tests on a stock LLVM 20 install without an MLIR
+//! workspace still builds and tests on a stock LLVM 22 install without an MLIR
 //! toolchain. With the feature disabled this crate is an empty placeholder; with
 //! it enabled it pulls in `melior` and exposes `lower_program` (HIR → MLIR) and
 //! `translate_to_llvm_ir` (that module carried on through the `llvm` dialect into

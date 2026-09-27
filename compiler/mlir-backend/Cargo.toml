@@ -19,10 +19,10 @@ ast-types = { path = "../infrastructure/ast-types", optional = true }
 shared-types = { path = "../infrastructure/shared-types" }
 
 [features]
-# The MLIR path is opt-in: enabling `mlir` pulls in melior (and an MLIR 20
+# The MLIR path is opt-in: enabling `mlir` pulls in melior (and an MLIR 22
 # toolchain at build time) plus the neuro-hir contract it lowers from. Default
 # builds compile a trivial placeholder so the workspace builds and tests on stock
-# LLVM 20 without MLIR. See CONTEXT.md.
+# LLVM 22 without MLIR. See CONTEXT.md.
 default = []
 mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types"]
 

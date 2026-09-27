@@ -32,7 +32,7 @@ fn a_reversed_range_strides_down_from_its_last_value() {
 func main() -> i32 {
     mut digits = 0
     for i in (0..10).rev().step(4) { digits = digits * 10 + i }
-    digits
+    digits % 256
 }
 "#;
     let exit = test
@@ -53,7 +53,7 @@ func main() -> i32 {
         last = i
         count = count + 1
     }
-    count * 100 + last
+    (count * 100 + last) % 256
 }
 "#;
     let exit = test

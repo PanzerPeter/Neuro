@@ -97,7 +97,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The handle and the control block `manager_ctx` addresses come from one `malloc`,
     /// since neither has an alignment requirement the other does not. The ELEMENT buffer
     /// stays a second allocation: fusing it needs the structure's size rounded up to
-    /// [`DLPACK_DATA_ALIGN`] as an IR constant expression, and LLVM 20 has been
+    /// [`DLPACK_DATA_ALIGN`] as an IR constant expression, and LLVM has been
     /// withdrawing constant-expression arithmetic. The element buffer's size is computable
     /// in Rust; the structure's is not.
     pub(crate) fn alloc_dlpack_tensor(

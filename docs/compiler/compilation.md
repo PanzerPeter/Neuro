@@ -45,7 +45,7 @@ Source File (.nr)
 ├──────────────────────────────────────────────────────────────┤
 │ 6. Code Generation (llvm_backend::compile)                   │
 │    - Consumes the typed HIR directly                         │
-│    - LLVM IR generation (inkwell / LLVM 20)                  │
+│    - LLVM IR generation (inkwell / LLVM 22)                  │
 │    - Object code emission                                     │
 ├──────────────────────────────────────────────────────────────┤
 │ 7. Write Object File (tempfile)                              │
@@ -179,7 +179,7 @@ feature-gated.
 
 ## Setup
 
-LLVM 20 with `LLVM_SYS_201_PREFIX` set is required to build the compiler. See the
+LLVM 22 with `LLVM_SYS_221_PREFIX` set is required to build the compiler. See the
 [Installation Guide](../getting-started/installation.md) for per-platform instructions (Linux,
 macOS, Windows) and the optional MLIR backend setup. Common build problems are covered in
 [Troubleshooting](../guides/troubleshooting.md).

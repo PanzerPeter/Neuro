@@ -2,7 +2,7 @@
 
 **Status**: experimental, off by default behind the `mlir` cargo feature
 **Crate**: `compiler/mlir-backend`
-**Library**: melior 0.25.1 (Rust MLIR bindings, LLVM/MLIR 20)
+**Library**: melior 0.27.8 (Rust MLIR bindings, LLVM/MLIR 22)
 
 ## Overview
 
@@ -23,12 +23,13 @@ copies.
 The path is opt-in behind the off-by-default `mlir` feature
 (`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types"]`):
 
-The gate is permanent, not a staging step. The only Windows LLVM 20 build shipping the headers and
-import libraries `llvm-sys` needs carries no MLIR at all, so requiring MLIR would stop `neurc.exe`
-being buildable; Homebrew's `llvm@20` does carry it, and Arch's `llvm20` does not.
+The gate is permanent, not a staging step. LLVM's official Windows development build, the one
+`llvm-sys` builds against there, carries no MLIR at all, so requiring MLIR would stop `neurc.exe`
+being buildable. Homebrew's `llvm@22` does carry it; on Arch it comes from the separate
+`aur/mlir` package.
 
 - **Disabled (default)**: the crate compiles to an empty placeholder and pulls in no MLIR toolchain
-  (nor `neuro-hir`), so `cargo build/test --workspace` works on a stock LLVM 20 install with no MLIR
+  (nor `neuro-hir`), so `cargo build/test --workspace` works on a stock LLVM 22 install with no MLIR
   on every CI OS.
 - **Enabled**: pulls in `melior` + `mlir-sys` + `inkwell` + `neuro-hir` + `ast-types` and exposes the
   entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a dedicated
@@ -36,7 +37,7 @@ being buildable; Homebrew's `llvm@20` does carry it, and Arch's `llvm20` does no
   legs build the placeholder.
 
 See [Installation → Optional: MLIR Backend](../../getting-started/installation.md#optional-mlir-backend)
-for the MLIR 20 + libclang 20 toolchain setup.
+for the MLIR 22 toolchain setup.
 
 ## Entry Points (feature `mlir`)
 
@@ -188,15 +189,16 @@ into loops. See [MLIR to LLVM IR](#mlir-to-llvm-ir).
 5. `reconcile-unrealized-casts` clears the `unrealized_conversion_cast` ops each conversion leaves
    at its boundary with the dialects the others own. The translation rejects any that survive, so
    this pass runs last by necessity, not by convention.
-6. `mlirTranslateModuleToLLVMIR` builds the LLVM module. `melior 0.25` does not wrap it, so the
+6. `mlirTranslateModuleToLLVMIR` builds the LLVM module. melior does not wrap it, so the
    call goes through `mlir-sys` directly, pinned to the exact version melior itself depends on so
    both reach one crate instance.
 7. The resulting `LLVMModuleRef` is wrapped by `inkwell::module::Module` (sole owner, disposed on
    drop) and put through LLVM's verifier.
 
 The pipeline is named in text and parsed with `melior::utility::parse_pass_pipeline`, because
-melior wraps no bufferization pass and two of the three that carry a `linalg` body are
-bufferization passes. Textually named passes must be in the process-global pass registry, so the
+two of the three entries that carry a `linalg` body have no usable typed constructor: melior's
+`one-shot-bufferize` takes no options, so it cannot set `bufferize-function-boundaries`, and
+`buffer-deallocation-pipeline` is a pipeline rather than a pass. Textually named passes must be in the process-global pass registry, so the
 MLIR context builder calls `register_all_passes` once.
 
 A bufferized tensor parameter crosses as an exploded `memref` descriptor (allocated pointer,
@@ -205,20 +207,18 @@ MLIR's tensor ABI, not the single DLPack handle the LLVM backend uses, and the t
 nothing in the compiler calls this path from a compile.
 
 The `LLVMContext` in step 3 is **inkwell's own**. That is deliberate: `mlir-sys` and `llvm-sys` are
-independent bindings, and an install where they resolve to different `libLLVM-20` copies fails at
+independent bindings, and an install where they resolve to different `libLLVM` copies fails at
 this handoff instead of miscompiling downstream. Errors are values throughout, one variant per
 stage: `PassPipelineFailed`, `TranslationFailed`, `LlvmVerificationFailed`.
 
 ## Coexistence with inkwell
 
-`mlir-sys` carries no `llvm-sys` dependency and links its own `MLIR` key, so it coexists with
-inkwell's `llvm-20` link without a Cargo `links` conflict. Pointing `MLIR_SYS_200_PREFIX` /
-`TABLEGEN_200_PREFIX` at the same LLVM 20 build as `LLVM_SYS_201_PREFIX` makes both bindings share one
-`libLLVM-20` dylib. That prefix must include MLIR (`mlir-c` headers + `libMLIR*`); Arch's stock
-`llvm20` omits MLIR, so build LLVM 20 with `-DLLVM_ENABLE_PROJECTS=mlir`.
+`mlir-sys` carries no `llvm-sys` dependency and no Cargo `links` key that clashes with inkwell's.
+It finds MLIR by running `$MLIR_SYS_220_PREFIX/bin/llvm-config`, so MLIR must be installed into
+the same prefix as the LLVM `LLVM_SYS_221_PREFIX` names, and `TABLEGEN_220_PREFIX` names it too.
+Both bindings then load one `libLLVM` 22, which the handoff above relies on.
 
-`melior 0.25.1` is the newest release targeting MLIR 20 (via `mlir-sys 0.5.0`); `melior 0.26+` moved
-to MLIR 21/22.
+`melior 0.27.x` is the last line on MLIR 22 (via `mlir-sys 220`); `melior 0.28` moved to MLIR 23.
 
 ## Resources
 

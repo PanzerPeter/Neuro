@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "3.18.1"
+version = "3.19.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -41,39 +41,30 @@ logos = "0.16"
 unicode-ident = "1.0"
 
 # LLVM Backend
-# Requires LLVM 20 installed system-wide (the backend emits LLVM IR via inkwell;
-# MLIR is not needed until the Phase 2C tensor dialects).
-# On CachyOS/Arch: sudo pacman -S llvm20
-# LLVM_SYS_201_PREFIX must point to the LLVM 20 installation (e.g. /usr/lib/llvm20).
-# Feature flag is llvm20-1 (inkwell uses the minor-version suffix scheme).
-# inkwell 0.10.0 supports LLVM 12 through 22 and keeps LLVM 20 on the llvm20-1
-# feature. It drops the pre-12 LLVM releases (irrelevant here) and swaps its
-# internal raw pointers for NonNull; the safe wrapper API this backend uses is
-# unchanged. Staying current is also what keeps a later LLVM 22 move a
-# feature-flag change rather than a crate rewrite.
+# Requires LLVM 22 with dev libraries (the backend emits LLVM IR via inkwell).
+# LLVM_SYS_221_PREFIX points at that install: /usr on Arch/CachyOS, whose stock
+# `llvm` is 22. Feature flag llvm22-1 (inkwell's minor-version suffix scheme).
 # default-features = false disables inkwell's `target-all` default, which would
 # otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
-# That fails to link on Windows CI, whose prebuilt LLVM only ships the x86 target
-# libs. We only ever initialize the native (x86) target, so target-x86 suffices.
-inkwell = { version = "0.10.0", default-features = false, features = ["llvm20-1", "target-x86"] }
+# That fails to link against LLVM's official Windows build, which ships only a
+# subset of backends. We only ever initialize the native (x86) target.
+inkwell = { version = "0.10.0", default-features = false, features = ["llvm22-1", "target-x86"] }
 
 # MLIR Backend (Phase 1.8+)
-# Rust MLIR bindings, used alongside inkwell for the tensor / AD / GPU lowering
-# path. melior 0.25.1 is the newest release that targets MLIR 20 (via mlir-sys
-# 0.5.0); melior 0.26+ moved to MLIR 21/22. mlir-sys carries no llvm-sys
-# dependency: it discovers MLIR through `MLIR_SYS_200_PREFIX` and links its own
-# `MLIR` key, so it coexists with inkwell's `llvm-20` link without conflict.
-# MLIR_SYS_200_PREFIX and TABLEGEN_200_PREFIX must point at an LLVM 20 build that
-# includes MLIR (the same prefix as LLVM_SYS_201_PREFIX, so both bindings share
-# one libLLVM-20 dylib). Arch's stock llvm20 omits MLIR; build LLVM 20 with
-# -DLLVM_ENABLE_PROJECTS=mlir or use a prefix that ships mlir-c headers + libMLIR.
-melior = "0.25.1"
+# Rust MLIR bindings for the tensor lowering path, behind mlir-backend's `mlir`
+# feature. melior 0.27.x is the last line on MLIR 22 (via mlir-sys 220); 0.28
+# moved to MLIR 23. mlir-sys finds MLIR through `$MLIR_SYS_220_PREFIX/bin/
+# llvm-config`, so MLIR must be installed into the same prefix as the LLVM that
+# LLVM_SYS_221_PREFIX names: `bridge.rs` hands an `LLVMContextRef` from MLIR's
+# libLLVM to inkwell, so both must load one libLLVM 22. TABLEGEN_220_PREFIX
+# names the same prefix for mlir-tblgen.
+melior = "0.27.8"
 
-# melior 0.25 does not wrap `mlirTranslateModuleToLLVMIR`, so the MLIR -> LLVM IR
-# crossing calls it through the raw bindings. Pinned to the exact version melior
+# melior does not wrap `mlirTranslateModuleToLLVMIR`, so the MLIR -> LLVM IR
+# crossing calls it through the raw bindings. Pinned to the version melior
 # itself depends on, so both reach the SAME `mlir-sys` instance and its
 # `MlirOperation` / `LLVMContextRef` types unify.
-mlir-sys = "0.5.0"
+mlir-sys = "220.0.2"
 
 # Serialization
 serde_json = "1.0"

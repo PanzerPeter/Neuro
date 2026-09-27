@@ -1,10 +1,10 @@
-name: "Setup LLVM 20"
-description: "Installs LLVM 20 and sets LLVM_SYS_201_PREFIX for llvm-sys-201.x"
+name: "Setup LLVM 22"
+description: "Installs LLVM 22 and sets LLVM_SYS_221_PREFIX for llvm-sys-221.x"
 inputs:
   mlir:
     description: >-
-      Also install the MLIR 20 dev libraries + a matching libclang 20 (Linux
-      only) and export MLIR_SYS_200_PREFIX / TABLEGEN_200_PREFIX / LIBCLANG_PATH.
+      Also install the MLIR 22 dev libraries + a matching libclang 22 (Linux
+      only) and export MLIR_SYS_220_PREFIX / TABLEGEN_220_PREFIX / LIBCLANG_PATH.
       Required only by jobs that enable the mlir-backend `mlir` feature (e.g. the
       `--all-features` lint job). Default builds do not need it.
     required: false
@@ -22,7 +22,7 @@ runs:
     # whole budget without ever producing a failure. Every fetch below is
     # therefore bounded and retried, and apt waits for the dpkg lock (held early
     # in a runner's life by unattended-upgrades) instead of aborting on it.
-    - name: Install LLVM 20 (Linux)
+    - name: Install LLVM 22 (Linux)
       if: runner.os == 'Linux'
       shell: bash
       run: |
@@ -58,34 +58,34 @@ runs:
           | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
 
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ \
-          llvm-toolchain-$(lsb_release -cs)-20 main" \
+          llvm-toolchain-$(lsb_release -cs)-22 main" \
           | sudo tee /etc/apt/sources.list.d/llvm.list
 
         apt_retry apt-get update -q
         apt_retry apt-get install -y \
-          llvm-20 \
-          llvm-20-dev \
-          llvm-20-tools \
-          libpolly-20-dev \
+          llvm-22 \
+          llvm-22-dev \
+          llvm-22-tools \
+          libpolly-22-dev \
           libzstd-dev \
           zlib1g-dev
 
         # Sanity-check: ensure llvm-config resolves the correct version
-        /usr/lib/llvm-20/bin/llvm-config --version | grep -E "^20\." \
+        /usr/lib/llvm-22/bin/llvm-config --version | grep -E "^22\." \
           || { echo "ERROR: unexpected LLVM version"; exit 1; }
 
         {
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20"
+          echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22"
           echo "LLVM_LINK_LLVM_DYLIB=1"
-          echo "PATH=/usr/lib/llvm-20/bin:$PATH"
+          echo "PATH=/usr/lib/llvm-22/bin:$PATH"
         } >> "$GITHUB_ENV"
 
-    # ── MLIR 20 + libclang 20 (Linux, opt-in) ──────────────────────────────────
+    # ── MLIR 22 + libclang 22 (Linux, opt-in) ──────────────────────────────────
     # mlir-sys runs bindgen over the MLIR-C headers at build time and needs a
-    # libclang whose major version matches the headers (libclang 20 here). The
-    # apt.llvm.org llvm-20 channel ships both, so the version matches with no
+    # libclang whose major version matches the headers (libclang 22 here). The
+    # apt.llvm.org llvm-22 channel ships both, so the version matches with no
     # workaround. Only jobs enabling the mlir-backend `mlir` feature request this.
-    - name: Install MLIR 20 + libclang 20 (Linux)
+    - name: Install MLIR 22 + libclang 22 (Linux)
       if: runner.os == 'Linux' && inputs.mlir == 'true'
       shell: bash
       run: |
@@ -110,22 +110,22 @@ runs:
         }
 
         apt_retry apt-get install -y \
-          libmlir-20-dev \
-          mlir-20-tools \
-          libclang-20-dev \
-          libclang-common-20-dev
+          libmlir-22-dev \
+          mlir-22-tools \
+          libclang-22-dev \
+          libclang-common-22-dev
 
-        test -f /usr/lib/llvm-20/include/mlir-c/IR.h \
+        test -f /usr/lib/llvm-22/include/mlir-c/IR.h \
           || { echo "ERROR: MLIR-C headers missing"; exit 1; }
 
         {
-          echo "MLIR_SYS_200_PREFIX=/usr/lib/llvm-20"
-          echo "TABLEGEN_200_PREFIX=/usr/lib/llvm-20"
-          echo "LIBCLANG_PATH=/usr/lib/llvm-20/lib"
+          echo "MLIR_SYS_220_PREFIX=/usr/lib/llvm-22"
+          echo "TABLEGEN_220_PREFIX=/usr/lib/llvm-22"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-22/lib"
         } >> "$GITHUB_ENV"
 
     # ── macOS ──────────────────────────────────────────────────────────────────
-    - name: Install LLVM 20 (macOS)
+    - name: Install LLVM 22 (macOS)
       if: runner.os == 'macOS'
       shell: bash
       run: |
@@ -133,80 +133,78 @@ runs:
 
         # Unlink any existing LLVM to avoid keg-only conflicts
         brew unlink llvm 2>/dev/null || true
-        brew install llvm@20
+        brew install llvm@22
 
-        LLVM_PREFIX="$(brew --prefix llvm@20)"
+        LLVM_PREFIX="$(brew --prefix llvm@22)"
 
-        "$LLVM_PREFIX/bin/llvm-config" --version | grep -E "^20\." \
+        "$LLVM_PREFIX/bin/llvm-config" --version | grep -E "^22\." \
           || { echo "ERROR: unexpected LLVM version"; exit 1; }
 
         {
-          echo "LLVM_SYS_201_PREFIX=$LLVM_PREFIX"
+          echo "LLVM_SYS_221_PREFIX=$LLVM_PREFIX"
           echo "PATH=$LLVM_PREFIX/bin:$PATH"
           # macOS links statically by default: do NOT set LLVM_LINK_LLVM_DYLIB
         } >> "$GITHUB_ENV"
 
-    # ── Windows ────────────────────────────────────────────────────────────────
-    # The official LLVM Windows NSIS installer ships only Clang + LLVM-C.dll:
-    # it does NOT include llvm-config.exe, headers, or static .lib files, so
-    # llvm-sys (used by inkwell) cannot build against it. KyleMayes/install-
-    # llvm-action repackages the same NSIS installer for Windows and has the
-    # same limitation.
+    # ── Windows ──────────────────────────────────────────────────────────────────
+    # LLVM's own release ships a full MSVC development build as
+    # clang+llvm-<ver>-x86_64-pc-windows-msvc.tar.xz: llvm-config.exe, headers and
+    # every static .lib llvm-sys needs. (The NSIS .exe installer does not; it holds
+    # only Clang and LLVM-C.dll.) The archive is pinned by SHA-256, the digest
+    # GitHub records for the release asset.
     #
-    # We use vovkos/llvm-package-windows, which provides full LLVM dev builds
-    # for Windows with MSVC toolchain in both /MD (msvcrt) and /MT (libcmt)
-    # CRT variants. Rust's stable-x86_64-pc-windows-msvc target uses /MD by
-    # default, so we pick the `msvcrt` variant.
+    # Two properties of that build shape the steps below:
+    #   - It is compiled against the static CRT (/MT). `.cargo/config.toml`
+    #     builds Rust with +crt-static on this target to match; a /MD Rust build
+    #     would pull both CRTs into one link.
+    #   - Its llvm-config lists `xml2s.lib` among the system libraries, because
+    #     LLVMWindowsManifest uses libxml2. Nothing inkwell calls reaches that
+    #     library, so no object from it is ever linked, but link.exe still fails
+    #     with LNK1181 when a named library is missing. A static libxml2 from the
+    #     runner's vcpkg is copied into the LLVM lib directory under that name.
     #
-    # IMPORTANT: vovkos builds with LLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU.
-    # Non-X86 backends (ARM, AArch64, RISCV, Mips, etc.) are NOT included.
-    # inkwell must therefore use `target-x86` only, not `target-all`.
-    #
-    # Notes:
-    #   - 7z.exe is preinstalled on windows-latest runners.
-    #   - Archive top-level dir matches the asset basename; we move/rename it
-    #     to C:\LLVM for a stable, space-free prefix path.
-    #   - curl.exe is more reliable than Invoke-WebRequest for large binaries.
-    #   - The extracted LLVM tree (~1 GB) is cached between runs using
-    #     actions/cache keyed on the pinned version string.
+    # The archive carries a subset of backends (X86, AArch64, ARM, BPF, NVPTX,
+    # RISCV, WebAssembly), which is why inkwell uses `target-x86` and not
+    # `target-all`. The pruned prefix is cached per version.
 
-    - name: Cache LLVM 20 (Windows)
+    - name: Cache LLVM 22 (Windows)
       if: runner.os == 'Windows'
       uses: actions/cache@v4
       id: llvm-cache
       with:
         path: C:\LLVM
-        key: llvm-20.1.8-windows-amd64-msvc17-msvcrt
+        key: llvm-22.1.8-x86_64-pc-windows-msvc-xml2s
 
-    - name: Install LLVM 20 (Windows)
+    - name: Install LLVM 22 (Windows)
       if: runner.os == 'Windows' && steps.llvm-cache.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
 
-        $version = "20.1.8"
-        $asset   = "llvm-$version-windows-amd64-msvc17-msvcrt"
-        $url     = "https://github.com/vovkos/llvm-package-windows/releases/download/llvm-$version/$asset.7z"
-        $archive = "$env:TEMP\$asset.7z"
+        $version = "22.1.8"
+        $sha256  = "d96c2cc1736f4eb7fa43cb9bbdf56d93551a9ae0a9aadb9c99c3c3b2b712a234"
+        $asset   = "clang+llvm-$version-x86_64-pc-windows-msvc"
+        $url     = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/$asset.tar.xz"
+        $archive = "$env:TEMP\$asset.tar.xz"
         $extract = "$env:TEMP\llvm-extract"
         $prefix  = "C:\LLVM"
 
-        Write-Host "Downloading LLVM dev build from vovkos/llvm-package-windows..."
+        Write-Host "Downloading $url ..."
         # Retry curl to absorb transient GitHub release CDN errors.
         curl.exe -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o $archive $url
         if ($LASTEXITCODE -ne 0) { throw "curl failed (exit $LASTEXITCODE)" }
 
+        $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
+        if ($actual -ne $sha256) { throw "SHA-256 mismatch: expected $sha256, got $actual" }
+
         Write-Host "Extracting $archive ..."
         if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
         New-Item -ItemType Directory -Force -Path $extract | Out-Null
-        & 7z.exe x $archive "-o$extract" -y | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "7z extract failed (exit $LASTEXITCODE)" }
+        # Windows' bundled bsdtar reads .tar.xz directly.
+        tar.exe -xf $archive -C $extract
+        if ($LASTEXITCODE -ne 0) { throw "tar extract failed (exit $LASTEXITCODE)" }
 
         $inner = Join-Path $extract $asset
-        if (-not (Test-Path $inner)) {
-          # Some archives flatten differently; fall back to first subdir.
-          $inner = (Get-ChildItem -Directory $extract | Select-Object -First 1).FullName
-        }
         if (-not (Test-Path $inner)) { throw "Could not locate extracted LLVM root in $extract" }
 
         if (Test-Path $prefix) { Remove-Item -Recurse -Force $prefix }
@@ -214,6 +212,23 @@ runs:
 
         Remove-Item $archive -ErrorAction SilentlyContinue
         Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
+
+        # Keep only what llvm-sys reads: llvm-config, the LLVM headers and the
+        # LLVM*.lib archives. Dropping clang, lld and lldb keeps the cache small
+        # and leaves no second clang on PATH to change which one neurc links with.
+        Get-ChildItem "$prefix\bin" | Where-Object Name -ne 'llvm-config.exe' | Remove-Item -Recurse -Force
+        Get-ChildItem "$prefix\include" | Where-Object Name -notin 'llvm', 'llvm-c' | Remove-Item -Recurse -Force
+        Get-ChildItem "$prefix\lib" | Where-Object { $_.Name -notlike 'LLVM*.lib' -and $_.Name -ne 'cmake' } | Remove-Item -Recurse -Force
+        Get-ChildItem "$prefix\lib\cmake" | Where-Object Name -ne 'llvm' | Remove-Item -Recurse -Force
+        Get-ChildItem $prefix | Where-Object Name -notin 'bin', 'include', 'lib' | Remove-Item -Recurse -Force
+
+        # [core] drops the iconv and zlib defaults: they would only add more
+        # libraries that llvm-config does not name.
+        & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install "libxml2[core]:x64-windows-static"
+        if ($LASTEXITCODE -ne 0) { throw "vcpkg install libxml2 failed (exit $LASTEXITCODE)" }
+        $xml2 = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static\lib\libxml2s.lib"
+        if (-not (Test-Path $xml2)) { throw "vcpkg produced no $xml2" }
+        Copy-Item $xml2 "$prefix\lib\xml2s.lib"
 
     - name: Configure LLVM env (Windows)
       if: runner.os == 'Windows'
@@ -229,23 +244,21 @@ runs:
 
         $detected = & $llvmConfig --version
         Write-Host "Detected LLVM version: $detected"
-        if ($detected -notmatch '^20\.') {
-          throw "Unexpected LLVM version '$detected'; expected 20.x"
+        if ($detected -notmatch '^22\.') {
+          throw "Unexpected LLVM version '$detected'; expected 22.x"
         }
         Write-Host "LLVM prefix: $prefix"
 
-        # Persist env for subsequent steps.
         # llvm-sys on Windows/MSVC links statically: do NOT set
-        # LLVM_LINK_LLVM_DYLIB. Default CRT linkage (/MD) matches the
-        # `msvcrt` variant we downloaded.
-        "LLVM_SYS_201_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
+        # LLVM_LINK_LLVM_DYLIB.
+        "LLVM_SYS_221_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
         "$prefix\bin"                  | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
     - name: Verify LLVM prefix is set
       shell: bash
       run: |
-        : "${LLVM_SYS_201_PREFIX:?LLVM_SYS_201_PREFIX is not set, LLVM install failed}"
-        echo "LLVM_SYS_201_PREFIX = $LLVM_SYS_201_PREFIX"
+        : "${LLVM_SYS_221_PREFIX:?LLVM_SYS_221_PREFIX is not set, LLVM install failed}"
+        echo "LLVM_SYS_221_PREFIX = $LLVM_SYS_221_PREFIX"
         # Use llvm-config from PATH (bin dir was added above) to avoid
         # backslash path issues on Windows runners using Git Bash.
         llvm-config --version

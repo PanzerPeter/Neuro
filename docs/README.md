@@ -10,7 +10,7 @@ once, in the page that owns it.
 
 ## What is Neuro?
 
-A compiled language for high-performance AI workloads. It generates native code through an LLVM 20
+A compiled language for high-performance AI workloads. It generates native code through an LLVM 22
 backend, and it checks tensor shapes and differentiates tensor code while compiling. GPU
 acceleration through MLIR GPU dialects is on the roadmap.
 
@@ -73,8 +73,8 @@ current entry points when this directory disagrees.
 
 | Component | Library | Status |
 |---|---|---|
-| CPU codegen | inkwell (LLVM 20) | In use |
-| MLIR construction | melior (LLVM/MLIR 20) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR, behind the off-by-default `mlir` feature |
+| CPU codegen | inkwell (LLVM 22) | In use |
+| MLIR construction | melior (LLVM/MLIR 22) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR, behind the off-by-default `mlir` feature |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
 | GPU | MLIR nvgpu / rocdl / Triton | Phase 4+ |
 

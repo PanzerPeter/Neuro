@@ -30,7 +30,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
 
-      - name: Setup LLVM 20 (+ MLIR for --all-features)
+      - name: Setup LLVM 22 (+ MLIR for --all-features)
         uses: ./.github/actions/setup-llvm
         with:
           mlir: "true"
@@ -99,7 +99,7 @@ jobs:
           # Separate cache keys per OS + toolchain to avoid poisoning
           key: ${{ matrix.os }}-${{ matrix.rust_version }}
 
-      - name: Setup LLVM 20
+      - name: Setup LLVM 22
         uses: ./.github/actions/setup-llvm
 
       # The DLPack differential harness compares tensor results against NumPy through the
@@ -128,7 +128,7 @@ jobs:
           toolchain: stable
       - name: Rust Cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
-      - name: Setup LLVM 20
+      - name: Setup LLVM 22
         uses: ./.github/actions/setup-llvm
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -162,7 +162,7 @@ jobs:
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
         with:
           key: ${{ matrix.os }}-stable
-      - name: Setup LLVM 20
+      - name: Setup LLVM 22
         uses: ./.github/actions/setup-llvm
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -206,7 +206,7 @@ jobs:
           toolchain: stable
       - name: Rust Cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
-      - name: Setup LLVM 20 (+ MLIR for the mlir feature)
+      - name: Setup LLVM 22 (+ MLIR for the mlir feature)
         uses: ./.github/actions/setup-llvm
         with:
           mlir: "true"

@@ -7,7 +7,7 @@ Lower the typed HIR to MLIR for the tensor path, which Phase 4 extends to GPU di
 The whole crate is opt-in behind the off-by-default `mlir` feature
 (`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir"]`). Disabled, it compiles to an empty
 placeholder pulling in no MLIR toolchain (nor `neuro-hir`), so a default
-`cargo build/test --workspace` works on stock LLVM 20 on every CI OS. Enabled, it exposes the
+`cargo build/test --workspace` works on stock LLVM 22 on every CI OS. Enabled, it exposes the
 entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a
 `cargo test -p mlir-backend --features mlir` step exercise the gated code; the Windows/macOS
 legs build the placeholder.
@@ -36,8 +36,9 @@ third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
 
 ## Notes
 **The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `LLVM_LOWERING_PIPELINE`, named in
-text and parsed by `melior::utility::parse_pass_pipeline` because melior wraps no bufferization
-pass. Its first three entries are what carry a `linalg` body: `one-shot-bufferize` (with
+text and parsed by `melior::utility::parse_pass_pipeline`: melior's typed `one-shot-bufferize`
+constructor takes no options, and `buffer-deallocation-pipeline` is a pipeline with no
+constructor at all. Its first three entries are what carry a `linalg` body: `one-shot-bufferize` (with
 `bufferize-function-boundaries=true`, or a `func.func` keeps `tensor` in its signature and never
 converts) rewrites tensor values into `memref` buffers, `buffer-deallocation-pipeline` gives each
 one an owner, and only then does `convert-linalg-to-loops` (nested under `func.func`, which is
@@ -49,27 +50,29 @@ others own and the translation rejects any that survive. Pass names in a textual
 the process-global registry, so `new_context` calls `register_all_passes` behind a `Once`.
 
 It then calls `mlirTranslateModuleToLLVMIR`
-**directly through `mlir-sys`**: `melior 0.25` does not wrap it, and `mlir-sys 0.5.0` is pinned to
+**directly through `mlir-sys`**: melior does not wrap it, and `mlir-sys` is pinned to
 the exact version melior itself depends on so both reach one crate instance and their
 `MlirOperation` / `LLVMContextRef` types unify.
 
 The `LLVMContext` the translation builds into is **inkwell's**, and the returned `LLVMModuleRef`
 is wrapped by `inkwell::module::Module` (sole owner, disposes on drop) and put through LLVM's
 verifier. That is the whole point of the entry point: `mlir-sys` and `llvm-sys` are independent
-bindings, and a build where they resolve to different `libLLVM-20` copies fails at this handoff
+bindings, and a build where they resolve to different `libLLVM` copies fails at this handoff
 rather than miscompiling later. Each binding declares its own opaque `LLVMContextRef` /
 `LLVMModuleRef` alias over the same C type, so the pointers are cast across.
 
 `register_all_llvm_translations` runs in `new_context()` for every path, not only the translating
 one: the translation interfaces have to be on the context that *built* the module.
 
-**Toolchain pinning.** `melior 0.25.1` is the newest release targeting MLIR 20 (via
-`mlir-sys 0.5.0`); `melior 0.26+` moved to MLIR 21/22. `mlir-sys` carries no `llvm-sys`
-dependency. It discovers MLIR through `MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` and links
-its own `MLIR` key, so it coexists with inkwell's `llvm-20` link with no Cargo `links` conflict.
-Pointing those prefixes at the same LLVM 20 build as `LLVM_SYS_201_PREFIX` makes both bindings
-share one `libLLVM-20` dylib. That prefix must include MLIR (`mlir-c` headers + `libMLIR*`);
-Arch's stock `llvm20` omits MLIR, so build LLVM 20 with `-DLLVM_ENABLE_PROJECTS=mlir`.
+**Toolchain pinning.** `melior 0.27.x` is the last line on MLIR 22 (via `mlir-sys 220`);
+`melior 0.28` moved to MLIR 23. `mlir-sys` carries no `llvm-sys` dependency and no Cargo
+`links` key clashing with inkwell's. It finds MLIR by running
+`$MLIR_SYS_220_PREFIX/bin/llvm-config`, so MLIR has to be installed into the same prefix as the
+LLVM that `LLVM_SYS_221_PREFIX` names; `TABLEGEN_220_PREFIX` names that prefix too. One prefix
+means both bindings load one `libLLVM` 22, which the crossing above depends on. On Arch the
+stock `llvm` package is 22 and `aur/mlir` installs MLIR 22 beside it in `/usr`; on Ubuntu,
+apt.llvm.org's `libmlir-22-dev` does the same under `/usr/lib/llvm-22`. `mlir-sys` uses Rust
+2024 let-chains in its build script, so the `mlir` feature needs Rust 1.88 or newer.
 
 **Tensor arithmetic is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` over element-wise `+ - * /`

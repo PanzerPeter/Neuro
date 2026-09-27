@@ -90,7 +90,7 @@ Python is the dominant language for AI today. It has an enormous ecosystem, exce
 
 Neuro addresses these at the language level: types are static, tensor shapes are compile-time, execution is native, and memory layout is explicit.
 
-### Why LLVM 20 and MLIR?
+### Why LLVM and MLIR?
 
 LLVM is the industry standard for optimizing native code generation. The inkwell bindings give Neuro a mature, well-tested code generation foundation without reinventing register allocation, instruction selection, or platform ABI handling.
 

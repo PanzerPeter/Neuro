@@ -22,7 +22,7 @@ AI development runs on two languages: an interpreted one to write in, and C++ or
 for anything that has to be fast. Crossing that boundary is where performance and type safety are
 lost. Neuro is one language on both sides of it.
 
-- **Native code, no interpreter.** Compiled ahead of time through LLVM 20, with no bytecode VM and
+- **Native code, no interpreter.** Compiled ahead of time through LLVM 22, with no bytecode VM and
   no global interpreter lock. On compute-bound programs it lands in the same range as
   `clang -O2`; see [Performance](#performance).
 - **Shapes checked by the compiler.** `Tensor<T, [d0, d1]>` carries its dimensions in the type, so
@@ -101,31 +101,32 @@ several features at once.
 | Requirement | Version | Notes |
 |---|---|---|
 | **Rust** | 1.85+ | Install via [rustup](https://rustup.rs/) |
-| **LLVM 20** | 20.x with dev libraries | Per-platform commands below |
+| **LLVM 22** | 22.x with dev libraries | Per-platform commands below |
 | **C linker** | any | `gcc` / `clang` on Linux and macOS, MSVC on Windows |
 
-### 1. LLVM 20
+### 1. LLVM 22
 
 This is the only step that differs between systems. Put the `export` in your shell profile
 (`~/.bashrc`, `~/.zshrc`) so it survives a new terminal.
 
 ```bash
 # Arch Linux / CachyOS
-sudo pacman -S llvm20
-export LLVM_SYS_201_PREFIX=/usr/lib/llvm20
+sudo pacman -S llvm
+export LLVM_SYS_221_PREFIX=/usr
 
 # Ubuntu / Debian
-wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
-export LLVM_SYS_201_PREFIX=/usr/lib/llvm-20
+wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 22
+sudo apt-get install -y llvm-22-dev libpolly-22-dev
+export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22
 
 # macOS (Homebrew)
-brew install llvm@20
-export LLVM_SYS_201_PREFIX="$(brew --prefix llvm@20)"
+brew install llvm@22
+export LLVM_SYS_221_PREFIX="$(brew --prefix llvm@22)"
 ```
 
-Windows needs the MSVC toolchain and a **full LLVM 20 development build**: the official installer
-ships Clang and `LLVM-C.dll` but no `llvm-config.exe`, no headers and no static libraries, so
-`llvm-sys` cannot build against it. The PowerShell walkthrough is in the
+Windows needs the MSVC toolchain and LLVM's **full development archive**,
+`clang+llvm-22.*-x86_64-pc-windows-msvc.tar.xz`: the `.exe` installer ships Clang and `LLVM-C.dll`
+but no `llvm-config.exe`, no headers and no static libraries, so `llvm-sys` cannot build against it. The PowerShell walkthrough is in the
 [installation guide](docs/getting-started/installation.md#windows-msvc), and
 [troubleshooting](docs/guides/troubleshooting.md) covers the errors that follow from getting it
 wrong.
@@ -178,7 +179,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic and float `.to_checked::<T>()` report what does not fit |
 | **Ownership** | Move-by-default, `Copy`, borrows with flow-sensitive exclusivity, lifetime elision, deterministic `Drop`, and `pool { }` arena blocks ([reference](docs/language-reference/memory-model.md)) |
 | **Modules** | Every `.nr` file is a module, `mod.nr` directories nest, inline `module { }` blocks group; `import` with renames and re-export facades, private-by-default visibility, implicit prelude ([reference](docs/language-reference/modules.md)) |
-| **Toolchain** | `neurc check` / `run` / `compile` on inkwell 0.10 and LLVM 20, `--emit obj` for C and NumPy interop, buffered `print` / `println`, and a `panic` / `assert` runtime with located diagnostics |
+| **Toolchain** | `neurc check` / `run` / `compile` on inkwell 0.10 and LLVM 22, `--emit obj` for C and NumPy interop, buffered `print` / `println`, and a `panic` / `assert` runtime with located diagnostics |
 
 > **Alpha memory note.** Stack values, literals, the owning collections and reassigned bindings
 > are all reclaimed, and so is a heap `string` stored into a struct field, an array or tuple
@@ -191,7 +192,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 
 ## Performance
 
-`neurc compile -O 3` hands the module to the same LLVM 20 pipeline `clang -O2` uses. The default
+`neurc compile -O 3` hands the module to the same LLVM 22 pipeline `clang -O2` uses. The default
 is `-O 0`, checked arithmetic with no optimization, so pass `-O 3` before drawing any conclusion
 about speed.
 
@@ -250,7 +251,7 @@ compiler/
 ├── argument-binding/        # Named arguments -> positional calls
 ├── semantic-analysis/       # Type checker, scope and borrow analysis
 ├── hir-lowering/            # Type-checked AST -> typed HIR
-├── llvm-backend/            # HIR -> object code (inkwell 0.10 / LLVM 20)
+├── llvm-backend/            # HIR -> object code (inkwell 0.10 / LLVM 22)
 ├── mlir-backend/            # HIR -> MLIR linalg (off-by-default `mlir` feature)
 └── neurc/                   # CLI compiler driver
 ```

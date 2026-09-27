@@ -42,8 +42,8 @@ transforms.
 - ast-types: the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)
 - shared-types: type system primitives, `FormatSpec` for interpolation
 
-inkwell 0.10.0 (feature `llvm20-1`) is a third-party crate, not Shared Kernel. Requires LLVM 20;
-set `LLVM_SYS_201_PREFIX` (e.g. `/usr/lib/llvm20`) before building. `semantic-analysis` is not a
+inkwell 0.10.0 (feature `llvm22-1`) is a third-party crate, not Shared Kernel. Requires LLVM 22;
+set `LLVM_SYS_221_PREFIX` (e.g. `/usr` on Arch) before building. `semantic-analysis` is not a
 production dependency: neurc orders type-check then HIR lowering before codegen.
 `syntax-parsing` and `hir-lowering` appear only in `[dev-dependencies]` (tests and benches lower
 source to HIR before compiling).
@@ -725,7 +725,7 @@ a foreign tensor.
 Two allocations for the tensor, not one: the structure and its control block come from `malloc`,
 the elements from the over-aligned allocator at 64 bytes, because DLPack requires a 64-byte-aligned `data` and `malloc`
 guarantees only `max_align_t`. Fusing them would need the structure's size rounded up to 64 as an
-IR constant expression, and LLVM 20 has been withdrawing constant-expression arithmetic; the
+IR constant expression, and LLVM has been withdrawing constant-expression arithmetic; the
 element buffer's size is computable in Rust (`tensor_buffer_bytes`), the structure's is not. The
 allocation size is rounded up to the alignment, but only the unpadded element run is ever copied
 (`dlpack_copy_length`).
@@ -1417,7 +1417,7 @@ against clang's native `_Float16` / `__bf16`. Regenerate via that command if LLV
 changes.
 
 ## Future: MLIR Integration
-When tensor ops land, `melior` (Rust MLIR bindings, same LLVM 20 / MLIR 20 install) joins inkwell.
+When tensor ops land, `melior` (Rust MLIR bindings, same LLVM 22 / MLIR 22 install) joins inkwell.
 Lowering: AST → HIR → MLIR dialects (linalg/tensor/func/arith) → Enzyme MLIR AD pass → GPU dialects
 (nvgpu/rocdl) or the `llvm` dialect → inkwell for final LLVM IR. inkwell stays the terminal
 emission layer in all paths.
