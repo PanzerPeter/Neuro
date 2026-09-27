@@ -182,3 +182,63 @@ func main() -> i32 {
         "the Option<u8> instance should be emitted for the backend"
     );
 }
+
+#[test]
+fn an_enum_impl_names_the_enum_as_its_receiver() {
+    let program = lower(
+        r#"
+enum Light { Red, Green }
+impl Light {
+    func code(&self) -> i32 {
+        match self {
+            Light::Red => 1,
+            Light::Green => 2
+        }
+    }
+}
+func main() -> i32 {
+    val l = Light::Green
+    l.code()
+}
+"#,
+    );
+    assert_eq!(impl_method_names(&program, "Light"), vec!["code"]);
+    assert!(
+        program.items.iter().any(|item| matches!(
+            item,
+            HirItem::Impl(imp) if imp.type_name == "Light"
+                && imp.self_type == HirType::Enum("Light".to_string())
+        )),
+        "the impl must carry the enum as its receiver type"
+    );
+}
+
+#[test]
+fn a_generic_enum_impl_is_emitted_per_instance() {
+    let program = lower(
+        r#"
+enum Tree<T> { Leaf(T), Empty }
+impl<T> Tree<T> {
+    func or(&self, fallback: T) -> T {
+        match self {
+            Tree::Leaf(v) => v,
+            Tree::Empty => fallback
+        }
+    }
+}
+func main() -> i32 {
+    val t: Tree<i32> = Tree::Leaf(4)
+    t.or(0)
+}
+"#,
+    );
+    assert!(
+        program.items.iter().any(|item| matches!(
+            item,
+            HirItem::Impl(imp) if imp.type_name == "Tree_g_i32"
+                && imp.self_type == HirType::Enum("Tree_g_i32".to_string())
+                && imp.methods.iter().any(|m| m.name == "or")
+        )),
+        "the Tree<i32> instance must get its own impl"
+    );
+}

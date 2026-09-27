@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-09-27
+
+### Added
+
+- Enums take `impl` blocks and trait impls, the same as structs. That covers `&self`,
+  `&mut self` and consuming `self` methods, associated functions such as `Light::start()`, and
+  user traits. Those dispatch statically through a `T: Trait` bound or dynamically through
+  `&dyn Trait`, default methods included. It also covers operator traits: `impl PartialEq for
+  Light` gives `==`. A `&mut self` method may assign a whole new variant to `self`. A generic
+  enum's `impl<T> Tree<T>` is monomorphized per instance, and an enum can drive a `for` loop
+  through `impl Iterator`. An `impl` member named like one of the enum's variants is a compile
+  error, since `Shape::Circle` would name either, and so is `impl Drop` on an enum.
+  Example: `examples/types/enum_methods.nr`.
+
 ## [3.17.0] - 2026-09-27
 
 ### Added

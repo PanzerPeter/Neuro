@@ -150,7 +150,7 @@ impl<'ctx> CodegenContext<'ctx> {
             if matches!(method.self_param, Some(HirSelfParam::RefMut)) {
                 self_ptr.into()
             } else {
-                let struct_ty = self.get_struct_llvm_type(type_name)?;
+                let struct_ty = self.nominal_llvm_type(type_name)?;
                 self.builder
                     .build_load(struct_ty, self_ptr, "dyn.self")?
                     .into()
@@ -200,10 +200,10 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let concrete = Type::from_hir(&value.ty);
         let type_name = match concrete.referent() {
-            Type::Struct(name) => name.clone(),
+            Type::Struct(name) | Type::Enum(name) => name.clone(),
             other => {
                 return Err(CodegenError::UnsupportedType(format!(
-                    "only a struct can be used as a `dyn {}` trait object, found {:?}",
+                    "only a struct or enum can be used as a `dyn {}` trait object, found {:?}",
                     trait_name, other
                 )))
             }

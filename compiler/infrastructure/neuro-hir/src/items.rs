@@ -136,10 +136,13 @@ pub struct HirField {
 }
 
 /// An `impl` block. `trait_name` is `Some` for a trait implementation
-/// (`impl Drop for T`) and `None` for an inherent block.
+/// (`impl Drop for T`) and `None` for an inherent block. `type_name` is the prefix of
+/// every method's mangled symbol; `self_type` is the receiver's type, a struct or an
+/// enum, so a backend never has to guess which kind of nominal type the name denotes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirImpl {
     pub type_name: String,
+    pub self_type: HirType,
     pub trait_name: Option<String>,
     pub methods: Vec<HirMethod>,
     pub span: Span,

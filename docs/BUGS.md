@@ -5,6 +5,93 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-082: an enum that owns a heap value is copied instead of moved
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`is_type_copy` / `is_type_move_tracked` in
+  `type_checkers/mod.rs`) and `llvm-backend` (`enum_holds_owner` in `codegen/drops.rs`)
+- **Severity**: critical. A second use of a moved enum frees its payload twice, and an enum
+  holding a `string` never frees it
+
+**Minimal repro**
+
+```neuro
+enum Bag {
+    Items(Vec<i32>),
+    Empty
+}
+
+func count(b: Bag) -> i32 {
+    match b {
+        Bag::Items(v) => v.len() as i32,
+        Bag::Empty => 0
+    }
+}
+
+func main() -> i32 {
+    mut xs: Vec<i32> = Vec::new()
+    xs.push(1)
+    val b = Bag::Items(xs)
+    val a = count(b)
+    return a + count(b)
+}
+```
+
+Expected: `use of moved value 'b'` at the second `count(b)`, as the language reference says
+an enum carrying an owned payload moves. Observed: it compiles, and AddressSanitizer
+(`LD_PRELOAD` of `libasan`) reports a double free in `__neuro_release`. A consuming `self`
+method on such an enum does the same. Separately, `val m = Msg::Text("ab" + "cd")` in a
+function called in a loop leaks the string once per call.
+
+**Root cause**: confirmed in the code, two halves. The checker's `is_type_copy` answers `true`
+for every `Type::Enum` (the catch-all arm) and `is_type_move_tracked` answers `false`, so no
+enum is ever moved. The backend's `enum_holds_owner` asks `holds_owner` of each payload type,
+which is `false` for `string` by design, so an enum whose only owner is a `string` gets no drop
+target.
+
+**Workaround**: pass an owning enum by reference, or use it exactly once.
+
+**Fix sketch**: give `is_type_copy` and `is_type_move_tracked` an enum arm that asks the payload
+types (from `enum_defs`), as the tuple and array arms do, and let `enum_holds_owner` count a
+`string` payload the way `holds_string_position` counts a string position.
+
+## BUG-081: an operator-trait comparison against a temporary crashes codegen
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering` (`build_operator_call`) and `llvm-backend` (borrow codegen)
+- **Severity**: major. A well-typed program is an internal compiler error
+
+**Minimal repro**
+
+```neuro
+@derive(Copy, Clone)
+struct P { x: i32 }
+
+impl PartialEq for P {
+    func eq(&self, other: &P) -> bool { return self.x == other.x }
+}
+
+func main() -> i32 {
+    val p = P { x: 1 }
+    val same = p == P { x: 1 }
+    if same { return 1 }
+    return 0
+}
+```
+
+Expected: exit 1. Observed: `internal compiler error: borrow of a non-place expression reached
+codegen: StructLiteral { .. }`. An enum with `impl PartialEq` fails the same way on
+`light == Light::Red`.
+
+**Root cause**: confirmed in the code. A comparison method takes `rhs: &Rhs`, so lowering wraps
+the right operand in a borrow. The checker never sees that borrow, so it never applies the
+"a borrow needs a place" rule, and the backend can only borrow a place.
+
+**Workaround**: bind the right operand first: `val q = P { x: 1 }` then `p == q`.
+
+**Fix sketch**: in `build_operator_call`, when the right operand is not a place, bind it to a
+fresh local before borrowing it, so the borrow always names storage.
+
 ## BUG-080: a turbofish on a method call is ignored
 
 - **Status**: open, confirmed
@@ -99,15 +186,15 @@ every other trait, arithmetic operators included, explicitly. Observed: `error: 
 `impl Add for Meters` is refused the same way.
 
 **Root cause**: confirmed in the code. `register_impl` accepts an `impl` target only when it
-is a key of `struct_defs`, so a newtype (like an enum) falls into the unknown-struct error, whose
-message also misnames what was written.
+is a struct or an enum (`impl_target_type`), so a newtype falls into the unknown-struct error,
+whose message also misnames what was written.
 
 **Workaround**: write a free function over the newtype and compute on `.0` inside it.
 
 **Fix sketch**: accept a declared newtype as an `impl` target in `register_impl` and in method
 lookup, mangle its methods like a struct's, and let the operator-trait path resolve a
-newtype operand. The enum case is the planned `impl`-on-enums work and should share the same
-target check.
+newtype operand. Enums already take an `impl`: `impl_target_type` is the one target check to
+extend with a newtype arm.
 
 ## BUG-077: a store through a borrow never destroys the value it displaces
 

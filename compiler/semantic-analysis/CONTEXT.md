@@ -44,8 +44,11 @@ module per declaration kind beside it. `tests/` is split by subject.
   (pass 0b, `trait_names`), so a struct field's `&dyn Trait` resolves in pass 1; its object
   safety needs the methods, so it is queued and checked right after 1d
   (`check_deferred_object_safety`).
-- **2. impl method signatures** into `functions` (mangled `StructName__methodName`) and
-  `impl_methods` (struct → method → mangled key).
+- **2. impl method signatures** into `functions` (mangled `TypeName__methodName`) and
+  `impl_methods` (type → method → mangled key). The target is a struct or an enum
+  (`impl_target_type`); on an enum a member sharing a variant's name is refused
+  (`ImplMemberNamesVariant`), and a generic enum's impls are also instantiated for any instance
+  built before them in the declaration pass.
 - **2b. `check_operator_supertraits`** enforces `Comparable: PartialEq` order-independently
   (`MissingSupertraitImpl`). **2c. `check_derive_impl_conflicts`** rejects a struct that both
   derives a trait and declares an `impl` of it (`DeriveConflictsWithImpl`).
@@ -227,9 +230,14 @@ error list grew while the initializer was checked.
   `BitNot` requires an integer.
 
 ### Methods, impls, and dispatch
-`check_impl` binds `self` as a var of the struct type (**mutable for `&mut self`**, immutable for
-`&self`), then the remaining params, before checking the body. A `&mut self` body may therefore
-assign to `self.field`.
+`check_impl` binds `self` as a var of the impl's target type, struct or enum (**mutable for
+`&mut self`**, immutable for `&self`), then the remaining params, before checking the body. A
+`&mut self` body may therefore assign to `self.field`, or to `self` itself. An enum's owned
+`self` follows `is_type_copy` like any receiver, and an enum may not implement `Drop`
+(`InvalidDropImpl`: the backend runs user destructors for structs only). A method call on an enum
+consults the enum's `impl_methods` first and falls through to the compiler-known `Option` /
+`Result` surface for anything the impl does not declare; `Enum::name(args)` is an associated
+call when `Enum__name` is registered and a variant construction otherwise.
 
 **Method calls** (`instance.method(args)`) are recognised when a `Call`'s `func` is a
 `FieldAccess`; the object's struct type drives an `impl_methods` lookup for the mangled name, then

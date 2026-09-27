@@ -79,6 +79,7 @@ impl Lowerer {
                 }
             }
         }
+        self.register_existing_enum_instance_methods()?;
         for item in items {
             match item {
                 Item::Function(func) => self.register_function(func)?,
@@ -229,11 +230,8 @@ impl Lowerer {
         const_subst: &std::collections::HashMap<String, u64>,
     ) -> Result<(), LoweringError> {
         let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
-        let base_generics = self
-            .generic_structs
-            .get(base)
-            .map(|s| s.generics.clone())
-            .unwrap_or_default();
+        let base_generics = self.template_generics(base);
+        let self_ty = self.impl_target_type(mangled);
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             for method in &imp.methods {
@@ -245,7 +243,7 @@ impl Lowerer {
                 let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
                 let mut params = Vec::new();
                 if method.self_param.is_some() {
-                    params.push(HirType::Struct(mangled.to_string()));
+                    params.push(self_ty.clone());
                 }
                 for param in &method.params {
                     params.push(self.resolve_type(&param.ty)?);
@@ -269,6 +267,48 @@ impl Lowerer {
                 self.trait_impls
                     .insert((trait_name.name.clone(), mangled.to_string()));
             }
+        }
+        Ok(())
+    }
+
+    /// The receiver type of an `impl` on `name`: an enum when the name is a declared
+    /// enum, a generic enum template or an instance of one, a struct otherwise.
+    pub(crate) fn impl_target_type(&self, name: &str) -> HirType {
+        if self.enums.contains_key(name) || self.generic_enums.contains_key(name) {
+            HirType::Enum(name.to_string())
+        } else {
+            HirType::Struct(name.to_string())
+        }
+    }
+
+    /// The generic parameters of the struct or enum template named `base`.
+    fn template_generics(&self, base: &str) -> Vec<ast_types::GenericParam> {
+        if let Some(s) = self.generic_structs.get(base) {
+            return s.generics.clone();
+        }
+        self.generic_enums
+            .get(base)
+            .map(|e| e.generics.clone())
+            .unwrap_or_default()
+    }
+
+    /// Give every enum instance built before the generic impls were recorded (a field
+    /// or payload naming `Tree<i32>` resolves in the declaration pass) its methods.
+    fn register_existing_enum_instance_methods(&mut self) -> Result<(), LoweringError> {
+        let existing: Vec<(String, String)> = self
+            .enum_instance_base
+            .iter()
+            .filter(|(_, base)| self.generic_impls.contains_key(*base))
+            .map(|(mangled, base)| (mangled.clone(), base.clone()))
+            .collect();
+        for (mangled, base) in existing {
+            let args = self
+                .enum_instance_args
+                .get(&mangled)
+                .cloned()
+                .unwrap_or_default();
+            let (subst, const_subst) = split_mono_args(&self.template_generics(&base), &args);
+            self.register_instance_methods(&base, &mangled, &subst, &const_subst)?;
         }
         Ok(())
     }
@@ -320,27 +360,44 @@ impl Lowerer {
             span: template.span,
         }));
 
-        let impls = self
-            .generic_impls
-            .get(&ms.base)
-            .cloned()
-            .unwrap_or_default();
+        self.emit_instance_impls(
+            &ms.base,
+            &ms.mangled,
+            &template.generics,
+            &ms.subst,
+            &ms.const_subst,
+        )
+    }
+
+    /// Emit one `HirItem::Impl` per generic impl of `base` for the instance `mangled`,
+    /// with method bodies lowered under the impl's concrete type-parameter substitution.
+    fn emit_instance_impls(
+        &mut self,
+        base: &str,
+        mangled: &str,
+        generics: &[ast_types::GenericParam],
+        subst: &std::collections::HashMap<String, HirType>,
+        const_subst: &std::collections::HashMap<String, u64>,
+    ) -> Result<(), LoweringError> {
+        let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
+        let self_type = self.impl_target_type(mangled);
         for imp in &impls {
-            let impl_subst = self.build_impl_subst(imp, &template.generics, &ms.subst);
+            let impl_subst = self.build_impl_subst(imp, generics, subst);
             let mut methods = Vec::new();
             for method in &imp.methods {
-                let const_types = self.const_param_types(&template.generics)?;
+                let const_types = self.const_param_types(generics)?;
                 let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
-                let saved_c = std::mem::replace(&mut self.const_subst, ms.const_subst.clone());
+                let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
                 let saved_ct = std::mem::replace(&mut self.const_types, const_types);
-                let lowered = self.lower_method(&ms.mangled, method);
+                let lowered = self.lower_method(&self_type, method);
                 self.type_subst = saved_ty;
                 self.const_subst = saved_c;
                 self.const_types = saved_ct;
                 methods.push(lowered?);
             }
             self.mono_items.push(HirItem::Impl(HirImpl {
-                type_name: ms.mangled.clone(),
+                type_name: mangled.to_string(),
+                self_type: self_type.clone(),
                 trait_name: imp.trait_name.as_ref().map(|t| t.name.clone()),
                 methods,
                 span: imp.span,
@@ -417,6 +474,7 @@ impl Lowerer {
                 .insert(mangled.clone(), base.to_string());
             self.enum_instance_args
                 .insert(mangled.clone(), args.to_vec());
+            self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
             self.mono_enum_pending.push(crate::MonoEnum {
                 base: base.to_string(),
                 mangled: mangled.clone(),
@@ -459,7 +517,13 @@ impl Lowerer {
         let mut lowered = lowered?;
         lowered.name = me.mangled.clone();
         self.mono_items.push(HirItem::Enum(lowered));
-        Ok(())
+        self.emit_instance_impls(
+            &me.base,
+            &me.mangled,
+            &template.generics,
+            &me.subst,
+            &me.const_subst,
+        )
     }
 
     /// Record a trait's methods in declaration order. That order is the vtable
@@ -508,7 +572,8 @@ impl Lowerer {
             // The checker already rejected it on any non-`Copy` type, so every
             // owned-`self` method reaching lowering is sound and is registered normally.
             let mangled = format!("{}__{}", struct_name, method.name.name);
-            let (params, ret) = self.method_signature(struct_name, method)?;
+            let self_ty = self.impl_target_type(struct_name);
+            let (params, ret) = self.method_signature(&self_ty, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
             if crate::autodiff::is_grad(&method.attributes) {
                 let names = method.params.iter().map(|p| p.name.name.clone()).collect();
@@ -587,16 +652,16 @@ impl Lowerer {
         Ok(())
     }
 
-    /// The full signature of a method: the implicit `self` (the struct type) leads
-    /// the parameter list for an instance method, then the declared parameters.
+    /// The full signature of a method: the implicit `self` (the impl's target type)
+    /// leads the parameter list for an instance method, then the declared parameters.
     fn method_signature(
         &mut self,
-        struct_name: &str,
+        self_ty: &HirType,
         method: &MethodDef,
     ) -> Result<(Vec<HirType>, HirType), LoweringError> {
         let mut params = Vec::new();
         if method.self_param.is_some() {
-            params.push(HirType::Struct(struct_name.to_string()));
+            params.push(self_ty.clone());
         }
         for param in &method.params {
             params.push(self.resolve_type(&param.ty)?);
@@ -980,13 +1045,14 @@ impl Lowerer {
 
     fn lower_impl(&mut self, def: &ImplDef) -> Result<HirImpl, LoweringError> {
         let struct_name = def.type_name.name.clone();
+        let self_type = self.impl_target_type(&struct_name);
         let saved_ty = self.enter_impl_assoc(def)?;
         let mut methods = Vec::new();
         for method in &def.methods {
             // Owned `self` on a `Copy` receiver is a valid operator-trait method;
             // the checker rejected it on any non-`Copy` type, so it is lowered like any
             // other method (an owned `Copy` receiver is ABI-identical to `&self`).
-            let lowered = self.lower_method(&struct_name, method);
+            let lowered = self.lower_method(&self_type, method);
             match lowered {
                 Ok(m) => methods.push(m),
                 Err(e) => {
@@ -998,6 +1064,7 @@ impl Lowerer {
         self.type_subst = saved_ty;
         Ok(HirImpl {
             type_name: struct_name,
+            self_type,
             trait_name: def.trait_name.as_ref().map(|t| t.name.clone()),
             methods,
             span: def.span,
@@ -1006,7 +1073,7 @@ impl Lowerer {
 
     fn lower_method(
         &mut self,
-        struct_name: &str,
+        self_ty: &HirType,
         method: &MethodDef,
     ) -> Result<HirMethod, LoweringError> {
         let mut params = Vec::with_capacity(method.params.len());
@@ -1025,7 +1092,7 @@ impl Lowerer {
 
         self.push_scope();
         if self_param.is_some() {
-            self.define("self".to_string(), HirType::Struct(struct_name.to_string()));
+            self.define("self".to_string(), self_ty.clone());
         }
         for param in &params {
             self.define(param.name.clone(), param.ty.clone());

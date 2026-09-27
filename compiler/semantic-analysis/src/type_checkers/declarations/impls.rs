@@ -22,15 +22,16 @@ impl TypeChecker {
     /// exclusive borrow of the receiver, and a consuming `self` in
     /// `consuming_self_methods` so they can record the move of it.
     pub(crate) fn register_impl(&mut self, def: &ImplDef) -> Option<()> {
-        if !self.struct_defs.contains_key(&def.type_name.name) {
+        let Some(self_ty) = self.impl_target_type(&def.type_name.name) else {
             self.record_error(TypeError::UnknownStruct {
                 name: def.type_name.name.clone(),
                 span: def.type_name.span,
             });
             return None;
-        }
+        };
 
         let struct_name = def.type_name.name.clone();
+        self.check_members_against_variants(def, &struct_name);
 
         // The block's associated-type bindings are in scope for every signature below:
         // a method may write `Self::Item` for what this impl bound it to.
@@ -50,7 +51,7 @@ impl TypeChecker {
         // all mutable borrows of `self` for type resolution are finished.
         let mut method_entries: Vec<(String, String)> = Vec::new();
 
-        let struct_is_copy = self.copy_structs.contains(&struct_name);
+        let struct_is_copy = self.is_type_copy(&self_ty);
 
         for method in &def.methods {
             let mangled = format!("{}__{}", struct_name, method.name.name);
@@ -69,7 +70,7 @@ impl TypeChecker {
             // Build the full parameter type list: implicit `self` first for instance methods.
             let mut param_types: Vec<Type> = Vec::new();
             if method.self_param.is_some() {
-                param_types.push(Type::Struct(struct_name.clone()));
+                param_types.push(self_ty.clone());
             }
             for param in &method.params {
                 if let Some(ty) = self.resolve_type(&param.ty) {
@@ -126,6 +127,40 @@ impl TypeChecker {
 
         self.self_assoc = saved_assoc;
         Some(())
+    }
+
+    /// The receiver type an `impl` target names: a struct or an enum, generic templates
+    /// included, whose base name is registered alongside the concrete ones.
+    pub(crate) fn impl_target_type(&self, name: &str) -> Option<Type> {
+        if self.struct_defs.contains_key(name) {
+            return Some(Type::Struct(name.to_string()));
+        }
+        if self.enum_defs.contains_key(name) {
+            return Some(Type::Enum(name.to_string()));
+        }
+        None
+    }
+
+    /// Reject an enum `impl` member that shares a variant's name. `Shape::Circle(r)` is
+    /// already a variant construction, so an associated function of that name could never
+    /// be called, and a method of that name would read as one at every call site.
+    fn check_members_against_variants(&mut self, def: &ImplDef, enum_name: &str) {
+        let Some(variants) = self.enum_defs.get(enum_name) else {
+            return;
+        };
+        let clashes: Vec<(String, shared_types::Span)> = def
+            .methods
+            .iter()
+            .filter(|m| variants.iter().any(|v| v.name == m.name.name))
+            .map(|m| (m.name.name.clone(), m.name.span))
+            .collect();
+        for (name, span) in clashes {
+            self.record_error(TypeError::ImplMemberNamesVariant {
+                enum_name: enum_name.to_string(),
+                name,
+                span,
+            });
+        }
     }
 
     /// Resolve an `impl` block's `type Name = T` bindings and install them as the
@@ -301,6 +336,16 @@ impl TypeChecker {
     /// registered by the normal `impl` path under `T__drop`; this only enforces the
     /// lang-item shape and records `T` as a Drop type for scope-exit insertion.
     pub(super) fn register_drop_impl(&mut self, def: &ImplDef, struct_name: &str) {
+        // The backend runs a user destructor for a struct binding only; an enum's scope exit
+        // releases its payload and never looks for a `T__drop`, so the impl would be dead.
+        if self.enum_defs.contains_key(struct_name) {
+            self.record_error(TypeError::InvalidDropImpl {
+                type_name: struct_name.to_string(),
+                reason: "an enum may not implement `Drop`; only a struct may".to_string(),
+                span: def.type_name.span,
+            });
+            return;
+        }
         self.drop_structs.insert(struct_name.to_string());
 
         if self.copy_structs.contains(struct_name) {
@@ -400,7 +445,7 @@ impl TypeChecker {
             // is mutable so the body may assign to `self.field`; `&self` is
             // immutable.
             if method.self_param.is_some() {
-                let self_ty = Type::Struct(struct_name.clone());
+                let self_ty = self.impl_target_type(&struct_name).unwrap_or(Type::Unknown);
                 let self_mutable = matches!(method.self_param, Some(SelfParam::RefMut));
                 let _ = self
                     .symbols

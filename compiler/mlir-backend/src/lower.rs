@@ -85,7 +85,7 @@ pub(crate) fn build_module<'c>(
                     // The receiver lowers to an opaque pointer to the struct; the
                     // scaffold does not yet distinguish &self / &mut self / self.
                     if method.self_param.is_some() {
-                        params.push(receiver_type(&impl_block.type_name, &method.self_param));
+                        params.push(receiver_type(&impl_block.self_type, &method.self_param));
                     }
                     params.extend(method.params.iter().map(|p| p.ty.clone()));
                     let name = format!("{}_{}", impl_block.type_name, method.name);
@@ -123,20 +123,21 @@ pub(crate) fn build_module<'c>(
     Ok(module)
 }
 
-/// The HIR type of a method receiver: a borrow of the owning struct for `&self` /
-/// `&mut self`, or the owned struct for a consuming `self`. All three lower to an
-/// opaque pointer in the scaffold, but keeping the distinction here documents intent.
-fn receiver_type(type_name: &str, self_param: &Option<HirSelfParam>) -> HirType {
+/// The HIR type of a method receiver: a borrow of the impl's target (a struct or an
+/// enum) for `&self` / `&mut self`, or the owned value for a consuming `self`. All three
+/// lower to an opaque pointer in the scaffold, but keeping the distinction here documents
+/// intent.
+fn receiver_type(self_type: &HirType, self_param: &Option<HirSelfParam>) -> HirType {
     match self_param {
         Some(HirSelfParam::Ref) => HirType::Reference {
-            inner: Box::new(HirType::Struct(type_name.to_string())),
+            inner: Box::new(self_type.clone()),
             mutable: false,
         },
         Some(HirSelfParam::RefMut) => HirType::Reference {
-            inner: Box::new(HirType::Struct(type_name.to_string())),
+            inner: Box::new(self_type.clone()),
             mutable: true,
         },
-        _ => HirType::Struct(type_name.to_string()),
+        _ => self_type.clone(),
     }
 }
 
@@ -345,6 +346,7 @@ mod tests {
         let program = HirProgram {
             items: vec![HirItem::Impl(HirImpl {
                 type_name: "Point".to_string(),
+                self_type: HirType::Struct("Point".to_string()),
                 trait_name: None,
                 methods: vec![HirMethod {
                     name: "reset".to_string(),

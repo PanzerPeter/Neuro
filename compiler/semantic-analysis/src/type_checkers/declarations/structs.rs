@@ -287,7 +287,8 @@ impl TypeChecker {
     /// the struct can materialize each method for a concrete instance.
     pub(crate) fn register_generic_impl(&mut self, def: &ImplDef) {
         let base = def.type_name.name.clone();
-        if !self.generic_structs.contains_key(&base) {
+        let is_enum = self.generic_enums.contains_key(&base);
+        if !is_enum && !self.generic_structs.contains_key(&base) {
             self.record_error(TypeError::UnknownStruct {
                 name: base.clone(),
                 span: def.type_name.span,
@@ -298,9 +299,24 @@ impl TypeChecker {
         let _ = self.register_impl(def);
         self.exit_generic_scope();
         self.generic_impls
-            .entry(base)
+            .entry(base.clone())
             .or_default()
             .push(def.clone());
+
+        // An enum instance can already exist here: a struct field or another enum's
+        // payload naming `Tree<i32>` is resolved in the declaration pass, before any impl
+        // is registered, and the instance would otherwise never learn these methods.
+        if is_enum {
+            let existing: Vec<(String, Vec<Type>)> = self
+                .enum_instances
+                .iter()
+                .filter(|(_, (b, _))| *b == base)
+                .map(|(mangled, (_, args))| (mangled.clone(), args.clone()))
+                .collect();
+            for (mangled, args) in existing {
+                self.instantiate_impls_for(&base, &mangled, &args);
+            }
+        }
     }
 
     /// Type-check a generic `impl` block's method bodies once, abstractly:
@@ -413,7 +429,7 @@ impl TypeChecker {
     /// Register the methods of every generic `impl` of `base` for the concrete
     /// instance `mangled`, substituting the impl's type parameters (mapped positionally
     /// from the impl's type arguments to the struct's concrete arguments) into each
-    /// method signature and rewriting the receiver's `Struct(base)` to `Struct(mangled)`.
+    /// method signature and renaming the receiver's base type to the instance.
     pub(super) fn instantiate_impls_for(&mut self, base: &str, mangled: &str, args: &[Type]) {
         let impls = match self.generic_impls.get(base) {
             Some(v) => v.clone(),

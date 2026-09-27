@@ -42,6 +42,7 @@ mod divergent_arms;
 mod dlpack;
 mod drop_destructors;
 mod elementwise_math;
+mod enum_impls;
 mod enumerate;
 mod enums;
 mod error_propagation;

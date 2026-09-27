@@ -257,7 +257,7 @@ impl TypeChecker {
     }
 
     /// Verify each bounded type parameter's concrete argument implements every required
-    /// trait. A concrete struct satisfies `T: Tr` when an `impl Tr for Struct`
+    /// trait. A concrete struct or enum satisfies `T: Tr` when an `impl Tr for Type`
     /// exists; a type parameter passed through from an enclosing generic satisfies it
     /// when that parameter carries the same bound. Any other type (e.g. a primitive) has
     /// no user-trait impl and therefore fails the bound.
@@ -278,7 +278,7 @@ impl TypeChecker {
                     continue;
                 }
                 let satisfied = match concrete {
-                    Type::Struct(name) => self
+                    Type::Struct(name) | Type::Enum(name) => self
                         .trait_impls
                         .contains(&(bound.trait_name.clone(), name.clone())),
                     Type::Generic(name) => self
@@ -521,6 +521,17 @@ impl TypeChecker {
                 // `r: &Struct` dispatches on `Struct`. The borrow is never moved.
                 let struct_name = match obj_ty.referent() {
                     Type::Struct(n) => n.clone(),
+                    // An enum's own `impl` is consulted first; a method it does not declare
+                    // falls through to the compiler-known surface below, which is where
+                    // `Option` / `Result` keep `.unwrap()` and the rest.
+                    Type::Enum(n)
+                        if self
+                            .impl_methods
+                            .get(n)
+                            .is_some_and(|m| m.contains_key(&field.name)) =>
+                    {
+                        n.clone()
+                    }
                     // Trait-method dispatch on a bounded type parameter inside a
                     // generic body: `T: Drawable` lets `obj.draw()` resolve
                     // to the trait's declared signature. Monomorphization later
@@ -708,7 +719,11 @@ impl TypeChecker {
                         return Some(self.check_collection_new(kind, args, expected, *path_span));
                     }
                 }
-                if self.enum_defs.contains_key(&type_name.name) {
+                // A member name is never both a variant and an associated function (the
+                // impl registration rejects the pair), so a registered function wins here.
+                let mangled = format!("{}__{}", type_name.name, member.name);
+                let is_enum = self.enum_defs.contains_key(&type_name.name);
+                if is_enum && !self.functions.contains_key(&mangled) {
                     return Some(self.check_enum_tuple_call(
                         &type_name.name,
                         &member.name,
@@ -717,7 +732,7 @@ impl TypeChecker {
                         expected,
                     ));
                 }
-                if !self.struct_defs.contains_key(&type_name.name) {
+                if !is_enum && !self.struct_defs.contains_key(&type_name.name) {
                     self.record_error(TypeError::UnknownPathType {
                         type_name: type_name.name.clone(),
                         member: member.name.clone(),
@@ -726,7 +741,6 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                let mangled = format!("{}__{}", type_name.name, member.name);
                 let func_ty = if let Some(ty) = self.functions.get(&mangled) {
                     ty.clone()
                 } else {

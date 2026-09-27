@@ -286,8 +286,10 @@ the field as a value would discard the advance. Anything else (a call result, a 
 address and is refused: a `&mut self` method needs storage to write through.
 
 ## Method ABI
-`impl` methods lower to LLVM free functions mangled `StructName__methodName` (double underscore).
-`codegen_method_call` recovers the receiver struct by splitting the symbol on `__`, so the
+`impl` methods lower to LLVM free functions mangled `TypeName__methodName` (double underscore).
+The receiver is `HirImpl::self_type`, a struct or an enum; `nominal_llvm_type` gives either one's
+aggregate (field struct or tagged union). `codegen_method_call` recovers the receiver type by
+splitting the symbol on `__`, so the
 separator must appear **exactly once**. Two rules hold that: semantic analysis rejects a declared
 name containing `__` (`TypeError::ReservedNameSeparator`), and every monomorphized instance name
 uses a single-underscore `_g_` marker (`identity_g_i32`, `Pair_g_i32_f64`).
@@ -305,7 +307,9 @@ uses a single-underscore `_g_` marker (`identity_g_i32`, `Pair_g_i32_f64`).
   `TypeName::func(args)` becomes `codegen_call("StructName__funcName", args)`.
 
 A method call is recognised when a `Call`'s callee is a `FieldAccess`; the receiver's struct name
-comes from the callee node's HIR type. The call site detects a by-pointer callee from its first
+comes from the callee node's HIR type. An enum receiver is dispatched to `Enum__method` when that
+function exists and otherwise falls through to the builtin `Option` / `Result` surface. The call
+site detects a by-pointer callee from its first
 LLVM param being a pointer and passes the receiver place's address (via
 `get_struct_ptr_and_type`, which auto-loads a `&mut Struct` receiver) rather than the loaded value.
 

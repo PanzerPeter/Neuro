@@ -397,6 +397,14 @@ impl<'ctx> CodegenContext<'ctx> {
                     }
                     return self.codegen_method_call(&mangled, object, args);
                 }
+                // An enum's own `impl` method; every other method on an enum is the
+                // compiler-known `Option` / `Result` surface resolved below.
+                if let Type::Enum(enum_name) = recv_ty.referent() {
+                    let mangled = format!("{}__{}", enum_name, field);
+                    if self.functions.contains_key(&mangled) {
+                        return self.codegen_method_call(&mangled, object, args);
+                    }
+                }
 
                 // Non-struct receiver: a compiler-known intrinsic on a builtin type.
                 // Resolved ahead of the collection surface below because `.slice(range)`

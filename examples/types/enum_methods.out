@@ -1,0 +1,4 @@
+step 0: red for 30s
+step 1: green for 25s
+step 2: amber for 3s
+back to red after a 58000 ms cycle

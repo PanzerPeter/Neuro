@@ -6,7 +6,9 @@
 //   `.to_checked::<u8>()`, which answers `None` where `as` would saturate ·
 //   `match` over the `Option` it returns, and `??` for a default · a closure
 //   capturing the scale · a `@derive(Copy)` struct per reading collected in a
-//   `Vec` · a range walked with `.step(n)` · interpolation with format specs.
+//   `Vec` · a range walked with `.step(n)` · an enum with its own `impl` block and an
+//   `impl PartialEq`, so its values compare with `==` · a rank-0 tensor read out with
+//   `.item()` · interpolation with format specs.
 //
 // A reading's code is twice its value, truncated toward zero, so a byte holds readings
 // from just above -0.5 to just below 128. Past either end `as u8` would clamp to 0 or
@@ -15,6 +17,40 @@
 // cannot hold.
 
 const SCALE: f64 = 2.0
+
+// Which part of the byte range an accepted code falls in. The classification and the
+// comparison are the enum's own methods rather than free functions over it.
+enum Band {
+    Low,
+    Mid,
+    High
+}
+
+impl Band {
+    func of(code: u8) -> Band {
+        if code < 100u8 {
+            return Band::Low
+        }
+        if code < 200u8 {
+            return Band::Mid
+        }
+        return Band::High
+    }
+
+    func slot(&self) -> i32 {
+        match self {
+            Band::Low => 0,
+            Band::Mid => 1,
+            Band::High => 2
+        }
+    }
+}
+
+impl PartialEq for Band {
+    func eq(&self, other: &Band) -> bool {
+        return self.slot() == other.slot()
+    }
+}
 
 @derive(Copy, Clone)
 struct Sample {
@@ -57,6 +93,24 @@ func main() -> i32 {
         thinned += (quantize(readings[i]) ?? 128u8) as i32
     }
 
+    // Accepted codes per band, and how many sit at the top of the range.
+    mut per_band: [i32; 3] = [0, 0, 0]
+    val top = Band::High
+    mut in_top = 0
+    for i in 0..8 {
+        val s = samples[i]
+        if s.valid {
+            val band = Band::of(s.code)
+            per_band[band.slot()] += 1
+            if band == top {
+                in_top += 1
+            }
+        }
+    }
+    val counts: Tensor<i32, [3]> = [per_band[0], per_band[1], per_band[2]]
+    val accepted = counts.sum(axis: 0).item()
+
     println("rejected {rejected} of 8, checksum {checksum}, thinned {thinned}")
+    println("bands {per_band[0]}/{per_band[1]}/{per_band[2]}, {in_top} of {accepted} in the high band")
     return rejected
 }

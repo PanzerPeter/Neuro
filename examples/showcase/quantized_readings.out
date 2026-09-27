@@ -7,3 +7,4 @@ sample 5:   -3.50 -> rejected
 sample 6:   99.99 -> 199
 sample 7:     nan -> rejected
 rejected 3 of 8, checksum 732, thinned 477
+bands 2/1/2, 2 of 5 in the high band

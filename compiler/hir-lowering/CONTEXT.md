@@ -264,7 +264,7 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   `success_variant`, `not_fallible`, and `fallible_base` are shared with the `?` desugar.
 - **Operator traits** (`operator_traits.rs` holds the table: `Add`, `Sub`, …, `MatMul`,
   `PartialEq`, `Comparable`). An operator-trait impl populates `operator_binary_impls` / `operator_unary_impls`
-  during `register_impl`; a `Binary` / `Unary` whose peeled left/operand type is a struct with a
+  during `register_impl`; a `Binary` / `Unary` whose peeled left/operand type is a struct or enum with a
   matching entry becomes the method call `a.op(b)`, a `Call` with a `FieldAccess` callee,
   identical to an ordinary method call, so the backend needs no operator awareness. A comparison
   method's `rhs: &Rhs` parameter means the argument is wrapped in a `Reference`. Owned `self`
@@ -339,7 +339,11 @@ annotation and from `lower_generic_struct_literal` after inferring the arguments
 values. Each instance registers concrete fields plus impl-method signatures and emits one
 `HirItem::Struct` plus one `HirItem::Impl` per generic impl, with method bodies lowered under the
 impl's `type_subst` and `self` bound to the instance. Because these are ordinary struct/impl HIR
-items, the backend needs no generic awareness.
+items, the backend needs no generic awareness. A generic enum's impls follow the same path from
+`instantiate_generic_enum` and `emit_mono_enum` (shared `emit_instance_impls`); an instance made
+before the impls were recorded is caught up by `register_existing_enum_instance_methods`. Every
+`HirImpl` carries its receiver as `self_type` (`impl_target_type`: an enum when the name is one,
+a struct otherwise).
 
 **The mangling scheme is load-bearing.** `mangle_instance` (`name_g_<type…>`) and
 `mangle_struct_instance` (`Base_g_<type…>`) use a **single**-underscore marker, deliberately

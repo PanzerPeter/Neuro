@@ -146,6 +146,13 @@ pub enum TypeError {
     #[error("type '{type_name}' implements Drop and so cannot be Copy: a type with a destructor must be moved, not duplicated")]
     DropTypeCannotBeCopy { type_name: String, span: Span },
 
+    #[error("`{name}` is both a variant of enum '{enum_name}' and a method in its `impl`; `{enum_name}::{name}` would name either, so rename the method")]
+    ImplMemberNamesVariant {
+        enum_name: String,
+        name: String,
+        span: Span,
+    },
+
     #[error("invalid `impl Drop for {type_name}`: {reason}")]
     InvalidDropImpl {
         type_name: String,
@@ -1222,6 +1229,7 @@ impl TypeError {
             | Self::DeriveConflictsWithImpl { span, .. }
             | Self::DeriveFieldUnsupported { span, .. }
             | Self::DropTypeCannotBeCopy { span, .. }
+            | Self::ImplMemberNamesVariant { span, .. }
             | Self::InvalidDropImpl { span, .. }
             | Self::UnknownTrait { span, .. }
             | Self::TraitAlreadyDefined { span, .. }

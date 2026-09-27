@@ -39,6 +39,15 @@ impl<'ctx> CodegenContext<'ctx> {
         self.type_mapper.struct_type(name)
     }
 
+    /// The LLVM aggregate for a method receiver's nominal type, which an `impl` allows to
+    /// be an enum's tagged union as well as a struct's field aggregate.
+    pub(crate) fn nominal_llvm_type(&self, name: &str) -> CodegenResult<StructType<'ctx>> {
+        if self.enum_variants.contains_key(name) {
+            return self.type_mapper.enum_struct_type(name);
+        }
+        self.get_struct_llvm_type(name)
+    }
+
     /// Build a struct aggregate value from a struct literal expression.
     ///
     /// `base` is the optional functional-update source (`Point { x, ..p }`): the
@@ -383,7 +392,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     .get(name)
                     .copied()
                     .ok_or_else(|| CodegenError::UndefinedVariable(name.clone()))?;
-                let llvm_ty = self.get_struct_llvm_type(struct_name)?;
+                let llvm_ty = self.nominal_llvm_type(struct_name)?;
                 // A `&Struct` binding stores a pointer to the struct in its alloca (the
                 // mapped LLVM type is `ptr`, not the aggregate). Load that pointer to reach
                 // the borrowed struct; an owned struct binding's alloca is the struct itself.
@@ -424,7 +433,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     idx as u32,
                     &format!("{}.ptr", field),
                 )?;
-                Ok((field_ptr, self.get_struct_llvm_type(struct_name)?))
+                Ok((field_ptr, self.nominal_llvm_type(struct_name)?))
             }
             other => Err(CodegenError::UnsupportedType(format!(
                 "a method receiver must be a place, not {:?}",

@@ -39,6 +39,7 @@ types/collections.nr                101
 types/constants.nr                  51
 types/destructuring.nr              72
 types/dispatch.nr                   44
+types/enum_methods.nr               30
 types/extended_types.nr             0
 types/extended_types_arithmetic.nr  0
 types/float_ops.nr                  42

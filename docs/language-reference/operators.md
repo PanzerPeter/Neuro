@@ -515,7 +515,7 @@ val half = match halve(n) {
 error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32
 ```
 
-**No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. Convert first with `.map_err(...)` when the types differ.
+**No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. When the types differ, convert first with a `match` that rebuilds the `Err`; `.map_err` is not available yet.
 
 **Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine, the unwrapped `bool` is used locally, not returned.
 

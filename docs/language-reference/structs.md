@@ -122,7 +122,9 @@ factory function and the `Type::new(...)` constructor pattern work.
 
 ## impl Blocks
 
-Use `impl TypeName { ... }` to add methods and associated functions to a struct.
+Use `impl TypeName { ... }` to add methods and associated functions to a struct. Everything in
+this section applies to an enum too; see
+[Enum methods and trait impls](types.md#methods-and-trait-impls).
 
 ### Instance Methods (`&self`)
 

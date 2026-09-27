@@ -184,7 +184,7 @@ fn build_module<'ctx>(
 
                     // Implicit `self` parameter for instance methods.
                     if method.self_param.is_some() {
-                        param_types.push(Type::Struct(struct_name.clone()));
+                        param_types.push(Type::from_hir(&impl_def.self_type));
                     }
 
                     for param in &method.params {

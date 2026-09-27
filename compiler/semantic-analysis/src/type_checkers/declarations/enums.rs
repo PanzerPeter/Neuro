@@ -200,6 +200,7 @@ impl TypeChecker {
         self.enum_defs.insert(mangled.clone(), variants);
         self.enum_instances
             .insert(mangled.clone(), (base.to_string(), args.to_vec()));
+        self.instantiate_impls_for(base, &mangled, args);
         Type::Enum(mangled)
     }
 

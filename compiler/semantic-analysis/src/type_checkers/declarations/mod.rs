@@ -311,7 +311,7 @@ pub(super) fn mangle_struct_instance(base: &str, args: &[Type]) -> String {
 }
 
 /// Rewrite a monomorphized method's signature: substitute the impl's type parameters
-/// and rename the receiver's `Struct(base)` to the concrete `Struct(mangled)`.
+/// and rename the receiver's `Struct(base)` / `Enum(base)` to the concrete instance.
 pub(super) fn remap_method_type(
     ty: &Type,
     subst: &HashMap<String, Type>,
@@ -341,6 +341,7 @@ pub(super) fn remap_type(
     match ty {
         Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
         Type::Struct(name) if name == base => Type::Struct(mangled.to_string()),
+        Type::Enum(name) if name == base => Type::Enum(mangled.to_string()),
         Type::Reference { inner, mutable } => Type::Reference {
             inner: Box::new(remap_type(inner, subst, base, mangled)),
             mutable: *mutable,

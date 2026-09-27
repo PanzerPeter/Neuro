@@ -189,6 +189,11 @@ Option<Box<HirExpr>>` is `.step(n)`, a positive stride of the range's own type e
 struct-variant syntax all become: payload in declared field order, `tag` the variant's
 declaration index.
 
+**An impl names its receiver type.** `HirImpl` carries `type_name`, the prefix of every
+method's mangled symbol (`Shape__area`), and `self_type`, the receiver as a `HirType`. The
+target may be a struct or an enum, and a backend building the `self` parameter reads
+`self_type` rather than assuming `HirType::Struct(type_name)`.
+
 **Newtypes produce no item.** `HirType::Newtype { name, inner }` carries its resolved inner type
 and the transparent `HirExprKind::NewtypeConstruct { name, value }` / `NewtypeAccess { object }`
 lower straight through, so backends erase the wrapper entirely.

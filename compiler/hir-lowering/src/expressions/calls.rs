@@ -73,10 +73,15 @@ impl Lowerer {
             }
             // `Enum::Variant(args)` is a tuple-variant construction when the
             // type names an enum; otherwise an associated-function call.
+            // A registered `Enum__member` is an associated function; the checker made sure
+            // no variant shares its name.
             Expr::Path {
                 type_name, member, ..
-            } if self.enums.contains_key(&type_name.name)
-                || self.is_generic_enum(&type_name.name) =>
+            } if (self.enums.contains_key(&type_name.name)
+                || self.is_generic_enum(&type_name.name))
+                && !self
+                    .functions
+                    .contains_key(&format!("{}__{}", type_name.name, member.name)) =>
             {
                 self.lower_enum_tuple_call(&type_name.name, &member.name, args, expected, span)
             }
@@ -507,8 +512,21 @@ impl Lowerer {
             return self.lower_tensor_sort(object, method, args, span);
         }
 
-        let (lowered_args, result_ty) = if let HirType::Struct(struct_name) = recv.referent() {
-            let struct_name = struct_name.clone();
+        let impl_receiver = match recv.referent() {
+            HirType::Struct(name) => Some(name.clone()),
+            // An enum's own method; anything else on an enum is the compiler-known
+            // `Option` / `Result` surface, lowered as a builtin below.
+            HirType::Enum(name)
+                if self
+                    .impl_methods
+                    .get(name)
+                    .is_some_and(|m| m.contains_key(method)) =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        };
+        let (lowered_args, result_ty) = if let Some(struct_name) = impl_receiver {
             if let Some(mangled) = self
                 .impl_methods
                 .get(&struct_name)

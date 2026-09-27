@@ -141,7 +141,8 @@ func main() -> i32 {
 
 #[test]
 fn equality_on_an_aggregate_is_rejected() {
-    // Arrays, tuples and enums have no built-in equality and cannot carry an impl either.
+    // Arrays, tuples and enums have no built-in equality; an enum gets `==` only from an
+    // `impl PartialEq`.
     for (name, source) in [
         (
             "eq_array.nr",

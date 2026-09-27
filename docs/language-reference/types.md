@@ -504,6 +504,40 @@ val s = Shape::Circle { radius: 5.0 }    // struct variant
 
 An enum value can be bound to a `val`/`mut`, passed to and returned from functions, and stored in a struct field. An enum is **`Copy`** exactly when every payload it can carry is, so an enum over scalars duplicates on a bind while one carrying a `string` moves.
 
+### Methods and Trait Impls
+
+An enum takes `impl` blocks exactly as a struct does: `&self`, `&mut self` and consuming `self`
+methods, associated functions, user trait impls (static dispatch through a bound, dynamic
+through `&dyn Trait`, default methods included) and operator traits such as `PartialEq`. The
+body usually `match`es on `self`, and a `&mut self` method may assign a whole new variant to
+`self`. From [`examples/types/enum_methods.nr`](../../examples/types/enum_methods.nr):
+
+```neuro
+impl Light {
+    func start() -> Light {
+        return Light::Red
+    }
+
+    func advance(&mut self) {
+        self = match self {
+            Light::Red => Light::Green,
+            Light::Green => Light::Amber,
+            Light::Amber => Light::Red
+        }
+    }
+}
+
+impl PartialEq for Light {
+    func eq(&self, other: &Light) -> bool {
+        return self.wait_secs() == other.wait_secs()
+    }
+}
+```
+
+`Light::start()` is an associated call and `Light::Red` a variant, so an `impl` member may not
+share a variant's name (`ImplMemberNamesVariant`). A generic enum's `impl<T> Tree<T>` is
+monomorphized with each instance, as a generic struct's is.
+
 ### Memory Layout
 
 An enum is a tagged union: a discriminant identifying the active variant, plus storage for the widest variant's payload. Two enums with the same variant names but declared separately are distinct types.
@@ -575,7 +609,8 @@ Variants may be written qualified (`Option::Some`, `Result::Err`) or, because th
 ### Phase 1 Limitations
 
 - **Payloads must be sized.** Any sized type is admissible, `Copy` or not: a `string`, a struct, an array, a tuple, another enum. `void` and the unsized types (`dyn Trait`, `[T]`) are rejected (`UnsupportedEnumPayload`), because a payload slot has to have a width.
-- **No `impl` blocks on enums**, methods (and therefore `Option`/`Result` helpers such as `.map_err`) need impls over enums, which are struct-only today.
+- **No `impl Drop` on an enum** (`InvalidDropImpl`): only a struct runs a user destructor.
+- **No `.map_err` or other `Option` / `Result` helper methods.** They would be generic over a closure's result type, and a closure cannot yet be passed to a generic higher-order function.
 - **No lifetime parameters on an enum**; `enum E<'a, T>` is a parse error.
 
 ### Type Errors
@@ -591,6 +626,7 @@ Variants may be written qualified (`Option::Some`, `Result::Err`) or, because th
 | `GenericEnumNeedsArgs` | A generic enum's bare name used as a type |
 | `GenericEnumNotInferable` | A construction whose type arguments no context determines |
 | `GenericArgCountMismatch` | `Option<i32, bool>`, wrong number of type arguments |
+| `ImplMemberNamesVariant` | An `impl` method or associated function named like one of the enum's variants |
 
 ## Newtype Declarations
 

@@ -148,3 +148,176 @@ func main() -> i32 {
     );
     assert!(errors.is_empty(), "expected no errors, got {errors:?}");
 }
+
+#[test]
+fn an_enum_takes_an_inherent_impl() {
+    // Every receiver form and an associated function, which a path call reaches instead of
+    // a variant construction because no variant shares its name.
+    let errors = semantic_errors(
+        r#"
+enum Light { Red, Green }
+impl Light {
+    func start() -> Light { Light::Red }
+    func code(&self) -> i32 {
+        match self {
+            Light::Red => 1,
+            Light::Green => 2
+        }
+    }
+    func flip(&mut self) { self = Light::Green }
+    func is_red(self) -> bool { self.code() == 1 }
+}
+func main() -> i32 {
+    mut l = Light::start()
+    l.flip()
+    if l.is_red() { return 0 }
+    l.code()
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn an_enum_trait_impl_satisfies_a_bound_and_a_trait_object() {
+    let errors = semantic_errors(
+        r#"
+trait Code { func code(&self) -> i32 }
+enum Light { Red, Green }
+impl Code for Light {
+    func code(&self) -> i32 {
+        match self {
+            Light::Red => 1,
+            Light::Green => 2
+        }
+    }
+}
+func stat<T: Code>(x: T) -> i32 { x.code() }
+func dynamic(x: &dyn Code) -> i32 { x.code() }
+func main() -> i32 {
+    val l = Light::Green
+    stat(l) + dynamic(&l)
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn an_enum_operator_impl_gives_it_equality() {
+    let errors = semantic_errors(
+        r#"
+enum Light { Red, Green }
+impl Light {
+    func rank(&self) -> i32 {
+        match self {
+            Light::Red => 0,
+            Light::Green => 1
+        }
+    }
+}
+impl PartialEq for Light {
+    func eq(&self, other: &Light) -> bool { self.rank() == other.rank() }
+}
+func main() -> i32 {
+    val a = Light::Red
+    val b = Light::Red
+    if a == b { return 1 }
+    0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn a_generic_enum_impl_reaches_an_instance_declared_before_it() {
+    // `Holder` names `Tree<i32>` in the declaration pass, before the impl is registered,
+    // so the instance has to be given the impl's methods after the fact.
+    let errors = semantic_errors(
+        r#"
+enum Tree<T> { Leaf(T), Empty }
+struct Holder { t: Tree<i32> }
+impl<T> Tree<T> {
+    func is_leaf(&self) -> bool {
+        match self {
+            Tree::Leaf(_) => true,
+            Tree::Empty => false
+        }
+    }
+}
+func main() -> i32 {
+    val h = Holder { t: Tree::Leaf(7) }
+    val f: Tree<f64> = Tree::Empty
+    if h.t.is_leaf() && !f.is_leaf() { return 1 }
+    0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn an_impl_member_may_not_share_a_variant_name() {
+    let source = r#"
+enum Shape { Circle(f64), Dot }
+impl Shape {
+    func Circle(r: f64) -> Shape { Shape::Dot }
+}
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(source);
+    let at = source
+        .find("Circle(r")
+        .expect("the method name is in the source");
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::ImplMemberNamesVariant { name, span, .. }
+                if name == "Circle" && span.start == at
+        )),
+        "expected the clash at the method name; got {errors:?}"
+    );
+}
+
+#[test]
+fn an_enum_may_not_implement_drop() {
+    // Only a struct binding runs a user destructor, so the impl would never be called.
+    let errors = semantic_errors(
+        r#"
+enum Handle { Open(i32), Closed }
+impl Drop for Handle {
+    func drop(&mut self) { }
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors.iter().any(
+            |e| matches!(e, TypeError::InvalidDropImpl { type_name, .. } if type_name == "Handle")
+        ),
+        "expected the Drop impl on an enum to be refused; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_method_an_enum_impl_does_not_declare_is_not_found() {
+    let errors = semantic_errors(
+        r#"
+enum Light { Red, Green }
+impl Light {
+    func code(&self) -> i32 { 1 }
+}
+func main() -> i32 {
+    val l = Light::Red
+    l.missing()
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MethodNotFound { method_name, .. } if method_name == "missing")),
+        "expected an unknown method on the enum; got {errors:?}"
+    );
+}

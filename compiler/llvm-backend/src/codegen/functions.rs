@@ -90,7 +90,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // `&self` / `self`: pass the struct value, dereferencing a `&Struct` borrow.
             match self.codegen_expr(receiver)? {
                 BasicValueEnum::PointerValue(ptr) => {
-                    let struct_ty = self.get_struct_llvm_type(struct_name)?;
+                    let struct_ty = self.nominal_llvm_type(struct_name)?;
                     self.builder.build_load(struct_ty, ptr, "deref.self")?
                 }
                 other => other,
@@ -267,12 +267,16 @@ impl<'ctx> CodegenContext<'ctx> {
         // Bind parameters: param[0] is `self` for instance methods.
         let non_self_start = if method.self_param.is_some() { 1 } else { 0 };
 
+        // The receiver's type is the signature's first parameter: a struct or an enum.
+        let self_ty = param_types
+            .first()
+            .cloned()
+            .unwrap_or_else(|| Type::Struct(struct_name.to_string()));
         if method.self_param.is_some() {
             // Record `self`'s Neuro type so a `self.field = …` write in a `&mut self`
             // body resolves its struct here, not from the (per-function, possibly
             // stale) type-pass `type_env` left over from another item.
-            self.type_env
-                .insert("self".to_string(), Type::Struct(struct_name.to_string()));
+            self.type_env.insert("self".to_string(), self_ty.clone());
 
             let self_val = function
                 .get_nth_param(0)
@@ -282,11 +286,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 // struct. Bind `self` directly to it (no copy) so reads and field
                 // writes go through to the caller. The recorded type is the struct
                 // (not the pointer), matching how an owned struct binding reads.
-                let struct_ty = self.get_struct_llvm_type(struct_name)?;
+                let struct_ty = self.type_mapper.map_type(&self_ty)?;
                 self.variables
                     .insert("self".to_string(), self_val.into_pointer_value());
-                self.variable_types
-                    .insert("self".to_string(), struct_ty.into());
+                self.variable_types.insert("self".to_string(), struct_ty);
             } else {
                 // `&self`: allocate and store a private copy of the struct value.
                 let self_type = self_val.get_type();
@@ -318,7 +321,6 @@ impl<'ctx> CodegenContext<'ctx> {
         self.push_drop_scope();
         if matches!(method.self_param, Some(HirSelfParam::Owned)) {
             if let Some(alloca) = self.variables.get(SELF_BINDING).copied() {
-                let self_ty = Type::Struct(struct_name.to_string());
                 self.register_owned_binding(SELF_BINDING, alloca, &self_ty)?;
             }
         }

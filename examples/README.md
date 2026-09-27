@@ -20,7 +20,7 @@ not what each one does.
 | Directory       | What it covers | Reference |
 | --------------- | -------------- | --------- |
 | `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
-| `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
+| `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
 | `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `String` | [Strings](../docs/language-reference/strings.md) |
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
@@ -128,7 +128,7 @@ One line each. The program's own header comment is the full description.
 - [`owned_aggregates.nr`](showcase/owned_aggregates.nr): arrays, tuples, enum payloads, newtypes and a generic struct all holding an owned `string`, destructured element by element
 - [`owned_catalog.nr`](showcase/owned_catalog.nr): a catalog whose `Vec`, `HashMap` and `BTreeMap` own the text they hold, closing the value model with the rest of its sub-phase
 - [`perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward pass
-- [`quantized_readings.nr`](showcase/quantized_readings.nr): sensor readings quantized to one byte by `.to_checked::<u8>()`, so a reading a byte cannot hold (NaN included) is rejected instead of clamped, with a closure, `match` and `??` over the `Option`, a `Vec` of `Copy` structs and a `.step(n)` walk
+- [`quantized_readings.nr`](showcase/quantized_readings.nr): sensor readings quantized to one byte by `.to_checked::<u8>()`, so a reading a byte cannot hold (NaN included) is rejected instead of clamped, with a closure, `match` and `??` over the `Option`, a `Vec` of `Copy` structs, a `.step(n)` walk, an enum with its own `impl` and `impl PartialEq` sorting codes into bands, and `.item()` reading their total out of a rank-0 tensor
 - [`ranked_batch.nr`](showcase/ranked_batch.nr): ordering a tensor axis alongside the rest of the tensor surface
 - [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` carrying a position through earlier features
 - [`render_settings.nr`](showcase/render_settings.nr): a render pipeline configured by named arguments
