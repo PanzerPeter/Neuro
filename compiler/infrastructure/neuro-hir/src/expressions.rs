@@ -438,10 +438,13 @@ pub enum HirTensorAxis {
     Position(HirExpr),
     /// The half-open sub-range `[start, end)` of the axis that survives. `reversed`
     /// reads it back to front, which changes the element order and not the extent.
+    /// `step` keeps every `step`th element of that walk (at least 1), so the surviving
+    /// extent is `(end - start).div_ceil(step)`.
     Range {
         start: usize,
         end: usize,
         reversed: bool,
+        step: usize,
     },
 }
 

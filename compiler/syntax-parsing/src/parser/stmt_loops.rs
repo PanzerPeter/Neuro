@@ -170,7 +170,9 @@ impl Parser {
             // No range operator follows, so the whole iterable is already parsed:
             // either a sequence expression or a parenthesised range, each possibly
             // wearing an adapter chain.
-            let (iterable, adapters, enumerated, reversed) = strip_adapters(start)?;
+            let (iterable, adapters, enumerated) = strip_adapters(start)?;
+            let (iterable, step) = strip_step(iterable)?;
+            let (iterable, reversed) = strip_rev(iterable)?;
             // `.char_indices()` binds its own position, so a chain around one would have
             // two sources for a single binding, and an adapter that drops or replaces
             // elements would leave the offsets naming text no longer being yielded.
@@ -207,6 +209,7 @@ impl Parser {
                     end: *end,
                     inclusive,
                     reversed,
+                    step,
                     adapters,
                     body,
                     span,
@@ -245,6 +248,7 @@ impl Parser {
             end,
             inclusive,
             reversed: false,
+            step: None,
             adapters: Vec::new(),
             body,
             span: start_span.merge(end_span),
@@ -438,18 +442,19 @@ const MAP_METHOD: &str = "map";
 const FILTER_METHOD: &str = "filter";
 /// The range-only adapter that walks the bounds from the top down.
 const REV_METHOD: &str = "rev";
+/// The range-only adapter that keeps every `n`th value of the walk.
+const STEP_METHOD: &str = "step";
 
-/// Split the whole adapter chain off a `for` loop's iterable: an outermost
-/// `.enumerate()`, then any number of `.map(f)` / `.filter(p)` calls, then an
-/// innermost `.rev()`.
+/// Split the adapter chain off a `for` loop's iterable: an outermost `.enumerate()`,
+/// then any number of `.map(f)` / `.filter(p)` calls.
 ///
 /// Returns the base iterable, the adapters in SOURCE order (the peel runs
-/// outside-in, so the collected list is reversed), whether the head was
-/// enumerated, and whether it was reversed. `.enumerate()` is recognised only at the
-/// outermost position: it yields pairs, and no adapter beneath one could be given a
-/// single element. `.rev()` is recognised only at the innermost position, because it
-/// reorders a range's own bounds rather than the element stream an adapter sees.
-fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool, bool)> {
+/// outside-in, so the collected list is reversed), and whether the head was
+/// enumerated. `.enumerate()` is recognised only at the outermost position: it yields
+/// pairs, and no adapter beneath one could be given a single element. The base still
+/// wears any `.step(n)` and `.rev()`, which the caller peels next: they decide which of
+/// a range's own values are walked, so they sit beneath every adapter.
+fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool)> {
     let (mut current, enumerated) = strip_enumerate(iterable)?;
     let mut adapters = Vec::new();
     loop {
@@ -460,8 +465,7 @@ fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool, 
             }
             Peeled::Base(expr) => {
                 adapters.reverse();
-                let (base, reversed) = strip_rev(expr)?;
-                return Ok((base, adapters, enumerated, reversed));
+                return Ok((expr, adapters, enumerated));
             }
         }
     }
@@ -497,6 +501,36 @@ fn strip_rev(iterable: Expr) -> ParseResult<(Expr, bool)> {
         return Err(ParseError::RevOnNonRange { span: *span });
     }
     Ok((receiver, true))
+}
+
+/// Split a trailing `.step(n)` off the base iterable, returning the receiver (still
+/// wearing any `.rev()`) and the stride.
+///
+/// The language defines `.step(n)` on ranges only and `.rev()` may sit under it, so the
+/// receiver must be a range once a `.rev()` is peeled; anything else is rejected here
+/// for the reason `strip_rev` gives.
+fn strip_step(iterable: Expr) -> ParseResult<(Expr, Option<Box<Expr>>)> {
+    let Expr::Call {
+        func, args, span, ..
+    } = &iterable
+    else {
+        return Ok((iterable, None));
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return Ok((iterable, None));
+    };
+    if field.name != STEP_METHOD {
+        return Ok((iterable, None));
+    }
+    let [stride] = args.as_slice() else {
+        return Err(ParseError::StepArity { span: *span });
+    };
+    let receiver = object.as_ref().clone();
+    let (under_rev, _) = strip_rev(receiver.clone())?;
+    if !matches!(unwrap_paren(under_rev), Expr::Range { .. }) {
+        return Err(ParseError::StepOnNonRange { span: *span });
+    }
+    Ok((receiver, Some(Box::new(stride.clone()))))
 }
 
 /// One step of the adapter peel: either an adapter and the receiver under it, or
@@ -592,7 +626,7 @@ fn unwrap_paren(expr: Expr) -> Expr {
 mod tests {
     use crate::errors::ParseError;
     use crate::parse;
-    use ast_types::{Item, Stmt};
+    use ast_types::{Expr, Item, Stmt};
 
     /// The first statement of the first function body.
     fn first_stmt(source: &str) -> Stmt {
@@ -841,6 +875,58 @@ mod tests {
         assert!(matches!(
             parse_err("func main() -> i32 { for x in (0..4).rev(2) { }\n 0 }"),
             ParseError::AdapterTakesNoArguments { adapter, .. } if adapter == "rev"
+        ));
+    }
+
+    /// `.step(n)` sits beneath the adapters and above `.rev()`, so both peel off the
+    /// range and the loop stays a counted range loop.
+    #[test]
+    fn a_stepped_reversed_range_stays_a_range_loop() {
+        let Stmt::ForRange {
+            reversed,
+            step,
+            adapters,
+            index,
+            ..
+        } = first_stmt(
+            "func main() -> i32 { for (i, v) in (0..9).rev().step(3).filter(p).enumerate() { }\n 0 }",
+        )
+        else {
+            panic!("expected a range loop");
+        };
+        assert!(reversed);
+        assert!(matches!(step.as_deref(), Some(Expr::Literal(..))));
+        assert_eq!(adapters.len(), 1);
+        assert!(index.is_some());
+    }
+
+    #[test]
+    fn step_on_a_non_range_head_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in xs.step(2) { }\n 0 }"),
+            ParseError::StepOnNonRange { .. }
+        ));
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in (0..4).step(2).step(2) { }\n 0 }"),
+            ParseError::StepOnNonRange { .. }
+        ));
+    }
+
+    #[test]
+    fn step_takes_exactly_one_stride() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in (0..4).step() { }\n 0 }"),
+            ParseError::StepArity { .. }
+        ));
+    }
+
+    /// Only `.rev().step(n)` is defined; the other order is reported rather than
+    /// silently read as a different walk.
+    #[test]
+    fn rev_after_step_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for x in (0..9).step(3).rev() { }\n 0 }"),
+            ParseError::RevOnNonRange { .. }
         ));
     }
 

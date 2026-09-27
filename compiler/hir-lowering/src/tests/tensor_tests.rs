@@ -275,11 +275,51 @@ func main() -> i32 {
         HirTensorAxis::Range {
             start: 0,
             end: 3,
-            reversed: false
+            reversed: false,
+            step: 1
         }
     );
     assert_eq!(
         row.ty,
+        HirType::Tensor {
+            element: Box::new(HirType::I32),
+            shape: neuro_hir::static_shape(&[3]),
+            names: AxisNames::default(),
+        }
+    );
+}
+
+/// A stride keeps the range's own bounds and divides its extent, rounding up, so the
+/// last partial stride still contributes an element.
+#[test]
+fn a_stepped_slice_keeps_its_bounds_and_divides_its_extent() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val t: Tensor<i32, [7]> = Tensor::<i32, [7]>::zeros()
+    val every_third = t[(0..7).rev().step(3)]
+    return 0
+}
+"#,
+    );
+    let slice = binding_init(function_body(&program, "main"), "every_third");
+    let HirExprKind::TensorIndex { axes, .. } = &slice.kind else {
+        panic!(
+            "a tensor index should lower to TensorIndex, got {:?}",
+            slice.kind
+        );
+    };
+    assert_eq!(
+        axes[0],
+        HirTensorAxis::Range {
+            start: 0,
+            end: 7,
+            reversed: true,
+            step: 3
+        }
+    );
+    assert_eq!(
+        slice.ty,
         HirType::Tensor {
             element: Box::new(HirType::I32),
             shape: neuro_hir::static_shape(&[3]),
@@ -313,7 +353,8 @@ func main() -> i32 {
         HirTensorAxis::Range {
             start: 0,
             end: 3,
-            reversed: false
+            reversed: false,
+            step: 1
         }
     );
     assert_eq!(
@@ -321,7 +362,8 @@ func main() -> i32 {
         HirTensorAxis::Range {
             start: 1,
             end: 3,
-            reversed: false
+            reversed: false,
+            step: 1
         }
     );
     assert_eq!(

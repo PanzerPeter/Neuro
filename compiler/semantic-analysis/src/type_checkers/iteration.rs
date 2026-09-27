@@ -5,12 +5,13 @@
 //! reaches here is a head whose type is a user nominal type, which is iterable exactly
 //! when the protocol says so.
 
-use ast_types::Expr;
+use ast_types::{Expr, UnaryOp};
 use shared_types::Span;
 
 use crate::errors::TypeError;
 use crate::types::Type;
 
+use super::expressions::const_predicates::eval_literal_int;
 use super::TypeChecker;
 
 /// The prelude trait a container implements to produce an iterator.
@@ -24,7 +25,54 @@ const INTO_ITER_METHOD: &str = "into_iter";
 /// The `for`-head form that drives a `Chars` iterator by byte offset.
 const CHAR_INDICES_METHOD: &str = "char_indices";
 
+/// The value of a constant `.step(n)` stride. A negative one is the case worth
+/// catching, and the shared folder does not read a leading `-`, so it is peeled here.
+pub(crate) fn constant_stride(step: &Expr) -> Option<i128> {
+    match step {
+        Expr::Unary {
+            op: UnaryOp::Negate,
+            operand,
+            ..
+        } => eval_literal_int(operand).map(|value| -value),
+        Expr::Paren(inner, _) => constant_stride(inner),
+        other => eval_literal_int(other),
+    }
+}
+
 impl TypeChecker {
+    /// Type-check the stride of a `for` head's `.step(n)`: an integer of the range's own
+    /// element type, since the induction variable advances by it. A constant stride is
+    /// checked positive here; a run-time one is guarded where the loop starts.
+    pub(crate) fn check_range_step(&mut self, step: &Expr, element: &Type) {
+        let ty = self
+            .check_expr(step, Some(element))
+            .unwrap_or(Type::Unknown);
+        if matches!(ty, Type::Unknown) {
+            return;
+        }
+        if !ty.is_integer() {
+            self.record_error(TypeError::InvalidForRangeType {
+                found: ty,
+                span: step.span(),
+            });
+            return;
+        }
+        if !matches!(element, Type::Unknown) && !ty.is_compatible_with(element) {
+            self.record_error(TypeError::Mismatch {
+                expected: element.clone(),
+                found: ty,
+                span: step.span(),
+            });
+            return;
+        }
+        if let Some(value) = constant_stride(step).filter(|value| *value <= 0) {
+            self.record_error(TypeError::RangeStepNotPositive {
+                step: value,
+                span: step.span(),
+            });
+        }
+    }
+
     /// Type-check a `for` head of the form `text.char_indices()`, yielding the `Chars`
     /// iterator it drives.
     ///

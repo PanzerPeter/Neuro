@@ -1,7 +1,7 @@
-// Showcase: range `.rev()` driving a replay buffer, over earlier features.
+// Showcase: range `.rev()` and `.step(n)` driving a replay buffer, over earlier features.
 //
 // Cumulative integration example combining:
-//   range `.rev()` in a `for` head and on a tensor index axis
+//   range `.rev()` and `.step(n)` in a `for` head and on a tensor index axis
 //   · static tensor types and tensor slicing · tensor reductions (`.sum()`)
 //   · structs with `&self` methods · `@derive(Copy, Clone)`
 //   · `.enumerate()` paired with `.rev()` · a `.filter(p)` head adapter
@@ -69,6 +69,17 @@ func main() -> i32 {
         }
     }
     println("first below six    = index {first_small}")
+
+    // Frame skipping. `.step(2)` keeps every other frame; under `.rev()` it starts
+    // from the newest one, so the skipped replay is 12, 8, 4 and not 10, 6, 2.
+    val skipped: Tensor<i32, [3]> = episode[(0..6).rev().step(2)]
+    println("every other frame  = {skipped[0]} {skipped[1]} {skipped[2]}")
+    mut sampled = 0
+    for i in (0..6).step(2) {
+        val frame = Frame { reward: episode[i], step: i }
+        sampled = sampled + frame.weighted()
+    }
+    println("sampled weighted   = {sampled}")
 
     val answer = total + first_small + (weighted % 50)
     println("answer             = {answer}")

@@ -364,6 +364,17 @@ Each axis decides its own direction, so `m[(0..2).rev(), ..]` flips the rows and
 each row's own order alone. The same `.rev()` reverses a `for` range; see
 [Iterating Backwards](control-flow.md#iterating-backwards-rev).
 
+A range argument may also wear `.step(n)`, which keeps every `n`th element. The stride
+divides the extent, rounding up, so it is part of the result's type and must be a positive
+constant. Under `.rev()` the walk starts at the range's last element:
+
+```neuro
+val samples: Tensor<i32, [7]> = [10, 20, 30, 40, 50, 60, 70]
+
+val evens: Tensor<i32, [4]> = samples[(0..7).step(2)]         // 10, 30, 50, 70
+val newest: Tensor<i32, [3]> = samples[(0..7).rev().step(3)]  // 70, 40, 10
+```
+
 A slice is a **fresh owned tensor holding a copy**, not a view into the source. A tensor
 owns its buffer and releases it through its own DLPack deleter, so two tensors never share
 one buffer; the slice may be sliced again, cloned, passed by value, and returned, and it
@@ -894,10 +905,7 @@ through an index (`t[i, j] = v`), sliced, reshaped with
 `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`, and reduced with
 `.sum()` / `.mean()` / `.max()` / `.min()`, contracted with `einsum`, traversed
 elementwise with `.map(f)` / `.zip(other, f)` / `.reduce(init, f)`, and passed through
-`.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`. What is still later work
-is the step index form
-(`t[(0..n).step(2)]`), which waits on `.step(n)` existing on ranges at all. The reverse
-form `t[(0..n).rev()]` is implemented. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
+`.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
 an extent works on one, and there is no run-time shape check that would let a `?` be
 narrowed back to a literal. Symbolic
 extents are accepted on functions: a shape-generic struct, enum, or `impl` block is

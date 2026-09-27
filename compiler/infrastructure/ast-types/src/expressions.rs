@@ -482,11 +482,15 @@ pub enum TensorIndexArg {
     ///
     /// `reversed` is `t[(a..b).rev()]`: the same sub-range, its elements read back to
     /// front. Only the order changes, so the surviving extent is the range's either way.
+    ///
+    /// `step` is `t[(a..b).step(n)]`: every `n`th element of that walk, so the axis
+    /// survives at the range's extent divided by `n`, rounded up.
     Range {
         start: Box<Expr>,
         end: Box<Expr>,
         inclusive: bool,
         reversed: bool,
+        step: Option<Box<Expr>>,
         span: Span,
     },
     /// The whole axis, `t[..]`. The axis survives at its declared extent.

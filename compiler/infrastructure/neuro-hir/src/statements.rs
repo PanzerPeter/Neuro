@@ -148,6 +148,8 @@ pub enum HirStmt {
     /// plain `for v in a..b`.
     /// `reversed` walks the same bounds from the last value down to `start`; an
     /// enumerated loop's `index` still counts up from zero either way.
+    /// `step` strides that walk by a positive value of the range's own type; `None`
+    /// is a stride of one.
     ForRange {
         label: Option<String>,
         index: Option<String>,
@@ -156,6 +158,7 @@ pub enum HirStmt {
         end: HirExpr,
         inclusive: bool,
         reversed: bool,
+        step: Option<Box<HirExpr>>,
         body: Vec<HirStmt>,
         span: Span,
     },

@@ -18,6 +18,7 @@ fn test_for_range_accepts_integer_bounds() {
         end: Expr::Literal(Literal::Integer(5, None), Span::new(4, 5)),
         inclusive: false,
         reversed: false,
+        step: None,
         adapters: Vec::new(),
         body: vec![Stmt::Continue {
             label: None,
@@ -42,6 +43,7 @@ fn test_for_range_rejects_non_integer_bound() {
         end: Expr::Literal(Literal::Integer(5, None), Span::new(7, 8)),
         inclusive: false,
         reversed: false,
+        step: None,
         adapters: Vec::new(),
         body: vec![],
         span: Span::new(0, 12),
@@ -322,4 +324,94 @@ fn a_loop_inside_a_closure_still_accepts_its_own_break() {
          }\n",
     );
     assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+}
+
+/// A stride advances the induction variable, so it takes the range's own type and a
+/// literal adopts it the way the upper bound does.
+#[test]
+fn a_range_stride_takes_the_range_type() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val n: u8 = 3
+    mut total: u8 = 0
+    for i in (0u8..9u8).step(2) { total = total + i }
+    for i in (0u8..9u8).rev().step(n) { total = total + i }
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "valid stepped loops; got {errors:?}");
+}
+
+#[test]
+fn a_constant_stride_below_one_is_rejected_at_its_span() {
+    let source = "func main() -> i32 {\n    for i in (0..9).step(-2) { }\n    return 0\n}\n";
+    let errors = semantic_errors(source);
+    let stride_at = source.find("-2").expect("stride in source");
+    assert!(
+        errors.iter().any(|error| matches!(
+            error,
+            TypeError::RangeStepNotPositive { step: -2, span } if span.start == stride_at
+        )),
+        "a negative stride should be rejected at the stride; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_stride_of_another_type_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val k: i64 = 2
+    for i in (0..9).step(k) { }
+    for j in (0..9).step(1.5) { }
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::Mismatch { .. })),
+        "an i64 stride over an i32 range; got {errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::InvalidForRangeType { .. })),
+        "a float stride; got {errors:?}"
+    );
+}
+
+/// The stride divides a slice's extent, which is part of its type, so it has to be
+/// known before any value is.
+#[test]
+fn a_tensor_slice_stride_must_be_a_positive_constant() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val t: Tensor<i32, [6]> = [1, 2, 3, 4, 5, 6]
+    val ok: Tensor<i32, [3]> = t[(0..6).step(2)]
+    val tail: Tensor<i32, [2]> = t[(1..=5).rev().step(3)]
+    mut k = 2
+    val runtime = t[(0..6).step(k)]
+    val zero = t[(0..6).step(0)]
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::TensorSliceStepNotConstant { .. })),
+        "a run-time stride; got {errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::RangeStepNotPositive { step: 0, .. })),
+        "a zero stride; got {errors:?}"
+    );
+    assert_eq!(errors.len(), 2, "the two valid slices type; got {errors:?}");
 }

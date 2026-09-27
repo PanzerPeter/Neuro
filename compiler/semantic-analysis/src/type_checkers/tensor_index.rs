@@ -105,9 +105,23 @@ impl TypeChecker {
                 start,
                 end,
                 inclusive,
+                step,
                 span,
                 ..
-            } => self.resolve_range(start, end, *inclusive, axis, extent, *span),
+            } => {
+                // Both halves are checked before either failure is acted on, so one
+                // compile reports a bad stride and a bad bound together.
+                let stride = self.resolve_slice_step(step.as_deref());
+                match (
+                    self.resolve_range(start, end, *inclusive, axis, extent, *span)?,
+                    stride?,
+                ) {
+                    (ResolvedAxis::Kept(ArrayLen::Fixed(len)), stride) => {
+                        Some(ResolvedAxis::Kept(ArrayLen::Fixed(len.div_ceil(stride))))
+                    }
+                    (other, _) => Some(other),
+                }
+            }
         }
     }
 
@@ -141,6 +155,27 @@ impl TypeChecker {
             }
         }
         Some(ResolvedAxis::Position)
+    }
+
+    /// The stride of a `.step(n)` axis, 1 when there is none. Like the bounds it must
+    /// fold to a constant, because it divides the surviving extent.
+    fn resolve_slice_step(&mut self, step: Option<&Expr>) -> Option<usize> {
+        let Some(step) = step else {
+            return Some(1);
+        };
+        self.check_expr(step, None);
+        let Some(value) = super::iteration::constant_stride(step) else {
+            self.record_error(TypeError::TensorSliceStepNotConstant { span: step.span() });
+            return None;
+        };
+        if value <= 0 {
+            self.record_error(TypeError::RangeStepNotPositive {
+                step: value,
+                span: step.span(),
+            });
+            return None;
+        }
+        usize::try_from(value).ok()
     }
 
     /// A sub-range of one axis. Both bounds must fold to constants: the resulting

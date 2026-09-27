@@ -326,6 +326,13 @@ loop.
   state and no diagnostic to raise: the parser has already rejected the only ill-formed case
   (a receiver that is not a range).
 
+- **Stepped heads.** A `.step(n)` stride is checked by `check_range_step` (`iteration.rs`) in
+  the enclosing scope: an integer (`InvalidForRangeType`) of the range's own type (`Mismatch`),
+  and, when `constant_stride` folds it (a leading `-` included, which the shared folder does not
+  read), positive (`RangeStepNotPositive`). A run-time stride is the backend's to guard. On a
+  tensor axis the stride must fold (`TensorSliceStepNotConstant`) because it divides the
+  surviving extent, rounded up.
+
 - **Adapted heads.** `type_checkers/loop_adapters.rs`. `check_loop_adapters` folds the head's
   `adapters` over the element type the base head produced: `.map(f)` replaces it with `f`'s
   return type, `.filter(p)` leaves it alone. Each function is checked in the scope *enclosing*

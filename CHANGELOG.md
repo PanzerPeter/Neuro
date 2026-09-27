@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-09-27
+
+### Added
+
+- `.step(n)` on a range keeps every `n`th value of the walk, as a `for` head
+  (`for i in (0..100).step(5)`) and as a tensor index axis (`t[(0..n).step(2)]`). `.rev()` goes
+  beneath it, so `(0..100).rev().step(5)` strides down from 99. It composes with
+  `.enumerate()`, `.map` / `.filter`, labels and inclusive ranges, and a stepped slice's extent
+  is the range's divided by `n`, rounded up.
+- The stride has the range's own type and must be positive: a constant below one is a compile
+  error, and a zero stride computed at run time panics with `range step must be positive`. A
+  tensor slice's stride must be a constant. The loop never adds past its bound, so
+  `(0u8..255).step(10)` stops at 250.
+- `@grad` bodies differentiate through a stepped loop and a stepped slice; there the stride must
+  be an integer literal.
+- `examples/control_flow/for_range_step.nr`, and `examples/showcase/replay_buffer.nr` now skips
+  frames with `.step(2)`.
+
+### Fixed
+
+- BUG-031: `.step(n)` was specified on ranges but did not exist, so every spelling of it failed
+  to compile.
+
 ## [3.14.0] - 2026-09-27
 
 ### Added

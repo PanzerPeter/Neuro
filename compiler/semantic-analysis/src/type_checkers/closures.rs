@@ -241,12 +241,16 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             iterator,
             start,
             end,
+            step,
             adapters,
             body,
             ..
         } => {
             collect_expr(start, fv);
             collect_expr(end, fv);
+            if let Some(step) = step {
+                collect_expr(step, fv);
+            }
             for adapter in adapters {
                 collect_expr(&adapter.callee, fv);
             }
@@ -393,9 +397,14 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
             for index in indices {
                 match index {
                     TensorIndexArg::Position(expr) => collect_expr(expr, fv),
-                    TensorIndexArg::Range { start, end, .. } => {
+                    TensorIndexArg::Range {
+                        start, end, step, ..
+                    } => {
                         collect_expr(start, fv);
                         collect_expr(end, fv);
+                        if let Some(step) = step {
+                            collect_expr(step, fv);
+                        }
                     }
                     TensorIndexArg::FullAxis(_) => {}
                 }
@@ -448,9 +457,14 @@ fn collect_place(place: &Place, fv: &mut FreeVars) {
             for index in indices {
                 match index {
                     TensorIndexArg::Position(expr) => collect_expr(expr, fv),
-                    TensorIndexArg::Range { start, end, .. } => {
+                    TensorIndexArg::Range {
+                        start, end, step, ..
+                    } => {
                         collect_expr(start, fv);
                         collect_expr(end, fv);
+                        if let Some(step) = step {
+                            collect_expr(step, fv);
+                        }
                     }
                     TensorIndexArg::FullAxis(_) => {}
                 }

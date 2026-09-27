@@ -236,6 +236,11 @@ the tuple-index parse, so it needs no expression grammar of its own.
   resolved later: left to fall through it would be reported as a missing method, naming a
   construct the language does not define on that type. `AdapterTakesNoArguments` covers `.rev(x)`
   and `.enumerate(x)` alike.
+- **`.step(n)` sits directly above `.rev()`.** `strip_step` peels it off before `strip_rev` runs,
+  into `Stmt::ForRange`'s `step`, and `expr_index.rs` does the same for `TensorIndexArg::Range`.
+  Its receiver, once a `.rev()` is peeled, must be a range (`StepOnNonRange`), and it takes one
+  argument (`StepArity`). `(a..b).step(n).rev()` is therefore `RevOnNonRange`: the language
+  defines only the other order, and the two walk different values.
   The cost of resolving them here is the same one `.enumerate()` pays (a user type with its own
   one-argument `.map` method cannot be a bare `for` head), and it buys the adapters over ranges and
   arrays, neither of which is an `Iterator` impl with a method to call.

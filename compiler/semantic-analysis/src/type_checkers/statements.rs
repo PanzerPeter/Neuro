@@ -576,6 +576,7 @@ impl TypeChecker {
                 end,
                 inclusive: _,
                 reversed: _,
+                step,
                 adapters,
                 body,
                 span: _,
@@ -607,6 +608,9 @@ impl TypeChecker {
                         found: end_ty,
                         span: end.span(),
                     });
+                }
+                if let Some(step) = step {
+                    self.check_range_step(step, &start_ty);
                 }
 
                 // The adapter chain is checked in the enclosing scope: its functions are

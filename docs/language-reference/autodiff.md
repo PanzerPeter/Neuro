@@ -320,7 +320,7 @@ expression. Its values may use:
 | `.sum()` and `.mean()`, over the whole tensor or along one `axis:` | the adjoint spread back over what was reduced |
 | a tensor literal or `Tensor::scalar(v)` built from values | each element's adjoint sent back to the value it came from |
 | an element read `t[i, j]`, at literal positions or ones computed at run time | the adjoint lands on that one element |
-| a slice `t[1..3, ..]` or `t[(0..3).rev(), 1]` at literal bounds | each element's adjoint lands where it was read from |
+| a slice `t[1..3, ..]`, `t[(0..3).rev(), 1]` or `t[(0..6).step(2)]` at literal bounds | each element's adjoint lands where it was read from |
 | `.t()`, `.permute(...)`, `.reshape(...)`, `.flatten(...)` | the adjoint put back in the receiver's shape and axis order |
 | `einsum(...)` | each operand's adjoint is the contraction of the result's adjoint with the other operands |
 | `as` between integer and float types | the adjoint converted back; zero through an integer |
@@ -338,8 +338,10 @@ The statements may be:
   expression. An arm of an `if` at the top level of the body may end in `return`: the rest of
   the body is then the other arm;
 - `while`, including loops whose trip count depends on the differentiated parameters;
-- `for` over a range, `a..b` or `a..=b`, forwards, `.rev()` or `.enumerate()`. It is
-  differentiated as the counted `while` it is, with the bounds read once as the loop reads them.
+- `for` over a range, `a..b` or `a..=b`, forwards, `.rev()`, `.step(n)` or `.enumerate()`. It
+  is differentiated as the counted `while` it is, with the bounds read once as the loop reads
+  them. A `.step(n)` stride must be an integer literal there: the replay has no run-time check
+  to stop a zero stride.
 
 ```neuro
 @grad

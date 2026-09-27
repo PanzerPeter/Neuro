@@ -309,10 +309,17 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
             rewrite_block(body, resolved);
         }
         Stmt::ForRange {
-            start, end, body, ..
+            start,
+            end,
+            step,
+            body,
+            ..
         } => {
             rewrite_expr(start, resolved);
             rewrite_expr(end, resolved);
+            if let Some(step) = step {
+                rewrite_expr(step, resolved);
+            }
             rewrite_block(body, resolved);
         }
         Stmt::ForEach { iterable, body, .. } => {
@@ -491,9 +498,14 @@ fn rewrite_place(place: &mut Place, resolved: &HashMap<String, Type>) {
 fn rewrite_index_arg(index: &mut TensorIndexArg, resolved: &HashMap<String, Type>) {
     match index {
         TensorIndexArg::Position(expr) => rewrite_expr(expr, resolved),
-        TensorIndexArg::Range { start, end, .. } => {
+        TensorIndexArg::Range {
+            start, end, step, ..
+        } => {
             rewrite_expr(start, resolved);
             rewrite_expr(end, resolved);
+            if let Some(step) = step {
+                rewrite_expr(step, resolved);
+            }
         }
         TensorIndexArg::FullAxis(_) => {}
     }

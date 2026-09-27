@@ -215,13 +215,22 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let elem_llvm = self.get_any_llvm_type(element)?;
 
-        // The surviving axes, paired with the source stride each one steps by and whether
-        // `.rev()` reads that axis back to front.
-        let kept: Vec<(usize, bool)> = axes
+        // The surviving axes, each with the source stride it moves by, its `.step(n)`, and
+        // the last position of its range when `.rev()` reads it back to front.
+        let kept: Vec<(usize, usize, Option<usize>)> = axes
             .iter()
             .enumerate()
             .filter_map(|(axis, index)| match index {
-                HirTensorAxis::Range { reversed, .. } => Some((strides[axis], *reversed)),
+                HirTensorAxis::Range {
+                    start,
+                    end,
+                    reversed,
+                    step,
+                } => Some((
+                    strides[axis],
+                    *step,
+                    reversed.then(|| end.saturating_sub(*start).saturating_sub(1)),
+                )),
                 HirTensorAxis::Position(_) => None,
             })
             .collect();
@@ -260,21 +269,31 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body);
         let mut source_index = base;
-        for (position, (extent, (source_stride, reversed))) in
+        for (position, (extent, (source_stride, step, reversed_from))) in
             result_shape.iter().zip(kept.iter()).enumerate()
         {
             let coordinate = self.slice_coordinate(i, result_strides[position], *extent)?;
-            // A reversed axis reads the same sub-range in the opposite order, so the
-            // result's coordinate `c` names the source's `extent - 1 - c`. The base
-            // offset already carries the range's start, so the reflection is about the
-            // extent alone.
-            let coordinate = match reversed {
-                true => self.builder.build_int_sub(
-                    i64_type.const_int((*extent as u64).saturating_sub(1), false),
+            // A stepped axis keeps every `step`th position of its walk, so the result's
+            // coordinate `c` is `c * step` positions into it.
+            let coordinate = match *step {
+                1 => coordinate,
+                step => self.builder.build_int_mul(
+                    coordinate,
+                    i64_type.const_int(step as u64, false),
+                    "tensor.slice.stride",
+                )?,
+            };
+            // A reversed axis walks the same sub-range from its last position down, so
+            // `k` positions into the walk is the source's `last - k`. The base offset
+            // already carries the range's start, so the reflection is about the range's
+            // own length, which a `.step(n)` does not shorten.
+            let coordinate = match reversed_from {
+                Some(last) => self.builder.build_int_sub(
+                    i64_type.const_int(*last as u64, false),
                     coordinate,
                     "tensor.slice.rev",
                 )?,
-                false => coordinate,
+                None => coordinate,
             };
             let stepped = self.builder.build_int_mul(
                 coordinate,

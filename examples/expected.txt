@@ -108,6 +108,7 @@ control_flow/for_enumerate.nr         56
 control_flow/for_range.nr             10
 control_flow/for_range_inclusive.nr   15
 control_flow/for_range_rev.nr         0
+control_flow/for_range_step.nr        0
 control_flow/if_block_expressions.nr  149
 control_flow/iterator_protocol.nr     79
 control_flow/labeled_breaks.nr        4

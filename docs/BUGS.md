@@ -412,58 +412,6 @@ what is missing is the borrow check accepting a sub-place as the operand of `&` 
 `&mut`, and the exclusivity bookkeeping for a borrow of part of a binding rather than the
 whole of it.
 
-## BUG-031 — `.step(n)` on a range is specified but has no implementation and no checkbox
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (range method dispatch); reaches `syntax-parsing`,
-  `hir-lowering` and `llvm-backend` once implemented
-- **Severity**: major. A documented construct of a closed sub-phase does not compile.
-
-The specification gives `.step(n)` as a method on any range, in three places: as a
-`for`-head adapter, in the list of adapters ranges implement alongside `.enumerate()` /
-`.map()` / `.filter()`, and as a tensor index (`tensor[(0..n).step(2)]`). The syntax
-summary lists both the range form and the tensor step-slice form. No range method named `step` exists in the
-compiler, so all of those spellings are rejected.
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    mut t = 0
-    for i in (0..6).step(2) { t = t + i }
-    t
-}
-```
-
-Expected: `6` (0 + 2 + 4). Observed: a compile error reporting that a range expression is
-only valid as the argument to `.slice()` or `.char_slice()`, followed by a cascaded
-`undefined variable 'i'`. The tensor-index form
-(`val s: Tensor<i32, [3]> = a[(0..6).step(2)]`) fails the same way.
-
-**Root cause**: there is no `step` method on a range at all. A range expression is accepted
-only in a `for` head and as the argument to `.slice()` / `.char_slice()`; any method call on
-one falls through to the diagnostic above. The diagnostic is accurate about what the checker
-supports and silent about the fact that the language defines the method.
-
-**Why this is filed rather than scheduled**: the roadmap item that adds `.rev()` to ranges
-has since shipped, and it named only `.rev()`. The `for`-head form of `.step(n)` belongs to
-a sub-phase that closed long before that, and the tensor-index half was deferred in the
-internal notes archive to an item whose text never grew to cover it. The roadmap's own
-spec-coverage rule says a deferral written in the prose of a closed item is not tracking,
-and that every construct a spec section names needs either an implementation or a checkbox
-of its own. `.step(n)` had neither until it was given a roadmap line of its own, which is
-where it is now scheduled.
-
-**Workaround**: write the stride into the loop body or the index arithmetic
-(`for i in 0..3 { val j = i * 2 ... }`).
-
-**Fix sketch**: feature-sized, not a surgical fix, so it is built from its roadmap line
-rather than in a bug-fix pass. Most of the shape is already there:
-`.rev()` is peeled in the parser as an innermost range form, ridden through as a flag on
-`Stmt::ForRange` and on `TensorIndexArg::Range`, and honoured by the counted-loop lowering
-and the tensor slice path. `.step(n)` is the same route with a stride instead of a flag,
-and the two compose (`.rev().step(n)`).
-
 ## BUG-030 — an element moved out of a `Vec` leaves the `Vec` owning it too
 
 - **Status**: open, confirmed

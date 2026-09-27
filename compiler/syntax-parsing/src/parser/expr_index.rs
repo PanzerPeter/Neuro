@@ -61,9 +61,11 @@ impl Parser {
 }
 
 /// Classify a parsed index expression. A range is peeled out of one layer of
-/// parentheses so `t[(0..3)]` names the same axis range as `t[0..3]`, and out of a
-/// `.rev()` call so `t[(0..3).rev()]` names that axis read back to front.
+/// parentheses so `t[(0..3)]` names the same axis range as `t[0..3]`, out of a
+/// `.rev()` call so `t[(0..3).rev()]` names that axis read back to front, and out of a
+/// `.step(n)` call so `t[(0..6).step(2)]` keeps every second position.
 fn index_argument_from(expr: Expr) -> TensorIndexArg {
+    let (expr, step) = strip_step(expr);
     let (expr, reversed) = strip_rev(expr);
     let expr = match expr {
         Expr::Paren(inner, _) if matches!(*inner, Expr::Range { .. }) => *inner,
@@ -80,6 +82,7 @@ fn index_argument_from(expr: Expr) -> TensorIndexArg {
             end,
             inclusive,
             reversed,
+            step,
             span,
         },
         other => TensorIndexArg::Position(other),
@@ -100,12 +103,45 @@ fn strip_rev(expr: Expr) -> (Expr, bool) {
         return (expr, false);
     }
     let receiver = object.as_ref().clone();
-    match &receiver {
-        Expr::Range { .. } => (receiver, true),
-        Expr::Paren(inner, _) if matches!(**inner, Expr::Range { .. }) => (receiver, true),
-        _ => (expr, false),
+    match names_range(&receiver) {
+        true => (receiver, true),
+        false => (expr, false),
     }
 }
 
-/// The range adapter an axis argument may wear.
+/// Split a `.step(n)` call off an axis argument, returning its receiver (still wearing
+/// any `.rev()`) and the stride. Like `strip_rev`, anything but a range underneath falls
+/// through unchanged, to be reported as the non-integer position it is.
+fn strip_step(expr: Expr) -> (Expr, Option<Box<Expr>>) {
+    let Expr::Call { func, args, .. } = &expr else {
+        return (expr, None);
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return (expr, None);
+    };
+    let [stride] = args.as_slice() else {
+        return (expr, None);
+    };
+    if field.name != STEP_METHOD {
+        return (expr, None);
+    }
+    let receiver = object.as_ref().clone();
+    let (under_rev, _) = strip_rev(receiver.clone());
+    if !names_range(&under_rev) {
+        return (expr, None);
+    }
+    (receiver, Some(Box::new(stride.clone())))
+}
+
+/// A range, bare or in one layer of parentheses.
+fn names_range(expr: &Expr) -> bool {
+    match expr {
+        Expr::Range { .. } => true,
+        Expr::Paren(inner, _) => matches!(**inner, Expr::Range { .. }),
+        _ => false,
+    }
+}
+
+/// The range adapters an axis argument may wear.
 const REV_METHOD: &str = "rev";
+const STEP_METHOD: &str = "step";

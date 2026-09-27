@@ -882,6 +882,15 @@ axis is the same reflection one level down: `copy_tensor_slice` maps result coor
 source `extent - 1 - c`, about the range's own extent, since the base offset already carries
 its start.
 
+A `.step(n)` head evaluates its stride once, before the loop, and aborts with `range step must
+be positive` unless it is (`codegen_range_stride`, in every build: a zero stride would never
+exit). The step block then leaves the loop when the distance still to go, `end - current` taken
+as an unsigned difference, is no more than the stride (less, for an inclusive range), before it
+adds: adding first would wrap `(0u8..255).step(10)` from 250 back to 4. A reversed stepped range
+keeps the same mirror, so its binding is `last - j * n`. A stepped slice axis maps result
+coordinate `c` to `c * step` along its walk, reflected about the range's last position when it
+is also reversed.
+
 ## Integer Overflow ABI
 Integer `+` / `-` / `*` and unary `-` honor the overflow rule, keyed off
 `OptimizationLevelSetting`:

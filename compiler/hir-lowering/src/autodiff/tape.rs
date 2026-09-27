@@ -46,6 +46,10 @@ const MAX_UNROLLED_ELEMENTS: usize = 1024;
 const RUN_TIME_TARGET: &str =
     "a function value chosen at run time; call each function directly where the choice is made";
 
+/// What a `.step(n)` whose stride is not a literal is refused as.
+const RUN_TIME_STRIDE: &str =
+    "a `.step(n)` whose stride is not an integer literal; write the stride as a literal";
+
 /// A tape operand.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Leaf {
@@ -367,6 +371,7 @@ struct ForRange<'a> {
     end: &'a HirExpr,
     inclusive: bool,
     reversed: bool,
+    step: Option<&'a HirExpr>,
 }
 
 /// The bindings one arm or loop body declares, so that leaving it can undo them.
@@ -680,6 +685,7 @@ impl<'f> Linearizer<'f> {
                 end,
                 inclusive,
                 reversed,
+                step,
                 body,
                 span,
                 ..
@@ -691,6 +697,7 @@ impl<'f> Linearizer<'f> {
                     end,
                     inclusive: *inclusive,
                     reversed: *reversed,
+                    step: step.as_deref(),
                 },
                 body,
                 *span,
@@ -865,6 +872,8 @@ impl<'f> Linearizer<'f> {
     /// read once, as the primal reads them. The counter never steps past `end`, so an
     /// inclusive range that ends at its type's maximum stops on a flag instead, and a
     /// reversed one counts up and mirrors the counter onto the binding, as the backend does.
+    /// A `.step(n)` head also stops on the flag, because a stride can carry the counter
+    /// past the type's maximum on either kind of range.
     fn for_range(
         &mut self,
         head: ForRange<'_>,
@@ -872,6 +881,10 @@ impl<'f> Linearizer<'f> {
         span: Span,
     ) -> Result<(), LoweringError> {
         let ty = &head.start.ty;
+        let stride = head
+            .step
+            .map(|step| constant_stride(step).ok_or_else(|| self.refuse(RUN_TIME_STRIDE, span)))
+            .transpose()?;
         let var = |name: &str, ty: &HirType| {
             HirExpr::new(HirExprKind::Variable(name.to_string()), ty.clone(), span)
         };
@@ -947,30 +960,65 @@ impl<'f> Linearizer<'f> {
             &counter,
             binary(BinaryOp::Add, var(&counter, ty), one(ty), ty),
         );
-        let condition = if head.inclusive {
-            let more = self.fresh();
-            let nonempty = binary(
-                BinaryOp::LessEqual,
-                var(&low, ty),
-                var(&high, ty),
-                &HirType::Bool,
-            );
-            self.stmt(&declare(&more, nonempty, true))?;
-            looped.push(HirStmt::If {
-                condition: binary(
-                    BinaryOp::Less,
-                    var(&counter, ty),
-                    var(&high, ty),
-                    &HirType::Bool,
-                ),
-                then_block: vec![step],
+        let within = match head.inclusive {
+            true => BinaryOp::LessEqual,
+            false => BinaryOp::Less,
+        };
+        let when =
+            |condition: HirExpr, then_block: Vec<HirStmt>, else_block: Vec<HirStmt>| HirStmt::If {
+                condition,
+                then_block,
                 else_if_blocks: Vec::new(),
-                else_block: Some(vec![assign(
-                    &more,
-                    literal(Literal::Boolean(false), &HirType::Bool),
-                )]),
+                else_block: Some(else_block),
                 span,
-            });
+            };
+        let condition = if head.inclusive || stride.is_some() {
+            let more = self.fresh();
+            let nonempty = binary(within, var(&low, ty), var(&high, ty), &HirType::Bool);
+            self.stmt(&declare(&more, nonempty, true))?;
+            let stop = || assign(&more, literal(Literal::Boolean(false), &HirType::Bool));
+            let advance = match stride {
+                None => when(
+                    binary(
+                        BinaryOp::Less,
+                        var(&counter, ty),
+                        var(&high, ty),
+                        &HirType::Bool,
+                    ),
+                    vec![step],
+                    vec![stop()],
+                ),
+                // `counter + n` overflows where the range ends near the type's top, so the
+                // test is `counter <= high - n`. That subtraction underflows when `high`
+                // lies within `n` of the type's minimum, and there no second value exists
+                // anyway, so it is formed only once `high` is known to clear that floor.
+                Some(n) => {
+                    let floor = integer_min(ty)
+                        .map(|min| literal(Literal::Integer(min + n, None), ty))
+                        .ok_or_else(|| self.malformed("a stepped range over a non-integer"))?;
+                    let n = literal(Literal::Integer(n, None), ty);
+                    let last_start = binary(BinaryOp::Subtract, var(&high, ty), n.clone(), ty);
+                    let stride_fits = when(
+                        binary(within, var(&counter, ty), last_start, &HirType::Bool),
+                        vec![assign(
+                            &counter,
+                            binary(BinaryOp::Add, var(&counter, ty), n, ty),
+                        )],
+                        vec![stop()],
+                    );
+                    when(
+                        binary(
+                            BinaryOp::GreaterEqual,
+                            var(&high, ty),
+                            floor,
+                            &HirType::Bool,
+                        ),
+                        vec![stride_fits],
+                        vec![stop()],
+                    )
+                }
+            };
+            looped.push(advance);
             var(&more, &HirType::Bool)
         } else {
             looped.push(step);
@@ -1791,6 +1839,27 @@ fn coordinates(mut flat: usize, extents: &[usize], span: Span) -> Vec<Leaf> {
         .collect()
 }
 
+/// A `.step(n)` stride the checker has already proved positive, when it is a literal.
+/// Only a literal is taken: the replay has no run-time guard to stop a zero stride.
+fn constant_stride(step: &HirExpr) -> Option<i128> {
+    match &step.kind {
+        HirExprKind::Literal(Literal::Integer(value, _)) if *value > 0 => Some(*value),
+        _ => None,
+    }
+}
+
+/// The least value of an integer type.
+fn integer_min(ty: &HirType) -> Option<i128> {
+    match ty {
+        HirType::I8 => Some(i8::MIN.into()),
+        HirType::I16 => Some(i16::MIN.into()),
+        HirType::I32 => Some(i32::MIN.into()),
+        HirType::I64 => Some(i64::MIN.into()),
+        HirType::U8 | HirType::U16 | HirType::U32 | HirType::U64 => Some(0),
+        _ => None,
+    }
+}
+
 /// The value of an integer literal array position.
 fn literal_position(index: &HirExpr) -> Option<usize> {
     match &index.kind {
@@ -1832,15 +1901,16 @@ fn slice_sources(object_ty: &HirType, axes: &[HirTensorAxis]) -> Option<Vec<usiz
                 start,
                 end,
                 reversed,
+                step,
             } => {
-                if start > end || end > extent {
+                if start > end || end > extent || *step == 0 {
                     return None;
                 }
                 let mut along: Vec<usize> = (*start..*end).collect();
                 if *reversed {
                     along.reverse();
                 }
-                along
+                along.into_iter().step_by(*step).collect()
             }
         };
         visits.push(along);

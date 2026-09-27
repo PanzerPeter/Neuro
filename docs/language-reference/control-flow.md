@@ -528,6 +528,36 @@ value the range holds.
 A range index into a tensor takes `.rev()` too, reading that axis back to front;
 see [Slicing and indexing](tensors.md#slicing-and-indexing).
 
+### Striding: `.step(n)`
+
+`.step(n)` on a range keeps every `n`th value of the walk. Like `.rev()` it applies
+to a parenthesised range only, and `.rev()` goes beneath it: the reversed walk
+starts at the last value and strides down.
+
+```neuro
+for i in (0..10).step(3) {
+    // i takes values 0, 3, 6, 9
+}
+
+for i in (0..=12).step(4) {
+    // 0, 4, 8, 12: an inclusive range still yields a bound the stride lands on
+}
+
+for i in (0..10).rev().step(3) {
+    // 9, 6, 3, 0
+}
+```
+
+The stride is an integer of the range's own type and must be positive. A constant
+stride below one is a compile error; a stride computed at run time is checked when
+the loop starts, and a zero one panics rather than looping forever. The loop never
+adds past its bound, so `(0u8..255u8).step(10)` ends at `250` instead of wrapping.
+The other order, `(a..b).step(n).rev()`, walks different values and is rejected;
+write `.rev().step(n)`.
+
+`.step(n)` sits beneath the adapters and `.enumerate()` exactly as `.rev()` does,
+and a tensor index takes it too (`t[(0..n).step(2)]`).
+
 ### Iterating with a Position: `.enumerate()`
 
 A `for` head may bind a pair instead of a single variable when the iterable ends

@@ -204,6 +204,10 @@ pub enum Stmt {
     /// `reversed` is the `.rev()` head form: the same bounds, walked from the last
     /// value down to `start`. It decorates the range itself rather than the element
     /// stream, so it sits beneath every adapter in `adapters` and beneath `index`.
+    ///
+    /// `step` is the `.step(n)` head form: every `n`th value of the (possibly
+    /// reversed) walk. It sits directly above `reversed`, so `(a..b).rev().step(n)`
+    /// strides down from the last value.
     ForRange {
         label: Option<Identifier>,
         index: Option<Identifier>,
@@ -212,6 +216,7 @@ pub enum Stmt {
         end: Expr,
         inclusive: bool,
         reversed: bool,
+        step: Option<Box<Expr>>,
         adapters: Vec<LoopAdapter>,
         body: Vec<Stmt>,
         span: Span,

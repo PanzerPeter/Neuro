@@ -474,9 +474,16 @@ fn stmt_retains(stmt: &HirStmt, name: &Param) -> bool {
             condition, body, ..
         } => retains(condition, name) || body.iter().any(|s| stmt_retains(s, name)),
         HirStmt::ForRange {
-            start, end, body, ..
+            start,
+            end,
+            step,
+            body,
+            ..
         } => {
-            retains(start, name) || retains(end, name) || body.iter().any(|s| stmt_retains(s, name))
+            retains(start, name)
+                || retains(end, name)
+                || step.as_ref().is_some_and(|step| retains(step, name))
+                || body.iter().any(|s| stmt_retains(s, name))
         }
         HirStmt::ForEach { iterable, body, .. } => {
             retains(iterable, name) || body.iter().any(|s| stmt_retains(s, name))
@@ -786,10 +793,17 @@ fn walk_stmts(stmts: &[HirStmt], visit: &mut impl FnMut(&HirExpr)) {
                 walk_stmts(body, visit);
             }
             HirStmt::ForRange {
-                start, end, body, ..
+                start,
+                end,
+                step,
+                body,
+                ..
             } => {
                 walk(start, visit);
                 walk(end, visit);
+                if let Some(step) = step {
+                    walk(step, visit);
+                }
                 walk_stmts(body, visit);
             }
             HirStmt::ForEach { iterable, body, .. } => {

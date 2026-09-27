@@ -227,6 +227,12 @@ pub enum TypeError {
     #[error("the bounds of a tensor slice must be compile-time constants, because the sliced shape is part of the result's type; write literal bounds, or index one position with a runtime value")]
     TensorSliceBoundNotConstant { span: Span },
 
+    #[error("the stride of a tensor slice's `.step(n)` must be a compile-time constant, because the sliced extent is part of the result's type; write a literal stride")]
+    TensorSliceStepNotConstant { span: Span },
+
+    #[error("`.step(n)` must be a positive integer, found {step}; to walk a range downward, reverse it first, as in `(0..n).rev().step(2)`")]
+    RangeStepNotPositive { step: i128, span: Span },
+
     #[error("the slice `{start}..{end}` does not name a sub-range of axis {axis}, whose extent is {extent}; a slice runs forward and stops at the extent")]
     TensorSliceOutOfRange {
         start: i128,
@@ -715,7 +721,7 @@ pub enum TypeError {
     )]
     BreakValueInUnitLoop { span: Span },
 
-    #[error("for-range bound must be an integer type, found {found}")]
+    #[error("a for-range bound or `.step(n)` stride must be an integer type, found {found}")]
     InvalidForRangeType { found: Type, span: Span },
 
     #[error("name '{name}' contains '__', which is reserved for compiler-generated symbols; use a single underscore")]
@@ -1227,6 +1233,8 @@ impl TypeError {
             | Self::TensorIndexRankMismatch { span, .. }
             | Self::TensorIndexOutOfBounds { span, .. }
             | Self::TensorSliceBoundNotConstant { span, .. }
+            | Self::TensorSliceStepNotConstant { span, .. }
+            | Self::RangeStepNotPositive { span, .. }
             | Self::TensorSliceOutOfRange { span, .. }
             | Self::TensorIndexOnNonTensor { span, .. }
             | Self::AssignToTensorSlice { span }

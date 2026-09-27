@@ -237,12 +237,16 @@ fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
         Stmt::ForRange {
             start,
             end,
+            step,
             adapters,
             body,
             ..
         } => {
             walk_expr(start, f)?;
             walk_expr(end, f)?;
+            if let Some(step) = step {
+                walk_expr(step, f)?;
+            }
             for adapter in adapters {
                 walk_expr(&mut adapter.callee, f)?;
             }
@@ -305,9 +309,14 @@ fn walk_place(place: &mut Place, f: SiteFn) -> Result<(), ModuleError> {
             for index in indices {
                 match index {
                     TensorIndexArg::Position(expr) => walk_expr(expr, f)?,
-                    TensorIndexArg::Range { start, end, .. } => {
+                    TensorIndexArg::Range {
+                        start, end, step, ..
+                    } => {
                         walk_expr(start, f)?;
                         walk_expr(end, f)?;
+                        if let Some(step) = step {
+                            walk_expr(step, f)?;
+                        }
                     }
                     TensorIndexArg::FullAxis(_) => {}
                 }
@@ -441,9 +450,14 @@ fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
             for index in indices {
                 match index {
                     TensorIndexArg::Position(expr) => walk_expr(expr, f)?,
-                    TensorIndexArg::Range { start, end, .. } => {
+                    TensorIndexArg::Range {
+                        start, end, step, ..
+                    } => {
                         walk_expr(start, f)?;
                         walk_expr(end, f)?;
+                        if let Some(step) = step {
+                            walk_expr(step, f)?;
+                        }
                     }
                     TensorIndexArg::FullAxis(_) => {}
                 }

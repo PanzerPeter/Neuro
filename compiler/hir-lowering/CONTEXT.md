@@ -176,7 +176,11 @@ short circuit), calls to user functions and through function values with a known
 statement or an expression, an early `return` ending an arm of a top-level `if`, `while`, and
 `for` over a range, which `for_range` rewrites into the counted `while` it is (bounds read once;
 an inclusive range stops on a flag rather than stepping past its end, and a reversed one counts up
-and mirrors the counter onto the binding, as the backend's own loop does).
+and mirrors the counter onto the binding, as the backend's own loop does). A `.step(n)` head
+stops on the same flag and advances only while `counter <= high - n` (strictly less for an
+exclusive range), forming `high - n` only once `high` clears the type's minimum plus `n`, so no
+test overflows. Its stride must be an integer literal: the replay has no run-time guard to stop a
+zero one, so any other stride is refused.
 Anything else, inactive or not, is
 `LoweringError::NotDifferentiable { function, construct, span }`, the one user-facing variant of
 this enum: the transform owns its rule set, so it is the one place that can say precisely what
@@ -517,8 +521,9 @@ compiler bug, not a diagnostic.
   indices, so the notation stops existing here and no backend parses a string. The operands
   are left alone rather than moved: a contraction reads them, so borrowed ones lower here too.
   Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
-  the constant the checker already proved it to be (`HirTensorAxis::Range { start, end, reversed }`, with
-  a `..` full axis becoming the whole extent and an inclusive range stopping one further on),
+  the constant the checker already proved it to be (`HirTensorAxis::Range { start, end, reversed, step }`, with
+  a `..` full axis becoming the whole extent at step 1, an inclusive range stopping one further
+  on, and a `.step(n)` stride folded the same way, dividing the surviving extent rounded up),
   lowers a position as an ordinary expression, and computes the result type by dropping every
   axis given a position along with its name, keeping the name of every axis that survives. Both index spellings reach it: `Expr::TensorIndex`, and the
   one-argument `Expr::Index` whose object lowered to a tensor.
@@ -526,9 +531,10 @@ compiler bug, not a diagnostic.
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it
   too, or a closure in the body captures it.
-- **Reversed ranges**: `ForRange`'s `reversed` flag rides through untouched, to the adapted
-  lowering as well as the plain one. Nothing about the bounds, the element type, or the body
-  changes with it; the direction is a backend traversal decision.
+- **Reversed and stepped ranges**: `ForRange`'s `reversed` flag and `step` ride through to the
+  adapted lowering as well as the plain one, the stride lowered against the range's element type.
+  Nothing about the bounds, the element type, or the body changes with them; the walk is a
+  backend traversal decision.
 - **Tuples**: `resolve_type` gives `HirType::Tuple`; a literal is typed by lowering each element
   (hinted by the expected tuple's element type when annotated) and `t.N` reads the N-th element
   type off the auto-derefed tuple type. Destructuring is parser-desugared.

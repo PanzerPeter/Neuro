@@ -4,4 +4,6 @@ tail newest-first  = 12 10 8
 weighted replay    = 182
 even frames        = 4 2 0 
 first below six    = index 5
+every other frame  = 12 8 4
+sampled weighted   = 70
 answer             = 79

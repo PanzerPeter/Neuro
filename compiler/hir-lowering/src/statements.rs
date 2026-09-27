@@ -170,17 +170,22 @@ impl Lowerer {
                 end,
                 inclusive,
                 reversed,
+                step,
                 adapters,
                 body,
                 span,
             } => {
                 let start = self.lower_expr(start, None)?;
                 let end = self.lower_expr(end, Some(&start.ty))?;
+                let step = step
+                    .as_ref()
+                    .map(|step| self.lower_expr(step, Some(&start.ty)).map(Box::new))
+                    .transpose()?;
                 let iter_ty = start.ty.clone();
                 if !adapters.is_empty() {
                     return self.lower_adapted_for_range(
-                        label, index, iterator, start, end, *inclusive, *reversed, adapters, body,
-                        *span,
+                        label, index, iterator, start, end, *inclusive, *reversed, step, adapters,
+                        body, *span,
                     );
                 }
                 let index_name = index.as_ref().map(|i| i.name.clone());
@@ -199,6 +204,7 @@ impl Lowerer {
                     end,
                     inclusive: *inclusive,
                     reversed: *reversed,
+                    step,
                     body,
                     span: *span,
                 })

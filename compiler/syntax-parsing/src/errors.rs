@@ -75,6 +75,12 @@ pub enum ParseError {
     #[error("`.rev()` reverses a range, so its receiver must be one: write `(start..end).rev()`")]
     RevOnNonRange { span: Span },
 
+    #[error("`.step(n)` strides over a range, so its receiver must be one: write `(start..end).step(n)`, or `(start..end).rev().step(n)` to stride down")]
+    StepOnNonRange { span: Span },
+
+    #[error("`.step()` takes exactly one argument: the positive stride, as in `(0..n).step(2)`")]
+    StepArity { span: Span },
+
     #[error("a `[...]` shape argument is only valid on a tensor type; `{name}` takes type or const arguments, as in `{name}<i32>`")]
     ShapeArgumentOnNonTensor { name: String, span: Span },
 

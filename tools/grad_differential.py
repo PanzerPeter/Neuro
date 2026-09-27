@@ -946,6 +946,37 @@ func counted_loops(w: &mut Tensor<f32, [3]>) -> Tensor<f32, []> {
         lambda a, b, c: (2.0 * a + 2.0, 2.0 * b + 3.5, 2.0 * c + 5.25),
     ),
     TensorCase(
+        "stepped",
+        """
+@grad
+func stepped(w: &mut Tensor<f32, [6]>) -> Tensor<f32, []> {
+    mut s = 0.0f32
+    for i in (0..6).step(2) {
+        s = s + w[i] * w[i]
+    }
+    mut acc = 0.0f32
+    for j in (0..6).rev().step(2) {
+        acc = acc * 0.5 + w[j]
+    }
+    mut t = 0.0f32
+    for k in (1..=5).step(4) {
+        t = t + w[k] * 3.0
+    }
+    val odds = w[(1..6).step(2)]
+    val back = w[(0..6).rev().step(3)]
+    val weights: Tensor<f32, [3]> = [1.0, -2.0, 0.5]
+    val pair: Tensor<f32, [2]> = [2.0, -1.0]
+    return Tensor::scalar(s + acc + t + (odds * weights).sum() + (back * pair).sum())
+}
+""",
+        (6,),
+        (1.25, -0.5, 2.0, 1.5, -1.25, 0.75),
+        # s = w0^2 + w2^2 + w4^2; the reversed stride visits 5, 3, 1, so Horner's rule
+        # gives acc = w1 + w3 / 2 + w5 / 4; the inclusive stride lands on its bound, so
+        # t = 3 w1 + 3 w5; odds = (w1, w3, w5) and back = (w5, w2) meet their weights.
+        lambda a, b, c, d, e, f: (2.0 * a, 5.0, 2.0 * c - 1.0, -1.5, 2.0 * e, 5.75),
+    ),
+    TensorCase(
         "through_calls",
         """
 func squared_norm(x: &Tensor<f32, [3]>) -> f32 {

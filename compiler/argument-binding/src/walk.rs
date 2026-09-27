@@ -168,6 +168,7 @@ impl Walker<'_, '_> {
             Stmt::ForRange {
                 start,
                 end,
+                step,
                 adapters,
                 body,
                 index,
@@ -176,6 +177,9 @@ impl Walker<'_, '_> {
             } => {
                 self.expr(start);
                 self.expr(end);
+                if let Some(step) = step {
+                    self.expr(step);
+                }
                 for adapter in adapters {
                     self.expr(&mut adapter.callee);
                 }
@@ -258,9 +262,14 @@ impl Walker<'_, '_> {
         for index in indices {
             match index {
                 TensorIndexArg::Position(expr) => self.expr(expr),
-                TensorIndexArg::Range { start, end, .. } => {
+                TensorIndexArg::Range {
+                    start, end, step, ..
+                } => {
                     self.expr(start);
                     self.expr(end);
+                    if let Some(step) = step {
+                        self.expr(step);
+                    }
                 }
                 TensorIndexArg::FullAxis(_) => {}
             }

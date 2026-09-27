@@ -53,8 +53,11 @@ impl Lowerer {
         let extents = crate::static_extents(&shape)?;
         for (position, (index, extent)) in indices.iter().zip(extents.iter()).enumerate() {
             let axis = self.lower_tensor_axis(index, *extent)?;
-            if let HirTensorAxis::Range { start, end, .. } = &axis {
-                kept.push(end - start);
+            if let HirTensorAxis::Range {
+                start, end, step, ..
+            } = &axis
+            {
+                kept.push((end - start).div_ceil(*step));
                 kept_names.push(names.0.get(position).cloned().flatten());
             }
             axes.push(axis);
@@ -89,6 +92,7 @@ impl Lowerer {
                 start: 0,
                 end: extent,
                 reversed: false,
+                step: 1,
             }),
             TensorIndexArg::Position(expr) => {
                 Ok(HirTensorAxis::Position(self.lower_expr(expr, None)?))
@@ -98,16 +102,30 @@ impl Lowerer {
                 end,
                 inclusive,
                 reversed,
+                step,
                 ..
             } => {
                 let start = const_int(start)?;
                 let end = const_int(end)?;
                 // An inclusive range names its last position, so it stops one further on.
                 let end = if *inclusive { end + 1 } else { end };
+                let step = match step {
+                    None => 1,
+                    Some(step) => {
+                        const_int(step)
+                            .ok()
+                            .filter(|step| *step > 0)
+                            .ok_or_else(|| LoweringError::Malformed {
+                                detail: "a tensor slice stride is not a positive constant"
+                                    .to_string(),
+                            })?
+                    }
+                };
                 Ok(HirTensorAxis::Range {
                     start,
                     end,
                     reversed: *reversed,
+                    step,
                 })
             }
         }

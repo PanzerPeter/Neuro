@@ -10,6 +10,9 @@ use crate::types::Type;
 
 use super::context::CodegenContext;
 
+/// The panic a `.step(n)` whose run-time stride is zero or negative aborts with.
+const RANGE_STEP_NOT_POSITIVE: &str = "range step must be positive";
+
 /// Everything a counted range loop needs but its body.
 ///
 /// `index` names the position binding of `(start..end).enumerate()`: it counts
@@ -24,6 +27,8 @@ pub(crate) struct ForRangeHead<'a> {
     pub(crate) inclusive: bool,
     /// `.rev()`: the same bounds walked from the last value down to `start`.
     pub(crate) reversed: bool,
+    /// `.step(n)`: the stride of that walk, of the range's own type.
+    pub(crate) step: Option<&'a HirExpr>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -647,6 +652,62 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(CodegenError::from)
     }
 
+    /// Evaluate a `.step(n)` stride once, before the loop, and abort unless it is
+    /// positive: a zero stride would never leave the loop, and the language defines no
+    /// meaning for a negative one (`.rev()` is how a range walks down).
+    fn codegen_range_stride(
+        &mut self,
+        step: &HirExpr,
+        element: &Type,
+    ) -> CodegenResult<inkwell::values::IntValue<'ctx>> {
+        let stride = self.codegen_expr(step)?.into_int_value();
+        let zero = stride.get_type().const_zero();
+        let predicate = match TypeMapper::is_unsigned_int(element) {
+            true => IntPredicate::NE,
+            false => IntPredicate::SGT,
+        };
+        let positive = self
+            .builder
+            .build_int_compare(predicate, stride, zero, "for.step.ok")?;
+        self.codegen_guard_or_panic(positive, RANGE_STEP_NOT_POSITIVE, step.span.start)?;
+        Ok(stride)
+    }
+
+    /// Leave a stepped loop when no further value fits in the range.
+    ///
+    /// Adding the stride first and comparing after is wrong near the top of the type:
+    /// `(0u8..255).step(10)` would wrap from 250 back to 4 and never exit. The distance
+    /// still to go is compared instead. `end - current` is taken as an unsigned
+    /// difference, which is exact even for a signed range whose width exceeds its
+    /// type's maximum, because the loop only reaches here with `current` inside the range.
+    fn exit_when_stride_overshoots(
+        &mut self,
+        current: inkwell::values::IntValue<'ctx>,
+        end: inkwell::values::IntValue<'ctx>,
+        stride: inkwell::values::IntValue<'ctx>,
+        inclusive: bool,
+        exit_bb: inkwell::basic_block::BasicBlock<'ctx>,
+    ) -> CodegenResult<()> {
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
+        let remaining = self.builder.build_int_sub(end, current, "for.step.left")?;
+        // An inclusive range may still yield `end` itself, so a stride landing exactly on
+        // it continues; an exclusive one must land strictly short of `end`.
+        let overshoots = match inclusive {
+            true => IntPredicate::ULT,
+            false => IntPredicate::ULE,
+        };
+        let done =
+            self.builder
+                .build_int_compare(overshoots, remaining, stride, "for.step.done")?;
+        let advance_bb = self.context.append_basic_block(parent_fn, "for.advance");
+        self.builder
+            .build_conditional_branch(done, exit_bb, advance_bb)?;
+        self.builder.position_at_end(advance_bb);
+        Ok(())
+    }
+
     /// Generate code for a for-range statement (`for i in start..end { ... }`).
     pub(crate) fn codegen_for_range(
         &mut self,
@@ -661,6 +722,7 @@ impl<'ctx> CodegenContext<'ctx> {
             end,
             inclusive,
             reversed,
+            step,
         } = head;
         let parent_fn = self
             .current_function
@@ -669,6 +731,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let iter_sem_ty = Type::from_hir(&start.ty);
         let start_val = self.codegen_expr(start)?;
         let end_val = self.codegen_expr(end)?;
+        let stride = step
+            .map(|step| self.codegen_range_stride(step, &iter_sem_ty))
+            .transpose()?;
         let iter_name = iterator.to_string();
         // Record the iterator's type so a body place statement can recover it.
         self.type_env.insert(iter_name.clone(), iter_sem_ty.clone());
@@ -807,10 +872,13 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_load(start_val.get_type(), induction_alloca, "for.cur")?
             .into_int_value();
-        let one = current_iter.get_type().const_int(1, false);
+        if let Some(stride) = stride {
+            self.exit_when_stride_overshoots(current_iter, end_int, stride, inclusive, exit_bb)?;
+        }
+        let increment = stride.unwrap_or_else(|| current_iter.get_type().const_int(1, false));
         let next_iter = self
             .builder
-            .build_int_add(current_iter, one, "for.next")
+            .build_int_add(current_iter, increment, "for.next")
             .map_err(|e| CodegenError::LlvmError(format!("failed to increment iterator: {}", e)))?;
         self.builder
             .build_store(induction_alloca, next_iter)
@@ -902,6 +970,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 end,
                 inclusive,
                 reversed,
+                step,
                 body,
                 ..
             } => self.codegen_for_range(
@@ -913,6 +982,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     end,
                     inclusive: *inclusive,
                     reversed: *reversed,
+                    step: step.as_deref(),
                 },
                 body,
             ),
