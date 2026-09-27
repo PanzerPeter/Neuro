@@ -62,6 +62,16 @@ def find_c_compiler():
 
 C_COMPILER = find_c_compiler()
 
+# On Windows `neurc` emits MSVC-target objects, which probe any stack frame over a page
+# through `__chkstk`. The MinGW `cc` that links them has no such symbol, only libgcc's
+# `___chkstk_ms`, the same probe under the MinGW name (size in RAX, RSP left alone). `-u`
+# pulls it out of libgcc and `--defsym` answers the MSVC name with it.
+PLATFORM_LINK_FLAGS = (
+    ["-Wl,-u,___chkstk_ms", "-Wl,--defsym,__chkstk=___chkstk_ms"]
+    if sys.platform == "win32"
+    else []
+)
+
 
 class Case:
     """One Neuro function and the NumPy expression it must agree with.
@@ -361,7 +371,7 @@ def build_library(neurc, work_dir):
 
     library_path = work_dir / "libdlpack_cases.so"
     link_result = subprocess.run(
-        [C_COMPILER, "-shared", "-o", str(library_path), str(object_path), "-lm"],
+        [C_COMPILER, "-shared", "-o", str(library_path), str(object_path), "-lm", *PLATFORM_LINK_FLAGS],
         capture_output=True,
         text=True,
     )

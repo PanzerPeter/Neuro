@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.2] - 2026-09-27
+
+### Fixed
+
+- The gradient and DLPack differential harnesses link on Windows again. `neurc` emits
+  MSVC-target objects there, which call `__chkstk` for any stack frame over a page, and the
+  MinGW `cc` the harnesses link with only provides the same probe as `___chkstk_ms`. The link
+  step now aliases one to the other.
+
 ## [3.15.1] - 2026-09-27
 
 ### Docs
