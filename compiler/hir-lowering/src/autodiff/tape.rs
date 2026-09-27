@@ -28,7 +28,7 @@ use shared_types::{Literal, Span};
 
 use super::emit::{self, tensor_parts};
 use super::{FieldPath, PathStep, WrtField, RECEIVER};
-use crate::LoweringError;
+use crate::{is_full_float, is_integer, is_numeric, LoweringError};
 
 /// The prefix of every name the tape generates. User names may not contain `__`, so no
 /// generated name can shadow a binding the body declared.
@@ -1676,28 +1676,6 @@ fn is_arithmetic(op: BinaryOp) -> bool {
     )
 }
 
-fn is_float(ty: &HirType) -> bool {
-    matches!(ty, HirType::F32 | HirType::F64)
-}
-
-fn is_integer(ty: &HirType) -> bool {
-    matches!(
-        ty,
-        HirType::I8
-            | HirType::I16
-            | HirType::I32
-            | HirType::I64
-            | HirType::U8
-            | HirType::U16
-            | HirType::U32
-            | HirType::U64
-    )
-}
-
-fn is_numeric(ty: &HirType) -> bool {
-    is_float(ty) || is_integer(ty)
-}
-
 /// Whether a field read of `ty` is a copy the replay can take as the primal did: a
 /// number, a `bool` or a `char`, all `Copy`.
 /// The receiver of `expr` when `expr` is `receiver.clone()` on a tensor.
@@ -1788,8 +1766,8 @@ fn is_scalar(ty: &HirType) -> bool {
 /// Whether a value of `ty` has a derivative: a float, or a tensor of floats.
 fn is_float_valued(ty: &HirType) -> bool {
     match ty.referent() {
-        HirType::Tensor { element, .. } => is_float(element),
-        other => is_float(other),
+        HirType::Tensor { element, .. } => is_full_float(element),
+        other => is_full_float(other),
     }
 }
 
@@ -1798,9 +1776,9 @@ fn is_float_valued(ty: &HirType) -> bool {
 fn is_slot_type(ty: &HirType) -> bool {
     match ty {
         HirType::Tensor { element, shape, .. } => {
-            is_float(element) && shape.iter().all(Option::is_some)
+            is_full_float(element) && shape.iter().all(Option::is_some)
         }
-        other => is_float(other) || is_integer(other) || *other == HirType::Bool,
+        other => is_full_float(other) || is_integer(other) || *other == HirType::Bool,
     }
 }
 

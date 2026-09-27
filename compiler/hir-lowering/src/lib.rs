@@ -431,7 +431,7 @@ fn param_names(func: &ast_types::FunctionDef) -> Vec<String> {
 }
 
 /// Whether `t` is a signed or unsigned integer type.
-fn is_integer(t: &HirType) -> bool {
+pub(crate) fn is_integer(t: &HirType) -> bool {
     matches!(
         t,
         HirType::I8
@@ -447,8 +447,19 @@ fn is_integer(t: &HirType) -> bool {
 
 /// Whether `t` is a full-precision float (`f32`/`f64`). Half-precision is excluded,
 /// matching the checker's contextual-inference predicate.
-fn is_full_float(t: &HirType) -> bool {
+pub(crate) fn is_full_float(t: &HirType) -> bool {
     matches!(t, HirType::F32 | HirType::F64)
+}
+
+/// Whether `t` is a numeric type usable with `-` / arithmetic (integer or
+/// full-precision float). Half-precision is excluded.
+pub(crate) fn is_numeric(t: &HirType) -> bool {
+    is_integer(t) || is_full_float(t)
+}
+
+/// A checker escape: a construct the type checker should have rejected reached lowering.
+pub(crate) fn malformed(detail: String) -> LoweringError {
+    LoweringError::Malformed { detail }
 }
 
 /// Whether `t` is `string` or a borrow of `string` (`&string` slice). Used to detect

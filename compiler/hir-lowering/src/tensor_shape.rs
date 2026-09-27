@@ -15,7 +15,7 @@ use ast_types::{BinaryOp, Expr, UnaryOp};
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::{Literal, Span};
 
-use crate::{Lowerer, LoweringError};
+use crate::{malformed, Lowerer, LoweringError};
 
 pub(crate) const TRANSPOSE_METHOD: &str = "t";
 pub(crate) const RESHAPE_METHOD: &str = "reshape";
@@ -39,10 +39,6 @@ struct ShapeCast {
     shape: Vec<usize>,
     names: AxisNames,
     permutation: Option<Vec<usize>>,
-}
-
-fn malformed(detail: String) -> LoweringError {
-    LoweringError::Malformed { detail }
 }
 
 impl Lowerer {

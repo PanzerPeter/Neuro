@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.1] - 2026-09-27
+
+### Changed
+
+- `neurc compile` now writes the intermediate object file into a temporary directory that
+  is removed once linking finishes, including when the link fails. Before, it was kept
+  in the system temp directory whenever linking failed.
+- The release smoke test is now an inline CI step (compile two examples with the release
+  `neurc`, check their exit codes) instead of a Python script, and the per-OS artifact
+  upload steps are one step.
+
+### Removed
+
+- The `unicode-ident` dependency and the unused `Lexer` type from `lexical-analysis`. The
+  logos identifier regex already applies Unicode XID rules; `tokenize()` is the slice's
+  only entry point.
+- Duplicate helpers in the compiler: type predicates in `hir-lowering` and `semantic-analysis`
+  that repeated ones already defined, `TypeMapper` wrappers over `Type` methods, and a
+  hand-written zero constant that inkwell already provides. The constant folder's
+  float-to-integer cast now uses Rust's saturating `as`, which has the same semantics as
+  `llvm.fpto{s,u}i.sat`.
+
 ## [3.19.0] - 2026-09-27
 
 ### Changed

@@ -333,7 +333,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor element is an integer or a float".to_string(),
             ));
         };
-        let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element);
+        let unsigned = element.is_unsigned_int();
         Ok(self
             .codegen_int_arith(
                 ast_types::BinaryOp::Multiply,
@@ -365,7 +365,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor element is an integer or a float".to_string(),
             ));
         };
-        let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element);
+        let unsigned = element.is_unsigned_int();
         Ok(self
             .codegen_int_arith(
                 ast_types::BinaryOp::Add,

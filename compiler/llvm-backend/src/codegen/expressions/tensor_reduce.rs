@@ -280,7 +280,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_float_add(a, b, "tensor.reduce.add")?
                 .into()),
             (HirReduceOp::Sum, BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) => {
-                let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element);
+                let unsigned = element.is_unsigned_int();
                 Ok(self
                     .codegen_int_arith(
                         ast_types::BinaryOp::Add,

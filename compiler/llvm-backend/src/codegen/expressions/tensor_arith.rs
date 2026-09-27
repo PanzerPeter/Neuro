@@ -749,7 +749,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor element is an integer or a float".to_string(),
             ));
         };
-        let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element_ty);
+        let unsigned = element_ty.is_unsigned_int();
         let value = match op {
             BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply => {
                 self.codegen_int_arith(op, a, b, unsigned, offset, "tensor.op.arith")?

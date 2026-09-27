@@ -8,7 +8,6 @@ use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
 /// The diagnostic a debug-build arithmetic overflow panics with.
@@ -538,13 +537,13 @@ impl<'ctx> CodegenContext<'ctx> {
         match op {
             // Arithmetic operators
             BinaryOp::Add => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_add(lhs.into_float_value(), rhs.into_float_value(), "addtmp")?
                         .into())
                 } else {
-                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
+                    let unsigned = left_ty.is_unsigned_int();
                     Ok(self
                         .codegen_int_arith(
                             BinaryOp::Add,
@@ -558,13 +557,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::Subtract => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_sub(lhs.into_float_value(), rhs.into_float_value(), "subtmp")?
                         .into())
                 } else {
-                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
+                    let unsigned = left_ty.is_unsigned_int();
                     Ok(self
                         .codegen_int_arith(
                             BinaryOp::Subtract,
@@ -578,13 +577,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::Multiply => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_mul(lhs.into_float_value(), rhs.into_float_value(), "multmp")?
                         .into())
                 } else {
-                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
+                    let unsigned = left_ty.is_unsigned_int();
                     Ok(self
                         .codegen_int_arith(
                             BinaryOp::Multiply,
@@ -598,13 +597,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::Divide => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_div(lhs.into_float_value(), rhs.into_float_value(), "divtmp")?
                         .into())
                 } else {
-                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
+                    let unsigned = left_ty.is_unsigned_int();
                     Ok(self
                         .codegen_int_div_rem(
                             BinaryOp::Divide,
@@ -618,13 +617,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::Modulo => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_rem(lhs.into_float_value(), rhs.into_float_value(), "modtmp")?
                         .into())
                 } else {
-                    let unsigned = TypeMapper::is_unsigned_int(left_ty);
+                    let unsigned = left_ty.is_unsigned_int();
                     Ok(self
                         .codegen_int_div_rem(
                             BinaryOp::Modulo,
@@ -640,7 +639,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
             // Comparison operators (string equality handled above the coercion)
             BinaryOp::Equal => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -663,7 +662,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::NotEqual => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -686,7 +685,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::Less => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -696,7 +695,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             "lttmp",
                         )?
                         .into())
-                } else if TypeMapper::is_unsigned_int(left_ty) {
+                } else if left_ty.is_unsigned_int() {
                     // Unsigned less than comparison
                     Ok(self
                         .builder
@@ -721,7 +720,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::Greater => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -731,7 +730,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             "gttmp",
                         )?
                         .into())
-                } else if TypeMapper::is_unsigned_int(left_ty) {
+                } else if left_ty.is_unsigned_int() {
                     // Unsigned greater than comparison
                     Ok(self
                         .builder
@@ -756,7 +755,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::LessEqual => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -766,7 +765,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             "letmp",
                         )?
                         .into())
-                } else if TypeMapper::is_unsigned_int(left_ty) {
+                } else if left_ty.is_unsigned_int() {
                     // Unsigned less than or equal comparison
                     Ok(self
                         .builder
@@ -791,7 +790,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             BinaryOp::GreaterEqual => {
-                if TypeMapper::is_float_type(left_ty) {
+                if left_ty.is_float() {
                     Ok(self
                         .builder
                         .build_float_compare(
@@ -801,7 +800,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             "getmp",
                         )?
                         .into())
-                } else if TypeMapper::is_unsigned_int(left_ty) {
+                } else if left_ty.is_unsigned_int() {
                     // Unsigned greater than or equal comparison
                     Ok(self
                         .builder

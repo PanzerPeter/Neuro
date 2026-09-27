@@ -409,7 +409,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let elem_llvm = self.collection_value_type(element_ty)?;
         let slot_alloca = self.entry_alloca(elem_llvm, "vec.read")?;
-        self.builder.build_store(slot_alloca, zero_of(elem_llvm))?;
+        self.builder
+            .build_store(slot_alloca, elem_llvm.const_zero())?;
 
         let read_bb = self.context.append_basic_block(parent_fn, "vec.read.do");
         let done_bb = self.context.append_basic_block(parent_fn, "vec.read.done");
@@ -547,18 +548,5 @@ pub(super) fn collection_args(ty: &Type) -> CodegenResult<&[Type]> {
             "expected a collection type, found {:?}",
             other
         ))),
-    }
-}
-
-/// The all-zero value of an LLVM type, used as the discarded payload of a `None`.
-fn zero_of(ty: inkwell::types::BasicTypeEnum<'_>) -> BasicValueEnum<'_> {
-    match ty {
-        inkwell::types::BasicTypeEnum::IntType(t) => t.const_zero().into(),
-        inkwell::types::BasicTypeEnum::FloatType(t) => t.const_zero().into(),
-        inkwell::types::BasicTypeEnum::PointerType(t) => t.const_null().into(),
-        inkwell::types::BasicTypeEnum::StructType(t) => t.const_zero().into(),
-        inkwell::types::BasicTypeEnum::ArrayType(t) => t.const_zero().into(),
-        inkwell::types::BasicTypeEnum::VectorType(t) => t.const_zero().into(),
-        inkwell::types::BasicTypeEnum::ScalableVectorType(t) => t.const_zero().into(),
     }
 }

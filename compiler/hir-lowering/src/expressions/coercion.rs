@@ -5,7 +5,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::Literal;
 
 use crate::types::{float_suffix_type, int_suffix_type};
-use crate::{is_full_float, is_integer, peels_to_string, LoweringError};
+use crate::{is_full_float, is_integer, is_numeric, peels_to_string, LoweringError};
 use ast_types::BinaryOp;
 
 /// Wrap a reference in whichever unsizing coercion the expected type calls for:
@@ -86,12 +86,6 @@ pub(super) fn literal_scalar(lit: &Literal) -> Result<i64, LoweringError> {
             detail: "float/string literal reached a match pattern".to_string(),
         }),
     }
-}
-
-/// Whether `t` is a numeric type usable with `-` / arithmetic (integer or
-/// full-precision float). Half-precision is excluded.
-pub(super) fn is_numeric(t: &HirType) -> bool {
-    is_integer(t) || is_full_float(t)
 }
 
 /// The result type of a binary operator given its operand types. Comparisons and

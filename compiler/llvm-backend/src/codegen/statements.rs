@@ -5,7 +5,6 @@ use neuro_hir::{HirConst, HirExpr, HirExprKind, HirPlace, HirStmt, HirType};
 use shared_types::Span;
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
 use super::context::CodegenContext;
@@ -170,7 +169,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let from_w = iv.get_type().get_bit_width();
                 let to_w = it.get_bit_width();
                 if to_w > from_w {
-                    if TypeMapper::is_unsigned_int(target_sem) {
+                    if target_sem.is_unsigned_int() {
                         Ok(self.builder.build_int_z_extend(iv, it, "coerce")?.into())
                     } else {
                         Ok(self.builder.build_int_s_extend(iv, it, "coerce")?.into())
@@ -662,7 +661,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<inkwell::values::IntValue<'ctx>> {
         let stride = self.codegen_expr(step)?.into_int_value();
         let zero = stride.get_type().const_zero();
-        let predicate = match TypeMapper::is_unsigned_int(element) {
+        let predicate = match element.is_unsigned_int() {
             true => IntPredicate::NE,
             false => IntPredicate::SGT,
         };
@@ -801,7 +800,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .into_int_value();
         let end_int = end_val.into_int_value();
 
-        let cmp_predicate = match (TypeMapper::is_unsigned_int(&iter_sem_ty), inclusive) {
+        let cmp_predicate = match (iter_sem_ty.is_unsigned_int(), inclusive) {
             (true, true) => IntPredicate::ULE,
             (true, false) => IntPredicate::ULT,
             (false, true) => IntPredicate::SLE,

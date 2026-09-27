@@ -6,7 +6,6 @@ use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::CodegenResult;
-use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -40,7 +39,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         match op {
             UnaryOp::Negate => {
-                if TypeMapper::is_float_type(operand_ty) {
+                if operand_ty.is_float() {
                     return Ok(self
                         .builder
                         .build_float_neg(val.into_float_value(), "negtmp")?
@@ -53,7 +52,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 // wrapped silently on the debug tier while the subtraction panicked.
                 let int_val = val.into_int_value();
                 let zero = int_val.get_type().const_zero();
-                let unsigned = TypeMapper::is_unsigned_int(operand_ty);
+                let unsigned = operand_ty.is_unsigned_int();
                 Ok(self
                     .codegen_int_arith(
                         BinaryOp::Subtract,

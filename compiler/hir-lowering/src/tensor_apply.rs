@@ -11,7 +11,7 @@ use ast_types::Expr;
 use neuro_hir::{HirExpr, HirExprKind, HirTensorApply, HirType};
 use shared_types::Span;
 
-use crate::{Lowerer, LoweringError};
+use crate::{malformed, Lowerer, LoweringError};
 
 pub(crate) const MAP_METHOD: &str = "map";
 pub(crate) const ZIP_METHOD: &str = "zip";
@@ -20,10 +20,6 @@ pub(crate) const REDUCE_METHOD: &str = "reduce";
 /// Whether `method` names one of the three functional traversals.
 pub(crate) fn is_apply_method(method: &str) -> bool {
     matches!(method, MAP_METHOD | ZIP_METHOD | REDUCE_METHOD)
-}
-
-fn malformed(detail: String) -> LoweringError {
-    LoweringError::Malformed { detail }
 }
 
 impl Lowerer {

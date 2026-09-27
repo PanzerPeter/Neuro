@@ -716,19 +716,6 @@ fn boolean_literals() {
 }
 
 #[test]
-fn is_valid_identifier_test() {
-    assert!(Lexer::is_valid_identifier("foo"));
-    assert!(Lexer::is_valid_identifier("_bar"));
-    assert!(Lexer::is_valid_identifier("baz123"));
-    assert!(Lexer::is_valid_identifier("αβγ"));
-    assert!(Lexer::is_valid_identifier("変数"));
-
-    assert!(!Lexer::is_valid_identifier(""));
-    assert!(!Lexer::is_valid_identifier("123abc"));
-    assert!(!Lexer::is_valid_identifier("-invalid"));
-}
-
-#[test]
 fn tokenize_char_literals() {
     let result = tokenize("'a' '\\n' '\\u{1F44D}' '\\''").unwrap();
     assert!(matches!(result[0].kind, TokenKind::Char('a')));

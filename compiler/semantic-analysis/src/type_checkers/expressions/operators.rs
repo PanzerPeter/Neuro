@@ -471,7 +471,7 @@ impl TypeChecker {
                 // none. Name that, and name the spelling that does produce the wrap.
                 // Keyed on the TARGET's signedness, not the value's sign: `-200` for
                 // `i8` is out of range too, and is not this diagnostic.
-                if !Self::is_signed_integer(&target) {
+                if !target.is_signed_int() {
                     self.record_error(TypeError::NegativeLiteralForUnsignedType {
                         magnitude: *magnitude,
                         ty: target,

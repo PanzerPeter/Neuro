@@ -4,7 +4,6 @@ use llvm_backend::OptimizationLevelSetting;
 use shared_types::Span;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
@@ -521,21 +520,12 @@ fn compile_file(
         return Ok(output_path);
     }
 
-    let mut object_file = tempfile::Builder::new()
-        .suffix(&format!(".{}", object_extension))
-        .tempfile()
-        .context("Failed to create temporary object file")?;
-
-    object_file
-        .write_all(&object_code)
+    // The object lives in a temporary directory that is removed on return, after the
+    // linker has read it.
+    let dir = tempfile::tempdir().context("Failed to create temporary directory")?;
+    let object_path = dir.path().join(format!("program.{}", object_extension));
+    fs::write(&object_path, &object_code)
         .context("Failed to write object code to temporary file")?;
-
-    object_file.flush().context("Failed to flush object file")?;
-
-    // Persist past the TempFile guard so the file survives until the linker reads it.
-    let (_, object_path) = object_file
-        .keep()
-        .context("Failed to persist temporary object file")?;
 
     let output_path = if let Some(out) = output {
         out.to_path_buf()
@@ -552,25 +542,7 @@ fn compile_file(
     link_object_to_executable(&object_path, &output_path)
         .context("Failed to link object file to executable")?;
 
-    let _ = fs::remove_file(&object_path);
-
     Ok(output_path)
-}
-
-/// Link an object file to a native executable via the platform's C compiler,
-/// which acts as a linker driver (C runtime, startup code, etc.).
-///
-/// Windows tries clang, then lld-link, then MSVC cl.exe; Unix uses cc.
-fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        link_windows(object_path, output_path)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        link_unix(object_path, output_path)
-    }
 }
 
 /// Record why one linker did not produce the executable, for the error the last one raises.
@@ -607,8 +579,11 @@ fn record_attempt(
     }
 }
 
+/// Link an object file to a native executable via the platform's C compiler,
+/// which acts as a linker driver (C runtime, startup code, etc.). Windows tries
+/// clang, then lld-link, then MSVC cl.exe.
 #[cfg(target_os = "windows")]
-fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
+fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<()> {
     let mut attempts: Vec<String> = Vec::new();
 
     log::debug!("Attempting to link with clang");
@@ -679,8 +654,9 @@ fn link_windows(object_path: &Path, output_path: &Path) -> Result<()> {
     ))
 }
 
+/// Link an object file to a native executable via `cc`, the Unix linker driver.
 #[cfg(not(target_os = "windows"))]
-fn link_unix(object_path: &Path, output_path: &Path) -> Result<()> {
+fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<()> {
     // cc (gcc or clang) acts as the linker driver. `-lm` is explicit because
     // `Tensor::random_normal` and the elementwise math methods emit `log`, `exp`, `tanh`,
     // `pow` and `cos`, and the C math library is a separate archive on the older glibc

@@ -17,13 +17,9 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::{Literal, Span};
 use std::collections::HashMap;
 
-use crate::{Lowerer, LoweringError};
+use crate::{malformed, Lowerer, LoweringError};
 
 pub(crate) const EINSUM_FUNC: &str = "einsum";
-
-fn malformed(detail: String) -> LoweringError {
-    LoweringError::Malformed { detail }
-}
 
 impl Lowerer {
     /// Lower one contraction into a [`HirExprKind::TensorEinsum`].

@@ -1,5 +1,5 @@
 // Feature slice for tokenization and lexical processing.
-// Public API: the `Lexer` struct and `tokenize()`.
+// Public API: `tokenize()`.
 
 mod errors;
 mod tokens;
@@ -12,77 +12,31 @@ pub use tokens::{
 use logos::Logos;
 use shared_types::Span;
 
-/// Lexer for the Neuro language
-pub struct Lexer<'source> {
-    source: &'source str,
-    inner: logos::Lexer<'source, TokenKind>,
-}
+/// Turn logos' catch-all error into the diagnostic it stands for. logos reports any
+/// unmatched input as `UnexpectedChar('\0')`; an unclosed `"` is the one case worth
+/// its own message, and every other one gets the character actually found.
+fn classify_error(source: &str, err: LexError, span: Span) -> LexError {
+    match err {
+        LexError::UnexpectedChar {
+            character: '\0', ..
+        } => {
+            let start = span.start;
+            let remaining = source.get(start..).unwrap_or_default();
+            if remaining.starts_with('"') {
+                let end = remaining
+                    .find('\n')
+                    .map(|offset| start + offset)
+                    .unwrap_or(source.len());
 
-impl<'source> Lexer<'source> {
-    /// Create a new lexer for the given source code
-    pub fn new(source: &'source str) -> Self {
-        Self {
-            source,
-            inner: TokenKind::lexer(source),
-        }
-    }
-
-    fn classify_error(&self, err: LexError, span: Span) -> LexError {
-        match err {
-            LexError::UnexpectedChar {
-                character: '\0', ..
-            } => {
-                let start = span.start;
-                if let Some(remaining) = self.source.get(start..) {
-                    if remaining.starts_with('"') {
-                        let end = remaining
-                            .find('\n')
-                            .map(|offset| start + offset)
-                            .unwrap_or(self.source.len());
-
-                        return LexError::UnterminatedString {
-                            span: Span::new(start, end),
-                        };
-                    }
-                }
-
-                let character = self.inner.slice().chars().next().unwrap_or('\0');
-                LexError::UnexpectedChar { character, span }
+                return LexError::UnterminatedString {
+                    span: Span::new(start, end),
+                };
             }
-            other => other,
+
+            let character = remaining.chars().next().unwrap_or('\0');
+            LexError::UnexpectedChar { character, span }
         }
-    }
-
-    /// Check if a string is a valid identifier
-    ///
-    /// Follows Unicode XID standard: first character must be XID_Start or underscore,
-    /// remaining characters must be XID_Continue.
-    pub fn is_valid_identifier(s: &str) -> bool {
-        let mut chars = s.chars();
-
-        let Some(first) = chars.next() else {
-            return false;
-        };
-
-        if first != '_' && !unicode_ident::is_xid_start(first) {
-            return false;
-        }
-
-        chars.all(unicode_ident::is_xid_continue)
-    }
-}
-
-impl<'source> Iterator for Lexer<'source> {
-    type Item = LexResult<Token>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let kind = self.inner.next()?;
-        let span = Span::new(self.inner.span().start, self.inner.span().end);
-
-        Some(match kind {
-            Ok(kind) => Ok(Token::new(kind, span)),
-            Err(err) => Err(self.classify_error(err, span)),
-        })
+        other => other,
     }
 }
 
@@ -102,11 +56,12 @@ impl<'source> Iterator for Lexer<'source> {
 /// }
 /// ```
 pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
-    let lexer = Lexer::new(source);
     let mut tokens = Vec::new();
 
-    for result in lexer {
-        tokens.push(result?);
+    for (kind, range) in TokenKind::lexer(source).spanned() {
+        let span = Span::new(range.start, range.end);
+        let kind = kind.map_err(|err| classify_error(source, err, span))?;
+        tokens.push(Token::new(kind, span));
     }
 
     let eof_span = Span::new(source.len(), source.len());

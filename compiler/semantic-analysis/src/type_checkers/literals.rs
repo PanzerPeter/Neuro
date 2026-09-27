@@ -24,12 +24,6 @@ impl TypeChecker {
         value >= min && value <= max
     }
 
-    /// Whether `ty` is a signed integer type, and so has a most negative value one
-    /// past its maximum in magnitude.
-    pub(crate) fn is_signed_integer(ty: &Type) -> bool {
-        matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
-    }
-
     /// Infer the type of an integer literal based on expected type
     /// Returns the inferred type and whether it's valid
     pub(crate) fn infer_integer_type(

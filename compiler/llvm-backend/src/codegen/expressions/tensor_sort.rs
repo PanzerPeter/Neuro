@@ -499,7 +499,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor element is an integer or a float".to_string(),
             ));
         };
-        let unsigned = crate::type_mapping::TypeMapper::is_unsigned_int(element);
+        let unsigned = element.is_unsigned_int();
         let predicate = match (descending, unsigned) {
             (true, true) => IntPredicate::UGT,
             (true, false) => IntPredicate::SGT,

@@ -11,8 +11,8 @@ use crate::types::Type;
 /// The inclusive value range of an integer type, as the widest signed integer that
 /// holds every bound (`u64::MAX` does not fit an `i64`).
 ///
-/// Used to saturate a float-to-integer cast in the constant folder so a folded cast
-/// and the run-time one agree; see [`CodegenContext::codegen_cast`].
+/// Used by the constant folder to reject a folded result the type cannot hold, the
+/// same overflow the run-time checked arithmetic traps on.
 fn int_type_range(ty: &Type) -> Option<(i128, i128)> {
     Some(match ty {
         Type::I8 => (i8::MIN as i128, i8::MAX as i128),
@@ -28,23 +28,19 @@ fn int_type_range(ty: &Type) -> Option<(i128, i128)> {
 }
 
 /// Truncate `f` toward zero into `ty`, clamping to the type's bounds and mapping NaN
-/// to zero, the same total function `llvm.fpto{s,u}i.sat` computes at run time.
+/// to zero, the same total function `llvm.fpto{s,u}i.sat` computes at run time. Rust's
+/// float-to-integer `as` is defined as exactly that saturating conversion.
 fn saturating_float_to_int(f: f64, ty: &Type) -> i128 {
-    let Some((min, max)) = int_type_range(ty) else {
-        return 0;
-    };
-    if f.is_nan() {
-        return 0;
-    }
-    // `f.trunc()` is exact, so the comparisons below decide representability without
-    // the rounding a cast through a narrower integer would introduce.
-    let truncated = f.trunc();
-    if truncated <= min as f64 {
-        min
-    } else if truncated >= max as f64 {
-        max
-    } else {
-        truncated as i128
+    match ty {
+        Type::I8 => f as i8 as i128,
+        Type::I16 => f as i16 as i128,
+        Type::I32 => f as i32 as i128,
+        Type::I64 => f as i64 as i128,
+        Type::U8 => f as u8 as i128,
+        Type::U16 => f as u16 as i128,
+        Type::U32 => f as u32 as i128,
+        Type::U64 => f as u64 as i128,
+        _ => 0,
     }
 }
 

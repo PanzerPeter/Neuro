@@ -17,11 +17,9 @@ use ast_types::{Expr, TensorIndexArg, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
 use shared_types::Literal;
 
-use coercion::{
-    apply_unsizing_coercion, binary_result_type, is_numeric, literal_scalar, literal_type,
-};
+use coercion::{apply_unsizing_coercion, binary_result_type, literal_scalar, literal_type};
 
-use crate::{is_integer, LoopCtx, Lowerer, LoweringError};
+use crate::{is_integer, is_numeric, LoopCtx, Lowerer, LoweringError};
 
 /// The divergent panic-family builtins. Each aborts and never returns, so a
 /// call takes on whatever type its context demands.

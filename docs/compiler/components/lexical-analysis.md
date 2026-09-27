@@ -191,8 +191,7 @@ block, and malformed numbers, escapes and character literals. The authoritative 
 
 ### Technology
 
-- **Lexer generator**: [logos](https://crates.io/crates/logos) 0.14
-- **Unicode support**: `unicode-ident` for identifier validation
+- **Lexer generator**: [logos](https://crates.io/crates/logos), whose identifier regex applies Unicode XID_Start / XID_Continue
 
 ### Performance
 

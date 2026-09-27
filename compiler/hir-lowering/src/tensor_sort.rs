@@ -14,7 +14,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirSortKind, HirType};
 use shared_types::{Literal, Span};
 
 use crate::tensor_shape::const_integer;
-use crate::{Lowerer, LoweringError};
+use crate::{malformed, Lowerer, LoweringError};
 
 pub(crate) const SORT_METHOD: &str = "sort";
 pub(crate) const ARGSORT_METHOD: &str = "argsort";
@@ -26,10 +26,6 @@ const INDEX_ELEMENT: HirType = HirType::I32;
 /// Whether `method` names one of the three order-based selections.
 pub(crate) fn is_sort_method(method: &str) -> bool {
     matches!(method, SORT_METHOD | ARGSORT_METHOD | TOPK_METHOD)
-}
-
-fn malformed(detail: String) -> LoweringError {
-    LoweringError::Malformed { detail }
 }
 
 impl Lowerer {

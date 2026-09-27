@@ -13,7 +13,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirReduceOp, HirType};
 use shared_types::Span;
 
 use crate::tensor_shape::const_integer;
-use crate::{Lowerer, LoweringError};
+use crate::{malformed, Lowerer, LoweringError};
 
 pub(crate) const SUM_METHOD: &str = "sum";
 pub(crate) const MEAN_METHOD: &str = "mean";
@@ -23,10 +23,6 @@ pub(crate) const MIN_METHOD: &str = "min";
 /// Whether `method` names one of the four reductions.
 pub(crate) fn is_reduce_method(method: &str) -> bool {
     matches!(method, SUM_METHOD | MEAN_METHOD | MAX_METHOD | MIN_METHOD)
-}
-
-fn malformed(detail: String) -> LoweringError {
-    LoweringError::Malformed { detail }
 }
 
 impl Lowerer {

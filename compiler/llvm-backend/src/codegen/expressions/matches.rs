@@ -17,7 +17,6 @@ use neuro_hir::{
 
 use crate::codegen::context::{CodegenContext, DropTarget};
 use crate::errors::{CodegenError, CodegenResult};
-use crate::type_mapping::TypeMapper;
 use crate::types::Type;
 
 /// A binding's saved prior state in the three name maps, restored when the arm's
@@ -196,8 +195,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             HirMatchTest::IntRange { lo, hi } => {
                 let scalar = self.load_match_scalar(scrut_alloca, scrut_llvm)?;
-                let unsigned =
-                    TypeMapper::is_unsigned_int(scrut_sem) || matches!(scrut_sem, Type::Char);
+                let unsigned = scrut_sem.is_unsigned_int() || matches!(scrut_sem, Type::Char);
                 let (ge_pred, le_pred) = if unsigned {
                     (IntPredicate::UGE, IntPredicate::ULE)
                 } else {

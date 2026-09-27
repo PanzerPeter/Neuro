@@ -1069,13 +1069,13 @@ fn test_type_mapper_primitives() {
 
 #[test]
 fn test_type_predicates() {
-    assert!(TypeMapper::is_float_type(&Type::F32));
-    assert!(TypeMapper::is_float_type(&Type::F64));
-    assert!(!TypeMapper::is_float_type(&Type::I32));
+    assert!(Type::F32.is_float());
+    assert!(Type::F64.is_float());
+    assert!(!Type::I32.is_float());
 
     // Test unsigned integer predicate
-    assert!(TypeMapper::is_unsigned_int(&Type::U32));
-    assert!(!TypeMapper::is_unsigned_int(&Type::I32));
+    assert!(Type::U32.is_unsigned_int());
+    assert!(!Type::I32.is_unsigned_int());
 }
 
 #[test]

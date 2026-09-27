@@ -505,16 +505,6 @@ impl<'ctx> TypeMapper<'ctx> {
             _ => panic!("map_int_type called on non-integer type {:?}", ty),
         }
     }
-
-    /// Check if a type is a floating-point type
-    pub(crate) fn is_float_type(ty: &Type) -> bool {
-        ty.is_float()
-    }
-
-    /// Check if a type is an unsigned integer type
-    pub(crate) fn is_unsigned_int(ty: &Type) -> bool {
-        ty.is_unsigned_int()
-    }
 }
 
 #[cfg(test)]

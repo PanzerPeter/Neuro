@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "3.19.0"
+version = "3.19.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Neuro Contributors"]
@@ -38,7 +38,6 @@ anyhow = "1.0"
 
 # Lexical Analysis
 logos = "0.16"
-unicode-ident = "1.0"
 
 # LLVM Backend
 # Requires LLVM 22 with dev libraries (the backend emits LLVM IR via inkwell).

@@ -24,7 +24,7 @@ Workspace layout (`compiler/`):
 | `infrastructure/shared-types` | `Span`, `Identifier`, `Literal`: no business logic |
 | `infrastructure/ast-types` | AST node definitions (owned here, not in the parser) |
 | `infrastructure/neuro-hir` | Typed HIR: the frontend/backend contract |
-| `lexical-analysis` | Tokenizer (logos + unicode-ident) |
+| `lexical-analysis` | Tokenizer (logos) |
 | `syntax-parsing` | Pratt expression parser + statement parser |
 | `module-resolution` | Multi-file program loading |
 | `argument-binding` | Named/positional argument binding |
@@ -186,7 +186,7 @@ local-only paths.
 
 CI additionally runs the suite on Linux/macOS/Windows against stable and
 nightly, OSV-Scanner over the dependency graph, benchmark regression budgets,
-release smoke tests (`tools/run_release_smoke_tests.py`), and coverage.
+release smoke tests (compile and run two examples with the release `neurc`), and coverage.
 
 ## Security Considerations
 

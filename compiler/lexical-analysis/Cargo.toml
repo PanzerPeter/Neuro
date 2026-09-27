@@ -10,7 +10,6 @@ publish.workspace = true
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
 logos = { workspace = true }
-unicode-ident = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

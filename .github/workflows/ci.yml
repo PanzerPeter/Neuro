@@ -164,34 +164,28 @@ jobs:
           key: ${{ matrix.os }}-stable
       - name: Setup LLVM 22
         uses: ./.github/actions/setup-llvm
-      - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-
       - name: Build release neurc
         run: cargo build -p neurc --release
 
-      - name: Run release smoke tests (Windows)
-        if: runner.os == 'Windows'
-        run: python tools/run_release_smoke_tests.py --neurc target/release/neurc.exe
-      - name: Run release smoke tests (Unix)
-        if: runner.os != 'Windows'
-        run: python tools/run_release_smoke_tests.py --neurc target/release/neurc
+      # Each example returns a known value from `main`; the release binary must link it
+      # and the program must exit with exactly that value.
+      - name: Run release smoke tests
+        shell: bash
+        run: |
+          ext='${{ runner.os == 'Windows' && '.exe' || '' }}'
+          for case in function_call:8 factorial:120; do
+            name=${case%%:*}; want=${case##*:}; exe="target/smoke-$name$ext"
+            "target/release/neurc$ext" compile "examples/basics/$name.nr" -O 2 -o "$exe"
+            "$exe" && got=0 || got=$?
+            [ "$got" -eq "$want" ] || { echo "$name: expected exit $want, got $got"; exit 1; }
+            echo "Smoke test passed: $name -> exit $got"
+          done
 
-      - name: Upload Compiler Artifact (Unix)
-        if: runner.os != 'Windows'
+      - name: Upload Compiler Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: neurc-${{ runner.os }}
-          path: target/release/neurc
-
-      - name: Upload Compiler Artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: neurc-${{ runner.os }}
-          path: target/release/neurc.exe
+          path: target/release/neurc${{ runner.os == 'Windows' && '.exe' || '' }}
 
   coverage:
     name: Code Coverage
