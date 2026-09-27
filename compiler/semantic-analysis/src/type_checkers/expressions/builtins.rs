@@ -36,6 +36,9 @@ pub(crate) const TENSOR_TO_METHOD: &str = "to";
 /// `tensor.detach()`, the value-level gradient fence.
 const DETACH_METHOD: &str = "detach";
 
+/// `tensor.item()`, the read of a rank-0 tensor's one element.
+const ITEM_METHOD: &str = "item";
+
 /// `float.to_checked::<T>()`, the float-to-integer conversion that reports a value `T`
 /// cannot hold instead of saturating it.
 const TO_CHECKED_METHOD: &str = "to_checked";
@@ -339,6 +342,19 @@ impl TypeChecker {
                 self.check_call_args(args, &[Type::Enum(DEVICE_TYPE_NAME.to_string())], call_span);
                 self.record_move(object);
                 Some(recv.clone())
+            }
+            // `.item()` is the rank-0 index the surface cannot spell as `t[]`. It reads the
+            // receiver as an index does, so `&Tensor<T, []>` is accepted and nothing moves.
+            (Type::Tensor { element, shape }, ITEM_METHOD) => {
+                let (element, rank) = ((**element).clone(), shape.len());
+                self.check_call_args(args, &[], call_span);
+                if rank != 0 {
+                    self.record_error(TypeError::TensorItemRank {
+                        rank,
+                        span: call_span,
+                    });
+                }
+                Some(element)
             }
             // `.detach()` CONSUMES the receiver as a shape cast does: its buffer is handed
             // on with empty derivative slots rather than shared, because two tensors owning

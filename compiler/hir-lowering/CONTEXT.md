@@ -526,7 +526,9 @@ compiler bug, not a diagnostic.
   on, and a `.step(n)` stride folded the same way, dividing the surviving extent rounded up),
   lowers a position as an ordinary expression, and computes the result type by dropping every
   axis given a position along with its name, keeping the name of every axis that survives. Both index spellings reach it: `Expr::TensorIndex`, and the
-  one-argument `Expr::Index` whose object lowered to a tensor.
+  one-argument `Expr::Index` whose object lowered to a tensor. `.item()` on a rank-0 receiver
+  (`expressions/calls.rs`) lowers to a `TensorIndex` with no axes, so the backends and the
+  derivative tape read it as any element read and no node exists for it.
 - **Enumerated loops**: `ForRange` / `ForEach` carry the position binding through as
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it

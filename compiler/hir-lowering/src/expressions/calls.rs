@@ -18,6 +18,7 @@ const GRAD_METHOD: &str = "grad";
 const HESSIAN_METHOD: &str = "hessian";
 const ZERO_GRAD_METHOD: &str = "zero_grad";
 const DETACH_METHOD: &str = "detach";
+const ITEM_METHOD: &str = "item";
 
 impl Lowerer {
     /// Lower a call, dispatching on the callee shape: free/builtin function,
@@ -456,6 +457,21 @@ impl Lowerer {
                 receiver: Box::new(object),
             };
             return Ok(HirExpr::new(kind, recv, span));
+        }
+
+        // `.item()` is the index `t[]` with no axes, which the surface cannot spell: one
+        // element at offset zero, read through a borrow as any index is.
+        if method == ITEM_METHOD {
+            if let HirType::Tensor { element, shape, .. } = recv.referent() {
+                if shape.is_empty() {
+                    let element = (**element).clone();
+                    let kind = HirExprKind::TensorIndex {
+                        object: Box::new(object),
+                        axes: Vec::new(),
+                    };
+                    return Ok(HirExpr::new(kind, element, span));
+                }
+            }
         }
 
         // A reduction reads its receiver rather than consuming it, so a borrowed one is

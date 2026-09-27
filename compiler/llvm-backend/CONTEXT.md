@@ -647,7 +647,9 @@ here; each operand that no binding owns is freed through the same
 constant (every extent is part of the type), so the index is arithmetic on the flat row-major
 run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis
 contributes `start * stride[k]`. Reading an element is that offset, one `getelementptr`, and one
-`load`. A slice ALLOCATES a fresh handle through `alloc_dlpack_tensor` and copies into it: a
+`load`; with no axes (`.item()` on a rank-0 tensor) the offset is zero. Either way the
+receiver is then freed through `release_receiver_temporary` when no binding owns it, since
+neither an element nor a slice copy keeps its buffer alive. A slice ALLOCATES a fresh handle through `alloc_dlpack_tensor` and copies into it: a
 tensor owns its buffer and releases it through its own deleter, so a view sharing one would be a
 double free, and a copy is also what keeps the DLPack contract's contiguous `strides` and
 zero `byte_offset` true of every value. The copy loop walks the RESULT, whose linear index is its own buffer index,

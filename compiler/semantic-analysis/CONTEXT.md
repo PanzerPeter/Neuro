@@ -1028,7 +1028,10 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   rank-1 tensor takes the ordinary bracket. Indexing READS its receiver (nothing is moved,
   and `referent()` sees through a borrow) because a slice is a fresh owned copy rather than
   a view, which is what keeps one buffer to one owner. A range index on a non-tensor is
-  `TensorIndexOnNonTensor`, whose text names `.slice(a..b)`.
+  `TensorIndexOnNonTensor`, whose text names `.slice(a..b)`. `.item()`
+  (`expressions/builtins.rs`) is the rank-0 index the bracket cannot spell: on
+  `Tensor<T, []>`, owned or borrowed, it reads `T` and moves nothing; any other rank is
+  `TensorItemRank`.
 - **Tuples.** Each element is checked against the expected tuple's element type when annotated;
   `t.N` is `NotATuple` on a non-tuple and `TupleIndexOutOfBounds` past the arity. Struct, tuple,
   and array *destructuring* is parser-desugared and reaches this slice as ordinary field-access

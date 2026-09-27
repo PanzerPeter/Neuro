@@ -3,7 +3,7 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   Phase 3's `@grad` with `.backward()`, `.grad()` and `.zero_grad()`, a whole
-//   training step · 2C's `@` contraction and broadcast arithmetic, which are the loss
+//   training step, and `.item()` reading the rank-0 loss out as an `f32` · 2C's `@` contraction and broadcast arithmetic, which are the loss
 //   itself, and compound assignment, which is the update · 2D's `pool` arena around
 //   each step · a struct and a `Vec` recording the progress · string interpolation
 //   with the format mini-language.
@@ -60,7 +60,9 @@ func main() -> i32 {
             b -= RATE * b.grad()
             w.zero_grad()
             b.zero_grad()
-            measured = loss.sum()
+            // The loss is a rank-0 tensor; `.item()` copies its one element out, so the
+            // number outlives the arena the tensor is released with.
+            measured = loss.item()
         }
         if step % EVERY == 0 {
             progress.push(Checkpoint { step: step, loss: measured })

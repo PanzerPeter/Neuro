@@ -79,7 +79,7 @@ func main() -> i32 {
     val a = Tensor::<i32, []>::scalar(20)
     val b = Tensor::<i32, []>::scalar(22)
     val total = a + b
-    println("rank 0: {total.sum()}")
+    println("rank 0: {total.item()}")
 
     return sum[1, 2] + grid[0, 0]
 }

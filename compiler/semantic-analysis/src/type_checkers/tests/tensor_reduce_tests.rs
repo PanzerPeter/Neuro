@@ -204,3 +204,63 @@ func main() -> i32 {
         "a dynamic extent should be rejected; got {errors:?}"
     );
 }
+
+/// `.item()` reads a rank-0 tensor's element as the bare element type, through a borrow
+/// too, and reads rather than consumes: the receiver is still usable afterwards.
+#[test]
+fn item_reads_a_rank_zero_element_without_moving() {
+    let errors = semantic_errors(
+        r#"
+func peek(t: &Tensor<f64, []>) -> f64 {
+    t.item()
+}
+
+func main() -> i32 {
+    val v: Tensor<i32, [4]> = Tensor::<i32, [4]>::ones()
+    val s: Tensor<i32, []> = v.sum(0)
+    val first: i32 = s.item()
+    val again: i32 = s.item()
+    val f: Tensor<f64, []> = Tensor::scalar(2.5)
+    val x: f64 = peek(&f)
+    return first + again
+}
+"#,
+    );
+    assert!(errors.is_empty(), "`.item()` should check; got {errors:?}");
+}
+
+#[test]
+fn item_on_a_tensor_with_an_axis_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val v: Tensor<i32, [4]> = Tensor::<i32, [4]>::ones()
+    return v.item()
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TensorItemRank { rank: 1, .. })),
+        "a rank-1 receiver should be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn item_takes_no_arguments() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val s: Tensor<i32, []> = Tensor::scalar(3)
+    return s.item(0)
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "an argument should be rejected; got {errors:?}"
+    );
+}

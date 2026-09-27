@@ -116,6 +116,7 @@ mod tensor_compound_assign;
 mod tensor_dynamic_shapes;
 mod tensor_einsum;
 mod tensor_indexing;
+mod tensor_item;
 mod tensor_matmul;
 mod tensor_named_dimensions;
 mod tensor_operators;

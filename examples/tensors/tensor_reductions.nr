@@ -14,6 +14,9 @@
 // accepts a borrow: a weight can be summarised without being moved out of whatever owns
 // it.
 //
+// Reducing a rank-1 tensor along its only axis leaves a rank-0 `Tensor<T, []>`, and
+// `.item()` reads its one element back as a plain `T`.
+//
 // `.mean()` is float-only. An integer mean would have to pick a rounding rule, and the
 // language does not give one; `.sum()` and an explicit divide say what was meant.
 
@@ -53,6 +56,10 @@ func main() -> i32 {
     // The receiver survives: `scores` is read through a borrow, then read again here.
     val scores: Tensor<i32, [4]> = [4, 9, 2, 7]
     println("spread={spread(&scores)} total={scores.sum()}")
+
+    // Folding the only axis leaves rank 0; `.item()` reads the element without moving it.
+    val folded: Tensor<i32, []> = scores.sum(axis: 0)
+    println("folded = {folded.item()}, peak = {scores.max(axis: 0).item()}")
 
     return grid.sum()
 }

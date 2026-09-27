@@ -1463,6 +1463,30 @@ fn a_string_temporary_is_released_at_the_consumer_that_discards_it() {
     }
 }
 
+/// A tensor index reads one element or copies a slice out of its receiver, so a
+/// receiver no binding owns is released once the read is done. Here one `make()` is
+/// indexed and one reduced, and the reduction's result is read by `.item()`: three
+/// buffers, three releases. Before the index released its receiver, two of them leaked.
+#[test]
+fn regression_a_tensor_index_releases_a_temporary_receiver() {
+    let source = r#"
+        func make() -> Tensor<i32, [4]> {
+            [1, 2, 3, 4]
+        }
+
+        func main() -> i32 {
+            return make()[1] + make().sum(0).item()
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert_eq!(
+        body.matches("call void %dlpack.deleter").count(),
+        3,
+        "every temporary tensor is released exactly once:\n{body}"
+    );
+}
+
 /// An owned `string` handed to a parameter the callee only reads is released exactly
 /// once, by the place that owns it. The argument loop cleared the caller's drop flag for every by-value
 /// argument, while the release after the call reached only an argument that ALLOCATED

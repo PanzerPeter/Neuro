@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-09-27
+
+### Added
+
+- `.item()` reads the one element of a rank-0 tensor as its element type, so
+  `scores.sum(axis: 0).item()` is an `i32` for an `i32` tensor and a `@grad` loss prints as a
+  plain number. It reads rather than consumes: it works through a `&Tensor<T, []>` and the
+  tensor stays usable. Inside a `@grad` body the gradient flows back through it. Calling it on
+  a tensor with any axis is a compile error.
+
+### Fixed
+
+- Indexing or slicing a tensor that no binding owns, such as `make()[1]` or
+  `grid.sum(axis: 1)[0]`, leaked that tensor's buffer on every evaluation. It is now released
+  once the element or the slice has been read.
+
 ## [3.16.0] - 2026-09-27
 
 ### Added

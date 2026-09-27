@@ -45,24 +45,29 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
         let shape = crate::types::static_extents(&shape)?;
-        let data = self.tensor_index_data(object, &source_ty)?;
+        let handle = self.tensor_receiver_handle(object, &source_ty)?;
+        let data = self.load_dlpack_data(handle)?;
         let strides = row_major_strides(&shape);
         let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
         let elem_llvm = self.get_any_llvm_type(&element)?;
 
-        let Type::Tensor {
-            shape: result_shape,
-            ..
-        } = result_ty
-        else {
-            let slot = self.tensor_element_ptr(elem_llvm, data, base)?;
-            return self
-                .builder
-                .build_load(elem_llvm, slot, "tensor.elem")
-                .map_err(CodegenError::from);
+        // Either result is independent of the receiver's buffer once built, so a receiver
+        // no binding owns (`v.sum(axis: 0).item()`) is released here or it leaks.
+        let value = match result_ty {
+            Type::Tensor {
+                shape: result_shape,
+                ..
+            } => {
+                let result_shape = crate::types::static_extents(result_shape)?;
+                self.copy_tensor_slice(result_ty, &result_shape, axes, &strides, data, base)?
+            }
+            _ => {
+                let slot = self.tensor_element_ptr(elem_llvm, data, base)?;
+                self.builder.build_load(elem_llvm, slot, "tensor.elem")?
+            }
         };
-        let result_shape = crate::types::static_extents(result_shape)?;
-        self.copy_tensor_slice(result_ty, &result_shape, axes, &strides, data, base)
+        self.release_receiver_temporary(object, handle)?;
+        Ok(value)
     }
 
     /// The element buffer of the indexed tensor. A borrowed receiver lowers to the

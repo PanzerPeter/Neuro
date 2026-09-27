@@ -635,7 +635,19 @@ val row_peaks: Tensor<f64, [height: 2]> = frame.max(axis: -1)
 ```
 
 Reducing a rank-1 tensor along its only axis leaves the rank-0 `Tensor<T, []>`, the shape
-`Tensor::scalar` builds.
+`Tensor::scalar` builds. `.item()` reads its one element back as a plain `T`. It does not
+consume the tensor, so it works through a borrow and the tensor stays usable afterwards.
+On a tensor of any other rank it is a compile error; index one element with `t[i, j]`
+there instead.
+
+```neuro
+val scores: Tensor<i32, [4]> = [4, 9, 2, 7]
+val folded: Tensor<i32, []> = scores.sum(axis: 0)
+val total: i32 = folded.item()                 // 22
+```
+
+This is how a loss leaves a `@grad` function's rank-0 result as a number, for printing
+or for keeping past the `pool` block the tensor is released with.
 
 Three rules are compile-time errors. The element type must be an integer or `f32`/`f64`: a
 `bool` tensor has nothing to fold. `.mean()` narrows that to `f32`/`f64`, because an

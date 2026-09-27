@@ -377,6 +377,9 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("`.item()` reads the one element of a rank-0 tensor, and this tensor has rank {rank}; index one element with one position per axis, or reduce it with `.sum()` first")]
+    TensorItemRank { rank: usize, span: Span },
+
     #[error("`.{method}()` orders one axis of a tensor, and a rank-0 tensor has none; order a tensor with at least one axis")]
     TensorSortRankZero { method: String, span: Span },
 
@@ -1265,6 +1268,7 @@ impl TypeError {
             | Self::TensorReduceMeanNotFloat { span, .. }
             | Self::TensorReduceEmpty { span, .. }
             | Self::TensorSortElementType { span, .. }
+            | Self::TensorItemRank { span, .. }
             | Self::TensorSortRankZero { span, .. }
             | Self::TensorSortEmpty { span, .. }
             | Self::TensorSortArgNotConstant { span, .. }

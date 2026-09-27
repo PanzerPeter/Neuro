@@ -51,7 +51,7 @@ gradient, and `.zero_grad()` empties the slot. A training step from
             b -= RATE * b.grad()
             w.zero_grad()
             b.zero_grad()
-            measured = loss.sum()
+            measured = loss.item()
         }
 ```
 
@@ -319,7 +319,7 @@ expression. Its values may use:
 | `a @ b` on matrices | `dA = dC @ Bᵀ`, `dB = Aᵀ @ dC` |
 | `.sum()` and `.mean()`, over the whole tensor or along one `axis:` | the adjoint spread back over what was reduced |
 | a tensor literal or `Tensor::scalar(v)` built from values | each element's adjoint sent back to the value it came from |
-| an element read `t[i, j]`, at literal positions or ones computed at run time | the adjoint lands on that one element |
+| an element read `t[i, j]`, at literal positions or ones computed at run time, or `.item()` on a rank-0 tensor | the adjoint lands on that one element |
 | a slice `t[1..3, ..]`, `t[(0..3).rev(), 1]` or `t[(0..6).step(2)]` at literal bounds | each element's adjoint lands where it was read from |
 | `.t()`, `.permute(...)`, `.reshape(...)`, `.flatten(...)` | the adjoint put back in the receiver's shape and axis order |
 | `einsum(...)` | each operand's adjoint is the contraction of the result's adjoint with the other operands |

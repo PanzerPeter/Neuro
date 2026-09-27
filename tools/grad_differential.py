@@ -1480,6 +1480,21 @@ func no_grad_calls_frozen(w: &mut Tensor<f32, [2]>, k: f32) -> Tensor<f32, []> {
         constants=(1.5,),
         path="no_grad_calls_frozen",
     ),
+    TensorCase(
+        # `.item()` reads a rank-0 tensor's one element, so the gradient flows back through
+        # it as through any element read: the loss is |w|^2 * w[0].
+        "item_read",
+        """
+@grad
+func item_read(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val squares = (w * w).sum(axis: 0)
+    return Tensor::scalar(squares.item() * w[0])
+}
+""",
+        (2,),
+        (0.75, -1.25),
+        lambda a, b: (3.0 * a * a + b * b, 2.0 * a * b),
+    ),
 ]
 
 
