@@ -321,3 +321,111 @@ func main() -> i32 {
         "expected an unknown method on the enum; got {errors:?}"
     );
 }
+
+fn moved(errors: &[TypeError]) -> bool {
+    errors
+        .iter()
+        .any(|e| matches!(e, TypeError::UseOfMovedValue { .. }))
+}
+
+/// An enum holding an owner moves, as a tuple holding one does. Every enum used to be
+/// treated as `Copy`, so a second use of one owning a `Vec` freed the buffer twice.
+#[test]
+fn regression_bug_082_an_enum_holding_an_owner_moves() {
+    let errors = semantic_errors(
+        r#"
+enum Bag { Items(Vec<i32>), Empty }
+func count(b: Bag) -> i32 { match b { Bag::Items(v) => v.len() as i32, Bag::Empty => 0 } }
+func main() -> i32 {
+    val b = Bag::Empty
+    val a = count(b)
+    return a + count(b)
+}
+"#,
+    );
+    assert!(moved(&errors), "an owning enum moves; got {errors:?}");
+}
+
+#[test]
+fn an_enum_of_copy_payloads_still_copies() {
+    let errors = semantic_errors(
+        r#"
+enum Pt { At(i32, i32), Nowhere }
+func x(p: Pt) -> i32 { match p { Pt::At(a, _) => a, Pt::Nowhere => 0 } }
+func main() -> i32 {
+    val p = Pt::At(1, 2)
+    return x(p) + x(p)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a Copy-payload enum copies; got {errors:?}"
+    );
+}
+
+/// A payload is stored inline, so an enum that holds itself has no size. The backend's
+/// layout recursed without end on one and overflowed the compiler's stack.
+#[test]
+fn regression_an_enum_that_holds_itself_is_refused() {
+    for source in [
+        "enum L { Cons(i32, L), Nil }\nfunc main() -> i32 { 0 }",
+        "struct S { e: E }\nenum E { X(S), N }\nfunc main() -> i32 { 0 }",
+        "enum A { X((i32, B)), N }\nenum B { Y([A; 2]), M }\nfunc main() -> i32 { 0 }",
+    ] {
+        let errors = semantic_errors(source);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::RecursiveEnum { .. })),
+            "{source}: expected RecursiveEnum, got {errors:?}"
+        );
+    }
+    let errors = semantic_errors("enum Ok1 { A(Vec<i32>), B(&i32) }\nfunc main() -> i32 { 0 }");
+    assert!(
+        errors.is_empty(),
+        "indirection ends the cycle; got {errors:?}"
+    );
+}
+
+/// `match self` in a `&self` method may read a payload but not take an owner out of
+/// it: the value belongs to the caller. Binding the `Vec` by value freed it twice.
+#[test]
+fn regression_a_match_may_not_take_an_owner_out_of_a_borrow() {
+    let errors = semantic_errors(
+        r#"
+enum Bag { Items(Vec<i32>), Empty }
+impl Bag {
+    func size(&self) -> i32 { match self { Bag::Items(v) => v.len() as i32, Bag::Empty => 0 } }
+    func full(&self) -> bool { match self { Bag::Items(_) => true, Bag::Empty => false } }
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotMoveOutOfBorrow { .. })),
+        "binding the Vec out of `&self` is refused; got {errors:?}"
+    );
+    assert_eq!(errors.len(), 1, "`full` binds nothing; got {errors:?}");
+}
+
+/// A `match` on a borrowed enum tests the referent, as `match self` and `match *d` do.
+#[test]
+fn regression_a_match_reads_through_a_borrowed_enum() {
+    let errors = semantic_errors(
+        r#"
+enum Dir { Up, Down(i32) }
+func f(d: &Dir) -> i32 { match d { Dir::Up => 0, Dir::Down(n) => n } }
+func main() -> i32 {
+    val x = Dir::Down(7)
+    return f(&x)
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "matching `&Dir` is matching `Dir`; got {errors:?}"
+    );
+}

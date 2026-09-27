@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use ast_types::{ImportDef, Item, ModuleDef, ModuleId};
 
 use crate::walk::{walk_items, Site};
-use crate::ModuleError;
+use crate::{ModuleError, ParseModule};
 
 /// A module that was loaded, as reported back to the driver.
 #[derive(Debug, Clone)]
@@ -84,10 +84,7 @@ pub(crate) struct ModuleGraph {
 
 impl ModuleGraph {
     /// Load `root` and every module reachable from it.
-    pub(crate) fn load(
-        root: &Path,
-        parse_module: &dyn Fn(&str) -> Result<Vec<Item>, String>,
-    ) -> Result<Self, ModuleError> {
+    pub(crate) fn load(root: &Path, parse_module: &ParseModule<'_>) -> Result<Self, ModuleError> {
         let file = canonical(root)?;
         let root_dir = parent_dir(&file);
         let mut graph = ModuleGraph {
@@ -159,7 +156,7 @@ impl ModuleGraph {
         &mut self,
         from: usize,
         chain: &[String],
-        parse_module: &dyn Fn(&str) -> Result<Vec<Item>, String>,
+        parse_module: &ParseModule<'_>,
     ) -> Result<(), ModuleError> {
         let mut dir = self.modules[from].ref_dir.clone();
         let mut current: Option<usize> = None;
@@ -221,7 +218,7 @@ impl ModuleGraph {
         file: PathBuf,
         child_dir: Option<PathBuf>,
         path: String,
-        parse_module: &dyn Fn(&str) -> Result<Vec<Item>, String>,
+        parse_module: &ParseModule<'_>,
     ) -> Result<usize, ModuleError> {
         let file = canonical(&file)?;
         if let Some(id) = self.by_file.get(&file) {
@@ -232,7 +229,7 @@ impl ModuleGraph {
             path: display.clone(),
             message: e.to_string(),
         })?;
-        let items = parse_module(&source).map_err(|message| ModuleError::Parse {
+        let items = parse_module(&source, &display).map_err(|message| ModuleError::Parse {
             path: display.clone(),
             message,
         })?;

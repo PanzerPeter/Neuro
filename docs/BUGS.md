@@ -5,196 +5,84 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-082: an enum that owns a heap value is copied instead of moved
+## BUG-083: an owned `string` wrapped in a newtype is never released
 
 - **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`is_type_copy` / `is_type_move_tracked` in
-  `type_checkers/mod.rs`) and `llvm-backend` (`enum_holds_owner` in `codegen/drops.rs`)
-- **Severity**: critical. A second use of a moved enum frees its payload twice, and an enum
-  holding a `string` never frees it
+- **Area**: `llvm-backend`; `drop_target_of` and the owned-string registration in
+  `codegen/drops.rs`
+- **Severity**: major. An unbounded leak, one buffer per evaluation
 
 **Minimal repro**
 
 ```neuro
-enum Bag {
-    Items(Vec<i32>),
-    Empty
+newtype Name = string
+
+func main() -> i32 {
+    val n = Name("ab" + "c")
+    n.0.len() as i32
+}
+```
+
+Expected: the buffer `"ab" + "c"` built is released when `n` leaves scope, as it is for
+`val s = "ab" + "c"`. Observed: exit 3, and AddressSanitizer's leak check reports the 3-byte
+buffer allocated in `main`.
+
+**Root cause**: not yet confirmed in the code. A newtype is erased to its inner type in the
+backend, and a `string` binding owns its buffer only when its initializer is one of the shapes
+`produces_owned_string` recognizes. A newtype construction around such a shape is not one of
+them, so the binding is never registered as an owner.
+
+**Workaround**: keep the owned `string` in a plain binding and wrap it where it is read.
+
+**Fix sketch**: let `produces_owned_string` look through a newtype construction to its
+argument, and add a regression test that runs the repro in a loop under a leak check.
+
+## BUG-082: an enum that owns a `string` never releases it
+
+- **Status**: open, confirmed. Narrowed: an enum holding an owner now moves rather than
+  copies, so the double free this entry was filed for is a compile error
+- **Area**: `llvm-backend` (`enum_holds_owner` in `codegen/drops.rs`)
+- **Severity**: major. An unbounded leak, one buffer per evaluation
+
+**Minimal repro**
+
+```neuro
+enum Msg {
+    Text(string),
+    Num(i32)
 }
 
-func count(b: Bag) -> i32 {
-    match b {
-        Bag::Items(v) => v.len() as i32,
-        Bag::Empty => 0
+func make() -> u64 {
+    val m = Msg::Text("ab" + "cd")
+    7
+}
+
+func main() -> i32 {
+    mut t: u64 = 0
+    for i in 0..5 {
+        t = t + make()
     }
-}
-
-func main() -> i32 {
-    mut xs: Vec<i32> = Vec::new()
-    xs.push(1)
-    val b = Bag::Items(xs)
-    val a = count(b)
-    return a + count(b)
+    if t != 35 { return 1 }
+    0
 }
 ```
 
-Expected: `use of moved value 'b'` at the second `count(b)`, as the language reference says
-an enum carrying an owned payload moves. Observed: it compiles, and AddressSanitizer
-(`LD_PRELOAD` of `libasan`) reports a double free in `__neuro_release`. A consuming `self`
-method on such an enum does the same. Separately, `val m = Msg::Text("ab" + "cd")` in a
-function called in a loop leaks the string once per call.
+Expected: each buffer `"ab" + "cd"` built is released when `m` leaves scope. Observed: the
+arithmetic is right, and AddressSanitizer's leak check reports the 4-byte buffers as leaked.
 
-**Root cause**: confirmed in the code, two halves. The checker's `is_type_copy` answers `true`
-for every `Type::Enum` (the catch-all arm) and `is_type_move_tracked` answers `false`, so no
-enum is ever moved. The backend's `enum_holds_owner` asks `holds_owner` of each payload type,
-which is `false` for `string` by design, so an enum whose only owner is a `string` gets no drop
-target.
+**Root cause**: confirmed in the code. `enum_holds_owner` asks `holds_owner` of each payload
+type, which answers `false` for `string` by design: a `string` position owns its buffer only
+when the store that filled it allocated one, which is a runtime fact. A struct field carries
+that fact in a drop flag per position; an enum payload slot has none, because which payload
+is live depends on the tag.
 
-**Workaround**: pass an owning enum by reference, or use it exactly once.
+**Workaround**: hold the text in a struct field, or build it where it is read.
 
-**Fix sketch**: give `is_type_copy` and `is_type_move_tracked` an enum arm that asks the payload
-types (from `enum_defs`), as the tuple and array arms do, and let `enum_holds_owner` count a
-`string` payload the way `holds_string_position` counts a string position.
-
-## BUG-081: an operator-trait comparison against a temporary crashes codegen
-
-- **Status**: open, confirmed
-- **Area**: `hir-lowering` (`build_operator_call`) and `llvm-backend` (borrow codegen)
-- **Severity**: major. A well-typed program is an internal compiler error
-
-**Minimal repro**
-
-```neuro
-@derive(Copy, Clone)
-struct P { x: i32 }
-
-impl PartialEq for P {
-    func eq(&self, other: &P) -> bool { return self.x == other.x }
-}
-
-func main() -> i32 {
-    val p = P { x: 1 }
-    val same = p == P { x: 1 }
-    if same { return 1 }
-    return 0
-}
-```
-
-Expected: exit 1. Observed: `internal compiler error: borrow of a non-place expression reached
-codegen: StructLiteral { .. }`. An enum with `impl PartialEq` fails the same way on
-`light == Light::Red`.
-
-**Root cause**: confirmed in the code. A comparison method takes `rhs: &Rhs`, so lowering wraps
-the right operand in a borrow. The checker never sees that borrow, so it never applies the
-"a borrow needs a place" rule, and the backend can only borrow a place.
-
-**Workaround**: bind the right operand first: `val q = P { x: 1 }` then `p == q`.
-
-**Fix sketch**: in `build_operator_call`, when the right operand is not a place, bind it to a
-fresh local before borrowing it, so the borrow always names storage.
-
-## BUG-080: a turbofish on a method call is ignored
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`check_call_expr` in `type_checkers/expressions/calls.rs`)
-  and `hir-lowering` (`lower_method_call`)
-- **Severity**: minor. Nothing miscompiles, but a program that names type arguments no
-  method declares is accepted
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val x: f64 = 1.5
-    val b = x.is_nan::<u8>()
-    return 0
-}
-```
-
-Expected: an error that `is_nan` takes no type arguments, the way a free function does
-(`turbofish supplies 1 generic argument(s), but 'f' declares 0`). `neurc check` accepts it.
-The same holds for a struct method, a trait method and every builtin except
-`.to_checked::<T>()`, the one method that reads its turbofish.
-
-**Root cause**: confirmed in the code. `Expr::Call` carries `type_args` for every call, but
-the method-call branch of `check_call_expr` hands them only to `resolve_builtin_method`, which
-reads them for `.to_checked` alone. No other method path looks at them.
-
-**Workaround**: none needed; delete the turbofish.
-
-**Fix sketch**: in the method-call branch, record `TurbofishCountMismatch` with `expected: 0`
-whenever `type_args` is non-empty and the resolved method is not `.to_checked`.
-
-## BUG-079: a syntax error is reported without its line and column
-
-- **Status**: open, confirmed
-- **Area**: `neurc` (`load_program` in `src/main.rs`) and `module-resolution` (`ModuleError::Parse`);
-  `syntax-parsing` has no span accessor on `ParseError`
-- **Severity**: minor. Nothing miscompiles, but every syntax or lexical error points at the
-  whole file
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val x = 1 +
-}
-```
-
-Expected: the error names line 3, column 1, and underlines the `}` the way a type error is
-rendered. `neurc check` prints ``Error: Module error: failed to parse module `bad.nr`: unexpected token
-RightBrace, expected expression``, with no location at all. A lexical error such as an unclosed
-interpolation hole gives a byte offset (`at position 47`) instead of a line and column.
-
-**Root cause**: confirmed in the code. `ParseError` carries a `Span` on almost every variant, but
-the driver hands `module-resolution` a parser closure that converts the error with
-`e.to_string()`, and `ModuleError::Parse` holds only that string. The span is gone before
-anything could render it.
-
-**Workaround**: none beyond reading the message; the token it names is usually enough to find
-the line.
-
-**Fix sketch**: give `ParseError` a `span()` accessor (the lexical variants already carry
-spans; `UnexpectedEof` can point at the end of the source), carry the span and the module's
-source through `ModuleError::Parse`, and render it in the driver with `render_diagnostic`, as
-type errors are.
-
-## BUG-078: a newtype cannot take an `impl` block
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; impl registration in `type_checkers/declarations/impls.rs`
-- **Severity**: major. The language design gives a newtype its operators through explicit
-  trait impls, and none can be written, so a newtype supports no arithmetic and no methods
-
-**Minimal repro**
-
-```neuro
-newtype Meters = i32
-
-impl Meters {
-    func double(&self) -> Meters { Meters(self.0 * 2) }
-}
-
-func main() -> i32 {
-    val m = Meters(3).double()
-    return m.0
-}
-```
-
-Expected: exit 6. A newtype forwards `Copy` and `Clone` from its inner type and implements
-every other trait, arithmetic operators included, explicitly. Observed: `error: unknown struct
-'Meters'` at the `impl`, then `struct 'Meters' has no method 'double'` at the call. An
-`impl Add for Meters` is refused the same way.
-
-**Root cause**: confirmed in the code. `register_impl` accepts an `impl` target only when it
-is a struct or an enum (`impl_target_type`), so a newtype falls into the unknown-struct error,
-whose message also misnames what was written.
-
-**Workaround**: write a free function over the newtype and compute on `.0` inside it.
-
-**Fix sketch**: accept a declared newtype as an `impl` target in `register_impl` and in method
-lookup, mangle its methods like a struct's, and let the operator-trait path resolve a
-newtype operand. Enums already take an `impl`: `impl_target_type` is the one target check to
-extend with a newtype arm.
+**Fix sketch**: give an enum's `string` payload positions a flag of their own, armed at the
+construction when the payload expression allocates, cleared when a `match` binds the payload
+by value, and consulted by the enum's drop. A payload read through a borrow must leave it set.
+Regression tests: the repro, a payload built from a literal (must not be freed), and a payload
+moved out by a `match` (freed once, by the binding).
 
 ## BUG-077: a store through a borrow never destroys the value it displaces
 

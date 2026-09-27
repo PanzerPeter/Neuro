@@ -64,7 +64,7 @@ struct Cell<T> {
 }
 
 impl<T> Cell<T> {
-    func get(&self) -> T {
+    func get(self) -> T {
         self.value
     }
     func set(&mut self, v: T) {

@@ -124,3 +124,25 @@ func main() -> i32 {
         "a locally declared Option must coalesce; got {errors:?}"
     );
 }
+
+/// `??` yields the payload itself, so the fallible value is spent. Reading an owning
+/// `Option` twice through it freed the payload twice.
+#[test]
+fn regression_coalesce_moves_an_owning_left_operand() {
+    let errors = semantic_errors(&format!(
+        "{FALLIBLE_DECLS}
+func mk() -> Option<Vec<i32>> {{ Option::None }}
+func main() -> i32 {{
+    val o = mk()
+    val a = o ?? Vec::new()
+    val b = o ?? Vec::new()
+    0
+}}"
+    ));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "the second `??` reads a moved value; got {errors:?}"
+    );
+}

@@ -102,5 +102,41 @@ pub enum ParseError {
     LexError(#[from] LexError),
 }
 
+impl ParseError {
+    /// The source range the error points at. `None` for the two errors that have no
+    /// token to point at: the input ended early, or nesting ran past the limit.
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            ParseError::UnexpectedEof { .. } | ParseError::MaxDepthExceeded(_) => None,
+            ParseError::LexError(error) => Some(error.span()),
+            ParseError::UnexpectedToken { span, .. }
+            | ParseError::DuplicateParameter { span, .. }
+            | ParseError::DuplicateParameterLabel { span, .. }
+            | ParseError::DuplicateTypeAlias { span, .. }
+            | ParseError::TypeAliasShadowsBuiltin { span, .. }
+            | ParseError::CyclicTypeAlias { span, .. }
+            | ParseError::EnumLifetimeParam { span, .. }
+            | ParseError::ExportNotAllowed { span, .. }
+            | ParseError::MisplacedNoPrelude { span }
+            | ParseError::EmptyInterpolationHole { span }
+            | ParseError::InvalidFormatSpec { span, .. }
+            | ParseError::InterpolationInPattern { span }
+            | ParseError::PairWithoutEnumerate { span }
+            | ParseError::PairHeadWithoutPair { span, .. }
+            | ParseError::CharIndicesHeadDecorated { span }
+            | ParseError::AdapterTakesNoArguments { span, .. }
+            | ParseError::LoopAdapterArity { span, .. }
+            | ParseError::RevOnNonRange { span }
+            | ParseError::StepOnNonRange { span }
+            | ParseError::StepArity { span }
+            | ParseError::ShapeArgumentOnNonTensor { span, .. }
+            | ParseError::TensorTypeArity { span }
+            | ParseError::NotAPlace { span, .. }
+            | ParseError::NotAPipelineTarget { span }
+            | ParseError::NotAComposeOperand { span } => Some(*span),
+        }
+    }
+}
+
 /// Result type for parsing operations
 pub type ParseResult<T> = Result<T, ParseError>;

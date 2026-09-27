@@ -370,7 +370,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 HirExprKind::FieldAccess { object, field } => {
                     let receiver = Type::from_hir(&object.ty);
                     // A user method is summarized under the name its call mangles.
-                    if let Type::Struct(type_name) = receiver.referent() {
+                    if let Type::Struct(type_name) | Type::Enum(type_name) = receiver.referent() {
                         return self
                             .string_ownership
                             .returns_owned(&format!("{}__{}", type_name, field));
@@ -763,7 +763,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if matches!(Type::from_hir(&receiver.ty), Type::Reference { .. }) {
             return Ok(());
         }
-        if !builds_its_own_buffer(&receiver.kind) {
+        if !builds_its_own_buffer(receiver) {
             return Ok(());
         }
         self.build_dlpack_release(handle)
@@ -1555,12 +1555,18 @@ impl<'ctx> CodegenContext<'ctx> {
 ///
 /// Deliberately a whitelist rather than "not a place": an `if`, a `match` or a block
 /// yields whatever its branch yields, which may be a buffer a binding still owns, and
-/// releasing that would free it twice. `TensorIndex` is out for the same reason — a
-/// sliced view reads the receiver's storage.
-fn builds_its_own_buffer(kind: &HirExprKind) -> bool {
+/// releasing that would free it twice. A slice qualifies because it is a copy, while an
+/// index that reads one element yields no buffer at all. A shape cast and a detach
+/// consume their receiver, so the buffer they hand on has no other owner left.
+fn builds_its_own_buffer(expr: &HirExpr) -> bool {
+    if let HirExprKind::TensorIndex { .. } = expr.kind {
+        return matches!(expr.ty, HirType::Tensor { .. });
+    }
     matches!(
-        kind,
+        expr.kind,
         HirExprKind::Binary { .. }
+            | HirExprKind::TensorShapeCast { .. }
+            | HirExprKind::TensorDetach { .. }
             | HirExprKind::Call { .. }
             | HirExprKind::TensorLiteral { .. }
             | HirExprKind::TensorFill { .. }

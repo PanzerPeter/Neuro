@@ -3,6 +3,7 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
+use super::builtins::TO_CHECKED_METHOD;
 use super::{declarations, eval_const_predicate, TypeChecker, CLONE_METHOD, COLLECTION_CTOR};
 use crate::errors::TypeError;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
@@ -278,7 +279,7 @@ impl TypeChecker {
                     continue;
                 }
                 let satisfied = match concrete {
-                    Type::Struct(name) | Type::Enum(name) => self
+                    Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => self
                         .trait_impls
                         .contains(&(bound.trait_name.clone(), name.clone())),
                     Type::Generic(name) => self
@@ -517,6 +518,19 @@ impl TypeChecker {
                 if matches!(obj_ty, Type::Unknown) {
                     return Some(Type::Unknown);
                 }
+                // No method declares type parameters, so a turbofish on one names nothing,
+                // exactly as it would on a non-generic free function. `.to_checked::<T>()`
+                // is the one builtin that reads its turbofish, as its target type.
+                let reads_turbofish =
+                    field.name == TO_CHECKED_METHOD && obj_ty.referent().is_float();
+                if !type_args.is_empty() && !reads_turbofish {
+                    self.record_error(TypeError::TurbofishCountMismatch {
+                        name: field.name.clone(),
+                        expected: 0,
+                        found: type_args.len(),
+                        span: *span,
+                    });
+                }
                 // Auto-deref through an immutable borrow: `r.method()` where
                 // `r: &Struct` dispatches on `Struct`. The borrow is never moved.
                 let struct_name = match obj_ty.referent() {
@@ -524,7 +538,7 @@ impl TypeChecker {
                     // An enum's own `impl` is consulted first; a method it does not declare
                     // falls through to the compiler-known surface below, which is where
                     // `Option` / `Result` keep `.unwrap()` and the rest.
-                    Type::Enum(n)
+                    Type::Enum(n) | Type::Newtype(n)
                         if self
                             .impl_methods
                             .get(n)
@@ -732,7 +746,10 @@ impl TypeChecker {
                         expected,
                     ));
                 }
-                if !is_enum && !self.struct_defs.contains_key(&type_name.name) {
+                if !is_enum
+                    && !self.struct_defs.contains_key(&type_name.name)
+                    && !self.newtype_defs.contains_key(&type_name.name)
+                {
                     self.record_error(TypeError::UnknownPathType {
                         type_name: type_name.name.clone(),
                         member: member.name.clone(),
@@ -787,7 +804,9 @@ impl TypeChecker {
         }
         // Standalone path expression (not used as a call target).
         // Validate the struct and member exist; the type is a function type.
-        if !self.struct_defs.contains_key(&type_name.name) {
+        if !self.struct_defs.contains_key(&type_name.name)
+            && !self.newtype_defs.contains_key(&type_name.name)
+        {
             self.record_error(TypeError::UnknownPathType {
                 type_name: type_name.name.clone(),
                 member: member.name.clone(),

@@ -199,10 +199,19 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     // `check`'s single-line error rendering.
     let program = module_resolution::resolve_program(
         input,
-        &|source| syntax_parsing::parse(source).map_err(|e| e.to_string()),
+        &|source, path| {
+            syntax_parsing::parse(source).map_err(|e| render_parse_error(path, source, &e))
+        },
         prelude.variants(),
     )
-    .map_err(|e| anyhow::anyhow!("Module error: {}", e))?;
+    .map_err(|e| match e {
+        // Already a rendered diagnostic with its location; printed as a type error is.
+        module_resolution::ModuleError::Parse { message, .. } => {
+            eprintln!("{}\n", message);
+            anyhow::anyhow!("Parsing failed")
+        }
+        other => anyhow::anyhow!("Module error: {}", other),
+    })?;
 
     let module_count = program.modules.len();
     // The merged namespace is flat, so the prelude's declarations are either in the program
@@ -228,6 +237,21 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
         items,
         module_count,
     })
+}
+
+/// Render a syntax or lexical error the way a type error is rendered. An input that
+/// ended early is pointed at its end; an error with no location keeps its message alone.
+fn render_parse_error(path: &str, source: &str, error: &syntax_parsing::ParseError) -> String {
+    let span = match error {
+        syntax_parsing::ParseError::UnexpectedEof { .. } => {
+            Some(Span::new(source.len(), source.len()))
+        }
+        other => other.span(),
+    };
+    match span {
+        Some(span) => render_diagnostic(Path::new(path), Some(source), &error.to_string(), span),
+        None => format!("error: {}", error),
+    }
 }
 
 /// Render one diagnostic with its source location: the message, the file, the line

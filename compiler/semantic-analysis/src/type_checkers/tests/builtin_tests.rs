@@ -240,3 +240,27 @@ fn user_function_shadows_println_builtin() {
     assert_eq!(checker.check_expr(&call, None), Some(Type::I32));
     assert!(!checker.has_errors(), "got: {:?}", checker.into_errors());
 }
+
+/// No method declares type parameters, so a turbofish on one is refused as it is on a
+/// non-generic function. `.to_checked::<T>()` is the one method that reads its own.
+#[test]
+fn regression_bug_080_a_turbofish_on_a_method_is_refused() {
+    let errors = semantic_errors(
+        r#"
+struct P { x: i32 }
+impl P { func get(&self) -> i32 { self.x } }
+func main() -> i32 {
+    val x: f64 = 1.5
+    val a = x.is_nan::<u8>()
+    val b = P { x: 1 }.get::<i32>()
+    val c = x.to_checked::<u8>()
+    return 0
+}
+"#,
+    );
+    let turbofish = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::TurbofishCountMismatch { expected: 0, .. }))
+        .count();
+    assert_eq!(turbofish, 2, "got {errors:?}");
+}

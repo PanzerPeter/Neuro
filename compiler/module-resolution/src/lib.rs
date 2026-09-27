@@ -66,13 +66,19 @@ pub struct PreludeVariant {
     pub variant: String,
 }
 
+/// The parser the caller injects: called with a module's source and the path that names
+/// the module in a diagnostic, it returns the module's items or its rendered error.
+pub type ParseModule<'a> = dyn Fn(&str, &str) -> Result<Vec<Item>, String> + 'a;
+
 /// Everything that can go wrong turning a root file into one program.
 #[derive(Debug, thiserror::Error)]
 pub enum ModuleError {
     #[error("failed to read module file `{path}`: {message}")]
     Read { path: String, message: String },
 
-    #[error("failed to parse module `{path}`: {message}")]
+    /// `message` is the injected parser's own rendering, which it was given the module's
+    /// path to write, so it is reported as-is.
+    #[error("{message}")]
     Parse { path: String, message: String },
 
     #[error(
@@ -182,7 +188,9 @@ pub enum ModuleError {
 /// Expand `root` and every module it reaches into one item list.
 ///
 /// Parsing is supplied by the caller rather than imported: this slice depends only on the
-/// AST it rewrites, so the parser stays on the driver's side of the boundary. `prelude`
+/// AST it rewrites, so the parser stays on the driver's side of the boundary. It is
+/// called with a module's source and the path to name that module by in a diagnostic.
+/// `prelude`
 /// names the enum variants every module may write bare (`Some`, `None`, `Ok`, `Err`)
 /// and comes from the caller for the same reason.
 ///
@@ -194,7 +202,7 @@ pub enum ModuleError {
 /// other than an item, or when two modules declare the same name.
 pub fn resolve_program(
     root: &Path,
-    parse_module: &dyn Fn(&str) -> Result<Vec<Item>, String>,
+    parse_module: &ParseModule<'_>,
     prelude: &[PreludeVariant],
 ) -> Result<ResolvedProgram, ModuleError> {
     let mut graph = loader::ModuleGraph::load(root, parse_module)?;

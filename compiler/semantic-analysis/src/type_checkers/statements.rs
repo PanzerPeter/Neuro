@@ -362,6 +362,9 @@ impl TypeChecker {
                         // Only initialized: infer from initializer (Phase 1: simple inference)
                         init
                     }
+                    // An initializer whose error was already reported binds at `Unknown`
+                    // below, the same as one that came back `Unknown`.
+                    (None, None) if init_errored => Type::Unknown,
                     (None, None) => {
                         // Neither declared nor initialized: error
                         self.record_error(TypeError::UninitializedVariable {
@@ -494,7 +497,7 @@ impl TypeChecker {
             } => {
                 // Check condition is boolean - no type inference needed (must be bool)
                 if let Some(cond_ty) = self.check_expr(condition, Some(&Type::Bool)) {
-                    if !cond_ty.is_bool() {
+                    if !matches!(cond_ty, Type::Unknown) && !cond_ty.is_bool() {
                         self.record_error(TypeError::Mismatch {
                             expected: Type::Bool,
                             found: cond_ty,
@@ -517,7 +520,7 @@ impl TypeChecker {
 
                 for (else_if_cond, else_if_stmts) in else_if_blocks {
                     if let Some(cond_ty) = self.check_expr(else_if_cond, Some(&Type::Bool)) {
-                        if !cond_ty.is_bool() {
+                        if !matches!(cond_ty, Type::Unknown) && !cond_ty.is_bool() {
                             self.record_error(TypeError::Mismatch {
                                 expected: Type::Bool,
                                 found: cond_ty,
@@ -553,7 +556,7 @@ impl TypeChecker {
                 span: _,
             } => {
                 if let Some(cond_ty) = self.check_expr(condition, Some(&Type::Bool)) {
-                    if !cond_ty.is_bool() {
+                    if !matches!(cond_ty, Type::Unknown) && !cond_ty.is_bool() {
                         self.record_error(TypeError::Mismatch {
                             expected: Type::Bool,
                             found: cond_ty,
@@ -1090,7 +1093,7 @@ impl TypeChecker {
     /// The mutability of the first reference met walking a place's object chain from
     /// `expr` (of type `ty`) toward its root. `None` when the chain crosses none, or
     /// passes through a projection whose type cannot be read without re-checking it.
-    fn nearest_reference(&self, expr: &Expr, ty: &Type) -> Option<bool> {
+    pub(crate) fn nearest_reference(&self, expr: &Expr, ty: &Type) -> Option<bool> {
         if let Type::Reference { mutable, .. } = ty {
             return Some(*mutable);
         }

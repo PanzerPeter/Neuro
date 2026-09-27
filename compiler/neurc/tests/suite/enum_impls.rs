@@ -135,7 +135,7 @@ struct Holder {
 }
 
 impl<T> Tree<T> {
-    func or(&self, fallback: T) -> T {
+    func or(self, fallback: T) -> T {
         match self {
             Tree::Leaf(v) => v,
             Tree::Empty => fallback

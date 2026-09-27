@@ -295,6 +295,30 @@ impl TypeChecker {
             });
             return;
         }
+        // The block's body is checked once, against the template and under the
+        // template's own parameter names, so it can only stand for every instance and
+        // must name the parameters as the declaration does. A concrete argument
+        // (`impl Tr for W<i32>`) or a renamed one would fail inside the body instead.
+        let template: Vec<String> = if is_enum {
+            self.generic_enums.get(&base).map(|d| &d.generics)
+        } else {
+            self.generic_structs.get(&base).map(|d| &d.generics)
+        }
+        .map(|generics| generics.iter().map(|g| g.name.name.clone()).collect())
+        .unwrap_or_default();
+        let as_declared = def.type_args.len() == template.len()
+            && def.type_args.iter().zip(&template).all(|(arg, name)| {
+                matches!(arg, ast_types::Type::Named(ident)
+                    if &ident.name == name && def.generics.iter().any(|g| &g.name.name == name))
+            });
+        if !as_declared {
+            let params = template.join(", ");
+            self.record_error(TypeError::ImplForOneInstance {
+                expected: format!("impl<{params}> {base}<{params}>"),
+                span: def.type_name.span,
+            });
+            return;
+        }
         self.enter_generic_scope(&def.generics, &def.lifetimes);
         let _ = self.register_impl(def);
         self.exit_generic_scope();

@@ -5,7 +5,7 @@ Expand a root `.nr` file into the single item list its program is built from, lo
 
 ## Entry Point
 - Type: Library function
-- Input: `root: &Path`, a `&dyn Fn(&str) -> Result<Vec<Item>, String>` parser supplied by the caller, and `prelude: &[PreludeVariant]`: the enum variants every module may write bare
+- Input: `root: &Path`, a `&ParseModule` (`dyn Fn(&str, &str) -> Result<Vec<Item>, String>`) parser supplied by the caller (called with a module's source and the path that names it in a diagnostic), and `prelude: &[PreludeVariant]`: the enum variants every module may write bare
 - Output: `Result<ResolvedProgram, ModuleError>`: `items: Vec<ast_types::Item>`, each stamped with the module it came from, one `ResolvedModule` per loaded file, and `no_prelude`, the root file's opt-out
 
 ## Shared Kernel
@@ -19,7 +19,9 @@ Reads `.nr` files from disk; writes nothing.
 - The parser is **injected, not imported**. This slice would otherwise depend on
   `syntax-parsing`, a feature slice; `neurc` is the one place both meet, and it passes
   `syntax_parsing::parse` in. The slice's own unit tests use a stub parser, so it builds
-  and tests with no feature-slice dependency at all.
+  and tests with no feature-slice dependency at all. The parser is handed the module's
+  display path along with its source, so the error text it returns is already a rendered
+  diagnostic with a location, and `ModuleError::Parse` displays that text as it is.
 - **Discovery is reference-driven.** A module is loaded when an `import` names it or a
   qualified path reaches into it: `math::sqrt` looks for `math.nr` or `math/mod.nr` beside
   the referencing file. Globbing a directory instead would drag every unrelated single-file

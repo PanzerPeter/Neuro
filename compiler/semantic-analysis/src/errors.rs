@@ -985,8 +985,14 @@ pub enum TypeError {
     #[error("newtype '{name}' is cyclic: a newtype may not wrap itself directly or transitively")]
     CyclicNewtype { name: String, span: Span },
 
-    #[error("enum variant payload type {ty} is not supported: enum variants may only carry scalar Copy primitives (integers, floats, bool, char) in this phase")]
+    #[error("enum variant payload type {ty} is not supported: a payload must be sized, so `void` is refused and `dyn Trait` or `[T]` must sit behind a reference")]
     UnsupportedEnumPayload { ty: Type, span: Span },
+
+    #[error("an `impl` for a generic type covers every instance and names its parameters as the declaration does: write `{expected}`; an `impl` for one instance, or with renamed or reordered parameters, is not available")]
+    ImplForOneInstance { expected: String, span: Span },
+
+    #[error("enum '{name}' holds itself: a payload is stored inline, so an enum that contains itself, directly or through a struct, array, tuple or another enum, has no finite size")]
+    RecursiveEnum { name: String, span: Span },
 
     #[error("enum '{enum_name}' has no variant '{variant}'")]
     UnknownEnumVariant {
@@ -1395,6 +1401,8 @@ impl TypeError {
             | Self::NewtypeAlreadyDefined { span, .. }
             | Self::CyclicNewtype { span, .. }
             | Self::UnsupportedEnumPayload { span, .. }
+            | Self::RecursiveEnum { span, .. }
+            | Self::ImplForOneInstance { span, .. }
             | Self::GradFormUnsupported { span, .. }
             | Self::GradOrderUnsupported { span, .. }
             | Self::NoGradForm { span, .. }

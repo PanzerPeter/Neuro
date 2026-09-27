@@ -417,3 +417,41 @@ fn emit_llvm_ir_writes_a_main_less_module() {
         "Expected a definition of `twice` in the emitted IR, got: {ir}"
     );
 }
+
+/// A syntax or lexical error is rendered with its file, line and column, the way a type
+/// error is. The driver used to flatten it to one line naming only the file.
+#[test]
+fn regression_bug_079_a_parse_error_renders_source_location() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    for (name, source, location) in [
+        (
+            "syntax.nr",
+            "func main() -> i32 {\n    val x = 1 +\n}\n",
+            "syntax.nr:3:1",
+        ),
+        (
+            "lexical.nr",
+            "func main() -> i32 {\n    val s = \"a{x\"\n    0\n}\n",
+            "lexical.nr:2:13",
+        ),
+        (
+            "eof.nr",
+            "func main() -> i32 {\n    val x = 1 +",
+            "eof.nr:2:16",
+        ),
+    ] {
+        let source_path = write_source(&temp_dir, name, source);
+        let output = Command::new(neurc_path())
+            .arg("check")
+            .arg(&source_path)
+            .output()
+            .expect("Failed to execute neurc check");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{name} must fail");
+        assert!(
+            stderr.contains(location),
+            "Expected {location}, got: {stderr}"
+        );
+        assert!(stderr.contains('^'), "Expected a caret, got: {stderr}");
+    }
+}

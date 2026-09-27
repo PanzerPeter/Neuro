@@ -185,7 +185,7 @@ fn generic_impl_method_dispatches_on_instance() {
     let errors = semantic_errors(
         r#"
 struct Wrapper<T> { value: T }
-impl<T> Wrapper<T> { func get(&self) -> T { self.value } }
+impl<T> Wrapper<T> { func get(self) -> T { self.value } }
 func main() -> i32 {
     val w = Wrapper { value: 7 }
     return w.get()
@@ -301,5 +301,79 @@ func main() -> i32 {
     assert!(
         errors.is_empty(),
         "an explicit lifetime must not change the reference type; got {errors:?}"
+    );
+}
+
+/// An implicit tail return moves its value exactly as `return` does. It moved nothing,
+/// so a `&self` method handed its caller a field it did not own, which `return` refused,
+/// and the value was freed twice.
+#[test]
+fn regression_a_tail_return_moves_like_return() {
+    for body in [
+        "{ self.v }",
+        "{ return self.v }",
+        "{ if c { self.v } else { self.v } }",
+        "{ match c { true => self.v, false => Vec::new() } }",
+        "{ { self.v } }",
+    ] {
+        let errors = semantic_errors(&format!(
+            "struct W {{ v: Vec<i32> }}
+impl W {{ func get(&self, c: bool) -> Vec<i32> {body} }}
+func main() -> i32 {{ 0 }}"
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::CannotMoveOutOfBorrow { .. })),
+            "{body}: moving a field out of `&self` is refused; got {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn a_generic_field_may_not_leave_through_a_borrowed_receiver() {
+    let errors = semantic_errors(
+        r#"
+struct Cell<T> { value: T }
+impl<T> Cell<T> { func get(&self) -> T { self.value } }
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotMoveOutOfBorrow { .. })),
+        "a `T` is non-`Copy` in the body; got {errors:?}"
+    );
+}
+
+/// An impl body is checked once, under the declaration's own parameter names, so an
+/// impl for one instance (`W<i32>`) or with renamed parameters was reported inside its
+/// body as `expected i32, found T`. It is refused at the impl, naming the form to write.
+#[test]
+fn an_impl_for_one_instance_or_renamed_parameters_is_refused_at_the_impl() {
+    for header in ["impl Weigh for W<i32>", "impl<U> Weigh for W<U>"] {
+        let errors = semantic_errors(&format!(
+            "trait Weigh {{ func weight(&self) -> i32 }}
+struct W<T> {{ v: T }}
+{header} {{ func weight(&self) -> i32 {{ 0 }} }}
+func main() -> i32 {{ 0 }}"
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::ImplForOneInstance { expected, .. } if expected == "impl<T> W<T>")),
+            "{header}: got {errors:?}"
+        );
+    }
+    let errors = semantic_errors(
+        "trait Weigh { func weight(&self) -> i32 }
+struct W<T> { v: T }
+impl<T> Weigh for W<T> { func weight(&self) -> i32 { 0 } }
+func main() -> i32 { 0 }",
+    );
+    assert!(
+        errors.is_empty(),
+        "the declared form is accepted; got {errors:?}"
     );
 }

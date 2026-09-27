@@ -378,10 +378,9 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Get the alloca pointer and LLVM struct type for a struct object expression.
-    /// Only simple identifier objects are supported (no chained access).
+    /// Get the storage pointer and LLVM struct type for a struct or enum object expression.
     pub(crate) fn get_struct_ptr_and_type(
-        &self,
+        &mut self,
         object: &HirExpr,
         struct_name: &str,
     ) -> CodegenResult<(PointerValue<'ctx>, StructType<'ctx>)> {
@@ -435,10 +434,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 )?;
                 Ok((field_ptr, self.nominal_llvm_type(struct_name)?))
             }
-            other => Err(CodegenError::UnsupportedType(format!(
-                "a method receiver must be a place, not {:?}",
-                other
-            ))),
+            // An array or `Vec` element, a tuple element or a `*r`: the checker accepted
+            // it as a place, so `arr[i].advance()` writes through to the element.
+            other => match self.held_place_ptr(object)? {
+                Some(ptr) => Ok((ptr, self.nominal_llvm_type(struct_name)?)),
+                None => Err(CodegenError::UnsupportedType(format!(
+                    "a method receiver must be a place, not {:?}",
+                    other
+                ))),
+            },
         }
     }
 }

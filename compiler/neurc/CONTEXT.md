@@ -26,7 +26,8 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
 
 1. `load_program`: module resolution plus the prelude. It hands `syntax_parsing::parse` to
    `module_resolution::resolve_program` and gets back the merged item list of every module the
-   root reaches through a qualified path. The parser is **passed in rather than depended on**
+   root reaches through a qualified path. The closure it hands over renders a parse error with
+   `render_parse_error`, so a syntax error prints with its line and column like a type error. The parser is **passed in rather than depended on**
    because `module-resolution` may not import a feature slice; neurc is the single place the
    two meet.
 2. `argument_binding::bind_arguments`: after the merge and the prelude, before type checking.
@@ -154,6 +155,9 @@ line, the column, the offending line and a caret run under the span. A `TypeErro
 `Display` carries no location any more: byte offsets are an internal representation, and
 `TypeError::span()` is what the driver renders instead. A use-after-move carries a second
 span and gets a `note: moved here` under the error, rendered by the same helper.
+
+`render_parse_error` does the same for a syntax or lexical error through `ParseError::span()`.
+`UnexpectedEof` has no span of its own and is pointed at the end of the file.
 
 `report_lowering_error` renders a lowering failure. `LoweringError::NotDifferentiable`, the
 derivative transform's refusal of a construct in a `@grad` body, carries a span and goes through

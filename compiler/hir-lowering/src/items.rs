@@ -231,7 +231,7 @@ impl Lowerer {
     ) -> Result<(), LoweringError> {
         let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
         let base_generics = self.template_generics(base);
-        let self_ty = self.impl_target_type(mangled);
+        let self_ty = self.impl_target_type(mangled)?;
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             for method in &imp.methods {
@@ -273,12 +273,17 @@ impl Lowerer {
 
     /// The receiver type of an `impl` on `name`: an enum when the name is a declared
     /// enum, a generic enum template or an instance of one, a struct otherwise.
-    pub(crate) fn impl_target_type(&self, name: &str) -> HirType {
+    pub(crate) fn impl_target_type(&mut self, name: &str) -> Result<HirType, LoweringError> {
         if self.enums.contains_key(name) || self.generic_enums.contains_key(name) {
-            HirType::Enum(name.to_string())
-        } else {
-            HirType::Struct(name.to_string())
+            return Ok(HirType::Enum(name.to_string()));
         }
+        if let Some(inner) = self.newtypes.get(name).cloned() {
+            return Ok(HirType::Newtype {
+                name: name.to_string(),
+                inner: Box::new(self.resolve_type(&inner)?),
+            });
+        }
+        Ok(HirType::Struct(name.to_string()))
     }
 
     /// The generic parameters of the struct or enum template named `base`.
@@ -380,7 +385,7 @@ impl Lowerer {
         const_subst: &std::collections::HashMap<String, u64>,
     ) -> Result<(), LoweringError> {
         let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
-        let self_type = self.impl_target_type(mangled);
+        let self_type = self.impl_target_type(mangled)?;
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, generics, subst);
             let mut methods = Vec::new();
@@ -572,7 +577,7 @@ impl Lowerer {
             // The checker already rejected it on any non-`Copy` type, so every
             // owned-`self` method reaching lowering is sound and is registered normally.
             let mangled = format!("{}__{}", struct_name, method.name.name);
-            let self_ty = self.impl_target_type(struct_name);
+            let self_ty = self.impl_target_type(struct_name)?;
             let (params, ret) = self.method_signature(&self_ty, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
             if crate::autodiff::is_grad(&method.attributes) {
@@ -1045,7 +1050,7 @@ impl Lowerer {
 
     fn lower_impl(&mut self, def: &ImplDef) -> Result<HirImpl, LoweringError> {
         let struct_name = def.type_name.name.clone();
-        let self_type = self.impl_target_type(&struct_name);
+        let self_type = self.impl_target_type(&struct_name)?;
         let saved_ty = self.enter_impl_assoc(def)?;
         let mut methods = Vec::new();
         for method in &def.methods {

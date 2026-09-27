@@ -166,3 +166,32 @@ func main() -> i32 {
 }
 
 // --- Generics ---
+
+/// A newtype takes `impl` blocks and trait impls as a struct does: methods, associated
+/// functions, operator traits and user traits through a bound.
+#[test]
+fn regression_bug_078_a_newtype_takes_an_impl() {
+    let errors = semantic_errors(
+        r#"
+newtype Meters = i32
+impl Meters {
+    func double(&self) -> Meters { Meters(self.0 * 2) }
+    func zero() -> Meters { Meters(0) }
+    func grow(&mut self, d: i32) { self = Meters(self.0 + d) }
+}
+impl Add for Meters {
+    type Output = Meters
+    func add(self, rhs: Meters) -> Meters { Meters(self.0 + rhs.0) }
+}
+trait Size { func size(&self) -> i32 }
+impl Size for Meters { func size(&self) -> i32 { self.0 } }
+func total<T: Size>(t: &T) -> i32 { t.size() }
+func main() -> i32 {
+    mut m = Meters(3).double() + Meters::zero()
+    m.grow(1)
+    return total(&m)
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}

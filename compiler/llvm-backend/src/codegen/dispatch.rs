@@ -5,7 +5,7 @@
 // method table: a `&dyn Trait` is a `{ data ptr, vtable ptr }` fat pointer, and a call
 // through it loads a fixed slot from the vtable and jumps.
 
-use inkwell::types::BasicType;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::*;
 use inkwell::AddressSpace;
 use neuro_hir::{HirExpr, HirImpl, HirItem, HirSelfParam};
@@ -150,9 +150,22 @@ impl<'ctx> CodegenContext<'ctx> {
             if matches!(method.self_param, Some(HirSelfParam::RefMut)) {
                 self_ptr.into()
             } else {
-                let struct_ty = self.nominal_llvm_type(type_name)?;
+                // The target's own receiver type, which a newtype has although its name
+                // is no LLVM type.
+                let self_ty = target
+                    .get_type()
+                    .get_param_types()
+                    .first()
+                    .copied()
+                    .and_then(|t| BasicTypeEnum::try_from(t).ok())
+                    .ok_or_else(|| {
+                        CodegenError::InternalError(format!(
+                            "method '{}' takes no value receiver",
+                            target_name
+                        ))
+                    })?;
                 self.builder
-                    .build_load(struct_ty, self_ptr, "dyn.self")?
+                    .build_load(self_ty, self_ptr, "dyn.self")?
                     .into()
             };
 
@@ -198,10 +211,13 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
 
+        // A newtype's name keys its vtable, and `Type::from_hir` would erase it to the
+        // inner type, so the HIR type is read first.
         let concrete = Type::from_hir(&value.ty);
-        let type_name = match concrete.referent() {
-            Type::Struct(name) | Type::Enum(name) => name.clone(),
-            other => {
+        let type_name = match (value.ty.referent(), concrete.referent()) {
+            (neuro_hir::HirType::Newtype { name, .. }, _) => name.clone(),
+            (_, Type::Struct(name) | Type::Enum(name)) => name.clone(),
+            (_, other) => {
                 return Err(CodegenError::UnsupportedType(format!(
                     "only a struct or enum can be used as a `dyn {}` trait object, found {:?}",
                     trait_name, other

@@ -507,6 +507,13 @@ impl TypeChecker {
     /// derives `Copy`. Other type forms (functions, void, unknown) are not Copy receivers
     /// in any move-tracked position, so the distinction is immaterial for them.
     pub(crate) fn is_type_copy(&self, ty: &Type) -> bool {
+        self.copy_within(ty, &mut Vec::new())
+    }
+
+    /// [`Self::is_type_copy`], carrying the enums whose payloads are being asked about. A
+    /// recursive enum is refused as unsized, but it is still registered, so the question
+    /// can meet it again before that diagnostic ends compilation.
+    fn copy_within(&self, ty: &Type, visiting: &mut Vec<String>) -> bool {
         match ty {
             Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
             // An abstract type parameter answers for every instantiation at once, and a
@@ -521,7 +528,7 @@ impl TypeChecker {
             Type::Newtype(name) => self
                 .newtype_defs
                 .get(name)
-                .map(|inner| self.is_type_copy(inner))
+                .map(|inner| self.copy_within(inner, visiting))
                 .unwrap_or(false),
             // A borrow `&T` / `&mut T` is `Copy`: copying the reference is sound
             // because it never moves the borrowed value. Note: aliasing
@@ -531,18 +538,46 @@ impl TypeChecker {
             // The element is currently restricted to Copy scalars at resolution time,
             // so this recursion is always true in practice; it keeps the rule honest
             // if the restriction is later relaxed.
-            Type::Array { element, .. } => self.is_type_copy(element),
+            Type::Array { element, .. } => self.copy_within(element, visiting),
             // A tuple is `Copy` exactly when every element is `Copy`.
             // Element Copy-ness is enforced at resolution, so this is always true in
             // practice; it keeps the rule honest if that restriction is relaxed.
-            Type::Tuple(elements) => elements.iter().all(|e| self.is_type_copy(e)),
+            Type::Tuple(elements) => elements.iter().all(|e| self.copy_within(e, visiting)),
             // A collection owns a heap buffer, so duplicating its header would
             // alias, and later double-free, that buffer.
             Type::Collection { .. } => false,
             // A tensor owns its buffer for the same reason a collection does.
             Type::Tensor { .. } => false,
+            // An enum is structural like a tuple: it holds an owner exactly when one of
+            // its payloads does, and then it moves rather than copies.
+            Type::Enum(name) => {
+                if visiting.contains(name) {
+                    return true;
+                }
+                visiting.push(name.clone());
+                let copy = self
+                    .enum_payload_types(name)
+                    .iter()
+                    .all(|payload| self.copy_within(payload, visiting));
+                visiting.pop();
+                copy
+            }
             _ => true,
         }
+    }
+
+    /// Every payload type an enum's variants carry, in declaration order. Empty for a
+    /// payload-free enum and for a name `enum_defs` does not know.
+    pub(crate) fn enum_payload_types(&self, name: &str) -> Vec<Type> {
+        self.enum_defs
+            .get(name)
+            .map(|variants| {
+                variants
+                    .iter()
+                    .flat_map(|variant| variant.fields.iter().map(|(_, ty)| ty.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Whether values of `ty` participate in move-by-default ownership.
@@ -550,6 +585,12 @@ impl TypeChecker {
     /// `string` is always tracked. A struct is tracked unless it derives `Copy`, mirroring
     /// the spec rule that user types are move-by-default and opt into copying via `@derive`.
     pub(crate) fn is_type_move_tracked(&self, ty: &Type) -> bool {
+        self.tracked_within(ty, &mut Vec::new())
+    }
+
+    /// [`Self::is_type_move_tracked`], carrying the enums in progress for the reason
+    /// [`Self::copy_within`] gives.
+    fn tracked_within(&self, ty: &Type, visiting: &mut Vec<String>) -> bool {
         match ty {
             Type::String => true,
             // An abstract type parameter stands for whatever a call site substitutes, so
@@ -564,14 +605,26 @@ impl TypeChecker {
             // An aggregate is tracked exactly when it holds something tracked: the
             // owner of a `[string; 3]` is the array binding, and duplicating it would
             // duplicate every buffer inside it.
-            Type::Array { element, .. } => self.is_type_move_tracked(element),
-            Type::Tuple(elements) => elements.iter().any(|e| self.is_type_move_tracked(e)),
+            Type::Array { element, .. } => self.tracked_within(element, visiting),
+            Type::Tuple(elements) => elements.iter().any(|e| self.tracked_within(e, visiting)),
+            Type::Enum(name) => {
+                if visiting.contains(name) {
+                    return false;
+                }
+                visiting.push(name.clone());
+                let tracked = self
+                    .enum_payload_types(name)
+                    .iter()
+                    .any(|payload| self.tracked_within(payload, visiting));
+                visiting.pop();
+                tracked
+            }
             // A newtype is its inner value wearing another name.
             Type::Newtype(name) => self
                 .newtype_defs
                 .get(name)
                 .cloned()
-                .map(|inner| self.is_type_move_tracked(&inner))
+                .map(|inner| self.tracked_within(&inner, visiting))
                 .unwrap_or(false),
             _ => false,
         }
@@ -779,6 +832,11 @@ impl TypeChecker {
         // Runs before Copy-derive validation so a struct with a newtype field
         // sees the newtype's real Copy-ness.
         self.resolve_newtype_inners(items);
+
+        // Pass 1e: an enum stored inline inside itself has no size. Runs once struct
+        // fields, enum payloads and newtype inners are all resolved, since the cycle can
+        // pass through any of them.
+        self.reject_recursive_enums(items);
 
         // Pass 1b: validate `@derive(Copy)`: every field of a Copy struct must itself
         // be Copy. Runs after all structs are registered so a Copy field that is

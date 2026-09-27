@@ -2298,3 +2298,58 @@ fn test_bug_064_a_map_lookup_releases_a_key_built_for_it() {
         );
     }
 }
+
+/// A slice copies its receiver's elements into a buffer of its own, and a shape cast or
+/// a detach hands on the buffer of a receiver it consumed, so none of the three results
+/// has another owner. Indexing one that no binding holds released nothing, and each
+/// evaluation leaked a buffer.
+#[test]
+fn regression_a_slice_or_shape_cast_temporary_is_released() {
+    let source = r#"
+        func make() -> Tensor<i32, [4]> {
+            [1, 2, 3, 4]
+        }
+
+        func grid() -> Tensor<i32, [2, 2]> {
+            [[1, 2], [3, 4]]
+        }
+
+        func main() -> i32 {
+            return make()[0..2][1] + grid().t()[0, 1] + make().detach()[3]
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    // The slice's receiver and the slice; the transpose's source (released inside the
+    // cast, which copies) and its result; the detach's gradient and Hessian slots, and
+    // the detached buffer. Before the fix the slice, the transpose and the detached
+    // buffer were never released: four calls.
+    assert_eq!(
+        body.matches("call void %dlpack.deleter").count(),
+        7,
+        "every temporary tensor is released exactly once:\n{body}"
+    );
+}
+
+/// An enum's own method returns a buffer to its caller exactly as a struct's does.
+/// The return summary was consulted for struct receivers only, so each call leaked.
+#[test]
+fn regression_an_enum_method_returning_an_owned_string_hands_it_to_the_caller() {
+    let source = r#"
+        enum Kind { A, B }
+        impl Kind {
+            func label(&self, n: i32) -> string { "k{n}" }
+        }
+        func main() -> i32 {
+            val k = Kind::A
+            val s = k.label(3)
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert!(
+        free_calls(&ir, "main") > 0,
+        "the caller releases the label:\n{}",
+        function_body(&ir, "main")
+    );
+}

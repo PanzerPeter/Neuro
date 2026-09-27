@@ -202,12 +202,17 @@ have no single token to point at.
 - **Precise error messages**: each names what was expected
 - **Span information**: the exact location of the offending token
 
-The driver does not render that span yet: a parse error reaches the user as one line naming
-the file, with no line or column
-([BUG-079](../../BUGS.md#bug-079-a-syntax-error-is-reported-without-its-line-and-column)).
+`ParseError::span()` hands that span to the driver, which renders a parse error the way it
+renders a type error. `UnexpectedEof` is pointed at the end of the file.
 
 ```text
-Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
+error: unexpected token RightBrace, expected expression
+ --> bad.nr:3:1
+  |
+3 | }
+  | ^
+
+Error: Parsing failed
 ```
 
 ## Implementation Details

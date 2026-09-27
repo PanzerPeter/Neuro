@@ -325,7 +325,8 @@ fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
             }
             // A user method is keyed by the `Type__method` its call site mangles.
             HirExprKind::FieldAccess { object, field } => {
-                if let HirType::Struct(type_name) = object.ty.referent() {
+                if let HirType::Struct(type_name) | HirType::Enum(type_name) = object.ty.referent()
+                {
                     return producers.contains(&format!("{}__{}", type_name, field));
                 }
                 // `String::to_string` copies the builder's bytes into a buffer of their

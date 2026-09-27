@@ -4,7 +4,7 @@
 //! Every file here adds methods to the same `impl Lowerer` block.
 
 use ast_types::Expr;
-use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirFieldInit, HirType};
+use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirFieldInit, HirStmt, HirType};
 
 use super::{
     CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT, CHAR_AT_METHOD,
@@ -365,6 +365,19 @@ impl Lowerer {
         dispatch: crate::OpDispatch,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
+        // A comparison method takes `rhs: &Rhs`, and a borrow needs storage to point at,
+        // so `p == P { x: 1 }` binds each operand first. Both are bound, left then right,
+        // so the operands still evaluate in source order.
+        let borrows_rhs = matches!(dispatch.rhs_param, HirType::Reference { .. });
+        if borrows_rhs && !matches!(rhs.kind, HirExprKind::Variable(_)) {
+            let mut stmts = Vec::with_capacity(3);
+            let object = self.bind_operand(object, &mut stmts);
+            let rhs = self.bind_operand(rhs, &mut stmts);
+            let result = dispatch.result.clone();
+            let call = self.build_operator_call(object, rhs, dispatch, span)?;
+            stmts.push(HirStmt::Expr(call));
+            return Ok(HirExpr::new(HirExprKind::Block { stmts }, result, span));
+        }
         let arg = if let HirType::Reference { mutable, .. } = &dispatch.rhs_param {
             let mutable = *mutable;
             let ty = HirType::Reference {
@@ -398,6 +411,24 @@ impl Lowerer {
             dispatch.result,
             span,
         ))
+    }
+
+    /// Bind `operand` to a fresh local unless it already names one, and yield the read.
+    fn bind_operand(&mut self, operand: HirExpr, stmts: &mut Vec<HirStmt>) -> HirExpr {
+        if matches!(operand.kind, HirExprKind::Variable(_)) {
+            return operand;
+        }
+        let name = format!("__operand_{}", self.operand_counter);
+        self.operand_counter += 1;
+        let (ty, span) = (operand.ty.clone(), operand.span);
+        stmts.push(HirStmt::VarDecl {
+            name: name.clone(),
+            ty: ty.clone(),
+            init: Some(operand),
+            mutable: false,
+            span,
+        });
+        HirExpr::new(HirExprKind::Variable(name), ty, span)
     }
 
     /// Build the method call an overloaded unary operator desugars to:
@@ -516,7 +547,7 @@ impl Lowerer {
             HirType::Struct(name) => Some(name.clone()),
             // An enum's own method; anything else on an enum is the compiler-known
             // `Option` / `Result` surface, lowered as a builtin below.
-            HirType::Enum(name)
+            HirType::Enum(name) | HirType::Newtype { name, .. }
                 if self
                     .impl_methods
                     .get(name)

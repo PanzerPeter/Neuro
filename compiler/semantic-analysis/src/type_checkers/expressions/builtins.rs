@@ -41,7 +41,7 @@ const ITEM_METHOD: &str = "item";
 
 /// `float.to_checked::<T>()`, the float-to-integer conversion that reports a value `T`
 /// cannot hold instead of saturating it.
-const TO_CHECKED_METHOD: &str = "to_checked";
+pub(super) const TO_CHECKED_METHOD: &str = "to_checked";
 
 /// The one elementwise math method with an argument, its exponent.
 const POW_METHOD: &str = "pow";
@@ -671,7 +671,12 @@ impl TypeChecker {
         let Some(info) = self.symbols.lookup(&name) else {
             return;
         };
-        if !info.mutable {
+        // A sub-place reached through a reference is as writable as that reference,
+        // whatever its root binding was declared: the rule `p.c.n += 1` already follows.
+        let writable = self
+            .nearest_reference(object, obj_ty)
+            .unwrap_or(info.mutable);
+        if !writable {
             self.record_error(TypeError::CannotBorrowMutably {
                 name: name.clone(),
                 span,

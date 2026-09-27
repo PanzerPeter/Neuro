@@ -134,3 +134,51 @@ func main() -> i32 { f("x") }
         "matching on a string must be rejected in phase 1E; got {errors:?}"
     );
 }
+
+/// An arm that binds an owner by value takes it out of the scrutinee, so a second
+/// `match` on the same binding reads a moved value. It used to free the payload twice.
+#[test]
+fn regression_a_match_binding_an_owner_moves_the_scrutinee() {
+    let errors = semantic_errors(
+        r#"
+enum Bag { Items(Vec<i32>), Empty }
+func main() -> i32 {
+    val b = Bag::Empty
+    val x = match b { Bag::Items(v) => v.len(), Bag::Empty => 0 }
+    val y = match b { Bag::Items(v) => v.len(), Bag::Empty => 0 }
+    0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "got {errors:?}"
+    );
+}
+
+/// A name an arm declares shadows an outer binding only inside the arm, so an arm's
+/// tail naming it does not move the outer one.
+#[test]
+fn an_arm_local_tail_does_not_move_an_outer_binding_of_the_same_name() {
+    let errors = semantic_errors(
+        r#"
+enum Bag { Items(Vec<i32>), Empty }
+func main() -> i32 {
+    val v: Vec<i32> = Vec::new()
+    val b = Bag::Empty
+    val w = match b { Bag::Items(v) => v, Bag::Empty => Vec::new() }
+    val z = {
+        val v: Vec<i32> = Vec::new()
+        v
+    }
+    return (v.len() + w.len() + z.len()) as i32
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "the outer `v` is untouched; got {errors:?}"
+    );
+}

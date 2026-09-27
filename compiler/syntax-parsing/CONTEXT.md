@@ -8,6 +8,9 @@ Transform a Neuro token stream into a typed Abstract Syntax Tree for later compi
 - Input: `source: &str`
 - Output: `Result<Vec<Item>, ParseError>`
 
+`ParseError::span()` gives the range an error points at, `None` for `UnexpectedEof` and
+`MaxDepthExceeded`, which have no token to point at. A wrapped `LexError` answers with its own.
+
 `parse_expr(source: &str) -> Result<Expr, ParseError>` is also public. It is not a second
 pipeline entry point: no slice and no driver calls it. It exists so `tests/error_tests.rs`
 can drive the Pratt parser over a bare expression and assert on the `ParseError` a fragment

@@ -654,16 +654,29 @@ Because a newtype is a separate type, its values are not interchangeable with th
 ```neuro
 val m: Meters = Meters(3)
 val bad: i32 = m               // ERROR: expected i32, found Meters
-val also_bad = Meters(1) + Seconds(2)  // ERROR: arithmetic is not defined on newtypes
+val also_bad = Meters(1) + Seconds(2)  // ERROR: no `impl Add` makes Meters + Seconds
 ```
 
 A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype is itself `Copy` and a `newtype Name = string` moves like the `string` it wraps. It can be a `val`/`mut` binding, a function parameter or return type, and a struct field.
 
-### Limitations
+A newtype takes `impl` blocks and trait impls exactly as a struct does: methods with any
+receiver, associated functions, user traits (through a bound or `&dyn`), and the operator
+traits, which is how it gets arithmetic:
 
-- **No `impl` blocks on a newtype yet**, so a newtype has no methods and no operator traits
-  ([BUG-078](../BUGS.md#bug-078-a-newtype-cannot-take-an-impl-block)). Use `.0` to compute on
-  the inner value.
+```neuro
+newtype Meters = i32
+
+impl Add for Meters {
+    type Output = Meters
+    func add(self, rhs: Meters) -> Meters { Meters(self.0 + rhs.0) }
+}
+
+impl Meters {
+    func double(&self) -> Meters { Meters(self.0 * 2) }
+}
+```
+
+`.0` reads the inner value through a borrow too, so `m.0` works on `m: &Meters`.
 
 ### Type Errors
 

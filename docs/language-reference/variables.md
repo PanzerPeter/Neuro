@@ -268,8 +268,11 @@ val n: u64 = s2.len()      // OK, s2 owns the value now
 ```
 
 A move happens whenever a non-`Copy` value is handed to a new owner: a `val`/`mut`
-initializer, an assignment, a `return`, a struct-field store, or a by-value call
-argument:
+initializer, an assignment, a `return` or a function's last expression, a struct-field
+store, a by-value call argument, the left side of `??`, the operand of `?`, or a `match`
+whose arm binds an owning payload by value. An `if`, `match` or block in one of those
+positions moves whatever its arms yield. A value reached through a borrow (a `&self`
+receiver's field, say) owns nothing to hand over, so moving it is an error:
 
 ```neuro
 func consume(s: string) -> u64 { s.len() }

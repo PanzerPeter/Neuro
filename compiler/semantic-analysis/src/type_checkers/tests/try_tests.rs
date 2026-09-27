@@ -160,3 +160,26 @@ func main() -> i32 { 0 }",
         "a shadowing `Result` still propagates; got {errors:?}"
     );
 }
+
+/// `?` yields the payload or forwards the failure; either way the operand is spent, so
+/// a second `?` on the same owning binding is a use of a moved value.
+#[test]
+fn regression_try_moves_an_owning_operand() {
+    let errors = semantic_errors(&format!(
+        "{FALLIBLE_DECLS}
+func mk() -> Option<Vec<i32>> {{ Option::None }}
+func twice() -> Option<u64> {{
+    val o = mk()
+    val a = o?
+    val b = o?
+    Option::Some(a.len() + b.len())
+}}
+func main() -> i32 {{ 0 }}"
+    ));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "the second `?` reads a moved value; got {errors:?}"
+    );
+}

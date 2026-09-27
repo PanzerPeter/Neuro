@@ -303,7 +303,22 @@ impl<'ctx> CodegenContext<'ctx> {
             // is representationally identical to its inner type, so both lower to the
             // inner value unchanged.
             HirExprKind::NewtypeConstruct { value, .. } => self.codegen_expr(value),
-            HirExprKind::NewtypeAccess { object } => self.codegen_expr(object),
+            HirExprKind::NewtypeAccess { object } => {
+                let value = self.codegen_expr(object)?;
+                // Through a borrow (`m.0` on `m: &Meters`) the operand is the newtype's
+                // address, so the inner value is loaded from it. An inner type that is
+                // itself a pointer (a tensor handle) is the value already.
+                let inner_ty = self.get_any_llvm_type(&Type::from_hir(&expr.ty))?;
+                match value {
+                    BasicValueEnum::PointerValue(ptr)
+                        if matches!(object.ty, neuro_hir::HirType::Reference { .. })
+                            && !inner_ty.is_pointer_type() =>
+                    {
+                        Ok(self.builder.build_load(inner_ty, ptr, "newtype.inner")?)
+                    }
+                    other => Ok(other),
+                }
+            }
 
             // Array rest remainder `..rest` from a destructuring desugar.
             HirExprKind::ArrayRest { array, start } => {
@@ -366,6 +381,15 @@ impl<'ctx> CodegenContext<'ctx> {
 
             // Method call: `instance.method(args)`, passing self as the first arg.
             HirExprKind::FieldAccess { object, field } => {
+                // A newtype's own `impl` method. `Type::from_hir` erases a newtype to its
+                // inner type, which may be a struct with methods of its own, so the name
+                // that keys the newtype's methods is read off the HIR first.
+                if let neuro_hir::HirType::Newtype { name, .. } = object.ty.referent() {
+                    let mangled = format!("{}__{}", name, field);
+                    if self.functions.contains_key(&mangled) {
+                        return self.codegen_method_call(&mangled, object, args);
+                    }
+                }
                 let recv_ty = Type::from_hir(&object.ty);
                 // A trait-object receiver dispatches dynamically through its vtable
                 // The concrete implementation is unknown until runtime.

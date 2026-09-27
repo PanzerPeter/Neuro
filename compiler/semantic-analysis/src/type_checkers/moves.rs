@@ -53,9 +53,54 @@ impl TypeChecker {
     /// consuming positions (e.g. an argument inside a call) are handled where
     /// that call's arguments are checked.
     pub(crate) fn record_move(&mut self, expr: &Expr) {
+        self.record_move_outside(expr, &[]);
+    }
+
+    /// [`Self::record_move`] for a value that may be the tail of an `if`, a `match` or
+    /// a block. Such an expression yields one of its arms' tails, so each tail is moved
+    /// the way a place written in the consuming position itself would be. `local` holds
+    /// the names the arms declare: their scopes have closed by now, so a tail naming one
+    /// of them moved an arm-local value, not an outer binding of the same name.
+    fn record_move_outside(&mut self, expr: &Expr, local: &[String]) {
         let mut place = expr;
         while let Expr::Paren(inner, _) = place {
             place = inner;
+        }
+
+        match place {
+            Expr::If {
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => {
+                self.record_tail_move(then_block, local);
+                for (_, block) in else_if_blocks {
+                    self.record_tail_move(block, local);
+                }
+                if let Some(block) = else_block {
+                    self.record_tail_move(block, local);
+                }
+                return;
+            }
+            Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } => {
+                self.record_tail_move(stmts, local);
+                return;
+            }
+            Expr::Match { arms, .. } => {
+                for arm in arms {
+                    let mut names = local.to_vec();
+                    for pattern in &arm.patterns {
+                        names.extend(pattern.binding_names());
+                    }
+                    self.record_move_outside(&arm.body, &names);
+                }
+                return;
+            }
+            _ => {}
+        }
+        if Self::place_root_name(place).is_some_and(|root| local.contains(&root)) {
+            return;
         }
 
         // A constant is a value, not an owner, so it cannot be moved from.
@@ -90,6 +135,35 @@ impl TypeChecker {
         self.reject_move_of_borrowee(&root, place.span());
         let path = Self::place_path(place).unwrap_or_default();
         self.symbols.mark_place_moved(&root, &path, place.span());
+    }
+
+    /// Move the value a block yields: its trailing expression, or a trailing `if` with an
+    /// `else`, which the parser shapes as a statement.
+    pub(crate) fn record_tail_move(&mut self, stmts: &[Stmt], outer: &[String]) {
+        let mut local = outer.to_vec();
+        for stmt in stmts {
+            match stmt {
+                Stmt::VarDecl { name, .. } => local.push(name.name.clone()),
+                Stmt::ValElse { pattern, .. } => local.extend(pattern.binding_names()),
+                _ => {}
+            }
+        }
+        match stmts.last() {
+            Some(Stmt::Expr(tail)) => self.record_move_outside(tail, &local),
+            Some(Stmt::If {
+                then_block,
+                else_if_blocks,
+                else_block: Some(else_block),
+                ..
+            }) => {
+                self.record_tail_move(then_block, &local);
+                for (_, block) in else_if_blocks {
+                    self.record_tail_move(block, &local);
+                }
+                self.record_tail_move(else_block, &local);
+            }
+            _ => {}
+        }
     }
 
     /// The path of a sub-place below its root binding, as the move state keys it:
@@ -202,7 +276,7 @@ impl TypeChecker {
     ///
     /// `None` means the expression is not a place rooted in a binding — a call
     /// result or a literal — which owns nothing a caller could move out of.
-    fn place_origin(&self, place: &Expr) -> Option<(Type, bool)> {
+    pub(crate) fn place_origin(&self, place: &Expr) -> Option<(Type, bool)> {
         match place {
             Expr::Paren(inner, _) => self.place_origin(inner),
             Expr::Identifier(ident) => self.symbols.lookup(&ident.name).map(|info| {

@@ -22,6 +22,20 @@ impl Lowerer {
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         let scrutinee = self.lower_expr(scrutinee, None)?;
+        // A borrowed scrutinee is matched through: the patterns test its referent.
+        let scrutinee = match scrutinee.ty.clone() {
+            HirType::Reference { inner, .. } => {
+                let span = scrutinee.span;
+                HirExpr::new(
+                    HirExprKind::Deref {
+                        operand: Box::new(scrutinee),
+                    },
+                    *inner,
+                    span,
+                )
+            }
+            _ => scrutinee,
+        };
         let scrut_ty = scrutinee.ty.clone();
 
         // Body-type hint, mirroring the checker: the expected type if any, else the

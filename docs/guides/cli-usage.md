@@ -280,11 +280,18 @@ Errors go to stderr with exit code `1`. `compile` wraps the failing stage's mess
 
 Example:
 ```text
-Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
+error: unexpected token RightBrace, expected expression
+ --> bad.nr:3:1
+  |
+3 | }
+  | ^
+
+Error: Parsing failed
 ```
 
 **Information provided**:
-- The module that failed to parse
+- The file, line and column of the offending token (the end of the file when the input
+  stopped early), with the source line underlined
 - The offending token and what the parser expected
 
 ### Type Errors

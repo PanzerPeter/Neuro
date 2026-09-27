@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.1] - 2026-09-27
+
+### Fixed
+
+- An enum holding an owner (a `Vec`, a tensor, a non-`Copy` struct) now moves instead of being
+  copied, so using it twice is a compile error rather than a double free (BUG-082, partly: an
+  enum's `string` payload still leaks). An enum of `Copy` payloads still copies.
+- `??`, `?` and a `match` arm that binds an owning payload now move their operand, and a
+  function's last expression moves its value exactly as `return` does, through any nesting of
+  `if`, `match` and blocks. Reading an owning `Option` twice, or handing back a field of a
+  `&self` receiver from a method's tail, used to free the same buffer twice. A `match` that binds
+  an owning payload out of a borrowed value is now a compile error.
+- An enum that holds itself inline, directly or through a struct, array, tuple or another enum,
+  is a compile error. It used to overflow the compiler's stack.
+- A newtype takes `impl` blocks and trait impls: methods with any receiver, associated
+  functions, user traits (through a bound or `&dyn`) and operator traits (BUG-078). `.0` on a
+  borrowed newtype reads the inner value instead of failing in codegen.
+- A syntax or lexical error is printed with its file, line, column and a caret, the way a type
+  error is (BUG-079).
+- A turbofish on a method call that declares no type parameters is a compile error, as it is on
+  a function (BUG-080).
+- A comparison through an operator trait against a value that is not a variable, such as
+  `p == P { x: 1 }` or `p == arr[0]`, compiles instead of stopping with an internal error
+  (BUG-081).
+- `match` on a borrowed enum or scalar (`d: &Dir`) tests the value behind the borrow, as
+  `match self` in a `&self` method already did.
+- A `&mut self` method called on an array, `Vec` or tuple element, or on a field reached
+  through a `&mut` parameter, writes through to it. The first stopped with an internal error
+  and the second was refused.
+- Indexing or reducing a slice, a shape cast or a `.detach()` result that no binding holds, such
+  as `t[0..2][1]` or `m.t()[0, 1]`, leaked a buffer each time. An enum method returning an owned
+  `string` leaked it the same way.
+- An undefined name in an initializer is reported once. Every later use of the binding used to
+  add an "uninitialized", "undefined" or `bool` mismatch error.
+- An `impl` for one instance of a generic type, or with renamed parameters, is reported at the
+  `impl` with the form to write, instead of as a type mismatch inside its body.
+
 ## [3.18.0] - 2026-09-27
 
 ### Added

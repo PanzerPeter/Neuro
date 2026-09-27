@@ -259,7 +259,12 @@ variant or include a `_` arm; an integer/`char` match requires a `_` arm; a
 `bool` match needs both `true` and `false` (or `_`). A guarded arm does not
 count toward exhaustiveness.
 
-**Limits**: the scrutinee must be an enum, integer, `char`, or `bool`;
+A borrow of an enum or scalar is matched through: `match d` on `d: &Dir` tests the `Dir`,
+as `match self` does in a `&self` method. An arm that binds an owning payload by value moves
+it out, which a borrowed scrutinee cannot give up, so that is an error there; bind with `_`
+or match on an owned value.
+
+**Limits**: the scrutinee must be an enum, integer, `char`, or `bool` (or a borrow of one);
 enum-payload sub-patterns must be bindings or `_` (match a payload *value* with a
 guard, e.g. `Some(n) if n == 0`); and alternatives of an `|`-pattern may not
 bind.

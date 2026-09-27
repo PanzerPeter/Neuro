@@ -234,7 +234,13 @@ func main() -> i32 {
 
 Error output:
 ```text
-Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
+error: unexpected token RightBrace, expected expression
+ --> bad.nr:3:1
+  |
+3 | }
+  | ^
+
+Error: Parsing failed
 ```
 
 ### Type Error Example

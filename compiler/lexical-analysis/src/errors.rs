@@ -40,6 +40,25 @@ pub enum LexError {
     UnescapedClosingBrace { span: Span },
 }
 
+impl LexError {
+    /// The source range the error points at.
+    pub fn span(&self) -> Span {
+        match self {
+            LexError::UnexpectedChar { span, .. }
+            | LexError::UnterminatedString { span }
+            | LexError::InvalidNumber { span, .. }
+            | LexError::InvalidEscape { span, .. }
+            | LexError::InvalidCharLiteral { span, .. }
+            | LexError::UnterminatedBlockComment { span }
+            | LexError::UnterminatedInterpolation { span }
+            | LexError::UnterminatedTripleQuotedString { span }
+            | LexError::TripleQuoteClosingNotOnOwnLine { span }
+            | LexError::TripleQuoteUnderIndented { span, .. }
+            | LexError::UnescapedClosingBrace { span } => *span,
+        }
+    }
+}
+
 impl Default for LexError {
     fn default() -> Self {
         LexError::UnexpectedChar {

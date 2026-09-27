@@ -31,7 +31,10 @@ impl TypeChecker {
         span: Span,
         expected: Option<&Type>,
     ) -> Type {
-        let scrut_ty = self.check_expr(scrutinee, None).unwrap_or(Type::Unknown);
+        let written_ty = self.check_expr(scrutinee, None).unwrap_or(Type::Unknown);
+        // A borrow is matched through, as `self` is in a `&self` method and as `*r` is
+        // written out: the patterns test the referent.
+        let scrut_ty = written_ty.referent().clone();
 
         // Only Copy scalars and enums are matchable in this phase; reject anything
         // else up front (but keep checking arms so their bodies still get diagnosed).
@@ -65,15 +68,20 @@ impl TypeChecker {
         // type once known, so `_ => 0` infers to a sibling arm's integer width.
         let mut hint: Option<Type> = expected.cloned();
         let mut arm_types: Vec<Type> = Vec::with_capacity(arms.len());
+        let mut takes_owner = false;
         for arm in arms {
             self.symbols.restore_moves(&move_snapshot);
-            let arm_ty = self.check_arm(arm, &pattern_ty, hint.as_ref());
+            let (arm_ty, binds_owner) = self.check_arm(arm, &pattern_ty, hint.as_ref());
+            takes_owner |= binds_owner;
             if hint.is_none() && !matches!(arm_ty, Type::Unknown) {
                 hint = Some(arm_ty.clone());
             }
             arm_types.push(arm_ty);
         }
         self.symbols.restore_moves(&move_snapshot);
+        if takes_owner {
+            self.take_from_scrutinee(scrutinee, &written_ty, span);
+        }
 
         if matchable && !matches!(scrut_ty, Type::Unknown) {
             self.check_exhaustive(arms, &scrut_ty, span);
@@ -104,8 +112,14 @@ impl TypeChecker {
     }
 
     /// Check one arm: its patterns, guard, and body. Introduces the pattern bindings
-    /// into a fresh scope for the guard and body. Returns the body's type.
-    fn check_arm(&mut self, arm: &MatchArm, scrut_ty: &Type, expected: Option<&Type>) -> Type {
+    /// into a fresh scope for the guard and body. Returns the body's type, and whether
+    /// whether it binds a value that owns something, which the arm moves out.
+    fn check_arm(
+        &mut self,
+        arm: &MatchArm,
+        scrut_ty: &Type,
+        expected: Option<&Type>,
+    ) -> (Type, bool) {
         self.symbols.push_scope();
 
         // Or-patterns (`a | b`) may not bind: only a single pattern arm binds.
@@ -123,6 +137,9 @@ impl TypeChecker {
             }
         }
 
+        let binds_owner = bindings
+            .iter()
+            .any(|(_, ty, _)| self.is_type_move_tracked(ty));
         for (name, ty, _span) in &bindings {
             let _ = self.symbols.define(name.clone(), ty.clone(), false);
         }
@@ -148,9 +165,26 @@ impl TypeChecker {
         // `match` has a value, so it says nothing about that value and must not
         // constrain its siblings: the contract `panic` / `unreachable` already have.
         if expr_diverges(&arm.body) {
-            return Type::Unknown;
+            return (Type::Unknown, binds_owner);
         }
-        body_ty
+        (body_ty, binds_owner)
+    }
+
+    /// Settle what binding an owner by value does to the scrutinee. An owned scrutinee
+    /// is given up whichever arm runs, as `??` and `?` give theirs up. A borrowed one
+    /// (`self` in a `&self` method, or `*r`) owns nothing to give, so taking an owner out
+    /// of it is refused, as `return self.field` is.
+    fn take_from_scrutinee(&mut self, scrutinee: &Expr, scrut_ty: &Type, span: Span) {
+        let behind_borrow = matches!(scrut_ty, Type::Reference { .. })
+            || self
+                .place_origin(scrutinee)
+                .is_some_and(|(_, borrowed)| borrowed);
+        if !behind_borrow {
+            self.record_move(scrutinee);
+            return;
+        }
+        let name = Self::place_root_name(scrutinee).unwrap_or_else(|| "value".to_string());
+        self.record_error(TypeError::CannotMoveOutOfBorrow { name, span });
     }
 
     /// Check a pattern against the scrutinee type, collecting the bindings it

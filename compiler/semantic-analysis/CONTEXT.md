@@ -179,7 +179,10 @@ everything, so binding it is what actually stops the cascade. It applies only wh
 initializer was actually reported: `Type::Unknown` also comes back from a DIVERGING
 initializer (`panic`, `unreachable`), which produces no value to bind and is routed to
 `VoidBinding` below instead. The `Stmt::VarDecl` arm tells the two apart by whether the
-error list grew while the initializer was checked.
+error list grew while the initializer was checked, and applies it whether the initializer came
+back `Unknown` or with no type at all (an undefined name): the second used to fall through to a
+false `UninitializedVariable`. A statement-level `if` / `else if` / `while` condition that is
+`Unknown` is not re-reported as a `bool` mismatch, as the expression-level `if` already skipped it.
 
 ### Primitive and reference type contracts
 - Struct types are **nominal**: two `Type::Struct` are compatible iff their names match. The same
@@ -230,7 +233,7 @@ error list grew while the initializer was checked.
   `BitNot` requires an integer.
 
 ### Methods, impls, and dispatch
-`check_impl` binds `self` as a var of the impl's target type, struct or enum (**mutable for
+`check_impl` binds `self` as a var of the impl's target type, struct, enum or newtype (**mutable for
 `&mut self`**, immutable for `&self`), then the remaining params, before checking the body. A
 `&mut self` body may therefore assign to `self.field`, or to `self` itself. An enum's owned
 `self` follows `is_type_copy` like any receiver, and an enum may not implement `Drop`
@@ -239,14 +242,23 @@ consults the enum's `impl_methods` first and falls through to the compiler-known
 `Result` surface for anything the impl does not declare; `Enum::name(args)` is an associated
 call when `Enum__name` is registered and a variant construction otherwise.
 
+An `impl` for a generic type must name the declaration's own parameters, in order
+(`impl<T> W<T>` for `struct W<T>`); `register_generic_impl` reports anything else, a concrete
+instance (`impl Tr for W<i32>`) or a renamed parameter, as `ImplForOneInstance`. The body is
+checked once under the declaration's parameter names, so either form used to fail inside the
+body with a mismatch naming the template's `T`.
+
 **Method calls** (`instance.method(args)`) are recognised when a `Call`'s `func` is a
 `FieldAccess`; the object's struct type drives an `impl_methods` lookup for the mangled name, then
 arity and argument types are validated (skipping param[0] = `self`). When the resolved method is
 in `mut_self_methods`, `check_mut_self_receiver` enforces the exclusive borrow: the receiver must
-be a `mut` place (or reached through `&mut T`) and must not already be borrowed (the same
+be a `mut` place, or a sub-place whose nearest reference is `&mut` (`nearest_reference`, the rule
+a field store follows, so `p.c.inc()` works on `p: &mut P`), and must not already be borrowed (the same
 coexistence rule as a `&mut place` borrow), registering a transient exclusive borrow that clears
 at statement end. A `&T` receiver or a non-`mut` binding is `CannotBorrowMutably`; a live borrow is
-`CannotMutablyBorrowWhileBorrowed`.
+`CannotMutablyBorrowWhileBorrowed`. No method declares type parameters, so a turbofish on a
+method call is `TurbofishCountMismatch` with `expected: 0`, except `.to_checked::<T>()` on a
+float, the one method that reads its turbofish.
 
 **Associated calls** (`TypeName::func(args)`) are recognised when `func` is an `Expr::Path`; the
 mangled `TypeName__funcName` is looked up directly in `functions`.
@@ -398,8 +410,14 @@ there is no `Stmt::Loop`.
 
 ### Ownership, borrows, and lifetimes
 **Move by default** (`type_checkers/moves.rs`). A non-`Copy` value is moved out of its source
-binding when placed into a new owner: a `val`/`mut` initializer, an assignment RHS, a `return`, a
-struct-literal or struct-field assignment value, or a by-value call argument. `record_move` marks
+binding when placed into a new owner: a `val`/`mut` initializer, an assignment RHS, a `return` or
+an implicit tail return, a struct-literal or struct-field assignment value, a by-value call
+argument, the operand of `??` or `?`, or a `match` scrutinee an arm binds an owner out of. An
+`if`, `match` or block in one of those positions yields an arm's tail, so `record_move` follows
+it into every arm (`record_move_outside` / `record_tail_move`), skipping a name the arm itself
+declares: its scope has closed, so the outer binding of that name is not the one moved. The
+tail return used to record nothing, so `self.v` as a `&self` method's last expression was
+accepted where `return self.v` was not, and freed the field twice. `record_move` marks
 the source moved when the consumed expression is a place of a move-tracked type
 (`is_type_move_tracked` is true for `Type::String`, every collection, every tensor, any
 `Type::Struct` not deriving `Copy`, every `Type::Generic`, and an array, tuple or newtype holding
@@ -797,7 +815,8 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
   operator is not operand-symmetric: the right side is typed by the left's *payload*, not by the
   left. `fallible_payload` returns the `Some`/`Ok` slot-0 type; anything else is
   `NullCoalesceOnNonFallible`. The `Result` error payload is deliberately unconstrained: `??`
-  discards it. A mistyped fallback is an ordinary `Mismatch`.
+  discards it. A mistyped fallback is an ordinary `Mismatch`. The left operand is moved: `??`
+  yields the payload itself, so an owning `Option` read twice through it is `UseOfMovedValue`.
 - **`?`** (`expressions/try_expr.rs`) types `Expr::Try` as the operand's success payload after two
   checks. The operand must be fallible (else `TryOnNonFallible`), and
   `current_function_return_type` must be an instance of the SAME fallible enum, since that is
@@ -805,7 +824,8 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
   `Option` out of a `Result` function, since the two do not convert). For `Result`, the operand's `Err`
   payload must already equal the function's, reported as an ordinary `Mismatch`: the spec forwards
   the error with no implicit `.into()`, so `.map_err(...)` is the explicit conversion path.
-  Success payloads are unconstrained; only the error types must agree.
+  Success payloads are unconstrained; only the error types must agree. The operand is moved,
+  for the reason `??` moves its left side.
 - **`val-else`** (`val_else.rs`). `check_val_else` checks the scrutinee, runs the pattern through
   `check_pattern`, checks the `else` branch in its own scope, and only THEN defines the pattern's
   bindings in the enclosing scope, so the branch cannot see bindings its own failure means were
@@ -816,11 +836,15 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
 
 ### Pattern matching
 `type_checkers/matches.rs`. `check_match` types the scrutinee (restricted to enum / integer /
-`char` / `bool`), checks each arm's patterns against it, introduces pattern bindings into a
+`char` / `bool`, or a borrow of one, whose referent the patterns test, as `match self` and
+`match *r` already did), checks each arm's patterns against it, introduces pattern bindings into a
 per-arm scope for the guard and body, unifies arm-body types (the first arm drives literal
 inference), and verifies exhaustiveness: enum variant coverage, both `bool` values, or a `_`
 catch-all, with guarded arms never counting. Payload sub-patterns are restricted to bindings and
-`_` this phase, and or-patterns cannot bind. Errors: `NonExhaustiveMatch`,
+`_` this phase, and or-patterns cannot bind. An arm that binds a move-tracked value takes it
+out of the scrutinee, so `take_from_scrutinee` records a move of an owned scrutinee and reports
+`CannotMoveOutOfBorrow` for a borrowed one (a `&self` receiver, a `&Enum`, a `*r`): binding a
+`Vec` payload out of a borrow freed it twice. Errors: `NonExhaustiveMatch`,
 `UnsupportedMatchScrutinee`, `PatternTypeMismatch`, `MatchArmTypeMismatch`, `InvalidRangePattern`,
 `VariantPatternFormMismatch`, `OrPatternBinding`, `RefutablePayloadPattern`.
 
@@ -830,14 +854,22 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `resolve_enum_variants` (pass 1a) resolves the payloads. They are split because a payload may
   name a struct and a struct field may name the enum, so neither table can be complete before the
   other's names exist. A payload may be any SIZED type, `Copy` or not; `void` and the unsized
-  types are `UnsupportedEnumPayload`. Construction: `E::V` (Path) → unit, `E::V(..)` (Call→Path)
+  types are `UnsupportedEnumPayload`. `reject_recursive_enums` (pass 1e, once struct fields and
+  newtype inners are resolved too) reports `RecursiveEnum` for an enum stored inline inside
+  itself, through a struct, array, tuple, newtype or another enum, and clears its payloads to
+  `Unknown`, because every predicate that recurses through payloads, and the backend's layout,
+  would otherwise run forever. An enum is `Copy` exactly when every payload is, and
+  move-tracked when any payload is (`copy_within` / `tracked_within` carry the enums in progress,
+  so the recursion ends even on a reported cycle): an enum holding an owner moves. Construction: `E::V` (Path) → unit, `E::V(..)` (Call→Path)
   → tuple, `E::V { .. }` (`EnumStructLiteral`) → struct, with arity/field/form diagnostics.
 - **Newtypes.** `predeclare_newtype` reserves each name (rejecting builtin/struct/enum/newtype
   collisions via `NewtypeAlreadyDefined`), then `resolve_newtype_inners` resolves inner types once
   all nominal names are known and rejects cycles (`CyclicNewtype`), which is what makes every
   predicate that recurses through an inner type terminate. A newtype forwards both `Copy` and
   move-tracking from its inner type. Construction `Name(value)` is handled in `check_plain_call`;
-  `.0` yields the inner type in the `TupleIndex` check.
+  `.0` yields the inner type in the `TupleIndex` check. A newtype is an `impl` target like a
+  struct (`impl_target_type`): its methods, associated functions (`Name::f`), operator traits and
+  trait impls resolve through the same tables, keyed by the newtype's name.
 - **Arrays.** `resolve_type` resolves `[T; N]`; `check_expr` handles array literals (homogeneous,
   length vs annotation) and indexing (`NotIndexable` / `IndexNotInteger`); `array.len()` is `u64`;
   `Stmt::ForEach` binds the element type, and a BY-VALUE head over a move-tracked element type

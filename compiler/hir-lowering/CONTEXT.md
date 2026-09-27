@@ -264,10 +264,13 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   `success_variant`, `not_fallible`, and `fallible_base` are shared with the `?` desugar.
 - **Operator traits** (`operator_traits.rs` holds the table: `Add`, `Sub`, …, `MatMul`,
   `PartialEq`, `Comparable`). An operator-trait impl populates `operator_binary_impls` / `operator_unary_impls`
-  during `register_impl`; a `Binary` / `Unary` whose peeled left/operand type is a struct or enum with a
+  during `register_impl`; a `Binary` / `Unary` whose peeled left/operand type is a struct, enum or newtype with a
   matching entry becomes the method call `a.op(b)`, a `Call` with a `FieldAccess` callee,
   identical to an ordinary method call, so the backend needs no operator awareness. A comparison
-  method's `rhs: &Rhs` parameter means the argument is wrapped in a `Reference`. Owned `self`
+  method's `rhs: &Rhs` parameter means the argument is wrapped in a `Reference`, and a borrow
+  needs storage, so when the right operand is not a variable `build_operator_call` binds both
+  operands to fresh `__operand_N` locals in a `Block` first (left then right, keeping source
+  order): `p == P { x: 1 }` otherwise reached the backend as a borrow of a temporary. Owned `self`
   methods are lowered like any other receiver, on a generic impl as well as a concrete one; the
   ownership difference is the backend's, not this stage's.
 - **Derived equality** (`@derive(PartialEq)`). A struct in `partial_eq_structs` has no `eq` to
@@ -343,7 +346,8 @@ items, the backend needs no generic awareness. A generic enum's impls follow the
 `instantiate_generic_enum` and `emit_mono_enum` (shared `emit_instance_impls`); an instance made
 before the impls were recorded is caught up by `register_existing_enum_instance_methods`. Every
 `HirImpl` carries its receiver as `self_type` (`impl_target_type`: an enum when the name is one,
-a struct otherwise).
+a `HirType::Newtype` with its resolved inner type when it names a newtype, a struct otherwise).
+A method call on a newtype receiver resolves through `impl_methods` as an enum's does.
 
 **The mangling scheme is load-bearing.** `mangle_instance` (`name_g_<type…>`) and
 `mangle_struct_instance` (`Base_g_<type…>`) use a **single**-underscore marker, deliberately
@@ -555,7 +559,8 @@ compiler bug, not a diagnostic.
   `HirExprKind::ArrayRest { array, start }` typed `[T; N - start]`, re-derived from the source
   array's `HirType`. A defensive arity re-check (`exact ⇒ N == start`, else `start <= N`) raises
   `Malformed` rather than underflowing `N - start`.
-- **Pattern matching**: `pattern_test` maps a pattern to a `HirMatchTest` (variant tag / `IntEq`
+- **Pattern matching**: a borrowed scrutinee is wrapped in a `Deref` first, so the patterns test
+  its referent (`match d` on `d: &Dir` lowers as `match *d`). `pattern_test` maps a pattern to a `HirMatchTest` (variant tag / `IntEq`
   / `IntRange`, with `char`/`bool` literals as scalar codepoints or 0-1, and an exclusive `a..b`
   normalized to `a..=b-1`); `pattern_bindings` resolves an arm's bindings to
   `HirBindingSource::Scrutinee` or `EnumPayload { slot }` (slot = declared field position).

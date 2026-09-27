@@ -332,7 +332,13 @@ func good_implicit(x: i32) -> i32 {
 
 **Symptoms**:
 ```text
-Error: Module error: failed to parse module `program.nr`: unexpected token RightBrace, expected expression
+error: unexpected token RightBrace, expected expression
+ --> program.nr:3:1
+  |
+3 | }
+  | ^
+
+Error: Parsing failed
 ```
 
 Parse errors stop the run at the first one; only the type checker reports a list.

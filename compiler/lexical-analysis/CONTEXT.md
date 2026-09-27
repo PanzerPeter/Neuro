@@ -8,6 +8,8 @@ Transform raw Neuro source text into a validated token stream as the first stage
 - Input: `source: &str`
 - Output: `Result<Vec<Token>, LexError>`
 
+`LexError::span()` gives the range every variant carries, so a caller can render a location.
+
 ## Shared Kernel
 - shared-types: `Span` for the byte range on every token, plus `IntSuffix` / `FloatSuffix`
 

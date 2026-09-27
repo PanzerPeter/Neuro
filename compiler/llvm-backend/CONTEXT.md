@@ -208,7 +208,8 @@ then belongs to the storage, and is tracked one of three ways:
 - **A function's return value.** `codegen/string_ownership.rs` reads every body once, before any is
   generated, and collects the functions whose every exit (each `return`, plus an expression tail)
   allocates. `impl` methods and associated functions are collected too, keyed by the
-  `Type__method` their call sites mangle, and a producer called with arguments is a producer. The set is a fixpoint, because one producer can be another's only return path; it
+  `Type__method` their call sites mangle (a struct's or an enum's alike), and a producer called
+  with arguments is a producer. The set is a fixpoint, because one producer can be another's only return path; it
   starts empty and grows, so a recursive cycle never enters it. A name a local binding shadows is
   excluded, since `codegen_call_dispatch` may send that call through the indirect path. A tail
   `if` (with an `else`), `match` or block exits through each branch's own tail (`tail_exits`). A
@@ -287,8 +288,11 @@ address and is refused: a `&mut self` method needs storage to write through.
 
 ## Method ABI
 `impl` methods lower to LLVM free functions mangled `TypeName__methodName` (double underscore).
-The receiver is `HirImpl::self_type`, a struct or an enum; `nominal_llvm_type` gives either one's
-aggregate (field struct or tagged union). `codegen_method_call` recovers the receiver type by
+The receiver is `HirImpl::self_type`, a struct, an enum or a newtype; `nominal_llvm_type` gives
+a struct's or an enum's aggregate (field struct or tagged union). A newtype has no LLVM type of
+its own (`Type::from_hir` erases it to its inner type), so a by-value receiver behind a borrow is
+loaded as the callee's own first parameter type, here and in the vtable thunk, and a `&mut self`
+newtype receiver's storage comes from `held_place_ptr`. `codegen_method_call` recovers the receiver type by
 splitting the symbol on `__`, so the
 separator must appear **exactly once**. Two rules hold that: semantic analysis rejects a declared
 name containing `__` (`TypeError::ReservedNameSeparator`), and every monomorphized instance name
@@ -307,11 +311,16 @@ uses a single-underscore `_g_` marker (`identity_g_i32`, `Pair_g_i32_f64`).
   `TypeName::func(args)` becomes `codegen_call("StructName__funcName", args)`.
 
 A method call is recognised when a `Call`'s callee is a `FieldAccess`; the receiver's struct name
-comes from the callee node's HIR type. An enum receiver is dispatched to `Enum__method` when that
+comes from the callee node's HIR type. A newtype receiver is dispatched first, to
+`Newtype__method`, by the name on the HIR type: erased, it would read as its inner type, which may
+be a struct with methods of its own. An enum receiver is dispatched to `Enum__method` when that
 function exists and otherwise falls through to the builtin `Option` / `Result` surface. The call
 site detects a by-pointer callee from its first
 LLVM param being a pointer and passes the receiver place's address (via
-`get_struct_ptr_and_type`, which auto-loads a `&mut Struct` receiver) rather than the loaded value.
+`get_struct_ptr_and_type`, which auto-loads a `&mut Struct` receiver, and falls back to
+`held_place_ptr` for an array, `Vec` or tuple element or a `*r`) rather than the loaded value.
+A `&dyn Trait` coercion of a newtype keys its vtable by the newtype's HIR name for the same reason.
+`.0` on a `&Newtype` loads the inner value through the borrow (`NewtypeAccess`).
 
 An overloaded operator needs no codegen of its own: `hir-lowering` desugars it to an ordinary
 method call, so the backend emits a plain `StructName__op` call.
@@ -587,7 +596,10 @@ released, once the fold has read everything, is a receiver that no binding owns:
 result, a call's return, a tensor constructor, another reduction) which otherwise has nothing
 to release it. The predicate is a whitelist of shapes that provably allocate their own buffer,
 not "anything that is not a place": an `if`, a `match` or a block yields whatever its branch
-yields, which may be a buffer a binding still owns.
+yields, which may be a buffer a binding still owns. A slice (a `TensorIndex` of tensor type) is on
+the list, since it copies; so are a shape cast and a `.detach()`, which consume their receiver
+and hand its buffer on with no other owner left. Without them `t[0..2][1]` and `m.t()[0, 1]`
+leaked a buffer per evaluation.
 
 `expressions/tensor_sort.rs` owns `HirExprKind::TensorSort`: `.sort()`, `.argsort()` and
 `.topk()`. It walks the same `outer`/`mid`/`inner` split the reduction does, and builds, per

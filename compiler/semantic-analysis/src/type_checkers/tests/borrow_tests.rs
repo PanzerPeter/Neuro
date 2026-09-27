@@ -494,3 +494,34 @@ func main() -> i32 {
     );
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+/// A `&mut self` method on a sub-place is as writable as the reference the place is
+/// reached through, the rule `p.c.n += 1` already follows. `p.c.inc()` through a
+/// `&mut P` parameter was refused because the parameter binding is not `mut`.
+#[test]
+fn regression_a_mut_self_call_through_a_mut_borrow_is_accepted() {
+    let prelude = r#"
+@derive(Copy, Clone)
+struct C { n: i32 }
+impl C { func inc(&mut self) { self.n = self.n + 1 } }
+struct P { c: C }
+"#;
+    let accepted = semantic_errors(&format!(
+        "{prelude}func f(p: &mut P, a: &mut [C; 2]) {{
+    p.c.inc()
+    a[0].inc()
+}}
+func main() -> i32 {{ 0 }}"
+    ));
+    assert!(accepted.is_empty(), "got {accepted:?}");
+    let refused = semantic_errors(&format!(
+        "{prelude}func f(p: &P) {{ p.c.inc() }}
+func main() -> i32 {{ 0 }}"
+    ));
+    assert!(
+        refused
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotBorrowMutably { .. })),
+        "a shared borrow stays read-only; got {refused:?}"
+    );
+}

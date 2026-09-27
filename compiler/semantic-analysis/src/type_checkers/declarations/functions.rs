@@ -267,6 +267,8 @@ impl TypeChecker {
                     }
                 }
                 self.symbols.clear_transient_borrows();
+                // Returning a value moves it out of the function, the same as `return`.
+                self.record_move(expr);
                 // A trailing reference expression is an implicit return; verify it
                 // does not borrow a function-local place.
                 if matches!(return_type, Type::Reference { .. }) {
@@ -298,6 +300,9 @@ impl TypeChecker {
                     });
                 }
                 self.symbols.clear_transient_borrows();
+                if let Some(tail) = body.last() {
+                    self.record_tail_move(std::slice::from_ref(tail), &[]);
+                }
             }
             _ => {}
         }

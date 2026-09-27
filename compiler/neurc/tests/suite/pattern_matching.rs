@@ -232,3 +232,25 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 10);
 }
+
+/// A `match` on a borrowed enum tests its referent, as `match self` in a `&self` method
+/// and an explicit `match *d` already did.
+#[test]
+fn regression_a_match_reads_through_a_borrowed_enum() {
+    let test = CompileTest::new();
+    let source = r#"
+enum Dir { Up, Down(i32) }
+func through(d: &Dir) -> i32 { match d { Dir::Up => 0, Dir::Down(n) => n } }
+func deref(d: &Dir) -> i32 { match *d { Dir::Up => 0, Dir::Down(n) => n } }
+func level(x: &i32) -> i32 { match x { 1 => 10, _ => 20 } }
+func main() -> i32 {
+    val x = Dir::Down(7)
+    val one = 1
+    through(&x) + deref(&x) + level(&one)
+}
+"#;
+    let exit = test
+        .compile_and_run("match_borrow.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 24);
+}

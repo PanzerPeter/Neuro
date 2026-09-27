@@ -192,3 +192,53 @@ func main() -> i32 {
         "the backend must never be asked to build it: {message}"
     );
 }
+
+/// A comparison method borrows its right operand, and a borrow needs storage. A right
+/// operand that is not a variable reached codegen as a borrow of a temporary and was an
+/// internal compiler error.
+#[test]
+fn regression_bug_081_a_comparison_against_a_temporary_runs() {
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct P { x: i32 }
+impl PartialEq for P {
+    func eq(&self, other: &P) -> bool { return self.x == other.x }
+}
+impl Comparable for P {
+    func lt(&self, other: &P) -> bool { return self.x < other.x }
+    func le(&self, other: &P) -> bool { return self.x <= other.x }
+    func gt(&self, other: &P) -> bool { return self.x > other.x }
+    func ge(&self, other: &P) -> bool { return self.x >= other.x }
+}
+struct W { p: P }
+enum Light { Red, Green }
+impl PartialEq for Light {
+    func eq(&self, other: &Light) -> bool {
+        match self {
+            Light::Red => match other { Light::Red => true, Light::Green => false },
+            Light::Green => match other { Light::Red => false, Light::Green => true }
+        }
+    }
+}
+func mk(x: i32) -> P { P { x: x } }
+func main() -> i32 {
+    val p = P { x: 1 }
+    val arr = [P { x: 1 }, P { x: 2 }]
+    val w = W { p: P { x: 2 } }
+    mut n = 0
+    if p == (P { x: 1 }) { n += 1 }
+    if p == arr[0] { n += 2 }
+    if mk(2) == w.p { n += 4 }
+    if mk(0) < mk(1) { n += 8 }
+    if p >= arr[1] { n += 100 }
+    val l = Light::Green
+    if l == Light::Green { n += 16 }
+    n
+}
+"#;
+    let exit = test
+        .compile_and_run("operator_temporaries.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 31);
+}

@@ -471,3 +471,44 @@ func main() -> i32 {
         "the counter advances 1, 2, 3 across the calls"
     );
 }
+
+/// A `&mut self` method on an array, `Vec` or tuple element writes through to it, both
+/// on an owned binding and through a `&mut` borrow. The checker accepted the call on an
+/// owned array, then the backend refused the element as a receiver; through a borrow
+/// the checker refused it, though `a[0].n += 1` was accepted.
+#[test]
+fn regression_a_mut_self_method_on_an_element_writes_through() {
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct C { n: i32 }
+impl C { func inc(&mut self) { self.n = self.n + 1 } }
+struct P { c: C }
+func bump(a: &mut [C; 2], p: &mut P) {
+    a[0].inc()
+    p.c.inc()
+}
+func main() -> i32 {
+    mut arr = [C { n: 1 }, C { n: 5 }]
+    arr[1].inc()
+    mut i = 0
+    while i < 2 {
+        arr[i].inc()
+        i += 1
+    }
+    mut p = P { c: C { n: 10 } }
+    bump(&mut arr, &mut p)
+    mut v: Vec<C> = Vec::new()
+    v.push(C { n: 20 })
+    v[0].inc()
+    mut t = (C { n: 30 }, 3)
+    t.0.inc()
+    arr[0].n * 1000 + arr[1].n * 100 + p.c.n + v[0].n + t.0.n
+}
+"#;
+    let exit = test
+        .compile_and_run("element_receiver.nr", source)
+        .expect("compile/run failed");
+    // arr = [3, 7], p.c = 11, v[0] = 21, t.0 = 31: 3000 + 700 + 11 + 21 + 31.
+    assert_eq!(exit, (3000 + 700 + 11 + 21 + 31) % 256);
+}

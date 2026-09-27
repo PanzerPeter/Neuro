@@ -63,6 +63,70 @@ impl TypeChecker {
         self.enum_defs.insert(def.name.name.clone(), variants);
     }
 
+    /// Reject an enum that holds itself inline. Its payloads are cleared to `Unknown`
+    /// once reported, because every predicate that recurses through an enum's payloads
+    /// (and the backend's layout) would otherwise run forever on it.
+    pub(crate) fn reject_recursive_enums(&mut self, items: &[ast_types::Item]) {
+        for item in items {
+            let ast_types::Item::Enum(def) = item else {
+                continue;
+            };
+            let name = &def.name.name;
+            let reaches_itself = self
+                .enum_payload_types(name)
+                .iter()
+                .any(|payload| self.holds_inline(payload, name, &mut Vec::new()));
+            if !reaches_itself {
+                continue;
+            }
+            self.record_error(TypeError::RecursiveEnum {
+                name: name.clone(),
+                span: def.name.span,
+            });
+            if let Some(variants) = self.enum_defs.get_mut(name) {
+                for variant in variants.iter_mut() {
+                    for (_, ty) in variant.fields.iter_mut() {
+                        *ty = Type::Unknown;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether a value of `ty` stores a `target` enum inline. References, collections
+    /// and tensors hold their contents behind a pointer, so they end the search.
+    fn holds_inline(&self, ty: &Type, target: &str, seen: &mut Vec<String>) -> bool {
+        let (name, parts) = match ty {
+            Type::Enum(name) if name == target => return true,
+            Type::Enum(name) => (name, self.enum_payload_types(name)),
+            Type::Struct(name) => (
+                name,
+                self.struct_defs
+                    .get(name)
+                    .map(|fields| fields.iter().map(|(_, ty)| ty.clone()).collect())
+                    .unwrap_or_default(),
+            ),
+            Type::Newtype(name) => (
+                name,
+                self.newtype_defs.get(name).cloned().into_iter().collect(),
+            ),
+            Type::Array { element, .. } => return self.holds_inline(element, target, seen),
+            Type::Tuple(elements) => {
+                return elements
+                    .iter()
+                    .any(|element| self.holds_inline(element, target, seen))
+            }
+            _ => return false,
+        };
+        if seen.contains(name) {
+            return false;
+        }
+        seen.push(name.clone());
+        parts
+            .iter()
+            .any(|part| self.holds_inline(part, target, seen))
+    }
+
     /// Resolve an enum-variant payload type, rejecting an unsized one with
     /// `UnsupportedEnumPayload` and recovering as `Type::Unknown`.
     pub(super) fn resolve_enum_payload_type(&mut self, ty: &ast_types::Type) -> Type {

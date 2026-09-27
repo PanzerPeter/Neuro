@@ -150,7 +150,9 @@ impl Lowerer {
                 // Operator-trait dispatch on a user type: desugar `a OP b` into the
                 // impl method call `a.op(b)`. The checker validated the impl, so a lookup
                 // hit means the call resolves.
-                if let HirType::Struct(name) | HirType::Enum(name) = left.ty.referent() {
+                if let HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } =
+                    left.ty.referent()
+                {
                     if let Some(dispatch) = self.operator_binary_impls.get(&(name.clone(), *op)) {
                         let dispatch = crate::OpDispatch {
                             method: dispatch.method.clone(),
@@ -216,7 +218,9 @@ impl Lowerer {
                 };
                 let operand = self.lower_expr(operand, operand_expected)?;
                 // Operator-trait dispatch: `-a` → `a.neg()`, `~a` → `a.not()`.
-                if let HirType::Struct(name) | HirType::Enum(name) = operand.ty.referent() {
+                if let HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } =
+                    operand.ty.referent()
+                {
                     if let Some((method, result)) =
                         self.operator_unary_impls.get(&(name.clone(), *op))
                     {

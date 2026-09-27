@@ -28,13 +28,15 @@ struct Pair<T, U> {
 }
 
 // A generic struct with a generic inherent impl. `Cell<T>::get` is specialized per
-// element type; here it is used at both i32 and bool.
+// element type; here it is used at both i32 and bool. It takes `self` by value: the
+// body is checked once for every `T`, and a `T` may own a buffer, so it cannot be moved
+// out from behind a `&self` borrow.
 struct Cell<T> {
     value: T,
 }
 
 impl<T> Cell<T> {
-    func get(&self) -> T {
+    func get(self) -> T {
         self.value
     }
 }

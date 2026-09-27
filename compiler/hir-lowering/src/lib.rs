@@ -238,6 +238,9 @@ struct Lowerer {
     /// Monotonic counter naming the bindings each `?` desugar introduces (`__try_N`),
     /// so a chain of propagations in one expression never shadows itself.
     try_counter: usize,
+    /// Monotonic counter naming the bindings an operator-trait call introduces for a
+    /// borrowed operand that is not a place (`__operand_N`).
+    operand_counter: usize,
     /// Monotonic counter naming the iterator and position bindings each `for`-loop
     /// protocol desugar introduces (`__iter_N` / `__iter_pos_N`), so nested loops over
     /// two iterators never shadow each other.
@@ -366,6 +369,7 @@ impl Lowerer {
             closure_counter: 0,
             coalesce_counter: 0,
             try_counter: 0,
+            operand_counter: 0,
             protocol_counter: 0,
             grad_params: HashMap::new(),
             grad_specializations: Vec::new(),

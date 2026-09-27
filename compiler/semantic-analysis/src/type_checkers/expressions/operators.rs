@@ -101,7 +101,7 @@ impl TypeChecker {
         // a struct or enum that implements the operator's trait, the operator lowers to
         // that impl's method and takes its result type. Checked before the
         // built-in numeric/bitwise/comparison paths, which reject struct operands.
-        if let Type::Struct(name) | Type::Enum(name) = left_ty.referent() {
+        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = left_ty.referent() {
             if let Some(dispatch) = self
                 .operator_binary_impls
                 .get(&(name.clone(), *op))
@@ -376,6 +376,8 @@ impl TypeChecker {
             return Some(Type::Unknown);
         };
 
+        // `??` yields the payload itself, so the fallible value is given up.
+        self.record_move(left);
         let right_ty = self
             .check_expr(right, Some(&payload))
             .unwrap_or(Type::Unknown);
@@ -503,7 +505,7 @@ impl TypeChecker {
 
         // Operator-trait dispatch on a user type: `-a` via `Neg`, `~a` via
         // `Not`. The boolean `!a` (`UnaryOp::Not`) is never overloadable.
-        if let Type::Struct(name) | Type::Enum(name) = operand_ty.referent() {
+        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = operand_ty.referent() {
             if let Some(result) = self.operator_unary_impls.get(&(name.clone(), *op)).cloned() {
                 return Some(result);
             }

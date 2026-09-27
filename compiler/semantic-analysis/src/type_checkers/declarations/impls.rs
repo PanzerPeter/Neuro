@@ -138,6 +138,11 @@ impl TypeChecker {
         if self.enum_defs.contains_key(name) {
             return Some(Type::Enum(name.to_string()));
         }
+        // A newtype implements every trait but `Copy` and `Clone` explicitly, operators
+        // included, so it takes an `impl` exactly as a struct does.
+        if self.newtype_defs.contains_key(name) {
+            return Some(Type::Newtype(name.to_string()));
+        }
         None
     }
 

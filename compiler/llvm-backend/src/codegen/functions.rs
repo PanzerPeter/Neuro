@@ -84,14 +84,43 @@ impl<'ctx> CodegenContext<'ctx> {
         let self_arg: BasicValueEnum<'ctx> = if self_by_pointer {
             // `&mut self`: pass the receiver place's address (auto-loading through a
             // `&mut Struct` receiver), so the callee writes through to it.
-            let (self_ptr, _) = self.get_struct_ptr_and_type(receiver, struct_name)?;
+            // A newtype has no LLVM type of its own to name, so its storage is reached as
+            // any other place's is.
+            let self_ptr = if matches!(receiver.ty.referent(), HirType::Newtype { .. }) {
+                self.held_place_ptr(receiver)?.ok_or_else(|| {
+                    CodegenError::UnsupportedType(format!(
+                        "a method receiver must be a place, not {:?}",
+                        receiver.kind
+                    ))
+                })?
+            } else {
+                self.get_struct_ptr_and_type(receiver, struct_name)?.0
+            };
             self_ptr.into()
         } else {
-            // `&self` / `self`: pass the struct value, dereferencing a `&Struct` borrow.
+            // `&self` / `self`: pass the value, dereferencing a borrow of it. The callee's
+            // own first parameter is the value's type, which also covers a newtype, whose
+            // name is not an LLVM type of its own.
             match self.codegen_expr(receiver)? {
                 BasicValueEnum::PointerValue(ptr) => {
-                    let struct_ty = self.nominal_llvm_type(struct_name)?;
-                    self.builder.build_load(struct_ty, ptr, "deref.self")?
+                    let self_ty = function
+                        .get_type()
+                        .get_param_types()
+                        .first()
+                        .copied()
+                        .ok_or_else(|| {
+                            CodegenError::InternalError(format!(
+                                "method '{}' has no self parameter",
+                                mangled_name
+                            ))
+                        })?;
+                    let self_ty = BasicTypeEnum::try_from(self_ty).map_err(|_| {
+                        CodegenError::InternalError(format!(
+                            "method '{}' takes a self parameter that is not a value",
+                            mangled_name
+                        ))
+                    })?;
+                    self.builder.build_load(self_ty, ptr, "deref.self")?
                 }
                 other => other,
             }

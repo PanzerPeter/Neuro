@@ -253,7 +253,7 @@ fn write(dir: &Path, rel: &str, source: &str) -> PathBuf {
 }
 
 fn resolve(root: &Path) -> Result<ResolvedProgram, ModuleError> {
-    resolve_program(root, &stub_parse, &[])
+    resolve_program(root, &|source, _| stub_parse(source), &[])
 }
 
 /// Resolve with the prelude the driver really supplies, so a fixture can be written the
@@ -271,7 +271,7 @@ fn resolve_with_prelude(root: &Path) -> Result<ResolvedProgram, ModuleError> {
         variant: variant.to_string(),
     })
     .collect();
-    resolve_program(root, &stub_parse, &prelude)
+    resolve_program(root, &|source, _| stub_parse(source), &prelude)
 }
 
 /// The name every function item declares, in program order.

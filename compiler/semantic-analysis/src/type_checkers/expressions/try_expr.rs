@@ -33,6 +33,8 @@ impl TypeChecker {
             return Some(Type::Unknown);
         };
 
+        // `?` yields the payload or forwards the failure; either way the operand is spent.
+        self.record_move(operand);
         let declared_return = self
             .current_function_return_type
             .clone()

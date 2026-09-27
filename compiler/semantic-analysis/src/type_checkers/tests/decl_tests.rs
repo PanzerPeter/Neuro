@@ -107,3 +107,25 @@ fn a_user_method_cannot_forge_a_generic_instance_symbol() {
 
     assert_eq!(reserved_names(&checker.into_errors()), vec!["g_i32__push"]);
 }
+
+/// A binding whose initializer was already reported is still bound, at `Unknown`, so its
+/// later uses stay quiet. An undefined name in the initializer left it unbound, and each
+/// use then reported it undefined, uninitialized and of the wrong type.
+#[test]
+fn regression_an_errored_initializer_reports_once() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val q = undefined_thing
+    if q > 3 { return 1 }
+    while !q { return 2 }
+    0
+}
+"#,
+    );
+    assert_eq!(
+        errors.len(),
+        1,
+        "only the undefined name is an error; got {errors:?}"
+    );
+}
