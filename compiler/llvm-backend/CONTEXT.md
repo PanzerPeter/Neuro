@@ -200,7 +200,7 @@ then belongs to the storage, and is tracked one of three ways:
 
 - **A position inside a holder** (a struct field, an array or tuple element, one of those nested).
   `plan_held_drops` plans a `DropTarget::HeapString` held entry for every `string` position, with
-  its flag DISARMED — the type proves nothing. `arm_stored_string_positions` arms the positions the
+  its flag DISARMED: the type proves nothing. `arm_stored_string_positions` arms the positions the
   initializer or field assignment stored a provable allocation into, walking the aggregate literal
   in step with the held paths. A holder's move or its field's move clears those flags exactly as it
   clears any other. An enum payload gets no such entry: its slot is destroyed under a tag switch
@@ -415,16 +415,16 @@ always wraps, regardless of `overflow_checks`.
 `compile` builds an `enum_payloads` table (each enum's variant payload types) and hands it to the
 `TypeMapper`. `enum_payload_shape` derives the layout from it as `(slots, words)`: `slots` is the
 widest variant's field count, `words` the widest single payload field rounded up to whole 64-bit
-words (`llvm_words`, a deliberate over-estimate — every field is rounded up before it is summed,
+words (`llvm_words`, a deliberate over-estimate: every field is rounded up before it is summed,
 which cannot under-count a layout whose maximum alignment is 8). An enum is therefore the tagged
 union `{ i32 tag, [W x [K x i64]] payload }`, usable as a parameter, return, or field via
 `map_type`.
 
 `codegen_enum_construct` (`expressions/enums.rs`) writes each payload field into its slot through
 `enum_payload_cell`: a zeroed `[K x i64]` stack slot the field's own type is stored into and the
-slot type loaded back out of. Going through memory is what makes a slot type-agnostic — a
+slot type loaded back out of. Going through memory is what makes a slot type-agnostic (a
 `string` fat pointer, a struct, an array or a tuple round-trips bit-exactly, exactly as a scalar
-does — and zeroing it is what keeps a field narrower than the slot from leaving poison in the
+does) and zeroing it is what keeps a field narrower than the slot from leaving poison in the
 words the load reads anyway. The cell is an `entry_alloca`, not a local one: a cell built at the
 builder's position inside a loop body grows the stack by one slot per iteration. A payload may be
 any sized type; semantic analysis rejects the unsized ones. `codegen_enum_value` is
@@ -472,8 +472,8 @@ value is a **DLPack handle** (a pointer to the `DLManagedTensorVersioned` that
 own layout `tensor_buffer_type` gives as a flat, row-major `[d0*d1*... x T]` array. The rank-0
 tensor's buffer is `[1 x T]` (the empty product), not a zero-length array. Because the value is
 just the handle, a tensor with a dynamic `?` axis maps, moves and releases like any other;
-`types::static_extents` guards the sites that do need a number — the buffer layout, its byte
-size, an index's strides — and reports `UnsupportedType` rather than sizing an allocation from a
+`types::static_extents` guards the sites that do need a number (the buffer layout, its byte
+size, an index's strides) and reports `UnsupportedType` rather than sizing an allocation from a
 guess. Host memory only:
 `.to(device)` guards on the requested device rather than moving anything, and the handle reports
 `kDLCPU` until a device backend flips that field.
@@ -549,7 +549,7 @@ element's, exactly as for the element-wise family, so an overflowing accumulatio
 an overflowing scalar `+` would.
 
 `codegen_tensor_shape_cast` (same file) lowers `HirExprKind::TensorShapeCast`: `.t()`,
-`.reshape(...)`, `.permute(...)` and `.flatten(...)`. It is not a `BuiltinMethod` — the method
+`.reshape(...)`, `.permute(...)` and `.flatten(...)`. It is not a `BuiltinMethod`: the method
 name alone would not say how the axes move, so lowering resolved that into the node's
 `permutation` and the backend never sees the four spellings. Both halves consume the receiver
 (`mark_moved_for_drop`), leaving exactly one buffer alive. With no permutation the receiver's own
@@ -564,7 +564,7 @@ recomposes into a source offset with constant `mul`, and the IR is the same size
 
 `expressions/tensor_reduce.rs` owns `HirExprKind::TensorReduce`: `.sum()`, `.mean()`,
 `.max()` and `.min()`. Reducing along axis `k` splits the flat run into three constant
-factors — `outer` elements above the axis, `mid` along it, `inner` below — so result slot
+factors (`outer` elements above the axis, `mid` along it, `inner` below) so result slot
 `r` gathers `(r / inner) * mid * inner + j * inner + (r % inner)` for `j` in `0..mid`, and a
 whole-tensor reduction is that same walk with `outer` and `inner` both 1. Two counted loops,
 never a nest of `rank` of them, for the reason the permuted copy gives. The accumulator
@@ -574,8 +574,8 @@ empty run). A sum reuses `codegen_int_arith`, so an overflowing reduction panics
 an overflowing `+` would; `.mean()` divides the float accumulator by the run length. Nothing
 is moved here, and a receiver a binding owns is left to that binding's own drop. What IS
 released, once the fold has read everything, is a receiver that no binding owns:
-`release_receiver_temporary` frees the buffer of a receiver built for the call — an operator
-result, a call's return, a tensor constructor, another reduction — which otherwise has nothing
+`release_receiver_temporary` frees the buffer of a receiver built for the call (an operator
+result, a call's return, a tensor constructor, another reduction) which otherwise has nothing
 to release it. The predicate is a whitelist of shapes that provably allocate their own buffer,
 not "anything that is not a place": an `if`, a `match` or a block yields whatever its branch
 yields, which may be a buffer a binding still owns.
@@ -583,7 +583,7 @@ yields, which may be a buffer a binding still owns.
 `expressions/tensor_sort.rs` owns `HirExprKind::TensorSort`: `.sort()`, `.argsort()` and
 `.topk()`. It walks the same `outer`/`mid`/`inner` split the reduction does, and builds, per
 run, a permutation of `0..mid` in one stack scratch array; the three methods then differ only
-in what the writer at the end reads out of it — the elements in that order, the permutation
+in what the writer at the end reads out of it: the elements in that order, the permutation
 truncated to `i32`, or the leading `k` of both into a two-tensor tuple. The permutation is
 seeded with the identity and carried by a stable insertion sort, so equal elements never
 cross and an argsort of a tensor with ties is reproducible. The float comparator spells out
@@ -597,7 +597,7 @@ released once the selection has copied what it needs, through the same
 `expressions/tensor_apply.rs` owns `HirExprKind::TensorApply`, the functional traversals
 `.map` / `.zip` / `.reduce`. One counted loop over the flat buffer whatever the receiver's
 rank: the traversals are elementwise, so the element count is a single compile-time product
-and there is no axis arithmetic at all — the simplest of the tensor walks. The function value
+and there is no axis arithmetic at all: the simplest of the tensor walks. The function value
 is lowered ONCE, before the loop, and `split_function_value` keeps its `{ fn_ptr, env_ptr }`
 halves so `call_function_value` can dispatch per element without rebuilding them; that split
 is what `codegen_indirect_call` in `closures.rs` now also calls, so an ordinary `f(x)` and a
@@ -623,8 +623,8 @@ intrinsics' `half` / `bfloat` overloads are not ones every target lowers. `Math`
 contraction. The notation is gone by this point: HIR supplies one extent per subscript letter
 and, per operand, which letter each of its axes carries, which reduces the whole construct to
 flat index arithmetic over row-major buffers with every factor a compile-time constant. Two
-counted loops for the reason the reduction gives — the outer walks the result's elements, the
-inner the contracted letters' product — so the IR is the same size whatever the ranks are. A
+counted loops for the reason the reduction gives (the outer walks the result's elements, the
+inner the contracted letters' product) so the IR is the same size whatever the ranks are. A
 letter's index is recovered from a counter by dividing out the letters below it and taking the
 remainder (`decode_counter`), and an operand's offset is that index times a per-letter
 COEFFICIENT: the row-major strides of every axis the letter sits on, ADDED together
@@ -634,7 +634,7 @@ rather than at a first element, unlike the reduction's: the loop sums products, 
 element to seed it with and an empty contraction is genuinely zero. Both the product and the
 accumulation reuse `codegen_int_arith`, so an overflowing contraction panics exactly where an
 overflowing `*` or `+` would, which is also why the inner counter is reloaded before its
-increment — a checked operation may have split the body around its guard. Nothing is moved
+increment: a checked operation may have split the body around its guard. Nothing is moved
 here; each operand that no binding owns is freed through the same
 `release_receiver_temporary` the reduction uses, once every read is behind the loops.
 
@@ -642,7 +642,7 @@ here; each operand that no binding owns is freed through the same
 constant (every extent is part of the type), so the index is arithmetic on the flat row-major
 run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis
 contributes `start * stride[k]`. Reading an element is that offset, one `getelementptr`, and one
-`load`. A slice ALLOCATES a fresh handle through `alloc_dlpack_tensor` and copies into it — a
+`load`. A slice ALLOCATES a fresh handle through `alloc_dlpack_tensor` and copies into it: a
 tensor owns its buffer and releases it through its own deleter, so a view sharing one would be a
 double free, and a copy is also what keeps the DLPack contract's contiguous `strides` and
 zero `byte_offset` true of every value. The copy loop walks the RESULT, whose linear index is its own buffer index,
@@ -789,7 +789,7 @@ and restored in the name maps per arm, and the fall-through block is `unreachabl
 exhaustiveness is a frontend guarantee.
 
 Ownership of an enum payload crosses at the arm. The match disowns every held drop flag of the
-scrutinee as soon as ANY arm binds — which arm ran is a runtime fact and the flags are static —
+scrutinee as soon as ANY arm binds (which arm ran is a runtime fact and the flags are static)
 so the arm's binding has to be what releases what it took. Each arm body therefore runs in a drop
 scope of its own, and `bind_arm` registers an owning payload binding in it (`owns_payload`); an
 arm that MOVES the payload out disarms the flag first, through the ordinary
@@ -1266,8 +1266,8 @@ over `moved_place`) names a binding in the INNERMOST frame. Everything else rout
 write, whose referent belongs to whoever handed the reference over; a binding of an enclosing
 pool, whose own arena outlives this block's release; and any binding the set happens to miss,
 which costs the arena's speed on that store and never its safety. `semantic-analysis` rejects
-the stores routing cannot save — a value that already holds arena memory when the statement
-starts — so the two sides meet at the same line.
+the stores routing cannot save (a value that already holds arena memory when the statement
+starts) so the two sides meet at the same line.
 
 **Every release goes through a wrapper**, `__neuro_release` and `__neuro_aligned_release`
 (`release_fn` / `aligned_release_fn`), which return without calling libc when the pointer lies

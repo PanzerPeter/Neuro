@@ -33,12 +33,12 @@ func main() -> i32 {
     val neuron = Neuron::new(0.5, -0.1)
 
     // Dead region: input too small to overcome the bias
-    val dead = neuron.activate(0.0)    // 0.0 * 0.5 + (−0.1) = −0.1 → 0.0
+    val dead = neuron.activate(0.0)    // 0.0 * 0.5 - 0.1 = -0.1, clamped to 0.0
     val dead_fires = neuron.is_active(0.0)
     println("input 0.0 -> {dead:.2}  fires: {dead_fires}")
 
     // Active region: strong enough input fires the neuron
-    val active = neuron.activate(1.0)  // 1.0 * 0.5 + (−0.1) =  0.4
+    val active = neuron.activate(1.0)  // 1.0 * 0.5 - 0.1 = 0.4, passes through
     val active_fires = neuron.is_active(1.0)
     println("input 1.0 -> {active:.2}  fires: {active_fires}")
 

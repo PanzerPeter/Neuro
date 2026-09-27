@@ -304,7 +304,7 @@ loop.
   (`BreakValueInUnitLoop`), sets the loop's type on the first value-break, and reports a `Mismatch`
   on a disagreeing later one.
 - **Expected type.** `check_loop_body` carries the loop expression's expected type into its
-  `LoopContext`, and the `Stmt::Break` arm reads it back through `break_target_expected` — by
+  `LoopContext`, and the `Stmt::Break` arm reads it back through `break_target_expected`, by
   label, so a `break outer v` adopts the annotation of the loop it actually leaves. Without it a
   literal in `break [10, 20]` was typed on its own and then failed against an annotation the
   `if`-arm, `match`-arm and block-tail spellings of the same program all satisfied.
@@ -408,7 +408,7 @@ consuming receiver's fields are the callee's to move out. `..base` moves its bas
 (`record_update_base_move`), and moves nothing when every unlisted field is `Copy`.
 
 **Sub-place moves.** A move out of a sub-place is recorded against the PATH below its root
-binding — `"label"`, `"0"`, `"1.name"` — not against the root alone. `MoveState` on `SymbolInfo`
+binding (`"label"`, `"0"`, `"1.name"`) not against the root alone. `MoveState` on `SymbolInfo`
 holds the whole-binding span plus a map of moved paths, and `MoveState::conflict` rejects a read
 whose path either contains, or is contained by, a moved one. That is what makes
 `val (a, b) = pair` work: the destructure desugar binds `tmp.0` then `tmp.1`, which under a
@@ -623,8 +623,8 @@ reverse is refused, since a `?` found where a literal is expected would let the 
 strides the run-time shape may not have. A `?` binds no shape parameter (`unify_array_len` has no
 case for it), so a shape-generic call over a dynamic argument is an uninferable parameter rather
 than a wrong extent. `reject_dynamic_extent` (in `tensors.rs`) is the single gate every
-extent-consuming operation passes through — construction, literal coercion, indexing, the four
-shape casts, `.clone()`, `.to(device)`, and compound assignment — reporting
+extent-consuming operation passes through (construction, literal coercion, indexing, the four
+shape casts, `.clone()`, `.to(device)`, and compound assignment) reporting
 `TensorDynamicExtent` with the operation and the type. What remains legal on a `?`-shaped tensor
 is what needs no extent: binding, passing, returning, moving and dropping.
 
@@ -697,13 +697,13 @@ same check for return-position `impl Trait<Assoc = U>`.
 - **`@` is the one tensor operator that is not element-wise.** `matmul_shape` (same file) is
   reached instead of the broadcast join and contracts rather than stretches: two rank-2 operands
   whose inner axes agree give `[M, K] @ [K, N]` -> `[M, N]`, taking the left operand's row axis
-  and the right operand's column axis with their names. Anything else — a rank other than 2, a
-  scalar operand, a disagreeing inner extent, disagreeing axis NAMES on the contracted axis — is
+  and the right operand's column axis with their names. Anything else (a rank other than 2, a
+  scalar operand, a disagreeing inner extent, disagreeing axis NAMES on the contracted axis) is
   `TensorMatMulMismatch`. `ArrayLen` equality is what compares the inner axes, so `matmul<M, N, K>`
   checks its repeated `K` once at the declaration rather than per instantiation. A `?` is rejected
   on BOTH operand shapes rather than only the result's (`TensorDynamicExtent`), because the
   contracted axis bounds the loop even though it appears in neither operand's result. Everything
-  after the join — the element-arithmetic check, the move recording — is shared with the
+  after the join (the element-arithmetic check, the move recording) is shared with the
   element-wise operators. A user type reaches `@` through the `MatMul` operator trait instead.
 - **Compound assignment** (`Stmt::Assign` with `op: Some(_)`) implements the operator-trait
   dispatch rule in `type_checkers/statements.rs`. A tensor place routes to
@@ -859,7 +859,7 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   names agree *where both carry one*, so a named shape and an unnamed one with the same extents
   are interchangeable while `[height: H, width: W]` and `[width: W, height: H]` are not. That
   rule lives in one place, `TensorAxis::agrees_with`, and both `is_compatible_with` and
-  `unify_tensor_shape` route through it — derived `PartialEq` on the axis is structural and
+  `unify_tensor_shape` route through it: derived `PartialEq` on the axis is structural and
   therefore stricter, so a shape comparison never uses `==`. A repeated name in one shape is
   `DuplicateTensorAxisName` (raised in `resolve_type`, where the name's span is still to hand),
   and a disagreement is `TensorAxisNameMismatch`, which names the axis and both names because two
@@ -927,8 +927,8 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   move, and so accepts `&Tensor<T, S>` where the consuming shape casts do not. With no
   argument the result is the element type; with an `axis:` argument it is the tensor of the
   remaining axes, each keeping its name. The argument is read as syntax for the same reason
-  `.permute`'s is — a dimension NAME resolves against the receiver's shape and no value
-  scope declares it — and a negative index counts from the end, which is how the
+  `.permute`'s is (a dimension NAME resolves against the receiver's shape and no value
+  scope declares it) and a negative index counts from the end, which is how the
   specification spells the last axis. The element must be an integer or `f32`/`f64`
   (`TensorReduceElementType`); `.mean` narrows that to `f32`/`f64`, an integer mean having
   no rounding rule in the specification (`TensorReduceMeanNotFloat`); a reduced run of zero
@@ -959,7 +959,7 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   first two allocate their own result and the third allocates nothing, so none records a
   move and `&Tensor<T, S>` is an acceptable receiver. Every argument here IS a value,
   unlike a reduction's `axis:`, so each is checked in the ordinary way. The function's
-  parameters are checked against what it will be handed — the element type for `.map`, both
+  parameters are checked against what it will be handed: the element type for `.map`, both
   element types for `.zip`, and the SEED FIRST then the element for `.reduce`, which is the
   order `|acc, x|` is written in (`TensorApplyNotCallable`, `TensorApplyArity`,
   `TensorApplyParamType`). `.map` and `.zip` answer the receiver's shape over the function's
@@ -988,7 +988,7 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `!self.functions.contains_key` guard, so a program's own `einsum` shadows it. It is the one
   variadic call in the language, and only because the subscript literal fixes its arity: the
   comma-separated pieces left of `->` say how many operands there are and what rank each one
-  has. The subscripts are read as SYNTAX (`parse_subscripts`), never as a value — a string a
+  has. The subscripts are read as SYNTAX (`parse_subscripts`), never as a value: a string a
   program computes cannot decide a result shape the rest of checking depends on
   (`EinsumSubscriptNotLiteral`), and anything that is not ASCII letters separated by `,`
   around one `->` is `EinsumMalformedSubscripts`. Each operand is matched on the REFERENT for
@@ -1007,8 +1007,8 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   DROPPED and one given a `Range` (a `..` full axis is the range over the whole extent)
   SURVIVES at its new extent, so an index naming every axis reads the element type and any
   other builds `Tensor<T, [survivors]>`. An argument count other than the rank is
-  `TensorIndexRankMismatch`. A position is any integer expression — `IndexNotInteger`
-  otherwise — and only a *constant* one is bounds-checked here (`TensorIndexOutOfBounds`); a
+  `TensorIndexRankMismatch`. A position is any integer expression (`IndexNotInteger`
+  otherwise) and only a *constant* one is bounds-checked here (`TensorIndexOutOfBounds`); a
   run-time position is left to the backend's debug-tier guard, the tier an array index sits
   on. Both bounds of a range must fold through `eval_literal_int`
   (`expressions/const_predicates.rs`) or it is `TensorSliceBoundNotConstant`: the extent is
@@ -1016,8 +1016,8 @@ catch-all, with guarded arms never counting. Payload sub-patterns are restricted
   `TensorSliceOutOfRange`. Two spellings reach this: `Expr::TensorIndex` through
   `check_tensor_index_expr`, and the one-argument `Expr::Index` whose object is a tensor,
   routed from `check_index_expr` (`expressions/places.rs`) ahead of the sequence rules so a
-  rank-1 tensor takes the ordinary bracket. Indexing READS its receiver — nothing is moved,
-  and `referent()` sees through a borrow — because a slice is a fresh owned copy rather than
+  rank-1 tensor takes the ordinary bracket. Indexing READS its receiver (nothing is moved,
+  and `referent()` sees through a borrow) because a slice is a fresh owned copy rather than
   a view, which is what keeps one buffer to one owner. A range index on a non-tensor is
   `TensorIndexOnNonTensor`, whose text names `.slice(a..b)`.
 - **Tuples.** Each element is checked against the expected tuple's element type when annotated;
@@ -1141,8 +1141,8 @@ the value holds no arena memory:
   constant or a function item;
 - `&e`, `*e`, `(e)`, `e as T` and a unary operator over a value that passes;
 - a call whose provenance is provable and whose receiver and every argument also pass. A
-  function this program DECLARES — a free function found in `functions`, or an associated
-  function / method found through `impl_methods` — is always provable: its body is emitted with
+  function this program DECLARES (a free function found in `functions`, or an associated
+  function / method found through `impl_methods`) is always provable: its body is emitted with
   the backend's pool depth back at zero, so what it allocates comes from libc. The operand walk
   is what rules out its handing back arena memory it was given;
 - a struct or tuple literal whose every field (and `..base`) passes: the aggregate allocates
@@ -1160,7 +1160,7 @@ depends on where the backend puts the value, and the two call sites want differe
 
 `Emission::InPlace` is the reading for an argument handed to a callee (`check_pool_retention`):
 the value is emitted where it was written, inside the pool, so anything inlined there takes the
-bump path. A builtin or collection method is therefore not provable — its body is not a function
+bump path. A builtin or collection method is therefore not provable: its body is not a function
 at all but instructions emitted at the call site.
 
 `Emission::Routed` is the reading for a store (`check_pool_store`, `check_pool_ref_store`),
@@ -1180,7 +1180,7 @@ The store rules above see only places the block's own text writes. A store a CAL
 is written in the callee, so `check_pool_retention` covers it separately: a call inside a pool
 is refused when an argument fails the in-place reading AND the call gives the callee write access to a
 place declared before the outermost open pool. Write access is read from the SIGNATURE, never
-from the callee's body — a `&mut self` receiver (found in `mut_self_methods`) and a `&mut T`
+from the callee's body: a `&mut self` receiver (found in `mut_self_methods`) and a `&mut T`
 parameter are the complete set of channels a callee has back into its caller, and whether the
 body actually stores through one is not asked. That over-approximates in the same direction
 `carries_no_arena` does: unproven means refused. Two things narrow it without weakening it. An
@@ -1201,7 +1201,7 @@ Both rules resolve their callee through the shared `callee_key`, which returns t
 `None` otherwise. `receiver_struct` resolves the receiver through a field chain
 (`outer.inner.stash(..)`) one `struct_defs` step at a time, so a nested receiver is checked
 like a direct one (BUG-051). `callee_provenance_is_provable` is `callee_key(..).is_some()`,
-plus the routed relaxation above. Note the two rules want OPPOSITE conservatism from it — an unnameable callee is assumed to
+plus the routed relaxation above. Note the two rules want OPPOSITE conservatism from it: an unnameable callee is assumed to
 allocate arena memory (safe) but cannot be shown to retain any (unsafe). That is why every
 callee the retention rule can name has to be resolvable: a generic template and a nested
 receiver were once unnameable, and each let a callee keep arena memory unchecked.
@@ -1209,7 +1209,7 @@ receiver were once unnameable, and each let a callee keep arena memory unchecked
 One asymmetry the parameter walk has to handle: an instance method's signature in `functions`
 carries the implicit `self` as `params[0]`, as the bare struct type rather than a reference, so
 a receiver's mutability is only ever in `mut_self_methods`. `Expr::Call`'s `args` exclude the
-receiver, so the walk skips `params[0]` exactly when the callee is a field-access expression —
+receiver, so the walk skips `params[0]` exactly when the callee is a field-access expression:
 the same test `callee_operand` uses.
 
 ### Three rules that exist because the backend cannot answer them

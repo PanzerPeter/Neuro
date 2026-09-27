@@ -168,13 +168,13 @@ Three rules keep arena memory from outliving the block, all checked at compile t
   from the arena into a binding declared before the `pool` would leave it addressing
   bytes the block's exit reclaims. Scalars cross freely: an `i32` carries no address.
   A value the statement itself builds crosses too, because the compiler routes it off
-  the arena — see below.
+  the arena (see below).
 - **Nothing the block allocated may be handed to a callee that can store it past
   the block.** The rule above watches stores written inside the block; this one
   watches the store a callee makes on your behalf. A `&mut self` receiver and a
   `&mut` parameter are the two channels through which a callee reaches memory the
-  caller holds, so passing an arena value through either — to a place declared
-  before the `pool` — is refused.
+  caller holds, so passing an arena value through either (to a place declared
+  before the `pool`) is refused.
 - **`return`, `break` and `continue` may not leave the block.** Each would jump
   past the arena release. Write the exit outside the pool instead; a `break`
   targeting a loop opened *inside* the block is fine, because it stays in it.
@@ -193,8 +193,8 @@ pool {
 ### Routing
 
 The compiler decides where an allocation comes from by asking who ends up owning it.
-Where the owner is a place that outlives the block — a binding declared before it, a
-field or element reached through one, or the referent of a reference — the allocation
+Where the owner is a place that outlives the block (a binding declared before it, a
+field or element reached through one, or the referent of a reference) the allocation
 is routed to the ordinary heap and the arena never sees it. That is why `name = "c" +
 "d"` above compiles: the whole statement is emitted with the arena switched off, so
 the text it builds survives the release and reads correctly afterwards.
@@ -217,7 +217,7 @@ reassignment of such a binding does too.
 
 A function's body is emitted outside every arena, so what it returns is heap memory
 the block's release never touches. A call to a function you declared therefore
-crosses the boundary, as long as every argument and the receiver cross it too —
+crosses the boundary, as long as every argument and the receiver cross it too:
 otherwise the callee could be handing back the very pointer the block gave it.
 
 ```neuro
@@ -260,7 +260,7 @@ arena values freely.
 The two rules part company over a builtin method such as `.clone()`. It is not a
 function the backend emits somewhere else; it is instructions placed where you wrote
 them. In a routed store that is harmless, because the arena is switched off across
-the whole statement — `kept = render(step).clone()` compiles for the same reason
+the whole statement: `kept = render(step).clone()` compiles for the same reason
 `name = "c" + "d"` does. Passed to a callee it is not harmless, because the argument
 is emitted where it stands, in the arena, which is why `b.stash("a" + "b")` is
 refused.
@@ -510,7 +510,7 @@ The two spellings differ where they always do: `5` is not in `0..5`, so reversin
 it starts at `4`; it is in `0..=5`, so reversing that starts at `5`. An empty
 range is empty in either direction.
 
-`.rev()` applies to a **range only** — it reorders the bounds themselves, not an
+`.rev()` applies to a **range only**: it reorders the bounds themselves, not an
 element stream, so `xs.rev()` over an array or a `Vec<T>` is a parse error naming
 the spelling that works. It composes with everything else a head may carry, and
 sits innermost, beneath the adapters and `.enumerate()`:
@@ -994,7 +994,7 @@ The `else` branch **must exit the scope**: `return`, `break`, `continue`,
 `panic(...)`, or `unreachable()`. A branch that can fall through is rejected, so the
 binding is guaranteed initialized on the path that continues:
 
-```
+```text
 error: the `else` branch of a `val-else` can fall through: it must exit the scope
        with `return`, `break`, `continue`, `panic(...)`, or `unreachable()`
 ```
@@ -1029,7 +1029,7 @@ func area(s: Shape) -> i32 {
 
 Naming an `Option`'s binding is rejected, since there is nothing to name:
 
-```
+```text
 error: `else |e|` has nothing to bind: `Option::None` carries no payload;
        write `else` or `else |_|`
 ```

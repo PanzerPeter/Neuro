@@ -622,9 +622,11 @@ val also_bad = Meters(1) + Seconds(2)  // ERROR: arithmetic is not defined on ne
 
 A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype is itself `Copy` and a `newtype Name = string` moves like the `string` it wraps. It can be a `val`/`mut` binding, a function parameter or return type, and a struct field.
 
-### Phase 1E Limitations
+### Limitations
 
-- **No inherent methods or operator traits yet**, arithmetic and other operators on a newtype await the trait system (1F). Use `.0` to compute on the inner value.
+- **No `impl` blocks on a newtype yet**, so a newtype has no methods and no operator traits
+  ([BUG-078](../BUGS.md#bug-078-a-newtype-cannot-take-an-impl-block)). Use `.0` to compute on
+  the inner value.
 
 ### Type Errors
 
@@ -725,7 +727,7 @@ The borrow checker enforces two coexistence rules at compile time:
 - **A `&mut T` borrow is exclusive**: while it is live, no other borrow of that place
   shared or mutable, may exist.
 
-A third rule governs the **borrowee** — the place the borrow points at — rather than the
+A third rule governs the **borrowee** (the place the borrow points at) rather than the
 borrows against each other:
 
 - While a `&mut T` of a place is live, the place may not be **read**, **written**, or
@@ -1020,8 +1022,8 @@ Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
   along an axis (see [Reductions](#reductions))
 - Implemented: sorting and selection `.sort()` / `.argsort()` / `.topk(k:)`
   (see [Sorting and selection](#sorting-and-selection))
-- Planned: by-value tensor arithmetic (`a + b`, `a @ b`)
-- Planned: broadcasting rules
+- Implemented: by-value tensor arithmetic (`a + b`, `a @ b`) with broadcasting
+  (see [Tensors](tensors.md))
 
 ## Type Safety Guarantees
 
@@ -1044,11 +1046,12 @@ func mismatch() -> i32 {
 ```
 
 **Error message**:
-```
-Type error: Type mismatch
-  expected: i32
-  found: bool
-  at program.nr:2:18
+```text
+error: type mismatch: expected i32, found bool
+ --> program.nr:2:5
+  |
+2 |     val x: i32 = true  // Error: expected i32, found bool
+  |     ^^^^^^^^^^^^^^^^^
 ```
 
 ### Argument Type Mismatch
@@ -1064,11 +1067,12 @@ func wrong_arg() -> i32 {
 ```
 
 **Error message**:
-```
-Type error: Argument type mismatch
-  expected: i32
-  found: bool
-  at program.nr:6:22
+```text
+error: type mismatch: expected i32, found bool
+ --> program.nr:6:22
+  |
+6 |     return takes_i32(true)  // Error: expected i32, found bool
+  |                      ^^^^
 ```
 
 ### Return Type Mismatch
@@ -1080,11 +1084,12 @@ func returns_wrong() -> i32 {
 ```
 
 **Error message**:
-```
-Type error: Return type mismatch
-  expected: i32
-  found: bool
-  at program.nr:2:12
+```text
+error: return type mismatch: expected i32, found bool
+ --> program.nr:2:5
+  |
+2 |     return true  // Error: expected i32, found bool
+  |     ^^^^^^^^^^^
 ```
 
 ## Best Practices
@@ -1401,7 +1406,7 @@ val first = t.a
 ```
 
 An index the compiler cannot evaluate names no particular element, so a move through one
-takes the whole binding — `a[0]` moves element `0`, while `a[i]` moves `a`. Use
+takes the whole binding: `a[0]` moves element `0`, while `a[i]` moves `a`. Use
 `.clone()` on the element when the aggregate has to stay intact.
 
 ## Tensor Types

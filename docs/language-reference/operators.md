@@ -96,7 +96,7 @@ Shapes broadcast: they align at the trailing axis, an extent of `1` stretches ac
 wider one, and a lower-rank operand supplies the innermost axes. A scalar sits on either
 side and takes the tensor's element type. The full rule, its edge cases, and the way
 compound assignment inherits it are in
-[Tensors — element-wise arithmetic](tensors.md#element-wise-arithmetic).
+[Tensors: element-wise arithmetic](tensors.md#element-wise-arithmetic).
 
 ### Matrix Multiplication (`@`)
 
@@ -108,7 +108,7 @@ product of row `i` of the left operand and column `j` of the right.
 val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
 val b: Tensor<i32, [3, 2]> = [[7, 8], [9, 10], [11, 12]]
 
-val c = &a @ &b               // [2, 2] — the inner 3 is contracted away
+val c = &a @ &b               // [2, 2]: the inner 3 is contracted away
 ```
 
 **Shape rule**: `[M, K] @ [K, N]` gives `[M, N]`. The two inner extents must agree, and a
@@ -116,7 +116,7 @@ mismatch is a compile error. Both operands are rank 2 and neither broadcasts: th
 vector form and no scalar form of `@`. A `?` extent is rejected on either operand, because
 the contracted axis bounds the sum and the result's own two size its buffer.
 
-Shape parameters make the check generic — the repeated `K`
+Shape parameters make the check generic: the repeated `K`
 below is verified once at the declaration rather than per call site:
 
 ```neuro
@@ -129,7 +129,7 @@ func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tenso
 mathematical convention: `a @ b + c` adds `c` to the product, and `a @ b * s` scales it.
 
 On a user type, `@` dispatches through the `MatMul` trait like every other overloadable
-operator. See [Tensors — matrix multiplication](tensors.md#matrix-multiplication).
+operator. See [Tensors: matrix multiplication](tensors.md#matrix-multiplication).
 
 ## Comparison Operators
 
@@ -482,7 +482,7 @@ val chained = lookup(7) ?? lookup(1) ?? 99
 
 Applying `??` to anything that is not an `Option<T>` or `Result<T, E>` is rejected:
 
-```
+```text
 error: `??` expects an `Option<T>` or `Result<T, E>` on the left, found i32
 ```
 
@@ -511,7 +511,7 @@ val half = match halve(n) {
 
 **Enclosing function**: the function containing the `?` must return the same fallible enum, a `Result` propagates only out of a `-> Result<_, _>` function, an `Option` only out of a `-> Option<_>` one. Otherwise the failure has nowhere to go:
 
-```
+```text
 error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32
 ```
 
@@ -551,7 +551,7 @@ val c = reading |> (|v: i32| -> i32 { v * v })     // a parenthesized closure li
 
 A binding of function type is a name like any other, so `val halve = |v: i32| -> i32 { v / 2 }` then `x |> halve` works too. Anything else is rejected where it is written:
 
-```
+```text
 error: the right of `|>` must be a function value: a function name, a bound method
        `receiver.method`, or a parenthesized closure `(|x: T| ...)`
 ```
@@ -579,13 +579,13 @@ val batch = other |> prepare                  // and here
 
 **Both operands are function names.** A composition calls each stage directly, so the operand is a `func` in scope, not a value holding one:
 
-```
+```text
 error: `>>` composes named functions: 'held' is a binding, so name the `func` it holds instead
 ```
 
 A closure literal, a bound method `receiver.method`, an associated path `Type::member` and a generic function are all rejected the same way. Each stage takes exactly one parameter, and each stage's result type must be what the next one accepts:
 
-```
+```text
 error: 'label' returns string, which 'double' cannot take: it expects i32
 ```
 

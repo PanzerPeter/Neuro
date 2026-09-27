@@ -162,10 +162,10 @@ which is why the workspace pins inkwell to the `target-x86` feature rather than
 
 ## Optional: MLIR Backend
 
-The MLIR lowering path (tensor / autodiff / GPU, Phase 2+) is being built out via
-the `melior` Rust MLIR bindings in the `mlir-backend` slice. It is **off by
+The MLIR lowering path for tensors (and, from Phase 4, GPU dialects) lives in the
+`mlir-backend` slice, built on the `melior` Rust MLIR bindings. It is **off by
 default** behind the `mlir` cargo feature, so nothing here is required for a
-normal Neuro build, the default `cargo build/test --workspace` compiles a
+normal Neuro build: the default `cargo build/test --workspace` compiles a
 placeholder and needs only LLVM 20.
 
 To build the MLIR path you need an LLVM 20 install that **includes MLIR** (the

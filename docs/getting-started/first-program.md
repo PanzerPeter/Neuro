@@ -42,9 +42,12 @@ cargo run -p neurc -- check hello.nr
 ```
 
 Expected output:
+```text
+Type checking passed for "hello.nr" (1 module(s), 17 HIR items)
 ```
-Type checking passed for "hello.nr" (1 module(s), 9 HIR items)
-```
+
+The HIR item count includes the items of the implicit prelude, so it is larger than the
+number of declarations in your file.
 
 ## Step 4: Compile the Program
 
@@ -55,7 +58,7 @@ cargo run -p neurc -- compile hello.nr
 ```
 
 Expected output:
-```
+```text
 Successfully compiled hello.nr -> hello
 ```
 

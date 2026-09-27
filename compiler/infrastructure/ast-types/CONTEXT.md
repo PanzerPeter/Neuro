@@ -7,12 +7,12 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
 - Type: Library (no entry function: pure data)
 - Public surface, re-exported from the crate root in four groups:
   - `expressions`: `Expr`, `BinaryOp`, `UnaryOp`, `Pattern`, `MatchArm`, `EnumPatternPayload`,
-    `FieldPattern`, `FieldInit`, `ClosureParam`, `InterpPart`
+    `FieldPattern`, `FieldInit`, `ClosureParam`, `InterpPart`, `TensorIndexArg`
   - `items`: `Item`, `FunctionDef`, `StructDef`, `EnumDef`, `EnumVariant`, `VariantPayload`,
     `FieldDef`, `ImplDef`, `MethodDef`, `SelfParam`, `TraitDef`, `TraitMethod`, `ConstDef`,
     `NewtypeDef`, `ModuleDef`, `ModuleId`, `PRELUDE_MODULE`, `ImportDef`, `ImportName`,
     `ImportSelection`, `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`,
-    `TraitBound`, `Attribute`
+    `TraitBound`, `Attribute`, `AttributeNamedArg`
   - `statements`: `Stmt`, `Place`, `LoopAdapter`, `LoopAdapterKind`
   - `types`: `Type`, `ArraySize`, `TensorDim`, `TensorExtent`, `GenericArg`
 
@@ -103,7 +103,7 @@ walkers.
   types as unit, so a trailing value in the body has nowhere to go. `label` is diagnostic-only:
   nothing refers to it, and there is no `break` out of a pool.
 - `BinaryOp::MatMul` is the matrix product `a @ b`. It is a `BinaryOp` like any other, but it is
-  the one that is not element-wise on tensors — it contracts the operands' inner axis — so each
+  the one that is not element-wise on tensors (it contracts the operands' inner axis) so each
   stage separates it from the arithmetic family rather than sharing an arm with it.
 - `Expr::Compose { functions, span }` is the composition chain `f >> g >> h`. It carries
   `Vec<Identifier>`, not operand expressions: composition takes named functions, and a name is
@@ -138,8 +138,8 @@ walkers.
   tensor) and `name` is the optional dimension name (`[batch: 32]`).
   `TensorExtent` is the tensor counterpart of `ArraySize`, and
   for a reason that holds for two of its three cases: a symbolic extent is resolved by
-  monomorphization and never reaches a backend. `Dynamic` is the exception — it has no value to
-  resolve, so it survives every stage. A dimension name is frontend-only for a stronger reason — it is checked between two
+  monomorphization and never reaches a backend. `Dynamic` is the exception: it has no value to
+  resolve, so it survives every stage. A dimension name is frontend-only for a stronger reason: it is checked between two
   shapes and then dropped, so no later pass has to carry it. It is the one type
   node the parser builds from a *name* plus a bracketed shape rather than from a keyword or a
   bracket, and `span` covers the name through the closing `>`.

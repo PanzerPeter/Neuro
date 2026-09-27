@@ -1,6 +1,5 @@
 # HIR Lowering
 
-**Status**: Complete (1D)
 **Crate**: `compiler/hir-lowering`
 **Entry Point**: `pub fn lower_program(items: &[Item]) -> Result<HirProgram, LoweringError>`
 

@@ -6,7 +6,7 @@
 
 ## Overview
 
-The MLIR backend is the tensor / autodiff / GPU lowering path. It consumes the same typed
+The MLIR backend is the tensor lowering path that Phase 4 extends to GPU dialects. It consumes the same typed
 High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
 MLIR module: one `func.func` *declaration* per function and `impl` method, except where a body is
 element-wise tensor arithmetic or a matrix product, which becomes a definition built from the
@@ -124,7 +124,7 @@ never stretched because nothing at compile time can show it is 1; a literal oper
 ### Matrix multiplication
 
 `@` takes a path of its own: a matrix product contracts an axis rather than walking one, so its
-index space has a third dimension no operand of the result has. It emits three operations — a
+index space has a third dimension no operand of the result has. It emits three operations: a
 `tensor.empty`, a `linalg.generic` that fills it with the element's zero, and a second one that
 accumulates into the filled destination:
 
@@ -161,8 +161,8 @@ is the order the maps number the dimensions in. The fill is not optional: a redu
 destination at every point, which is what makes it an accumulator, and `tensor.empty` is
 undefined memory.
 
-Named `linalg.matmul` and `linalg.fill` are not reachable — melior's ODS module generates from
-`LinalgOps.td` only — so all three generics go through one builder that takes its operand split,
+Named `linalg.matmul` and `linalg.fill` are not reachable (melior's ODS module generates from
+`LinalgOps.td` only) so all three generics go through one builder that takes its operand split,
 maps, iterators and body region as arguments. Every extent must be static: `tensor.dim` can
 recover a dynamic result axis but not the contracted one, which appears in no operand of the
 destination, so a `?` anywhere leaves the function a declaration.
@@ -199,8 +199,8 @@ melior wraps no bufferization pass and two of the three that carry a `linalg` bo
 bufferization passes. Textually named passes must be in the process-global pass registry, so the
 MLIR context builder calls `register_all_passes` once.
 
-A bufferized tensor parameter crosses as an exploded `memref` descriptor — allocated pointer,
-aligned pointer, offset, sizes, strides — and the result buffer belongs to the caller. That is
+A bufferized tensor parameter crosses as an exploded `memref` descriptor (allocated pointer,
+aligned pointer, offset, sizes, strides) and the result buffer belongs to the caller. That is
 MLIR's tensor ABI, not the single DLPack handle the LLVM backend uses, and the two do not meet:
 nothing in the compiler calls this path from a compile.
 

@@ -15,6 +15,7 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 ## Shared Kernel
 - ast-types: the parsed item list handed between the resolution, binding, and checking steps
 - neuro-hir: the lowered program handed to the backend
+- shared-types: `Span`, which the driver resolves to a line and column when it renders a diagnostic
 
 ## Notes
 neurc is the only crate permitted to depend on every feature slice. It holds **no business
@@ -53,7 +54,7 @@ with no `main` is legitimate.
 ### `--emit`
 `--emit obj` stops the pipeline one step earlier and writes the object file to the output path
 instead of handing it to the linker. It also lifts the `main` requirement above: an object may
-be a library, and a library has no entry point. That is the whole of the difference — the same
+be a library, and a library has no entry point. That is the whole of the difference: the same
 front half, the same backend call, the same object bytes the executable path would have linked.
 
 It exists because a foreign consumer cannot call into an executable. A tensor value IS a

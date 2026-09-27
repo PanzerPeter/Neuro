@@ -57,7 +57,7 @@ Neuro does not have an interpreter and does not plan to have one. It is not suit
 
 ### Not Python-compatible
 
-Neuro does not aim to run Python code or embed a Python interpreter. DLPack interoperability (Phase 6) will allow tensor data to be exchanged with Python-based ML frameworks at runtime, but Neuro code and Python code are distinct programs.
+Neuro does not aim to run Python code or embed a Python interpreter. Python FFI over DLPack (Phase 7) will allow tensor data to be exchanged with Python-based ML frameworks at runtime, but Neuro code and Python code are distinct programs.
 
 ### Not a research language for type theory
 
@@ -73,7 +73,7 @@ There is no `reflect` package, no `typeof`, and no dynamic dispatch on arbitrary
 
 ### No backwards compatibility promise during alpha
 
-Until Neuro reaches v1.0 (Phase 2 complete), syntax and semantics may change between minor versions. Contributors should not build critical infrastructure on pre-1.0 Neuro. The CHANGELOG documents all breaking changes.
+Until the language stabilizes, syntax and semantics may change between minor versions. Contributors should not build critical infrastructure on Neuro yet. The CHANGELOG documents all breaking changes.
 
 ---
 
@@ -94,17 +94,18 @@ Neuro addresses these at the language level: types are static, tensor shapes are
 
 LLVM is the industry standard for optimizing native code generation. The inkwell bindings give Neuro a mature, well-tested code generation foundation without reinventing register allocation, instruction selection, or platform ABI handling.
 
-MLIR (Multi-Level Intermediate Representation) is how Phase 3+ tensor operations will be lowered. MLIR's type system natively represents tensor shapes as type parameters. The `linalg`, `tensor`, and `arith` dialects provide a high-level representation that MLIR can lower to both CPU vector code and GPU kernels using the `nvgpu`, `rocdl`, and Triton dialects. This means Neuro's compiler can target CPU, NVIDIA GPU, and AMD GPU without maintaining separate backends.
+MLIR (Multi-Level Intermediate Representation) is the route tensor operations take toward GPU targets. MLIR's type system natively represents tensor shapes as type parameters. The `linalg`, `tensor`, and `arith` dialects provide a high-level representation that MLIR can lower to both CPU vector code and GPU kernels using the `nvgpu`, `rocdl`, and Triton dialects. This means Neuro's compiler can target CPU, NVIDIA GPU, and AMD GPU without maintaining separate backends.
 
-### Why automatic differentiation via Enzyme?
+### Why compile-time AD over the typed HIR?
 
 Frameworks like PyTorch use operator-overloading AD: every tensor operation records itself into a computation graph at runtime, which is then traversed in reverse. This has high overhead and requires the framework to know about every operation.
 
-Enzyme is an LLVM/MLIR pass that differentiates native code at the IR level. It does not need to know about "tensor operations" specifically; it differentiates the LLVM IR the compiler produced. This means:
+Neuro differentiates at compile time instead. `@grad` is a compiler annotation: HIR lowering generates a reverse-mode derivative function beside the annotated one, so nothing records a graph while the program runs. The transform works on Neuro's own typed HIR for two reasons:
 
-- Differentiation is transparent to the language: `@grad(f)` is a compiler annotation, not a runtime mode switch.
-- Custom operations written in Neuro (not from a library) are automatically differentiable.
-- The differentiated code is optimized by the same LLVM passes as the forward pass.
+- Tensor shapes are still in the types there, so a gradient comes back as a tensor with its parameter's static shape. An IR-level tool such as Enzyme hands back an untyped shadow buffer, and the shape would have to be rebuilt in the frontend anyway.
+- It runs before any MLIR or GPU lowering, so the derivative is ordinary code that later lowering stages carry to every target. A pass over LLVM IR runs after GPU lowering and cannot differentiate a kernel launch.
+
+The derivative is optimized by the same LLVM passes as the forward pass, and every derivative the compiler generates is checked against finite differences of the compiled function. The user-facing rules are in the [automatic differentiation reference](docs/language-reference/autodiff.md).
 
 ### Why tensor shapes as type parameters?
 
@@ -114,7 +115,7 @@ A `Tensor<f32, [784, 128]>` has its shape encoded in its type. This means:
 - Batch dimension mismatches between model layers are caught before the model runs.
 - The optimizer can use shape information to select loop tile sizes and memory access patterns.
 
-This requires MLIR (Phase 3) because the LLVM IR type system does not natively represent n-dimensional arrays with static shape constraints. MLIR's parametric type system does.
+The frontend checks shapes itself. Past the frontend, only MLIR keeps them: the LLVM IR type system does not represent n-dimensional arrays with static shape constraints, and MLIR's parametric type system does.
 
 ---
 

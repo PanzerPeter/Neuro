@@ -11,10 +11,8 @@
 [![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
-**Status: alpha.** Phases 1 (Core Language) and 2 (Tensors and MLIR) are complete: the
-general-purpose language surface and the tensor stack compile and run. Phase 3 (Automatic
-Differentiation) is open. Breaking changes are expected. Per-phase status lives in one place,
-the [Quick Roadmap](#quick-roadmap).
+**Status: alpha.** Breaking changes are expected. Per-phase status lives in one place, the
+[Quick Roadmap](#quick-roadmap).
 
 ---
 
@@ -69,21 +67,25 @@ impl Neuron {
 func main() -> i32 {
     val neuron = Neuron::new(0.5, -0.1)
 
-    val dead = neuron.activate(0.0)         // 0.0 * 0.5 - 0.1 = -0.1 -> clamped to 0.0
+    // Dead region: input too small to overcome the bias
+    val dead = neuron.activate(0.0)    // 0.0 * 0.5 - 0.1 = -0.1, clamped to 0.0
     val dead_fires = neuron.is_active(0.0)
     println("input 0.0 -> {dead:.2}  fires: {dead_fires}")
 
-    val active = neuron.activate(1.0)       // 1.0 * 0.5 - 0.1 =  0.4 -> passes through
+    // Active region: strong enough input fires the neuron
+    val active = neuron.activate(1.0)  // 1.0 * 0.5 - 0.1 = 0.4, passes through
     val active_fires = neuron.is_active(1.0)
     println("input 1.0 -> {active:.2}  fires: {active_fires}")
 
+    // The dead region clamps to exactly zero.
     if dead > 0.0 { return 1 }
 
-    return (active * 10.0) as i32           // 4
+    // Scale the active output into the exit code so the result is observed.
+    return (active * 10.0) as i32      // 0.4 * 10 = 4
 }
 ```
 
-```
+```text
 input 0.0 -> 0.00  fires: false
 input 1.0 -> 0.40  fires: true
 ```
@@ -171,7 +173,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |
 | **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` ([reference](docs/language-reference/types.md)) |
 | **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce`, `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)` ([reference](docs/language-reference/tensors.md)) |
-| **Automatic differentiation** | `@grad` on a function or method compiles a reverse-mode derivative of a tensor loss beside it, through branches, loops, calls, function values and elementwise math, at compile time and with no gradient tape; `@grad(wrt: [w, self.head.w])` picks the parameters and receiver fields it differentiates; `loss.backward()` runs it and `w.grad()` / `.zero_grad()` read and clear each parameter's gradient; `@grad(order: 2)` adds `w.hessian()`; `.detach()` and `@no_grad` fence values out of the derivative; every one checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
+| **Automatic differentiation** | `@grad` compiles a reverse-mode derivative beside a function or method, with no gradient tape; `wrt:` selection, `.backward()` / `.grad()` / `.zero_grad()`, `order: 2` Hessians, `.detach()` / `@no_grad`, each checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
 | **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `String` buffer ([reference](docs/language-reference/strings.md)) |
 | **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic reports overflow |
 | **Ownership** | Move-by-default, `Copy`, borrows with flow-sensitive exclusivity, lifetime elision, deterministic `Drop`, and `pool { }` arena blocks ([reference](docs/language-reference/memory-model.md)) |
@@ -229,16 +231,6 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **8** | **Developer experience**: debug info, incremental compilation, Language Server Protocol, formatter, `@test` runner | Planned |
 | **9** | **Distribution**: the `neurpm` package manager, cross-OS installer and self-updater, signed binaries, CPU parallelism, further optimization passes | Planned |
 
-Phase 2 is complete: **2A** standard I/O and spec stragglers, **2B** tensor core, **2C** MLIR
-lowering, **2D** the pool allocator, **2E** the value model and **2F** functional sugar — the
-`|>` and `>>` operators, Einstein notation, and the `.map` / `.zip` / `.reduce` traversals —
-all shipped. Phase 3 now trains: `@grad` on a function or a method emits a reverse-mode
-gradient function over tensor arithmetic, `if`, `while`, calls to user functions and function values, `wrt:` picks what
-it differentiates down to a model's own fields, `.backward()` runs it and parks each
-gradient beside its parameter for `.grad()` to read, `order: 2` adds the Hessian for
-`.hessian()`, `.detach()` and `@no_grad` keep a value out of the gradient, and every derivative the compiler
-generates is measured against central finite differences of the compiled function.
-
 ---
 
 ## Architecture
@@ -246,7 +238,7 @@ generates is measured against central finite differences of the compiled functio
 Neuro follows [Vertical Slice Architecture](VSA.md): code is organized by language feature, not by
 technical layer.
 
-```
+```text
 compiler/
 ├── infrastructure/          # Shared, zero-business-logic crates
 │   ├── ast-types/           #   AST node definitions
@@ -254,6 +246,8 @@ compiler/
 │   └── neuro-hir/           #   Typed High-Level IR (frontend <-> backend contract)
 ├── lexical-analysis/        # Tokenizer (logos, Unicode XID)
 ├── syntax-parsing/          # Pratt + statement parser -> AST
+├── module-resolution/       # Multi-file loading, imports, visibility
+├── argument-binding/        # Named arguments -> positional calls
 ├── semantic-analysis/       # Type checker, scope and borrow analysis
 ├── hir-lowering/            # Type-checked AST -> typed HIR
 ├── llvm-backend/            # HIR -> object code (inkwell 0.10 / LLVM 20)
@@ -261,10 +255,10 @@ compiler/
 └── neurc/                   # CLI compiler driver
 ```
 
-Today a `.nr` file travels: **tokens → AST → type-checked AST → typed HIR → LLVM object code →
-system linker**. The tensor path forks after HIR into MLIR (linalg, tensor, func, arith) and will
-carry the GPU dialects as Phase 4 lands; the AD transform reads the same typed HIR. Stage by
-stage:
+Today a `.nr` file travels: **tokens → AST → merged program → type-checked AST → typed HIR →
+LLVM object code → system linker**. Automatic differentiation runs inside HIR lowering. The
+`mlir-backend` slice lowers the same typed HIR to MLIR `linalg`, but the driver does not route
+through it yet; that route, and the GPU dialects behind it, arrive with Phase 4. Stage by stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---

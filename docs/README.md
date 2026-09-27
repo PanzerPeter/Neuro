@@ -11,8 +11,8 @@ once, in the page that owns it.
 ## What is Neuro?
 
 A compiled language for high-performance AI workloads. It generates native code through an LLVM 20
-backend, with a roadmap toward MLIR-based tensor operations, compile-time automatic
-differentiation, and GPU acceleration via MLIR GPU dialects.
+backend, and it checks tensor shapes and differentiates tensor code while compiling. GPU
+acceleration through MLIR GPU dialects is on the roadmap.
 
 Design goals:
 

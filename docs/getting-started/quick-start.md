@@ -29,8 +29,8 @@ cargo run -p neurc -- check examples/basics/hello.nr
 ```
 
 Expected output:
-```
-Type checking passed for "examples/basics/hello.nr" (1 module(s), 11 HIR items)
+```text
+Type checking passed for "examples/basics/hello.nr" (1 module(s), 19 HIR items)
 ```
 
 ## Compiling a Program
@@ -43,7 +43,7 @@ cargo run -p neurc -- compile examples/basics/hello.nr
 
 The compiler prints the paths it produced:
 
-```
+```text
 Successfully compiled examples/basics/hello.nr -> examples/basics/hello
 ```
 
@@ -88,7 +88,7 @@ func main() -> i32 {
 }
 ```
 
-```
+```text
 hello from Neuro
 ```
 
@@ -233,7 +233,7 @@ func main() -> i32 {
 ```
 
 Error output:
-```
+```text
 Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
 ```
 
@@ -248,7 +248,7 @@ func main() -> i32 {
 ```
 
 Error output:
-```
+```text
 Type errors found in "mismatch.nr":
 error: type mismatch: expected i32, found bool
  --> mismatch.nr:2:5
@@ -337,7 +337,7 @@ current compiler supports:
 - Immutable `&T` and mutable `&mut T` borrows with `*` deref; flow-sensitive borrow exclusivity
 - Explicit lifetime annotations `<'a>`; returned-reference lifetime elision
 - Deterministic `Drop` running at scope exit in reverse declaration order, at the assignment
-  that displaces a value, and for every owner a destroyed value holds — a struct field, an
+  that displaces a value, and for every owner a destroyed value holds: a struct field, an
   array or tuple element, an enum payload, a newtype's inner value
 
 ### Control Flow

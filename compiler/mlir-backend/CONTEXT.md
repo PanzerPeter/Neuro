@@ -1,7 +1,7 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the tensor / autodiff / GPU path. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end.
+Lower the typed HIR to MLIR for the tensor path, which Phase 4 extends to GPU dialects. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end.
 
 ## Feature Gate
 The whole crate is opt-in behind the off-by-default `mlir` feature
@@ -40,8 +40,8 @@ text and parsed by `melior::utility::parse_pass_pipeline` because melior wraps n
 pass. Its first three entries are what carry a `linalg` body: `one-shot-bufferize` (with
 `bufferize-function-boundaries=true`, or a `func.func` keeps `tensor` in its signature and never
 converts) rewrites tensor values into `memref` buffers, `buffer-deallocation-pipeline` gives each
-one an owner, and only then does `convert-linalg-to-loops` — nested under `func.func`, which is
-what it is anchored on — produce `scf` loops; run before bufferization it silently leaves the op
+one an owner, and only then does `convert-linalg-to-loops` (nested under `func.func`, which is
+what it is anchored on) produce `scf` loops; run before bufferization it silently leaves the op
 alone. The rest is the descent those loops land in: `convert-scf-to-cf`, `finalize-memref-to-llvm`,
 then `func` / `arith` / `cf` / `index` to LLVM and `reconcile-unrealized-casts` last by necessity,
 since each conversion leaves `unrealized_conversion_cast` ops at its boundary with the dialects the
@@ -84,15 +84,15 @@ result dimensions. An extent of 1 against a larger result extent is stretched: t
 to the constant `0`, so the operand is read at index 0 at every point the result axis covers. A
 scalar operand of the element type has no index space at all and maps to `()`, which is how
 `linalg.generic` hands one value to every point. The destination always keeps the identity map;
-that is what makes the operation element-wise rather than a gather. Any other mismatch — an
-extent neither equal nor 1, an operand outranking the result, or a different element type — is
+that is what makes the operation element-wise rather than a gather. Any other mismatch (an
+extent neither equal nor 1, an operand outranking the result, or a different element type) is
 a shape error the frontend owns, so it answers `Ok(None)` rather than being lowered wrongly.
 
 **A `?` extent sizes the destination from an operand.** `tensor.empty` needs one `index`
 operand per dynamic axis, and those come from `tensor.dim` on an operand that walks that axis
 itself. A *stretched* operand cannot supply one: it is size 1 there and says nothing about the
-result. For the same reason a `?` operand extent is never stretched — nothing here can prove it
-is 1 at run time, and guessing wrong would silently read the wrong element — so a result axis
+result. For the same reason a `?` operand extent is never stretched (nothing here can prove it
+is 1 at run time, and guessing wrong would silently read the wrong element) so a result axis
 no operand walks leaves the function a declaration.
 
 It answers `Ok(None)`, meaning "leave this function a declaration", for everything else, and
@@ -108,14 +108,14 @@ element-wise path and emits the canonical three-operation shape: a `tensor.empty
 a second one whose index space is `(row, column, contracted)` with maps `(d0, d2)` / `(d2, d1)` /
 `(d0, d1)`, iterators `parallel, parallel, reduction`, and a multiply-accumulate body. The fill is
 not optional: a reduction READS its destination at every point, and `tensor.empty` is undefined
-memory. Named `linalg.matmul` and `linalg.fill` are still not reachable — melior's ODS module
-generates from `LinalgOps.td` only — so all three go through the one `generic_op` builder, which
+memory. Named `linalg.matmul` and `linalg.fill` are still not reachable (melior's ODS module
+generates from `LinalgOps.td` only) so all three go through the one `generic_op` builder, which
 takes its operand split, maps, iterators and body region as arguments. Every extent must be
 static here: `tensor.dim` can recover a dynamic result axis but not the contracted one, which
 appears in no operand of the destination, so a `?` anywhere answers `Ok(None)`.
 
 **The bufferized function has MLIR's tensor ABI, not Neuro's.** A tensor parameter crosses as an
-exploded `memref` descriptor — allocated pointer, aligned pointer, offset, sizes, strides — where
+exploded `memref` descriptor (allocated pointer, aligned pointer, offset, sizes, strides) where
 the LLVM backend's tensor is one pointer to a flat buffer behind a DLPack handle, and the result
 buffer is the caller's to free. Nothing calls the MLIR path from a compile, so the two never meet;
 the boundary layout is deliberately left at MLIR's default until something does.

@@ -1,6 +1,5 @@
 # Module Resolution
 
-**Status**: Complete (1G)
 **Crate**: `compiler/module-resolution`
 **Entry Point**: `pub fn resolve_program(root: &Path, parse: &dyn Fn(&str) -> Result<Vec<Item>, String>, prelude: &[PreludeVariant]) -> Result<ResolvedProgram, ModuleError>`
 

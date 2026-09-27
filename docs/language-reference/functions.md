@@ -768,7 +768,7 @@ func main() -> i32 {
 }
 ```
 
-```
+```text
 hello from Neuro
 phase 2 is 0.88 done
 ```
@@ -901,7 +901,7 @@ destructor runs exactly once per value, whether the callee consumes it or hands 
 **Restrictions (this phase).** The same conservatism bars a `T` from the positions restricted to
 `Copy` types: a closure may not capture a `T`-typed binding, and `[v, v]` or `(v, v)` over a `T`
 duplicates one owner, so the second slot is a use of a moved value. Generic **struct** and
-**enum** type arguments carry no `Copy` requirement either — the instance holds the value and
+**enum** type arguments carry no `Copy` requirement either: the instance holds the value and
 moves with it (see [Types → Ownership of an element](types.md#ownership-of-an-element)). Generic
 `impl` blocks are supported.
 

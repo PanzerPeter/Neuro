@@ -12,7 +12,7 @@ written in Rust and laid out as a Cargo workspace.
 
 Pipeline:
 
-```
+```text
 source (.nr) -> lexical analysis -> syntax parsing -> semantic analysis
              -> HIR lowering -> LLVM backend -> linker -> native binary
 ```

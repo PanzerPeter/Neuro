@@ -1,6 +1,5 @@
 # Argument Binding
 
-**Status**: Complete (1H)
 **Crate**: `compiler/argument-binding`
 **Entry Point**: `pub fn bind_arguments(items: &mut [Item]) -> Result<(), Vec<ArgumentError>>`
 

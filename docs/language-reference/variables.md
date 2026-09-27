@@ -402,7 +402,7 @@ x = 10  // Same variable, must be same type
 
 ### Required Initialization
 
-Variables must be initialized when declared (Phase 1):
+Variables must be initialized when declared:
 
 ```neuro
 val x: i32 = 42           // OK: initialized
@@ -415,18 +415,7 @@ mut y: i32 = 0            // OK: initialized
 ```neuro
 val x: i32 = 10 + 20              // Arithmetic
 val y: i32 = add(5, 3)            // Function call
-val z: i32 = if true { 1 } else { 0 }  // Conditional (Phase 1)
-```
-
-### Uninitialized Variables (Phase 1+)
-
-Future phases may support uninitialized variables with explicit type:
-
-```neuro
-// Not yet implemented
-val x: i32  // Declared but not initialized
-// Use of x here would be an error
-x = 42      // Initialize before use
+val z: i32 = if true { 1 } else { 0 }  // Conditional
 ```
 
 ## Common Patterns

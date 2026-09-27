@@ -1,6 +1,5 @@
 # Lexical Analysis
 
-**Status**: Complete (Phase 1)
 **Crate**: `compiler/lexical-analysis`
 **Entry Point**: `pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError>`
 
@@ -183,19 +182,10 @@ match tokenize(source) {
 
 ## Error Types
 
-```rust
-pub enum LexError {
-    UnexpectedChar { character: char, span: Span },
-    UnterminatedString { span: Span },
-    InvalidNumber { text: String, span: Span },
-    InvalidEscape { escape: String, span: Span },
-    InvalidCharLiteral { literal: String, span: Span },
-    UnterminatedBlockComment { span: Span },
-    UnterminatedInterpolation { span: Span },
-}
-```
-
-All errors include span information for precise error reporting.
+Every lexical failure is a `LexError` variant carrying the `Span` of the offending text: an
+unexpected character, an unterminated string, block comment, interpolation hole or triple-quoted
+block, and malformed numbers, escapes and character literals. The authoritative list is
+[`compiler/lexical-analysis/src/errors.rs`](../../../compiler/lexical-analysis/src/errors.rs).
 
 ## Implementation Details
 
@@ -316,7 +306,6 @@ The excerpt above shows representative variants; the full set lives in
 
 - [ ] Token stream caching for incremental compilation
 - [ ] Better error recovery (continue lexing after an error)
-- [ ] Documentation comment tokens (`///`, `/**`)
 
 Nothing links `TokenKind` to `neuro-language-support/syntaxes/neuro.tmLanguage.json`, so any
 change to the token set has to update that editor grammar by hand in the same commit.

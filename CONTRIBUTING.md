@@ -4,14 +4,10 @@ Thank you for your interest in contributing to the Neuro programming language co
 
 ## Project Status
 
-Phase 2 (Tensors and MLIR) is complete: first-class tensors, the MLIR lowering path, the
-pool allocator, the value model and the functional sugar shipped as **v3.0.0**. Neuro is now
-in Phase 3 (Automatic Differentiation, v3.x). A phase is divided into lettered sub-phases
-implemented strictly in dependency order; finishing all of Phase 3 ships v4.0.0.
-
-Per-phase status lives in exactly one place: the
-[Quick Roadmap](README.md#quick-roadmap). What each release changed is in
-[CHANGELOG.md](CHANGELOG.md); neither is restated here, so neither can go stale here.
+A phase is divided into lettered sub-phases implemented strictly in dependency order, and
+finishing a phase ships the next MAJOR version. Per-phase status lives in exactly one place:
+the [Quick Roadmap](README.md#quick-roadmap). What each release changed is in
+[CHANGELOG.md](CHANGELOG.md).
 
 We welcome contributions, but note:
 
@@ -53,7 +49,7 @@ brew install llvm@20
 export LLVM_SYS_201_PREFIX=$(brew --prefix llvm@20)
 ```
 
-> **Optional: the MLIR backend (sub-phase 1D+).** the `mlir-backend` slice is gated
+> **Optional: the MLIR backend.** The `mlir-backend` slice is gated
 > behind the off-by-default `mlir` cargo feature, so a normal build needs only
 > LLVM 20. To work on it you need an LLVM 20 install that includes MLIR plus a
 > matching libclang 20 (`MLIR_SYS_200_PREFIX` / `TABLEGEN_200_PREFIX` /
@@ -103,7 +99,7 @@ problem. Pick the one that fits, the fields are the questions triage would ask a
 
 ### Commit Message Format
 
-```
+```text
 scope: short summary (50 chars or less)
 
 Optional longer description. Explain what and why, not how.
@@ -149,19 +145,21 @@ Neuro uses **Vertical Slice Architecture (VSA)**. Each compiler feature is a sel
 
 ### Project Layout
 
-```
+```text
 compiler/
-├── infrastructure/          # Shared utilities, no business logic
+├── infrastructure/          # Shared contract types, no business logic
 │   ├── ast-types/           # AST node definitions (owned here, not in syntax-parsing)
-│   ├── neuro-hir/           # Typed HIR, the backend-agnostic frontend/backend contract (1D)
+│   ├── neuro-hir/           # Typed HIR, the backend-agnostic frontend/backend contract
 │   └── shared-types/        # Span, Identifier, Literal
 │
 ├── lexical-analysis/        # Tokenizer slice
 ├── syntax-parsing/          # Parser slice (depends on lexical-analysis by design)
+├── module-resolution/       # Multi-file loading, imports and visibility
+├── argument-binding/        # Named arguments rewritten to positional calls
 ├── semantic-analysis/       # Type checker slice
-├── hir-lowering/            # AST → typed HIR lowering slice (1D)
+├── hir-lowering/            # AST → typed HIR lowering slice, including autodiff
 ├── llvm-backend/            # LLVM 20 / inkwell 0.10 codegen slice
-├── mlir-backend/            # MLIR / melior slice (1D+, off-by-default `mlir` feature)
+├── mlir-backend/            # MLIR / melior slice (off-by-default `mlir` feature)
 │
 └── neurc/                   # Compiler driver, the only crate depending on all slices
 ```
@@ -358,7 +356,7 @@ git commit -s -m "parser: add struct definition parsing"
 
 Resulting trailer:
 
-```
+```text
 Signed-off-by: Your Name <your.email@example.com>
 ```
 

@@ -5,6 +5,78 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-079: a syntax error is reported without its line and column
+
+- **Status**: open, confirmed
+- **Area**: `neurc` (`load_program` in `src/main.rs`) and `module-resolution` (`ModuleError::Parse`);
+  `syntax-parsing` has no span accessor on `ParseError`
+- **Severity**: minor. Nothing miscompiles, but every syntax or lexical error points at the
+  whole file
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val x = 1 +
+}
+```
+
+Expected: the error names line 3, column 1, and underlines the `}` the way a type error is
+rendered. `neurc check` prints ``Error: Module error: failed to parse module `bad.nr`: unexpected token
+RightBrace, expected expression``, with no location at all. A lexical error such as an unclosed
+interpolation hole gives a byte offset (`at position 47`) instead of a line and column.
+
+**Root cause**: confirmed in the code. `ParseError` carries a `Span` on almost every variant, but
+the driver hands `module-resolution` a parser closure that converts the error with
+`e.to_string()`, and `ModuleError::Parse` holds only that string. The span is gone before
+anything could render it.
+
+**Workaround**: none beyond reading the message; the token it names is usually enough to find
+the line.
+
+**Fix sketch**: give `ParseError` a `span()` accessor (the lexical variants already carry
+spans; `UnexpectedEof` can point at the end of the source), carry the span and the module's
+source through `ModuleError::Parse`, and render it in the driver with `render_diagnostic`, as
+type errors are.
+
+## BUG-078: a newtype cannot take an `impl` block
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; impl registration in `type_checkers/declarations/impls.rs`
+- **Severity**: major. The language design gives a newtype its operators through explicit
+  trait impls, and none can be written, so a newtype supports no arithmetic and no methods
+
+**Minimal repro**
+
+```neuro
+newtype Meters = i32
+
+impl Meters {
+    func double(&self) -> Meters { Meters(self.0 * 2) }
+}
+
+func main() -> i32 {
+    val m = Meters(3).double()
+    return m.0
+}
+```
+
+Expected: exit 6. A newtype forwards `Copy` and `Clone` from its inner type and implements
+every other trait, arithmetic operators included, explicitly. Observed: `error: unknown struct
+'Meters'` at the `impl`, then `struct 'Meters' has no method 'double'` at the call. An
+`impl Add for Meters` is refused the same way.
+
+**Root cause**: confirmed in the code. `register_impl` accepts an `impl` target only when it
+is a key of `struct_defs`, so a newtype (like an enum) falls into the unknown-struct error, whose
+message also misnames what was written.
+
+**Workaround**: write a free function over the newtype and compute on `.0` inside it.
+
+**Fix sketch**: accept a declared newtype as an `impl` target in `register_impl` and in method
+lookup, mangle its methods like a struct's, and let the operator-trait path resolve a
+newtype operand. The enum case is the planned `impl`-on-enums work and should share the same
+target check.
+
 ## BUG-077: a store through a borrow never destroys the value it displaces
 
 - **Status**: open, confirmed
@@ -144,7 +216,7 @@ declares bindings needs the walk to run after the value is checked, so that its 
 resolvable. Decide first whether the provenance walk is meant to grow these shapes or whether
 the refusal is the intended boundary.
 
-## BUG-039 — a function that hands back its own `string` parameter leaks the buffer
+## BUG-039: a function that hands back its own `string` parameter leaks the buffer
 
 - **Status**: open, confirmed
 - **Area**: `llvm-backend`; the return summary in `codegen/string_ownership.rs`
@@ -202,7 +274,7 @@ same body walk the pass already runs. Regression tests want the identity above, 
 forward (one exit a parameter, one an allocation, which must stay conservative), and a forward
 through two calls, so a wrong transfer would double-free rather than merely leak.
 
-## BUG-038 — a `string` passed by value to a closure, or returned by one, is released by nobody
+## BUG-038: a `string` passed by value to a closure, or returned by one, is released by nobody
 
 - **Status**: open, confirmed
 - **Area**: `llvm-backend`; `codegen/closures.rs` and the call-boundary summary in
@@ -289,18 +361,18 @@ is a change to what that path passes rather than a new arm in it. Regression tes
 repro above, the `|>` spelling, a closure stored in a struct field (must stay conservative),
 and a closure that DOES retain its argument, which must keep the current transfer.
 
-## BUG-035 — a borrow reaching a binding through a call return is not tracked
+## BUG-035: a borrow reaching a binding through a call return is not tracked
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` (borrow checking); `borrow_target_of` in
   `type_checkers/statements.rs`
-- **Severity**: major — memory-unsafe. The borrowee rules accept a program that leaves a
+- **Severity**: major. Memory-unsafe. The borrowee rules accept a program that leaves a
   reference pointing into a freed buffer, and the compiler says nothing.
 
 A borrow becomes a tracked *persistent* borrow only when the initializer is syntactically a
 borrow of a named place (`val r = &x`, or a `.slice(range)` view). A borrow that reaches the
-binding any other way — most commonly as the return value of a function that takes one and
-hands it back — attaches to nothing. The borrowee rules read those tracked counts, so for such
+binding any other way (most commonly as the return value of a function that takes one and
+hands it back) attaches to nothing. The borrowee rules read those tracked counts, so for such
 a binding they see no live borrow and every one of them stands down.
 
 **Minimal repro**
@@ -321,7 +393,7 @@ Expected: rejected with `cannot move out of 's' while it is borrowed`. Observed:
 passes, `s` is moved into `consume`, and `b.len()` then reads the buffer `consume` released.
 
 The direct spelling of the same program is correctly rejected, which isolates the trigger:
-replace `id(&s)` with `&s` and the diagnostic fires. The read half escapes the same way —
+replace `id(&s)` with `&s` and the diagnostic fires. The read half escapes the same way:
 `val r: &mut i32 = pick(&mut n); val read: i32 = n` compiles, where the direct `&mut n` form
 does not.
 
@@ -336,14 +408,14 @@ frozen. There is no workaround that keeps the indirect spelling.
 
 **Fix sketch**: the borrow must be carried by the *type*, not recovered from the initializer's
 syntax. A reference-typed binding whose initializer is a call needs the callee's elided output
-lifetime resolved to the argument it came from — the same input-to-output mapping
-`check_returned_reference` already relies on via `current_fn_outliving` — and then
+lifetime resolved to the argument it came from (the same input-to-output mapping
+`check_returned_reference` already relies on via `current_fn_outliving`) and then
 `attach_borrow` against that argument's root place. Ranking the whole-function approach: this is
 the point where per-binding counters stop paying for themselves and a borrow set keyed by
 (place, region) starts to. Regression tests want the repro above, the `&mut` read variant, and a
 callee returning a reference derived from `self`.
 
-## BUG-033 — `&` does not accept a field or an element, only a bare variable
+## BUG-033: `&` does not accept a field or an element, only a bare variable
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` (borrow checking); the rvalue side of the place-expression
@@ -377,13 +449,13 @@ func main() -> i32 {
 
 Expected: compiles and returns 19. Observed:
 
-```
+```text
 cannot borrow this expression: `&` requires a place (a variable); bind it to a `val` first
 ```
 
 Dropping the `&` swaps one error for the other:
 
-```
+```text
 cannot move out of 'self': it is reached through a `&` borrow, which owns nothing to give
 away; bind a `.clone()` instead, or take the value by a binding that owns it
 ```
@@ -412,11 +484,11 @@ what is missing is the borrow check accepting a sub-place as the operand of `&` 
 `&mut`, and the exclusivity bookkeeping for a borrow of part of a binding rather than the
 whole of it.
 
-## BUG-030 — an element moved out of a `Vec` leaves the `Vec` owning it too
+## BUG-030: an element moved out of a `Vec` leaves the `Vec` owning it too
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` (move analysis of index places)
-- **Severity**: major — two owners of one heap buffer; not yet observable as a crash only
+- **Severity**: major. Two owners of one heap buffer; not yet observable as a crash only
   because an anonymous heap string is never freed today
 
 Move analysis records a move out of a binding and, since the struct-field fix, out of a
@@ -437,8 +509,8 @@ func main() -> i32 {
 
 Expected: a diagnostic, the way the same program written against a plain binding or a
 struct field gets one. Observed: it compiles, and `x` and `v` own one buffer between them.
-It exits 4 rather than crashing because an owned string built by `+` is never freed — the
-untracked leak Phase 1 left behind — so the double free has nothing to fire on yet. A
+It exits 4 rather than crashing because an owned string built by `+` is never freed (the
+untracked leak Phase 1 left behind) so the double free has nothing to fire on yet. A
 collection of a type with a real destructor would abort.
 
 **Root cause**: `record_move` resolves a place through `place_origin`, which now handles an
@@ -449,19 +521,19 @@ so no move is recorded and no error is raised.
 than binding it, or `.clone()` it.
 
 **Fix sketch**: not purely mechanical, which is why it is filed rather than fixed. An array
-and a tuple now answer this per ELEMENT PATH — `a[0]` moves the path `"0"`, a runtime `a[i]`
+and a tuple now answer this per ELEMENT PATH: `a[0]` moves the path `"0"`, a runtime `a[i]`
 moves the whole binding, because the compiler cannot say which element left. A `Vec`'s
 length is not static, so every index into one is the runtime case, and applying the array
-rule unchanged would make a `Vec` of a non-`Copy` element readable exactly once — `&v[0]`
+rule unchanged would make a `Vec` of a non-`Copy` element readable exactly once: `&v[0]`
 is not a borrowable place either. What a partial move of a collection means is still a
 language decision the spec does not make. Decide the rule first (reject the move outright,
 as Rust does; require `.clone()`; or add a borrowing index form), then implement it.
 
-## BUG-027 — a const generic parameter cannot be passed to another generic call
+## BUG-027: a const generic parameter cannot be passed to another generic call
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` (generic inference, `unify_array_len` / `seed_turbofish`)
-- **Severity**: major — a generic function cannot delegate to another over its own const
+- **Severity**: major. A generic function cannot delegate to another over its own const
   parameter, by inference or explicitly; the compiler rejects, it does not miscompile
 
 A generic function that takes a const parameter (including a tensor shape parameter, which
@@ -490,14 +562,14 @@ func main() -> i32 {
 Expected: compiles and returns 6. The callee's `N` is named by the argument's own type, so
 it is inferable. Observed:
 
-```
+```text
 generic parameter 'N' cannot be inferred from the call arguments;
 supply it explicitly with a turbofish, e.g. `f::<...>(...)`
 ```
 
 The turbofish the message recommends does not work either. `sum_n::<N>(t)` reports
 
-```
+```text
 turbofish argument for parameter 'N' has the wrong kind: a const argument was expected
 ```
 
@@ -524,8 +596,8 @@ parses as `GenericArg::Type`, so it lands in the kind-mismatch arm.
 concrete.
 
 **Fix sketch**: this is bigger than the two arms it appears to be, which is why it is filed
-rather than patched. A substitution has to be able to hold a *symbolic* const — "the
-caller's parameter `N`" — not only a `Type::ConstValue`; `unify_array_len` then binds the
+rather than patched. A substitution has to be able to hold a *symbolic* const ("the
+caller's parameter `N`") not only a `Type::ConstValue`; `unify_array_len` then binds the
 callee's parameter to it, `substitute_array_len` maps it back to an `ArrayLen::Param` in the
 caller's frame, and the Copy check in `calls.rs` needs a carve-out for it the way
 `ConstValue` already has one. `seed_turbofish` separately has to resolve an identifier
@@ -537,11 +609,11 @@ that decides the shape of the rest. Regression tests want both spellings of the 
 name, the turbofish form, the array form, and two distinct instantiations of the outer
 function so a wrong extent could not pass unnoticed.
 
-## BUG-026 — a later binding may not reuse a name in the same block
+## BUG-026: a later binding may not reuse a name in the same block
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` (scope resolution)
-- **Severity**: minor — the compiler rejects; it never miscompiles, and renaming works
+- **Severity**: minor. The compiler rejects; it never miscompiles, and renaming works
 
 The language reference says a later `val` or `mut` in the same block may reuse an earlier
 binding's name, shadowing it for the rest of the scope, and that shadowing may change the
@@ -559,7 +631,7 @@ func main() -> i32 {
 
 Expected: compiles, `s` is `i32` and the program returns 7. Observed:
 
-```
+```text
 variable 's' already defined in this scope
 ```
 

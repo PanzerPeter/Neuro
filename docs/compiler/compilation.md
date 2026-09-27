@@ -16,7 +16,7 @@ pipeline orchestration and contains no feature business logic itself (VSA).
 
 ### Compilation Pipeline
 
-```
+```text
 Source File (.nr)
     ↓
 ┌──────────────────────────────────────────────────────────────┐
@@ -88,7 +88,7 @@ temporary object file → link.
   the first one.
 
 **Example Error Output** (a program with a type mismatch):
-```
+```text
 Type errors found in "concat.nr":
 error: cannot apply binary operator + to types string and i32
  --> concat.nr:2:13
@@ -175,7 +175,7 @@ feature-gated.
 
 - Debug information (`-g`), position-independent code, cross-compilation, LTO.
 - Parallel / incremental compilation and build caching.
-- The MLIR tensor/autodiff/GPU path (Phase 2+), lowering the same typed HIR via `mlir-backend`.
+- Routing tensor lowering through `mlir-backend` in the driver, and on to MLIR GPU dialects (Phase 4).
 
 ## Setup
 

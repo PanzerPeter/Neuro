@@ -279,7 +279,7 @@ Errors go to stderr with exit code `1`. `compile` wraps the failing stage's mess
 ### Parse Errors
 
 Example:
-```
+```text
 Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
 ```
 
@@ -290,7 +290,7 @@ Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrac
 ### Type Errors
 
 Example:
-```
+```text
 Type errors found in "bad.nr":
 error: type mismatch: expected i32, found bool
  --> bad.nr:2:5
@@ -315,7 +315,7 @@ indexes the module that raised the error rather than the file named on the comma
 Codegen failures print as `Compilation failed: Code generation error: ...`; link failures
 name the linker invocation, for example:
 
-```
+```text
 Compilation failed: Failed to link object file /tmp/neuro.o to executable program
 Caused by (1): Failed to execute cc - ensure a C compiler (gcc/clang) is installed
 ```

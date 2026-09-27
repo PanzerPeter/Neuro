@@ -3,7 +3,7 @@
 Neuro programs may span several files. Every `.nr` file is a module, and a directory
 holding a `mod.nr` is a module with children.
 
-```
+```text
 examples/modules/
   main.nr          <- the root module (the file you pass to neurc)
   geometry.nr      <- module `geometry`

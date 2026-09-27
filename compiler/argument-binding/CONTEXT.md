@@ -44,7 +44,7 @@ Reads and rewrites the AST it is handed; touches no files.
   builtins have one: the language has no default-argument syntax, so a declared function's
   parameters are all `default: None` and a labelled call to one still has to supply every
   argument. A filled-in default is a constant the specification writes, so such a call is
-  never hoisted — there is no effect to order it against.
+  never hoisted: there is no effect to order it against.
 - **Permuting the arguments also permutes when they are evaluated, so a call that would
   notice is rewritten instead** (`hoisting.rs`). Every later stage evaluates an argument
   where it finds it, so a bare permutation ran `f(second: b(), first: a())` as `a()` then

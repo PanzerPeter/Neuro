@@ -8,8 +8,10 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
 - Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirParam`, `HirStruct`, `HirField`,
   `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
   `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirPlace`, `HirExpr`, `HirExprKind`,
-  `HirFieldInit`,
-  `HirType`, `HirCollectionKind`, `HirReduceOp`
+  `HirFieldInit`, `HirBindingSource`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,
+  `HirMatchTest`, `HirMathOp`, `HirReduceOp`, `HirSortKind`, `HirTensorApply`, `HirTensorAxis`,
+  `HirType`, `HirCollectionKind`, `AxisNames`
+- Pure functions over those types: `static_shape` and `extent_display`
 
 ## Shared Kernel
 - shared-types: `Span`, `Literal`, `FormatSpec` embedded in HIR nodes
@@ -47,7 +49,7 @@ it the *typed* contract:
    drops its axis and `HirTensorAxis::Range { start, end, reversed, step }` keeps it (`reversed`
    is `.rev()`, which changes the traversal order and not the extent; `step`, at least 1, keeps
    every `step`th element of that walk, so the extent is `(end - start).div_ceil(step)`), and the expression's own
-   `ty` is what says which happened — an element type when every axis was a position, a
+   `ty` is what says which happened: an element type when every axis was a position, a
    `HirType::Tensor` of the survivors otherwise. A `..` full axis has no variant of its own: the
    checker resolved it to the range over the whole extent.
    `HirExprKind::TensorShapeCast { receiver, permutation }` is `.t()` / `.reshape(...)` /
@@ -91,7 +93,7 @@ it the *typed* contract:
    second tensor or `.reduce`'s seed and is `None` for `.map`; a `.zip`'s operand has the
    receiver's extents, checked before lowering, so one index walks both buffers. Its `ty` is
    the receiver's shape over the callee's return type for the first two and the seed's type
-   for `.reduce` — a scalar, the way the whole-tensor reductions answer one. It READS every
+   for `.reduce`: a scalar, the way the whole-tensor reductions answer one. It READS every
    operand like the reduction does.
    `HirExprKind::Math { op, operand, exponent }` is elementwise math (`HirMathOp`: `.exp()`,
    `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)`), one node for a scalar and a tensor

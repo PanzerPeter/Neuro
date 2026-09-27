@@ -1,6 +1,5 @@
 # Syntax Parsing
 
-**Status**: Complete (Phase 1)
 **Crate**: `compiler/syntax-parsing`
 **Entry Point**: `pub fn parse(source: &str) -> Result<Vec<Item>, ParseError>`
 
@@ -193,7 +192,8 @@ token-level failures, `UnexpectedToken`, `UnexpectedEof`, a wrapped `LexError`, 
 grammar rules that are cheapest to enforce while parsing: `DuplicateParameter`,
 `DuplicateTypeAlias`, `TypeAliasShadowsBuiltin`, `CyclicTypeAlias`, `EnumLifetimeParam`,
 `ExportNotAllowed`, and `MisplacedNoPrelude`. Each carries the span of the offending token,
-not the start of the enclosing construct.
+not the start of the enclosing construct, except `UnexpectedEof` and `MaxDepthExceeded`, which
+have no single token to point at.
 
 ### Error Recovery
 
@@ -202,16 +202,13 @@ not the start of the enclosing construct.
 - **Precise error messages**: each names what was expected
 - **Span information**: the exact location of the offending token
 
-Example error:
-```
-Error: unexpected token `}`, expected expression
-  at line 5, column 12
-```
+The driver does not render that span yet: a parse error reaches the user as one line naming
+the file, with no line or column
+([BUG-079](../../BUGS.md#bug-079-a-syntax-error-is-reported-without-its-line-and-column)).
 
-Planned:
-- Error recovery to report multiple errors
-- Suggestion system for common mistakes
-- Better recovery from missing delimiters
+```text
+Error: Module error: failed to parse module `bad.nr`: unexpected token RightBrace, expected expression
+```
 
 ## Implementation Details
 
@@ -435,7 +432,7 @@ func calculate() -> i32 {
 ```
 
 **AST** (simplified):
-```
+```text
 Binary(Subtract)
 ├─ left: Binary(Multiply)
 │  ├─ left: Paren(Binary(Add, "a", "b"))
@@ -447,9 +444,6 @@ Binary(Subtract)
 
 - [ ] **Error recovery**: continue parsing after an error so a run can report more than one
 - [ ] **Suggestions**: "did you mean?" for near-miss identifiers and keywords
-- [ ] **Triple-quoted strings**: the `"""..."""` block form (1H)
-- [ ] **Named arguments**: the `external internal: T` parameter form (1H)
-- [ ] **Macros**: procedural and declarative (Phase 7)
 
 ## Troubleshooting
 

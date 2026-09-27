@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-09-27
+
+### Docs
+
+- `DESIGN.md` explains automatic differentiation as the compile-time transform over the typed
+  HIR that ships, not the Enzyme pass it once proposed, and no longer places MLIR lowering and
+  DLPack interop in the wrong phases.
+- The README and `CONTRIBUTING.md` link to the Quick Roadmap instead of restating phase
+  progress, list all slices in their layout trees, and say that the driver does not yet route
+  through `mlir-backend`. The README example now matches `examples/structs/neuron.nr` exactly.
+- Stale claims corrected: nested struct fields, tensor broadcasting and by-value tensor
+  arithmetic were listed as unsupported or planned; shipped items were listed as future work in
+  the parser and checker component docs; the type reference showed a diagnostic format the
+  compiler no longer prints; the getting-started HIR item counts were out of date; the parser
+  doc showed an error location the driver never prints.
+- The lexer and backend component docs link to their error enums instead of pasting stale
+  copies. The `neuro-hir`, `ast-types` and `neurc` `CONTEXT.md` files list their full public
+  surface and dependencies.
+- Em dashes are gone from tracked docs, every code fence names its language, and the
+  troubleshooting issue template no longer closes its own fence early.
+- `docs/BUGS.md` records BUG-078 (a newtype cannot take an `impl` block) and BUG-079 (a syntax
+  error is reported without its line and column).
+
 ## [3.15.0] - 2026-09-27
 
 ### Added

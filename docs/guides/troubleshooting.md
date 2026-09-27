@@ -7,7 +7,7 @@ Common problems and solutions when working with Neuro.
 ### "No suitable version of LLVM was found"
 
 **Symptoms**:
-```
+```text
 error: No suitable version of LLVM was found system-wide or pointed
        to by LLVM_SYS_201_PREFIX.
 ```
@@ -41,7 +41,7 @@ echo $LLVM_SYS_201_PREFIX
 ### "LLVMConfig.cmake not found"
 
 **Symptoms**:
-```
+```text
 Could not find LLVMConfig.cmake
 ```
 
@@ -58,7 +58,7 @@ Download and extract the full development package:
 ### "cannot open input file 'libxml2s.lib'" (Windows)
 
 **Symptoms**:
-```
+```text
 LINK : fatal error LNK1181: cannot open input file 'libxml2s.lib'
 ```
 
@@ -83,7 +83,7 @@ search path, so no further configuration is needed once the package is installed
 ### Build fails with linker errors (Unix)
 
 **Symptoms**:
-```
+```text
 error: linker `cc` not found
 ```
 
@@ -113,7 +113,7 @@ The `mlir-backend` slice's `mlir` feature is opt-in and needs more than stock LL
 Default builds compile a placeholder and need none of this.
 
 **Symptoms**:
-```
+```text
 mlir-sys: MLIR_SYS_200_PREFIX not set
 # or
 error: evaluation of constant value failed: attempt to compute `0_usize - 8_usize`
@@ -155,7 +155,7 @@ MLIR prefix's `lib/` second for the runtime `libMLIR`.
 ### Type Mismatch Errors
 
 **Symptoms**:
-```
+```text
 Type errors found in "program.nr":
 error: type mismatch: expected i32, found f64
  --> program.nr:2:5
@@ -204,7 +204,7 @@ takes_i32(x)  // OK
 ### Undefined Variable Errors
 
 **Symptoms**:
-```
+```text
 Type errors found in "program.nr":
 error: undefined variable 'z'
  --> program.nr:2:14
@@ -252,7 +252,7 @@ func scoped() -> i32 {
 ### Cannot Assign to Immutable Variable
 
 **Symptoms**:
-```
+```text
 Type errors found in "program.nr":
 error: cannot assign to immutable variable 'x'
  --> program.nr:3:5
@@ -282,7 +282,7 @@ y = 20  // OK
 ### Missing Return Statement
 
 **Symptoms**:
-```
+```text
 Type errors found in "program.nr":
 error: missing return statement in function returning i32
  --> program.nr:1:1
@@ -331,7 +331,7 @@ func good_implicit(x: i32) -> i32 {
 ### Parse Errors
 
 **Symptoms**:
-```
+```text
 Error: Module error: failed to parse module `program.nr`: unexpected token RightBrace, expected expression
 ```
 
@@ -398,7 +398,7 @@ func good() -> i32 {
 ### Permission Denied (Unix)
 
 **Symptoms**:
-```
+```text
 bash: ./program: Permission denied
 ```
 
@@ -587,7 +587,7 @@ Include in bug reports:
 - Steps to reproduce
 
 **Template**:
-```markdown
+````markdown
 ## Environment
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
 - Neuro: version from `neurc --version` (and commit hash)
@@ -610,7 +610,7 @@ Include in bug reports:
 ```
 [Complete error message with debug logging]
 ```
-```
+````
 
 ### Resources
 
@@ -647,7 +647,7 @@ The compiler currently emits one lint:
 ### `prefer-loop-over-while-true`
 
 **Message**:
-```
+```text
 warning[prefer-loop-over-while-true] at 24..28: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
 ```
 

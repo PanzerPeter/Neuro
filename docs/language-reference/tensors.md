@@ -173,7 +173,7 @@ shared with the standard collections.
 
 That the handle is really consumable is checked, not asserted. Compile a module of
 tensor-returning functions with `neurc compile --emit obj`, link it into a shared library,
-and NumPy imports each result with `numpy.from_dlpack` — reading the dtype, rank, extents
+and NumPy imports each result with `numpy.from_dlpack`: reading the dtype, rank, extents
 and strides off the handle and taking ownership of it.
 `tools/dlpack_differential.py` does this for every tensor operation below and compares the
 elements against NumPy's own answer; see
@@ -285,7 +285,7 @@ func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tenso
 ```
 
 `@` binds tighter than `*` and `+` and looser than `as`, so `w @ x + b` adds the bias to
-the product — the shape a linear layer is written in, with the `[N]` bias broadcasting down
+the product: the shape a linear layer is written in, with the `[N]` bias broadcasting down
 the product's rows under the element-wise rule above. Like every tensor operator it takes
 owned or borrowed operands: `&w @ &x` reads a weight without moving it out of its binding.
 
@@ -498,7 +498,7 @@ val plane: Tensor<i32, [height: 2, width: 3]> = [[1, 2, 3], [4, 5, 6]]
 val same:  Tensor<i32, [2, 3]> = plane          // fine: one side names nothing
 ```
 
-What is rejected is the transposition the feature exists to catch — the same extents, the
+What is rejected is the transposition the feature exists to catch, the same extents the
 wrong way round:
 
 ```neuro
@@ -513,7 +513,7 @@ The extents are identical, so nothing else would have caught it.
 Names live in the tensor type's own namespace rather than the surrounding scope: a local
 variable called `height` neither shadows an axis nor collides with one. Each axis of one
 shape needs its own name (`[side: 4, side: 4]` is an error), and the name is not a generic
-parameter — in `[batch: N]`, `batch` names the axis and `N` is the shape parameter the call
+parameter: in `[batch: N]`, `batch` names the axis and `N` is the shape parameter the call
 infers. An axis keeps its name through an index, at whatever extent survives:
 
 ```neuro
@@ -588,8 +588,8 @@ since they only reorder axes.
 
 A reduction folds a tensor's elements. Written with no argument it folds all of them and
 produces one scalar of the element type; written with `axis:` it folds along that axis
-alone, which drops that axis from the result and leaves every other one — extent and
-dimension name both — exactly as it was.
+alone, which drops that axis from the result and leaves every other one (extent and
+dimension name both) exactly as it was.
 
 ```neuro
 val grid: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
@@ -639,7 +639,7 @@ Reducing a rank-1 tensor along its only axis leaves the rank-0 `Tensor<T, []>`, 
 
 Three rules are compile-time errors. The element type must be an integer or `f32`/`f64`: a
 `bool` tensor has nothing to fold. `.mean()` narrows that to `f32`/`f64`, because an
-integer mean would have to pick a rounding rule the language does not give — sum and divide
+integer mean would have to pick a rounding rule the language does not give: sum and divide
 explicitly instead. And a reduction over **no** elements is rejected outright rather than
 given an identity value, since `.max()` of nothing has no answer. A receiver whose extent is
 a shape parameter or a `?` has no run length either, so a reduction needs a tensor whose
@@ -668,7 +668,7 @@ val (top, at) = scores.topk(k: 3)     // top = (9, 7, 5), at = (2, 4, 0)
 | `.topk(k: n)` / `.topk(k: n, axis: k)` | a `(values, indices)` pair whose selected axis is `n` long |
 
 `axis:` takes a position, a dimension **name** the receiver's type declares, or a negative
-index counting from the end, and defaults to the last axis — the row of a matrix. `.topk`
+index counting from the end, and defaults to the last axis: the row of a matrix. `.topk`
 selects the `n` **greatest**, so it has no `descending:` of its own; its selected axis is
 `n` long in both results and carries no dimension name, a truncated axis no longer being
 the thing its name documented.
@@ -791,7 +791,7 @@ since the answers go into a buffer.
 two need not hold the same element type, the function's parameters saying what each holds.
 
 `.reduce` answers **one value of the seed's type**, not a rank-0 tensor, the way a
-whole-tensor `.sum()` does — a reader should not need a second call to get the number out.
+whole-tensor `.sum()` does: a reader should not need a second call to get the number out.
 The accumulator is the **first** parameter, which is what `|acc, x|` means, and an untyped
 seed takes its type from that parameter: `0.0` folded over an `f32` tensor is an `f32`.
 

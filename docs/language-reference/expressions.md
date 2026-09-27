@@ -259,7 +259,7 @@ variant or include a `_` arm; an integer/`char` match requires a `_` arm; a
 `bool` match needs both `true` and `false` (or `_`). A guarded arm does not
 count toward exhaustiveness.
 
-**Phase 1E limits**: the scrutinee must be an enum, integer, `char`, or `bool`;
+**Limits**: the scrutinee must be an enum, integer, `char`, or `bool`;
 enum-payload sub-patterns must be bindings or `_` (match a payload *value* with a
 guard, e.g. `Some(n) if n == 0`); and alternatives of an `|`-pattern may not
 bind.

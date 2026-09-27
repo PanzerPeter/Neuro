@@ -1,6 +1,5 @@
 # Semantic Analysis
 
-**Status**: Complete (Phase 1)
 **Crate**: `compiler/semantic-analysis`
 **Entry Point**: `pub fn type_check(items: &[Item]) -> Result<Vec<Warning>, Vec<TypeError>>`
 
@@ -400,10 +399,7 @@ func bad_example() -> i32 {
 
 ### Open checker items
 
-Phase 1 (Core Language) is complete: structs, methods, arrays, tuples, `as` conversions,
-the borrow checker, enums and pattern matching, generics, traits, and dispatch have all
-landed. See the [Quick Roadmap](../../../README.md#quick-roadmap) for the phase now open.
-What the checker still owes:
+What the checker still owes (phase status is in the [Quick Roadmap](../../../README.md#quick-roadmap)):
 
 - [ ] **A generic instantiated with an enclosing type parameter**: a `Wrapper<T>` field inside
       another generic struct is deferred; type arguments themselves carry no `Copy`
@@ -424,9 +420,8 @@ What the checker still owes:
 - [x] **Shape generics**: a tensor extent may be a `const N: u32` parameter, inferred from
       the argument's own shape and monomorphized per distinct set of extents; a parameter
       written twice must agree, and a `where` predicate over one is checked at the call
-- [ ] **Shape checking beyond identity**: broadcasting; today two tensors match only when
-      their elements and every extent are equal
-- [ ] **Broadcasting**: NumPy-style broadcasting rules
+- [x] **Broadcasting**: NumPy-style broadcasting for the by-value tensor operators, aligned
+      at the trailing axis, with an extent of 1 stretching to match
 
 ## Troubleshooting
 

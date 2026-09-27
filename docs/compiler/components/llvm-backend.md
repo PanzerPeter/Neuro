@@ -1,6 +1,5 @@
 # LLVM Backend
 
-**Status**: Complete (Phase 1)
 **Crate**: `compiler/llvm-backend`
 **Library**: inkwell 0.10.0 (LLVM 20 bindings)
 **Build requirement**: `LLVM_SYS_201_PREFIX=/usr/lib/llvm20`
@@ -85,7 +84,7 @@ Integer instructions are selected based on signedness:
 
 ## Code Generation Pipeline
 
-```
+```text
 1. Pre-pass: register struct definitions and extract all function/method signatures (including mangled method names `StructName__methodName`)
 2. Initialize LLVM context + module (via inkwell)
 3. Pre-pass: collect expression types for instruction selection
@@ -154,20 +153,10 @@ integer-overflow check is weighted but *not* outlined, its trap block is a singl
 
 ## Error Types
 
-```rust
-pub enum CodegenError {
-    InitializationFailed(String),
-    UnsupportedType(String),
-    UndefinedVariable(String),
-    UndefinedFunction(String),
-    TypeMismatch { expected: String, found: String },
-    InvalidOperandType { op: String, ty: String },
-    InvalidOptimizationLevel(u8),
-    LlvmError(String),
-    MissingReturn,
-    InternalError(String),
-}
-```
+Codegen reports a `CodegenError`. Most variants describe an internal invariant break (an
+unsupported type reaching the backend, an LLVM builder failure) rather than a fault in the
+program, because the type checker has already rejected invalid source. The authoritative list is
+[`compiler/llvm-backend/src/errors.rs`](../../../compiler/llvm-backend/src/errors.rs).
 
 ## Usage
 
@@ -247,25 +236,13 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 | `O2` | Default | Standard release build |
 | `O3` | Aggressive | Maximum optimization |
 
-## Future: MLIR Integration (Phase 2+)
+## Future: MLIR Integration
 
-`melior` (Rust MLIR bindings for LLVM/MLIR 20) is already integrated alongside inkwell in the
-`mlir-backend` slice behind the off-by-default `mlir` feature (1D scaffold); both crates link
-against the same LLVM 20 dylib via `LLVM_SYS_201_PREFIX`. When tensor types are introduced (Phase 2+)
-that slice will lower the **same typed HIR** this backend consumes.
-
-The planned lowering strategy:
-
-```
-typed HIR (neuro-hir)
-  → MLIR dialects (linalg / tensor / func / arith)
-  → reverse-mode AD transform (@grad)
-  → GPU dialects (nvgpu / rocdl / Triton)  or  llvm dialect
-  → inkwell (final LLVM IR emission)
-  → native object code
-```
-
-inkwell remains the terminal code-emission layer in all paths.
+The `mlir-backend` slice already lowers the same typed HIR this backend consumes to MLIR
+`linalg`, behind the off-by-default `mlir` feature, and both link against the same LLVM 20
+libraries. The driver does not route through it yet; that routing, and the GPU dialects after
+it, are Phase 4 work. inkwell remains the terminal code-emission layer on every path. See
+[MLIR Backend](mlir-backend.md).
 
 ## Resources
 
