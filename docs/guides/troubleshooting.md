@@ -642,7 +642,7 @@ Planned features are tracked through project issues and changelog updates.
 
 ## Common Warnings
 
-The compiler currently emits one lint:
+The compiler currently emits two warnings. Warnings never block compilation.
 
 ### `prefer-loop-over-while-true`
 
@@ -668,7 +668,22 @@ loop {
 ```
 
 Silence it with `@allow(prefer_loop_over_while_true)` on the enclosing function when the literal
-form reads better. Warnings never block compilation.
+form reads better.
+
+### `float-cast-out-of-range`
+
+**Message**:
+```text
+warning[float-cast-out-of-range] at 42..53: constant `1e20` does not fit `i32` and saturates to its maximum; use `.to_checked::<i32>()` for an `Option`, or silence with `@allow(float_cast_out_of_range)` on the enclosing function
+```
+
+**Cause**: An `as` cast from a float to an integer type whose operand is a constant the target
+cannot hold, or NaN. The cast clamps it to the type's minimum or maximum (NaN becomes `0`),
+which is rarely the value the author meant.
+
+**Solution**: Fix the constant or widen the target type. Where the program computes the value
+at run time, `.to_checked::<T>()` returns `None` for it instead of clamping. If the clamp is
+what you want, add `@allow(float_cast_out_of_range)` to the enclosing function or method.
 
 ## FAQ
 

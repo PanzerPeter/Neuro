@@ -1,0 +1,9 @@
+sample 0:   12.30 ->  24
+sample 1:  131.00 -> rejected
+sample 2:  127.40 -> 254
+sample 3:  127.90 -> 255
+sample 4:   -0.20 ->   0
+sample 5:   -3.50 -> rejected
+sample 6:   99.99 -> 199
+sample 7:     nan -> rejected
+rejected 3 of 8, checksum 732, thinned 477

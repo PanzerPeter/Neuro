@@ -128,6 +128,7 @@ One line each. The program's own header comment is the full description.
 - [`owned_aggregates.nr`](showcase/owned_aggregates.nr): arrays, tuples, enum payloads, newtypes and a generic struct all holding an owned `string`, destructured element by element
 - [`owned_catalog.nr`](showcase/owned_catalog.nr): a catalog whose `Vec`, `HashMap` and `BTreeMap` own the text they hold, closing the value model with the rest of its sub-phase
 - [`perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward pass
+- [`quantized_readings.nr`](showcase/quantized_readings.nr): sensor readings quantized to one byte by `.to_checked::<u8>()`, so a reading a byte cannot hold (NaN included) is rejected instead of clamped, with a closure, `match` and `??` over the `Option`, a `Vec` of `Copy` structs and a `.step(n)` walk
 - [`ranked_batch.nr`](showcase/ranked_batch.nr): ordering a tensor axis alongside the rest of the tensor surface
 - [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` carrying a position through earlier features
 - [`render_settings.nr`](showcase/render_settings.nr): a render pipeline configured by named arguments

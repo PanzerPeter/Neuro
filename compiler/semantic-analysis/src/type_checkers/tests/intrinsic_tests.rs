@@ -268,3 +268,81 @@ fn is_nan_on_non_float_receiver_reports_method_not_found() {
         );
     }
 }
+
+#[test]
+fn to_checked_resolves_to_an_option_of_its_turbofish() {
+    for (recv, target) in [("f64", "u8"), ("f32", "i64"), ("f64", "u64")] {
+        let errors = semantic_errors(&program_with_option(&format!(
+            "    val x: {recv} = 1.5
+    val r: Option<{target}> = x.to_checked::<{target}>()
+    return 0"
+        )));
+        assert!(
+            errors.is_empty(),
+            "{recv}.to_checked::<{target}>() should be Option<{target}>, got: {errors:?}"
+        );
+    }
+}
+
+fn to_checked_errors(call: &str) -> Vec<TypeError> {
+    semantic_errors(&program_with_option(&format!(
+        "    val x: f64 = 1.5\n    val r = {call}\n    return 0"
+    )))
+}
+
+#[test]
+fn to_checked_rejects_a_malformed_call() {
+    let errors = to_checked_errors("x.to_checked()");
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::TurbofishCountMismatch {
+                expected: 1,
+                found: 0,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
+    let errors = to_checked_errors("x.to_checked::<u8, i8>()");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TurbofishCountMismatch { found: 2, .. })),
+        "{errors:?}"
+    );
+    let errors = to_checked_errors("x.to_checked::<3>()");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TurbofishKindMismatch { .. })),
+        "{errors:?}"
+    );
+    let errors = to_checked_errors("x.to_checked::<f32>()");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ToCheckedTargetNotInteger { .. })),
+        "{errors:?}"
+    );
+    let errors = to_checked_errors("x.to_checked::<u8>(1)");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn to_checked_needs_a_float_receiver() {
+    let errors = semantic_errors(&program_with_option(
+        "    val n: i32 = 3\n    val r = n.to_checked::<u8>()\n    return 0",
+    ));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::MethodNotFound { .. })),
+        "Expected MethodNotFound, got: {errors:?}"
+    );
+}

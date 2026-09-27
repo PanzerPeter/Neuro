@@ -40,7 +40,7 @@ impl Lowerer {
                 self.lower_ident_call(&ident.name, type_args, args, expected, span)
             }
             Expr::FieldAccess { object, field, .. } => {
-                self.lower_method_call(object, &field.name, args, span)
+                self.lower_method_call(object, &field.name, type_args, args, span)
             }
             // `Tensor::<f32, [3, 3]>::zeros()` and the five other construction helpers, unless
             // the program declares its own `Tensor`.
@@ -427,6 +427,7 @@ impl Lowerer {
         &mut self,
         object: &Expr,
         method: &str,
+        type_args: &[ast_types::GenericArg],
         args: &[Expr],
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
@@ -539,7 +540,7 @@ impl Lowerer {
         } else if matches!(recv.referent(), HirType::Collection { .. }) {
             self.lower_collection_method(&recv, method, args)?
         } else {
-            self.lower_builtin_method(&recv, method, args)?
+            self.lower_builtin_method(&recv, method, type_args, args)?
         };
 
         // The method-name callee is a synthetic node (the language has no first-class
@@ -643,6 +644,7 @@ impl Lowerer {
         &mut self,
         recv: &HirType,
         method: &str,
+        type_args: &[ast_types::GenericArg],
         args: &[Expr],
     ) -> Result<(Vec<HirExpr>, HirType), LoweringError> {
         // String intrinsics auto-deref through `&string`, so match on the referent.
@@ -685,6 +687,18 @@ impl Lowerer {
             ) if is_integer(recv) => {
                 let args = self.lower_args(args, std::slice::from_ref(recv))?;
                 Ok((args, recv.clone()))
+            }
+            // `float.to_checked::<T>()`: nullary, `Option<T>` over the turbofish's integer
+            // type, which the checker has already required.
+            (_, "to_checked") if is_full_float(recv) => {
+                let [ast_types::GenericArg::Type(target)] = type_args else {
+                    return Err(LoweringError::Malformed {
+                        detail: "`.to_checked` expects one type argument".to_string(),
+                    });
+                };
+                let target = self.resolve_type(target)?;
+                let result = self.option_of(target)?;
+                Ok((self.lower_args(args, &[])?, result))
             }
             (_, "checked_add" | "checked_sub" | "checked_mul") if is_integer(recv) => {
                 let args = self.lower_args(args, std::slice::from_ref(recv))?;

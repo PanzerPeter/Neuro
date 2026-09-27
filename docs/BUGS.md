@@ -5,6 +5,38 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-080: a turbofish on a method call is ignored
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`check_call_expr` in `type_checkers/expressions/calls.rs`)
+  and `hir-lowering` (`lower_method_call`)
+- **Severity**: minor. Nothing miscompiles, but a program that names type arguments no
+  method declares is accepted
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val x: f64 = 1.5
+    val b = x.is_nan::<u8>()
+    return 0
+}
+```
+
+Expected: an error that `is_nan` takes no type arguments, the way a free function does
+(`turbofish supplies 1 generic argument(s), but 'f' declares 0`). `neurc check` accepts it.
+The same holds for a struct method, a trait method and every builtin except
+`.to_checked::<T>()`, the one method that reads its turbofish.
+
+**Root cause**: confirmed in the code. `Expr::Call` carries `type_args` for every call, but
+the method-call branch of `check_call_expr` hands them only to `resolve_builtin_method`, which
+reads them for `.to_checked` alone. No other method path looks at them.
+
+**Workaround**: none needed; delete the turbofish.
+
+**Fix sketch**: in the method-call branch, record `TurbofishCountMismatch` with `expected: 0`
+whenever `type_args` is non-empty and the resolved method is not `.to_checked`.
+
 ## BUG-079: a syntax error is reported without its line and column
 
 - **Status**: open, confirmed

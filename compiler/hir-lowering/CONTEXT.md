@@ -591,8 +591,11 @@ compiler bug, not a diagnostic.
   receiver (`is_full_float`, so `f16`/`bf16` are excluded), with no arguments to lower.
 - **`checked_{add,sub,mul}`**: `lower_builtin_method` types these on any integer receiver as
   `Option<T>` over that receiver, reusing `collections.rs`'s `option_of` so the instance is
-  materialized as an ordinary `HirItem::Enum` exactly like `Vec::pop`'s. They are the only builtin
-  intrinsics whose result is a monomorphized enum rather than a fixed type.
+  materialized as an ordinary `HirItem::Enum` exactly like `Vec::pop`'s.
+- **`.to_checked::<T>()`**: `lower_builtin_method` types it on a full-precision float receiver as
+  `Option<T>`, `T` resolved from the turbofish, which `lower_method_call` passes through for this
+  one method. With `checked_*` these are the builtin intrinsics whose result is a monomorphized
+  enum rather than a fixed type.
 - **Interpolated strings** (`expressions/interpolation.rs`): `Expr::InterpString` lowers to
   `HirExprKind::InterpString`, typed `string`. Each hole lowers with **no** expected type: the
   hole's own expression decides its type, and the rendering follows from that.

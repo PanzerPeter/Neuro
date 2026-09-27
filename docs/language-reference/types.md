@@ -199,6 +199,7 @@ Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the
 | `.is_nan()` | `bool` | `true` when the receiver is NaN, `false` for every other value including `Inf` and `-Inf`. Nullary; defined on `f32` and `f64` only. |
 | `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` | the receiver's type | The function of the receiver, IEEE 754 out of domain (`.log()` of `0.0` is `-inf`). Nullary; `f32` and `f64` only. Float tensors have them too, see [tensors](tensors.md#elementwise-math). |
 | `.pow(p)` | the receiver's type | The receiver raised to `p`, a value of the receiver's type. |
+| `.to_checked::<T>()` | `Option<T>` | The receiver truncated toward zero as the integer type `T`, or `None` when the result does not fit `T` or the receiver is NaN. See [Type Conversion](#type-conversion). |
 
 Floats follow IEEE 754 in full, so **every** comparison against NaN is false: `NaN == NaN`
 and `NaN != NaN` alike. That makes NaN undetectable with the comparison operators, and
@@ -1161,6 +1162,28 @@ func convert_types() -> i64 {
 ```
 
 The compiler will reject invalid casts (e.g. casting a string to an integer).
+
+### Float to integer
+
+`as` from a float to an integer truncates toward zero. Every input has a defined result: a
+value the target cannot hold saturates to the target's minimum or maximum, and NaN becomes
+`0`. When a clamped answer would be wrong, use `.to_checked::<T>()`, which returns
+`Option<T>` and gives `None` in exactly the cases where `as` would saturate or map NaN:
+
+```neuro
+val reading: f64 = 300.7
+val clamped: u8 = reading as u8                   // 255
+val checked = reading.to_checked::<u8>() ?? 0u8   // None, so 0
+val small = (2.9).to_checked::<i8>()              // Some(2)
+```
+
+`.to_checked` takes an `f32` or `f64` value and exactly one integer type argument.
+
+A cast whose operand is a compile-time constant (a float literal, a `const`, or arithmetic
+over those) that the target cannot hold is reported as the warning
+`float-cast-out-of-range`. The program still compiles, and the cast still saturates.
+Silence the warning with `@allow(float_cast_out_of_range)` on the enclosing function or
+method.
 
 ## Examples
 

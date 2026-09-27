@@ -7,4 +7,8 @@ NaN == NaN         = false
 NaN.is_nan()       = true
 Inf.is_nan()       = false
 b.is_nan()         = false
+300.7 as u8        = 255
+300.7 to_checked   = 0 (None)
+2.5 to_checked     = 2
+NaN to_checked     = -1 (None)
 all comparisons behaved

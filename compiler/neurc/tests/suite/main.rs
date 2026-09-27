@@ -21,6 +21,7 @@ mod block_scoped_bindings;
 mod borrow_exclusivity;
 mod builtin_methods;
 mod char_type;
+mod checked_float_conversion;
 mod cli_contract;
 mod closures;
 mod codepoint_iterators;

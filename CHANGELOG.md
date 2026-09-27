@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-09-27
+
+### Added
+
+- `.to_checked::<T>()` on an `f32` or `f64` converts to the integer type `T` and returns
+  `Option<T>`: `Some` of the value truncated toward zero, or `None` when it does not fit `T` or
+  is NaN. These are exactly the cases where `as` saturates or maps NaN to `0`. The bounds are
+  exact: `9223372036854775807.0` is `2^63` as a float, so converting it to `i64` gives `None`.
+  Calling it without a type argument, with a non-integer one, or on a non-float receiver is a
+  compile error.
+- The warning `float-cast-out-of-range`: an `as` from a float to an integer whose operand is a
+  compile-time constant (a float literal, a `const`, or arithmetic over those) that the target
+  cannot hold, or NaN. The program still compiles and the cast still saturates.
+  `@allow(float_cast_out_of_range)` on the enclosing function or method silences it.
+- `examples/showcase/quantized_readings.nr` quantizes sensor readings to bytes with
+  `.to_checked`, rejecting the ones a byte cannot hold instead of clamping them.
+
 ## [3.15.2] - 2026-09-27
 
 ### Fixed

@@ -591,9 +591,14 @@ impl TypeChecker {
                         ) {
                             return Some(ret);
                         }
-                        if let Some(ret) =
-                            self.resolve_builtin_method(&obj_ty, object, &field.name, args, *span)
-                        {
+                        if let Some(ret) = self.resolve_builtin_method(
+                            &obj_ty,
+                            object,
+                            &field.name,
+                            type_args,
+                            args,
+                            *span,
+                        ) {
                             return Some(ret);
                         }
                         self.record_error(TypeError::MethodNotFound {

@@ -520,6 +520,44 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
+    /// Convert `value` to `int_type` through `llvm.fpto{s,u}i.sat`: truncation toward zero,
+    /// clamped to the type's bounds, with NaN mapped to zero. The one float-to-integer
+    /// conversion the backend emits, shared by `as` and `.to_checked`.
+    pub(crate) fn saturating_float_to_int(
+        &self,
+        value: FloatValue<'ctx>,
+        int_type: inkwell::types::IntType<'ctx>,
+        unsigned: bool,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let name = if unsigned {
+            "llvm.fptoui.sat"
+        } else {
+            "llvm.fptosi.sat"
+        };
+        let intrinsic = Intrinsic::find(name).ok_or_else(|| {
+            CodegenError::LlvmError(format!("intrinsic `{}` is unavailable", name))
+        })?;
+        // Both the result and the argument type are overloaded, in that order,
+        // giving e.g. `llvm.fptosi.sat.i32.f64`.
+        let declaration = intrinsic
+            .get_declaration(&self.module, &[int_type.into(), value.get_type().into()])
+            .ok_or_else(|| {
+                CodegenError::LlvmError(format!(
+                    "could not declare `{}` for this operand type",
+                    name
+                ))
+            })?;
+        self.builder
+            .build_call(declaration, &[value.into()], "cast_f2i")?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| {
+                CodegenError::InternalError(
+                    "saturating float-to-int cast returned void".to_string(),
+                )
+            })
+    }
+
     /// Generate an `as` type cast from inner to target
     pub(crate) fn codegen_cast(
         &mut self,
@@ -556,40 +594,11 @@ impl<'ctx> CodegenContext<'ctx> {
             // an out-of-range one clamps to the target's bound, and NaN maps to zero,
             // which is also what the constant folder computes, so a folded cast and a
             // run-time one now agree.
-            (t1, t2) if t1.is_float() && t2.is_integer() => {
-                let float_value = value.into_float_value();
-                let int_type = target_llvm.into_int_type();
-                let name = if t2.is_unsigned_int() {
-                    "llvm.fptoui.sat"
-                } else {
-                    "llvm.fptosi.sat"
-                };
-                let intrinsic = Intrinsic::find(name).ok_or_else(|| {
-                    CodegenError::LlvmError(format!("intrinsic `{}` is unavailable", name))
-                })?;
-                // Both the result and the argument type are overloaded, in that order,
-                // giving e.g. `llvm.fptosi.sat.i32.f64`.
-                let declaration = intrinsic
-                    .get_declaration(
-                        &self.module,
-                        &[int_type.into(), float_value.get_type().into()],
-                    )
-                    .ok_or_else(|| {
-                        CodegenError::LlvmError(format!(
-                            "could not declare `{}` for this operand type",
-                            name
-                        ))
-                    })?;
-                self.builder
-                    .build_call(declaration, &[float_value.into()], "cast_f2i")?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        CodegenError::InternalError(
-                            "saturating float-to-int cast returned void".to_string(),
-                        )
-                    })
-            }
+            (t1, t2) if t1.is_float() && t2.is_integer() => self.saturating_float_to_int(
+                value.into_float_value(),
+                target_llvm.into_int_type(),
+                t2.is_unsigned_int(),
+            ),
             // Int to Float
             (t1, t2) if t1.is_integer() && t2.is_float() => {
                 let int_value = value.into_int_value();

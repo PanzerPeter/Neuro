@@ -394,6 +394,7 @@ impl TypeChecker {
             self.refuse_function_valued_return(&return_type, method.name.span);
             self.symbols.push_scope();
             self.current_function_return_type = Some(return_type.clone());
+            let warnings_before = self.warnings.len();
 
             // Bind `self` as a variable of the struct type. A `&mut self` receiver
             // is mutable so the body may assign to `self.field`; `&self` is
@@ -470,6 +471,7 @@ impl TypeChecker {
                 });
             }
 
+            self.drop_allowed_warnings(warnings_before, &method.attributes);
             self.symbols.pop_scope();
             self.current_function_return_type = None;
             self.current_fn_outliving.clear();

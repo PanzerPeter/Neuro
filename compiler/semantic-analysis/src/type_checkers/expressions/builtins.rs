@@ -14,7 +14,7 @@ use crate::type_checkers::tensor_shape::is_shape_method;
 use crate::type_checkers::tensor_sort::is_sort_method;
 use crate::type_checkers::tensors::DEVICE_TYPE_NAME;
 use crate::types::{CollectionKind, Type};
-use ast_types::Expr;
+use ast_types::{Expr, GenericArg};
 use shared_types::Span;
 
 /// The borrowing sub-range intrinsics. Both hand back a view into the receiver's
@@ -36,6 +36,10 @@ pub(crate) const TENSOR_TO_METHOD: &str = "to";
 /// `tensor.detach()`, the value-level gradient fence.
 const DETACH_METHOD: &str = "detach";
 
+/// `float.to_checked::<T>()`, the float-to-integer conversion that reports a value `T`
+/// cannot hold instead of saturating it.
+const TO_CHECKED_METHOD: &str = "to_checked";
+
 /// The one elementwise math method with an argument, its exponent.
 const POW_METHOD: &str = "pow";
 
@@ -54,11 +58,13 @@ impl TypeChecker {
     /// `object` is the receiver expression, needed by the borrowing intrinsics: a
     /// `.slice(range)` result points into the receiver's storage, so the receiver has to
     /// be a place and the borrow it hands out has to be registered against that place.
+    /// `type_args` is the call's turbofish, which only `.to_checked::<T>()` reads.
     pub(super) fn resolve_builtin_method(
         &mut self,
         recv: &Type,
         object: &Expr,
         method: &str,
+        type_args: &[GenericArg],
         args: &[Expr],
         call_span: Span,
     ) -> Option<Type> {
@@ -193,6 +199,11 @@ impl TypeChecker {
             ) if recv.is_integer() => {
                 self.check_unary_int_intrinsic_arg(recv, args, call_span);
                 Some(recv.clone())
+            }
+            // Checked float-to-integer conversion: `None` where `as` would saturate or map
+            // NaN to zero. Value receiver only, like `is_nan`.
+            (_, TO_CHECKED_METHOD) if recv.is_float() => {
+                Some(self.check_to_checked(type_args, args, call_span))
             }
             // Overflow-reporting arithmetic. Same argument contract as the intrinsics
             // above, but the result is `Option<T>` over the receiver's type: `None` is
@@ -662,5 +673,47 @@ impl TypeChecker {
             }
             self.symbols.add_transient_borrow(&name, true);
         }
+    }
+
+    /// Type `.to_checked::<T>()`: exactly one turbofish type, an integer, and no value
+    /// arguments. Yields `Option<T>`, or `Unknown` once an error is recorded.
+    fn check_to_checked(&mut self, type_args: &[GenericArg], args: &[Expr], span: Span) -> Type {
+        if !args.is_empty() {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 0,
+                found: args.len(),
+                span,
+            });
+        }
+        let target = match type_args {
+            [GenericArg::Type(ty)] => ty,
+            [GenericArg::Const { .. }] => {
+                self.record_error(TypeError::TurbofishKindMismatch {
+                    param: "T".to_string(),
+                    expected: "type".to_string(),
+                    span,
+                });
+                return Type::Unknown;
+            }
+            _ => {
+                self.record_error(TypeError::TurbofishCountMismatch {
+                    name: TO_CHECKED_METHOD.to_string(),
+                    expected: 1,
+                    found: type_args.len(),
+                    span,
+                });
+                return Type::Unknown;
+            }
+        };
+        let Some(target) = self.resolve_type(target) else {
+            return Type::Unknown;
+        };
+        if !target.is_integer() {
+            if !matches!(target, Type::Unknown) {
+                self.record_error(TypeError::ToCheckedTargetNotInteger { ty: target, span });
+            }
+            return Type::Unknown;
+        }
+        self.option_of(target, span)
     }
 }

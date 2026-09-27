@@ -50,6 +50,9 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("`.to_checked::<{ty}>()` converts a float to an integer type, and `{ty}` is not one")]
+    ToCheckedTargetNotInteger { ty: Type, span: Span },
+
     #[error("turbofish argument for parameter '{param}' has the wrong kind: a {expected} argument was expected")]
     TurbofishKindMismatch {
         param: String,
@@ -1197,6 +1200,7 @@ impl TypeError {
             | Self::ConstParamNotInteger { span, .. }
             | Self::ConstPredicateViolated { span, .. }
             | Self::TurbofishCountMismatch { span, .. }
+            | Self::ToCheckedTargetNotInteger { span, .. }
             | Self::TurbofishKindMismatch { span, .. }
             | Self::GenericStructNeedsArgs { span, .. }
             | Self::GenericEnumNeedsArgs { span, .. }

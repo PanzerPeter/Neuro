@@ -111,8 +111,13 @@ run-time question, as it is for `.grad()`.
 `.zero_grad()` takes the receiver exclusively (`check_mut_self_receiver`). A tensor compound
 assignment now checks the target's borrows before its RHS, as `=` does.
 - **5. lints**: `run_lints` walks bodies collecting non-fatal `Warning`s
-  (`prefer-loop-over-while-true` today, silenced by `@allow(prefer_loop_over_while_true)`;
+  (`prefer-loop-over-while-true`, silenced by `@allow(prefer_loop_over_while_true)`;
   parenthesised `while (true)` deliberately not matched). Lints run independently of type errors.
+  One warning is raised during checking instead, because it needs types:
+  `float-cast-out-of-range`, from `check_cast_expr` when a float-to-integer `as` has a constant
+  operand (`const_float_value`: float literals, `const` names, negation, grouping and arithmetic)
+  whose truncation the target cannot hold, or NaN. A function or method body records the warning
+  count on entry and `drop_allowed_warnings` removes what its `@allow(...)` names on exit.
 
 ### Expressions are checked exactly once
 This has to be arranged deliberately for the trailing bare expression of a non-void body: it is
@@ -273,6 +278,10 @@ a wrong count):
   instantiated through the shared `option_of` (`collections.rs`) so the overflow-reporting
   intrinsics and the fallible collection readers materialize the same prelude enum instance. A
   program with no `Option` in scope gets `UnknownTypeName`.
+- `f32`/`f64`.`to_checked::<T>()` returns `Option<T>` through the same `option_of`. It is the one
+  builtin that reads the call's turbofish (`resolve_builtin_method` takes `type_args` for it):
+  exactly one type argument, an integer (`ToCheckedTargetNotInteger` otherwise), and no value
+  arguments. A value receiver only, as for `is_nan`.
 - A struct receiver's `.clone()` is a nullary builtin when the struct derives `Clone`/`Copy` and
   no user `clone` method exists (a user method shadows); it returns the struct type.
 

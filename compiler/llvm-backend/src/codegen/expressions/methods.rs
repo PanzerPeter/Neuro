@@ -112,6 +112,7 @@ impl<'ctx> CodegenContext<'ctx> {
             BuiltinMethod::TensorTo => self.codegen_tensor_to(receiver, args),
             // `float.is_nan()`. The receiver is the whole computation; no arguments.
             BuiltinMethod::IsNan => self.codegen_is_nan(receiver),
+            BuiltinMethod::ToChecked => self.codegen_to_checked(result_ty, receiver),
             BuiltinMethod::CheckedAdd | BuiltinMethod::CheckedSub | BuiltinMethod::CheckedMul => {
                 self.codegen_checked_int_intrinsic(kind, recv_ty, result_ty, receiver, args)
             }
@@ -400,6 +401,7 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::SequenceSlice
             | BuiltinMethod::SliceLen
             | BuiltinMethod::IsNan
+            | BuiltinMethod::ToChecked
             | BuiltinMethod::CheckedAdd
             | BuiltinMethod::CheckedSub
             | BuiltinMethod::CheckedMul => {
@@ -445,6 +447,76 @@ impl<'ctx> CodegenContext<'ctx> {
         let (value, overflowed) = self.emit_with_overflow(intrinsic_name, lhs, rhs)?;
         let ok = self.builder.build_not(overflowed, "chk.ok")?;
         self.build_option_value(result_ty, ok, value.into(), recv_ty)
+    }
+
+    /// Lower `float.to_checked::<T>()` to `Option::Some(trunc(x))`, or `Option::None` when
+    /// the truncated value is outside `T` or `x` is NaN.
+    ///
+    /// The range test compares the truncated float against `T`'s bounds held as floats,
+    /// and both are exact: the lower bound is `0` or `-2^(bits-1)`, and the upper test is
+    /// `< 2^bits` (`< 2^(bits-1)` signed) rather than `<= MAX`, since `MAX` itself
+    /// (`2^63 - 1`, say) rounds up to the next power of two in every float format. Both
+    /// compares are ordered, so NaN fails them with no test of its own. `result_ty` is the
+    /// monomorphized `Option<T>`; `T` is read from its `Some` payload.
+    fn codegen_to_checked(
+        &mut self,
+        result_ty: &Type,
+        receiver: &HirExpr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let target = match result_ty {
+            Type::Enum(name) => {
+                let some_tag = self.enum_variant_tag(name, "Some")? as usize;
+                self.type_mapper
+                    .enum_payload_types(name)
+                    .and_then(|variants| variants.get(some_tag))
+                    .and_then(|fields| fields.first())
+                    .cloned()
+            }
+            _ => None,
+        }
+        .ok_or_else(|| {
+            CodegenError::InternalError(format!(
+                "`.to_checked` result is not an `Option` of an integer: {:?}",
+                result_ty
+            ))
+        })?;
+        let int_type = self.type_mapper.map_type(&target)?.into_int_type();
+        let unsigned = target.is_unsigned_int();
+
+        let value = self.codegen_expr(receiver)?.into_float_value();
+        let float_ty = value.get_type();
+        let trunc = Intrinsic::find("llvm.trunc")
+            .and_then(|i| i.get_declaration(&self.module, &[float_ty.into()]))
+            .ok_or_else(|| CodegenError::InternalError("no `llvm.trunc` overload".into()))?;
+        let truncated = self
+            .builder
+            .build_call(trunc, &[value.into()], "chk.trunc")?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError("`llvm.trunc` returned void".into()))?
+            .into_float_value();
+
+        let bits = int_type.get_bit_width() as i32;
+        let (lo, hi) = if unsigned {
+            (0.0, 2f64.powi(bits))
+        } else {
+            (-(2f64.powi(bits - 1)), 2f64.powi(bits - 1))
+        };
+        let above = self.builder.build_float_compare(
+            FloatPredicate::OGE,
+            truncated,
+            float_ty.const_float(lo),
+            "chk.lo",
+        )?;
+        let below = self.builder.build_float_compare(
+            FloatPredicate::OLT,
+            truncated,
+            float_ty.const_float(hi),
+            "chk.hi",
+        )?;
+        let fits = self.builder.build_and(above, below, "chk.fits")?;
+        let payload = self.saturating_float_to_int(value, int_type, unsigned)?;
+        self.build_option_value(result_ty, fits, payload, &target)
     }
 
     /// Evaluate an integer intrinsic's receiver and single argument, both coerced to the

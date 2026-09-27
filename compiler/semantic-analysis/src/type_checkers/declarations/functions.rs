@@ -156,6 +156,7 @@ impl TypeChecker {
         // Enter function scope
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
+        let warnings_before = self.warnings.len();
 
         // Reference-typed parameters outlive the call, so a returned reference may
         // safely borrow one (single-input-reference elision). Owned
@@ -215,6 +216,8 @@ impl TypeChecker {
                 span: func.name.span,
             });
         }
+
+        self.drop_allowed_warnings(warnings_before, &func.attributes);
 
         // Exit function scope
         self.symbols.pop_scope();

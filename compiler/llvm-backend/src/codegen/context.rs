@@ -94,6 +94,9 @@ pub(crate) enum BuiltinMethod {
     SliceLen,
     /// `float.is_nan()` → `fcmp uno`: an unordered self-comparison, true only for NaN.
     IsNan,
+    /// `float.to_checked::<T>()` → `Option::Some(truncated)`, or `Option::None` when the
+    /// truncated value is outside `T` or the receiver is NaN.
+    ToChecked,
 }
 
 /// Resolve a compiler-known intrinsic on a builtin receiver. Mirrors the resolver in
@@ -143,6 +146,9 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
         // rather than `Type::is_float`: that backend predicate also admits `f16`/`bf16`,
         // whose scalar contract is storage and casts only.
         (_, "is_nan") if matches!(recv, Type::F32 | Type::F64) => Some(BuiltinMethod::IsNan),
+        (_, "to_checked") if matches!(recv, Type::F32 | Type::F64) => {
+            Some(BuiltinMethod::ToChecked)
+        }
         // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
         // reading a scalar through `&T` needs the deref operator.
         (_, m) if recv.is_integer() => match m {
@@ -846,6 +852,18 @@ mod tests {
             resolve_builtin_method(&Type::I64, "checked_mul"),
             Some(BuiltinMethod::CheckedMul)
         ));
+    }
+
+    #[test]
+    fn to_checked_resolves_on_full_precision_float_values_only() {
+        for recv in [Type::F32, Type::F64] {
+            assert!(matches!(
+                resolve_builtin_method(&recv, "to_checked"),
+                Some(BuiltinMethod::ToChecked)
+            ));
+        }
+        assert!(resolve_builtin_method(&Type::F16, "to_checked").is_none());
+        assert!(resolve_builtin_method(&Type::I32, "to_checked").is_none());
     }
 
     #[test]

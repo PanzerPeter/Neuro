@@ -10,6 +10,9 @@ use std::fmt;
 pub enum WarningCode {
     /// `while true { ... }` should be written as `loop { ... }`.
     PreferLoopOverWhileTrue,
+    /// A constant float cast with `as` to an integer type it does not fit, so the
+    /// cast saturates (or maps NaN to zero) where the author may have expected the value.
+    FloatCastOutOfRange,
 }
 
 impl WarningCode {
@@ -17,6 +20,7 @@ impl WarningCode {
     pub fn name(self) -> &'static str {
         match self {
             WarningCode::PreferLoopOverWhileTrue => "prefer-loop-over-while-true",
+            WarningCode::FloatCastOutOfRange => "float-cast-out-of-range",
         }
     }
 
@@ -26,6 +30,7 @@ impl WarningCode {
     pub fn allow_identifier(self) -> &'static str {
         match self {
             WarningCode::PreferLoopOverWhileTrue => "prefer_loop_over_while_true",
+            WarningCode::FloatCastOutOfRange => "float_cast_out_of_range",
         }
     }
 }

@@ -7,6 +7,7 @@ use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::type_checkers::collections::OPTION_ENUM;
 use crate::types::Type;
+use crate::warnings::{Warning, WarningCode};
 use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Literal, Span};
 
@@ -562,6 +563,9 @@ impl TypeChecker {
         }
 
         if to_type.is_valid_cast(&from_type) {
+            if from_type.is_float() && to_type.is_integer() {
+                self.warn_constant_cast_out_of_range(expr, &from_type, &to_type, *span);
+            }
             Some(to_type)
         } else {
             self.record_error(TypeError::Mismatch {
@@ -570,6 +574,90 @@ impl TypeChecker {
                 span: *span,
             });
             Some(Type::Unknown)
+        }
+    }
+
+    /// Warn when a float cast to an integer type has a constant operand the target cannot
+    /// hold. The cast is still defined (it saturates, and NaN becomes zero), but a
+    /// constant that is known to clamp is almost always a typo or a wrong type.
+    fn warn_constant_cast_out_of_range(
+        &mut self,
+        operand: &Expr,
+        from: &Type,
+        to: &Type,
+        span: Span,
+    ) {
+        let Some(value) = self.const_float_value(operand, 0) else {
+            return;
+        };
+        // An `f32` constant is rounded to `f32` before the cast sees it, and that rounding
+        // can carry it across a bound: `4294967295.0f32` is `2^32`.
+        let value = if matches!(from, Type::F32) {
+            value as f32 as f64
+        } else {
+            value
+        };
+        // `as i128` is exact for every in-range truncation and saturates far past every
+        // bound otherwise; only NaN, which it maps to zero, needs its own test.
+        if !value.is_nan() && self.check_integer_range(value.trunc() as i128, to) {
+            return;
+        }
+        let what = if value.is_nan() {
+            "constant NaN converts to 0".to_string()
+        } else {
+            let bound = if value < 0.0 { "minimum" } else { "maximum" };
+            format!("constant `{value:?}` does not fit `{to}` and saturates to its {bound}")
+        };
+        self.warnings.push(Warning {
+            code: WarningCode::FloatCastOutOfRange,
+            message: format!(
+                "{what}; use `.to_checked::<{to}>()` for an `Option`, or silence with \
+                 `@allow(float_cast_out_of_range)` on the enclosing function"
+            ),
+            span,
+        });
+    }
+
+    /// The value of a compile-time float expression: a float literal, a `const` naming
+    /// one, and negation, grouping and arithmetic over those. `None` for anything the
+    /// program decides at run time. `const_hops` counts the `const` names followed to
+    /// reach `expr`, so zero means the expression being cast itself.
+    fn const_float_value(&self, expr: &Expr, const_hops: u8) -> Option<f64> {
+        match expr {
+            Expr::Literal(Literal::Float(v, _), _) => Some(*v),
+            Expr::Paren(inner, _) => self.const_float_value(inner, const_hops),
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                operand,
+                ..
+            } => self.const_float_value(operand, const_hops).map(|v| -v),
+            Expr::Binary {
+                left, op, right, ..
+            } => {
+                let (l, r) = (
+                    self.const_float_value(left, const_hops)?,
+                    self.const_float_value(right, const_hops)?,
+                );
+                match op {
+                    BinaryOp::Add => Some(l + r),
+                    BinaryOp::Subtract => Some(l - r),
+                    BinaryOp::Multiply => Some(l * r),
+                    BinaryOp::Divide => Some(l / r),
+                    BinaryOp::Modulo => Some(l % r),
+                    _ => None,
+                }
+            }
+            // A local shadows a `const` of the same name, but only in the expression
+            // being cast: a `const` initializer sees module scope alone. A `const` cycle
+            // is rejected elsewhere; the hop bound only keeps this walk finite.
+            Expr::Identifier(ident)
+                if const_hops < 32
+                    && (const_hops > 0 || self.symbols.lookup(&ident.name).is_none()) =>
+            {
+                let init = self.constant_values.get(&ident.name)?;
+                self.const_float_value(init, const_hops + 1)
+            }
+            _ => None,
         }
     }
 }

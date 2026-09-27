@@ -393,6 +393,11 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   `Some(result)` / `None` on the negated overflow bit. Branchless: both variants are materialized
   and `select`ed. The `Option<T>` instance, its variant tags, and its payload layout all come from
   the call's result type; nothing about `Option` is assumed here.
+- `.to_checked::<T>()` → `codegen_to_checked`: `T` is read from the result `Option`'s `Some`
+  payload. `llvm.trunc`, then `fcmp oge lo` and `fcmp olt hi` with `lo` = `0` or `-2^(bits-1)`
+  and `hi` = `2^bits` or `2^(bits-1)`: both powers of two, so exact in every float format,
+  unlike `T::MAX`. Ordered compares reject NaN. The payload is the saturating cast
+  (`saturating_float_to_int`, shared with `as`), so no `poison` is ever built.
 
 ## Literals and Constants ABI
 `codegen_literal` takes the literal's **resolved type** and emits the constant at it. An unsuffixed
@@ -744,7 +749,8 @@ void-error in value position.
   optimization level rather than on the source. The saturating form is total: in-range values
   still truncate toward zero, out-of-range values clamp to the target's bound, and NaN maps to
   zero. `FoldedConst::cast_to` computes the same function in Rust, so a folded cast and a
-  run-time one agree.
+  run-time one agree. The intrinsic call lives in `saturating_float_to_int`, which
+  `.to_checked` reuses for its payload.
 - **`f16` / `bf16`** lower to LLVM `half` / `bfloat`. Backend `is_float()` **includes** the halves,
   so equality (`fcmp`) and `as`-casts route through the float instructions. The float→float cast
   and `coerce_if_needed` pick `fpext` / `fptrunc` by **bit width**, not a fixed F32/F64 pair; an

@@ -1,6 +1,7 @@
 // Neuro Example: Floating-point operations
-// Demonstrates: f64 type, float arithmetic, IEEE-754 comparison ordering, and
-// `.is_nan()`: the only way to detect NaN, since every comparison against it is false
+// Demonstrates: f64 type, float arithmetic, IEEE-754 comparison ordering,
+// `.is_nan()`: the only way to detect NaN, since every comparison against it is false,
+// and float-to-integer conversion: `as` saturates, `.to_checked::<T>()` returns `None`
 
 func calculate_f64(x: f64, y: f64) -> f64 {
     val sum: f64 = x + y
@@ -50,6 +51,24 @@ func main() -> i32 {
     if !isnan.is_nan() { return 8 }
     if inf.is_nan() { return 9 }
     if b.is_nan() { return 10 }
+
+    // `as` truncates toward zero and clamps whatever the target cannot hold, NaN
+    // included (it becomes 0). `.to_checked::<T>()` reports those cases as `None`.
+    // A constant written straight into an out-of-range `as` is a compile warning.
+    val big: f64 = 300.7
+    val clamped = big as u8
+    val checked = big.to_checked::<u8>() ?? 0u8
+    val in_range = b.to_checked::<u8>() ?? 0u8
+    val from_nan = isnan.to_checked::<i32>() ?? -1
+    println("300.7 as u8        = {clamped}")
+    println("300.7 to_checked   = {checked} (None)")
+    println("2.5 to_checked     = {in_range}")
+    println("NaN to_checked     = {from_nan} (None)")
+
+    if clamped != 255u8 { return 11 }
+    if checked != 0u8 { return 12 }
+    if in_range != 2u8 { return 13 }
+    if from_nan != -1 { return 14 }
 
     println("all comparisons behaved")
     return 42

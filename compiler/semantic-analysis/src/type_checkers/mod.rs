@@ -919,6 +919,18 @@ impl TypeChecker {
         }
     }
 
+    /// Drop the warnings recorded since `from` that `attributes` opt out of. The lint walk
+    /// reads a body's `@allow` itself; this covers the warnings type checking raises
+    /// while it is inside that body.
+    pub(crate) fn drop_allowed_warnings(&mut self, from: usize, attributes: &[Attribute]) {
+        let raised = self.warnings.split_off(from);
+        self.warnings.extend(
+            raised
+                .into_iter()
+                .filter(|warning| !attr_allows(attributes, warning.code)),
+        );
+    }
+
     fn lint_method(&mut self, method: &MethodDef, suppress_while_true: bool) {
         self.lint_block(&method.body, suppress_while_true);
     }
