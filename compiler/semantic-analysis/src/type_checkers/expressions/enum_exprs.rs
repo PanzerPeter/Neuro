@@ -190,6 +190,8 @@ impl TypeChecker {
                     declarations::unify_generic(declared, ty, &mut subst);
                 }
             }
+            // The payload is a new owner: a place written here is moved into it.
+            self.record_move(arg);
             arg_tys.push(arg_ty);
         }
 
@@ -307,6 +309,7 @@ impl TypeChecker {
                 Some(declared) => {
                     let ctx = (!mentions_type_parameter(&declared)).then(|| declared.clone());
                     let actual = self.check_expr(value, ctx.as_ref());
+                    self.record_move(value);
                     if let Some(actual) = actual {
                         if inferring {
                             declarations::unify_generic(&declared, &actual, &mut subst);

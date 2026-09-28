@@ -45,8 +45,10 @@ impl TypeChecker {
                     found: expr_ty,
                     span: def.value.span(),
                 });
+                return None;
             }
         }
+        self.check_const_value(&def.value, &declared_ty);
 
         Some(())
     }

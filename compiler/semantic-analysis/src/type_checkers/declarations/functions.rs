@@ -12,6 +12,13 @@ use ast_types::{Expr, FunctionDef, Stmt};
 use shared_types::Span;
 use std::collections::HashMap;
 
+/// The program's entry point, called by the C runtime.
+const MAIN_FUNCTION: &str = "main";
+
+/// The module the program was compiled from: module resolution numbers the root file
+/// first, and a program that never reaches it is one module, numbered the same.
+const ROOT_MODULE: ast_types::ModuleId = 0;
+
 impl TypeChecker {
     /// Register a function's signature without checking its body.
     ///
@@ -23,6 +30,29 @@ impl TypeChecker {
     /// parameters are put in scope so the signature resolves with [`Type::Generic`]
     /// placeholders, and it is recorded in `generic_funcs` rather than `functions`.
     /// Concrete instantiation happens per call site.
+    /// The program's entry point is called by the C runtime, which passes `argc` as the
+    /// first argument and reads the return register as the exit status. Only the root
+    /// module's `main` is that entry point; the merged namespace is flat, so no other
+    /// module can declare one beside it.
+    fn check_main_signature(&mut self, func: &FunctionDef, params: &[Type], ret: &Type) {
+        if func.name.name != MAIN_FUNCTION || func.module != ROOT_MODULE {
+            return;
+        }
+        let problem = if !func.generics.is_empty() {
+            "it may not be generic".to_string()
+        } else if !params.is_empty() {
+            format!("it takes no parameters, found {}", params.len())
+        } else if *ret != Type::I32 {
+            format!("it returns the exit status as `i32`, found `{ret}`")
+        } else {
+            return;
+        };
+        self.record_error(TypeError::InvalidMainSignature {
+            problem,
+            span: func.name.span,
+        });
+    }
+
     pub(crate) fn register_function_signature(&mut self, func: &FunctionDef) -> Option<()> {
         // Put the generic type + const parameters in scope for signature
         // resolution. A parameter may not shadow a built-in type name.
@@ -63,6 +93,8 @@ impl TypeChecker {
             Some(ret_ty) => self.resolve_type(ret_ty).unwrap_or(Type::Void),
             None => Type::Void,
         };
+
+        self.check_main_signature(func, &param_types, &return_type);
 
         // Register function signature.
         if self.functions.contains_key(&func.name.name)

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use ast_types::{Attribute, Item, MethodDef, ModuleId, Stmt};
 
 use crate::errors::TypeError;
-use crate::symbol_table::SymbolTable;
+use crate::symbol_table::{MoveState, SymbolTable};
 use crate::types::Type;
 use crate::warnings::{Warning, WarningCode};
 
@@ -294,6 +294,12 @@ struct LoopContext {
     /// exit edge, so it never produces a value: it diverges, and adopts its
     /// context's expected type exactly as the panic-family builtins do.
     has_break: bool,
+    /// The move state at every `break` that leaves this loop: each is a path out of it,
+    /// so what it had moved is moved past the loop.
+    break_moves: Vec<Vec<MoveState>>,
+    /// The move state at every `continue` that starts this loop's next iteration: what
+    /// it had moved, that iteration would move again.
+    continue_moves: Vec<Vec<MoveState>>,
 }
 
 /// One open `pool` block. The arena it names is released at the block's closing
@@ -313,6 +319,7 @@ struct PoolContext {
 mod backward;
 mod closures;
 mod collections;
+mod const_eval;
 mod declarations;
 mod expressions;
 mod grad;

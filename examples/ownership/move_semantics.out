@@ -1,4 +1,4 @@
-consume(msg) inside branch = 2
+consume(kept) in branch    = 2
 msg.len() after branch     = 2
 moved binding             = neuro
 cloned pair equal          = true

@@ -31,10 +31,12 @@ impl TypeChecker {
             });
         }
 
-        // Each arm runs on its own path, so a move inside one arm must not
-        // leak onto the others or past the `if`. Snapshot the move state
-        // after the (unconditional) condition and restore it between arms.
+        // Each arm runs on its own path, so a move inside one arm must not leak onto
+        // the others. Snapshot the move state after the (unconditional) condition and
+        // restore it between arms; past the `if`, the moves of every arm that falls
+        // through are joined back in, since any one of them may have run.
         let move_snapshot = self.symbols.snapshot_moves();
+        let mut fell_through = Vec::new();
 
         // Arm-type hint, mirroring `check_match`: the caller's expected type if any,
         // else the first arm's type once known. Without it a later arm carrying no type
@@ -44,6 +46,9 @@ impl TypeChecker {
 
         // Collect arm types: then + each else-if + optional else
         let then_ty = self.arm_value_type(then_block, hint.as_ref());
+        if !stmts_diverge(then_block) {
+            fell_through.push(self.symbols.snapshot_moves());
+        }
         if hint.is_none() && !matches!(then_ty, Type::Unknown) {
             hint = Some(then_ty.clone());
         }
@@ -63,6 +68,9 @@ impl TypeChecker {
                 });
             }
             let elif_ty = self.arm_value_type(elif_block, hint.as_ref());
+            if !stmts_diverge(elif_block) {
+                fell_through.push(self.symbols.snapshot_moves());
+            }
             if hint.is_none() && !matches!(elif_ty, Type::Unknown) {
                 hint = Some(elif_ty.clone());
             }
@@ -70,12 +78,16 @@ impl TypeChecker {
         }
 
         self.symbols.restore_moves(&move_snapshot);
-        if let Some(else_stmts) = else_block {
-            arm_types.push(self.arm_value_type(else_stmts, hint.as_ref()));
-            self.symbols.restore_moves(&move_snapshot);
-        } else {
+        let Some(else_stmts) = else_block else {
+            self.symbols.join_moves(&fell_through);
             return Some(Type::Void);
+        };
+        arm_types.push(self.arm_value_type(else_stmts, hint.as_ref()));
+        if !stmts_diverge(else_stmts) {
+            fell_through.push(self.symbols.snapshot_moves());
         }
+        self.symbols.restore_moves(&move_snapshot);
+        self.symbols.join_moves(&fell_through);
 
         // All arms must agree on type. The result is the first arm that carries one:
         // a divergent arm (a `panic`, an `unreachable`, a `return`) is `Unknown`, the

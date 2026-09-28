@@ -1,6 +1,8 @@
 use super::backward::gradient_view_root;
+use super::val_else::stmts_diverge;
 use super::{LoopContext, TypeChecker};
 use crate::errors::TypeError;
+use crate::symbol_table::MoveState;
 use crate::types::Type;
 use ast_types::{BinaryOp, Expr, Place, Stmt, TensorIndexArg};
 use shared_types::{Identifier, Span};
@@ -206,6 +208,8 @@ impl TypeChecker {
             break_value_ty: None,
             expected_ty: expected.cloned(),
             has_break: false,
+            break_moves: Vec::new(),
+            continue_moves: Vec::new(),
         });
         self.symbols.push_scope();
         for stmt in body {
@@ -213,8 +217,7 @@ impl TypeChecker {
         }
         self.symbols.pop_scope();
         let ctx = self.loop_stack.pop();
-        self.report_loop_body_moves(&move_snapshot, body);
-        self.symbols.restore_moves(&move_snapshot);
+        self.close_loop_moves(&move_snapshot, body, ctx.as_ref());
         match ctx {
             Some(ctx) => LoopExit {
                 value_ty: ctx.break_value_ty,
@@ -230,16 +233,67 @@ impl TypeChecker {
     /// Record that a `break` targets the loop named by `label`, or the innermost
     /// loop when unlabeled.
     fn record_break_target(&mut self, label: Option<&Identifier>) {
-        let target = match label {
+        if let Some(ctx) = self.loop_target_mut(label) {
+            ctx.has_break = true;
+        }
+    }
+
+    /// The loop a `break` or `continue` with `label` targets: the one wearing the
+    /// label, or the innermost loop when unlabeled.
+    fn loop_target_mut(&mut self, label: Option<&Identifier>) -> Option<&mut LoopContext> {
+        match label {
             Some(label) => self
                 .loop_stack
                 .iter_mut()
                 .rev()
                 .find(|ctx| ctx.label.as_deref() == Some(label.name.as_str())),
             None => self.loop_stack.last_mut(),
-        };
-        if let Some(ctx) = target {
-            ctx.has_break = true;
+        }
+    }
+
+    /// Keep the move state at a `break` (`leaves`) or a `continue` for the loop it
+    /// targets to settle when the loop closes: see [`Self::close_loop_moves`].
+    fn record_jump_moves(&mut self, label: Option<&Identifier>, leaves: bool) {
+        let state = self.symbols.snapshot_moves();
+        if let Some(ctx) = self.loop_target_mut(label) {
+            if leaves {
+                ctx.break_moves.push(state);
+            } else {
+                ctx.continue_moves.push(state);
+            }
+        }
+    }
+
+    /// Settle a loop's moves once its body is checked, with the scope stack the
+    /// snapshot was taken on. The body's end and every `continue` start another
+    /// iteration, so a move still outstanding at any of them is reported. Past the
+    /// loop the state is the one before it (a `while` or `for` may run zero times),
+    /// joined with what every `break` had moved.
+    fn close_loop_moves(
+        &mut self,
+        snapshot: &[MoveState],
+        body: &[Stmt],
+        ctx: Option<&LoopContext>,
+    ) {
+        self.report_loop_body_moves(snapshot, body);
+        if let Some(ctx) = ctx {
+            let mut reported = self.symbols.moves_since(snapshot);
+            for state in &ctx.continue_moves {
+                self.symbols.restore_moves(state);
+                for (name, span) in self.symbols.moves_since(snapshot) {
+                    if !reported.iter().any(|(n, s)| *n == name && *s == span) {
+                        self.record_error(TypeError::MovedInLoopBody {
+                            name: name.clone(),
+                            span,
+                        });
+                        reported.push((name, span));
+                    }
+                }
+            }
+        }
+        self.symbols.restore_moves(snapshot);
+        if let Some(ctx) = ctx {
+            self.symbols.join_moves(&ctx.break_moves);
         }
     }
 
@@ -506,16 +560,21 @@ impl TypeChecker {
                     }
                 }
 
-                // A move inside one arm must not invalidate the binding on paths
-                // that never ran that arm. Restore the move state after each arm
-                // so only unconditional (straight-line) moves persist.
+                // A move inside one arm must not invalidate the binding in a sibling
+                // arm that never ran it, so the state is restored between arms. Past
+                // the `if`, a move any arm that falls through made may have happened,
+                // so those arms' moves are joined back in at the end.
                 let move_snapshot = self.symbols.snapshot_moves();
+                let mut fell_through = Vec::new();
 
                 self.symbols.push_scope();
                 for stmt in then_block {
                     let _ = self.check_stmt(stmt);
                 }
                 self.symbols.pop_scope();
+                if !stmts_diverge(then_block) {
+                    fell_through.push(self.symbols.snapshot_moves());
+                }
                 self.symbols.restore_moves(&move_snapshot);
 
                 for (else_if_cond, else_if_stmts) in else_if_blocks {
@@ -534,6 +593,9 @@ impl TypeChecker {
                         let _ = self.check_stmt(stmt);
                     }
                     self.symbols.pop_scope();
+                    if !stmts_diverge(else_if_stmts) {
+                        fell_through.push(self.symbols.snapshot_moves());
+                    }
                     self.symbols.restore_moves(&move_snapshot);
                 }
 
@@ -543,8 +605,12 @@ impl TypeChecker {
                         let _ = self.check_stmt(stmt);
                     }
                     self.symbols.pop_scope();
+                    if !stmts_diverge(else_stmts) {
+                        fell_through.push(self.symbols.snapshot_moves());
+                    }
                     self.symbols.restore_moves(&move_snapshot);
                 }
+                self.symbols.join_moves(&fell_through);
 
                 Some(())
             }
@@ -634,6 +700,8 @@ impl TypeChecker {
                     break_value_ty: None,
                     expected_ty: None,
                     has_break: false,
+                    break_moves: Vec::new(),
+                    continue_moves: Vec::new(),
                 });
                 self.symbols.push_scope();
 
@@ -655,9 +723,8 @@ impl TypeChecker {
                 }
 
                 self.symbols.pop_scope();
-                self.loop_stack.pop();
-                self.report_loop_body_moves(&move_snapshot, body);
-                self.symbols.restore_moves(&move_snapshot);
+                let ctx = self.loop_stack.pop();
+                self.close_loop_moves(&move_snapshot, body, ctx.as_ref());
 
                 Some(())
             }
@@ -740,6 +807,8 @@ impl TypeChecker {
                     break_value_ty: None,
                     expected_ty: None,
                     has_break: false,
+                    break_moves: Vec::new(),
+                    continue_moves: Vec::new(),
                 });
                 self.symbols.push_scope();
 
@@ -761,9 +830,8 @@ impl TypeChecker {
                 }
 
                 self.symbols.pop_scope();
-                self.loop_stack.pop();
-                self.report_loop_body_moves(&move_snapshot, body);
-                self.symbols.restore_moves(&move_snapshot);
+                let ctx = self.loop_stack.pop();
+                self.close_loop_moves(&move_snapshot, body, ctx.as_ref());
 
                 Some(())
             }
@@ -780,7 +848,9 @@ impl TypeChecker {
                     if !matches!(value_ty, Type::Unknown) {
                         self.record_break_value(label.as_ref(), value_ty, *span);
                     }
+                    self.record_move(value_expr);
                 }
+                self.record_jump_moves(label.as_ref(), true);
                 Some(())
             }
 
@@ -791,6 +861,7 @@ impl TypeChecker {
                     label.as_ref().map(|l| l.name.as_str()),
                     *span,
                 );
+                self.record_jump_moves(label.as_ref(), false);
                 Some(())
             }
 
@@ -833,6 +904,7 @@ impl TypeChecker {
                         return None;
                     }
                 }
+                self.check_const_value(value, &declared_ty);
 
                 self.constants.insert(name.name.clone(), declared_ty);
                 self.constant_values

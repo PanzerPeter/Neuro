@@ -17,6 +17,7 @@
 
 use std::collections::HashSet;
 
+use crate::types::Type;
 use neuro_hir::{
     HirCollectionKind, HirExpr, HirExprKind, HirInterpPart, HirItem, HirStmt, HirTensorAxis,
     HirType,
@@ -190,7 +191,8 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
         }
     }
     for (name, return_type, body) in returning {
-        if !matches!(return_type, HirType::String) {
+        // A newtype over `string` is the `string` itself once erased.
+        if !matches!(Type::from_hir(return_type), Type::String) {
             continue;
         }
         let mut exits = Vec::new();
@@ -310,6 +312,7 @@ fn returns_inside_expressions(body: &[HirStmt]) -> bool {
 fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
     match &expr.kind {
         HirExprKind::InterpString { .. } => true,
+        HirExprKind::NewtypeConstruct { value, .. } => allocates(value, producers),
         // A collection copies a `string` out of its slot, so the read owns the copy.
         HirExprKind::Index { object, .. } => {
             matches!(expr.ty, HirType::String) && indexes_a_collection(&object.ty)

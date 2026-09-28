@@ -854,3 +854,28 @@ func main() -> i32 {
         "each temporary destroyed exactly once, and 2 + 3 + 4 read"
     );
 }
+
+#[test]
+fn a_value_moved_into_a_newtype_is_dropped_once() {
+    // The newtype binding owns the value now; the binding it was built from must not
+    // destroy it a second time at scope exit.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"{PROBE}
+newtype Held = Probe
+
+func main() -> i32 {{
+    mut count = 0
+    {{
+        val p = Probe {{ sink: &mut count }}
+        val h = Held(p)
+    }}
+    count
+}}
+"#
+    );
+    let code = test
+        .compile_and_run("newtype_drop_once.nr", &source)
+        .expect("compile and run");
+    assert_eq!(code, 1, "the probe must be dropped exactly once");
+}

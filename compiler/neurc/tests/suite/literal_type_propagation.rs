@@ -140,3 +140,40 @@ func main() -> i32 {
         .expect("compilation failed");
     assert_eq!(exit, 43);
 }
+
+#[test]
+fn test_bug_086_an_annotation_types_the_literals_of_arithmetic() {
+    // `val x: u8 = 200` types its literal by the annotation, and so does arithmetic
+    // made of literals alone, in a binding and in a constant. It computes in the
+    // annotated type: `2147483647 + 1` is `2147483648` as an `i64`.
+    let source = r#"
+const Z: u8 = 255 - 255
+const MASK: u16 = (1 << 12) | 0xff
+
+func main() -> i32 {
+    val d: u8 = 200 + 50
+    val big: i64 = 2147483647 + 1
+    val huge: i64 = 5000000000 * 2
+    val f: f32 = 1.5 * 2.0
+    if d != 250u8 { return 1 }
+    if big != 2147483648i64 { return 2 }
+    if huge != 10000000000i64 { return 3 }
+    if f != 3.0f32 { return 4 }
+    if MASK != 4351u16 { return 5 }
+    Z as i32 + 42
+}
+"#;
+    let code = CompileTest::new()
+        .compile_and_run("literal_arithmetic.nr", source)
+        .expect("literal arithmetic takes the annotated type");
+    assert_eq!(code, 42);
+
+    // The annotation still bounds the result.
+    let error = CompileTest::new()
+        .check(
+            "literal_overflow.nr",
+            "func main() -> i32 {\n    val d: u8 = 300 + 1\n    0\n}",
+        )
+        .expect_err("300 does not fit u8");
+    assert!(error.contains("out of range for type u8"), "got: {error}");
+}

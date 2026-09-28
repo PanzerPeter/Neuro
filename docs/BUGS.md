@@ -5,69 +5,57 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-084: `main` with the wrong signature compiles and exits with an undefined status
+## BUG-085: a struct passed by value never releases the `string` buffers it holds
 
 - **Status**: open, confirmed
-- **Area**: `neurc` (the entry-point check in `src/main.rs`), with the rule belonging in
-  `semantic-analysis`
-- **Severity**: major. A silent wrong answer: the process exit status is garbage
+- **Area**: `llvm-backend`; parameter registration in `codegen/functions.rs` and
+  `plan_held_drops` in `codegen/drops.rs`
+- **Severity**: major. An unbounded leak, one buffer per call, for an ordinary by-value
+  argument or a consuming `self` receiver
 
 **Minimal repro**
 
 ```neuro
-func main() {
-    println("hi")
+struct C { label: string, n: i32 }
+
+impl C {
+    func into_n(self) -> i32 { self.n }
 }
-```
 
-Expected: a compile error, because the [functions reference](language-reference/functions.md#the-main-function)
-requires `main` to take no parameters and return `i32`. Observed: prints `hi` and exits with
-status 232, whatever the return register last held. `func main() -> string` exits with a
-pointer's low byte, `func main() -> bool` with 0 or 1, and `func main(x: i32) -> i32` is
-accepted with `x` bound to the C runtime's `argc`.
-
-**Root cause**: `neurc` checks only that a function named `main` exists (the
-`MAIN_FUNCTION` test before code generation). Nothing checks its parameters or return type,
-and the backend emits `main` under its own name as the C entry point, so the C runtime reads
-whatever the Neuro signature leaves in the return register.
-
-**Workaround**: declare `func main() -> i32` and return the exit code.
-
-**Fix sketch**: reject any other `main` signature in `semantic-analysis` with a diagnostic on
-the declaration's span, and add a regression test per rejected shape (no return type, a
-non-`i32` return, a parameter).
-
-## BUG-083: an owned `string` wrapped in a newtype is never released
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; `drop_target_of` and the owned-string registration in
-  `codegen/drops.rs`
-- **Severity**: major. An unbounded leak, one buffer per evaluation
-
-**Minimal repro**
-
-```neuro
-newtype Name = string
+func take(c: C) -> i32 { c.n }
 
 func main() -> i32 {
-    val n = Name("ab" + "c")
-    n.0.len() as i32
+    mut t = 0
+    for i in 0..10 {
+        val a = C { label: "a" + "bc", n: 1 }
+        t = t + a.into_n()
+        val b = C { label: "a" + "bcd", n: 1 }
+        t = t + take(b)
+    }
+    t
 }
 ```
 
-Expected: the buffer `"ab" + "c"` built is released when `n` leaves scope, as it is for
-`val s = "ab" + "c"`. Observed: exit 3, and AddressSanitizer's leak check reports the 3-byte
-buffer allocated in `main`.
+Expected: exit 20, with every `label` buffer released once, by the callee that took ownership of
+the struct. Observed: exit 20, and AddressSanitizer's leak check reports every buffer as leaked.
+`examples/showcase/owned_catalog.nr` shows it: its `catalog.into_report()` is commented as
+taking the field's buffer with it, and that buffer leaks.
 
-**Root cause**: not yet confirmed in the code. A newtype is erased to its inner type in the
-backend, and a `string` binding owns its buffer only when its initializer is one of the shapes
-`produces_owned_string` recognizes. A newtype construction around such a shape is not one of
-them, so the binding is never registered as an owner.
+**Root cause**: confirmed in the code. At the call the caller clears the drop flags of the
+struct it moves, including the flags of its `string` fields. The callee registers the
+parameter for destruction, but `plan_held_drops` starts every `string` position disarmed,
+because a type cannot prove a `string` owns its buffer. Nothing re-arms the position, so the
+callee skips the release, and the caller already gave it up.
 
-**Workaround**: keep the owned `string` in a plain binding and wrap it where it is read.
+**Workaround**: pass the struct by `&` and let the caller keep ownership. Moving the field
+into a binding in the callee (`val s = c.label`) does not help: that binding owns nothing
+either.
 
-**Fix sketch**: let `produces_owned_string` look through a newtype construction to its
-argument, and add a regression test that runs the repro in a loop under a leak check.
+**Fix sketch**: the flags need to cross the call. Either pass each `string` position's flag as a
+hidden argument, or have the caller keep ownership of the positions when the callee's summary
+proves it only reads them (the way a read-only `string` parameter already works) and release
+them after the call. Regression tests: the repro in a loop under a leak check, a literal field
+that must not be freed, and a field the callee moves out and returns.
 
 ## BUG-082: an enum that owns a `string` never releases it
 

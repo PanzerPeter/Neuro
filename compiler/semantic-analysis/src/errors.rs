@@ -21,6 +21,9 @@ pub enum TypeError {
     #[error("undefined function '{name}'")]
     UndefinedFunction { name: String, span: Span },
 
+    #[error("`main` must be declared `func main() -> i32`: {problem}")]
+    InvalidMainSignature { problem: String, span: Span },
+
     #[error("'{name}' is a generic function, and a bare name picks no instance to be a value of; wrap the call in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
     FunctionUsedAsValue { name: String, span: Span },
 
@@ -804,6 +807,9 @@ pub enum TypeError {
     #[error("constant expression required: only literals, arithmetic on literals, and references to other constants are allowed")]
     InvalidConstExpr { span: Span },
 
+    #[error("constant expression has no value: {reason}")]
+    ConstHasNoValue { reason: String, span: Span },
+
     #[error("comparison operators cannot be chained: use `&&` to combine separate comparisons")]
     ComparisonChain { span: Span },
 
@@ -1208,6 +1214,7 @@ impl TypeError {
             Self::Mismatch { span, .. }
             | Self::UndefinedVariable { span, .. }
             | Self::UndefinedFunction { span, .. }
+            | Self::InvalidMainSignature { span, .. }
             | Self::FunctionUsedAsValue { span, .. }
             | Self::GenericParamShadowsBuiltin { span, .. }
             | Self::GenericParamNotInferable { span, .. }
@@ -1357,6 +1364,7 @@ impl TypeError {
             | Self::UnknownAssociatedFunction { span, .. }
             | Self::ConstAlreadyDefined { span, .. }
             | Self::InvalidConstExpr { span, .. }
+            | Self::ConstHasNoValue { span, .. }
             | Self::ComparisonChain { span, .. }
             | Self::NullCoalesceOnNonFallible { span, .. }
             | Self::TryOnNonFallible { span, .. }

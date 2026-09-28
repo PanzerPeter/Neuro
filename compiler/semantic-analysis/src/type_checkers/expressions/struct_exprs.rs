@@ -42,6 +42,7 @@ impl TypeChecker {
                 });
             }
         }
+        self.record_move(&args[0]);
         Type::Newtype(name.to_string())
     }
 

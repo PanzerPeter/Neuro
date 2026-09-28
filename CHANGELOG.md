@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.3] - 2026-09-28
+
+### Fixed
+
+- A value placed into an enum payload or a newtype is moved. `Option::Some(v)`, `Ok(v)`,
+  `E::V(v)`, `E::V { f: v }` and `Name(v)` did not mark `v` as moved, so a later read or a
+  second move compiled, and an owner such as a `Vec` was released twice.
+- A newtype construction hands its argument's ownership to the newtype. `val h = Held(p)` left
+  `p` owning the value too, so a `Drop` type's destructor ran twice and a `Vec` was freed twice,
+  even in a program that never touched `p` again.
+- A move inside one arm of an `if` or `match` counts after it. Reading the binding past the
+  branch was accepted, and when the branch had run it read a value the callee had already
+  released. An arm that ends in `return`, `break`, `continue` or a `panic` still leaves the
+  binding usable past the branch. The language reference and the `move_semantics` example taught
+  the old rule and now teach this one.
+- A move followed by `break` counts after the loop, and a move followed by `continue` is refused
+  like one at the end of the body, since the next iteration repeats it. `break v` moves `v`.
+  All three compiled and freed the moved value twice.
+- An owned `string` wrapped in a newtype is released: `Name("ab" + "c")`, a function returning
+  such a newtype, and `Name(s)` over an owned binding each leaked the buffer (BUG-083).
+- `main` must be `func main() -> i32`. Any other signature compiled and exited with whatever the
+  return register held, or bound `argc` to a parameter (BUG-084).
+- Arithmetic made only of literals takes the type its context expects, as a lone literal does:
+  `val d: u8 = 200 + 50` and `const Z: u8 = 255 - 255` were refused as `i32`, and
+  `val big: i64 = 5000000000 + 1` as out of range.
+- A constant that overflows its type or divides by zero is a checked error on its initializer.
+  It passed `neurc check` and failed in the backend without a location, once as an internal
+  compiler error.
+
+### Added
+
+- A `matmul` benchmark: `@` on `[256, 256]` `f32` tensors against the same loop in C++ and
+  Python. The README's performance table is re-measured on LLVM 22 and includes it.
+
+### Docs
+
+- `docs/BUGS.md` records BUG-085 (a struct passed by value leaks its `string` fields).
+
 ## [3.19.2] - 2026-09-28
 
 ### Fixed

@@ -371,8 +371,9 @@ func main() -> i32 {
 - Must return `i32` (exit code)
 - Must not have parameters
 
-The compiler does not enforce the last two rules yet
-([BUG-084](../BUGS.md#bug-084-main-with-the-wrong-signature-compiles-and-exits-with-an-undefined-status)).
+Any other signature is refused with `InvalidMainSignature`: the C runtime passes `argc` as
+the first argument and reads the return register as the exit status, so no other shape has a
+defined exit code. Only the root file's `main` is the entry point.
 
 **Exit codes**:
 - `0` = success

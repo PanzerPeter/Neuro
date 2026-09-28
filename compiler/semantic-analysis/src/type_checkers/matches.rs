@@ -61,8 +61,10 @@ impl TypeChecker {
         };
 
         // Each arm runs on its own path, so snapshot the move state after the
-        // scrutinee and restore it between arms, mirroring `if`.
+        // scrutinee and restore it between arms, then join in the moves of every arm
+        // that falls through, mirroring `if`.
         let move_snapshot = self.symbols.snapshot_moves();
+        let mut fell_through = Vec::new();
 
         // The body-type hint: the caller's expected type if any, else the first arm's
         // type once known, so `_ => 0` infers to a sibling arm's integer width.
@@ -72,6 +74,9 @@ impl TypeChecker {
         for arm in arms {
             self.symbols.restore_moves(&move_snapshot);
             let (arm_ty, binds_owner) = self.check_arm(arm, &pattern_ty, hint.as_ref());
+            if !expr_diverges(&arm.body) {
+                fell_through.push(self.symbols.snapshot_moves());
+            }
             takes_owner |= binds_owner;
             if hint.is_none() && !matches!(arm_ty, Type::Unknown) {
                 hint = Some(arm_ty.clone());
@@ -79,6 +84,7 @@ impl TypeChecker {
             arm_types.push(arm_ty);
         }
         self.symbols.restore_moves(&move_snapshot);
+        self.symbols.join_moves(&fell_through);
         if takes_owner {
             self.take_from_scrutinee(scrutinee, &written_ty, span);
         }

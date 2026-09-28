@@ -143,6 +143,14 @@ impl Lowerer {
                         .cloned(),
                     _ => None,
                 };
+                // Mirrors the checker: arithmetic over literals alone takes the numeric
+                // type its context expects, as a lone literal does.
+                let left_expected = left_expected.or_else(|| {
+                    expected
+                        .filter(|ty| is_integer(ty) || crate::is_full_float(ty))
+                        .filter(|_| keeps_operand_type(*op) && is_literal_arithmetic(left))
+                        .cloned()
+                });
                 let left_src = left;
                 let left = self.lower_expr(left, left_expected.as_ref())?;
                 // Operator-trait dispatch on a user type: desugar `a OP b` into the
@@ -754,6 +762,42 @@ impl Lowerer {
 
 /// An unsuffixed numeric literal, possibly negated or parenthesised, as the checker's
 /// operator rule recognizes it: lowering it again has no effect beyond its type.
+/// Whether `op`'s result has its operands' type, so a type expected of the result is
+/// the type expected of each operand.
+fn keeps_operand_type(op: ast_types::BinaryOp) -> bool {
+    use ast_types::BinaryOp;
+    matches!(
+        op,
+        BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Modulo
+            | BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::Shl
+    )
+}
+
+/// Whether `expr` is arithmetic over numeric literals alone (`200 + 50`, `-(1 << 3)`):
+/// the operand shape whose type only its context can decide.
+fn is_literal_arithmetic(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(Literal::Integer(..) | Literal::Float(..), _) => true,
+        Expr::Paren(inner, _) => is_literal_arithmetic(inner),
+        Expr::Unary {
+            op: UnaryOp::Negate | UnaryOp::BitNot,
+            operand,
+            ..
+        } => is_literal_arithmetic(operand),
+        Expr::Binary {
+            left, op, right, ..
+        } => keeps_operand_type(*op) && is_literal_arithmetic(left) && is_literal_arithmetic(right),
+        _ => false,
+    }
+}
+
 fn is_bare_literal(expr: &Expr) -> bool {
     match expr {
         Expr::Literal(Literal::Integer(_, None) | Literal::Float(_, None), _) => true,

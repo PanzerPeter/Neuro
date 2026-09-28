@@ -19,6 +19,8 @@ const DOUBLED: i32 = BASE * 2   // arithmetic on other consts is allowed
 - RHS must be a constant expression: literals, arithmetic/unary/cast on literals,
   or identifiers that refer to previously declared `const` names
 - Function calls and runtime values are not allowed as `const` initializers
+- An integer constant must have a value of its type: an initializer that overflows it or
+  divides by zero is a compile error on the initializer (`ConstHasNoValue`)
 - No ownership or lifetime, consts do not participate in the borrow checker
 - Module-level consts are visible to all functions regardless of source order
 - Function-body consts are scoped to the enclosing function
@@ -293,16 +295,24 @@ val b: string = a.clone()  // a is NOT moved
 val ok: bool = a == b      // reading a here is fine
 ```
 
-**Conditional moves don't leak.** A move that only happens inside one branch of an
-`if`/`while`/`for` does not invalidate the binding on paths that never ran that
-branch:
+**A move in a branch counts after the branch.** A move inside one arm of an `if` or
+`match` does not affect the other arms, but past the `if` or `match` the binding may
+already be gone, so reading it there is a use of a moved value. An arm that leaves
+(`return`, `break`, `continue`, or a `panic`) is the exception, since no path past the
+branch runs it:
 
 ```neuro
 val msg: string = "hi"
 if ready {
-    val r: u64 = consume(msg)   // moves msg only on this path
+    val r: u64 = consume(msg)   // moves msg on this path
 }
-val n: u64 = msg.len()          // OK, the move above was conditional
+// val n: u64 = msg.len()      // COMPILE ERROR: use of moved value 'msg'
+
+val other: string = "hey"
+if !ready {
+    return consume(other)       // moves other, but this path leaves
+}
+val m: u64 = other.len()        // OK: every path that reaches here kept `other`
 ```
 
 > Move tracking covers every non-`Copy` type: `string`, the collections

@@ -36,7 +36,7 @@ impl TypeChecker {
         op: &BinaryOp,
         right: &Expr,
         span: &Span,
-        _expected: Option<&Type>,
+        expected: Option<&Type>,
     ) -> Option<Type> {
         // `??` is the one binary operator whose operands are not symmetric: the right
         // side is typed by the left's *payload*, not by the left itself. Handled before
@@ -59,7 +59,16 @@ impl TypeChecker {
         // as the expected type for symmetric inference. A tensor on the left expects the
         // right to be its ELEMENT instead, so `matrix * 2.0` types its literal as
         // the scalar being broadcast rather than as the default `f64`.
-        let left_expectation = self.scalar_broadcast_expectation(right);
+        //
+        // Arithmetic built from literals alone has no type of its own, so it takes the
+        // numeric type its context expects, exactly as a lone literal does: in
+        // `val d: u8 = 200 + 50` both literals are `u8`.
+        let left_expectation = self.scalar_broadcast_expectation(right).or_else(|| {
+            expected
+                .filter(|ty| ty.is_integer() || ty.is_float())
+                .filter(|_| keeps_operand_type(*op) && is_literal_arithmetic(left))
+                .cloned()
+        });
         let errors_before_left = self.errors.len();
         let mut left_ty = self
             .check_expr(left, left_expectation.as_ref())
@@ -666,6 +675,41 @@ impl TypeChecker {
 
 /// An unsuffixed numeric literal, possibly negated or parenthesised: the one operand whose
 /// type is decided entirely by its context and whose check has no other effect.
+/// Whether `op`'s result has its operands' type, so a type expected of the result is
+/// the type expected of each operand.
+fn keeps_operand_type(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Modulo
+            | BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::Shl
+    )
+}
+
+/// Whether `expr` is arithmetic over numeric literals alone (`200 + 50`, `-(1 << 3)`):
+/// the operand shape whose type only its context can decide.
+fn is_literal_arithmetic(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(Literal::Integer(..) | Literal::Float(..), _) => true,
+        Expr::Paren(inner, _) => is_literal_arithmetic(inner),
+        Expr::Unary {
+            op: UnaryOp::Negate | UnaryOp::BitNot,
+            operand,
+            ..
+        } => is_literal_arithmetic(operand),
+        Expr::Binary {
+            left, op, right, ..
+        } => keeps_operand_type(*op) && is_literal_arithmetic(left) && is_literal_arithmetic(right),
+        _ => false,
+    }
+}
+
 pub(super) fn is_bare_literal(expr: &Expr) -> bool {
     match expr {
         Expr::Literal(Literal::Integer(_, None) | Literal::Float(_, None), _) => true,

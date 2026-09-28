@@ -6,10 +6,11 @@
 //! source binding is invalid, and reading it is a `UseOfMovedValue` error
 //! (emitted from the `Expr::Identifier` arm in `expressions.rs`).
 //!
-//! The analysis is intentionally conservative: it flags only place expressions
-//! in a consuming position, and conditional regions snapshot/restore their move
-//! state (see `SymbolTable::snapshot_moves`). It may therefore miss some moves,
-//! but it never rejects a valid program.
+//! It flags only place expressions in a consuming position. Each arm of an `if` or
+//! a `match` starts from the state before the region (see
+//! `SymbolTable::snapshot_moves`), and past the region the moves of every arm that
+//! falls through are joined back in (`SymbolTable::join_moves`): the binding may be
+//! gone, so a later read is a use of a moved value.
 //!
 //! A move out of a *sub-place* — `l.w`, `(o).inner.w` — is recorded against the
 //! place's ROOT binding rather than the one field, because the language leaves a
@@ -463,9 +464,10 @@ mod tests {
     }
 
     #[test]
-    fn conditional_move_does_not_leak_out_of_branch() {
-        // `s` is moved only on the `if` path; the later read is on a path that
-        // may not have executed the move, so it must not be rejected.
+    fn a_move_in_one_branch_is_a_move_after_the_branch() {
+        // `s` is moved only when the `if` runs its arm, so after the `if` it may be gone
+        // and the later read is a use of a moved value. Accepting it read a buffer the
+        // callee had already released.
         let errs = errors(
             r#"
             func consume(s: string) -> i32 { 0 }
@@ -480,8 +482,60 @@ mod tests {
             "#,
         );
         assert!(
-            errs.is_empty(),
-            "conditional move must not leak past the branch; got {errs:?}"
+            errs.iter().any(|e| e.contains("use of moved value 's'")),
+            "a conditional move must reach past the branch; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_move_in_a_branch_that_leaves_does_not_reach_past_it() {
+        // The arm that moved `s` returns, so every path reaching the read kept `s`. The
+        // same holds for a sibling arm, for a `match` arm, and for an arm that gives
+        // the binding a fresh value before it ends.
+        let errs = errors(
+            r#"
+            enum E { A, B }
+            func consume(s: string) -> i32 { 0 }
+            func main() -> i32 {
+                mut s: string = "hi"
+                val e = E::A
+                if false {
+                    return consume(s)
+                } else if true {
+                    val r: i32 = consume(s)
+                    s = "again"
+                }
+                match e {
+                    E::A => { return consume(s) },
+                    E::B => {}
+                }
+                return s.len() as i32
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "no path moved `s`; got {errs:?}");
+    }
+
+    #[test]
+    fn a_move_in_one_match_arm_is_a_move_after_the_match() {
+        let errs = errors(
+            r#"
+            enum E { A, B }
+            func consume(s: string) -> i32 { 0 }
+            func main() -> i32 {
+                val s: string = "hi"
+                val e = E::A
+                val k = match e {
+                    E::A => consume(s),
+                    E::B => 1
+                }
+                return s.len() as i32 + k
+            }
+            "#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("use of moved value 's'")),
+            "a move in one arm must reach past the match; got {errs:?}"
         );
     }
 

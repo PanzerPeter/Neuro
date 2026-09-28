@@ -1848,6 +1848,48 @@ fn a_struct_field_releases_the_buffer_stored_into_it() {
     );
 }
 
+/// A newtype is its inner value, so wrapping an allocation in one leaves the binding
+/// owning the buffer exactly as the bare allocation would (BUG-083).
+#[test]
+fn test_bug_083_a_newtype_over_an_owned_string_releases_it() {
+    let source = r#"
+        newtype Name = string
+
+        func main() -> i32 {
+            val n = Name("ab" + "c")
+            return n.0.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert_eq!(
+        free_calls(&ir, "main"),
+        1,
+        "the wrapped buffer is released when `n` leaves scope:\n{}",
+        function_body(&ir, "main")
+    );
+
+    // A function returning the newtype hands the buffer to its caller the same way.
+    let returned = r#"
+        newtype Name = string
+
+        func make(k: i32) -> Name {
+            Name("id-{k}")
+        }
+
+        func main() -> i32 {
+            val n = make(4)
+            return n.0.len() as i32
+        }
+    "#;
+    let ir = module_ir(returned, OptimizationLevelSetting::O0);
+    assert_eq!(
+        free_calls(&ir, "main"),
+        1,
+        "the caller owns the buffer `make` returns:\n{}",
+        function_body(&ir, "main")
+    );
+}
+
 /// The positions an aggregate exposes are uniform, so an array element and a
 /// tuple element take the same treatment as a field, at any depth.
 #[test]

@@ -57,7 +57,8 @@ module per declaration kind beside it. `tests/` is split by subject.
   (parameter and return types resolved in the function's generic scope), run over *all* functions
   before any body is checked, so a call resolves regardless of source order and mutually recursive
   functions can name each other. `check_function` reads the signature back via
-  `lookup_registered_signature` rather than resolving it twice.
+  `lookup_registered_signature` rather than resolving it twice. The root module's `main` must
+  resolve to `func main() -> i32` with no generics (`InvalidMainSignature`).
 - **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
   signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every
   differentiated parameter `&mut` over a float element with literal extents (`GradSignature`),
@@ -459,9 +460,12 @@ same suppression for `Expr::ArrayRest`, whose `exact` node is an arity assertion
 the leading projections have already taken. And a loop body's `moves_since` compares part maps,
 not just the whole span, so a partial move a second iteration would repeat is still reported.
 
-The analysis is deliberately conservative: `if`/`while`/`for` bodies and if-expression arms
-snapshot and restore move state, so a conditional move never leaks onto a non-executing path. It
-may miss some moves, but it never rejects a valid program.
+Each arm of an `if` (statement or expression) or a `match` snapshots and restores move state,
+so a move in one arm is not seen by its siblings. Past the region, `SymbolTable::join_moves` adds
+back the moves of every arm that falls through (one `stmts_diverge` / `expr_diverges` does not
+call divergent), because any of them may have run: reading a binding one arm moved is a use of
+a moved value. An arm that ends in `return`, `break`, `continue` or a `panic` contributes nothing.
+A `while` / `for` body is restored plainly after the loop, since it may run zero times.
 
 A loop body is the exception to the plain restore. `report_loop_body_moves` runs after the body
 and before the restore, and reports `MovedInLoopBody` for every binding that was intact at the

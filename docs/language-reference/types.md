@@ -65,6 +65,10 @@ func demo_integers() -> i32 {
 
 **Default Type**: Integer literals default to `i32` when no annotation is present. Contextual inference from declaration, parameter, and return context is implemented; range validation is enforced (e.g. `300` cannot be assigned to `i8`). If an unannotated integer literal exceeds the range of `i32` (e.g. `5000000000`), a compile error is emitted. It is not silently promoted to `i64`.
 
+Arithmetic made only of literals takes its context's type the same way, so `val d: u8 = 200 + 50`
+is `u8` arithmetic and `val big: i64 = 2147483647 + 1` is `2147483648`. A literal next to a typed
+operand takes that operand's type.
+
 **Type Suffixes**: A suffix appended directly to an integer literal overrides contextual inference and pins the type:
 
 ```neuro

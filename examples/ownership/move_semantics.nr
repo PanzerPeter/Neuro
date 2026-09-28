@@ -23,13 +23,18 @@ func main() -> i32 {
     val b: string = a.clone()
     val both_ok: bool = a == b          // reads `a` after cloning: fine
 
-    // A conditional move does not leak past the branch it lives in.
+    // A move inside a branch still counts after the branch, because the branch may
+    // have run. A branch that leaves is the exception: no path past it moved anything.
     val msg: string = "hi"
-    if both_ok {
-        val len_in_branch: u64 = consume(msg)   // moves `msg` on this path only
-        println("consume(msg) inside branch = {len_in_branch}")
+    if !both_ok {
+        return consume(msg) as i32      // moves `msg`, on a path that never comes back
     }
-    val len_after: u64 = msg.len()      // valid: the move above was conditional
+    val kept: string = msg.clone()
+    if both_ok {
+        val len_in_branch: u64 = consume(kept)   // `kept` is gone past this `if`
+        println("consume(kept) in branch    = {len_in_branch}")
+    }
+    val len_after: u64 = msg.len()      // valid: the only move of `msg` left `main`
     println("msg.len() after branch     = {len_after}")
 
     // Copy scalars are duplicated, so the source stays usable.

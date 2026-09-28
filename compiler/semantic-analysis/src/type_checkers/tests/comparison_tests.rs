@@ -6,7 +6,7 @@ fn comparison_chain_less_less_rejected() {
     let mut checker = TypeChecker::new();
 
     let func = make_function(
-        "main",
+        "compare",
         vec![],
         Some("bool".to_string()),
         vec![Stmt::Expr(Expr::Binary {
@@ -43,7 +43,7 @@ fn comparison_chain_mixed_operators_rejected() {
 
     // a <= b > c
     let func = make_function(
-        "main",
+        "compare",
         vec![],
         Some("bool".to_string()),
         vec![Stmt::Expr(Expr::Binary {
@@ -80,7 +80,7 @@ fn comparison_chain_equality_rejected() {
 
     // a == b == c
     let func = make_function(
-        "main",
+        "compare",
         vec![],
         Some("bool".to_string()),
         vec![Stmt::Expr(Expr::Binary {
@@ -117,7 +117,7 @@ fn single_comparison_accepted() {
 
     // a < b, valid
     let func = make_function(
-        "main",
+        "compare",
         vec![],
         Some("bool".to_string()),
         vec![Stmt::Expr(Expr::Binary {
@@ -144,7 +144,7 @@ fn comparison_with_logical_and_accepted() {
 
     // a < b && b < c, valid
     let func = make_function(
-        "main",
+        "compare",
         vec![],
         Some("bool".to_string()),
         vec![Stmt::Expr(Expr::Binary {

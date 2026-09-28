@@ -146,3 +146,24 @@ func main() -> i32 { nowhere }
         "expected the undefined-variable diagnostic, got: {err}"
     );
 }
+
+#[test]
+fn test_bug_084_main_must_be_declared_without_parameters_returning_i32() {
+    // The C runtime reads `main`'s return register as the exit status and passes
+    // `argc` as its first argument, so any other signature exits with garbage.
+    for main in [
+        "func main() {\n    println(\"hi\")\n}",
+        "func main() -> bool {\n    true\n}",
+        "func main() -> string {\n    \"x\"\n}",
+        "func main(x: i32) -> i32 {\n    x\n}",
+        "func main<T>() -> i32 {\n    0\n}",
+    ] {
+        let error = CompileTest::new()
+            .check("bad_main.nr", main)
+            .expect_err("a `main` with the wrong signature must be refused");
+        assert!(
+            error.contains("`main` must be declared `func main() -> i32`"),
+            "the diagnostic must name the required signature for:\n{main}\ngot: {error}"
+        );
+    }
+}

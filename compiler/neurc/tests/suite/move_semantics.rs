@@ -90,26 +90,93 @@ func main() -> i32 {
 }
 
 #[test]
-fn conditional_move_does_not_leak_past_branch() {
-    // `s` is consumed only on the taken branch; the later read sits on a path
-    // that may not have moved it, so the program must still compile and run.
-    let test = CompileTest::new();
+fn a_conditional_move_reaches_past_the_branch() {
+    // `v` is consumed when the branch runs, so the later read may see a moved value.
+    // Accepting it released the vector's buffer twice.
     let source = r#"
-func consume(s: string) -> i32 { 0 }
+func consume(v: Vec<i32>) -> i32 { v.len() as i32 }
 
 func main() -> i32 {
-    val s: string = "hi"
-    if true {
-        val r: i32 = consume(s)
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    val c = true
+    if c {
+        val r = consume(v)
     }
-    val n: u64 = s.len()
-    return 0
+    consume(v)
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "a move in a branch that falls through must count after it"
+    );
+    assert!(
+        stderr.contains("use of moved value 'v'"),
+        "expected a move diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn a_move_before_a_break_or_continue_is_settled_by_the_loop() {
+    // A `break` leaves with `v` moved, so `v` is moved past the loop; a `continue`
+    // starts the next iteration with `v` moved, which would move it again; `break v`
+    // hands `v` to the loop's value. Each was accepted and released the buffer twice.
+    let cases = [
+        (
+            "loop {\n        if c {\n            val r = consume(v)\n            break\n        }\n    }\n    consume(v)",
+            "use of moved value 'v'",
+        ),
+        (
+            "mut t = 0\n    for i in 0..3 {\n        if c {\n            t = t + consume(v)\n            continue\n        }\n    }\n    t",
+            "moved out inside a loop body",
+        ),
+        (
+            "val w = loop { break v }\n    consume(v) + consume(w)",
+            "use of moved value 'v'",
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!(
+            r#"
+func consume(v: Vec<i32>) -> i32 {{ v.len() as i32 }}
+
+func main() -> i32 {{
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    val c = true
+    {body}
+}}
+"#
+        );
+        let (success, stderr) = check_source(&source);
+        assert!(!success, "must be rejected:\n{source}");
+        assert!(
+            stderr.contains(expected),
+            "expected `{expected}` for:\n{source}\ngot: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn a_move_in_a_branch_that_returns_does_not_reach_past_it() {
+    let test = CompileTest::new();
+    let source = r#"
+func consume(s: string) -> i32 { s.len() as i32 }
+
+func main() -> i32 {
+    val s: string = "hi" + "!"
+    val c = false
+    if c {
+        return consume(s)
+    }
+    s.len() as i32
 }
 "#;
     let exit_code = test
         .compile_and_run("move_conditional.nr", source)
-        .expect("conditional move program should compile and run");
-    assert_eq!(exit_code, 0);
+        .expect("a move on a path that leaves keeps the binding on every other path");
+    assert_eq!(exit_code, 3);
 }
 
 #[test]
@@ -524,4 +591,40 @@ func main() -> i32 {
         .compile_and_run("clone_field.nr", source)
         .expect("a cloned field is the documented way to keep the original");
     assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn a_value_placed_into_an_enum_payload_is_moved() {
+    // Every constructor that puts an owner into a new holder moves it: a tuple variant,
+    // `Option::Some`, a struct variant and a newtype construction alike.
+    for construct in [
+        "val o = Box2::Full(v)",
+        "val o = Option::Some(v)",
+        "val o = Some(v)",
+        "val o = Pair::Of { a: v }",
+        "val o = Wrap(v)",
+    ] {
+        let source = format!(
+            r#"
+enum Box2 {{ Full(Vec<i32>), Empty }}
+enum Pair {{ Of {{ a: Vec<i32> }} }}
+newtype Wrap = Vec<i32>
+
+func consume(v: Vec<i32>) -> i32 {{ v.len() as i32 }}
+
+func main() -> i32 {{
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    {construct}
+    consume(v)
+}}
+"#
+        );
+        let (success, stderr) = check_source(&source);
+        assert!(!success, "`{construct}` must move `v`");
+        assert!(
+            stderr.contains("use of moved value 'v'"),
+            "expected a move diagnostic for `{construct}`, got: {stderr}"
+        );
+    }
 }

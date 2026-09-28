@@ -446,3 +446,46 @@ func main() -> i32 {
         "~0u8 is 255, ~0u8 - 100u8 is 155, 1u8 << 3 is 8"
     );
 }
+
+#[test]
+fn test_bug_087_a_constant_without_a_value_is_a_checked_error() {
+    // Overflow and division by zero are reported by `neurc check`, on the initializer,
+    // including through another constant and at module level.
+    for (source, expected) in [
+        (
+            "func main() -> i32 {\n    const X: i32 = 1 / 0\n    X\n}",
+            "divides by zero",
+        ),
+        (
+            "func main() -> i32 {\n    const X: i32 = 7 % (3 - 3)\n    X\n}",
+            "divides by zero",
+        ),
+        (
+            "func main() -> i32 {\n    const X: i32 = 2147483647 + 1\n    X\n}",
+            "overflows i32",
+        ),
+        (
+            "const BIG: u8 = 200\nconst MORE: u8 = BIG * 2\nfunc main() -> i32 {\n    MORE as i32\n}",
+            "overflows u8",
+        ),
+        (
+            "func main() -> i32 {\n    const X: i64 = -9223372036854775807i64 - 2\n    0\n}",
+            "overflows i64",
+        ),
+    ] {
+        let error = CompileTest::new()
+            .check("bad_const.nr", source)
+            .expect_err("a constant with no value must be refused at check time");
+        assert!(
+            error.contains(expected) && error.contains("bad_const.nr:"),
+            "expected a located `{expected}` diagnostic for:\n{source}\ngot: {error}"
+        );
+    }
+
+    // The edges themselves are values.
+    let edges = "const MIN: i32 = -2147483648\nconst MAX: i32 = 2147483647\nconst Z: u8 = 255 - 255\nfunc main() -> i32 {\n    MAX + MIN + 1 + Z as i32\n}";
+    let code = CompileTest::new()
+        .compile_and_run("const_edges.nr", edges)
+        .expect("the range's own ends are constants");
+    assert_eq!(code, 0);
+}

@@ -54,6 +54,17 @@ impl MoveState {
         self.parts.clear();
     }
 
+    /// Add every move `other` has and this state lacks: a place moved on either path
+    /// is moved where the two paths meet.
+    fn join(&mut self, other: &MoveState) {
+        if self.whole.is_none() {
+            self.whole = other.whole;
+        }
+        for (path, span) in &other.parts {
+            self.parts.entry(path.clone()).or_insert(*span);
+        }
+    }
+
     /// The span of a move this state has and `before` did not, if any. A loop body
     /// uses it to report a move its next iteration would perform again.
     fn introduced_since(&self, before: &MoveState) -> Option<Span> {
@@ -388,8 +399,8 @@ impl SymbolTable {
 
     /// Capture the moved-state of every currently-visible binding, in a stable
     /// order. Paired with [`restore_moves`] to bound a conditional region (an
-    /// `if`/`while`/`for` body) so that a move inside it does not leak out onto
-    /// paths that never executed it. The scope stack must be identical at the
+    /// `if`/`while`/`for` body) so that a move inside one path is not seen on a
+    /// sibling path that never executed it. The scope stack must be identical at the
     /// matching `restore_moves` call so the flat order lines up.
     ///
     /// [`restore_moves`]: SymbolTable::restore_moves
@@ -426,6 +437,26 @@ impl SymbolTable {
             }
         }
         introduced
+    }
+
+    /// Join the move states of a conditional region's arms into the current one, each
+    /// captured by [`snapshot_moves`] at the end of an arm that falls through to the
+    /// region's end, with the same scope stack as now. A binding that any such arm
+    /// moved may have been moved once the region ends, so it is moved from here on.
+    ///
+    /// [`snapshot_moves`]: SymbolTable::snapshot_moves
+    pub(crate) fn join_moves(&mut self, arms: &[Vec<MoveState>]) {
+        let mut idx = 0;
+        for scope in &mut self.scopes {
+            for info in scope.values_mut() {
+                for arm in arms {
+                    if let Some(state) = arm.get(idx) {
+                        info.moves.join(state);
+                    }
+                }
+                idx += 1;
+            }
+        }
     }
 
     /// Restore moved-state captured by [`snapshot_moves`]. Entries beyond the

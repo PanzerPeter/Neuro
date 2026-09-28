@@ -8,7 +8,7 @@
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-neuro--lang.netlify.app-blue.svg)](https://neuro-lang.netlify.app)
-[![LLVM](https://img.shields.io/badge/LLVM-20-blue.svg)](https://llvm.org/)
+[![LLVM](https://img.shields.io/badge/LLVM-22-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
 
 **Status: alpha.** Breaking changes are expected. Per-phase status lives in one place, the
@@ -202,17 +202,23 @@ disagree on output.
 
 | Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 |
 |---|---|---|---|---|
-| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 5791 ms |
-| `vector_sum` | `Vec` push, indexed sweep | 25 ms | 26 ms | 10068 ms |
-| `call_overhead` | recursion, call and inline cost | 45 ms | 51 ms | 1389 ms |
-| `print_lines` | integer holes to standard output | 13 ms | 22 ms | 110 ms |
-| `format_floats` | `f64` holes at a fixed precision | 118 ms | 109 ms | 214 ms |
-| `int_divide` | guarded `/` and `%`, opaque divisor | 96 ms | 89 ms | 1318 ms |
+| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 5786 ms |
+| `vector_sum` | `Vec` push, indexed sweep | 24 ms | 25 ms | 9987 ms |
+| `call_overhead` | recursion, call and inline cost | 44 ms | 50 ms | 1363 ms |
+| `print_lines` | integer holes to standard output | 13 ms | 20 ms | 108 ms |
+| `format_floats` | `f64` holes at a fixed precision | 112 ms | 108 ms | 210 ms |
+| `int_divide` | guarded `/` and `%`, opaque divisor | 95 ms | 88 ms | 1312 ms |
+| `matmul` | `@` on `[256, 256]` `f32` tensors | 21 ms | 22 ms | 2935 ms |
 
 Absolute times belong to the machine, and the Python column to whichever `python3` is on your
 PATH. Two rows are worth a word: `print_lines` beats C because an integer hole renders through a
 digit loop instead of `snprintf`, and `int_divide` is the one place the compiler spends rather
 than saves, since `/` and `%` guard the operand pairs the hardware leaves undefined.
+
+`matmul` compares like with like: Neuro's `@` is a plain triple loop today, so the C++ and Python
+rows are the same loop. A NumPy or PyTorch product hands the work to a tuned, multithreaded BLAS,
+and Neuro is not in that class yet; matmul throughput (tiling or a vendor BLAS) is a planned
+optimization on the [roadmap](#quick-roadmap).
 
 ---
 

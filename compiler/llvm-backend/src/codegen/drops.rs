@@ -352,6 +352,8 @@ impl<'ctx> CodegenContext<'ctx> {
             // `codegen_interp_string` concatenates every piece into one fresh buffer,
             // and does so unconditionally: even a hole-free interpolation allocates.
             HirExprKind::InterpString { .. } => true,
+            // A newtype is its inner value: wrapping a fresh buffer hands it on unchanged.
+            HirExprKind::NewtypeConstruct { value, .. } => self.produces_owned_string(value),
             // `+` yielding a `string` is `codegen_string_concat`, which always allocates
             // a `len1 + len2` buffer. No numeric addition produces a `string`, so the
             // result type alone identifies the concatenation.
@@ -572,7 +574,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The drop flag of the binding `expr` names, when that binding may own a heap
     /// `string`.
     fn owned_string_flag_ptr(&self, expr: &HirExpr) -> Option<PointerValue<'ctx>> {
-        let HirExprKind::Variable(name) = &expr.kind else {
+        let HirExprKind::Variable(name) = &peel_newtype(expr).kind else {
             return None;
         };
         self.live_drop_entry(name)
@@ -681,6 +683,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if self.drop_scopes.is_empty() {
             return;
         }
+        let expr = peel_newtype(expr);
         let Some((name, path)) = Self::moved_place(expr) else {
             return;
         };
@@ -1090,7 +1093,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         expr: &HirExpr,
     ) -> CodegenResult<Vec<(Vec<String>, IntValue<'ctx>)>> {
-        let HirExprKind::Variable(name) = &expr.kind else {
+        let HirExprKind::Variable(name) = &peel_newtype(expr).kind else {
             return Ok(Vec::new());
         };
         let positions: Vec<(Vec<String>, PointerValue<'ctx>)> = self
@@ -1548,6 +1551,16 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(cont_bb);
         Ok(())
     }
+}
+
+/// The value a newtype construction wraps. The wrapper is transparent (the newtype is
+/// its inner value), so `Name(p)` moves `p` exactly as a bare `p` in the same position
+/// does, flags and all.
+fn peel_newtype(mut expr: &HirExpr) -> &HirExpr {
+    while let HirExprKind::NewtypeConstruct { value, .. } = &expr.kind {
+        expr = value;
+    }
+    expr
 }
 
 /// Whether this expression shape allocates the tensor buffer it hands back, so that
