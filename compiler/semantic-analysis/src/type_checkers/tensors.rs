@@ -289,8 +289,16 @@ impl TypeChecker {
         match expected {
             Some(ty @ Type::Tensor { .. }) => Some(ty.clone()),
             _ => {
+                // `scalar` builds only the rank-0 tensor, so a `[3, 3]` example would
+                // suggest a turbofish it then refuses.
+                let shape = if ctor.name == CTOR_SCALAR {
+                    "[]"
+                } else {
+                    "[3, 3]"
+                };
                 self.record_error(TypeError::TensorTypeNotInferable {
                     ctor: ctor.name.clone(),
+                    shape,
                     span,
                 });
                 None

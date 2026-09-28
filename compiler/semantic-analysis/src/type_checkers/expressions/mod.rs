@@ -224,7 +224,7 @@ impl TypeChecker {
                 base,
                 span,
             } => {
-                let ty = self.check_struct_literal_expr(name, fields, base, span);
+                let ty = self.check_struct_literal_expr(name, fields, base, expected, span);
                 if let Some(ty) = &ty {
                     self.check_pool_construction(ty, None, *span);
                 }

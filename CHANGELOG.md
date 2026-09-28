@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-28
+
+Phase 3, automatic differentiation, is complete. The derivative is Neuro's own reverse-mode
+transform over the typed HIR, built at compile time: `@grad` with `wrt:` and `order: 2`,
+`.backward()` / `.grad()` / `.hessian()` / `.zero_grad()`, differentiation through calls,
+control flow and function values, elementwise math, and the `.detach()` / `@no_grad` fences.
+Phase 4, GPU acceleration, is next.
+
+### Fixed
+
+- A generic struct literal takes its instance from the expected type. `val w: W<i64> = W { a: 5 }`,
+  and the same literal as a function's tail, `return` value or `match` arm under a `W<i64>`
+  return type, were refused as `W<i32>`, and a field value past the `i32` range as out of range.
+  `Option::Some(5)` under `Option<i64>` already worked this way.
+- Passing a function value to a generic function whose parameter is a function type naming a
+  type parameter (`func apply<T>(x: T, f: (T) -> T)`) is refused with a message that says so. It
+  was reported as `expected fn(i32) -> i32, found fn(i32) -> i32`.
+- The hint for an uninferable `Tensor::scalar(...)` suggests `Tensor::<f32, []>::scalar(...)`.
+  It suggested a `[3, 3]` turbofish, which `scalar` refuses.
+- The Windows build finds the Windows SDK's system libraries. With the static CRT, `llvm-sys`
+  links `psapi`, `shell32` and the rest as static libraries, which rustc looks up only on its
+  own search paths, so the Windows CI leg failed with ``could not find native static library
+  `psapi` ``. The CI setup adds the SDK's `um\x64` directory through Cargo's home config, and
+  the installation guide gives the same step for a local build.
+
+### Docs
+
+- `docs/BUGS.md` records BUG-088 (an unknown attribute such as `@gpu` or a misspelled
+  `@no_grad` is accepted and ignored).
+- The README marks Phase 3 complete and points contributors at Phase 4.
+
 ## [3.19.4] - 2026-09-28
 
 ### Changed

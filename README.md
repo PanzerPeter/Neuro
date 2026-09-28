@@ -225,8 +225,8 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 |:---:|---|:---:|
 | **1** | **Core Language**: types, control flow, LLVM backend, ownership and borrow checking, generics, traits, closures, enums and pattern matching, error handling, modules | Complete |
 | **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value model they need | Complete |
-| **3** | **Automatic differentiation**: a reverse-mode source-to-source transform over Neuro's own typed HIR, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, elementwise math, `.detach()` / `@no_grad` | In progress |
-| **4** | **GPU acceleration**: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | Planned |
+| **3** | **Automatic differentiation**: a reverse-mode source-to-source transform over Neuro's own typed HIR, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, elementwise math, `.detach()` / `@no_grad` | Complete |
+| **4** | **GPU acceleration**: MLIR GPU dialects (nvgpu / rocdl), `@gpu`, `KernelOut<T>` aliasing model, device memory pool, CPU fallback | In progress |
 | **5** | **Neural network standard library**: `TrainableTensor`, `ParameterList`, optimizers, `@model`, Dense / Conv2d / Attention, `.nrm` serialization | Planned |
 | **6** | **Async runtime**: `async func`, `Future<T>`, `spawn`, `join` / `race`, an executor for data-loader and I/O overlap | Planned |
 | **7** | **Interop**: Python FFI via DLPack, spread operator, advanced pattern matching, custom attributes, `defer` | Planned |
@@ -285,10 +285,9 @@ Everything is published at [neuro-lang.netlify.app](https://neuro-lang.netlify.a
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the architecture rules, coding standards, quality gates and
 pull request process. Open defects are in [docs/BUGS.md](docs/BUGS.md), and fixing one is the best
-way to start. Work is most useful in **Phase 3 (Automatic Differentiation)**. The engine is
-Neuro's own reverse-mode transform over the typed HIR, where tensor shapes are still in the
-types, and every gradient it generates is checked against central finite differences of the
-compiled function by `tools/grad_differential.py`.
+way to start. Work is most useful in **Phase 4 (GPU acceleration)**, which starts by routing
+tensor lowering through the `mlir-backend` slice in the driver and then lowers it to the MLIR
+GPU dialects.
 
 See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 

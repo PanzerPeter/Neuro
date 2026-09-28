@@ -331,7 +331,7 @@ impl Lowerer {
                 fields,
                 base,
                 span,
-            } => self.lower_struct_literal(name, fields, base, *span),
+            } => self.lower_struct_literal(name, fields, base, expected, *span),
 
             Expr::EnumStructLiteral {
                 enum_name,

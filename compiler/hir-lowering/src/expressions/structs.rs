@@ -14,12 +14,13 @@ impl Lowerer {
         name: &shared_types::Identifier,
         fields: &[FieldInit],
         base: &Option<Box<Expr>>,
+        expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         // A generic struct literal infers its type arguments from the field values,
         // then monomorphizes into a concrete instance.
         if self.generic_structs.contains_key(&name.name) {
-            return self.lower_generic_struct_literal(name, fields, base, span);
+            return self.lower_generic_struct_literal(name, fields, base, expected, span);
         }
 
         let def =
@@ -74,8 +75,10 @@ impl Lowerer {
         name: &shared_types::Identifier,
         fields: &[FieldInit],
         base: &Option<Box<Expr>>,
+        expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
+        let instance_fields = self.expected_struct_instance_fields(&name.name, expected);
         let template = self
             .generic_structs
             .get(&name.name)
@@ -112,7 +115,13 @@ impl Lowerer {
                 .iter()
                 .find(|f| f.name.name == fname.name)
                 .map(|f| f.ty.clone());
-            let lowered = self.lower_expr(value, None)?;
+            // The instance the context names types the field value, mirroring the
+            // checker; without one the value drives inference on its own.
+            let field_expected = instance_fields
+                .as_ref()
+                .and_then(|f| f.iter().find(|(n, _)| n == &fname.name))
+                .map(|(_, t)| t.clone());
+            let lowered = self.lower_expr(value, field_expected.as_ref())?;
             if let Some(ft) = &field_ast_ty {
                 crate::unify_ast_hir(
                     ft,
@@ -156,6 +165,26 @@ impl Lowerer {
             struct_ty,
             span,
         ))
+    }
+
+    /// The concrete fields of the instance of generic struct `base` that `expected`
+    /// names, if it names one. The checker has already required the literal to be
+    /// that instance, so `W { a: 5 }` under `W<i64>` lowers `5` as an `i64`.
+    fn expected_struct_instance_fields(
+        &self,
+        base: &str,
+        expected: Option<&HirType>,
+    ) -> Option<Vec<(String, HirType)>> {
+        let Some(HirType::Struct(instance)) = expected else {
+            return None;
+        };
+        let names_base = instance
+            .strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with("_g_"));
+        if !names_base || !self.instantiated_structs.contains(instance) {
+            return None;
+        }
+        self.structs.get(instance).cloned()
     }
 
     /// The declared type of `field` on `struct_name`.

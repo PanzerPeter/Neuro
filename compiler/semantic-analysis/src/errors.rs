@@ -27,6 +27,13 @@ pub enum TypeError {
     #[error("'{name}' is a generic function, and a bare name picks no instance to be a value of; wrap the call in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`")]
     FunctionUsedAsValue { name: String, span: Span },
 
+    #[error("a function value cannot be passed to the generic function '{callee}': its parameter type `{param}` names a type parameter, and a function argument does not infer one; declare that parameter with concrete types")]
+    FunctionToGenericHigherOrder {
+        callee: String,
+        param: Type,
+        span: Span,
+    },
+
     #[error("generic type parameter '{name}' shadows a built-in type name")]
     GenericParamShadowsBuiltin { name: String, span: Span },
 
@@ -198,8 +205,13 @@ pub enum TypeError {
     #[error("a rank-0 tensor has no elements to write; build it with `Tensor::scalar(value)` instead of an array literal")]
     TensorScalarNeedsConstructor { span: Span },
 
-    #[error("the tensor type of `Tensor::{ctor}` cannot be inferred here; annotate the binding with `Tensor<T, [...]>`, or name it with a turbofish: `Tensor::<f32, [3, 3]>::{ctor}(...)`")]
-    TensorTypeNotInferable { ctor: String, span: Span },
+    #[error("the tensor type of `Tensor::{ctor}` cannot be inferred here; annotate the binding with `Tensor<T, [...]>`, or name it with a turbofish: `Tensor::<f32, {shape}>::{ctor}(...)`")]
+    TensorTypeNotInferable {
+        ctor: String,
+        /// An example shape the constructor accepts, so the suggested turbofish compiles.
+        shape: &'static str,
+        span: Span,
+    },
 
     #[error("`Tensor` has no constructor named '{ctor}'; it provides `zeros`, `ones`, `identity`, `random_normal`, `scalar`, and `from`")]
     UnknownTensorConstructor { ctor: String, span: Span },
@@ -1216,6 +1228,7 @@ impl TypeError {
             | Self::UndefinedFunction { span, .. }
             | Self::InvalidMainSignature { span, .. }
             | Self::FunctionUsedAsValue { span, .. }
+            | Self::FunctionToGenericHigherOrder { span, .. }
             | Self::GenericParamShadowsBuiltin { span, .. }
             | Self::GenericParamNotInferable { span, .. }
             | Self::UnknownArrayLength { span, .. }

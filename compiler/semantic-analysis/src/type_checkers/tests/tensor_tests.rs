@@ -348,6 +348,40 @@ func main() -> i32 {
 }
 
 #[test]
+fn regression_scalar_inference_hint_suggests_a_rank_zero_turbofish() {
+    // The hint suggested `Tensor::<f32, [3, 3]>::scalar(...)`, which `scalar` refuses.
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val s = Tensor::scalar(2.0f32)
+    val z = Tensor::zeros()
+    return 0
+}
+"#,
+    );
+    let shapes: Vec<&str> = errors
+        .iter()
+        .filter_map(|e| match e {
+            TypeError::TensorTypeNotInferable { shape, .. } => Some(*shape),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shapes, vec!["[]", "[3, 3]"], "got {errors:?}");
+    let suggested = semantic_errors(
+        r#"
+func main() -> i32 {
+    val s = Tensor::<f32, []>::scalar(2.0f32)
+    return 0
+}
+"#,
+    );
+    assert!(
+        suggested.is_empty(),
+        "the suggestion must compile; got {suggested:?}"
+    );
+}
+
+#[test]
 fn an_unknown_constructor_lists_the_ones_that_exist() {
     let errors = semantic_errors(
         r#"

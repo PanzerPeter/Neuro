@@ -591,6 +591,10 @@ checks trait bounds (`check_trait_bounds` / `TraitBoundNotSatisfied`, keyed off
 `Copy` requirement**: the abstract body was already checked against a conservatively non-`Copy`
 `T`, so it holds for every instantiation. Errors: `GenericParamShadowsBuiltin`,
 `GenericParamNotInferable` (fires at the call site, since turbofish exists).
+`unify_generic` has no rule for a function type, so a function value passed to a parameter whose
+function type names a type parameter is `FunctionToGenericHigherOrder` (the closures section's
+"not passed to a generic higher-order function"), reported instead of a mismatch between a
+template and the identical-looking concrete type.
 
 **`Type::Generic` answers `false` to `is_type_copy` and `true` to `is_type_move_tracked`**, which
 is what makes checking the body once sound: a second read of a `T`-typed binding is
@@ -607,7 +611,10 @@ placeholder-typed fields also kept in `struct_defs` under the base name so gener
 bodies check abstractly; the bare name is `GenericStructNeedsArgs`. A generic `impl` goes to
 `generic_impls` and its method signatures register under the base.
 `instantiate_generic_struct` (called from `resolve_type` for a `Type::Generic` annotation and
-from `check_generic_struct_literal` after inferring the arguments from field values) materializes
+from `check_generic_struct_literal` after inferring the arguments from field values; when the
+expected type names an instance of the same base, each field value is checked against that
+instance's concrete field type, so a literal under `W<i64>` is an `i64` as it is under
+`Option<i64>`) materializes
 a distinct nominal `Type::Struct("Base<args>")` with concrete fields (`substitute_generic`) and
 per-instance methods (`remap_method_type`) registered on demand, so downstream field access and
 method dispatch reuse the ordinary struct machinery. A type argument carries no `Copy`

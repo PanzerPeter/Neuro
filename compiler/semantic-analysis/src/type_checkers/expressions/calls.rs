@@ -388,6 +388,22 @@ impl TypeChecker {
             if !matches!(arg_ty, Type::Unknown)
                 && !declarations::unify_generic(param, &arg_ty, &mut subst)
             {
+                // A closure is not passed to a generic higher-order function (the
+                // closures section of the language reference), and unification has no
+                // rule for a function type. Say so: the generic mismatch below would print
+                // two identical-looking types, `fn(i32) -> i32` against its template.
+                if matches!(param, Type::Function { .. })
+                    && matches!(arg_ty, Type::Function { .. })
+                    && super::mentions_type_parameter(param)
+                {
+                    self.record_error(TypeError::FunctionToGenericHigherOrder {
+                        callee: func_name.to_string(),
+                        param: param.clone(),
+                        span: arg.span(),
+                    });
+                    self.record_move(arg);
+                    continue;
+                }
                 // A shape parameter this argument contradicts is reported by name: the
                 // expected type below was itself inferred from an earlier argument, so
                 // printing it alone leaves the reader to work out which extent moved.

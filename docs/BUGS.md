@@ -5,6 +5,48 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-088: an attribute the compiler does not know is accepted and ignored
+
+- **Status**: open, specification gap
+- **Area**: `semantic-analysis`; attributes are read by name where each one matters
+  (`grad`, `no_grad`, `derive`, `allow`) and never checked as a set
+- **Severity**: minor. Nothing miscompiles, but a misspelled attribute silently does nothing,
+  and the GPU attributes the next phase adds already compile today as no-ops
+
+**Minimal repro**
+
+```neuro
+@gpu
+func double(x: i32) -> i32 { x * 2 }
+
+@no_grda
+func scale() -> f32 { 2.0f32 }
+
+func main() -> i32 {
+    double(1) + scale() as i32
+}
+```
+
+Observed: compiles and exits 4. `@gpu` runs the function on the CPU, and the misspelled
+`@no_grda` is dropped, so inside a `@grad` body the call would be differentiated rather than
+held constant. By contrast `tensor.to(Device::GPU(0))` stops with a located `panic:` that says
+the GPU backend does not exist yet.
+
+**Open question for the specification**: the custom attributes section says the `@name(args)`
+syntax is extensible, and says nothing about a name no one defined. Either an unknown attribute
+is an error (the usual choice, and the one that keeps a typo from changing a program's meaning),
+or it is ignored, in which case `@gpu` and `@kernel` should still be refused until they are
+implemented, since a program written against them today would change behaviour when they land.
+
+**Root cause**: confirmed in the code. Each consumer looks for its own attribute name on the
+item and skips everything else; no pass checks an item's attributes against the known set.
+
+**Workaround**: none needed for correct spellings. Check attribute names by hand.
+
+**Fix sketch**: once the rule is settled, one pass over every item's attributes against the
+recognized names, reporting the unknown one at its span. Regression tests: a misspelled
+`@no_grad`, `@gpu` before the GPU backend exists, and every recognized attribute still accepted.
+
 ## BUG-085: a struct passed by value never releases the `string` buffers it holds
 
 - **Status**: open, confirmed

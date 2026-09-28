@@ -16,6 +16,39 @@ func main() -> i32 { return identity(41) }
 }
 
 #[test]
+fn regression_function_to_generic_higher_order_names_the_restriction() {
+    // Passing a function value to a generic `(T) -> T` parameter was reported as
+    // "expected fn(i32) -> i32, found fn(i32) -> i32". It is refused under its own
+    // name, once, at the argument, with or without a turbofish.
+    let source = r#"
+func inc(x: i32) -> i32 { x + 1 }
+func apply<T>(x: T, f: (T) -> T) -> T { f(x) }
+func main() -> i32 {
+    val a = apply(3, inc)
+    val b = apply::<i32>(3, |x: i32| -> i32 { x + 1 })
+    return a + b
+}
+"#;
+    let errors = semantic_errors(source);
+    let spans: Vec<usize> = errors
+        .iter()
+        .filter_map(|e| match e {
+            TypeError::FunctionToGenericHigherOrder { span, .. } => Some(span.start),
+            _ => None,
+        })
+        .collect();
+    let first = source.find("inc)").expect("first argument");
+    let second = source.find("|x: i32|").expect("second argument");
+    assert_eq!(spans, vec![first, second], "got {errors:?}");
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "no generic mismatch alongside it; got {errors:?}"
+    );
+}
+
+#[test]
 fn generic_body_operation_without_bound_is_rejected() {
     // A bare `T` has no `+` without a trait bound (the trait system does not exist yet).
     let errors = semantic_errors("func bad<T>(a: T, b: T) -> T { a + b }");

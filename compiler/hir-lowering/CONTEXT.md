@@ -339,7 +339,8 @@ order is irrelevant.
 Generic structs and impls work the same way, through `generic_structs` / `generic_impls` and
 `instantiate_generic_struct(base, args)`: called from `resolve_type` for a `Type::Generic`
 annotation and from `lower_generic_struct_literal` after inferring the arguments from field
-values. Each instance registers concrete fields plus impl-method signatures and emits one
+values, each lowered against the matching field of the instance the expected type names when it
+names one (mirroring the checker, so the literal's type and layout agree). Each instance registers concrete fields plus impl-method signatures and emits one
 `HirItem::Struct` plus one `HirItem::Impl` per generic impl, with method bodies lowered under the
 impl's `type_subst` and `self` bound to the instance. Because these are ordinary struct/impl HIR
 items, the backend needs no generic awareness. A generic enum's impls follow the same path from

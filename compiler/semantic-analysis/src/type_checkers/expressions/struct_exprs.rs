@@ -55,6 +55,7 @@ impl TypeChecker {
         name: &shared_types::Identifier,
         fields: &[ast_types::FieldInit],
         base: &Option<Box<ast_types::Expr>>,
+        expected: Option<&Type>,
         span: shared_types::Span,
     ) -> Type {
         let template_fields = self
@@ -62,6 +63,7 @@ impl TypeChecker {
             .get(&name.name)
             .cloned()
             .unwrap_or_default();
+        let instance_fields = self.expected_struct_instance_fields(&name.name, expected);
         let generics: Vec<String> = self
             .generic_structs
             .get(&name.name)
@@ -89,12 +91,17 @@ impl TypeChecker {
                     let expected = expected.clone();
                     // A field whose type is fully concrete (mentions no type/const
                     // parameter) gives the value its contextual type so a bare literal
-                    // infers correctly; a parameterized field is checked with no
-                    // expectation so it drives inference instead.
-                    let expected_ctx = if mentions_type_parameter(&expected) {
-                        None
-                    } else {
-                        Some(&expected)
+                    // infers correctly; a parameterized field takes its type from the
+                    // instance the context names, and with no such context is checked
+                    // with no expectation so it drives inference instead.
+                    let instance_ty = instance_fields
+                        .as_ref()
+                        .and_then(|f| f.iter().find(|(n, _)| n == &fname.name))
+                        .map(|(_, t)| t);
+                    let expected_ctx = match instance_ty {
+                        Some(concrete) => Some(concrete),
+                        None if mentions_type_parameter(&expected) => None,
+                        None => Some(&expected),
                     };
                     let actual = self
                         .check_expr(value, expected_ctx)
@@ -163,17 +170,39 @@ impl TypeChecker {
         inst
     }
 
+    /// The concrete fields of the instance of generic struct `base` that `expected`
+    /// names, if it names one. An annotation or a return type types the literals it
+    /// covers, so `val w: W<i64> = W { a: 5 }` reads `5` as an `i64`, the way
+    /// `Option::Some(5)` does under `Option<i64>`.
+    fn expected_struct_instance_fields(
+        &self,
+        base: &str,
+        expected: Option<&Type>,
+    ) -> Option<Vec<(String, Type)>> {
+        let Some(Type::Struct(instance)) = expected else {
+            return None;
+        };
+        let names_base = instance
+            .strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with('<'));
+        if !names_base {
+            return None;
+        }
+        self.struct_defs.get(instance).cloned()
+    }
+
     pub(super) fn check_struct_literal_expr(
         &mut self,
         name: &Identifier,
         fields: &[FieldInit],
         base: &Option<Box<Expr>>,
+        expected: Option<&Type>,
         span: &Span,
     ) -> Option<Type> {
         // A generic struct literal `Pair { first: 1, second: 2.0 }` infers its
         // type arguments from the field values and monomorphizes.
         if self.is_generic_struct(&name.name) {
-            return Some(self.check_generic_struct_literal(name, fields, base, *span));
+            return Some(self.check_generic_struct_literal(name, fields, base, expected, *span));
         }
 
         let def = if let Some(d) = self.struct_defs.get(&name.name).cloned() {
