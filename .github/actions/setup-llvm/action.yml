@@ -262,6 +262,28 @@ runs:
         "LLVM_SYS_221_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
         "$prefix\bin"                  | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
+        # Under +crt-static, llvm-sys emits the system libraries llvm-config names
+        # (psapi, shell32, ole32, uuid, advapi32, ws2_32, ntdll) as `static=` links.
+        # rustc then has to find each .lib itself to bundle it into the llvm-sys
+        # rlib, and it searches only its -L paths, never the linker's LIB, so it
+        # fails with "could not find native static library `psapi`". The Windows
+        # SDK directory that holds them is added as a search path. It goes into
+        # Cargo's home config rather than RUSTFLAGS: Cargo joins config arrays,
+        # while RUSTFLAGS would replace the repository's +crt-static.
+        $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib'
+        $sdk = Get-ChildItem $kits -Directory |
+          Where-Object { Test-Path (Join-Path $_.FullName 'um\x64\psapi.lib') } |
+          Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+        if (-not $sdk) { throw "No Windows SDK with um\x64\psapi.lib under $kits" }
+        $um = Join-Path $sdk.FullName 'um\x64'
+        Write-Host "Windows SDK libraries: $um"
+        $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+        New-Item -ItemType Directory -Force -Path $cargoHome | Out-Null
+        @"
+        [target.x86_64-pc-windows-msvc]
+        rustflags = ['-L', 'native=$um']
+        "@ | Out-File (Join-Path $cargoHome 'config.toml') -Append -Encoding utf8
+
     - name: Verify LLVM prefix is set
       shell: bash
       run: |

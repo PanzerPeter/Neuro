@@ -141,12 +141,21 @@ Get-ChildItem "<vcpkg-root>\installed\x64-windows-static\lib\*xml2*.lib" |
 setx LLVM_SYS_221_PREFIX "C:\LLVM"
 $env:LLVM_SYS_221_PREFIX = "C:\LLVM"
 
-# 6. Clone and build
+# 6. Let rustc find the Windows SDK's system libraries (see below)
+$kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib'
+$sdk  = Get-ChildItem $kits -Directory |
+  Where-Object { Test-Path (Join-Path $_.FullName 'um\x64\psapi.lib') } |
+  Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+$um   = Join-Path $sdk.FullName 'um\x64'
+"[target.x86_64-pc-windows-msvc]`nrustflags = ['-L', 'native=$um']" |
+  Out-File "$env:USERPROFILE\.cargo\config.toml" -Append -Encoding utf8
+
+# 7. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
 cargo build --release
 
-# 7. Run tests
+# 8. Run tests
 cargo test --workspace
 ```
 
@@ -155,6 +164,14 @@ Rust defaults to the dynamic one (`/MD`) on `x86_64-pc-windows-msvc`. The reposi
 `.cargo/config.toml` builds Rust with `+crt-static` on that target so the two match. A
 `RUSTFLAGS` environment variable replaces that setting rather than adding to it, so if
 you set one, include `-C target-feature=+crt-static` in it.
+
+**Windows SDK libraries.** With the static CRT on, `llvm-sys` links the system libraries
+`llvm-config` names (`psapi`, `shell32`, `ole32`, `uuid`, `advapi32`, `ws2_32`, `ntdll`) as
+static libraries, and rustc looks for each `.lib` only on its own `-L` search paths, not on
+the linker's `LIB`. Without step 6 the build stops with
+``could not find native static library `psapi` ``. Step 6 adds the SDK's `um\x64` directory
+through your user-level Cargo config, which Cargo combines with the repository's
+`+crt-static` setting instead of replacing it.
 
 **libxml2.** `llvm-config.exe --system-libs` lists `xml2s.lib`, because one LLVM
 component (the Windows manifest merger) uses libxml2. Neuro never calls into it, so no
