@@ -168,8 +168,8 @@ device placement is later work.
 A tensor moves like any other non-`Copy` value, and the move hands the buffer on rather than
 copying it: binding it, passing it to a function, returning it, storing it in a struct
 field, and `.to(device)` all transfer ownership, and only the last owner releases it. A
-tensor held in a struct field is not released when the struct goes out of scope; that gap is
-shared with the standard collections.
+tensor held in a struct field, array element or enum payload is released with the value that
+holds it (see the [memory model](memory-model.md)).
 
 That the handle is really consumable is checked, not asserted. Compile a module of
 tensor-returning functions with `neurc compile --emit obj`, link it into a shared library,
@@ -198,8 +198,9 @@ is moved, exactly as passing a tensor to a function moves it; a borrowed one is 
 so a weight can feed an operator without leaving the binding that owns it. The result is a
 new buffer either way, which is what lets the operator read two borrows at once.
 
-The element type must have arithmetic (any integer, `f32`, or `f64`), and element
-arithmetic carries the same guards the scalar operator does: an overflowing element panics
+The element type must have arithmetic: any integer or float, `f16` and `bf16` included (each
+element is computed in `f32` and rounded back once). Element arithmetic carries the same
+guards the scalar operator does: an overflowing element panics
 on the debug tier and a zero divisor panics in every build.
 
 ### Broadcasting
@@ -315,8 +316,8 @@ goes back into the buffer the target already owns, so an operand may be stretche
 the target's shape and never past it. A scalar is accepted the same way, which is what
 makes `w *= 2.0` the scalar broadcast. The operand is evaluated before the target is
 borrowed for the update. The element type
-must have arithmetic (any integer, `f32`, or `f64`), and element arithmetic carries the
-same guards the scalar operator does. See
+must have arithmetic (any integer or float, half precision included), and element arithmetic
+carries the same guards the scalar operator does. See
 [Compound Assignment Operators](operators.md#compound-assignment-operators).
 
 ## Slicing and indexing
@@ -649,8 +650,9 @@ val total: i32 = folded.item()                 // 22
 This is how a loss leaves a `@grad` function's rank-0 result as a number, for printing
 or for keeping past the `pool` block the tensor is released with.
 
-Three rules are compile-time errors. The element type must be an integer or `f32`/`f64`: a
-`bool` tensor has nothing to fold. `.mean()` narrows that to `f32`/`f64`, because an
+Three rules are compile-time errors. The element type must be an integer or a float: a
+`bool` tensor has nothing to fold. A half-precision reduction accumulates in `f32`, so a long
+`bf16` sum does not stall. `.mean()` narrows that to floats, because an
 integer mean would have to pick a rounding rule the language does not give: sum and divide
 explicitly instead. And a reduction over **no** elements is rejected outright rather than
 given an identity value, since `.max()` of nothing has no answer. A receiver whose extent is
@@ -775,7 +777,7 @@ A subscript that disagrees with its operands is a compile error **naming the let
 letter bound to two different extents, an output letter no input binds, or an output letter
 written twice. The rest are checked the same way: one comma-separated subscript per
 operand, one letter per axis, every operand a tensor, and every operand sharing one integer
-or `f32`/`f64` element type. Every extent must be a number here, so a shape parameter or a
+or float element type (half precision included). Every extent must be a number here, so a shape parameter or a
 `?` axis is rejected: the result's shape and the strides behind it are both built from it.
 
 A result axis carries no dimension name. A subscript letter is a local label for the
@@ -919,9 +921,9 @@ through an index (`t[i, j] = v`), sliced, reshaped with
 elementwise with `.map(f)` / `.zip(other, f)` / `.reduce(init, f)`, and passed through
 `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`. A dynamic `?` axis is accepted, but only as a widening: nothing that needs
 an extent works on one, and there is no run-time shape check that would let a `?` be
-narrowed back to a literal. Symbolic
-extents are accepted on functions: a shape-generic struct, enum, or `impl` block is
-later work, so a shape parameter is a function's to declare.
+narrowed back to a literal. The bare-name shape parameter (`[N, K]`) is a function's to
+declare: a struct, enum or `impl` that wants a symbolic extent spells it as an explicit const
+parameter, as in `struct Dense<const IN: u32, const OUT: u32> { w: Tensor<f32, [IN, OUT]> }`.
 
 ## References
 

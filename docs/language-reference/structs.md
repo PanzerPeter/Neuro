@@ -33,7 +33,7 @@ export struct Config {
 ```
 
 `export` is per field, so an exported struct can still hold something back. Another module
-cannot read `c.timeout`, assign to it, list it in a literal, or reach it through `..base`
+cannot read `c.timeout`, assign to it, list it in a literal, or reach it through `..base`,
 which is what makes a constructor like `Config::new` the only way in. See
 [Modules → Visibility](modules.md#visibility).
 
@@ -70,7 +70,7 @@ val shifted = Point { x: 10.0, ..p }   // x = 10.0, y inherited from p (2.0)
 val copy = Point { ..p }               // all fields copied from p
 ```
 
-The base must be the same struct type as the literal (otherwise a type `Mismatch` error). When a base is present, omitting fields is **not** a `MissingStructField` error, the base fills them in. The base is evaluated and its fields are copied into the new value; no allocation is introduced.
+The base must be the same struct type as the literal (otherwise a type `Mismatch` error). When a base is present, omitting fields is **not** a `MissingStructField` error: the base fills them in. The base is evaluated and its fields are copied into the new value; no allocation is introduced.
 
 ## Field Access
 
@@ -98,7 +98,7 @@ Mutating a field of a `val` binding is a compile error:
 
 ```neuro
 val fixed = Point { x: 1.0, y: 2.0 }
-// fixed.x = 3.0  // Error: AssignToImmutableField
+// fixed.x = 3.0  // error: cannot assign to field 'x' of immutable binding 'fixed'
 ```
 
 ## Passing Structs to Functions
@@ -153,7 +153,8 @@ func main() -> i32 {
 
 - `self` inside the method refers to the receiver struct value.
 - All struct fields are accessible via `self.field`.
-- The receiver is passed by value (read-only snapshot).
+- The receiver is a shared borrow: the method can read fields but cannot move an owning one
+  out (see [Consuming Methods](#consuming-methods-self)).
 
 ### Mutating Methods (`&mut self`)
 
@@ -343,9 +344,10 @@ func main() -> i32 {
 }
 ```
 
-Not yet supported: a `match` arm that binds an enum payload by value disowns the whole
-scrutinee, because which payload left depends on a tag that is only known at runtime. A
-variant the taken arm did not bind therefore leaks rather than being destroyed twice.
+Not yet supported: a `match` arm that binds *some* of a variant's owning fields and not
+others (`A(x, _)`) disowns the whole scrutinee, so the field it did not bind leaks rather
+than being destroyed twice. An arm that binds every owning field, or none, releases
+everything exactly once.
 
 ## Derived Traits (`@derive`)
 
@@ -423,7 +425,7 @@ struct Wrapper<T> {
 }
 
 impl<T> Wrapper<T> {
-    func get(&self) -> T {
+    func get(self) -> T {   // by value: `&self` cannot give away an owning `T`
         self.value
     }
 }
@@ -440,12 +442,12 @@ func main() -> i32 {
 }
 ```
 
-**Restrictions (this phase).** Type arguments carry no `Copy` requirement: an instance *holds*
+**Restrictions.** Type arguments carry no `Copy` requirement: an instance *holds*
 the value, so `Wrapper<string>` owns the string it holds and moves with it (see
 [Types → Ownership of an element](types.md#ownership-of-an-element)). A generic struct is usable
 only *with* type arguments; its bare name is rejected. A generic instantiated with an enclosing type
-parameter (a `Wrapper<T>` field inside another generic struct) is a documented limitation,
-deferred with broader generic support.
+parameter (a `Wrapper<T>` field inside another generic struct) is rejected with
+`nested generic type argument is not yet supported`.
 
 ### Const (value) parameters
 
@@ -466,7 +468,13 @@ val other: Buffer<i32, 4> = Buffer { data: [5, 6, 7, 8], count: 4 }
 ```
 
 Each distinct `CAP` produces its own monomorphized struct at zero runtime cost. A generic `impl`
-over a struct's const parameter is a documented limitation deferred to broader generic support.
+declares the const parameter the same way, and its methods read it as a value:
+
+```neuro
+impl<T, const CAP: u32> Buffer<T, CAP> {
+    func capacity(&self) -> u32 { CAP }
+}
+```
 
 ## Traits
 
@@ -517,8 +525,8 @@ func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
 A trait-bounded generic is **fully monomorphized and erased**: each `impl` lowers to ordinary
 methods and each bound is specialized per concrete type, so there is no vtable and no runtime
 cost. Supertraits (`Comparable` requires `PartialEq`), dynamic dispatch (`dyn Trait`, which
-*does* use a vtable), and the [operator traits](operators.md#operator-overloading) have all
-landed.
+*does* use a vtable, see [Functions](functions.md#dyn-trait-dynamic-dispatch)) and the
+[operator traits](operators.md#operator-overloading) build on the same trait machinery.
 
 ### Associated types
 
@@ -574,7 +582,7 @@ is an error naming both types. A bound may only constrain an associated type the
 declares, and a bare bound still cannot type a call to a method that names one.
 
 A trait declaring an associated type has **no `dyn` form yet**. The form that will work
-binds the associated type in the trait-object type itself (`&dyn Channel<Sample = i32>`)
+binds the associated type in the trait-object type itself (`&dyn Channel<Sample = i32>`),
 which is what keeps the vtable's signatures resolvable after the implementor is erased. The
 compiler does not accept it today and says so: `dyn` on such a trait is rejected as not
 object-safe, naming the associated type and the bound form that is not implemented.
@@ -608,6 +616,6 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 
 ## References
 
-- [Types](types.md), type system overview
-- [Variables](variables.md), `val` and `mut` bindings
-- [Functions](functions.md), function definitions
+- [Types](types.md): type system overview
+- [Variables](variables.md): `val` and `mut` bindings
+- [Functions](functions.md): function definitions

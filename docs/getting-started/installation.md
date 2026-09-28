@@ -13,7 +13,7 @@ the three platforms CI builds, tests, and ships release binaries for.
 
 **Optional:**
 - MLIR 22 for the experimental MLIR backend; see [MLIR Backend](#optional-mlir-backend) below. Not needed for a normal build.
-- CUDA Toolkit 12+ for GPU support (Phase 4+, not yet implemented)
+- CUDA Toolkit 12+ for GPU support, once it lands (planned, not yet implemented)
 
 ---
 
@@ -134,7 +134,8 @@ Move-Item "$env:TEMP\$asset" C:\LLVM
 
 # 4. Provide the libxml2 library that LLVM's llvm-config names (see below)
 vcpkg install "libxml2[core]:x64-windows-static"
-Copy-Item "<vcpkg-root>\installed\x64-windows-static\lib\libxml2s.lib" C:\LLVM\lib\xml2s.lib
+Get-ChildItem "<vcpkg-root>\installed\x64-windows-static\lib\*xml2*.lib" |
+  Select-Object -First 1 | Copy-Item -Destination C:\LLVM\lib\xml2s.lib
 
 # 5. Set the LLVM prefix (persists for future sessions)
 setx LLVM_SYS_221_PREFIX "C:\LLVM"
@@ -158,7 +159,9 @@ you set one, include `-C target-feature=+crt-static` in it.
 **libxml2.** `llvm-config.exe --system-libs` lists `xml2s.lib`, because one LLVM
 component (the Windows manifest merger) uses libxml2. Neuro never calls into it, so no
 libxml2 code ends up in `neurc.exe`, but the linker still refuses to start when a named
-library is missing. Any static libxml2 copied in under that name satisfies it.
+library is missing. Any static libxml2 copied in under that name satisfies it. The archive
+vcpkg builds changes its file name between libxml2 releases (`libxml2s.lib` up to 2.14), which
+is why the command above matches `*xml2*.lib` instead of naming it.
 
 **Backend subset.** The archive carries X86, AArch64, ARM, BPF, NVPTX, RISCV and
 WebAssembly, which is why the workspace pins inkwell to `target-x86` rather than
@@ -168,7 +171,7 @@ WebAssembly, which is why the workspace pins inkwell to `target-x86` rather than
 
 ## Optional: MLIR Backend
 
-The MLIR lowering path for tensors (and, from Phase 4, GPU dialects) lives in the
+The MLIR lowering path for tensors (and, later, GPU dialects) lives in the
 `mlir-backend` slice, built on the `melior` Rust MLIR bindings. It is **off by
 default** behind the `mlir` cargo feature, so nothing here is required for a
 normal Neuro build: the default `cargo build/test --workspace` compiles a
@@ -224,8 +227,8 @@ cargo run -p neurc -- check examples/basics/hello.nr
 cargo run -p neurc -- compile examples/basics/factorial.nr
 
 # Run the compiled binary
-./examples/factorial            # Unix
-.\examples\factorial.exe        # Windows
+./examples/basics/factorial            # Unix
+.\examples\basics\factorial.exe       # Windows
 
 # After cargo install --path compiler/neurc:
 neurc --version

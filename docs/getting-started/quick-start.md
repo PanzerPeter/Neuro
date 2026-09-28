@@ -55,10 +55,10 @@ Execute the compiled program:
 
 ```bash
 # Windows
-.\examples\hello.exe
+.\examples\basics\hello.exe
 
 # Unix
-./examples/hello
+./examples/basics/hello
 ```
 
 Check the exit code:
@@ -71,7 +71,7 @@ echo $LASTEXITCODE
 echo $?
 ```
 
-The hello.nr program returns 26.
+The hello.nr program prints two lines and exits with 26.
 
 A program reports a result two ways, and every example in this repository is verified
 on both. `main`'s `i32` becomes the exit code, pinned in
@@ -118,8 +118,13 @@ func calculate(x: i32) -> i32 {
 func main() -> i32 {
     val x: i32 = 5
     val y: i32 = 3
+
     val sum: i32 = add(x, y)
+    println("add({x}, {y})    = {sum}")
+
     val calculated: i32 = calculate(sum)
+    println("calculate({sum}) = {calculated}")
+
     return calculated
 }
 ```
@@ -129,6 +134,7 @@ func main() -> i32 {
 - Calling functions and chaining their results
 - Immutable variables (`val`)
 - Integer arithmetic
+- String interpolation with `println`
 - `return` statements (the program exits with the value `main` returns, here `26`)
 
 ### function_call.nr
@@ -164,7 +170,7 @@ cargo run -p neurc -- compile examples/basics/function_call.nr
 ./examples/basics/function_call
 ```
 
-Prints `add(5, 3) = 8` and exits 8
+Prints `add(5, 3) = 8` and exits with 8.
 
 ## CLI Options
 
@@ -183,8 +189,10 @@ neurc compile <file.nr> [options]
 ```
 
 **Options**:
-- `-o, --output <FILE>` - Specify output executable path (default: the input filename without its extension, `.exe` on Windows)
-- `-O, --optimization <0-3>` - Optimization level (default: `0`)
+- `-o, --output <FILE>`: output path (default: the input filename without its extension, `.exe` on Windows)
+- `-O, --optimization <0-3>`: optimization level (default: `0`)
+- `--emit <exe|obj|llvm-ir>`: what to write, a linked executable (default), an unlinked object
+  file, or textual LLVM IR. See the [CLI guide](../guides/cli-usage.md)
 
 **Examples**:
 
@@ -213,7 +221,7 @@ status. Nothing is written beside the source, so this is the command to reach fo
 iterating; use `compile` when you want to keep the binary.
 
 **Options**:
-- `-O, --optimization <0-3>` - Optimization level (default: `0`)
+- `-O, --optimization <0-3>`: optimization level (default: `0`)
 
 ```bash
 neurc run examples/basics/hello.nr
@@ -271,7 +279,7 @@ Error: 1 type error(s) found
 2. **Check** syntax and types: `neurc check program.nr`
 3. **Run** it: `neurc run program.nr`
 4. **Ship** a binary when you want one: `neurc compile program.nr`
-5. **Iterate** - fix errors and repeat
+5. **Iterate**: fix errors and repeat
 
 ### Recommended Workflow
 
@@ -303,80 +311,11 @@ RUST_LOG=debug neurc compile examples/basics/hello.nr
 
 This shows each stage as it runs: module resolution and parsing, type checking, HIR lowering, LLVM IR and object-code generation, and linking.
 
-## Current Feature Summary
+## What the Language Covers
 
-Per-sub-phase status lives in the [Quick Roadmap](../../README.md#quick-roadmap). The
-current compiler supports:
-
-### Types
-- Integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
-- Floats: `f16`, `bf16`, `f32`, `f64`
-- Boolean: `bool`; `char` (32-bit Unicode scalar)
-- Strings: fat-pointer `string` with escape sequences (`\n`, `\t`, `\"`, `\\`, `\xNN`, `\u{NNNN}`); `==`/`!=` byte-level comparison; `+` concatenation; `.len()` / `.clone()` / `.slice(a..b)` (bytes) / `.char_slice(a..b)` (code points); `.chars()` iterates the scalars and `for (offset, c) in s.char_indices()` binds each one's byte offset
-- Structs: user-defined types with nominal typing
-- Fixed-size arrays `[T; N]`, tuples `(T1, T2, ...)`, enums with associated data, `newtype`, `type` aliases
-
-### Variables & Constants
-- Immutable variables: `val x: i32 = 10`
-- Mutable variables: `mut counter: i32 = 0`
-- Variable reassignment: `counter = counter + 1`
-- Compile-time constants: `const MAX: i32 = 100` at module and function scope
-- Contextual numeric literal inference (e.g. `val n = 42` infers `i32`)
-
-### Functions
-- Function definitions with typed parameters
-- Explicit `return` statements
-- Expression-based implicit returns (trailing expression)
-- Recursion and forward references
-- `impl` blocks with `&self` / `&mut self` methods and `TypeName::func` associated functions
-- Generic functions, structs and impls with enforced trait bounds, const generics, `where` clauses, turbofish
-- Closures and lambdas `|x: i32| x * x`; function type `(T1, ...) -> R`; higher-order functions
-
-### Traits & Dispatch
-- `trait` declarations with required and default methods; `impl Trait for Type`
-- Static dispatch via `impl Trait` and trait-bounded generics (monomorphized)
-- Dynamic dispatch via `&dyn Trait` (vtable-backed)
-- Operator overloading through the compiler-known operator traits
-
-### Ownership
-- Move-by-default with use-after-move detection; `@derive(Copy, Clone)`; `.clone()`
-- Immutable `&T` and mutable `&mut T` borrows with `*` deref; flow-sensitive borrow exclusivity
-- Explicit lifetime annotations `<'a>`; returned-reference lifetime elision
-- Deterministic `Drop` running at scope exit in reverse declaration order, at the assignment
-  that displaces a value, and for every owner a destroyed value holds: a struct field, an
-  array or tuple element, an enum payload, a newtype's inner value
-
-### Control Flow
-- `if` / `else if` / `else` chains; `if` and blocks as value expressions
-- `while` loops; `loop` (including as a value expression)
-- Range-for loops: `for i in 0..n` (exclusive) and `for i in 0..=n` (inclusive)
-- `for x in e` over any type implementing the prelude's `IntoIterator` / `Iterator` protocol,
-  adapters included
-- `break` and `continue`, with value-carrying breaks and loop labels
-- `match` as an exhaustive expression with payload binding, or-patterns, ranges, and guards
-- `panic(msg)` / `assert(cond)` / `unreachable()`
-
-### Operators
-- Arithmetic: `+`, `-`, `*`, `/`, `%`
-- Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
-- Logical: `&&`, `||`, `!`
-- Bitwise: `&`, `|`, `^`, `~`, `<<` (integer types only)
-- Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`
-- Type cast: `as` for numeric conversions and bool-to-int
-- Coalescing: `??` unwraps an `Option` / `Result`, else evaluates a lazy fallback
-- Propagation: `expr?` unwraps an `Option` / `Result`, else returns the failure to the caller
-
-### Modules
-- A program may span several files: every `.nr` file is a module, and a directory holding a `mod.nr` is a module with children. You compile the root
-- `import math`, `import ./utils::io`, `import math::{sqrt, sin}`, `as` renames, module aliases, variant imports, and `export import` re-export facades
-- Inline `module Name { ... }` blocks group items inside one file, under the same rules
-- Declarations and struct fields are private to their module until `export` opts them in
-- An implicit prelude puts `Option`, `Result`, and `Some` / `None` / `Ok` / `Err` in scope in every file with no `import`; `@no_prelude` on a file's first line opts out
-- Named arguments: `connect("localhost", port: 8080)`, in any order after the positional
-  ones. A parameter declared `external internal: T` *requires* the external name at the
-  call site; one declared `_ internal: T` is positional-only
-- Triple-quoted `"""` block strings dedented to the closing delimiter's column, and block
-  comments that nest
+The [capability table](../../README.md#current-capabilities) lists what the compiler supports
+today, and the [Quick Roadmap](../../README.md#quick-roadmap) what is planned. Each feature is
+defined once, in the [language reference](../README.md#language-reference).
 
 ## Common Issues
 
@@ -408,10 +347,10 @@ cargo run --release -p neurc -- compile program.nr
 
 ## Next Steps
 
-- [Your First Program](first-program.md) - Detailed tutorial
-- [Language Reference](../language-reference/types.md) - Complete language documentation
-- [CLI Usage Guide](../guides/cli-usage.md) - Advanced CLI features
-- [Troubleshooting](../guides/troubleshooting.md) - Common problems and solutions
+- [Your First Program](first-program.md): a detailed tutorial
+- [Language Reference](../language-reference/types.md): the full language
+- [CLI Usage Guide](../guides/cli-usage.md): every command and flag
+- [Troubleshooting](../guides/troubleshooting.md): common problems and solutions
 
 ## Getting Help
 

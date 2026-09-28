@@ -583,7 +583,7 @@ for (i, score) in scores.enumerate() {
 
 `.enumerate()` applies to a fixed-size array, a `Vec<T>`, a borrow of either, and
 a range. A range must be parenthesised, because `..` binds looser than a method
-call, `0..n.enumerate()` would enumerate `n`:
+call: `0..n.enumerate()` would enumerate `n`:
 
 ```neuro
 for (step, value) in (10..13).enumerate() {
@@ -762,7 +762,7 @@ for (offset, c) in "héllo".char_indices() {
 
 A `.char_indices()` head binds a pair and only a pair, and it takes no `.enumerate()`
 and no adapters: it already carries a position. See
-[types](types.md) for the method surface behind both.
+[Strings](strings.md#string-methods) for the method surface behind both.
 
 ## Break and Continue
 
@@ -954,7 +954,7 @@ func classify(n: i32) -> i32 {
 ```
 
 An arm body is an expression, and may also be a bare `return`, `break`, or
-`continue`, the statement that leaves the enclosing function or loop instead of
+`continue`: the statement that leaves the enclosing function or loop instead of
 producing a value for the arm:
 
 ```neuro
@@ -973,8 +973,8 @@ func first_even(limit: i32) -> i32 {
 
 Enum variants deconstruct and bind their payloads (`E::Tuple(a)`,
 `E::Struct { field }`). A `match` must be exhaustive. See
-[Expressions → Match Expressions](expressions.md) for the full pattern grammar,
-exhaustiveness rules, and current Phase-1E limits.
+[Expressions → Match Expressions](expressions.md#match-expressions) for the full pattern
+grammar, exhaustiveness rules, and current limits.
 
 ## `val-else`, Unwrap or Leave the Scope
 
@@ -1008,7 +1008,7 @@ decided by the scrutinee's type:
 | Scrutinee type | `else \|name\|` binds |
 | --- | --- |
 | `Result<T, E>` | the `Err` payload (`Result::Err(e)` → `e: E`) |
-| `Option<T>` | nothing, `None` is empty, so only `\|_\|` (or a bare `else`) is accepted |
+| `Option<T>` | nothing: `None` is empty, so only `\|_\|` (or a bare `else`) is accepted |
 | any other enum | the original scrutinee, unmodified, for a nested `match` |
 
 `Option` and `Result` have exactly one "other" variant, so the payload to unwrap is
@@ -1016,6 +1016,8 @@ unambiguous. A general enum has several, so `|name|` hands back the whole value 
 branch discriminates further:
 
 ```neuro
+enum Shape { Circle { radius: i32 }, Square(i32), Dot }
+
 func area(s: Shape) -> i32 {
     val Shape::Circle { radius } = s else |other| {
         match other {
@@ -1048,6 +1050,6 @@ Runnable program: [`examples/control_flow/val_else.nr`](../../examples/control_f
 
 ## References
 
-- [Expressions](expressions.md) - Boolean expressions
-- [Operators](operators.md) - Comparison and logical operators
-- [Variables](variables.md) - Variable scope in blocks
+- [Expressions](expressions.md): boolean expressions
+- [Operators](operators.md): comparison and logical operators
+- [Variables](variables.md): variable scope in blocks

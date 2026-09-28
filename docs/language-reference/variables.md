@@ -152,7 +152,7 @@ val x: i32 = 10
 // x = 20  // Error: cannot assign to immutable variable
 ```
 
-This prevents accidental modification and makes code easier to reason about.
+A reader can tell from the declaration alone which bindings change.
 
 ### Explicit Mutability
 
@@ -163,13 +163,6 @@ mut x: i32 = 10
 x = 20        // OK: x is mutable
 x = x + 5     // OK: can update
 ```
-
-### Why Immutable by Default?
-
-1. **Safety**: Prevents accidental modification
-2. **Clarity**: Easy to see which variables change
-3. **Reasoning**: Easier to understand code flow
-4. **Optimization**: Compiler can optimize better
 
 ## Variable Reassignment
 
@@ -198,7 +191,7 @@ x = 20        // OK: i32
 ```neuro
 mut result: i32 = 0
 result = add(5, 3)              // Function call result
-result = if x > 0 { 1 } else { 0 }  // Conditional (Phase 1)
+result = if x > 0 { 1 } else { 0 }  // Conditional
 result = x * 2 + y              // Complex expression
 ```
 
@@ -322,7 +315,7 @@ val n: u64 = msg.len()          // OK, the move above was conditional
 
 ## Type Annotations
 
-Type annotations are optional when the type can be inferred from the initializer. Numeric literal inference is fully implemented:
+Type annotations are optional when the initializer determines the type:
 
 ```neuro
 val x: i32 = 42           // Explicit annotation
@@ -334,7 +327,9 @@ val ratio = 3.14          // Inferred f64 (default for float literals)
 mut count = 0             // Inferred i32
 ```
 
-Non-numeric types (bool, string, struct) require an explicit annotation or a typed initializer. Function parameters and return types always require explicit annotations.
+A `bool`, string or struct initializer gives the binding its own type (`val p = Point { x: 1, y: 2 }`
+is a `Point`). An integer literal with nothing else to go on is `i32`, a float literal `f64`.
+Function parameters and return types always need annotations.
 
 ## Variable Scope
 
@@ -387,19 +382,13 @@ func shadowing() -> i32 {
 }
 ```
 
-**Shadowing vs. Reassignment**:
-- Shadowing creates a new variable (can have different type in Phase 1)
-- Reassignment modifies existing variable (must have same type)
+The inner binding may have a different type. A later `val` or `mut` in the *same* block may
+also reuse a name, but the checker currently rejects that with
+`variable 'x' already defined in this scope` ([BUG-026](../BUGS.md#bug-026-a-later-binding-may-not-reuse-a-name-in-the-same-block)).
+Until it is fixed, give the second binding a different name or open a nested block.
 
-```neuro
-// Shadowing (Phase 1 feature for type change)
-val x: i32 = 5
-val x: f64 = 3.14  // New variable, different type
-
-// Reassignment (Phase 1)
-mut x: i32 = 5
-x = 10  // Same variable, must be same type
-```
+Reassignment is the other way to change a value. It keeps the same binding, so the new
+value must have the binding's type.
 
 ## Initialization
 
@@ -607,7 +596,7 @@ y = 3.14  // OK
 ### Using Uninitialized Variable
 
 ```neuro
-// Error: uninitialized variables not allowed (Phase 1)
+// Error: uninitialized variables are not allowed
 // val x: i32
 // return x
 
@@ -618,13 +607,17 @@ return x
 
 ### Shadowing Instead of Reassignment
 
-```neuro
-mut x: i32 = 10
-val x: i32 = 20  // Creates new variable (shadowing), doesn't reassign
+A `val` inside a block declares a new binding, even when an outer `mut` has the same name:
 
-// If you meant reassignment:
-mut y: i32 = 10
-y = 20  // Reassigns existing variable
+```neuro
+mut total: i32 = 0
+if ready {
+    val total: i32 = 10   // a new binding that ends at this block's brace
+}
+return total              // still 0
+
+// If you meant reassignment, drop the `val`:
+// total = 10
 ```
 
 ## References

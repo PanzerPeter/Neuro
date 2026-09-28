@@ -9,6 +9,20 @@ The `string` type is an immutable, UTF-8 encoded fat pointer `{ ptr, i64 }`, a p
 the bytes plus a stored byte length. Equality (`==`, `!=`) compares byte content; the `+`
 operator concatenates two strings into a new owned `string`.
 
+### Escape Sequences
+
+| Escape | Produces |
+|---|---|
+| `\n`, `\r`, `\t` | newline, carriage return, tab |
+| `\\`, `\"` | backslash, double quote |
+| `\0` | the NUL character (legal content: see below) |
+| `\{`, `\}` | a literal brace, since `{` opens an [interpolation hole](expressions.md#string-interpolation) |
+| `\xNN` | the code point U+00NN, two hex digits. Above `\x7F` it is encoded as two UTF-8 bytes, so `"\xFF".len()` is `2` |
+| `\u{N...}` | the Unicode scalar value written in hex between the braces |
+
+Any other character after `\` is a lexical error. Triple-quoted block strings take the same
+escapes.
+
 ### Storage and the `len` Guarantee
 
 String **literals** live in read-only program memory (`.rodata`) for the lifetime of the
@@ -31,7 +45,7 @@ buffer is freed at scope exit.
 The pointer addresses a NUL-terminated byte sequence so it doubles as a valid C string for
 future FFI, but the stored `len` field **excludes** that trailing NUL. `len` is the
 **authoritative** length: it is the exact UTF-8 byte count of the content. Consumers must use
-`len` and **must not** scan for a NUL terminator, because interior NUL bytes are legal content
+`len` and **must not** scan for a NUL terminator, because interior NUL bytes are legal content:
 `"a\0b".len()` is `3`, not `1`.
 
 ### String Methods
@@ -47,22 +61,19 @@ val hello: &string = s.slice(0..5)    // "hello", borrowed, zero copy
 val world: &string = s.slice(7..=11)  // "world", inclusive upper bound
 ```
 
-**`.len() -> u64`**, returns the number of UTF-8 bytes, read directly from the fat pointer
+**`.len() -> u64`**: returns the number of UTF-8 bytes, read directly from the fat pointer
 in O(1) with no scan. The length **excludes** the null terminator. Because the index is a
 byte count, a multi-byte code point contributes more than one to the length.
 
-**`.clone() -> string`**, returns a fresh `string` equal to its receiver. It is the
-canonical explicit deep copy for non-`Copy` owned types and, now that move-by-default has
-landed (1C, see [variables](variables.md#move-semantics-ownership)), the way to
-keep using a value after it would otherwise be moved. Today strings
-are immutable and `.rodata`-backed (no heap string type exists yet), so the clone copies the
-`(ptr, len)` fat pointer, observationally a deep copy because the pointee bytes are
-immutable and shared safely. `.clone()` takes no arguments and returns a `string`, so it
-chains with other builtin methods (`"hi".clone().len()`). `Copy` scalar types
-(`i8`..`u64`, `f32`/`f64`, `bool`) do not provide `.clone()`: assignment already duplicates
-them.
+**`.clone() -> string`**: returns a fresh `string` equal to its receiver, with the bytes
+copied into a buffer of its own. It is the explicit deep copy for non-`Copy` owned types,
+and the way to keep using a value after it would otherwise be
+[moved](variables.md#move-semantics-ownership). `.clone()` takes no arguments and returns a
+`string`, so it chains with other builtin methods (`"hi".clone().len()`). `Copy` scalar
+types (integers, floats, `bool`, `char`) do not provide `.clone()`: assignment already
+duplicates them.
 
-**`.slice(range) -> &string`**, returns a borrowed `&string` view into the receiver's UTF-8
+**`.slice(range) -> &string`**: returns a borrowed `&string` view into the receiver's UTF-8
 data, with no allocation: since strings are immutable, a sub-range is just a `(ptr + start,
 len)` fat pointer (the analogue of Rust's `&str`). The range is exclusive (`s.slice(a..b)`)
 or inclusive (`s.slice(a..=b)`). **Indices are byte offsets**, not character offsets. The
@@ -76,7 +87,7 @@ violation:
 - **Code-point alignment:** each endpoint must fall on a UTF-8 code-point boundary. A range
   that splits a multi-byte code point panics with `string slice splits a UTF-8 code point`.
 
-**`.char_slice(range) -> &string`**, the codepoint-indexed companion to `.slice`. It returns
+**`.char_slice(range) -> &string`**: the codepoint-indexed companion to `.slice`. It returns
 the same borrowed, zero-copy `&string`, but its range counts **Unicode code points** rather
 than bytes, walking the UTF-8 data to locate each endpoint: O(n) on the receiver's length,
 where `.slice` is O(1). Use it whenever the indices came from counting characters (tokenizer
@@ -96,10 +107,11 @@ count`, and a reversed or out-of-range range panics with `string char slice out 
 There is no code-point-alignment rule to break: a code point index cannot name a position
 inside a code point, which is the reason to reach for this method in the first place.
 
-A range expression `a..b` / `a..=b` is valid **only** as a `.slice` or `.char_slice`
-argument; used anywhere else it is a compile error.
+A range expression `a..b` / `a..=b` is not a value: besides a `.slice` or `.char_slice`
+argument it appears only as a `for` head, a tensor index and a `match` pattern, so
+`val r = 0..5` is a compile error.
 
-**`.chars() -> Chars`**, an iterator over the receiver's Unicode scalar values. Each step is
+**`.chars() -> Chars`**: an iterator over the receiver's Unicode scalar values. Each step is
 O(1): the cursor decodes the code point standing at its byte offset and advances by that code
 point's own UTF-8 width, so no part of the text is scanned twice. `Chars` is an ordinary
 `Iterator` from the prelude (see [control flow](control-flow.md)), which means a `for` head
@@ -120,7 +132,7 @@ mut walk = text.chars()
 val first = walk.next() ?? '?'        // Option::Some('h')
 ```
 
-**`for (offset, c) in text.char_indices()`**, the same walk with the **byte offset** of each
+**`for (offset, c) in text.char_indices()`**: the same walk with the **byte offset** of each
 scalar bound alongside it. Those are the offsets `.slice(range)` takes, which is what makes the
 pair the tokenizer's tool: find a position by reading characters, then cut by bytes. An offset
 names the code point its step yields, never the one after it.
@@ -132,9 +144,8 @@ for (offset, c) in "aé漢".char_indices() {
 }
 ```
 
-`.char_indices()` is a **`for`-head form**, like `.enumerate()`, rather than a method: it binds
-a pair, and a pair cannot travel through `Iterator::next`, whose `Option` payload is limited to
-scalars in this phase. So it appears only in a `for` head, it binds a pair there (never a single
+`.char_indices()` is a **`for`-head form**, like `.enumerate()`, rather than a method that
+returns an iterator. It appears only in a `for` head, it binds a pair there (never a single
 variable), and it takes no `.enumerate()` and no adapters: it already carries a position of its
 own. Where a chain is wanted, walk `.chars()` instead.
 
@@ -156,8 +167,8 @@ report.push_str(" ok")
 val line: string = report.to_string()   // finished text, immutable from here
 ```
 
-`String` is a **compiler-known library type**, not a keyword and not a language primitive, the
-same status `Vec<T>` has: the language exposes no allocator and no raw pointers, so nothing in
+`String` is a **compiler-known library type**, not a keyword and not a language primitive: the
+same status `Vec<T>` has. The language exposes no allocator and no raw pointers, so nothing in
 `.nr` source could implement it. A program that declares its own `String` shadows this one.
 
 | | `string` | `String` |
@@ -169,21 +180,21 @@ same status `Vec<T>` has: the language exposes no allocator and no raw pointers,
 
 ### `String` Methods
 
-**`String::new() -> String`**, an empty builder. Allocates nothing until the first append, so an
+**`String::new() -> String`**: an empty builder. Allocates nothing until the first append, so an
 unused builder costs no heap traffic. It takes no type arguments, so unlike `Vec::new()` it needs
 no annotation to be inferred.
 
-**`.push_str(text)`**, appends the bytes of a `string` or an immutable `&string`. The argument is
+**`.push_str(text)`**: appends the bytes of a `string` or an immutable `&string`. The argument is
 **read, not moved** (the same latitude a `+` operand or a map lookup key gets), so the caller's
 binding stays usable afterwards. It mutates, so it needs a `mut` binding or a `&mut String`.
 
-**`.len() -> u64`**, the byte length, read from the header in O(1). Bytes, not characters, for the
+**`.len() -> u64`**: the byte length, read from the header in O(1). Bytes, not characters, for the
 same reason `string.len()` is.
 
-**`.clear()`**, resets the length to zero and **retains** the buffer, so refilling in a loop does
+**`.clear()`**: resets the length to zero and **retains** the buffer, so refilling in a loop does
 not reallocate. This is what makes one builder reusable across iterations. It mutates.
 
-**`.to_string() -> string`**, copies the accumulated bytes into a fresh owned immutable `string`.
+**`.to_string() -> string`**: copies the accumulated bytes into a fresh owned immutable `string`.
 This is the bridge back to `string`: everything that consumes text (`+`, `==`, `.len()`, a
 `Vec<string>` element, a map key) takes the result. A borrowed view into the buffer would be
 zero-copy, but a later `push_str` may reallocate and leave it dangling, and the borrow checker
@@ -203,7 +214,7 @@ val moved = buf          // buf is MOVED
 // buf.push_str("b")     // COMPILE ERROR: use of moved value 'buf'
 ```
 
-### Phase 1C Limitations
+### Limitations
 
 - No `.push(char)`, `String::with_capacity(n)`, `String::from(s)`, or `.is_empty()`.
 - No borrowed `.as_str()`; use `.to_string()`.

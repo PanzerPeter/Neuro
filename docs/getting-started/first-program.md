@@ -92,7 +92,7 @@ Output: `0`
 
 ## Understanding the Program
 
-Let's break down the hello.nr program:
+Each part of `hello.nr`:
 
 ```neuro
 func main() -> i32 {
@@ -109,7 +109,7 @@ func main() -> i32 {
 
 ## Adding Variables
 
-Let's make the program more interesting:
+Two bindings and an addition:
 
 ```neuro
 func main() -> i32 {
@@ -128,9 +128,8 @@ func main() -> i32 {
 Compile and run:
 
 ```bash
-cargo run -p neurc -- compile hello.nr
-.\hello.exe  # Windows
-echo $LASTEXITCODE  # Output: 30
+cargo run -p neurc -- run hello.nr
+echo $?             # Unix: 30 (PowerShell: echo $LASTEXITCODE)
 ```
 
 ## Using Mutable Variables
@@ -157,7 +156,7 @@ func main() -> i32 {
 
 ## Adding Functions
 
-Let's create a helper function:
+A second function, called from `main`:
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -178,9 +177,8 @@ func main() -> i32 {
 Compile and run:
 
 ```bash
-cargo run -p neurc -- compile hello.nr
-.\hello.exe
-echo $LASTEXITCODE  # Output: 8
+cargo run -p neurc -- run hello.nr
+echo $?             # 8
 ```
 
 ## Expression-Based Returns
@@ -357,7 +355,7 @@ func main() -> i32 {
 
 ## Complete Example: Factorial
 
-Combining everything we've learned:
+Combining everything so far:
 
 ```neuro
 func factorial(n: i32) -> i32 {
@@ -376,10 +374,12 @@ func main() -> i32 {
 
 Compile and run:
 
+[`examples/basics/factorial.nr`](../../examples/basics/factorial.nr) is the same function
+with explicit returns, printing each multiplication as the recursion unwinds:
+
 ```bash
-cargo run -p neurc -- compile examples/basics/factorial.nr
-.\factorial.exe
-echo $LASTEXITCODE  # Output: 120
+cargo run -p neurc -- run examples/basics/factorial.nr
+echo $?             # 120
 ```
 
 ## Best Practices
@@ -447,10 +447,12 @@ func classify(x: i32) -> i32 {
 
 ## Common Mistakes
 
-### 1. Forgetting Return Type
+### 1. Forgetting the Return Type
+
+A function with no `->` returns nothing, so returning a value from it is an error:
 
 ```neuro
-// Error: missing return type
+// Error: return type mismatch: expected void, found i32
 func bad() {
     return 0
 }
@@ -516,10 +518,10 @@ func wrong() -> i32 {
 
 Now that you've written your first programs, explore:
 
-1. **[Language Reference](../language-reference/types.md)** - Complete type system documentation
-2. **[Functions Guide](../language-reference/functions.md)** - Advanced function features
-3. **[Control Flow](../language-reference/control-flow.md)** - Conditional logic in detail
-4. **[CLI Usage](../guides/cli-usage.md)** - Advanced compiler usage
+1. **[Types](../language-reference/types.md)**: the type system
+2. **[Functions](../language-reference/functions.md)**: generics, closures, traits
+3. **[Control Flow](../language-reference/control-flow.md)**: loops, `match`, `val-else`
+4. **[CLI Usage](../guides/cli-usage.md)**: every command and flag
 
 ## Practice Exercises
 
@@ -553,7 +555,8 @@ func main() -> i32 {
 
 Write a function that computes x^n (x to the power of n).
 
-Expected output for `power(2, 8)`: 256
+Expected exit code for `power(3, 4)`: 81. An exit status holds 0 to 255, so a larger result
+such as `power(2, 8)` shows up as `256 % 256`, which is 0.
 
 <details>
 <summary>Solution</summary>
@@ -568,7 +571,7 @@ func power(base: i32, exp: i32) -> i32 {
 }
 
 func main() -> i32 {
-    power(2, 8)
+    power(3, 4)
 }
 ```
 </details>
@@ -615,7 +618,7 @@ func main() -> i32 {
 
 If you encounter issues:
 
-1. Check the error message carefully - it includes the exact location and problem
+1. Read the error message: it gives the file, line and column of the problem
 2. Review the [Troubleshooting Guide](../guides/troubleshooting.md)
 3. Consult the [Language Reference](../language-reference/types.md)
 4. Report bugs: https://github.com/PanzerPeter/Neuro/issues

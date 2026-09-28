@@ -25,16 +25,12 @@ val b: string = "cd"
 val joined: string = a + &b                   // "abcd"; a and b still valid
 ```
 
-> The concatenated buffer is heap-allocated. Deterministic `Drop` landed with 1C, so it is
-> freed where the compiler can prove who owns it: a binding whose initializer allocated it, or
-> an anonymous result a consumer reads and then discards: the left operand of `a + b + c`, an
-> `==` operand, a `.len()` receiver, a `push_str` argument, a `println` argument, an
-> interpolation hole, a statement whose value nothing reads. Reassigning such a binding frees
-> the buffer it displaces, and `s = s + "!"` is safe because the new buffer is built before the
-> old one is released. One that escapes the analysis still leaks, notably a heap `string`
-> stored into a collection or a struct field, passed by value to a function, returned from one,
-> or handed to a binding by a plain move rather than by a producer that allocates. See the
-> [memory model](memory-model.md).
+> The concatenated buffer is heap-allocated and released by `Drop`: with the binding that
+> holds it, or, for an anonymous result, at the consumer that reads and discards it (the left
+> operand of `a + b + c`, an `==` operand, a `println` argument). Reassigning a binding frees the
+> buffer it displaces, and `s = s + "!"` is safe because the new buffer is built before the old
+> one is released. The few shapes the compiler cannot prove an owner for are listed in the
+> [memory model](memory-model.md#what-still-leaks).
 
 ### Subtraction (`-`)
 
@@ -125,7 +121,8 @@ func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tenso
 }
 ```
 
-**Precedence**: level 13 below, tighter than `*` and `+` and looser than `as`, matching
+**Precedence**: tighter than `*` and `+` and looser than `as` (see
+[Operator Precedence](#operator-precedence)), matching
 mathematical convention: `a @ b + c` adds `c` to the product, and `a @ b * s` scales it.
 
 On a user type, `@` dispatches through the `MatMul` trait like every other overloadable
@@ -179,7 +176,7 @@ val at_least: bool = x >= min
 
 **Types**: Work with numeric types, booleans, and strings (`==`/`!=` only)
 **Requirement**: Both operands must be the same type
-**Chaining**: Comparison operators cannot be chained. `a < b < c` is a compile error, write `a < b && b < c` instead.
+**Chaining**: Comparison operators cannot be chained. `a < b < c` is a compile error; write `a < b && b < c` instead.
 
 ## Logical Operators
 
@@ -312,11 +309,14 @@ val flag: bool = true
 val one: i32 = flag as i32     // false → 0, true → 1
 ```
 
-**Types**: Works with numeric types and booleans.
+**Types**: between any two numeric types, from `bool` to an integer, and between `char` and an
+integer.
 **Rules**:
 - Widening integers zero-extends (unsigned) or sign-extends (signed).
-- Floats to integers truncate towards zero.
-- Booleans to integers map `false → 0` and `true → 1`.
+- Floats to integers truncate towards zero and saturate at the target's range; see
+  [Float to integer](types.md#float-to-integer).
+- Booleans to integers map `false → 0` and `true → 1`. Nothing casts *to* `bool`.
+- `char` to an integer gives its code point, and an integer to `char` the reverse.
 
 ## Assignment Operator (`=`)
 
@@ -449,14 +449,14 @@ The rules:
   `w *= 2.0` is the scalar broadcast.
 - The right-hand side is evaluated **first**, before the target is borrowed for the
   update.
-- The element type must have arithmetic: any integer, `f32`, or `f64`. `bool` and the
-  half-precision types `f16` / `bf16` are rejected, matching their scalar contract.
+- The element type must have arithmetic: any integer or float, the half-precision `f16` /
+  `bf16` included (each element is computed in `f32` and rounded back). `bool` is rejected.
 - Element arithmetic carries the scalar guards: an overflowing element panics in debug
   builds, and a zero divisor panics in every build.
 
 ## Null/Error Coalescing Operator (`??`)
 
-`??` is the read-site equivalent of `unwrap_or(default)`, it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`). The expression's type is the unwrapped payload `T`.
+`??` is the read-site equivalent of `unwrap_or(default)`: it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`). The expression's type is the unwrapped payload `T`.
 
 ```neuro
 val present = lookup(1) ?? 0        // the Some payload
@@ -478,7 +478,7 @@ For a `Result`, the error payload is **discarded**: `??` states "I do not care w
 val chained = lookup(7) ?? lookup(1) ?? 99
 ```
 
-**Precedence**: level 14, looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
+**Precedence**: looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
 
 Applying `??` to anything that is not an `Option<T>` or `Result<T, E>` is rejected:
 
@@ -486,7 +486,7 @@ Applying `??` to anything that is not an `Option<T>` or `Result<T, E>` is reject
 error: `??` expects an `Option<T>` or `Result<T, E>` on the left, found i32
 ```
 
-Payloads are scalar `Copy` values in this phase (see [types.md](types.md#optiont-and-resultt-e)), so `??` unwraps to a scalar. Runnable program: [`examples/operators/null_coalesce.nr`](../../examples/operators/null_coalesce.nr).
+`??` moves its left operand, so an `Option` holding an owner (a `string`, a `Vec`) is spent by it, exactly as by a `match`. Runnable program: [`examples/operators/null_coalesce.nr`](../../examples/operators/null_coalesce.nr).
 
 ## Error Propagation Operator (`?`)
 
@@ -509,7 +509,7 @@ val half = match halve(n) {
 }
 ```
 
-**Enclosing function**: the function containing the `?` must return the same fallible enum, a `Result` propagates only out of a `-> Result<_, _>` function, an `Option` only out of a `-> Option<_>` one. Otherwise the failure has nowhere to go:
+**Enclosing function**: the function containing the `?` must return the same fallible enum: a `Result` propagates only out of a `-> Result<_, _>` function, an `Option` only out of a `-> Option<_>` one. Otherwise the failure has nowhere to go:
 
 ```text
 error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32
@@ -517,9 +517,9 @@ error: `?` on a Option<i32> has nowhere to propagate: the enclosing function ret
 
 **No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. When the types differ, convert first with a `match` that rebuilds the `Err`; `.map_err` is not available yet.
 
-**Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine, the unwrapped `bool` is used locally, not returned.
+**Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine: the unwrapped `bool` is used locally, not returned.
 
-**Short-circuiting**: nothing after a failing `?` runs, including the rest of a loop body, `?` returns from the *function*, not from the iteration.
+**Short-circuiting**: nothing after a failing `?` runs, including the rest of a loop body: `?` returns from the *function*, not from the iteration.
 
 **Precedence**: postfix, binding as tightly as a call or index. `f(x)? + 1` adds to the unwrapped payload, and `parse(s)?.field` reads a field of the unwrapped value.
 
@@ -680,10 +680,10 @@ Both operands must be the same type.
 - `string` (only `==` and `!=`), byte-level equality via length check + `memcmp`
 - a newtype over any of the above, which compares as its inner type does
 
-Nothing else has comparison built in. A struct gets `==` / `!=` from `impl PartialEq` and
-the ordering operators from `impl Comparable` (see [Operator Overloading](#operator-overloading));
-comparing one that implements neither is a type error naming the missing trait. Arrays,
-tuples, enums and collections have no equality at all yet, and neither does a reference to
+Nothing else has comparison built in. A struct, enum or newtype gets `==` / `!=` from
+`impl PartialEq` and the ordering operators from `impl Comparable` (see
+[Operator Overloading](#operator-overloading)), and a struct can also `@derive(PartialEq)`.
+Arrays, tuples and collections have no equality yet, and neither does a reference to
 anything but a string. Read through it with `*` first.
 
 ### Logical Operators
@@ -786,7 +786,9 @@ impl PartialEq for Vec2 {
     func ne(&self, rhs: &Vec2) -> bool { self.x != rhs.x || self.y != rhs.y }
 }
 
-if Vec2 { x: 1, y: 2 } == Vec2 { x: 1, y: 2 } { }   // via PartialEq::eq
+val a = Vec2 { x: 1, y: 2 }
+val b = Vec2 { x: 1, y: 2 }
+if a == b { }   // via PartialEq::eq
 ```
 
 **Operator → trait → method:**
@@ -814,8 +816,7 @@ Rules and limits:
 - Compound assignment (`v += w`) works when the type implements the matching by-value
   operator: it desugars to `v = v + w`. In-place `*Assign` behaviour is compiler-known on
   tensors (see [Compound Assignment Operators](#compound-assignment-operators)) but not
-  yet declarable for a user type; auto-derived comparison defaults are planned for a later
-  phase. The tensor arithmetic operators are compiler-known too,
+  yet declarable for a user type. The tensor arithmetic operators are compiler-known too,
   and are not reached through an operator-trait impl.
 - Operator overloading is fully monomorphized and erased: each operator becomes the
   method call it stands for, with no vtable and no runtime cost.
@@ -825,6 +826,6 @@ for a complete program.
 
 ## References
 
-- [Types](types.md) - Type requirements for operators
-- [Expressions](expressions.md) - Operator precedence and evaluation
-- [Variables](variables.md) - Assignment operator
+- [Types](types.md): type requirements for operators
+- [Expressions](expressions.md): operator precedence and evaluation
+- [Variables](variables.md): assignment operator

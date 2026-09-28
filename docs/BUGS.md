@@ -5,6 +5,38 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-084: `main` with the wrong signature compiles and exits with an undefined status
+
+- **Status**: open, confirmed
+- **Area**: `neurc` (the entry-point check in `src/main.rs`), with the rule belonging in
+  `semantic-analysis`
+- **Severity**: major. A silent wrong answer: the process exit status is garbage
+
+**Minimal repro**
+
+```neuro
+func main() {
+    println("hi")
+}
+```
+
+Expected: a compile error, because the [functions reference](language-reference/functions.md#the-main-function)
+requires `main` to take no parameters and return `i32`. Observed: prints `hi` and exits with
+status 232, whatever the return register last held. `func main() -> string` exits with a
+pointer's low byte, `func main() -> bool` with 0 or 1, and `func main(x: i32) -> i32` is
+accepted with `x` bound to the C runtime's `argc`.
+
+**Root cause**: `neurc` checks only that a function named `main` exists (the
+`MAIN_FUNCTION` test before code generation). Nothing checks its parameters or return type,
+and the backend emits `main` under its own name as the C entry point, so the C runtime reads
+whatever the Neuro signature leaves in the return register.
+
+**Workaround**: declare `func main() -> i32` and return the exit code.
+
+**Fix sketch**: reject any other `main` signature in `semantic-analysis` with a diagnostic on
+the declaration's span, and add a regression test per rejected shape (no return type, a
+non-`i32` return, a parameter).
+
 ## BUG-083: an owned `string` wrapped in a newtype is never released
 
 - **Status**: open, confirmed

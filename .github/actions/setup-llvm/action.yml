@@ -226,9 +226,17 @@ runs:
         # libraries that llvm-config does not name.
         & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install "libxml2[core]:x64-windows-static"
         if ($LASTEXITCODE -ne 0) { throw "vcpkg install libxml2 failed (exit $LASTEXITCODE)" }
-        $xml2 = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static\lib\libxml2s.lib"
-        if (-not (Test-Path $xml2)) { throw "vcpkg produced no $xml2" }
-        Copy-Item $xml2 "$prefix\lib\xml2s.lib"
+        # The archive's file name follows libxml2's own CMake naming, which is not
+        # stable across releases (`libxml2s.lib` up to 2.14, a different name in
+        # 2.15), so it is found by pattern. Any static libxml2 satisfies the link.
+        $xml2dir = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static\lib"
+        $xml2 = Get-ChildItem $xml2dir -Filter '*xml2*.lib' | Sort-Object Name -Descending | Select-Object -First 1
+        if (-not $xml2) {
+          Get-ChildItem $xml2dir | Format-Table Name, Length | Out-String | Write-Host
+          throw "vcpkg produced no static libxml2 archive in $xml2dir"
+        }
+        Write-Host "Using $($xml2.FullName) as xml2s.lib"
+        Copy-Item $xml2.FullName "$prefix\lib\xml2s.lib"
 
     - name: Configure LLVM env (Windows)
       if: runner.os == 'Windows'

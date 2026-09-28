@@ -61,7 +61,7 @@ import Option::{Some, None}          // enum variants, usable without `Option::`
 ```
 
 Every path is resolved relative to the importing file, whether or not it is written
-`./`-first. A brace entry may name a **child module** as easily as an item
+`./`-first. A brace entry may name a **child module** as well as an item:
 `import ./utils::{io}` binds the module `utils::io`, so `io::read(x)` resolves.
 
 Imported variants read as themselves in value and pattern position alike:
@@ -83,7 +83,7 @@ func main() -> i32 {
 ```
 
 A variant written without its enum is readable when an import accounts for it, or when the
-prelude does, otherwise write `Shape::Circle`. Imports bind per file, so two modules may
+prelude does. Otherwise write `Shape::Circle`. Imports bind per file, so two modules may
 bind the same name to different things, but one module may not bind one name twice.
 
 ## The implicit prelude
@@ -123,9 +123,9 @@ func triangular(n: i32) -> i32 { ... }
 ```
 
 On a non-root file `@no_prelude` takes away that file's bindings. On the **root** file it
-also drops the prelude's declarations from the whole program, `Option` and `Result` are
-then declared nowhere, because the merged namespace is flat, so those types are either in
-the program or absent from all of it.
+also drops the prelude's declarations from the whole program: `Option` and `Result` are
+then declared nowhere. The merged namespace is flat, so those types are either in the
+program or absent from all of it.
 
 `print` / `println` (and the panic family) are **not** in the prelude. They are compiler
 builtins resolved by name, so `@no_prelude` does not take them away; only a local
@@ -149,7 +149,7 @@ re-point an existing `Point::new`.
 ## Visibility
 
 A declaration is **private to its file** unless it carries `export`. Nothing changes for a
-single-file program, one file is one module, but the moment a second file reads your code,
+single-file program (one file is one module), but the moment a second file reads your code,
 you choose what it may see.
 
 ```neuro
@@ -174,20 +174,20 @@ func validate(host: i32) -> bool { host > 0 }
 
 `export` goes between any `@derive(...)` attributes and the item keyword, the position `pub`
 takes in Rust. It applies to `func`, `struct`, `enum`, `trait`, `const`, and `newtype`
-declarations, and to each struct field independently, an exported struct may still keep a
+declarations, and to each struct field independently: an exported struct may still keep a
 field to itself, which is what makes an invariant hold across a module boundary.
 
 Two rules follow from a private field, and both are enforced:
 
 - another module cannot **read or write** it (`c.timeout`, `c.timeout = 5`), and
 - another module cannot **construct** the struct at all, whether by listing the field or by
-  reaching it through `..base`, the update form supplies every field you did not list.
+  reaching it through `..base`, since the update form supplies every field you did not list.
 
 There is no `export` on an `impl` block, a `type` alias, or an inline `module` block. An `impl`
 declares no name of its own; an alias is expanded at parse time, so nothing of it survives to be
 reached; and a block's name is reached only from the file that declares it, so there is no
 outside to open it to. Each is rejected with a message saying so. An `import` *does* take
-`export`, that is the re-export form, below.
+`export`: that is the re-export form, below.
 
 Item visibility is settled while modules are resolved, so it is reported before type checking.
 Field visibility needs the receiver's type and is reported by the type checker.
@@ -214,7 +214,7 @@ func main() -> i32 {
 
 A block is a module in every sense a file is one, and the same rules reach it: its items are
 private unless written with `export`, an `import` binds from it (`import geometry::{Circle}`),
-and blocks nest (`outer::inner::deep()`). Three consequences are worth stating outright:
+and blocks nest (`outer::inner::deep()`). Three consequences follow:
 
 - The file that declares a block is **outside** it. `export` is the only way in, exactly as
   for a file module.
@@ -289,20 +289,24 @@ consequences:
 
 The prelude is not a module you can name: `std::prelude` describes the effect, but the driver
 prepends the declarations and seeds the variant bindings directly, so there is no `std::` path
-to import from and no way to import a *subset* of it. `@no_prelude` on a
-non-root file therefore drops that file's bindings only; its declarations stay in the flat
-namespace, which is the same limitation as above.
+to import from and no way to import a *subset* of it. `@no_prelude` on a non-root file
+therefore drops that file's bindings only; its declarations stay in the flat namespace,
+which is the same limitation as above.
 
 An inline block does not lift the flat namespace either: a block buys a private *surface*,
 not a private namespace, so its items still collide with same-named declarations elsewhere in
 the program.
 
+**A local binding does not shadow an imported name.** After `import geometry::{ORIGIN_SHIFT}`,
+a `val ORIGIN_SHIFT = 7` in a function body is accepted, but every later use still reads the
+imported constant. Rename the import with `as` when a local needs the name.
+
 Also not yet available: a qualified name in a `match` pattern (write the bare enum name
 the flat namespace makes it reach), a module-qualified trait in `impl`/`dyn` position, and
 the functional-update form `mod::Point { x: 1.0, ..base }`.
 
-Panic diagnostics report positions in the root file's coordinate space, since merged
-modules share one span space, the same approximation the prepended prelude already carries.
+Panic diagnostics report positions in the root file's coordinate space. Merged modules share
+one span space, the same approximation the prepended prelude already carries.
 
 ## See also
 

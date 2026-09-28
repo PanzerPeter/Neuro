@@ -53,7 +53,7 @@ Download and extract the full development package:
 - Windows: the LLVM 22 `clang+llvm-22.*-x86_64-pc-windows-msvc.tar.xz` archive
 - URL: https://github.com/llvm/llvm-project/releases
 
-**DO NOT** use the `.exe` installer - it lacks required development files.
+**Do not** use the `.exe` installer: it lacks the development files.
 
 ### "cannot open input file 'xml2s.lib'" (Windows)
 
@@ -69,7 +69,8 @@ is linked, but the linker still stops when a named library is missing.
 **Solution**: copy any static libxml2 into the LLVM `lib` directory under that name:
 ```powershell
 vcpkg install "libxml2[core]:x64-windows-static"
-Copy-Item "<vcpkg-root>\installed\x64-windows-static\lib\libxml2s.lib" "$env:LLVM_SYS_221_PREFIX\lib\xml2s.lib"
+Get-ChildItem "<vcpkg-root>\installed\x64-windows-static\lib\*xml2*.lib" |
+  Select-Object -First 1 | Copy-Item -Destination "$env:LLVM_SYS_221_PREFIX\lib\xml2s.lib"
 ```
 
 ### Build fails with linker errors (Unix)
@@ -400,37 +401,42 @@ chmod +x ./program
 ./program
 ```
 
-### Runtime Crash (signal)
+### Runtime Panic
 
 **Symptoms**:
-The compiled program dies on an OS signal instead of exiting normally.
+The program prints a `panic:` line naming a source position, then aborts (`SIGABRT`, which a
+shell reports as status 134; `neurc run` reports it as status `1`):
 
-**Causes** (rare):
-1. Division by zero raises a hardware exception (`SIGFPE`); there is no checked division yet
-2. Integer overflow with `-O0` traps deliberately (the overflow check aborts the process);
-   release builds wrap silently
-3. A compiler bug (codegen producing invalid memory accesses)
+```text
+panic: division by zero at program.nr:1:33
+```
+
+**Causes**:
+1. Integer division or remainder by zero. The divisor is checked at every optimization level.
+2. Integer overflow in a build at `-O0`, reported as `panic: integer overflow`. From `-O1`
+   up, arithmetic wraps silently.
+3. An explicit `panic(msg)`, a failed `assert(cond)`, or a reached `unreachable()`.
 
 **Solutions**:
 
-**Check for division by zero**:
+**Check the divisor**:
 ```neuro
-// Potential crash
-val x: i32 = 10 / 0  // Division by zero
-
-// Fix: check denominator
 func safe_divide(a: i32, b: i32) -> i32 {
     if b == 0 {
-        return 0  // Or handle error
-    } else {
-        return a / b
+        return 0  // or report the failure through an Option or Result
     }
+    return a / b
 }
 ```
 
-**Report compiler bugs**:
+For overflow, `.checked_add`, `.checked_sub` and `.checked_mul` return an `Option` instead
+of panicking; see [integer methods](../language-reference/types.md#integer-methods).
+
+### Runtime Crash (signal)
+
+A program that dies on a signal (`SIGSEGV`, `SIGILL`) rather than a `panic:` line has hit
+either unbounded recursion or a compiler bug. Report it with a minimal reproduction:
 - GitHub Issues: https://github.com/PanzerPeter/Neuro/issues
-- Include minimal reproduction case
 
 ## Performance Issues
 
@@ -455,29 +461,6 @@ cargo build --release -p neurc
 cargo run --release -p neurc -- compile program.nr
 ```
 
-**Check system resources**:
-- Close unnecessary applications
-- Ensure sufficient RAM (minimum 4GB recommended)
-- Check disk space
-
-### Large Executable Size
-
-**Symptoms**:
-Executable is larger than expected.
-
-**Causes**:
-1. Debug information included
-2. Lower optimization level selected for faster compile time
-
-**Solutions**:
-
-**Current**:
-- Use `-O2` or `-O3` during `neurc compile` to reduce binary size and improve runtime performance
-- Typical size: 1-5 MB for simple programs
-
-**Further optimization options**:
-- Strip debug info with linker options
-
 ## Development Environment Issues
 
 ### VSCode Syntax Highlighting Not Working
@@ -487,16 +470,10 @@ Executable is larger than expected.
 
 **Solution**:
 
-Install Neuro VSCode extension:
-```bash
-cd neuro-language-support
-npm install -g @vscode/vsce
-vsce package
-code --install-extension neuro-language-support-*.vsix --force
-```
-
-Then reload the window (`Developer: Reload Window`). Highlighting in an editor that was
-already open does not refresh on its own.
+Install the extension from `neuro-language-support/` as described in
+[Editor Support](editor-support.md#vs-code), then reload the window
+(`Developer: Reload Window`). An editor that was already open does not pick up a new
+grammar on its own.
 
 ### Git Line Ending Issues (Windows)
 
@@ -581,7 +558,7 @@ Include in bug reports:
 ## Environment
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
 - Neuro: version from `neurc --version` (and commit hash)
-- LLVM: 20.x
+- LLVM: 22.x
 - Rust: 1.85+
 
 ## Issue
@@ -597,7 +574,7 @@ Include in bug reports:
 [What actually happens]
 
 ## Error Output
-```
+```text
 [Complete error message with debug logging]
 ```
 ````
@@ -608,27 +585,17 @@ Include in bug reports:
 - Documentation: [README.md](../../README.md)
 - Development Guidelines: [CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-## Known Limitations (current)
+## Known Limitations
 
-These are not bugs, but current limitations. See the
-[Quick Roadmap](../../README.md#quick-roadmap) for what is landed and what is planned.
+Features that are planned but not built yet are on the
+[Quick Roadmap](../../README.md#quick-roadmap). Each language reference page states the
+limits of the feature it covers. Two that surprise people most often:
 
-1. **Type inference**: bare numeric literals default to `i32` / `f64` unless a type is in scope
-2. **Generic type arguments**: a generic *function* takes any type, but a generic **struct**
-   or **enum** is restricted to `Copy` type arguments, and a generic may not be instantiated
-   with an enclosing type parameter (no `Option<T>` inside a `func f<T>`)
-3. **Strings are immutable**: `+`, `.len()`, `.clone()`, `.slice(a..b)`,
-   `.char_slice(a..b)`, `.chars()`, `.char_indices()`. Build text that
-   grows with the `String` buffer (`String::new` / `.push_str` / `.clear` /
-   `.to_string`) instead of chaining `+`
-4. **String interpolation holes**: a hole may not contain a `"` string literal, and an
-   interpolated literal is not a constant pattern. Triple-quoted `"""` blocks and
-   nesting block comments carry no such restriction
-5. **Ranges**: `a..b` and `a..=b` drive `for` loops and `.slice()`; `.rev()`
-   reverses one and `.step(n)` strides it, both on a range only
-6. **Optimization**: `-O0` through `-O3` supported (higher levels may increase compile time)
-
-Planned features are tracked through project issues and changelog updates.
+1. **A generic cannot be instantiated with an enclosing type parameter.** Inside
+   `func f<T>`, a type such as `Option<T>` is rejected with "nested generic type argument
+   is not yet supported". Concrete arguments (`Option<i32>`, `Box<string>`) work.
+2. **An interpolation hole cannot contain a string literal.** `"{"lit"}"` is a lexical
+   error; bind the string to a name first and interpolate the name.
 
 ## Common Warnings
 
@@ -696,9 +663,9 @@ Use `neurc check` for rapid feedback without code generation.
 
 ### Can I use Neuro for production?
 
-Not yet. The language is alpha. The core language (Phase 1) is complete and tensor values
-can be built, but tensor arithmetic, autodiff, and the GPU path are still ahead; see the
-[Quick Roadmap](../../README.md#quick-roadmap).
+Not yet. The language is alpha, and its syntax and semantics can still change between
+releases. The [Quick Roadmap](../../README.md#quick-roadmap) shows what is complete and what
+is ahead.
 
 ## Still Stuck?
 

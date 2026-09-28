@@ -21,12 +21,12 @@ not expose them, so the lowerer **re-derives** each expression's type while walk
   (tests build ASTs through the parser), never a production cross-slice dependency.
 - **Public API**: single `lower_program` entry point + `LoweringError`.
 - **No semantic coupling**: lowering re-derives types rather than importing
-  `semantic_analysis::Type`, importing it would couple two feature slices, which VSA forbids
+  `semantic_analysis::Type`: importing it would couple two feature slices, which VSA forbids
   (duplicate over couple).
 
 ## Behavior
 
-Lowering **assumes well-typedness**, it computes types, it does not validate them. A shape the
+Lowering **assumes well-typedness**: it computes types, it does not validate them. A shape the
 checker should have rejected surfaces as a `LoweringError`, never a panic. The one exception is
 the derivative transform's refusal, described under [`@grad` functions](#grad-functions).
 
@@ -45,12 +45,12 @@ Three nodes carry a deliberately-chosen type the source has no first-class form 
 
 - a `loop` value-expression takes its `break v` type (or `void`);
 - a method-name callee (`FieldAccess`) carries the call's result type (there is no method value);
-- a `Range` carries `void` (valid only as a `string.slice` / `string.char_slice` argument, whose lowering reads its bounds
-  directly).
+- a `Range` carries `void` (valid only as a `string.slice` / `string.char_slice` argument,
+  whose lowering reads its bounds directly).
 
 Divergent panic-family calls (`panic` / `assert` / `unreachable`) adopt their context's expected
-type, or `void` in statement position. The AST's `Expr::Paren` grouping node is dropped, tree
-structure already encodes grouping.
+type, or `void` in statement position. The AST's `Expr::Paren` grouping node is dropped: the
+tree structure already encodes grouping.
 
 ### `@grad` functions
 
@@ -91,9 +91,9 @@ it is that copy, and the copy's gradient goes in the struct under a name built f
 `.backward()` is lowered here too, and never reaches a backend. A block's `loss.backward()`
 statement is paired with the `val loss = f(...)` lowered earlier in the same block: that
 declaration becomes a call of `__<f>__rev` (or of the receiver's `__<m>__rev` for a method
-call) whose loss is unpacked into `loss`, and the statement
-becomes one private slot write per differentiated argument or `wrt:` field of the receiver,
-moving that gradient out of the returned struct. The derivative therefore runs where the call ran, and a call with no
+call) whose loss is unpacked into `loss`, and the statement becomes one private slot write per
+differentiated argument or `wrt:` field of the receiver, moving that gradient out of the
+returned struct. The derivative therefore runs where the call ran, and a call with no
 `.backward()` stays the plain function. `.grad()`, `.hessian()` and `.zero_grad()` lower as
 tensor builtins.
 
@@ -110,7 +110,7 @@ construct's span, and `neurc` renders it like a type error. See
 
 ## Testing
 
-Slice unit tests cover the lowering rules; `neurc/tests/hir_lowering.rs` provides end-to-end
+Slice unit tests cover the lowering rules; `compiler/neurc/tests/suite/hir_lowering.rs` provides end-to-end
 coverage. The workspace architecture test enforces the slice's infrastructure-only dependencies.
 
 ## Resources

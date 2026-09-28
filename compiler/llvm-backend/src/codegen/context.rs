@@ -6,7 +6,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context as LLVMContext;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicTypeEnum, FunctionType, PointerType};
-use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, GlobalValue, IntValue, PointerValue};
 use std::collections::{HashMap, HashSet};
 
 use crate::codegen::expressions::matches::SavedBinding;
@@ -512,6 +512,21 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Declare the external function `name` with signature `ty`, or return the
     /// declaration an earlier call already inserted.
+    /// A private `.rodata` copy of `text`, byte for byte, with a trailing NUL.
+    ///
+    /// `Builder::build_global_string_ptr` passes the text through a C string, which ends at
+    /// the first interior NUL. Every caller pairs the pointer with `text.len()`, so the bytes
+    /// after that NUL would be read from past the end of the global.
+    pub(crate) fn text_global(&self, text: &str, name: &str) -> GlobalValue<'ctx> {
+        let bytes = self.context.const_string(text.as_bytes(), true);
+        let global = self.module.add_global(bytes.get_type(), None, name);
+        global.set_linkage(Linkage::Private);
+        global.set_constant(true);
+        global.set_unnamed_addr(true);
+        global.set_initializer(&bytes);
+        global
+    }
+
     pub(crate) fn extern_fn(&self, name: &str, ty: FunctionType<'ctx>) -> FunctionValue<'ctx> {
         self.module
             .get_function(name)

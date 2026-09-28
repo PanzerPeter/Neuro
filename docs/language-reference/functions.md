@@ -317,7 +317,9 @@ func main() -> i32 {
 
 ### Tail Recursion
 
-While Neuro doesn't yet optimize tail calls, you can write tail-recursive functions:
+Tail calls are not guaranteed to be eliminated. At `-O0` every call takes a stack frame, so a
+deep tail recursion can overflow the stack; from `-O1` up, LLVM usually turns a function's
+tail call to itself into a loop:
 
 ```neuro
 func factorial_tail(n: i32, acc: i32) -> i32 {
@@ -367,7 +369,10 @@ func main() -> i32 {
 **Requirements**:
 - Must be named `main`
 - Must return `i32` (exit code)
-- Must not have parameters (Phase 1)
+- Must not have parameters
+
+The compiler does not enforce the last two rules yet
+([BUG-084](../BUGS.md#bug-084-main-with-the-wrong-signature-compiles-and-exits-with-an-undefined-status)).
 
 **Exit codes**:
 - `0` = success
@@ -648,10 +653,12 @@ func fixed(x: i32) -> i32 {
 
 ### Unreachable Code
 
+Statements after a `return` compile without a warning and never run:
+
 ```neuro
 func unreachable() -> i32 {
     return 42
-    val x: i32 = 10  // Warning: unreachable
+    val x: i32 = 10  // accepted, never executed
 }
 ```
 
@@ -660,7 +667,7 @@ func unreachable() -> i32 {
 ```neuro
 func wrong() -> i32 {
     val x: i32 = 42
-    x;  // Error: `;` is not a valid token (Neuro has no semicolons)
+    x;  // error: unexpected token Semicolon (Neuro has no semicolons)
 }
 
 // Fix: remove the semicolon
@@ -670,33 +677,25 @@ func right() -> i32 {
 }
 ```
 
-## Not Yet Implemented
+## Not in the Language
 
-### Default Parameters
+Neuro has no default parameter values and no variadic functions. A caller that wants to skip
+an argument passes it by [name](#named-arguments), and a function that takes any number of
+values takes a slice:
 
 ```neuro
-// Not yet implemented
-func greet(name: string, greeting: string = "Hello") -> string {
-    greeting + ", " + name
+func sum(values: &[i32]) -> i32 {
+    mut total = 0
+    for v in values { total = total + v }
+    total
 }
+
+val xs = [1, 2, 3]
+val s = sum(&xs)      // 6
 ```
 
-### Variadic Functions
-
-```neuro
-// Not yet implemented
-func sum(values: ...i32) -> i32 {
-    // Sum all arguments
-}
-```
-
-### Spread / Variadic Call Sites
-
-```neuro
-// Not yet implemented (Phase 7)
-val args = [1, 2, 3]
-sum(...args)
-```
+A spread operator at call sites (`f(..args)`) is planned; see the
+[Quick Roadmap](../../README.md#quick-roadmap).
 
 ## Panic Builtins
 
@@ -898,7 +897,7 @@ val n = identity(41)                        // identity<i32>
 The value is passed by value and returned by value, and a [`Drop`](structs.md#destructors-impl-drop) type's
 destructor runs exactly once per value, whether the callee consumes it or hands it back.
 
-**Restrictions (this phase).** The same conservatism bars a `T` from the positions restricted to
+**Restrictions.** The same conservatism bars a `T` from the positions restricted to
 `Copy` types: a closure may not capture a `T`-typed binding, and `[v, v]` or `(v, v)` over a `T`
 duplicates one owner, so the second slot is a use of a moved value. Generic **struct** and
 **enum** type arguments carry no `Copy` requirement either: the instance holds the value and
@@ -928,8 +927,9 @@ val s = sum(xs)    // sum<3>  ->  42
 ### `where` clauses
 
 For a readable signature, constraints may move into a `where` clause after the return type. A
-`where` clause carries trait bounds (parsed, still unenforced) and **value predicates** over const
-parameters, a boolean expression checked at every instantiation and reported at the offending call:
+`where` clause carries trait bounds (`where T: Shape`, enforced exactly as an inline bound is) and
+**value predicates** over const parameters, a boolean expression checked at every instantiation
+and reported at the offending call:
 
 ```neuro
 func head<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
@@ -981,7 +981,8 @@ func make() -> impl Shape { Square { side: 3 } }
 ```
 
 The body's result must be a direct constructor (a struct literal or enum value) for the
-concrete type to be inferable; richer forms arrive with closures and iterators.
+concrete type to be inferable. Returning a binding or a call result is rejected with
+`cannot infer the concrete type of the impl Shape return`.
 
 ### `dyn Trait`, dynamic dispatch
 
@@ -1053,7 +1054,7 @@ val tagged = move |x: i32| x + label
 ### Capture
 
 A closure captures each free variable its body reads **by value**; the variable
-must be `Copy` this phase, and it remains usable after the closure is created
+must be `Copy` for now, and it remains usable after the closure is created
 because it was copied, not moved:
 
 ```neuro
@@ -1066,7 +1067,7 @@ func main() -> i32 {
 ```
 
 Capturing a non-`Copy` value (such as a `string`), or assigning to a captured
-variable inside the closure, is a compile error in this phase.
+variable inside the closure, is a compile error for now.
 
 ### Function types and higher-order functions
 

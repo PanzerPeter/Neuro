@@ -306,7 +306,6 @@ residual gradient) settles on a different line.
   second derivative too, so `.hessian()` is the derivative of the gradient with the fenced
   values held fixed.
 
-
 ## What a `@grad` body may contain
 
 The body is a sequence of statements that ends in the loss, either as `return` or as the tail
@@ -436,11 +435,13 @@ branch or a loop, and a function-typed parameter of an ordinary function passed 
 order the traversal runs. A traversal over more than 1024 elements, or over a tensor with a
 dynamic axis, is refused.
 
-Any other construct in a `@grad` body is a compile error pointing at it: a `for` over a collection, a `loop` (unless its first way out is `if !condition { break }`, which makes it the `while` it spells), `break` and `continue`, `match`, a `return` inside a loop or
-anywhere but the end of an `if` arm at the top of the body, an assignment to a parameter,
-`.max()` / `.min()`, a slice at a position computed at run time, and an `einsum` operand that
-repeats a letter (a diagonal, as in a trace). A value that an `if` or a loop reassigns must be a float, integer or `bool`, or a float
-tensor.
+Any other construct in a `@grad` body is a compile error pointing at it: a `for` over a
+collection, a `loop` (unless its first way out is `if !condition { break }`, which makes it the
+`while` it spells), `break` and `continue`, `match`, a `return` inside a loop or anywhere but
+the end of an `if` arm at the top of the body, an assignment to a parameter, `.max()` /
+`.min()`, a slice at a position computed at run time, and an `einsum` operand that repeats a
+letter (a diagonal, as in a trace). A value that an `if` or a loop reassigns must be a float,
+integer or `bool`, or a float tensor.
 
 ### Control flow in the derivative
 
@@ -468,7 +469,6 @@ compiled function at the same point, and requires the two to agree componentwise
 where the path changes, a central difference would straddle both paths, so those cases compare
 against finite differences of the executed path alone, and a case with a `.detach()` or a
 `@no_grad` call against finite differences of the function with the fenced values frozen at
-the point. A second derivative is read back with
-`.hessian()` and compared against central finite differences of the compiled `.grad()`, which
-has itself just been checked against the loss. It runs as
-`cargo test -p neurc --test grad_differential`.
+the point. A second derivative is read back with `.hessian()` and compared against central
+finite differences of the compiled `.grad()`, which has itself just been checked against the
+loss. It runs as `cargo test -p neurc --test grad_differential`.

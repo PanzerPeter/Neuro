@@ -237,3 +237,41 @@ func main() -> i32 {
         .expect("String equality (empty strings) compilation or execution failed");
     assert_eq!(exit_code, 0);
 }
+
+/// Interior NUL is legal content, so every byte after it must reach `.rodata`.
+/// The literal global used to be built through a C string and end at the first NUL,
+/// while `len` still counted the rest, so reads past it came from beyond the global.
+#[test]
+fn literal_keeps_bytes_after_interior_nul() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val s = "a\0bc"
+    if s.len() != 4 { return 1 }
+    if s.slice(2..4) != "bc" { return 2 }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("interior_nul.nr", source)
+        .expect("program should compile and run");
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn interpolation_text_keeps_bytes_after_interior_nul() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val n = 7
+    val s = "{n}\0bc"
+    if s.len() != 4 { return 1 }
+    if s.slice(2..4) != "bc" { return 2 }
+    return 0
+}
+"#;
+    let exit_code = test
+        .compile_and_run("interior_nul_interp.nr", source)
+        .expect("program should compile and run");
+    assert_eq!(exit_code, 0);
+}

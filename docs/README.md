@@ -1,9 +1,8 @@
 # Neuro Documentation
 
-**Status**: Alpha. Phases 1 (Core Language) and 2 (Tensors and MLIR) are complete; Phase 3
-(Automatic Differentiation) is open.
-Per-phase status lives in one place, the [Quick Roadmap](../README.md#quick-roadmap); what each
-release changed is in [CHANGELOG.md](../CHANGELOG.md).
+**Status**: Alpha. Per-phase status lives in one place, the
+[Quick Roadmap](../README.md#quick-roadmap); what each release changed is in
+[CHANGELOG.md](../CHANGELOG.md).
 
 This file is an index. It describes where things are, not what they do: every feature is defined
 once, in the page that owns it.
@@ -17,10 +16,10 @@ acceleration through MLIR GPU dialects is on the roadmap.
 Design goals:
 
 - **Static typing** with inference, for safety and performance
-- **Tensor primitives** as first-class language types (Phase 2+)
-- **Compile-time AD** as a source-to-source transform over typed HIR, no runtime gradient tape (Phase 3+)
-- **GPU acceleration** via MLIR `nvgpu` / `rocdl` / Triton dialects (Phase 4+)
-- **Zero-copy Python interop** via DLPack (Phase 7+)
+- **Tensor primitives** as first-class language types
+- **Compile-time AD** as a source-to-source transform over typed HIR, with no runtime gradient tape
+- **GPU acceleration** via MLIR `nvgpu` / `rocdl` / Triton dialects
+- **Zero-copy Python interop** via DLPack
 
 ## Getting Started
 
@@ -34,7 +33,7 @@ Design goals:
 | Page | Covers |
 |---|---|
 | [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, borrows, type inference |
-| [Strings](language-reference/strings.md) | The `string` slice type, the growable `String` buffer, interpolation, triple-quoted literals, codepoint iteration |
+| [Strings](language-reference/strings.md) | The `string` slice type and its escape sequences, the growable `String` buffer, interpolation, triple-quoted literals, codepoint iteration |
 | [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic shapes, devices |
 | [Automatic Differentiation](language-reference/autodiff.md) | `@grad` on functions and methods, `wrt:` selection of parameters and receiver fields, the derivative it generates, `.backward()` / `.grad()` / `.zero_grad()` and the borrows they end, second derivatives with `order: 2` and `.hessian()`, the `.detach()` and `@no_grad` fences, its signature rules, which constructs a differentiated body may use, and how the derivative follows branches, loops, calls, function values and elementwise math |
 | [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |
@@ -76,7 +75,7 @@ current entry points when this directory disagrees.
 | CPU codegen | inkwell (LLVM 22) | In use |
 | MLIR construction | melior (LLVM/MLIR 22) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR, behind the off-by-default `mlir` feature |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
-| GPU | MLIR nvgpu / rocdl / Triton | Phase 4+ |
+| GPU | MLIR nvgpu / rocdl / Triton | Planned |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.
 

@@ -111,6 +111,11 @@ Literals are emitted to `.rodata`, never heap-allocated; the appended NUL
 authoritative: interior NULs are legal counted content, so consumers must not treat the data as
 NUL-terminated.
 
+Every constant whose pointer is paired with a `len` (string literals, interpolation text, panic
+message fragments) goes through `CodegenContext::text_global`, which writes the bytes with
+`const_string`. `Builder::build_global_string_ptr` passes its text through a C string and stops
+at the first interior NUL, so it is kept for text the compiler generates itself.
+
 Passed and returned by value. On x86-64 SysV this fits two registers, so no `sret` indirection.
 The semantic `Type::String` is unchanged: the fat-pointer layout is a backend-only detail.
 

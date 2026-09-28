@@ -35,7 +35,7 @@ RUST_LOG=debug neurc check examples/basics/function_call.nr
 ```
 
 **Output**:
-- Success: `Type checking passed for "examples/basics/hello.nr" (1 module(s), 11 HIR items)`
+- Success: `Type checking passed for "examples/basics/hello.nr" (1 module(s), N HIR items)`, where `N` counts the implicit prelude's items as well as the file's
 - Failure: `Type errors found in "<file>":`, then one located diagnostic per error, then `Error: N type error(s) found`
 
 **Exit codes**:
@@ -52,9 +52,9 @@ neurc compile <file.nr> [options]
 ```
 
 **Options**:
-- `-o, --output <FILE>` - Specify output executable path (default: the input filename without its extension)
-- `-O, --optimization <0-3>` - Optimization level (default: `0`); see [Optimization](#optimization)
-- `--emit <exe|obj|llvm-ir>` - Artifact to write (default: `exe`); see [Emitting an object file](#emitting-an-object-file) and [Emitting LLVM IR](#emitting-llvm-ir)
+- `-o, --output <FILE>`: output path (default: the input filename without its extension)
+- `-O, --optimization <0-3>`: optimization level (default: `0`); see [Optimization](#optimization)
+- `--emit <exe|obj|llvm-ir>`: artifact to write (default: `exe`); see [Emitting an object file](#emitting-an-object-file) and [Emitting LLVM IR](#emitting-llvm-ir)
 
 **Examples**:
 ```bash
@@ -144,7 +144,7 @@ neurc run <file.nr> [options]
 ```
 
 **Options**:
-- `-O, --optimization <0-3>` - Optimization level (default: `0`); see [Optimization](#optimization)
+- `-O, --optimization <0-3>`: optimization level (default: `0`); see [Optimization](#optimization)
 
 The executable is written to a temporary directory and removed once the program exits, so
 `run` never leaves a binary beside the source. Use `compile` when you want to keep one.
@@ -178,11 +178,11 @@ RUST_LOG=debug neurc compile program.nr
 ```
 
 **Levels**:
-- `error` - Only errors
-- `warn` - Warnings and errors
-- `info` - Informational messages
-- `debug` - Detailed compilation steps (recommended for troubleshooting)
-- `trace` - Very verbose output
+- `error`: only errors
+- `warn`: warnings and errors
+- `info`: informational messages
+- `debug`: each compilation step (recommended for troubleshooting)
+- `trace`: everything
 
 **Examples**:
 ```bash
@@ -266,10 +266,9 @@ neurc compile program.nr -o bin/release/app
 
 ### Temporary Files
 
-A temporary object file is written during compilation and deleted after linking:
-- Location: system temp directory
-- Format: `.o` on Unix, `.obj` on Windows
-- Cleanup: removed once the linker finishes
+`compile` writes the object file (`.o` on Unix, `.obj` on Windows) into a fresh temporary
+directory and removes the directory once linking finishes, whether the link succeeded or not.
+`--emit obj` writes the object to the output path instead.
 
 ## Error Handling
 
@@ -323,45 +322,45 @@ Codegen failures print as `Compilation failed: Code generation error: ...`; link
 name the linker invocation, for example:
 
 ```text
-Compilation failed: Failed to link object file /tmp/neuro.o to executable program
-Caused by (1): Failed to execute cc - ensure a C compiler (gcc/clang) is installed
+Compilation failed: Failed to link object file to executable
+  Caused by (1): Failed to execute cc - ensure a C compiler (gcc/clang) is installed
+  Caused by (2): No such file or directory (os error 2)
 ```
 
+On Unix the linker driver is `cc`. On Windows `neurc` tries `clang`, then `lld-link`, then
+MSVC's `cl.exe`, and when all three fail it reports each driver's own reason.
+
 **Common causes**:
-- Missing C toolchain (MSVC or clang on Windows, gcc/clang on Unix)
+- Missing C toolchain (clang or MSVC on Windows, gcc/clang on Unix)
 - Missing system libraries
 
 ## Performance
 
 ### Compilation Times
 
-Rough figures for a release-build compiler on a modern desktop; a debug build of `neurc`
-itself is slower:
-
-| Program Size | Check Time | Compile Time |
-|--------------|------------|--------------|
-| Small (<100 LOC) | <100ms | <1s |
-| Medium (<1000 LOC) | <500ms | <5s |
-| Large (<10000 LOC) | <2s | <30s |
+With a release build of `neurc`, `check` on any program in `examples/` finishes in a few
+milliseconds and `compile` (linking included) in well under a second. A debug build of `neurc`
+itself is noticeably slower. For the speed of the programs it produces, see the
+[benchmarks](../../README.md#performance).
 
 ### Optimization
 
 `neurc compile` supports optimization levels `-O0` through `-O3`.
 
-- `-O0`: Fastest compile time, minimal optimization
-- `-O1`: Basic optimization
-- `-O2`: Balanced optimization (recommended default for release-like builds)
-- `-O3`: Maximum optimization
+- `-O0`: fastest compile, no optimization
+- `-O1`: basic optimization
+- `-O2`: balanced optimization (the usual choice for a release build)
+- `-O3`: maximum optimization
 
 ## Platform-Specific Notes
 
 ### Windows
 
 **Requirements**:
-- MSVC Build Tools 2022 OR MinGW-w64
+- MSVC Build Tools 2022
 - LLVM 22 (the `clang+llvm-*-x86_64-pc-windows-msvc` development archive)
 - a static libxml2 copied in as `xml2s.lib` (see
-  [troubleshooting](troubleshooting.md))
+  [troubleshooting](troubleshooting.md#cannot-open-input-file-xml2slib-windows))
 
 **Executable extension**: Always `.exe`
 
@@ -369,24 +368,17 @@ itself is slower:
 
 ```powershell
 # Both work
-neurc compile examples\hello.nr
+neurc compile examples\basics\hello.nr
 neurc compile examples/basics/hello.nr
 ```
 
 ### Linux
 
 **Requirements**:
-- GCC or Clang
+- GCC or Clang (`build-essential` on Debian, `base-devel` on Arch)
 - LLVM 22
-- Build essentials (make, cmake, etc.)
 
-**Executable extension**: None (no extension)
-
-**Permissions**: Make executable:
-```bash
-chmod +x ./program
-./program
-```
+**Executable extension**: none
 
 ### macOS
 
@@ -394,24 +386,16 @@ chmod +x ./program
 - Xcode Command Line Tools
 - LLVM 22 (via Homebrew, `llvm@22`)
 
-**Apple Silicon**: Fully supported
+**Apple Silicon**: supported
 
-**Executable extension**: None
+**Executable extension**: none
 
 ## Advanced Usage
 
-### Custom Toolchain
+### Target
 
-Override default linker:
-
-```bash
-# Use specific linker (not yet configurable)
-# Future feature
-```
-
-### Cross-Compilation
-
-Not yet supported. Compiles for the native target only.
+`neurc` compiles for the host target only, and the linker driver is fixed (see
+[Code Generation and Link Errors](#code-generation-and-link-errors)).
 
 ### Build Scripts
 
@@ -439,7 +423,9 @@ echo "Build complete!"
   run: |
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
-    sudo ./llvm.sh 20
+    sudo ./llvm.sh 22
+    sudo apt-get install -y llvm-22-dev libpolly-22-dev libzstd-dev zlib1g-dev
+    echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> "$GITHUB_ENV"
 
 - name: Build Neuro compiler
   run: cargo build --release -p neurc
@@ -455,21 +441,10 @@ echo "Build complete!"
 
 See [Troubleshooting Guide](troubleshooting.md) for common issues and solutions.
 
-## Future Features
+## Planned
 
-### Planned CLI Enhancements
-
-- Debug information: `-g` flag
-- Position-independent code: `-fPIC`
-- Verbose output: `-v` flag
-- Quiet mode: `-q` flag
-- Color output control: `--color` option
-
-### Planned
-
-- Incremental compilation
-- Build caching
-- Cross-compilation targets
+Debug information (`neurc compile -g`) and incremental compilation with a persistent cache
+are on the roadmap; see the [Quick Roadmap](../../README.md#quick-roadmap).
 
 ## References
 

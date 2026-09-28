@@ -2,7 +2,7 @@
 
 **Status**: Implemented · AST → typed HIR → LLVM
 **Slice**: `compiler/neurc` (orchestrator)
-**Dependencies**: `lexical-analysis`, `syntax-parsing`, `module-resolution`, `semantic-analysis`, `hir-lowering`, `llvm-backend`
+**Dependencies**: `lexical-analysis`, `syntax-parsing`, `module-resolution`, `argument-binding`, `semantic-analysis`, `hir-lowering`, `llvm-backend`
 
 ---
 
@@ -34,6 +34,10 @@ Source File (.nr)
 │      then erases the qualifiers into one flat namespace      │
 │    - The driver prepends the prelude here, unless the root    │
 │      file opted out with `@no_prelude`                       │
+├──────────────────────────────────────────────────────────────┤
+│ 3b. Argument Binding (argument_binding::bind_arguments)      │
+│    - Reorders named arguments into declaration order, once   │
+│      every module is merged and every callee is visible      │
 ├──────────────────────────────────────────────────────────────┤
 │ 4. Semantic Analysis (semantic_analysis::type_check)         │
 │    - Type checking, scope resolution                         │
@@ -71,15 +75,18 @@ docs.
 ### Core Function: `compile_file`
 
 ```rust
-fn compile_file(input: &Path, output: Option<&Path>, optimization: OptimizationLevelSetting) -> Result<()>
+fn compile_file(input: &Path, output: Option<&Path>, optimization: u8, emit: EmitKind) -> Result<PathBuf>
 ```
 
-**Purpose**: Orchestrates the complete compilation pipeline from source file to executable.
+**Purpose**: Orchestrates the complete compilation pipeline from source file to artifact, and
+returns the path it wrote.
 
 Stages, in order: read source → resolve modules and parse (`module_resolution::resolve_program`,
-with the parser and the prelude injected by the driver) → `semantic_analysis::type_check` →
-`hir_lowering::lower_program` → `llvm_backend::compile(&hir, optimization, &source, &path)` → write
-temporary object file → link.
+with the parser and the prelude injected by the driver) → `argument_binding::bind_arguments` →
+`semantic_analysis::type_check` → `hir_lowering::lower_program` → check that `main` exists
+(unless `--emit` asks for an object or IR) → `llvm_backend::compile` → write the object file
+into a temporary directory → link. The rationale for this order lives in the
+[`neurc` CONTEXT.md](../../compiler/neurc/CONTEXT.md).
 
 **Error Handling Strategy**:
 - Uses `anyhow::Context` for error-chain construction; each stage adds contextual information.
@@ -102,9 +109,11 @@ Compilation failed: Type checking failed
 
 ### `check` vs `compile`
 
-`neurc check` runs stages 1 through 5 (read, resolve + parse, type-check, HIR lowering) and stops;
-it validates a program (including that it lowers cleanly to HIR) without producing a binary.
-`neurc compile` runs the full pipeline.
+`neurc check` runs stages 1 through 5 (read, resolve + parse, bind arguments, type-check, HIR
+lowering) and stops; it validates a program (including that it lowers cleanly to HIR) without
+producing a binary. `neurc compile` runs the full pipeline. `neurc run` calls `compile_file`
+with an output path inside a temporary directory, runs the result, and exits with the
+program's own status.
 
 `--emit obj` stops one step short of the linker and writes the object file to the output path
 instead. It carries no `main` requirement, because an object may be a library; the default
@@ -131,22 +140,25 @@ the C runtime and startup code). On Unix it always invokes `cc`. On Windows it t
 ## CLI Integration
 
 ```bash
-neurc check   <INPUT>            # Stages 1-5: resolve + parse, type-check, lower to HIR
+neurc check   <INPUT>            # Stages 1-5: resolve + parse, bind, type-check, lower to HIR
 neurc compile <INPUT> [OPTIONS]  # Full pipeline to a native binary
+neurc run     <INPUT> [-O <N>]   # Compile into a temporary directory and run
 ```
 
 **Options** (for `compile`):
-- `-o, --output <FILE>`, output executable path (defaults to the input filename, `.exe` on Windows)
-- `-O <LEVEL>`, optimization level (0 to 3)
-- `--emit <exe|obj|llvm-ir>`, artifact to write (defaults to `exe`)
+- `-o, --output <FILE>`: output executable path (defaults to the input filename, `.exe` on Windows)
+- `-O <LEVEL>`: optimization level (0 to 3)
+- `--emit <exe|obj|llvm-ir>`: artifact to write (defaults to `exe`)
 
 **Examples**:
 ```bash
-neurc check   examples/hello.nr
-neurc compile examples/hello.nr
-neurc compile examples/hello.nr -o bin/hello
-RUST_LOG=debug neurc compile examples/hello.nr   # debug logging
+neurc check   examples/basics/hello.nr
+neurc compile examples/basics/hello.nr
+neurc compile examples/basics/hello.nr -o bin/hello
+RUST_LOG=debug neurc compile examples/basics/hello.nr   # debug logging
 ```
+
+Every flag is described in the [CLI Usage Guide](../guides/cli-usage.md).
 
 ### Exit Codes
 
@@ -155,13 +167,16 @@ RUST_LOG=debug neurc compile examples/hello.nr   # debug logging
 | 0 | Compilation succeeded |
 | 1 | Compilation failed (syntax, type, HIR-lowering, codegen, or link error) |
 
+Under `run`, a successful build exits with the program's own status instead.
+
 ## Testing
 
-End-to-end coverage lives in `compiler/neurc/tests/`, e.g. `hir_lowering.rs` exercises the
-AST → HIR step, and per-feature suites (`arrays.rs`, `drop_destructors.rs`, `string_concat.rs`,
-`string_slice.rs`, …) compile and run real programs, asserting exit codes and output.
-`cargo test --workspace` runs the whole suite; the `mlir`-feature tests are additional and
-feature-gated.
+End-to-end coverage lives in `compiler/neurc/tests/`. The per-feature suites under
+`tests/suite/` (`arrays.rs`, `drop_destructors.rs`, `hir_lowering.rs`, …) compile and run real
+programs, asserting exit codes and output. `tests/examples.rs` builds and runs every program in
+`examples/` against its pinned exit code and stdout, and `tests/architecture_tests.rs` enforces
+the slice dependency rules. `cargo test --workspace` runs all of it; the `mlir`-feature tests
+are additional and feature-gated.
 
 ## Known Limitations
 
@@ -173,9 +188,9 @@ feature-gated.
 
 ## Future Enhancements
 
-- Debug information (`-g`), position-independent code, cross-compilation, LTO.
-- Parallel / incremental compilation and build caching.
-- Routing tensor lowering through `mlir-backend` in the driver, and on to MLIR GPU dialects (Phase 4).
+Planned on the [Quick Roadmap](../../README.md#quick-roadmap): debug information (`-g`),
+incremental compilation with a persistent cache, LTO defaults for release builds, and routing
+tensor lowering through `mlir-backend` in the driver, then on to MLIR GPU dialects.
 
 ## Setup
 

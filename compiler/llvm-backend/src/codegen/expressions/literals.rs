@@ -242,16 +242,8 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             shared_types::Literal::String(s) => {
                 // Literals are not heap-allocated: the UTF-8 bytes live in `.rodata` for the
-                // program's lifetime. LLVM appends the `STRING_NULL_TERMINATOR` automatically.
-                let global_string =
-                    self.builder
-                        .build_global_string_ptr(s, "str")
-                        .map_err(|e| {
-                            CodegenError::LlvmError(format!(
-                                "failed to create string constant: {}",
-                                e
-                            ))
-                        })?;
+                // program's lifetime, followed by the `STRING_NULL_TERMINATOR`.
+                let global_string = self.text_global(s, "str");
 
                 // `len` is the content's UTF-8 byte count and excludes the appended terminator;
                 // it is the authoritative length (interior NULs included). See STRING_NULL_TERMINATOR.

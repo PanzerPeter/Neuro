@@ -251,7 +251,7 @@ func main() -> i32 {
 }
 ```
 
-As **tensor element types** (`Tensor<bf16, [...]>`, Phase 2) the restriction lifts entirely: elementwise operators (with a tensor or a half-precision scalar on the other side), compound assignment, matmul, `einsum`, reductions and the elementwise math methods are all defined. On the CPU each element is computed in `f32` and rounded back once, and a reduction accumulates in `f32`, so a long `bf16` sum does not stall where a 16-bit running total would. The split keeps half-precision where it pays off (bulk tensor compute) without committing the scalar layer to non-portable semantics.
+As **tensor element types** (`Tensor<bf16, [...]>`) the restriction lifts entirely: elementwise operators (with a tensor or a half-precision scalar on the other side), compound assignment, matmul, `einsum`, reductions and the elementwise math methods are all defined. On the CPU each element is computed in `f32` and rounded back once, and a reduction accumulates in `f32`, so a long `bf16` sum does not stall where a 16-bit running total would. The split keeps half-precision where it pays off (bulk tensor compute) without committing the scalar layer to non-portable semantics.
 
 ### Digit Separators
 
@@ -330,7 +330,7 @@ An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated
 
 ## Struct Types
 
-Structs are user-defined types that group named fields. They use nominal typing, two structs with identical fields are distinct types.
+Structs are user-defined types that group named fields. They use nominal typing: two structs with identical fields are distinct types.
 
 ### Definition
 
@@ -346,7 +346,7 @@ struct Counter {
 }
 ```
 
-Fields are listed as `name: Type`, separated by commas or newlines. Any primitive type (or another struct type) is valid as a field type.
+Fields are listed as `name: Type`, separated by commas or newlines. A field may have any type: a scalar, `string`, a collection, an array, a tuple, a tensor, an enum or another struct. A struct cannot hold itself inline.
 
 ### Instantiation
 
@@ -375,7 +375,7 @@ mut cursor = Point { x: 0.0, y: 0.0 }
 cursor.x = 5.0   // OK: cursor is mut
 
 val fixed = Point { x: 1.0, y: 2.0 }
-fixed.x = 3.0    // Error: AssignToImmutableField
+fixed.x = 3.0    // error: cannot assign to field 'x' of immutable binding 'fixed'
 ```
 
 ### Definition Order
@@ -410,9 +410,10 @@ val s = a.x + b.y  // a is still valid here
 
 Rules:
 
-- A struct may derive `Copy` only when **every field is `Copy`**. Primitive scalars
-  (`i8` to `u64`, `f32`, `f64`, `bool`) are `Copy`; `string` is not; a struct field is `Copy`
-  only when its type also derives `Copy`. Violating this is a `CopyDeriveNonCopyField` error.
+- A struct may derive `Copy` only when **every field is `Copy`**. The scalars (integers,
+  floats including `f16` / `bf16`, `bool`, `char`) are `Copy`, and so are arrays and tuples of
+  them; `string` and the collections are not; a struct field is `Copy` only when its type also
+  derives `Copy`. Anything else is a compile error that names the offending field.
 - `Copy` implies `Clone`.
 - `@derive(Clone)` (or `Copy`) enables `struct.clone()`, an explicit deep copy that returns a
   fresh value without moving the receiver. A user-defined `clone` method in an `impl` block
@@ -606,9 +607,11 @@ val absent: Option<i32> = Option::None
 
 Variants may be written qualified (`Option::Some`, `Result::Err`) or, because the implicit prelude imports `Some`, `None`, `Ok`, and `Err` into every file without `@no_prelude`, unqualified (`Some(x)`). The [`??` operator](operators.md#nullerror-coalescing-operator-) unwraps either type with a fallback, the [`?` operator](operators.md#error-propagation-operator-) unwraps one or hands the failure to the caller, and [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) unwraps one or exits the scope.
 
-### Phase 1 Limitations
+### Limitations
 
 - **Payloads must be sized.** Any sized type is admissible, `Copy` or not: a `string`, a struct, an array, a tuple, another enum. `void` and the unsized types (`dyn Trait`, `[T]`) are rejected (`UnsupportedEnumPayload`), because a payload slot has to have a width.
+- **No enum that holds itself inline**, directly or through a struct, array, tuple or another
+  enum: it would have no finite size.
 - **No `impl Drop` on an enum** (`InvalidDropImpl`): only a struct runs a user destructor.
 - **No `.map_err` or other `Option` / `Result` helper methods.** They would be generic over a closure's result type, and a closure cannot yet be passed to a generic higher-order function.
 - **No lifetime parameters on an enum**; `enum E<'a, T>` is a parse error.
@@ -725,9 +728,9 @@ impl Point {
 func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through it
 ```
 
-> **Not yet lifetime-verified:** a returned `&T` is not yet checked against the lifetime of
-> the value it points into; that check lands with lifetime inference. Integer intrinsics
-> (`r.wrapping_add(..)`) still require a value receiver, read through `*r` first.
+Integer intrinsics (`r.wrapping_add(..)`) do not auto-deref: read through `*r` first. A
+returned `&T` is checked against what it points into; see
+[Lifetimes](#lifetimes-returned-references).
 
 ### References, Mutable Borrows (`&mut T`)
 
@@ -949,7 +952,7 @@ val x: i32 = 42              // Explicit type annotation
 val pi: f64 = 3.14159        // Explicit type annotation
 val flag: bool = true        // Explicit type annotation
 val n = 100                  // Inferred i32 (default for integer literals)
-val pi = 3.14159             // Inferred f64 (default for float literals)
+val e = 2.71828              // Inferred f64 (default for float literals)
 ```
 
 ### Function Parameters
@@ -984,7 +987,7 @@ func returns_nothing() {
 
 ### Strict Type System
 
-Neuro uses strict type checking with no implicit conversions in Phase 1:
+Neuro has no implicit conversions between types:
 
 ```neuro
 func strict_types() -> i32 {
@@ -1025,64 +1028,12 @@ func returns_i32() -> i32 {
 }
 ```
 
-## Type System Features
-
-### Phase 1, Core Language
-
-**Landed (✅):**
-- Primitive types (i8-i64, u8-u64, f32, f64, bool, char, f16/bf16)
-- String type with fat pointer ABI (`{ ptr, i64 }`)
-- Explicit type annotations + contextual numeric inference with range validation
-- Explicit type conversions via `as`
-- Function types, strict type checking, type-mismatch error reporting
-- Structs, methods, fixed-size arrays `[T; N]`, borrowed slices `&[T]` / `&mut [T]`, tuples + destructuring, type aliases
-- Enums with associated data `enum E { A, B(T), C { f: T } }`, generic enums `enum Slot<T> { ... }`
-- Pattern matching, newtypes
-- Generics + monomorphization, traits, operator traits, static/dynamic dispatch, closures
-- `Option<T>` / `Result<T, E>` from the implicit prelude, the `??` coalescing and `?` propagation operators, `val-else` binding
-- Collections `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>`, `checked_*` integer methods
-- Modules and imports: multi-file programs, inline `module` blocks, re-exports, and the implicit prelude (see [modules.md](modules.md))
-- String interpolation with the format mini-language (`"{x:.2}"`) and triple-quoted
-  block strings with dedent, see
-  [expressions.md](expressions.md#string-interpolation)
-- Named arguments with external labels, see
-  [functions.md](functions.md#named-arguments)
-
-- Growable runtime strings through the `String` buffer (`String::new` / `.push_str` /
-  `.clear` / `.to_string`)
-
-Phase 1 has no remaining work; every sub-phase 1A-1H is complete.
-
-### Phase 2, Tensors
-
-- Implemented: static tensor types `Tensor<f32, [3, 3]>`, literal coercion, the
-  construction helpers, tensor ownership, and in-place compound assignment
-  (see [Tensor Types](#tensor-types))
-- Implemented: slicing and indexing `t[i, j]` / `t[1..3, ..]` / `t[(0..n).rev()]`
-  (see [Slicing and indexing](#slicing-and-indexing))
-- Implemented: shape generics and constraints, `func f<M, K>(t: &Tensor<f32, [M, K]>)`
-  (see [Shape generics](#shape-generics))
-- Implemented: named dimensions `Tensor<f32, [batch: 32, embed: 768]>`
-- Implemented: shape manipulation `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`
-  (see [Rearranging a shape](#rearranging-a-shape))
-  (see [Named dimensions](#named-dimensions))
-- Implemented: dynamic shapes `Tensor<f32, [?, 784]>`
-  (see [Dynamic shapes](#dynamic-shapes))
-- Implemented: reductions `.sum()` / `.mean()` / `.max()` / `.min()`, whole-tensor and
-  along an axis (see [Reductions](#reductions))
-- Implemented: sorting and selection `.sort()` / `.argsort()` / `.topk(k:)`
-  (see [Sorting and selection](#sorting-and-selection))
-- Implemented: by-value tensor arithmetic (`a + b`, `a @ b`) with broadcasting
-  (see [Tensors](tensors.md))
-
 ## Type Safety Guarantees
 
-Neuro's type system provides:
-
-1. **No undefined behavior from type errors**: All type errors caught at compile time
-2. **No implicit conversions**: Explicit is better than implicit
-3. **Function type safety**: Arguments and returns type-checked
-4. **Memory safety**: Types prevent invalid memory access (future: ownership system)
+Every type error is reported at compile time, and no value changes type without an `as`.
+Ownership and borrow checking reject a use after a move, a write through a shared borrow and
+a reference that outlives its value; [docs/BUGS.md](../BUGS.md) lists the open defects in
+that guarantee.
 
 ## Common Type Errors
 
@@ -1170,7 +1121,7 @@ val pi: f64 = 3.141592653589793
 
 ### 3. Be Explicit About Types
 
-Even with future type inference, explicit types improve readability:
+Inference is available, but an explicit type states intent where a literal alone would not:
 
 ```neuro
 // Clear intent
@@ -1187,7 +1138,7 @@ func calculate_area(radius: f64) -> f64 {
 val is_valid: bool = true
 
 // Avoid: integer for boolean logic
-val is_valid: i32 = 1  // Less clear
+val is_valid_flag: i32 = 1  // Less clear
 ```
 
 ## Type Conversion
@@ -1533,13 +1484,13 @@ val first = names[0]      // a copy of its own, valid after `names` is gone
 
 | Operation | Result | Notes |
 | --- | --- | --- |
-| `v.push(x)` |, | Appends; grows the buffer as needed |
+| `v.push(x)` | nothing | Appends; grows the buffer as needed |
 | `v.pop()` | `Option<T>` | `None` when empty |
 | `v.get(i)` | `Option<T>` | The checked read |
-| `v[i]` / `v[i] = x` | `T` /, | Panics out of range, in **every** build |
+| `v[i]` / `v[i] = x` | `T` / nothing | Panics out of range, in **every** build |
 | `v.len()` | `u64` | Live element count |
-| `v.clear()` |, | Empties without releasing the buffer |
-| `for x in v` |, | Iterates the live elements in order |
+| `v.clear()` | nothing | Empties without releasing the buffer |
+| `for x in v` | nothing | Iterates the live elements in order |
 
 A `Vec` index is checked in every build, like an array's; a `Vec`'s length is only
 known at run time, so the optimizer can rarely prove the check redundant.
@@ -1550,12 +1501,12 @@ Both share one surface:
 
 | Operation | Result | Notes |
 | --- | --- | --- |
-| `m.insert(k, v)` |, | Overwrites the value of an existing key |
+| `m.insert(k, v)` | nothing | Overwrites the value of an existing key |
 | `m.get(k)` | `Option<V>` | `None` when absent |
 | `m.contains_key(k)` | `bool` | |
 | `m.remove(k)` | `bool` | `true` when a key was removed |
 | `m.len()` | `u64` | Live entry count |
-| `m.clear()` |, | |
+| `m.clear()` | nothing | |
 | `m.keys()` | `Vec<K>` | A fresh `Vec`, so a map is iterated via `for k in m.keys()` |
 
 `HashMap` is open-addressed with linear probing and average-O(1) lookup.

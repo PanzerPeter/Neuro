@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.2] - 2026-09-28
+
+### Fixed
+
+- A string literal, an interpolated string's text, or a `panic` message that contains `\0`
+  keeps every byte after it. The constant was built through a C string and ended at the first
+  NUL, while the stored length still counted the rest, so `"a\0bc".slice(2..4)` and `println`
+  read past the end of the constant.
+- The Windows CI's LLVM setup finds vcpkg's static libxml2 archive by pattern. libxml2 2.15 no
+  longer names it `libxml2s.lib`, which failed the Windows test leg before the build started.
+
+### Docs
+
+- The getting-started pages match the compiler: correct paths to `examples/basics/`, the real
+  source of `hello.nr`, the `--emit` flag, and a Power exercise whose result fits in an exit
+  status. The stale feature summary in the quick start is replaced by links to the README
+  capability table.
+- The CLI and troubleshooting guides describe what the compiler does now: division by zero and
+  `-O0` overflow print a located `panic:` and abort, a binary is kilobytes rather than
+  megabytes, the object file goes to a temporary directory, and the Windows linker order is
+  `clang`, `lld-link`, `cl.exe`. Unplanned "future" CLI flags are gone; the planned ones link to
+  the roadmap.
+- The component docs for the lexer, parser, checker, backends and module resolution are cut to
+  the shape of the newer ones: the lexer and parser docs link to the token and AST definitions
+  instead of pasting them, the checker's pass table lists all its passes, `compile_to_ir` and
+  the argument-binding stage are documented, `emit_smoke_module` (no longer public) is gone, and
+  the backend's IR example is real `-O0` output.
+- The strings reference documents the escape sequences. The modules reference warns that a
+  local binding does not shadow an imported name. The README control-flow row says
+  `else if`, not `elif`.
+- `docs/BUGS.md` records BUG-084 (a `main` with the wrong signature compiles).
+
 ## [3.19.1] - 2026-09-27
 
 ### Changed
@@ -4023,7 +4055,7 @@ is added here: the version number is the deliverable, alongside the cleanup belo
   Three new `LexError` variants carry the failures: `UnterminatedTripleQuotedString`,
   `TripleQuoteClosingNotOnOwnLine`, and `TripleQuoteUnderIndented`.
 
-  New examples: [`examples/types/triple_quoted.nr`](examples/types/triple_quoted.nr)
+  New examples: [`examples/strings/triple_quoted.nr`](examples/strings/triple_quoted.nr)
   checks each rule against its expected text, and
   [`examples/showcase/config_manifest.nr`](examples/showcase/config_manifest.nr)
   renders a config manifest combining block strings with a `@derive(Copy)` struct +

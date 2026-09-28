@@ -6,25 +6,28 @@
 
 ## Overview
 
-The LLVM backend slice generates native object code from the typed High-Level IR (`neuro-hir`), not the AST. Since 1D the frontend lowers the type-checked AST to HIR (`hir-lowering`), where every expression already carries its resolved type, so the backend reads types inline instead of re-deriving them. It uses [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 22) to produce optimized machine code for the host platform.
+The LLVM backend generates native object code from the typed High-Level IR (`neuro-hir`), not
+the AST. [HIR lowering](hir-lowering.md) has already attached a resolved type to every
+expression, so the backend reads types inline instead of re-deriving them. It uses
+[inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 22) to produce
+optimized machine code for the host platform.
 
-**Entry point:**
+**Entry points:**
 ```rust
-pub fn compile(
-    program: &HirProgram,
-    optimization: OptimizationLevelSetting,
-    source: &str,
-    source_path: &str,
-) -> CodegenResult<Vec<u8>>
+pub fn compile(program: &HirProgram, optimization: OptimizationLevelSetting,
+               source: &str, source_path: &str) -> CodegenResult<Vec<u8>>
+pub fn compile_to_ir(program: &HirProgram, optimization: OptimizationLevelSetting,
+                     source: &str, source_path: &str) -> CodegenResult<String>
 ```
 
-`source` / `source_path` are carried through for located runtime-panic diagnostics (e.g. array
-bounds, slice boundaries).
+`compile` returns object code; `compile_to_ir` stops after the pass pipeline and returns the
+textual module (`neurc compile --emit llvm-ir`). `source` / `source_path` are carried through for
+located runtime-panic diagnostics (array bounds, slice boundaries, integer overflow).
 
 ## Architecture
 
-- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `inkwell 0.10.0`; `hir-lowering` is a dev-dependency (tests/benches lower before compiling)
-- **Public API**: single `compile()` function returning object code bytes
+- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `inkwell 0.10.0`, `thiserror`; `syntax-parsing` and `hir-lowering` are dev-dependencies (tests and benches lower before compiling)
+- **Public API**: `compile`, `compile_to_ir`, `OptimizationLevelSetting`, `CodegenError`
 - **All internals**: `pub(crate)`, `CodegenContext`, `TypeMapper`, `codegen_*` helpers
 - **Output**: platform object code (`.o`) passed to the system linker by `neurc`
 
@@ -85,18 +88,21 @@ Integer instructions are selected based on signedness:
 ## Code Generation Pipeline
 
 ```text
-1. Pre-pass: register struct definitions and extract all function/method signatures (including mangled method names `StructName__methodName`)
-2. Initialize LLVM context + module (via inkwell)
-3. Pre-pass: collect expression types for instruction selection
-4. For each function:
-   a. Create LLVM function with parameter types
-   b. Allocate parameters on stack (alloca + store)
-   c. Generate body statements
-5. Verify LLVM module (catches malformed IR)
-6. Initialize native target (LLVM_SYS_221_PREFIX)
-7. Create target machine for the host triple
-8. Emit object code to memory buffer
+build_module
+  1. Declare every function, method and closure signature before any body,
+     so a call resolves regardless of item order (monomorphized instances included)
+  2. Emit vtables for every `impl Trait for Type`
+  3. Generate bodies
+  4. Insert the standard-output drain on every exit path, if the module prints
+  5. Link the soft-float builtins, if the module uses `half` / `bfloat`
+  6. Verify the module
+then
+  7. Create a target machine for the host triple and run the `-O` pass pipeline
+  8. Emit object code to a memory buffer (`compile`) or print the module (`compile_to_ir`)
 ```
+
+Why the order is fixed is recorded under *Module Emission Order* in the slice's
+[CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md).
 
 ## Opaque Pointers (LLVM 15+)
 
@@ -105,7 +111,7 @@ LLVM 15 removed typed pointers. All pointers are now opaque (`ptr`). The backend
 ## String ABI
 
 `string` values are represented as an anonymous LLVM struct `{ ptr, i64 }`:
-- **field 0** (`ptr`): pointer to null-terminated UTF-8 bytes in `.rodata`
+- **field 0** (`ptr`): pointer to the UTF-8 bytes, followed by a NUL (in `.rodata` for a literal, on the heap for a built string)
 - **field 1** (`i64`): byte count excluding the null terminator
 
 The fat pointer is passed and returned by value. On x86-64 SysV this fits in two registers (no sret needed). `==` and `!=` lower to a length check followed by a `memcmp` against an external libc symbol; a `select` passes `n=0` to `memcmp` when lengths differ, keeping it safe.
@@ -136,8 +142,8 @@ entry:
 }
 ```
 
-The diagnostic machinery, one `write(2, …)` per message fragment plus the `abort()`
-otherwise occupies cache lines between the guard branch and the code that follows it, at
+The diagnostic machinery (one `write(2, …)` per message fragment, plus the `abort()`) would
+otherwise occupy cache lines between the guard branch and the code that follows it, at
 every check. `noinline` is what holds the split in place; without it the inliner folds a
 single-call-site function straight back in. Thunks are deduplicated by their rendered
 diagnostic text, so the copies monomorphization makes of one generic body share a single
@@ -147,9 +153,10 @@ A `panic(msg)` whose message is a runtime `string` uses a `(ptr, i64)` thunk: on
 constant fragments are baked in, and the fat pointer travels as two arguments.
 
 Each guard branch also carries `!prof` branch weights (`2000 : 1`) marking the failure edge
-as the improbable one, so block placement keeps it off the fall-through path. The `-O0`
-integer-overflow check is weighted but *not* outlined, its trap block is a single
-`llvm.trap`, so moving it behind a call would trade one instruction for another.
+as the improbable one, so block placement keeps it off the fall-through path. At `-O0` the
+integer-overflow check is one more guard of the same shape: it prints
+`panic: integer overflow at file:line:col` through an outlined thunk. From `-O1` up, integer
+arithmetic wraps and carries no check.
 
 ## Error Types
 
@@ -162,7 +169,7 @@ program, because the type checker has already rejected invalid source. The autho
 
 ```rust
 use syntax_parsing::parse;
-use semantic_analysis::type_check;
+use hir_lowering::lower_program;
 use llvm_backend::{compile, OptimizationLevelSetting};
 
 let source = r#"
@@ -172,11 +179,13 @@ let source = r#"
 "#;
 
 let ast = parse(source)?;
-type_check(&ast)?;
 let hir = lower_program(&ast)?;                  // hir-lowering: AST → typed HIR
 let object_code = compile(&hir, OptimizationLevelSetting::O2, source, "add.nr")?;
 std::fs::write("output.o", &object_code)?;
 ```
+
+This skips the stages a real program needs between parsing and lowering (module resolution,
+argument binding, type checking); `compile_file` in `neurc` runs them all.
 
 ## LLVM IR Example
 
@@ -187,18 +196,30 @@ func add(a: i32, b: i32) -> i32 {
 }
 ```
 
-**Generated LLVM IR (simplified, opaque pointers):**
+**Generated LLVM IR at `-O0`** (`neurc compile --emit llvm-ir`, alignment annotations
+dropped). The `+` is overflow-checked at this level, so the add goes through
+`llvm.sadd.with.overflow` and a guard branch to an outlined panic thunk:
 ```llvm
 define i32 @add(i32 %0, i32 %1) {
 entry:
   %a = alloca i32
-  %b = alloca i32
   store i32 %0, ptr %a
+  %b = alloca i32
   store i32 %1, ptr %b
-  %2 = load i32, ptr %a
-  %3 = load i32, ptr %b
-  %addtmp = add i32 %2, %3
-  ret i32 %addtmp
+  %a1 = load i32, ptr %a
+  %b2 = load i32, ptr %b
+  %addtmp = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %a1, i32 %b2)
+  %arith.res = extractvalue { i32, i1 } %addtmp, 0
+  %arith.ovf = extractvalue { i32, i1 } %addtmp, 1
+  %arith.ok = xor i1 %arith.ovf, true
+  br i1 %arith.ok, label %guard.cont, label %guard.fail, !prof !0
+
+guard.fail:
+  call void @neuro.cold.panic.0() #1
+  unreachable
+
+guard.cont:
+  ret i32 %arith.res
 }
 ```
 
@@ -223,7 +244,9 @@ inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alterna
 
 ### Stack Allocation for All Locals
 
-All local variables and parameters are stack-allocated via `alloca`. This is the standard approach for a non-optimized Phase 1 backend: it is correct, simple, and LLVM's `mem2reg` pass (enabled at `-O1`+) will promote them to SSA registers during optimization.
+All local variables and parameters are stack-allocated via `alloca` in the entry block. This
+is correct and simple, and LLVM's `mem2reg` pass (enabled from `-O1`) promotes them to SSA
+registers during optimization.
 
 ### Optimization Levels
 
@@ -241,7 +264,7 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 The `mlir-backend` slice already lowers the same typed HIR this backend consumes to MLIR
 `linalg`, behind the off-by-default `mlir` feature, and both link against the same LLVM 22
 libraries. The driver does not route through it yet; that routing, and the GPU dialects after
-it, are Phase 4 work. inkwell remains the terminal code-emission layer on every path. See
+it, are planned on the [Quick Roadmap](../../../README.md#quick-roadmap). inkwell remains the terminal code-emission layer on every path. See
 [MLIR Backend](mlir-backend.md).
 
 ## Resources

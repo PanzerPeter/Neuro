@@ -142,7 +142,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Emit `write(2, <global ".rodata" bytes>, len)` for a compile-time-known string.
     pub(crate) fn emit_write_cstr(&self, text: &str) -> CodegenResult<()> {
-        let global = self.builder.build_global_string_ptr(text, "panic.str")?;
+        let global = self.text_global(text, "panic.str");
         let len = self.context.i64_type().const_int(text.len() as u64, false);
         self.emit_write(global.as_pointer_value().into(), len)
     }

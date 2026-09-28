@@ -206,10 +206,10 @@ val abs_n: i32 = if n >= 0 { n } else { 0 - n }
 val sign: i32  = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }
 ```
 
-All arms must produce the same type. An `if` without `else` has type `Void` and cannot be used as a value.
+All arms must produce the same type. An `if` without `else` has type `void` and cannot be used as a value.
 
-An arm that **leaves the scope** rather than producing a value, `return`, `break`,
-`continue`, `panic(...)`, or `unreachable()`, is exempt: it never reaches the point
+An arm that **leaves the scope** rather than producing a value (`return`, `break`,
+`continue`, `panic(...)` or `unreachable()`) is exempt: it never reaches the point
 where the `if` has a value, so it neither supplies the type nor has to match it. The
 remaining arms decide:
 
@@ -277,7 +277,7 @@ A `{ … }` block is an expression whose value is its final (trailing) expressio
 val area: i32 = {
     val w: i32 = 6
     val h: i32 = 7
-    w * h           // trailing expression, this is the block's value
+    w * h           // trailing expression: the block's value
 }
 ```
 
@@ -286,20 +286,20 @@ Locals declared inside a block are scoped to that block.
 ### Unsafe Block Expressions
 
 An `unsafe { … }` block is a block expression prefixed with the reserved
-`unsafe` keyword. It evaluates exactly like a bare block, its value is the
+`unsafe` keyword. It evaluates exactly like a bare block: its value is the
 trailing expression, and its locals are block-scoped:
 
 ```neuro
 val x: i32 = unsafe {
     val a: i32 = 20
-    a + 22          // trailing expression, this is the block's value
+    a + 22          // trailing expression: the block's value
 }
 ```
 
 `unsafe` is currently **inert**: it is a reserved keyword and produces a
-distinct AST node, but carries no special semantics yet. It exists as 1C
-groundwork for the GPU-kernel aliasing model (Phase 4), where `unsafe { }` will
-gate raw `KernelOut` index writes. Until then it behaves identically to `{ }`.
+distinct AST node, but carries no special semantics. It is reserved for the
+planned GPU-kernel aliasing model, where `unsafe { }` will gate raw `KernelOut`
+index writes. Until then it behaves identically to `{ }`.
 
 ### Parenthesized Expressions
 
@@ -312,32 +312,8 @@ x / (y + z)     // Force addition before division
 
 ## Operator Precedence
 
-Higher precedence operators bind first. Full table from highest to lowest, matching the
-Pratt parser's ladder exactly:
-
-| Level | Operators | Associativity | Description |
-|-------|-----------|---------------|-------------|
-| 18 (highest) | `.` | Left | Field / method access |
-| 17 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | Left | Postfix forms |
-| 16 | `-` (unary), `!`, `~` | Right | Negation, logical NOT, bitwise NOT |
-| 15 | `as` | Left | Type cast |
-| 14 | `*`, `/`, `%` | Left | Multiply, divide, modulo |
-| 13 | `+`, `-` | Left | Addition, subtraction |
-| 12 | `<<` | Left | Left shift |
-| 11 | `<`, `>`, `<=`, `>=` | Left | Comparison |
-| 10 | `==`, `!=` | Left | Equality |
-| 9 | `&` | Left | Bitwise AND |
-| 8 | `^` | Left | Bitwise XOR |
-| 7 | `\|` | Left | Bitwise OR |
-| 6 | `&&` | Left | Logical AND |
-| 5 | `\|\|` | Left | Logical OR |
-| 4 | `??` | Right | Null/error coalescing |
-| 3 | `..`, `..=` | Left | Ranges |
-| 2 | `>>` | Left | Composition: `f >> g` is `\|x\| g(f(x))` |
-| 1 (lowest) | `\|>` | Left | Pipeline: `x \|> f` is `f(x)` |
-
-Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. `>>` composes
-functions rather than shifting bits; right shift is the `.shr(n)` method.
+Higher precedence operators bind first. The full ladder, `@` and the pipeline operators
+included, is in [Operators: Operator Precedence](operators.md#operator-precedence).
 
 **Examples**:
 
@@ -431,7 +407,7 @@ All expressions are type-checked at compile time:
 ```neuro
 val x: i32 = 42 + 10        // OK: i32 + i32 = i32
 val y: f64 = 3.14 * 2.0     // OK: f64 * f64 = f64
-val z: bool = x > y         // Error: cannot compare i32 and f64
+val z: bool = x > y         // Error: type mismatch: expected i32, found f64
 ```
 
 ## Evaluation Order
@@ -510,6 +486,6 @@ val total: i32 = sum(a, b) + sum(c, d)
 
 ## References
 
-- [Operators](operators.md) - Detailed operator documentation
-- [Types](types.md) - Expression type checking
-- [Functions](functions.md) - Function call expressions
+- [Operators](operators.md): operator reference and precedence
+- [Types](types.md): expression type checking
+- [Functions](functions.md): function call expressions

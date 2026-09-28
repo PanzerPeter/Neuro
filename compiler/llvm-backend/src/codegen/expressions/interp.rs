@@ -62,7 +62,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for part in parts {
             match part {
                 HirInterpPart::Text(text) => {
-                    let global = self.builder.build_global_string_ptr(text, "interp.text")?;
+                    let global = self.text_global(text, "interp.text");
                     let len = self.context.i64_type().const_int(text.len() as u64, false);
                     pieces.push(Piece {
                         ptr: global.as_pointer_value(),
@@ -313,9 +313,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// A `.rodata` literal as a rendered piece, the punctuation a struct's debug form
     /// is framed with, and the whole rendering of a field-less one.
     fn text_piece(&self, text: &str) -> CodegenResult<Piece<'ctx>> {
-        let global = self
-            .builder
-            .build_global_string_ptr(text, "interp.dbg.text")?;
+        let global = self.text_global(text, "interp.dbg.text");
         Ok(Piece {
             ptr: global.as_pointer_value(),
             len: self.context.i64_type().const_int(text.len() as u64, false),

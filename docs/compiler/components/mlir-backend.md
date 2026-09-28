@@ -6,27 +6,34 @@
 
 ## Overview
 
-The MLIR backend is the tensor lowering path that Phase 4 extends to GPU dialects. It consumes the same typed
-High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
+The MLIR backend is the tensor lowering path that GPU dialects will extend later (see the
+[Quick Roadmap](../../../README.md#quick-roadmap)). It consumes the same typed High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
 MLIR module: one `func.func` *declaration* per function and `impl` method, except where a body is
 element-wise tensor arithmetic or a matrix product, which becomes a definition built from the
-`linalg` and `tensor` dialects. That module can be carried on through bufferization and the `llvm` dialect into a verified
-inkwell LLVM module, where a `linalg` body arrives as a real loop nest, proving the
+`linalg` and `tensor` dialects. That module can be carried on through bufferization and the
+`llvm` dialect into a verified inkwell LLVM module, where a `linalg` body arrives as a real loop nest, proving the
 HIR → MLIR → llvm dialect → inkwell pipeline end-to-end.
 
 Scalar arithmetic is deliberately **not** lowered here and never will be: it belongs to the
 [LLVM backend](llvm-backend.md) alone, so that tensor codegen does not exist in two maintained
 copies.
 
-## Feature Gate
+## Architecture
+
+- **Dependencies** (all behind the `mlir` feature): `neuro-hir` (the HIR it lowers), `ast-types`,
+  `melior`, `mlir-sys`, `inkwell`, `thiserror`. It depends on no feature slice.
+- **Public API** (feature `mlir`): `lower_program`, `translate_to_llvm_ir`, `MlirError`.
+- **Not reachable from `neurc`**: the path runs from the slice's own tests.
+
+### Feature gate
 
 The path is opt-in behind the off-by-default `mlir` feature
 (`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types"]`):
 
 The gate is permanent, not a staging step. LLVM's official Windows development build, the one
 `llvm-sys` builds against there, carries no MLIR at all, so requiring MLIR would stop `neurc.exe`
-being buildable. Homebrew's `llvm@22` does carry it; on Arch it comes from the separate
-`aur/mlir` package.
+being buildable. Homebrew's `llvm@22` and apt.llvm.org's packages do carry it; on Arch no
+package fits (`aur/mlir` ships no `libMLIR-C.so`), so MLIR comes from a source build.
 
 - **Disabled (default)**: the crate compiles to an empty placeholder and pulls in no MLIR toolchain
   (nor `neuro-hir`), so `cargo build/test --workspace` works on a stock LLVM 22 install with no MLIR
@@ -39,20 +46,19 @@ being buildable. Homebrew's `llvm@22` does carry it; on Arch it comes from the s
 See [Installation → Optional: MLIR Backend](../../getting-started/installation.md#optional-mlir-backend)
 for the MLIR 22 toolchain setup.
 
-## Entry Points (feature `mlir`)
+### Entry points (feature `mlir`)
 
 ```rust
 pub fn lower_program(program: &HirProgram) -> Result<String, MlirError>;
 pub fn translate_to_llvm_ir(program: &HirProgram) -> Result<String, MlirError>;
-pub fn emit_smoke_module() -> Result<String, MlirError>;
 ```
 
 - `lower_program`, the HIR → MLIR lowering: registers all dialects, walks the typed HIR, and returns
   the textual form of a **verified** module.
 - `translate_to_llvm_ir`, the full path: the same module, converted to the `llvm` dialect, translated
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
-- `emit_smoke_module`, the HIR-independent `melior` wiring check: builds + verifies
-  `func.func @neuro_smoke(index, index) -> index` with an `arith.addi` body.
+- The HIR-independent `melior` wiring check (a verified `func.func @neuro_smoke` with an
+  `arith.addi` body) is `pub(crate)` and compiled only under `test`.
 
 ## Lowering Rules
 

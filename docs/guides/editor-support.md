@@ -21,7 +21,7 @@ editors that are already open.
 Symlink the folder into `~/.vscode/extensions/` instead of repackaging on every edit; a window
 reload then picks up each change.
 
-The grammar and the lexer must agree on the keyword set. That is not a convention, it is a test:
+The grammar and the lexer must agree on the keyword set, and a test enforces it:
 `compiler/lexical-analysis/tests/tmlanguage_sync.rs` fails when a keyword is added to one and not
 the other.
 

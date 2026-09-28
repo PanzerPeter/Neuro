@@ -59,9 +59,9 @@ A `match` arm that binds part of an enum payload disowns the whole scrutinee, so
 variant the arm did not bind is not destroyed. An arm that binds nothing leaves the scrutinee
 owning everything, and it is destroyed at its own scope exit.
 
-## Status
+## Open defects
 
-Completing drop coverage is sub-phase 2E in the [Quick Roadmap](../../README.md#quick-roadmap).
-Until it lands, do not assume memory-safety guarantees beyond the table above. Memory-safety
-semantics and backend design are where contributions land best: see
-[CONTRIBUTING.md](../../CONTRIBUTING.md).
+Leaks and double frees found after a release are registered in [Known Bugs](../BUGS.md), each
+with a repro and a workaround. Do not assume memory-safety guarantees beyond the table above
+and that register. Memory-safety semantics and backend design are where contributions land
+best: see [CONTRIBUTING.md](../../CONTRIBUTING.md).
