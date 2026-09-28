@@ -62,7 +62,7 @@ the sweep leaves its adjoint for the bundle, and `field_copy` hands every read w
 has that path (`receiver_path`) the same copy. Its bundle field is `self__<step>__...`
 (`field_key`), a name no declaration can spell. `x.clone()` of a tensor is `x` itself on the tape
 (`cloned_tensor`): tape values are never written after they are made.
-The generated items follow every other item. `tape.rs` flattens the body into one-operation entries over
+The generated items follow every other item. `tape/` flattens the body into one-operation entries over
 leaves and marks activity, keeping `if` as a `Branch` (one tape per arm) and `while` as a `Loop`
 (condition and body tapes). A call to a user function is INLINED into the tape: the callee's
 lowered body is linearized at the call with its parameters bound to the arguments' leaves (in
@@ -203,7 +203,7 @@ Two derivations take their type from context and faithfully mirror the checker:
   rule `lower_match` already applied to arm bodies.
 
 **A trailing `Stmt::If` carrying an `else` is a value at every depth.** Both tail rules route it
-through `lower_if_expr` and emit a `HirStmt::Expr`: `lower_body_stmts` (`items.rs`, the implicit
+through `lower_if_expr` and emit a `HirStmt::Expr`: `lower_body_stmts` (`items/mod.rs`, the implicit
 return) and `lower_block_value_inner` (`expressions/mod.rs`, every nested block). When only the
 function body recognised it, a nested tail `if` lowered via
 `lower_stmt_block` and its branches' values were discarded, and a generic-enum construction

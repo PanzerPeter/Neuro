@@ -1,14 +1,12 @@
-use lexical_analysis::{StringValue, Token, TokenKind};
-use shared_types::{Identifier, Literal, Span};
+use super::expr_infix::{apply_compose, as_compose};
+use lexical_analysis::TokenKind;
+use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
-use ast_types::{BinaryOp, ClosureParam, Expr, GenericArg, Stmt, UnaryOp};
+use ast_types::{ClosureParam, Expr, Stmt};
 
-use super::expr_index::IndexArguments;
-use super::interpolation::parse_interp_string;
 use super::statements::stmt_span;
-use super::types::TENSOR_TYPE_NAME;
 use super::Parser;
 
 /// A parsed call argument list: the argument expressions, plus the call-site names of
@@ -85,286 +83,13 @@ impl Parser {
         Ok(left)
     }
 
-    /// Parse a prefix expression (literals, identifiers, unary operators, parentheses)
-    fn parse_prefix(&mut self) -> ParseResult<Expr> {
-        let token = self.advance().ok_or(ParseError::UnexpectedEof {
-            expected: "expression".to_string(),
-        })?;
-
-        match token.kind {
-            TokenKind::Integer(n) => {
-                Ok(Expr::Literal(Literal::Integer(n as i128, None), token.span))
-            }
-            TokenKind::IntegerSuffix(tok) => Ok(Expr::Literal(
-                Literal::Integer(tok.value as i128, Some(tok.suffix)),
-                token.span,
-            )),
-            TokenKind::Float(f) => Ok(Expr::Literal(Literal::Float(f, None), token.span)),
-            TokenKind::FloatSuffix(tok) => Ok(Expr::Literal(
-                Literal::Float(tok.value, Some(tok.suffix)),
-                token.span,
-            )),
-            TokenKind::String(StringValue::Plain(s)) => {
-                Ok(Expr::Literal(Literal::String(s), token.span))
-            }
-            TokenKind::String(StringValue::Interp(chunks)) => {
-                parse_interp_string(&chunks, token.span)
-            }
-            TokenKind::Char(c) => Ok(Expr::Literal(Literal::Char(c), token.span)),
-            TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),
-            TokenKind::False => Ok(Expr::Literal(Literal::Boolean(false), token.span)),
-
-            // Identifiers: path expressions (`Type::member`), struct literals, or plain idents
-            TokenKind::Identifier(name) => {
-                let ident = Identifier {
-                    name,
-                    span: token.span,
-                };
-                // Labeled loop expression `label: loop { ... }`: a single `:`
-                // (not `::`) after an identifier followed by `loop` is the only
-                // expression-position use of a bare colon.
-                if self.check(&TokenKind::Colon) {
-                    let mut idx = self.current + 1;
-                    while matches!(
-                        self.tokens.get(idx).map(|t| &t.kind),
-                        Some(TokenKind::Newline)
-                    ) {
-                        idx += 1;
-                    }
-                    if matches!(self.tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Loop)) {
-                        return self.parse_labeled_loop_expr(ident, token.span);
-                    }
-                }
-                // `Tensor::<f32, [3, 3]>::zeros()`: the tensor constructor spelling.
-                // A turbofish is otherwise the callee's own generic arguments and must
-                // be followed by `(`; here it applies to the *type* that qualifies the
-                // constructor, so it is followed by another `::`. `Tensor` is the only
-                // name that takes this form, and the shape inside the turbofish is what
-                // claims it, so a module shadowing `Tensor` is unaffected.
-                if ident.name == TENSOR_TYPE_NAME
-                    && self.check(&TokenKind::ColonColon)
-                    && self.colon_colon_opens_turbofish()
-                {
-                    return self.parse_tensor_qualified_call(ident);
-                }
-                // `::<` is a turbofish (`f::<T>(x)`), not a path member: leave it
-                // for `parse_infix` to attach to the following call. Only `::member`
-                // is a path here.
-                if self.check(&TokenKind::ColonColon) && !self.colon_colon_opens_turbofish() {
-                    // A path may carry more than two segments once modules exist
-                    // (`utils::io::read`). Everything ahead of the final segment folds into
-                    // one qualifier identifier; module resolution splits it again and erases
-                    // the module prefix before semantic analysis sees the name.
-                    let mut qualifier = ident;
-                    let mut member;
-                    loop {
-                        self.advance(); // consume '::'
-                        let member_token = self.consume(
-                            TokenKind::Identifier(String::new()),
-                            "member name after '::'",
-                        )?;
-                        member = if let TokenKind::Identifier(n) = member_token.kind {
-                            Identifier {
-                                name: n,
-                                span: member_token.span,
-                            }
-                        } else {
-                            return Err(ParseError::UnexpectedToken {
-                                found: member_token.kind,
-                                expected: "member name".to_string(),
-                                span: member_token.span,
-                            });
-                        };
-                        if !self.check(&TokenKind::ColonColon) || self.colon_colon_opens_turbofish()
-                        {
-                            break;
-                        }
-                        qualifier = Identifier {
-                            name: format!("{}::{}", qualifier.name, member.name),
-                            span: qualifier.span.merge(member.span),
-                        };
-                    }
-                    let ident = qualifier;
-                    // `EnumName::Variant { ... }` is a struct-variant construction
-                    // The trailing brace is the only enum-construction shape
-                    // distinguishable at parse time. Suppressed inside a `no_struct_lit`
-                    // context (an `if`/`while` condition), exactly like a struct literal.
-                    if !self.no_struct_lit && self.check(&TokenKind::LeftBrace) {
-                        return self.parse_enum_struct_literal(ident, member);
-                    }
-                    let span = ident.span.merge(member.span);
-                    Ok(Expr::Path {
-                        type_name: ident,
-                        member,
-                        span,
-                    })
-                } else if !self.no_struct_lit && self.check(&TokenKind::LeftBrace) {
-                    self.parse_struct_literal(ident)
-                } else {
-                    Ok(Expr::Identifier(ident))
-                }
-            }
-
-            // `self` keyword used as expression inside method bodies
-            TokenKind::SelfLower => Ok(Expr::Identifier(Identifier {
-                name: "self".to_string(),
-                span: token.span,
-            })),
-
-            TokenKind::Minus => {
-                let operand = self.parse_expr(Precedence::Unary)?;
-                let span = token.span.merge(operand.span());
-                Ok(Expr::Unary {
-                    op: UnaryOp::Negate,
-                    operand: Box::new(operand),
-                    span,
-                })
-            }
-            TokenKind::Bang => {
-                let operand = self.parse_expr(Precedence::Unary)?;
-                let span = token.span.merge(operand.span());
-                Ok(Expr::Unary {
-                    op: UnaryOp::Not,
-                    operand: Box::new(operand),
-                    span,
-                })
-            }
-            TokenKind::Tilde => {
-                let operand = self.parse_expr(Precedence::Unary)?;
-                let span = token.span.merge(operand.span());
-                Ok(Expr::Unary {
-                    op: UnaryOp::BitNot,
-                    operand: Box::new(operand),
-                    span,
-                })
-            }
-
-            // Borrow `&place` / `&mut place`. In prefix position `&` is
-            // a borrow; as an infix operator it is bitwise-AND, handled in
-            // `parse_infix`. A `mut` keyword after `&` marks a mutable borrow.
-            TokenKind::Amp => {
-                let mutable = self.check(&TokenKind::Mut);
-                if mutable {
-                    self.advance(); // consume 'mut'
-                }
-                let operand = self.parse_expr(Precedence::Unary)?;
-                let span = token.span.merge(operand.span());
-                Ok(Expr::Reference {
-                    operand: Box::new(operand),
-                    mutable,
-                    span,
-                })
-            }
-
-            // Dereference `*operand`. In prefix position `*` reads through a
-            // reference; as an infix operator it is multiplication, handled in
-            // `parse_infix`.
-            TokenKind::Star => {
-                let operand = self.parse_expr(Precedence::Unary)?;
-                let span = token.span.merge(operand.span());
-                Ok(Expr::Deref {
-                    operand: Box::new(operand),
-                    span,
-                })
-            }
-
-            // `( ... )` is either grouping or a tuple literal. A comma after
-            // the first expression makes it a tuple; otherwise it is plain grouping.
-            TokenKind::LeftParen => self.inside_delimiters(|p| {
-                p.skip_newlines();
-                let first = p.parse_expr(Precedence::Lowest)?;
-                p.skip_newlines();
-                if p.check(&TokenKind::Comma) {
-                    let mut elements = vec![first];
-                    while p.check(&TokenKind::Comma) {
-                        p.advance(); // consume ','
-                        p.skip_newlines();
-                        // A trailing comma before `)` closes the tuple.
-                        if p.check(&TokenKind::RightParen) {
-                            break;
-                        }
-                        elements.push(p.parse_expr(Precedence::Lowest)?);
-                        p.skip_newlines();
-                    }
-                    let close = p.consume(TokenKind::RightParen, "')' to close tuple literal")?;
-                    let span = token.span.merge(close.span);
-                    Ok(Expr::TupleLiteral { elements, span })
-                } else {
-                    let close = p.consume(TokenKind::RightParen, "')'")?;
-                    let span = token.span.merge(close.span);
-                    Ok(Expr::Paren(Box::new(first), span))
-                }
-            }),
-
-            // Array literal `[e0, e1, ...]`. Elements parse at the lowest
-            // precedence so each may be a full expression; a trailing comma is not
-            // accepted (each element must be followed by `,` or the closing `]`).
-            TokenKind::LeftBracket => self.inside_delimiters(|p| {
-                p.skip_newlines();
-                let mut elements = Vec::new();
-                if !p.check(&TokenKind::RightBracket) {
-                    loop {
-                        elements.push(p.parse_expr(Precedence::Lowest)?);
-                        p.skip_newlines();
-                        if !p.check(&TokenKind::Comma) {
-                            break;
-                        }
-                        p.advance(); // consume ','
-                        p.skip_newlines();
-                    }
-                }
-                let close = p.consume(TokenKind::RightBracket, "']' to close array literal")?;
-                let span = token.span.merge(close.span);
-                Ok(Expr::ArrayLiteral { elements, span })
-            }),
-
-            TokenKind::If => self.parse_if_expr(token.span),
-
-            TokenKind::LeftBrace => self.parse_block_expr(token.span),
-
-            TokenKind::Loop => self.parse_loop_expr(token.span),
-
-            TokenKind::Unsafe => self.parse_unsafe_expr(token.span),
-
-            TokenKind::Pool => self.parse_pool_expr(token.span),
-
-            TokenKind::Match => self.parse_match_expr(token.span),
-
-            // Closure literals: `|params| body`, `|| body`, or `move |params| body`.
-            // The `|` / `||` token has already been consumed as `token`; a leading
-            // `move` is consumed here and the following pipe fetched.
-            TokenKind::Move => {
-                let pipe = self.advance().ok_or(ParseError::UnexpectedEof {
-                    expected: "'|' or '||' after `move`".to_string(),
-                })?;
-                match pipe.kind {
-                    TokenKind::Pipe => self.parse_closure(true, token.span, false),
-                    TokenKind::PipePipe => self.parse_closure(true, token.span, true),
-                    other => Err(ParseError::UnexpectedToken {
-                        found: other,
-                        expected: "'|' or '||' after `move`".to_string(),
-                        span: pipe.span,
-                    }),
-                }
-            }
-            TokenKind::Pipe => self.parse_closure(false, token.span, false),
-            TokenKind::PipePipe => self.parse_closure(false, token.span, true),
-
-            _ => Err(ParseError::UnexpectedToken {
-                found: token.kind,
-                expected: "expression".to_string(),
-                span: token.span,
-            }),
-        }
-    }
-
     /// Parse a closure literal after its opening pipe token has been consumed.
     ///
     /// `is_move` records a leading `move` keyword. `start_span` is the span of the
     /// opening token (`move` or the pipe). `empty_params` is true when the opener was
     /// `||`: the zero-parameter form, which has already consumed both pipes; otherwise
     /// a closing `|` is parsed after the comma-separated parameter list.
-    fn parse_closure(
+    pub(super) fn parse_closure(
         &mut self,
         is_move: bool,
         start_span: Span,
@@ -442,7 +167,7 @@ impl Parser {
     }
 
     /// Parse an if-expression. The `if` token has already been consumed; `start_span` is its span.
-    fn parse_if_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+    pub(super) fn parse_if_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
         let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
@@ -489,7 +214,7 @@ impl Parser {
     }
 
     /// Parse a block expression. The `{` has already been consumed; `start_span` is its span.
-    fn parse_block_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+    pub(super) fn parse_block_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
         let mut stmts = Vec::new();
 
@@ -507,7 +232,7 @@ impl Parser {
     /// The `loop` keyword has already been consumed; `start_span` is its span. The
     /// loop evaluates to its value-carrying `break`s; an unlabeled form is used in
     /// expression position (labels are a statement-loop concern).
-    fn parse_loop_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+    pub(super) fn parse_loop_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
         let body = self.parse_block()?;
         let end_span = body.last().map(stmt_span).unwrap_or(start_span);
@@ -522,7 +247,7 @@ impl Parser {
     /// already-parsed identifier; the cursor sits on the `:`. The label is tracked
     /// in scope for the body so a nested `break label v` resolves to it rather than
     /// being read as a value-carrying `break label`.
-    fn parse_labeled_loop_expr(
+    pub(super) fn parse_labeled_loop_expr(
         &mut self,
         label: Identifier,
         start_span: Span,
@@ -548,7 +273,7 @@ impl Parser {
     /// Parse an unsafe block expression. The `unsafe` keyword has already been
     /// consumed; `start_span` is its span. The body is an ordinary statement
     /// block: `unsafe` is inert in Phase 1.7, so this only records the node.
-    fn parse_unsafe_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+    pub(super) fn parse_unsafe_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{' after 'unsafe'")?;
         self.skip_newlines();
@@ -570,7 +295,7 @@ impl Parser {
     /// The label sits after the keyword rather than before it, as loop labels do:
     /// a loop label is a jump target that `break` names, so it is introduced where a
     /// jump can see it, while a pool label is only ever quoted back in a diagnostic.
-    fn parse_pool_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+    pub(super) fn parse_pool_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
         let label = match self.peek().map(|t| &t.kind) {
             Some(TokenKind::Identifier(name)) => {
@@ -599,7 +324,7 @@ impl Parser {
     /// caller consumes). The opening `(` is already consumed. Arguments sit inside a
     /// delimiter pair, so a struct literal is unambiguous here even when the call
     /// appears in a guarded header (`if f(Point { x: 1 }) { ... }`).
-    fn parse_call_arguments(&mut self) -> ParseResult<CallArguments> {
+    pub(super) fn parse_call_arguments(&mut self) -> ParseResult<CallArguments> {
         self.inside_delimiters(|p| {
             let mut args = Vec::new();
             let mut labels: Vec<Option<Identifier>> = Vec::new();
@@ -645,534 +370,6 @@ impl Parser {
         self.skip_newlines();
         Ok((Some(label), self.parse_expr(Precedence::Lowest)?))
     }
-
-    /// Parse an infix expression (binary operators, function calls, field access, casts)
-    fn parse_infix(&mut self, left: Expr) -> ParseResult<Expr> {
-        let token = self.peek().ok_or(ParseError::UnexpectedEof {
-            expected: "operator or '('".to_string(),
-        })?;
-
-        match &token.kind {
-            TokenKind::LeftParen => {
-                self.advance(); // consume '('
-                let (args, arg_labels) = self.parse_call_arguments()?;
-                let close = self.consume(TokenKind::RightParen, "')'")?;
-                let span = left.span().merge(close.span);
-
-                Ok(finish_call(left, args, arg_labels, span))
-            }
-
-            // Turbofish `callee::<T, N>(args)`: explicit generic arguments before a
-            // call. Only valid immediately before a call, so a `(` argument list must
-            // follow the `>`.
-            TokenKind::ColonColon => {
-                self.advance(); // consume '::'
-                let type_args = self.parse_turbofish_args()?;
-                self.consume(TokenKind::LeftParen, "'(' after turbofish `::<...>`")?;
-                let (args, arg_labels) = self.parse_call_arguments()?;
-                let close = self.consume(TokenKind::RightParen, "')'")?;
-                let span = left.span().merge(close.span);
-                Ok(Expr::Call {
-                    func: Box::new(left),
-                    type_args,
-                    args,
-                    arg_labels,
-                    span,
-                })
-            }
-
-            // Field access `expr.field` or tuple index `expr.0`. A numeric
-            // token after the dot is a constant tuple index; an identifier names a
-            // struct field. (Chained `t.0.1` is lexed as `t` `.` `0.1`(float), so a
-            // nested tuple element is accessed as `(t.0).1`.)
-            TokenKind::Dot => {
-                self.advance(); // consume '.'
-                if let Some(TokenKind::Integer(_)) = self.peek_kind() {
-                    let idx_token = self.advance().ok_or(ParseError::UnexpectedEof {
-                        expected: "tuple index".to_string(),
-                    })?;
-                    let TokenKind::Integer(n) = idx_token.kind else {
-                        unreachable!("guarded by peek above")
-                    };
-                    // No sign check: an integer token carries a magnitude, so a
-                    // negative index is a `-` token followed by one and never reaches
-                    // here as a single token.
-                    let span = left.span().merge(idx_token.span);
-                    return Ok(Expr::TupleIndex {
-                        object: Box::new(left),
-                        index: n as usize,
-                        span,
-                    });
-                }
-                let field_token =
-                    self.consume(TokenKind::Identifier(String::new()), "field name")?;
-                let field = if let TokenKind::Identifier(name) = field_token.kind {
-                    Identifier {
-                        name,
-                        span: field_token.span,
-                    }
-                } else {
-                    return Err(ParseError::UnexpectedToken {
-                        found: field_token.kind,
-                        expected: "field name".to_string(),
-                        span: field_token.span,
-                    });
-                };
-                let span = left.span().merge(field.span);
-                Ok(Expr::FieldAccess {
-                    object: Box::new(left),
-                    field,
-                    span,
-                })
-            }
-
-            // Range expression `start..end` / `start..=end`. Only meaningful as
-            // a `string.slice` argument; semantic analysis rejects it elsewhere. The
-            // right operand is parsed at `Range` precedence so a stray second `..` ends
-            // the expression rather than chaining.
-            TokenKind::DotDot | TokenKind::DotDotEqual => {
-                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
-                    expected: "'..' or '..='".to_string(),
-                })?;
-                let inclusive = matches!(op_token.kind, TokenKind::DotDotEqual);
-                let right = self.parse_expr(Precedence::Range)?;
-                let span = left.span().merge(right.span());
-                Ok(Expr::Range {
-                    start: Box::new(left),
-                    end: Box::new(right),
-                    inclusive,
-                    span,
-                })
-            }
-
-            // Indexing `object[...]`. Binds at call precedence so `arr[i]` is a
-            // tight postfix on the preceding primary. One plain argument is the
-            // array / `Vec` / `HashMap` index; anything else is a tensor index.
-            TokenKind::LeftBracket => {
-                self.advance(); // consume '['
-                let arguments = self.inside_delimiters(|p| p.parse_index_arguments())?;
-                let close = self.consume(TokenKind::RightBracket, "']' to close index")?;
-                let span = left.span().merge(close.span);
-                Ok(match arguments {
-                    IndexArguments::Single(index) => Expr::Index {
-                        object: Box::new(left),
-                        index: Box::new(index),
-                        span,
-                    },
-                    IndexArguments::Axes(indices) => Expr::TensorIndex {
-                        object: Box::new(left),
-                        indices,
-                        span,
-                    },
-                })
-            }
-
-            // Error propagation `operand?`. A postfix operator: it binds as tightly
-            // as a call, so `f(x)? + 1` propagates the call's failure and adds to its
-            // payload, and `parse(s)?.field` reads a field of the unwrapped value.
-            TokenKind::Question => {
-                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
-                    expected: "'?'".to_string(),
-                })?;
-                let span = left.span().merge(op_token.span);
-                Ok(Expr::Try {
-                    operand: Box::new(left),
-                    span,
-                })
-            }
-
-            // Pipeline `left |> target`: the left value becomes the target's first
-            // argument. Desugared here, so no later stage learns the
-            // operator exists. The right operand is parsed at `Pipeline` precedence,
-            // which makes the operator left-associative: a following `|>` ends the
-            // target and re-enters the loop with the call as its new left.
-            TokenKind::PipeGreater => {
-                self.advance(); // consume '|>'
-                self.skip_newlines();
-                let target = self.parse_expr(Precedence::Pipeline)?;
-                self.pipe_into(left, target)
-            }
-
-            // Composition `left >> right`, lexed as two adjacent `>`: see
-            // `at_compose`. The right operand is parsed at `Compose` precedence, which
-            // makes the operator left-associative the way `|>` is, and the chain is
-            // flattened as it is built so `f >> g >> h` is one node.
-            TokenKind::Greater if self.at_compose() => {
-                self.advance(); // consume the first '>'
-                self.advance(); // consume the second '>'
-                self.skip_newlines();
-                let right = self.parse_expr(Precedence::Compose)?;
-                let span = left.span().merge(right.span());
-                let mut functions = compose_operand(left)?;
-                functions.extend(compose_operand(right)?);
-                Ok(Expr::Compose { functions, span })
-            }
-
-            // Type casts
-            TokenKind::As => {
-                self.advance(); // consume 'as'
-                let target_type = self.parse_type()?;
-                let span = left.span().merge(target_type.span());
-
-                Ok(Expr::Cast {
-                    expr: Box::new(left),
-                    target_type,
-                    span,
-                })
-            }
-
-            kind if self.is_binary_op(kind) => {
-                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
-                    expected: "operator".to_string(),
-                })?;
-                let op = self.token_to_binary_op(&op_token)?;
-                let precedence = self.get_precedence(&op_token.kind);
-                // R-to-L coalescing (`??`): recurse at one-step-lower precedence so the
-                // outer loop re-enters on the next `??` instead of stopping. Appendix B row 14.
-                let right_prec = if matches!(op_token.kind, TokenKind::QuestionQuestion) {
-                    Precedence::Lowest
-                } else {
-                    precedence
-                };
-                let right = self.parse_expr(right_prec)?;
-                let span = left.span().merge(right.span());
-
-                Ok(Expr::Binary {
-                    left: Box::new(left),
-                    op,
-                    right: Box::new(right),
-                    span,
-                })
-            }
-
-            _ => Err(ParseError::UnexpectedToken {
-                found: token.kind.clone(),
-                expected: "operator or '('".to_string(),
-                span: token.span,
-            }),
-        }
-    }
-
-    /// Check if a token kind is a binary operator
-    pub(super) fn is_binary_op(&self, kind: &TokenKind) -> bool {
-        matches!(
-            kind,
-            TokenKind::Plus
-                | TokenKind::Minus
-                | TokenKind::Star
-                | TokenKind::Slash
-                | TokenKind::Percent
-                | TokenKind::EqualEqual
-                | TokenKind::NotEqual
-                | TokenKind::Less
-                | TokenKind::Greater
-                | TokenKind::LessEqual
-                | TokenKind::GreaterEqual
-                | TokenKind::AmpAmp
-                | TokenKind::PipePipe
-                | TokenKind::Amp
-                | TokenKind::Pipe
-                | TokenKind::Caret
-                | TokenKind::LeftShift
-                | TokenKind::At
-                | TokenKind::QuestionQuestion
-        )
-    }
-
-    /// Convert a token to a binary operator
-    fn token_to_binary_op(&self, token: &Token) -> ParseResult<BinaryOp> {
-        match &token.kind {
-            TokenKind::Plus => Ok(BinaryOp::Add),
-            TokenKind::Minus => Ok(BinaryOp::Subtract),
-            TokenKind::Star => Ok(BinaryOp::Multiply),
-            TokenKind::Slash => Ok(BinaryOp::Divide),
-            TokenKind::Percent => Ok(BinaryOp::Modulo),
-            TokenKind::EqualEqual => Ok(BinaryOp::Equal),
-            TokenKind::NotEqual => Ok(BinaryOp::NotEqual),
-            TokenKind::Less => Ok(BinaryOp::Less),
-            TokenKind::Greater => Ok(BinaryOp::Greater),
-            TokenKind::LessEqual => Ok(BinaryOp::LessEqual),
-            TokenKind::GreaterEqual => Ok(BinaryOp::GreaterEqual),
-            TokenKind::AmpAmp => Ok(BinaryOp::And),
-            TokenKind::PipePipe => Ok(BinaryOp::Or),
-            TokenKind::Amp => Ok(BinaryOp::BitAnd),
-            TokenKind::Pipe => Ok(BinaryOp::BitOr),
-            TokenKind::Caret => Ok(BinaryOp::BitXor),
-            TokenKind::LeftShift => Ok(BinaryOp::Shl),
-            TokenKind::At => Ok(BinaryOp::MatMul),
-            TokenKind::QuestionQuestion => Ok(BinaryOp::NullCoalesce),
-            _ => Err(ParseError::UnexpectedToken {
-                found: token.kind.clone(),
-                expected: "binary operator".to_string(),
-                span: token.span,
-            }),
-        }
-    }
-
-    /// Build the call a `value |> target` pipeline stands for.
-    ///
-    /// The language admits exactly three spellings of `target`, and each is already a
-    /// callee shape the rest of the pipeline understands: a function name or
-    /// associated path becomes a plain call, a bound method `receiver.method`
-    /// becomes the ordinary method call `receiver.method(value)`, and a closure
-    /// literal is bound to a temporary first, because a call whose callee is a
-    /// closure *literal* is not a form any later stage accepts. Rejecting anything
-    /// else here is what keeps `x |> f(a)` a diagnostic about `|>` rather than a
-    /// type error about calling a non-callable.
-    fn pipe_into(&mut self, value: Expr, target: Expr) -> ParseResult<Expr> {
-        let span = value.span().merge(target.span());
-        match target {
-            Expr::Paren(inner, _) => self.pipe_into(value, *inner),
-
-            // `x |> f >> g` applies the composition rather than binding it, and
-            // applying it is the nested call it stands for. `>>` binds tighter than
-            // `|>` (Appendix B rows 16 and 17), which is what puts the whole chain
-            // here as one target.
-            Expr::Compose { functions, .. } => Ok(apply_compose(&functions, value, span)),
-
-            Expr::Identifier(_) | Expr::Path { .. } | Expr::FieldAccess { .. } => Ok(Expr::Call {
-                func: Box::new(target),
-                type_args: Vec::new(),
-                args: vec![value],
-                arg_labels: Vec::new(),
-                span,
-            }),
-
-            Expr::Closure { .. } => {
-                let tmp = Identifier {
-                    name: format!("__pipe_{}", self.next_pipe_id()),
-                    span: target.span(),
-                };
-                let call = Expr::Call {
-                    func: Box::new(Expr::Identifier(tmp.clone())),
-                    type_args: Vec::new(),
-                    args: vec![value],
-                    arg_labels: Vec::new(),
-                    span,
-                };
-                Ok(Expr::Block {
-                    stmts: vec![
-                        Stmt::VarDecl {
-                            name: tmp,
-                            ty: None,
-                            init: Some(target),
-                            mutable: false,
-                            span,
-                        },
-                        Stmt::Expr(call),
-                    ],
-                    span,
-                })
-            }
-
-            other => Err(ParseError::NotAPipelineTarget { span: other.span() }),
-        }
-    }
-
-    /// Allocate a unique id for a pipeline temporary.
-    fn next_pipe_id(&mut self) -> usize {
-        let id = self.pipe_counter;
-        self.pipe_counter += 1;
-        id
-    }
-
-    /// Whether the cursor sits on `>>`, the composition operator.
-    ///
-    /// `>>` is not a token. Lexing it as one would make `Vec<Vec<i32>>` end in a
-    /// single token the type parser has to split, the cost every C-family grammar
-    /// pays for nested generics; two adjacent `>` cost nothing and are unambiguous,
-    /// because right shift is the `.shr(n)` method here (Appendix B) and a comparison
-    /// never has `>` as the first token of its right operand.
-    fn at_compose(&self) -> bool {
-        let (Some(first), Some(second)) = (
-            self.tokens.get(self.current),
-            self.tokens.get(self.current + 1),
-        ) else {
-            return false;
-        };
-        matches!(first.kind, TokenKind::Greater)
-            && matches!(second.kind, TokenKind::Greater)
-            && first.span.end == second.span.start
-    }
-
-    /// The precedence of the operator at the cursor.
-    ///
-    /// Separate from [`Parser::get_precedence`] because `>>` is a token *pair*: only
-    /// the cursor can see it, and a lone `>` is a comparison.
-    fn infix_precedence(&self, kind: &TokenKind) -> Precedence {
-        if self.at_compose() {
-            return Precedence::Compose;
-        }
-        self.get_precedence(kind)
-    }
-
-    /// Get the precedence of an operator token
-    pub(super) fn get_precedence(&self, kind: &TokenKind) -> Precedence {
-        match kind {
-            TokenKind::PipeGreater => Precedence::Pipeline,
-            TokenKind::PipePipe => Precedence::LogicalOr,
-            TokenKind::AmpAmp => Precedence::LogicalAnd,
-            TokenKind::Pipe => Precedence::BitwiseOr,
-            TokenKind::Caret => Precedence::BitwiseXor,
-            TokenKind::Amp => Precedence::BitwiseAnd,
-            TokenKind::EqualEqual | TokenKind::NotEqual => Precedence::Equality,
-            TokenKind::Less
-            | TokenKind::Greater
-            | TokenKind::LessEqual
-            | TokenKind::GreaterEqual => Precedence::Comparison,
-            TokenKind::LeftShift => Precedence::Shift,
-            TokenKind::QuestionQuestion => Precedence::NullCoalesce,
-            TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
-            TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
-            TokenKind::At => Precedence::MatMul,
-            TokenKind::DotDot | TokenKind::DotDotEqual => Precedence::Range,
-            TokenKind::As => Precedence::Cast,
-            TokenKind::LeftParen => Precedence::Call,
-            TokenKind::LeftBracket => Precedence::Call,
-            TokenKind::Question => Precedence::Call,
-            // A turbofish `::<...>` binds like a call: it only ever precedes one.
-            TokenKind::ColonColon => Precedence::Call,
-            TokenKind::Dot => Precedence::FieldAccess,
-            _ => Precedence::Lowest,
-        }
-    }
-
-    /// Whether the current `::` is immediately followed by `<`, opening a turbofish
-    /// `::<...>` rather than a path member `::name`.
-    fn colon_colon_opens_turbofish(&self) -> bool {
-        matches!(
-            self.tokens.get(self.current + 1).map(|t| &t.kind),
-            Some(TokenKind::Less)
-        )
-    }
-
-    /// Parse `Tensor::<T, [d0, ...]>::ctor(args)`: the tensor constructor spelling, whose
-    /// turbofish qualifies the *type* rather than the callee.
-    ///
-    /// The result is an ordinary `Call` on a `Path` whose single type argument is the
-    /// assembled `Type::Tensor`. Nothing downstream needs a node of its own: the tensor
-    /// type is exactly what a turbofish already carries, and the associated-call arm of
-    /// the type checker is already where `Tensor::scalar(v)` (the same constructors
-    /// spelled without a turbofish) has to be resolved anyway.
-    fn parse_tensor_qualified_call(&mut self, type_name: Identifier) -> ParseResult<Expr> {
-        self.advance(); // consume '::'
-        let (args, shape, close_span) = self.parse_generic_type_args(true)?;
-        let type_span = type_name.span.merge(close_span);
-        let Some((dims, shape_span)) = shape else {
-            return Err(ParseError::TensorTypeArity { span: type_span });
-        };
-        let tensor_type =
-            Self::build_tensor_type(type_name.clone(), args, dims, shape_span, type_span)?;
-
-        self.consume(
-            TokenKind::ColonColon,
-            "'::' and a constructor name after `Tensor::<...>`",
-        )?;
-        let member_token = self.consume(
-            TokenKind::Identifier(String::new()),
-            "a tensor constructor name",
-        )?;
-        let TokenKind::Identifier(member_name) = member_token.kind else {
-            return Err(ParseError::UnexpectedToken {
-                found: member_token.kind,
-                expected: "a tensor constructor name".to_string(),
-                span: member_token.span,
-            });
-        };
-        let member = Identifier {
-            name: member_name,
-            span: member_token.span,
-        };
-
-        self.consume(TokenKind::LeftParen, "'(' after a tensor constructor name")?;
-        let (call_args, arg_labels) = self.parse_call_arguments()?;
-        let close = self.consume(TokenKind::RightParen, "')'")?;
-        let span = type_name.span.merge(close.span);
-        let path_span = type_span.merge(member.span);
-
-        Ok(Expr::Call {
-            func: Box::new(Expr::Path {
-                type_name,
-                member,
-                span: path_span,
-            }),
-            type_args: vec![GenericArg::Type(tensor_type)],
-            args: call_args,
-            arg_labels,
-            span,
-        })
-    }
-
-    /// Parse turbofish generic arguments `<T, N, ...>`, positioned just after the
-    /// `::`. Each argument is a type or a non-negative integer const value.
-    fn parse_turbofish_args(&mut self) -> ParseResult<Vec<GenericArg>> {
-        self.consume(TokenKind::Less, "'<' after '::' in a turbofish")?;
-        self.skip_newlines();
-        let mut args = Vec::new();
-        loop {
-            if let Some(TokenKind::Integer(n)) = self.peek_kind() {
-                let value = *n;
-                let span = self
-                    .advance()
-                    .map(|t| t.span)
-                    .ok_or(ParseError::UnexpectedEof {
-                        expected: "const argument".to_string(),
-                    })?;
-                // An integer token carries a magnitude, so a negative const argument
-                // is a `-` token followed by one and is rejected as an unexpected token
-                // before reaching here.
-                args.push(GenericArg::Const {
-                    value: value as i128,
-                    span,
-                });
-            } else {
-                args.push(GenericArg::Type(self.parse_type()?));
-            }
-            self.skip_newlines();
-            if !self.check(&TokenKind::Comma) {
-                break;
-            }
-            self.advance(); // consume ','
-            self.skip_newlines();
-        }
-        self.consume(TokenKind::Greater, "'>' to close turbofish arguments")?;
-        Ok(args)
-    }
-}
-
-/// The function names one operand of `>>` contributes to the chain.
-///
-/// Composition takes *named* functions: a bare name is not a value in this language,
-/// so the operand is validated here rather than left to produce a type error about a
-/// callee that is not callable. An operand that is already a `Compose` is the left of
-/// `f >> g >> h`, and flattening it there is what keeps the chain one node.
-fn compose_operand(operand: Expr) -> ParseResult<Vec<Identifier>> {
-    match operand {
-        Expr::Paren(inner, _) => compose_operand(*inner),
-        Expr::Identifier(name) => Ok(vec![name]),
-        Expr::Compose { functions, .. } => Ok(functions),
-        other => Err(ParseError::NotAComposeOperand { span: other.span() }),
-    }
-}
-
-/// The composed function chain `functions`, applied to `arg`: `h(g(f(arg)))`.
-fn apply_compose(functions: &[Identifier], arg: Expr, span: Span) -> Expr {
-    functions.iter().fold(arg, |value, function| Expr::Call {
-        func: Box::new(Expr::Identifier(function.clone())),
-        type_args: Vec::new(),
-        args: vec![value],
-        arg_labels: Vec::new(),
-        span,
-    })
-}
-
-/// The composition chain `callee` names, seen through any parentheses around it.
-fn as_compose(callee: &Expr) -> Option<&[Identifier]> {
-    match callee {
-        Expr::Paren(inner, _) => as_compose(inner),
-        Expr::Compose { functions, .. } => Some(functions),
-        _ => None,
-    }
 }
 
 /// Build the call expression for `callee(args)`.
@@ -1180,7 +377,7 @@ fn as_compose(callee: &Expr) -> Option<&[Identifier]> {
 /// A composition called where it is written, `(f >> g)(x)`, is the nested call it
 /// stands for: no function value need exist for a chain that is never bound. Every
 /// other callee keeps its `Expr::Call`.
-fn finish_call(
+pub(super) fn finish_call(
     callee: Expr,
     mut args: Vec<Expr>,
     arg_labels: Vec<Option<Identifier>>,

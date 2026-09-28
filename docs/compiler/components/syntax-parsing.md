@@ -141,7 +141,7 @@ program that compiles. That is the grammar's source of truth. This table maps it
 | `val PATTERN = expr else { ... }` | `parser/stmt_val_else.rs` |
 | Destructuring bindings | `parser/stmt_destructure.rs` |
 | Match patterns | `parser/patterns.rs` |
-| Expressions (Pratt) | `parser/expressions.rs` |
+| Expressions (Pratt) | `parser/expressions.rs`, `expr_prefix.rs`, `expr_infix.rs`, `expr_turbofish.rs`, `expr_index.rs` |
 | Index and tensor-slice arguments | `parser/expr_index.rs` |
 | String interpolation holes | `parser/interpolation.rs` |
 | Type syntax | `parser/types.rs` |

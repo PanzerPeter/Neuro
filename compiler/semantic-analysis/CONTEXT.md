@@ -508,7 +508,7 @@ Note the asymmetry, which is `docs/BUGS.md` BUG-033: an assignment TARGET is a f
 (a field, an element, a tensor coordinate), while the operand of `&` is still only a bare
 binding. The two notions of place are not yet the same one.
 
-**Assignment targets** (`check_assign` / `resolve_place` in `type_checkers/statements.rs`).
+**Assignment targets** (`check_assign` / `resolve_place` in `type_checkers/statements/places.rs`).
 `resolve_place` returns the type of the LOCATION and reports the place's own errors; a single
 store path then checks the value against it and records the move. The forms keep per-form rules
 rather than collapsing into one, because they genuinely differ: a slice takes its write
@@ -561,7 +561,7 @@ whole scope, so code reads back through the borrow or confines it to a block. On
 initializers create tracked persistent borrows, so borrows escaping through compound expressions
 are still missed.
 
-**Returned-reference outlives** (lifetime elision; `declarations/` + `statements.rs`). A
+**Returned-reference outlives** (lifetime elision; `declarations/` + `statements/returns.rs`). A
 function or method whose declared return type is a `Type::Reference` must not return a reference
 borrowing a place that dies with the call. `current_fn_outliving` holds the names that outlive the
 call: reference-typed parameters (single-input elision applies the input lifetime to outputs)
@@ -745,7 +745,7 @@ same check for return-position `impl Trait<Assoc = U>`.
   after the join (the element-arithmetic check, the move recording) is shared with the
   element-wise operators. A user type reaches `@` through the `MatMul` operator trait instead.
 - **Compound assignment** (`Stmt::Assign` with `op: Some(_)`) implements the operator-trait
-  dispatch rule in `type_checkers/statements.rs`. A tensor place routes to
+  dispatch rule in `type_checkers/statements/places.rs`. A tensor place routes to
   `check_tensor_compound_assign` (`type_checkers/tensors.rs`), the compiler-known `*Assign`
   implementation; every other place re-forms the `Expr::Binary` desugar over `Place::to_expr()`
   and checks it as an ordinary store, which is what keeps a user operator-trait impl reachable

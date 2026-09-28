@@ -83,7 +83,7 @@ no types.
   `field: field`; a trailing `..expr` sets `StructLiteral.base` and ends the field list.
 - **The pipeline operator**: `value |> target` becomes the call `target` already
   stands for, so `|>` reaches no other stage and needs no AST node. `pipe_into`
-  (`parser/expressions.rs`) matches the target: an `Identifier` or `Path` becomes a plain
+  (`parser/expr_infix.rs`) matches the target: an `Identifier` or `Path` becomes a plain
   `Expr::Call`, a `FieldAccess` becomes the ordinary method call `receiver.method(value)`,
   and a `Paren` is peeled and retried. A **closure literal** is the one target that cannot
   be a callee directly: a call whose `func` is an `Expr::Closure` is a shape no later stage
@@ -93,7 +93,7 @@ no types.
   further down the pipeline.
 
 - **The composition operator**: `f >> g >> h` becomes one flat `Expr::Compose` node holding the
-  names, built by `compose_operand` (`parser/expressions.rs`), which peels a `Paren`, accepts an
+  names, built by `compose_operand` (`parser/expr_infix.rs`), which peels a `Paren`, accepts an
   `Identifier`, and splices a nested `Compose` into its parent so a chain never nests. Any other
   operand is `ParseError::NotAComposeOperand`, which is what makes `1 >> 2` a diagnostic about
   composition rather than a stray comparison. A composition that is *applied* where it is written

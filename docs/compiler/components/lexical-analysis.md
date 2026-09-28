@@ -21,7 +21,7 @@ this crate directly.
 
 ### Tokens
 
-The token set is [`TokenKind` in `tokens.rs`](../../../compiler/lexical-analysis/src/tokens.rs).
+The token set is [`TokenKind` in `tokens/mod.rs`](../../../compiler/lexical-analysis/src/tokens/mod.rs).
 Two things about it are easy to get wrong:
 
 - Type names (`i32`, `f64`, `bool`, `string`, `char`, …) are ordinary identifiers, not
@@ -39,7 +39,7 @@ escapes in the [strings reference](../../language-reference/strings.md#escape-se
 
 ### Strings and interpolation
 
-A string token carries a [`StringValue`](../../../compiler/lexical-analysis/src/tokens.rs):
+A string token carries a [`StringValue`](../../../compiler/lexical-analysis/src/tokens/mod.rs):
 `Plain(String)` for a literal without holes, `Interp(Vec<InterpChunk>)` when it contains at
 least one `{expr}` hole. Each chunk is either `Text(String)` (already unescaped) or
 `Hole { source, span }` (the raw expression text plus its location). The parser hands the

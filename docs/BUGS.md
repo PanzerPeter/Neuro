@@ -9,7 +9,7 @@ never reused, so numbering stays stable as entries are removed.
 
 - **Status**: open, confirmed
 - **Area**: `llvm-backend`; parameter registration in `codegen/functions.rs` and
-  `plan_held_drops` in `codegen/drops.rs`
+  `plan_held_drops` in `codegen/drops/mod.rs`
 - **Severity**: major. An unbounded leak, one buffer per call, for an ordinary by-value
   argument or a consuming `self` receiver
 
@@ -61,7 +61,7 @@ that must not be freed, and a field the callee moves out and returns.
 
 - **Status**: open, confirmed. Narrowed: an enum holding an owner now moves rather than
   copies, so the double free this entry was filed for is a compile error
-- **Area**: `llvm-backend` (`enum_holds_owner` in `codegen/drops.rs`)
+- **Area**: `llvm-backend` (`enum_holds_owner` in `codegen/drops/mod.rs`)
 - **Severity**: major. An unbounded leak, one buffer per evaluation
 
 **Minimal repro**
@@ -107,8 +107,8 @@ moved out by a `match` (freed once, by the binding).
 ## BUG-077: a store through a borrow never destroys the value it displaces
 
 - **Status**: open, confirmed
-- **Area**: `llvm-backend`; the displaced-value release in `codegen/drops.rs`
-  (`displace_held_position`) and the store paths in `structs.rs` and `statements.rs`
+- **Area**: `llvm-backend`; the displaced-value release in `codegen/drops/displace.rs`
+  (`displace_held_position`) and the store paths in `structs.rs` and `statements/mod.rs`
 - **Severity**: major. A destructor with a side effect silently never runs, and an owned
   buffer the store displaces leaks
 
@@ -392,7 +392,7 @@ and a closure that DOES retain its argument, which must keep the current transfe
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` (borrow checking); `borrow_target_of` in
-  `type_checkers/statements.rs`
+  `type_checkers/statements/mod.rs`
 - **Severity**: major. Memory-unsafe. The borrowee rules accept a program that leaves a
   reference pointing into a freed buffer, and the compiler says nothing.
 

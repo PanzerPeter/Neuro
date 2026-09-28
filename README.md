@@ -215,11 +215,6 @@ PATH. Two rows are worth a word: `print_lines` beats C because an integer hole r
 digit loop instead of `snprintf`, and `int_divide` is the one place the compiler spends rather
 than saves, since `/` and `%` guard the operand pairs the hardware leaves undefined.
 
-`matmul` compares like with like: Neuro's `@` is a plain triple loop today, so the C++ and Python
-rows are the same loop. A NumPy or PyTorch product hands the work to a tuned, multithreaded BLAS,
-and Neuro is not in that class yet; matmul throughput (tiling or a vendor BLAS) is a planned
-optimization on the [roadmap](#quick-roadmap).
-
 ---
 
 ## Quick Roadmap

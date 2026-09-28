@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.4] - 2026-09-28
+
+### Changed
+
+- The largest compiler source files are split by concern, with no change in behaviour: the
+  emitted LLVM IR of every example and benchmark is byte-identical at `-O0` and `-O3`.
+  `llvm-backend`'s drop machinery becomes `codegen/drops/` (owned strings, moves, displaced
+  values, `string` positions, emission) and its loop codegen `codegen/statements/loops.rs`;
+  the autodiff tape becomes `autodiff/tape/` (control flow, leaves, calls, positions);
+  `hir-lowering`'s items become `items/` (registration, monomorphization, lowering); the
+  checker's statements become `type_checkers/statements/` (loops, places, returned
+  references); the parser's expressions gain `expr_prefix.rs`, `expr_infix.rs` and
+  `expr_turbofish.rs`; and the lexer's literal decoding moves to `tokens/strings.rs` and
+  `tokens/numbers.rs`.
+
 ## [3.19.3] - 2026-09-28
 
 ### Fixed

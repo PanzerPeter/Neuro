@@ -162,7 +162,7 @@ the `len` contract). The frontend types the result as owned `String` even when a
 ### Heap-string ownership
 The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
 cannot be read off a value at runtime. It is decided at compile time instead, by
-`produces_owned_string` (`drops.rs`): an expression owns its buffer only if it is an
+`produces_owned_string` (`drops/owned_strings.rs`): an expression owns its buffer only if it is an
 `InterpString`, a `+` yielding `string`, `String::to_string`, a `string.clone()`, or a call to a function
 `codegen/string_ownership.rs` proved allocates on every return path. Everything else (a literal,
 a variable, a `slice`) answers `false` and is never freed. The asymmetry is deliberate: a missed
@@ -889,7 +889,7 @@ labeled one scans `loop_targets` from innermost out for the matching label, an u
 the top. Label validity is guaranteed by semantic analysis, so an unresolved label is an
 `InternalError`.
 
-The three counted loops: `codegen_for_range` (`statements.rs`), `codegen_for_each`
+The three counted loops: `codegen_for_range` (`statements/loops.rs`), `codegen_for_each`
 (`expressions/arrays.rs`), and `codegen_vec_for_each` (`collections/vectors.rs`). Each takes an
 `index: Option<&str>`, the `u64` position binding of `for (i, x) in xs.enumerate()`. `loop_index.rs`
 owns its scope bookkeeping: `bind_loop_index` opens a slot and shadows the name across
@@ -1143,7 +1143,7 @@ call. `CodegenContext` carries `trait_methods` (vtable slot order, via `set_trai
 Static dispatch needs nothing here: `impl Trait` is monomorphized away before the HIR arrives.
 
 ## Drop ABI (deterministic destruction)
-`drops.rs` inserts a `{struct}__drop(&mut self)` call at each lexical scope exit for an owned
+`drops/` inserts a `{struct}__drop(&mut self)` call at each lexical scope exit for an owned
 binding of a `Drop` type. `drop_types: HashSet<String>` (filled by `compile` from `impl Drop for T`
 blocks) gates everything: when it is empty the scope stack stays empty and zero IR is emitted, so
 non-Drop programs are unaffected. `drop_scopes: Vec<Vec<DropEntry>>` is a stack of lexical scopes;
@@ -1290,7 +1290,7 @@ rather than the block's sweep, which `pool_registered_type` decides from the sam
 
 Which places outlive is read off `pool_locals`, one `HashSet<String>` per open `pool` region,
 pushed beside `pool_marks` in `codegen_pool_expr` and filled by `note_pool_local` at each
-`codegen_var_decl`. A store is kept on the bump path only when `Self::place_root` (in `drops.rs`,
+`codegen_var_decl`. A store is kept on the bump path only when `Self::place_root` (in `drops/moves.rs`,
 over `moved_place`) names a binding in the INNERMOST frame. Everything else routes: a `*p = v`
 write, whose referent belongs to whoever handed the reference over; a binding of an enclosing
 pool, whose own arena outlives this block's release; and any binding the set happens to miss,

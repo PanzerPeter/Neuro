@@ -44,7 +44,7 @@ fn read(relative: &str) -> String {
 }
 
 const GRAMMAR_PATH: &str = "neuro-language-support/syntaxes/neuro.tmLanguage.json";
-const TOKENS_PATH: &str = "compiler/lexical-analysis/src/tokens.rs";
+const TOKENS_PATH: &str = "compiler/lexical-analysis/src/tokens/mod.rs";
 
 fn grammar_json() -> serde_json::Value {
     serde_json::from_str(&read(GRAMMAR_PATH)).expect("the TextMate grammar is valid JSON")
@@ -134,7 +134,7 @@ fn textmate_grammar_covers_every_lexer_keyword() {
     assert!(
         keywords.len() > 20,
         "keyword extraction found only {} literals; the `#[token(\"...\")]` \
-         attribute layout in tokens.rs changed and this test no longer sees them",
+         attribute layout in tokens/mod.rs changed and this test no longer sees them",
         keywords.len()
     );
 
