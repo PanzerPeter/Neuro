@@ -561,9 +561,12 @@ and the borrow site has its own diagnostic. The move rule stands down when a per
 borrow is live, because the read rule has already reported that name.
 
 This is **lexical, not NLL**: a borrow held by a binding freezes its borrowee for that binding's
-whole scope, so code reads back through the borrow or confines it to a block. Only direct-borrow
-initializers create tracked persistent borrows, so borrows escaping through compound expressions
-are still missed.
+whole scope, so code reads back through the borrow or confines it to a block. Persistent borrows
+come from a direct `&place` / `&mut place` initializer, a `.slice` view, and a call that returns a
+reference (`hold_returned_borrows`): a reference-typed binding initialized or reassigned from a
+call holds every `&place` / `&mut place` argument of that call and its borrowed receiver, since a
+body may return any of its reference parameters. A borrow reaching a binding through any other
+compound expression (an `if`, a block) is still missed.
 
 **Returned-reference outlives** (lifetime elision; `declarations/` + `statements/returns.rs`). A
 function or method whose declared return type is a `Type::Reference` must not return a reference

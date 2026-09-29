@@ -525,3 +525,113 @@ func main() -> i32 {{ 0 }}"
         "a shared borrow stays read-only; got {refused:?}"
     );
 }
+
+/// A reference a call hands back borrows from the call's borrowed inputs, so the
+/// binding it initializes holds those borrows just as a direct `&s` initializer does.
+/// Through `id(&s)` the borrow attached to nothing, and `consume(s)` freed the buffer
+/// `b` still read.
+#[test]
+fn test_bug_035_a_reference_returned_by_a_call_keeps_its_source_borrowed() {
+    let moved = semantic_errors(
+        r#"
+func id(s: &string) -> &string { s }
+func consume(s: string) -> u64 { s.len() }
+func main() -> i32 {
+    val s: string = "hello"
+    val b: &string = id(&s)
+    val n: u64 = consume(s)
+    return b.len() as i32
+}
+"#,
+    );
+    assert!(
+        moved
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotMoveWhileBorrowed { name, .. } if name == "s")),
+        "moving the source of a live returned reference must be refused; got {moved:?}"
+    );
+
+    let read = semantic_errors(
+        r#"
+func pick(r: &mut i32) -> &mut i32 { r }
+func main() -> i32 {
+    mut n: i32 = 1
+    val r: &mut i32 = pick(&mut n)
+    val read: i32 = n
+    return *r + read
+}
+"#,
+    );
+    assert!(
+        read.iter().any(
+            |e| matches!(e, TypeError::CannotUseWhileMutablyBorrowed { name, .. } if name == "n")
+        ),
+        "reading the source of a live returned `&mut` must be refused; got {read:?}"
+    );
+
+    let receiver = semantic_errors(
+        r#"
+struct Holder { s: string }
+impl Holder {
+    func me(&self) -> &Holder { return &self }
+}
+func consume(h: Holder) -> u64 { h.s.len() }
+func main() -> i32 {
+    val h = Holder { s: "abc" }
+    val b: &Holder = h.me()
+    val n = consume(h)
+    return b.s.len() as i32
+}
+"#,
+    );
+    let reassigned = semantic_errors(
+        r#"
+func id(s: &string) -> &string { s }
+func consume(s: string) -> u64 { s.len() }
+func main() -> i32 {
+    val t: string = "other"
+    val s: string = "hello"
+    mut b: &string = &t
+    b = id(&s)
+    val n: u64 = consume(s)
+    return b.len() as i32
+}
+"#,
+    );
+    assert!(
+        reassigned
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotMoveWhileBorrowed { name, .. } if name == "s")),
+        "a reference stored by assignment holds its source too; got {reassigned:?}"
+    );
+
+    assert!(
+        receiver
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotMoveWhileBorrowed { name, .. } if name == "h")),
+        "a `&self` method's returned reference borrows its receiver; got {receiver:?}"
+    );
+}
+
+/// The borrow ends with the binding, and a call returning an owned value holds nothing.
+#[test]
+fn test_bug_035_a_returned_reference_releases_its_source_at_scope_end() {
+    let errors = semantic_errors(
+        r#"
+func id(s: &string) -> &string { s }
+func length(s: &string) -> u64 { s.len() }
+func consume(s: string) -> u64 { s.len() }
+func main() -> i32 {
+    val s: string = "hello"
+    {
+        val b: &string = id(&s)
+        val k = b.len()
+    }
+    val owned = length(&s)
+    val n = consume(s)
+    return (n + owned) as i32
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}

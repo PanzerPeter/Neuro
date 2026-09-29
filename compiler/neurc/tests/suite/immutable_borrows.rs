@@ -150,3 +150,29 @@ func main() -> i32 {
         "expected a borrow-place diagnostic, got: {stderr}"
     );
 }
+
+#[test]
+fn regression_a_reference_returned_by_a_call_keeps_its_source_borrowed() {
+    // `id(&s)` hands the borrow back, so `b` holds `s` exactly as `&s` would. Moving `s`
+    // into `consume` used to compile and let `b.len()` read the freed buffer.
+    let source = r#"
+func id(s: &string) -> &string { s }
+func consume(s: string) -> u64 { s.len() }
+
+func main() -> i32 {
+    val s: string = "hello"
+    val b: &string = id(&s)
+    val n: u64 = consume(s)
+    return b.len() as i32
+}
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(
+        !success,
+        "moving the source of a live returned reference must be refused"
+    );
+    assert!(
+        stderr.contains("cannot move out of 's' while it is borrowed"),
+        "expected the borrowee diagnostic, got: {stderr}"
+    );
+}

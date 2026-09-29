@@ -55,6 +55,53 @@ fn slice_receiver_of(expr: &Expr) -> Option<String> {
 }
 
 impl TypeChecker {
+    /// Make `holder`, a binding of reference type `ty` that `init` just initialized,
+    /// hold the borrows a call's returned reference may come from.
+    ///
+    /// The returned reference borrows one of the call's borrowed inputs (lifetime elision),
+    /// and a body may return any of its reference parameters, so each `&place` /
+    /// `&mut place` argument is a candidate, and so is a borrowed receiver. Without this
+    /// the borrow reached the binding attached to nothing, and the borrowee rules let the
+    /// source be moved or freed while the reference still read it.
+    pub(crate) fn hold_returned_borrows(&mut self, holder: &str, init: &Expr, ty: &Type) {
+        if !matches!(ty, Type::Reference { .. }) {
+            return;
+        }
+        let mut call = init;
+        while let Expr::Paren(inner, _) = call {
+            call = inner;
+        }
+        let Expr::Call { func, args, .. } = call else {
+            return;
+        };
+        for arg in args {
+            if let Some((place, exclusive)) = borrow_target_of(arg) {
+                self.symbols.attach_borrow(holder, &place, exclusive);
+            }
+        }
+        let Expr::FieldAccess { object, .. } = func.as_ref() else {
+            return;
+        };
+        // A consuming receiver is gone once the call returns, so nothing borrows it.
+        let (Some(key), Some(root)) = (self.callee_key(func), Self::place_root_name(object)) else {
+            return;
+        };
+        if self.consuming_self_methods.contains(&key) {
+            return;
+        }
+        let mutable = self.mut_self_methods.contains(&key);
+        let root_is_reference = matches!(
+            self.symbols.lookup(&root).map(|symbol| &symbol.ty),
+            Some(Type::Reference { .. })
+        );
+        match (mutable, root_is_reference) {
+            (true, true) => self.symbols.hold_reborrow(holder, &root),
+            (_, false) => self.symbols.attach_borrow(holder, &root, mutable),
+            // A shared borrow of a reference binding borrows nothing the frame owns.
+            (false, true) => {}
+        }
+    }
+
     /// Check a statement, then drop any transient borrows it took.
     ///
     /// A borrow passed to a call, used in a condition, or returned lives only for
@@ -187,6 +234,9 @@ impl TypeChecker {
                     }
                     if let Some(place) = view_root {
                         self.symbols.attach_borrow(&name.name, &place, false);
+                    }
+                    if let Some(ty) = self.symbols.lookup(&name.name).map(|s| s.ty.clone()) {
+                        self.hold_returned_borrows(&name.name, init_expr, &ty);
                     }
                     // A `mut` loss could be reassigned, and the `.backward()` would then
                     // run the derivative of a call its value no longer came from.

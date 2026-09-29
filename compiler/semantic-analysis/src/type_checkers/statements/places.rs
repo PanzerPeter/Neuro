@@ -524,6 +524,7 @@ impl TypeChecker {
         if let Some(place) = gradient_view_root(value, &value_ty) {
             self.symbols.attach_borrow(&target.name, &place, false);
         }
+        self.hold_returned_borrows(&target.name, value, &value_ty);
 
         let symbol_info = self.symbols.lookup(&target.name)?;
         if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&symbol_info.ty) {
