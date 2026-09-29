@@ -27,10 +27,17 @@ impl<'ctx> CodegenContext<'ctx> {
             .get(func_name)
             .ok_or_else(|| CodegenError::UndefinedFunction(func_name.to_string()))?;
 
+        let forwarded = self.string_ownership.forwarded_param(func_name);
+        let mut forwarded_owner = None;
         let mut arg_values = Vec::new();
         let mut passed = Vec::new();
         for (index, arg) in args.iter().enumerate() {
             let val = self.codegen_expr(arg)?;
+            // The call hands this argument's buffer back, so what it yields is owned
+            // exactly when the argument was; the move below is about to clear that.
+            if forwarded == Some(index) {
+                forwarded_owner = Some(self.argument_string_owner(arg)?);
+            }
             // A by-value argument moves an owned `Drop` place into the callee, which
             // now owns it; clearing the flag prevents a double drop here. A
             // borrow (`&x`) is not an identifier place, so it is left untouched.
@@ -51,6 +58,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
 
         self.release_owned_arguments(func_name, args, &passed)?;
+        if let Some(owner) = forwarded_owner {
+            self.forwarded_string_owner = Some((func_name.to_string(), owner));
+        }
 
         Ok(call_result.try_as_basic_value().basic())
     }
@@ -134,9 +144,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_values: Vec<BasicMetadataValueEnum> =
             vec![BasicMetadataValueEnum::from(self_arg)];
 
+        let forwarded = self.string_ownership.forwarded_param(mangled_name);
+        let mut forwarded_owner = None;
         let mut passed = Vec::new();
         for (index, arg) in args.iter().enumerate() {
             let val = self.codegen_expr(arg)?;
+            if forwarded == Some(index) {
+                forwarded_owner = Some(self.argument_string_owner(arg)?);
+            }
             // A by-value argument moves an owned `Drop` place into the callee; the
             // receiver's own ownership was settled above. A parameter the callee
             // provably only reads keeps its flag, for the reason the plain-call path
@@ -157,6 +172,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
 
         self.release_owned_arguments(mangled_name, args, &passed)?;
+        if let Some(owner) = forwarded_owner {
+            self.forwarded_string_owner = Some((mangled_name.to_string(), owner));
+        }
         // A `&self` receiver built for the call (`make().get()`) is owned by nothing once
         // the call returns. A consuming receiver belongs to the callee, and a `&mut self`
         // one was addressed in place.
@@ -288,6 +306,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
         self.current_function = Some(function);
+        self.borrowed_self = self_by_pointer;
         self.variables.clear();
         self.variable_types.clear();
         // The local type environment is per-body; clear any entries left by a prior item.
@@ -437,6 +456,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // Set current function for return statements
         self.current_function = Some(function);
+        self.borrowed_self = false;
 
         // Clear variables for new function scope
         self.variables.clear();

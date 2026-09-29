@@ -54,7 +54,6 @@ static struct {
                               void **);
     CUresult (*stream_create)(CUstream *, unsigned);
     CUresult (*stream_synchronize)(CUstream);
-    CUresult (*stream_destroy)(CUstream);
     CUresult (*mem_alloc)(CUdeviceptr *, size_t);
     CUresult (*mem_alloc_managed)(CUdeviceptr *, size_t, unsigned);
     CUresult (*mem_free)(CUdeviceptr);
@@ -78,7 +77,6 @@ static const struct {
     {"cuLaunchKernel", (void **)&cu.launch_kernel},
     {"cuStreamCreate", (void **)&cu.stream_create},
     {"cuStreamSynchronize", (void **)&cu.stream_synchronize},
-    {"cuStreamDestroy_v2", (void **)&cu.stream_destroy},
     {"cuMemAlloc_v2", (void **)&cu.mem_alloc},
     {"cuMemAllocManaged", (void **)&cu.mem_alloc_managed},
     {"cuMemFree_v2", (void **)&cu.mem_free},
@@ -193,11 +191,19 @@ void mgpuLaunchKernel(CUfunction function, intptr_t grid_x, intptr_t grid_y,
           "cuLaunchKernel");
 }
 
+// Every caller gets the same stream, created on first use and kept for the life of the
+// program. The launchers ask for a stream per kernel and the staging around them for one
+// per call; creating and destroying each costs more than a small kernel runs, and one
+// in-order stream is also what orders a call's copies before its kernels and its
+// kernels before the copy back. The driver releases it at exit.
+static CUstream shared_stream;
+
 CUstream mgpuStreamCreate(void) {
-    ensure_ready();
-    CUstream stream;
-    check(cu.stream_create(&stream, CU_STREAM_NON_BLOCKING), "cuStreamCreate");
-    return stream;
+    if (shared_stream == NULL) {
+        ensure_ready();
+        check(cu.stream_create(&shared_stream, CU_STREAM_NON_BLOCKING), "cuStreamCreate");
+    }
+    return shared_stream;
 }
 
 void mgpuStreamSynchronize(CUstream stream) {
@@ -205,7 +211,7 @@ void mgpuStreamSynchronize(CUstream stream) {
 }
 
 void mgpuStreamDestroy(CUstream stream) {
-    check(cu.stream_destroy(stream), "cuStreamDestroy");
+    (void)stream;
 }
 
 // `host_shared` is a byte, not a `bool`, to match the `i8` the callers declare.

@@ -802,10 +802,10 @@ func main() -> i32 {{
     let exit_code = test
         .compile_and_run("drop_shadowed_owner.nr", &source)
         .expect("Drop program should compile and run");
-    // `other` is displaced through a borrow, which no pass destroys yet (BUG-077), so it
-    // stays 0 here; what this test pins is that `outer` is released once, not twice.
+    // `other` is displaced through the borrow and destroyed at that store; what this test
+    // pins is that `outer` is released once, not twice.
     assert_eq!(
-        exit_code, 110,
+        exit_code, 111,
         "the outer owner is released once, at its scope exit"
     );
 }
@@ -878,4 +878,55 @@ func main() -> i32 {{
         .compile_and_run("newtype_drop_once.nr", &source)
         .expect("compile and run");
     assert_eq!(code, 1, "the probe must be dropped exactly once");
+}
+
+/// A store through a borrow displaces a value exactly as a store through its owner does,
+/// and the displaced value is destroyed there. Through a `&mut` parameter, a `&mut self`
+/// receiver and a `*r` store, the three displaced tokens were never destroyed: nothing
+/// tracks a borrowed place, so there were no flags to consult.
+#[test]
+fn test_bug_077_a_store_through_a_borrow_destroys_what_it_displaces() {
+    let test = CompileTest::new();
+    let source = test.write_source(
+        "displace_through_borrow.nr",
+        r#"
+struct Tok { id: i32 }
+
+impl Drop for Tok {
+    func drop(&mut self) { println("drop {self.id}") }
+}
+
+struct Pair { a: Tok }
+
+impl Pair {
+    func set(&mut self, id: i32) { self.a = Tok { id: id } }
+}
+
+func put(p: &mut Pair, id: i32) { p.a = Tok { id: id } }
+
+func replace(t: &mut Tok, id: i32) { *t = Tok { id: id } }
+
+func slot(ts: &mut [Tok; 2], id: i32) { ts[1] = Tok { id: id } }
+
+func main() -> i32 {
+    mut p = Pair { a: Tok { id: 1 } }
+    put(&mut p, 2)
+    p.set(3)
+    mut t = Tok { id: 4 }
+    replace(&mut t, 5)
+    mut ts = [Tok { id: 6 }, Tok { id: 7 }]
+    slot(&mut ts, 8)
+    println("end")
+    0
+}
+"#,
+    );
+    let exe = test.compile(&source).expect("compile failed");
+    let output = Command::new(&exe).output().expect("failed to run");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "drop 1\ndrop 2\ndrop 4\ndrop 7\nend\ndrop 6\ndrop 8\ndrop 5\ndrop 3\n",
+        "each displaced token goes at its store, the rest at scope exit in reverse order"
+    );
 }

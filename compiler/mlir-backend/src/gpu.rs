@@ -172,6 +172,11 @@ fn launches_every_op(function: &HirFunction) -> bool {
 /// own `gpu.module`. The kernels convert to the vendor dialect inside their
 /// modules; `gpu-to-llvm` turns each launch into runtime calls on the host side.
 ///
+/// `gpu-async-region` chains a body's launches on one stream with a single wait at
+/// its end. Without it every launch creates a stream, waits for its kernel and
+/// destroys the stream, so the host stalls between two kernels that need nothing
+/// from it.
+///
 /// `lower-affine` is there for the index arithmetic `convert-parallel-loops-to-gpu`
 /// writes as `affine.apply`, which the CPU path never produces. Serializing the
 /// kernels is a separate run so a missing toolkit is told apart from a lowering
@@ -182,7 +187,7 @@ fn gpu_lowering_pipeline(target: &GpuTarget) -> String {
          func.func(convert-linalg-to-parallel-loops,\
          scf-parallel-loop-tiling{{parallel-loop-tile-sizes={TILE_SIZES} no-min-max-bounds=true}},\
          gpu-map-parallel-loops,convert-parallel-loops-to-gpu),\
-         gpu-kernel-outlining,\
+         gpu-kernel-outlining,func.func(gpu-async-region),\
          {attach}{{chip={chip}}},\
          gpu.module({convert}),\
          lower-affine,{descent},gpu-to-llvm,reconcile-unrealized-casts)",
@@ -420,6 +425,26 @@ mod tests {
         assert!(
             !ir.contains("@malloc") && !ir.contains("@free("),
             "a host allocation would hand a kernel host memory:\n{ir}"
+        );
+
+        // Both launches queue on one stream and the host waits once, after the second:
+        // a wait per launch stalls the host between kernels that need nothing from it.
+        assert_eq!(ir.matches("call ptr @mgpuStreamCreate(").count(), 1, "{ir}");
+        assert_eq!(
+            ir.matches("call void @mgpuStreamSynchronize(").count(),
+            1,
+            "{ir}"
+        );
+        let last_launch = ir.rfind("call void @mgpuLaunchKernel").unwrap_or_default();
+        let wait = ir
+            .find("call void @mgpuStreamSynchronize(")
+            .unwrap_or_default();
+        let release = ir
+            .find("call void @_mlir_memref_to_llvm_free(")
+            .unwrap_or_default();
+        assert!(
+            last_launch < wait && wait < release,
+            "the intermediate is released only once the kernel reading it is done:\n{ir}"
         );
     }
 

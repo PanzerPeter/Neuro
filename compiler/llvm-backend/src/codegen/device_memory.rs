@@ -18,6 +18,10 @@
 // Every device operation goes through MLIR's GPU runtime ABI (`mgpuMemAlloc`,
 // `mgpuMemFree`, `mgpuMemcpy`, the `mgpuStream*` family), the one the launchers call, so a
 // single runtime library serves both.
+//
+// The runtime hands every `mgpuStreamCreate` the same in-order stream, so a call's copies,
+// its kernels and the copy back queue in that order without a wait between them: the one
+// synchronization is after the copy back, where the host is about to read the result.
 
 use inkwell::module::Linkage;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
@@ -48,7 +52,6 @@ const MGPU_MEM_FREE: &str = "mgpuMemFree";
 const MGPU_MEMCPY: &str = "mgpuMemcpy";
 const MGPU_STREAM_CREATE: &str = "mgpuStreamCreate";
 const MGPU_STREAM_SYNCHRONIZE: &str = "mgpuStreamSynchronize";
-const MGPU_STREAM_DESTROY: &str = "mgpuStreamDestroy";
 
 /// Device memory reserved the first time a run allocates any. Unlike host address space
 /// it is resident from the moment it is reserved, so it is sized for staging a handful
@@ -189,13 +192,6 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(device)
     }
 
-    /// Wait for the copies onto the device. A launcher runs each kernel on a stream of
-    /// its own that does not wait for this one, so without it a kernel could read an
-    /// operand before its copy lands.
-    pub(crate) fn await_device_staging(&self, staging: &DeviceStaging<'ctx>) -> CodegenResult<()> {
-        self.build_stream_call(MGPU_STREAM_SYNCHRONIZE, staging.stream)
-    }
-
     /// Copy the kernels' result at `device` back into `host`, then release everything
     /// the call staged: each buffer (a no-op for the ones in the chunk) and then the
     /// chunk itself back to the mark.
@@ -208,7 +204,6 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         self.build_device_copy(&staging, host, device, tensor_ty)?;
         self.build_stream_call(MGPU_STREAM_SYNCHRONIZE, staging.stream)?;
-        self.build_stream_call(MGPU_STREAM_DESTROY, staging.stream)?;
         let release = self.device_release_fn()?;
         for buffer in &staging.buffers {
             self.builder.build_call(release, &[(*buffer).into()], "")?;

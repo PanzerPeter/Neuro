@@ -231,6 +231,56 @@ impl<'ctx> CodegenContext<'ctx> {
             .map(|entry| entry.flag_ptr)
     }
 
+    /// Whether the `string` argument `arg` is owned at this point of the run: `true` for
+    /// one that allocates in place, the flag of the binding it names, what a forwarder
+    /// it calls handed back, and `false` for anything else. Read before the call's move
+    /// clears the flag.
+    pub(crate) fn argument_string_owner(&mut self, arg: &HirExpr) -> CodegenResult<IntValue<'ctx>> {
+        let bool_ty = self.context.bool_type();
+        if self.produces_owned_string(arg) {
+            return Ok(bool_ty.const_int(1, false));
+        }
+        if let Some(owner) = self.take_forwarded_owner(arg) {
+            return Ok(owner);
+        }
+        Ok(self
+            .load_owned_string_flag(arg)?
+            .unwrap_or_else(|| bool_ty.const_zero()))
+    }
+
+    /// The name a call to a `string` forwarder is summarized under, when `expr` is one.
+    /// Keyed the way [`produces_owned_string`](CodegenContext::produces_owned_string)
+    /// keys a producer, which is the name the call path lowers the call under.
+    pub(crate) fn forwarding_callee(&self, expr: &HirExpr) -> Option<String> {
+        let HirExprKind::Call { callee, .. } = &peel_newtype(expr).kind else {
+            return None;
+        };
+        let key = match &callee.kind {
+            HirExprKind::Variable(name) => name.clone(),
+            HirExprKind::Path { type_name, member } => format!("{}__{}", type_name, member),
+            HirExprKind::FieldAccess { object, field } => {
+                match Type::from_hir(&object.ty).referent() {
+                    Type::Struct(type_name) | Type::Enum(type_name) => {
+                        format!("{}__{}", type_name, field)
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        self.string_ownership.forwarded_param(&key).map(|_| key)
+    }
+
+    /// Whether the buffer the forwarder call `expr` just yielded is owned, when `expr` is
+    /// one and the call path recorded its answer.
+    pub(crate) fn take_forwarded_owner(&mut self, expr: &HirExpr) -> Option<IntValue<'ctx>> {
+        let key = self.forwarding_callee(expr)?;
+        match self.forwarded_string_owner.take() {
+            Some((callee, owner)) if callee == key => Some(owner),
+            _ => None,
+        }
+    }
+
     /// Whether `expr` names a binding that may own a heap `string`, so a move out of it
     /// may carry a buffer.
     pub(crate) fn names_an_owned_string(&self, expr: &HirExpr) -> bool {

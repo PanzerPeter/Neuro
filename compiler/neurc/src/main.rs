@@ -393,6 +393,14 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
                     &error,
                 )
             })?;
+            // Whether a `@gpu` body can become a kernel is decided by the backend that
+            // lowers it, so a `check` that stopped at HIR would pass a body `compile`
+            // refuses. Without MLIR nothing can compile one, and `check` stays the
+            // type check it is.
+            if cfg!(feature = "mlir") && gpu_functions(&hir).next().is_some() {
+                let source = single_module_source(path, module_count);
+                tensor_bodies(&hir, path, source.as_deref())?;
+            }
             println!(
                 "Type checking passed for {:?} ({} module(s), {} HIR items)",
                 path,

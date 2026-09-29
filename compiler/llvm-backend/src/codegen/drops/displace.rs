@@ -4,10 +4,13 @@
 use inkwell::types::ArrayType;
 use inkwell::values::PointerValue;
 use inkwell::IntPredicate;
-use neuro_hir::HirExpr;
+use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use crate::codegen::context::{CodegenContext, DropEntry, DropTarget};
 use crate::errors::{CodegenError, CodegenResult};
+
+/// The receiver's name in a method body.
+const SELF_BINDING: &str = "self";
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Release the value a reassigned binding is about to lose, and hand back its drop
@@ -101,6 +104,27 @@ impl<'ctx> CodegenContext<'ctx> {
         // the release above left every such position disarmed, because the type says
         // nothing about what the incoming value owns.
         self.arm_stored_string_positions(&root, &path, value)
+    }
+
+    /// Whether the place `expr` names is reached through a reference: a `&mut` binding
+    /// or receiver, a `*r`, or a field or element of one at any depth. Such a place
+    /// belongs to whoever lent it, so no drop entry of this frame tracks it, and what a
+    /// store there displaces is released by
+    /// [`drop_displaced_through_borrow`](CodegenContext::drop_displaced_through_borrow).
+    pub(crate) fn reached_through_borrow(&self, expr: &HirExpr) -> bool {
+        if matches!(expr.ty, HirType::Reference { .. }) {
+            return true;
+        }
+        match &expr.kind {
+            // A `&mut self` receiver is typed as the struct it points at.
+            HirExprKind::Variable(name) => name == SELF_BINDING && self.borrowed_self,
+            HirExprKind::Deref { .. } => true,
+            HirExprKind::FieldAccess { object, .. }
+            | HirExprKind::TupleIndex { object, .. }
+            | HirExprKind::Index { object, .. }
+            | HirExprKind::NewtypeAccess { object } => self.reached_through_borrow(object),
+            _ => false,
+        }
     }
 
     /// [`displace_held_position`] for an array element whose position is known only at

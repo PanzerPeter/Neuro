@@ -85,6 +85,110 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(flags)
     }
 
+    /// Which `string` positions of a value of type `ty` that `value` owns, by path: `true`
+    /// for one it provably allocated, the runtime flag for one a moved binding hands over,
+    /// and nothing for the rest. Read before the store's move clears those flags.
+    pub(crate) fn stored_string_owners(
+        &mut self,
+        value: &HirExpr,
+        ty: &Type,
+    ) -> CodegenResult<Vec<(Vec<String>, IntValue<'ctx>)>> {
+        if matches!(ty, Type::String) {
+            return Ok(vec![(Vec::new(), self.argument_string_owner(value)?)]);
+        }
+        let mut proven = Vec::new();
+        self.collect_armed_positions(value, &mut Vec::new(), &mut proven);
+        let armed = self.context.bool_type().const_int(1, false);
+        let mut owners: Vec<(Vec<String>, IntValue<'ctx>)> =
+            proven.into_iter().map(|path| (path, armed)).collect();
+        owners.extend(self.load_held_string_flags(value)?);
+        Ok(owners)
+    }
+
+    /// Make every `string` position of the `ty` value just stored at `place_ptr` through a
+    /// borrow own its bytes: a position `owners` does not say is owned gets a heap copy.
+    ///
+    /// Whoever lent the place releases it by a flag this store cannot see, armed or not.
+    /// A `.rodata` literal left under an armed flag is handed to `free` at the owner's
+    /// scope exit, which aborts; a heap copy is at worst a leak under a clear one. The
+    /// copy comes from `malloc` even inside a `pool`: the place outlives the block.
+    pub(crate) fn own_strings_stored_through_borrow(
+        &mut self,
+        place_ptr: PointerValue<'ctx>,
+        ty: &Type,
+        owners: &[(Vec<String>, IntValue<'ctx>)],
+    ) -> CodegenResult<()> {
+        let mut positions = Vec::new();
+        self.string_position_ptrs(place_ptr, ty, &mut Vec::new(), &mut positions)?;
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("a store emitted outside a function".to_string())
+        })?;
+        let string_llvm = self.get_any_llvm_type(&Type::String)?;
+        for (path, position_ptr) in positions {
+            let owned = owners
+                .iter()
+                .find(|(owned_path, _)| *owned_path == path)
+                .map(|(_, owns)| *owns);
+            if owned.is_some_and(|owns| owns.get_zero_extended_constant() == Some(1)) {
+                continue;
+            }
+            let copy_bb = self
+                .context
+                .append_basic_block(parent_fn, "borrowed.str.copy");
+            let done_bb = self
+                .context
+                .append_basic_block(parent_fn, "borrowed.str.done");
+            match owned {
+                Some(owns) => self
+                    .builder
+                    .build_conditional_branch(owns, done_bb, copy_bb)?,
+                None => self.builder.build_unconditional_branch(copy_bb)?,
+            };
+            self.builder.position_at_end(copy_bb);
+            let bytes = self
+                .builder
+                .build_load(string_llvm, position_ptr, "borrowed.str")?;
+            let depth = std::mem::replace(&mut self.pool_depth, 0);
+            let copy = self.copy_string_bytes(bytes);
+            self.pool_depth = depth;
+            self.builder.build_store(position_ptr, copy?)?;
+            self.builder.build_unconditional_branch(done_bb)?;
+            self.builder.position_at_end(done_bb);
+        }
+        Ok(())
+    }
+
+    /// The address of every `string` position of a `ty` value at `base_ptr`, the value
+    /// itself included when it is one, keyed by the paths [`plan_held_drops`] uses.
+    fn string_position_ptrs(
+        &mut self,
+        base_ptr: PointerValue<'ctx>,
+        ty: &Type,
+        path: &mut Vec<String>,
+        out: &mut Vec<(Vec<String>, PointerValue<'ctx>)>,
+    ) -> CodegenResult<()> {
+        if matches!(ty, Type::String) {
+            out.push((path.clone(), base_ptr));
+            return Ok(());
+        }
+        let positions = self.held_positions(ty);
+        if positions.is_empty() {
+            return Ok(());
+        }
+        let holder_llvm = self.get_any_llvm_type(ty)?;
+        for (index, (segment, position_ty)) in positions.into_iter().enumerate() {
+            if !matches!(position_ty, Type::String) && !self.holds_string_position(&position_ty) {
+                continue;
+            }
+            let position_ptr =
+                self.aggregate_position_ptr(holder_llvm, base_ptr, index as u32, "borrowed.pos")?;
+            path.push(segment);
+            self.string_position_ptrs(position_ptr, &position_ty, path, out)?;
+            let _ = path.pop();
+        }
+        Ok(())
+    }
+
     /// Store flags [`load_held_string_flags`] read off a moved holder into the same
     /// positions of `name`, the holder that took the value.
     pub(crate) fn store_held_string_flags(

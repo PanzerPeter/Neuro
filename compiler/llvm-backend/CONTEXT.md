@@ -102,10 +102,11 @@ descriptor needs a compile-time extent per axis.
 each tensor's own buffer. `Device` is for bodies that launch GPU kernels, and
 `codegen/device_memory.rs` stages every one of their buffers: the wrapper opens a staging region
 (the device arena's mark, and a stream from `mgpuStreamCreate`), copies each tensor operand into a
-device buffer with `mgpuMemcpy`, gives the symbol a device result buffer, synchronizes the stream
-before the call (the launcher's own streams do not wait for it), then copies the result back into
-the host tensor it returns, releases each staged buffer and restores the mark. Callers still pass
-and receive host tensors.
+device buffer with `mgpuMemcpy`, gives the symbol a device result buffer, calls it, copies the
+result back into the host tensor it returns, synchronizes once, releases each staged buffer and
+restores the mark. Callers still pass and receive host tensors. No wait sits between the copies in
+and the call: the runtime hands every `mgpuStreamCreate` the same in-order stream, so the kernels
+queue behind the copies, and the one synchronization is where the host is about to read.
 
 The device allocator is a second linear arena built from `arena.rs`'s `Arena` descriptor, the same
 bump (`build_bump_body`) and ownership test (`build_arena_owns`) over `__neuro_device_arena_base` /
@@ -122,6 +123,8 @@ back null aborts with a diagnostic rather than hand a kernel a null buffer.
 `mgpuModuleUnload`, `mgpuModuleGetFunction`, `mgpuLaunchKernel`, `mgpuStream*`, `mgpuMem*`) over the
 CUDA driver API, and internalizes every entry point after the link. It is generated from
 `gpu_runtime.c` like `softfloat`'s builtins, and opens `libcuda.so.1` with `dlopen` on first use,
+creates one non-blocking stream the first time a stream is asked for and hands it to every caller
+(`mgpuStreamDestroy` leaves it alone; a stream per launch cost more than a small kernel runs),
 so the binary does not need the driver to load and a missing GPU becomes a diagnostic rather than
 a dynamic-loader error. First use is the launchers' module-load constructor, so a program with a
 `@gpu` function checks for a GPU before `main`. The runtime reports every failure through
@@ -279,6 +282,18 @@ then belongs to the storage, and is tracked one of three ways:
   block) is an exit `collect_returns` does not enumerate, so a body holding one is never a
   producer: missing that exit once let a function that returned a literal through it be read as
   allocating, and its caller freed the literal.
+- **A forwarded parameter.** The pass's third answer: the functions whose every exit hands back
+  one `string` parameter unchanged (a read of it, or a call to another forwarder passing it on,
+  so again a growing fixpoint), with that parameter's index. What such a call yields is owned
+  exactly when its argument was, which is a runtime fact at the call: `argument_string_owner`
+  reads it (`true` for an argument that allocates, the flag of a binding, a nested forwarder's
+  answer) before the call's move clears it, and the call path leaves it in
+  `forwarded_string_owner` under the callee's name. A declaration or an assignment clears that
+  before evaluating its value and takes it only for its own call, so a stale answer is never
+  read, and anything it does not take owns nothing. A body that binds the parameter's name
+  anywhere (a `match` arm, an inner block) is never a forwarder, since its exit may read that
+  binding instead, and a function whose exits mix a forward with anything else is neither a
+  forwarder nor a producer.
 - **A by-value argument.** The same pass records the `string` parameters whose callee provably only
   READS them, by a whitelist of positions that copy the bytes out (a `print`/`println` argument, an
   interpolation hole, a binary operand, a `.len()` or `.clone()` receiver, a `push_str` argument,
@@ -1229,8 +1244,20 @@ the parser desugars it to a temporary plus one projection per leaf. A store into
 array element releases the displaced position and re-arms it (`displace_held_position`, at any
 depth; `displace_array_element` at a run-time index, which compares the written address against
 each tracked element). Until BUG-075 only a field of a named binding did, so a nested field or an
-element lost its old value without a destructor. A place reached through a borrow has no flags
-here and is not released (BUG-077). A reassignment re-arms the whole plan
+element lost its old value without a destructor.
+
+A place reached through a borrow (`reached_through_borrow`: a reference-typed object, a `*r`, a
+`&mut self` receiver, or a field or element of one) has no flags in this frame, since it belongs
+to whoever lent it. A store there does two things the owner's flags cannot. It destroys the
+displaced value when its type proves what it owns (`drop_displaced_through_borrow`: a user
+`Drop` type, a collection, or a holder of one, released like an unbound temporary; nothing
+inside a `pool`, and nothing holding a tensor or a `PoolAware` value, either of which may be
+arena memory the callee cannot see). And it leaves every `string` position it wrote owning heap
+bytes (`own_strings_stored_through_borrow`): the owner releases the position by its own flag,
+armed or not, so a `.rodata` literal left under an armed flag reached `free` and aborted. A
+position the value provably owns (an allocation, a moved binding's flag) keeps its buffer; any
+other gets a `malloc`'d copy, which at worst leaks. A displaced `string` or tensor still leaks
+(BUG-077). A reassignment re-arms the whole plan
 (`rearm_held_drop_flags`), which is unconditional because a held position exists only where its
 own type proves ownership.
 

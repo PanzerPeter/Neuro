@@ -1541,6 +1541,97 @@ fn regression_a_read_only_argument_releases_the_place_it_came_from() {
     }
 }
 
+/// A function that hands back its own `string` parameter yields a buffer its caller owns
+/// exactly when the argument was. The result was bound as owning nothing while the call's
+/// move had already disarmed the argument, so every call leaked the buffer. The binding
+/// the result initializes now takes the argument's ownership, read before the move: two
+/// releases in `main`, one for the argument's binding and one for the result's.
+#[test]
+fn test_bug_039_a_forwarded_parameter_is_owned_by_the_result() {
+    let cases = [
+        r#"
+        func keep(s: string) -> string { s }
+        func main() -> i32 {
+            val s = "one" + "two"
+            val r = keep(s)
+            return r.len() as i32
+        }
+        "#,
+        // Through a second forwarder, which the summary's fixpoint reaches.
+        r#"
+        func keep(s: string) -> string { s }
+        func relay(s: string) -> string { return keep(s) }
+        func main() -> i32 {
+            val s = "one" + "two"
+            val r = relay(s)
+            return r.len() as i32
+        }
+        "#,
+        // A method, keyed by the name its call mangles.
+        r#"
+        struct W { n: i32 }
+        impl W {
+            func pass(&self, s: string) -> string { s }
+        }
+        func main() -> i32 {
+            val w = W { n: 1 }
+            val s = "one" + "two"
+            val r = w.pass(s)
+            return r.len() as i32
+        }
+        "#,
+    ];
+    for case in cases {
+        let ir = module_ir(case, OptimizationLevelSetting::O0);
+        assert_eq!(
+            free_calls(&ir, "main"),
+            2,
+            "the argument's binding and the result's each release once, in:\n{}",
+            function_body(&ir, "main")
+        );
+    }
+}
+
+/// An exit that reads a binding of the parameter's name is not a forward: here a `match`
+/// arm and an inner block each bind their own `s`, a literal, and treating the result as
+/// the argument's buffer would hand `.rodata` to `free` whenever the argument was owned.
+#[test]
+fn a_binding_that_shadows_the_parameter_is_not_forwarded() {
+    let shadows = [
+        r#"
+        enum E { A(string), B }
+        func shadow(s: string) -> string {
+            match E::A("lit") { E::A(s) => s, E::B => "none" }
+        }
+        "#,
+        r#"
+        func shadow(s: string) -> string {
+            {
+                val s = "lit"
+                s
+            }
+        }
+        "#,
+    ];
+    for shadow in shadows {
+        let source = format!(
+            "{shadow}
+        func main() -> i32 {{
+            val q = \"one\" + \"two\"
+            val z = shadow(q)
+            return z.len() as i32
+        }}"
+        );
+        let ir = module_ir(&source, OptimizationLevelSetting::O0);
+        assert_eq!(
+            free_calls(&ir, "main"),
+            1,
+            "only the argument's binding may release, in:\n{}",
+            function_body(&ir, "main")
+        );
+    }
+}
+
 /// A parameter handed on to another read-only parameter, read through `.clone()`, or read
 /// under an `as` cast is read only too, so the caller releases the buffer it passed once
 /// the call returns. Each shape was counted a retention, and each call leaked the argument.

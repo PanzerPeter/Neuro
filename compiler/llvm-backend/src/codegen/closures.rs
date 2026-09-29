@@ -53,6 +53,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
         self.current_function = Some(function);
+        self.borrowed_self = false;
         self.variables.clear();
         self.variable_types.clear();
         self.type_env.clear();

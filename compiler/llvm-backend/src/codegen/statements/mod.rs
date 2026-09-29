@@ -36,7 +36,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let owns_initial_string = init.is_some_and(|expr| self.produces_owned_string(expr));
         let may_own_string = owns_initial_string
             || mutable
-            || init.is_some_and(|expr| self.names_an_owned_string(expr));
+            || init.is_some_and(|expr| {
+                self.names_an_owned_string(expr) || self.forwarding_callee(expr).is_some()
+            });
         let drop_target = self.drop_target(ty).or_else(|| {
             (may_own_string && matches!(Type::from_hir(ty), Type::String))
                 .then_some(DropTarget::HeapString)
@@ -48,6 +50,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .is_some_and(Self::is_aggregate_literal)
             .then(Default::default);
         let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
+        self.forwarded_string_owner = None;
         let init_val = init.map(|expr| self.codegen_expr(expr)).transpose();
         let literal_moves = std::mem::replace(&mut self.literal_string_moves, outer)
             .map(|moves| moves.flags)
@@ -83,8 +86,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
             // Read before the move below disarms it: whether the binding a `string` is
             // moved out of owned the buffer is a runtime fact, and it moves with the value.
+            // A forwarder's result is owned exactly when its argument was, which the call
+            // recorded before its move.
             let moved_string_flag = match init {
-                Some(expr) if !owns_initial_string => self.load_owned_string_flag(expr)?,
+                Some(expr) if !owns_initial_string => match self.take_forwarded_owner(expr) {
+                    Some(owner) => Some(owner),
+                    None => self.load_owned_string_flag(expr)?,
+                },
                 _ => None,
             };
             // The same for every `string` position of a holder moved whole (`val q = p`).
@@ -198,6 +206,7 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_assignment(&mut self, name: &str, value: &HirExpr) -> CodegenResult<()> {
         let collecting = Self::is_aggregate_literal(value).then(Default::default);
         let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
+        self.forwarded_string_owner = None;
         let val = self.codegen_expr(value);
         let literal_moves = std::mem::replace(&mut self.literal_string_moves, outer)
             .map(|moves| moves.flags)
@@ -229,7 +238,10 @@ impl<'ctx> CodegenContext<'ctx> {
         // binding's flag with it; read it before the move clears it.
         let moved_string_flag = match &rearm {
             Some((_, DropTarget::HeapString)) if !self.produces_owned_string(value) => {
-                self.load_owned_string_flag(value)?
+                match self.take_forwarded_owner(value) {
+                    Some(owner) => Some(owner),
+                    None => self.load_owned_string_flag(value)?,
+                }
             }
             _ => None,
         };
@@ -302,9 +314,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let ptr_val = self.codegen_expr(pointer)?;
         let ptr = ptr_val.into_pointer_value();
         let val = self.codegen_expr(value)?;
+        let referent = Type::from_hir(&pointer.ty).referent().clone();
+        self.drop_displaced_through_borrow(ptr, &referent)?;
+        let owners = self.stored_string_owners(value, &referent)?;
         self.builder.build_store(ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store through reference: {}", e))
         })?;
+        self.own_strings_stored_through_borrow(ptr, &referent, &owners)?;
         self.mark_moved_for_drop(value);
         Ok(())
     }

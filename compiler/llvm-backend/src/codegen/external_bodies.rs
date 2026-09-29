@@ -108,9 +108,6 @@ impl<'ctx> CodegenContext<'ctx> {
             None => host_result,
         };
         self.push_memref_descriptor(&result_ty, written, &mut arg_types, &mut args)?;
-        if let Some(staging) = &staging {
-            self.await_device_staging(staging)?;
-        }
 
         let callee = self.module.get_function(symbol).unwrap_or_else(|| {
             self.module.add_function(
@@ -372,15 +369,18 @@ mod tests {
 
         let stream = position(scale, "call ptr @mgpuStreamCreate()", 0);
         let copy_in = position(scale, "call void @mgpuMemcpy(", stream);
-        let settled = position(scale, "call void @mgpuStreamSynchronize(", copy_in);
-        let call = position(scale, "call void @ext_scale(ptr %device.buffer", settled);
+        let call = position(scale, "call void @ext_scale(ptr %device.buffer", copy_in);
         let copy_out = position(scale, "call void @mgpuMemcpy(", call);
-        position(scale, "call void @mgpuStreamDestroy(", copy_out);
-        position(scale, "call void @_mlir_memref_to_llvm_free(", copy_out);
+        let settled = position(scale, "call void @mgpuStreamSynchronize(", copy_out);
+        assert!(
+            !scale[..copy_out].contains("@mgpuStreamSynchronize("),
+            "the kernels queue behind the copies on one stream, so nothing waits before them:\n{scale}"
+        );
+        position(scale, "call void @_mlir_memref_to_llvm_free(", settled);
         position(
             scale,
             "store i64 %device.mark, ptr @__neuro_device_arena_offset",
-            copy_out,
+            settled,
         );
 
         assert_eq!(

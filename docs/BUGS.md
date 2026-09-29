@@ -9,34 +9,34 @@ never reused, so numbering stays stable as entries are removed.
 
 - **Status**: open, specification gap
 - **Area**: `semantic-analysis`; attributes are read by name where each one matters
-  (`grad`, `no_grad`, `derive`, `allow`) and never checked as a set
+  (`grad`, `no_grad`, `gpu`, `derive`, `allow`) and never checked as a set
 - **Severity**: minor. Nothing miscompiles, but a misspelled attribute silently does nothing,
-  and the GPU attributes the next phase adds already compile today as no-ops
+  and `@kernel`, which the next GPU items add, already compiles today as a no-op
 
 **Minimal repro**
 
 ```neuro
-@gpu
-func double(x: i32) -> i32 { x * 2 }
-
 @no_grda
 func scale() -> f32 { 2.0f32 }
 
+@kernel
+func k() -> i32 { 1 }
+
 func main() -> i32 {
-    double(1) + scale() as i32
+    scale() as i32 + k()
 }
 ```
 
-Observed: compiles and exits 4. `@gpu` runs the function on the CPU, and the misspelled
-`@no_grda` is dropped, so inside a `@grad` body the call would be differentiated rather than
-held constant. By contrast `tensor.to(Device::GPU(0))` stops with a located `panic:` that says
-the GPU backend does not exist yet.
+Observed: compiles and exits 3. The misspelled `@no_grda` is dropped, so inside a `@grad` body
+the call would be differentiated rather than held constant, and `@kernel` runs the function as
+an ordinary host function. `@gpu` is no longer part of this: a `@gpu` function whose body cannot
+become a kernel is now a compile error at the function.
 
 **Open question for the specification**: the custom attributes section says the `@name(args)`
 syntax is extensible, and says nothing about a name no one defined. Either an unknown attribute
 is an error (the usual choice, and the one that keeps a typo from changing a program's meaning),
-or it is ignored, in which case `@gpu` and `@kernel` should still be refused until they are
-implemented, since a program written against them today would change behaviour when they land.
+or it is ignored, in which case `@kernel` should still be refused until it is implemented,
+since a program written against it today would change behaviour when it lands.
 
 **Root cause**: confirmed in the code. Each consumer looks for its own attribute name on the
 item and skips everything else; no pass checks an item's attributes against the known set.
@@ -45,7 +45,7 @@ item and skips everything else; no pass checks an item's attributes against the 
 
 **Fix sketch**: once the rule is settled, one pass over every item's attributes against the
 recognized names, reporting the unknown one at its span. Regression tests: a misspelled
-`@no_grad`, `@gpu` before the GPU backend exists, and every recognized attribute still accepted.
+`@no_grad`, `@kernel` before it is implemented, and every recognized attribute still accepted.
 
 ## BUG-085: a struct passed by value never releases the `string` buffers it holds
 
@@ -146,70 +146,49 @@ by value, and consulted by the enum's drop. A payload read through a borrow must
 Regression tests: the repro, a payload built from a literal (must not be freed), and a payload
 moved out by a `match` (freed once, by the binding).
 
-## BUG-077: a store through a borrow never destroys the value it displaces
+## BUG-077: a store through a borrow leaks the `string` or tensor it displaces
 
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; the displaced-value release in `codegen/drops/displace.rs`
-  (`displace_held_position`) and the store paths in `structs.rs` and `statements/mod.rs`
-- **Severity**: major. A destructor with a side effect silently never runs, and an owned
-  buffer the store displaces leaks
+- **Status**: open, confirmed. Narrowed: a displaced value whose type proves what it owns (a
+  user `Drop` type, a `Vec`, a map, or a holder of one) is now destroyed at the store
+- **Area**: `llvm-backend`; `drop_displaced_through_borrow` in `codegen/drops/mod.rs`
+- **Severity**: major. An unbounded leak, one buffer per store, through a `&mut` parameter, a
+  `&mut self` receiver or a `*r` store
 
 **Minimal repro**
 
 ```neuro
-struct Tok { id: i32 }
+struct Named { name: string }
 
-impl Drop for Tok {
-    func drop(&mut self) { println("drop {self.id}") }
-}
-
-struct Pair { a: Tok }
-
-impl Pair {
-    func set(&mut self, id: i32) { self.a = Tok { id: id } }
-}
-
-func put(p: &mut Pair, id: i32) { p.a = Tok { id: id } }
-
-func replace(t: &mut Tok, id: i32) { *t = Tok { id: id } }
+func rename(n: &mut Named, i: i32) { n.name = "item {i}" }
 
 func main() -> i32 {
-    mut p = Pair { a: Tok { id: 1 } }
-    put(&mut p, 2)
-    p.set(3)
-    mut t = Tok { id: 4 }
-    replace(&mut t, 5)
-    println("end")
-    0
+    mut n = Named { name: "a" + "b" }
+    mut i = 0
+    while i < 1000 {
+        rename(&mut n, i)
+        i += 1
+    }
+    n.name.len() as i32
 }
 ```
 
-Expected: `drop 1`, `drop 2` and `drop 4` at the stores that displace them, then `end`, then
-`drop 5` and `drop 3`. Assigning to a field drops the value it displaces there, and every
-position is destroyed exactly once. Observed: `end`, `drop 5`, `drop 3`. The three displaced
-values are never destroyed. The same store into a binding's own field, at any depth, or into
-one of its array elements does destroy what it displaces.
+Expected: each `rename` releases the buffer it displaces, and the last one is released at `n`'s
+scope exit. Observed: exit 8, and AddressSanitizer's leak check reports every displaced buffer,
+the first `"a" + "b"` included. A tensor field replaced through a borrow leaks the same way.
 
-**Root cause**: confirmed in the code. The displaced value is found through the drop flags of
-the binding the place is rooted at, and a place reached through a borrow (a `&mut` parameter,
-a `&mut self` receiver, or a `*r` store) is rooted at a binding that owns nothing, so there are
-no flags to consult and nothing is released.
+**Root cause**: confirmed in the code. Whether a `string` position owns its buffer is a runtime
+flag of the binding that owns the place, and a store through a borrow runs in a frame that
+cannot see it, so it cannot tell a heap buffer from a `.rodata` literal and leaves the displaced
+value alone. A tensor is left alone for a different reason: the value behind the borrow may have
+come from a `pool` arena, and a callee cannot see whether its caller is inside one.
 
-**Why this is filed rather than fixed**: the value behind a borrow is always live (nothing can
-be moved out of a borrow), so an unconditional release would be sound for a value whose type
-proves its ownership. It is not sound for everything a borrow can reach: a `string` position
-owns its buffer only when the store that filled it allocated one, which is a runtime flag of the
-caller's, and a tensor a `pool` block allocated belongs to the arena, not to its binding. The
-release through a borrow needs the flag to travel with the reference, or a rule that keeps both
-kinds of value out of such a store.
+**Workaround**: store through the owning binding (`n.name = ...` in the scope that owns `n`).
 
-**Workaround**: store through the owning binding (`p.a = ...` in the scope that owns `p`), or
-reassign the whole value through the borrow's owner.
-
-**Fix sketch**: release unconditionally where the displaced type is proven to own what it holds
-(a user `Drop` type, a `Vec`, a map) and the store is outside any `pool`, and leave a `string`
-or tensor position to a follow-up that carries its ownership flag. Regression tests: the repro,
-one store per form, and a `string` field through a borrow that must not free a literal.
+**Fix sketch**: carry the flags with the reference, as a hidden argument per `string` position
+of a `&mut` parameter, or have the callee report which positions it wrote so the caller
+releases what they held before the call. Regression tests: the repro in a loop under a leak
+check, a literal in the place (must not be freed), and a tensor field inside and outside a
+`pool`.
 
 ## BUG-050: calling a closure literal in place reports a function type as "non-function"
 
@@ -284,64 +263,6 @@ block.
 declares bindings needs the walk to run after the value is checked, so that its names are
 resolvable. Decide first whether the provenance walk is meant to grow these shapes or whether
 the refusal is the intended boundary.
-
-## BUG-039: a function that hands back its own `string` parameter leaks the buffer
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; the return summary in `codegen/string_ownership.rs`
-- **Severity**: major. An unbounded leak, one buffer per call, in a shape as ordinary as an
-  identity or a passthrough wrapper
-
-A call is treated as handing its caller an owned buffer only when every one of the callee's
-exits is an *allocating expression* (`+`, an interpolation, `String::to_string`, or another
-such call). An exit that returns a `string` **parameter** is none of those, so the caller does
-not register the binding it initializes as an owner. The argument was moved into the callee at
-the call, which clears the caller's own flag for it, so both ends stand down.
-
-**Minimal repro**
-
-```neuro
-func keep(s: string) -> string { s }
-
-func main() -> i32 {
-    mut i: u32 = 0
-    mut n: u64 = 0
-    while i < 200000 {
-        val s = "one" + "two"
-        val r = keep(s)
-        n = n + r.len()
-        i = i + 1
-    }
-    if n != 1200000 { return 91 }
-    0
-}
-```
-
-Expected: the heap stays flat. The language makes a function's return value a storing
-position, so
-`r` owns the buffer and releases it at scope exit. Observed: the arithmetic is right and the
-process's resident set climbs linearly, about one 6-byte buffer plus its allocator header per
-iteration: the loop above peaks near 6 MB resident, against under 2 MB for the same loop with
-the workaround below. Raising the round count raises the peak in step.
-
-**Root cause**: confirmed in the code. `allocates` recognises the expression shapes that build
-a buffer and nothing else; a bare `Variable` exit is not one, so `keep` never enters
-`returns_owned`. The pass documents this direction as deliberate ("an unprovable case is
-`false` and leaks one buffer, because the other direction frees `.rodata` or dangles"), and
-for an opaque exit that is the right call. A parameter is not opaque: which buffer it names is
-exactly what the caller knows.
-
-**Workaround**: rebuild rather than forward the value (`func keep(s: string) -> string { s + "" }`),
-which makes the exit an allocating shape and re-arms the caller's binding.
-
-**Fix sketch**: the summary needs a third answer beside "allocates" and "unknown": *forwards
-parameter i*. An exit that is a bare parameter read gives the caller a buffer whose ownership
-it can settle itself: the argument it passed at that index. The call site then keeps its
-own flag for that argument instead of transferring it, the way the read-only-parameter case
-now does, rather than arming a fresh owner on the result. Both halves are a fixpoint over the
-same body walk the pass already runs. Regression tests want the identity above, a conditional
-forward (one exit a parameter, one an allocation, which must stay conservative), and a forward
-through two calls, so a wrong transfer would double-free rather than merely leak.
 
 ## BUG-038: a `string` passed by value to a closure, or returned by one, is released by nobody
 
@@ -430,60 +351,6 @@ is a change to what that path passes rather than a new arm in it. Regression tes
 repro above, the `|>` spelling, a closure stored in a struct field (must stay conservative),
 and a closure that DOES retain its argument, which must keep the current transfer.
 
-## BUG-035: a borrow reaching a binding through a call return is not tracked
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (borrow checking); `borrow_target_of` in
-  `type_checkers/statements/mod.rs`
-- **Severity**: major. Memory-unsafe. The borrowee rules accept a program that leaves a
-  reference pointing into a freed buffer, and the compiler says nothing.
-
-A borrow becomes a tracked *persistent* borrow only when the initializer is syntactically a
-borrow of a named place (`val r = &x`, or a `.slice(range)` view). A borrow that reaches the
-binding any other way (most commonly as the return value of a function that takes one and
-hands it back) attaches to nothing. The borrowee rules read those tracked counts, so for such
-a binding they see no live borrow and every one of them stands down.
-
-**Minimal repro**
-
-```neuro
-func id(s: &string) -> &string { s }
-func consume(s: string) -> u64 { s.len() }
-
-func main() -> i32 {
-    val s: string = "hello"
-    val b: &string = id(&s)
-    val n: u64 = consume(s)
-    return b.len() as i32
-}
-```
-
-Expected: rejected with `cannot move out of 's' while it is borrowed`. Observed: type checking
-passes, `s` is moved into `consume`, and `b.len()` then reads the buffer `consume` released.
-
-The direct spelling of the same program is correctly rejected, which isolates the trigger:
-replace `id(&s)` with `&s` and the diagnostic fires. The read half escapes the same way:
-`val r: &mut i32 = pick(&mut n); val read: i32 = n` compiles, where the direct `&mut n` form
-does not.
-
-**Root cause**: confirmed in the code, and recorded as a known property of the pass in
-`compiler/semantic-analysis/CONTEXT.md` ("only direct-borrow initializers create tracked
-persistent borrows"). Before the borrowee rules existed, missing such a borrow cost only an
-exclusivity diagnostic between two borrows; it now costs a dangling-pointer diagnostic, which
-is what promotes the known conservatism to a defect.
-
-**Workaround**: bind the borrow directly (`val b: &string = &s`) where the borrowee must stay
-frozen. There is no workaround that keeps the indirect spelling.
-
-**Fix sketch**: the borrow must be carried by the *type*, not recovered from the initializer's
-syntax. A reference-typed binding whose initializer is a call needs the callee's elided output
-lifetime resolved to the argument it came from (the same input-to-output mapping
-`check_returned_reference` already relies on via `current_fn_outliving`) and then
-`attach_borrow` against that argument's root place. Ranking the whole-function approach: this is
-the point where per-binding counters stop paying for themselves and a borrow set keyed by
-(place, region) starts to. Regression tests want the repro above, the `&mut` read variant, and a
-callee returning a reference derived from `self`.
-
 ## BUG-033: `&` does not accept a field or an element, only a bare variable
 
 - **Status**: open, confirmed
@@ -552,51 +419,6 @@ an array element and a tuple element to storage. Both halves of the machinery no
 what is missing is the borrow check accepting a sub-place as the operand of `&` and
 `&mut`, and the exclusivity bookkeeping for a borrow of part of a binding rather than the
 whole of it.
-
-## BUG-030: an element moved out of a `Vec` leaves the `Vec` owning it too
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (move analysis of index places)
-- **Severity**: major. Two owners of one heap buffer; not yet observable as a crash only
-  because an anonymous heap string is never freed today
-
-Move analysis records a move out of a binding and, since the struct-field fix, out of a
-field place. An **index** place is still not a place it recognises, so binding an element
-of a `Vec<string>` moves nothing: the element and the `Vec` both own the same buffer, and
-a `Vec` frees its elements on `Drop`.
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    mut v: Vec<string> = Vec::new()
-    v.push("a" + "b")
-    val x = v[0]
-    return (x.len() as i32) + (v[0].len() as i32)
-}
-```
-
-Expected: a diagnostic, the way the same program written against a plain binding or a
-struct field gets one. Observed: it compiles, and `x` and `v` own one buffer between them.
-It exits 4 rather than crashing because an owned string built by `+` is never freed (the
-untracked leak Phase 1 left behind) so the double free has nothing to fire on yet. A
-collection of a type with a real destructor would abort.
-
-**Root cause**: `record_move` resolves a place through `place_origin`, which now handles an
-index place over a fixed ARRAY but still returns `None` for one over a `Type::Collection`,
-so no move is recorded and no error is raised.
-
-**Workaround**: read the element through a method or a loop over the collection rather
-than binding it, or `.clone()` it.
-
-**Fix sketch**: not purely mechanical, which is why it is filed rather than fixed. An array
-and a tuple now answer this per ELEMENT PATH: `a[0]` moves the path `"0"`, a runtime `a[i]`
-moves the whole binding, because the compiler cannot say which element left. A `Vec`'s
-length is not static, so every index into one is the runtime case, and applying the array
-rule unchanged would make a `Vec` of a non-`Copy` element readable exactly once: `&v[0]`
-is not a borrowable place either. What a partial move of a collection means is still a
-language decision the spec does not make. Decide the rule first (reject the move outright,
-as Rust does; require `.clone()`; or add a borrowing index form), then implement it.
 
 ## BUG-027: a const generic parameter cannot be passed to another generic call
 
@@ -717,7 +539,10 @@ report. Two things have to come with it, and they are the reason this is not a o
 change. The reference requires the shadowed value to be dropped at the *normal end of scope*
 rather than early, so the displaced binding stays registered for destruction and both are
 released when the block ends. And the borrow and move checkers key on the name, so a moved
-binding that is then shadowed must not report a use-after-move against the new one. A
+binding that is then shadowed must not report a use-after-move against the new one. The borrow
+half is the harder one: a borrow records the place it borrows by name, so a `val r = &x` taken
+before a second `val x` would be released against the new `x` when `r` dies, which can clear a
+live borrow of the new binding and let it be moved while that borrow still reads it. A
 regression test needs all three: the type change above, a shadowed `Vec` (both buffers
 freed, exactly once), and a shadow of a moved binding.
 

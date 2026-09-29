@@ -196,6 +196,57 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Destroy the value of type `ty` at `place_ptr` that a store through a borrow is
+    /// about to displace.
+    ///
+    /// Nothing tracks a borrowed place, so there is no flag to consult, and none is
+    /// needed: nothing can be moved out of a borrow, so the value behind one is always
+    /// live. What the release needs instead is a type that proves what it owns. A
+    /// `string` position proves nothing and stays disarmed, and a value holding a tensor
+    /// or a `PoolAware` value is left alone, because either may belong to a `pool`'s
+    /// arena, which a callee cannot see from where its caller stands. Inside a `pool`
+    /// the arena owns what the block allocates, as for a temporary.
+    pub(crate) fn drop_displaced_through_borrow(
+        &mut self,
+        place_ptr: PointerValue<'ctx>,
+        ty: &Type,
+    ) -> CodegenResult<()> {
+        if self.pool_depth > 0 || !self.holds_owner(ty) || self.may_hold_arena_memory(ty) {
+            return Ok(());
+        }
+        let depth = self.drop_scopes.len();
+        self.push_drop_scope();
+        self.register_owned_binding(UNBOUND_TEMPORARY, place_ptr, ty)?;
+        self.emit_drops_through(depth)?;
+        self.pop_drop_scope();
+        Ok(())
+    }
+
+    /// Whether a value of `ty` holds a tensor or a `PoolAware` value anywhere inside it.
+    fn may_hold_arena_memory(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Tensor { .. } => true,
+            Type::Struct(name) => {
+                self.pool_aware_types.contains(name)
+                    || self.struct_defs.get(name).is_some_and(|fields| {
+                        fields.iter().any(|(_, f)| self.may_hold_arena_memory(f))
+                    })
+            }
+            Type::Enum(name) => self
+                .type_mapper
+                .enum_payload_types(name)
+                .is_some_and(|variants| {
+                    variants
+                        .iter()
+                        .flatten()
+                        .any(|f| self.may_hold_arena_memory(f))
+                }),
+            Type::Array { element, .. } => self.may_hold_arena_memory(element),
+            Type::Tuple(elements) => elements.iter().any(|e| self.may_hold_arena_memory(e)),
+            _ => false,
+        }
+    }
+
     /// Plan the drops for every owner held inside a binding of `ty`, flattening the
     /// field and element paths under `storage_ptr` into one entry each.
     ///

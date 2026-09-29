@@ -97,7 +97,9 @@ apt.llvm.org's `libmlir-22-dev` does the same under `/usr/lib/llvm-22`. `mlir-sy
 **The GPU pipeline.** `lower_for_gpu` builds the `lower_for_link` module and swaps the middle of
 the CPU pipeline: `convert-linalg-to-parallel-loops`, `scf-parallel-loop-tiling` (16 × 16 over the
 first two axes, guarded rather than clamped, so the outer loop maps to blocks and the inner to
-threads), `gpu-map-parallel-loops`, `convert-parallel-loops-to-gpu`, `gpu-kernel-outlining`, then
+threads), `gpu-map-parallel-loops`, `convert-parallel-loops-to-gpu`, `gpu-kernel-outlining`,
+`gpu-async-region` (a body's launches chain on one stream with a single wait at its end, instead
+of a stream created, waited on and destroyed per launch), then
 `nvvm-attach-target` / `rocdl-attach-target` with the chip and `convert-gpu-to-nvvm` /
 `convert-gpu-to-rocdl` inside each `gpu.module`. `lower-affine` is added for the index arithmetic
 the GPU mapping writes; `gpu-to-llvm` turns each launch into calls to MLIR's GPU runtime ABI

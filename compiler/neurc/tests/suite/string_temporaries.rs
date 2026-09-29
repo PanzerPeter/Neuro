@@ -439,3 +439,102 @@ func main() -> i32 {
     // 3 + 3 + 2 + 3; freeing a literal aborts instead.
     assert_eq!(exit, 11);
 }
+
+/// A function that hands back its own parameter gives its caller the buffer the caller
+/// passed, owned exactly when the argument was. Each round forwards an owned buffer, a
+/// literal (which must never reach `free`), a buffer through two forwarders, and one
+/// through a `mut` reassignment. A forward read as allocating frees the literal and
+/// aborts; one read as owned twice double-frees; one read as owning nothing leaks a
+/// buffer per round, which is what every forward did.
+#[test]
+fn test_bug_039_a_forwarded_parameter_is_released_once_by_the_caller() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+func keep(s: string) -> string {{ s }}
+func relay(s: string) -> string {{ return keep(s) }}
+
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    mut last = "start"
+    while i < {LEAK_ROUNDS} {{
+        val owned = keep(a + a)
+        val literal = keep("fixed")
+        val bound = a + a
+        val twice = relay(bound)
+        val again = a + a
+        last = keep(again)
+        n = n + owned.len() + literal.len() + twice.len() + last.len()
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * (WIDTH * 6 + 5)
+    );
+    let exit = test
+        .compile_and_run("forwarded_release.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}
+
+/// A store through a borrow cannot see the flag its place's owner keeps, and that flag,
+/// armed or not, is what releases the position at the owner's scope exit. A literal
+/// stored through a `&mut string`, a `&mut` struct, a `&mut self` receiver or a whole
+/// `*n = Named { .. }` was freed as the heap buffer the owner's armed flag promised, and
+/// the program aborted in `free`. Every position such a store writes now owns heap bytes.
+#[test]
+fn test_bug_089_a_literal_stored_through_a_borrow_is_never_freed_as_a_buffer() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+struct Named {{ name: string }}
+
+impl Named {{
+    func set(&mut self) {{ self.name = "method" }}
+}}
+
+func relabel(s: &mut string) {{ *s = "literal" }}
+func rename(n: &mut Named) {{ n.name = "field" }}
+func swap(n: &mut Named) {{ *n = Named {{ name: "whole" }} }}
+func slot(names: &mut [string; 2]) {{ names[1] = "element" }}
+func build(s: &mut string) {{ *s = "built" + "!" }}
+
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        mut s = a + a
+        relabel(&mut s)
+        mut b = a + a
+        build(&mut b)
+        mut r = Named {{ name: a + a }}
+        rename(&mut r)
+        mut w = Named {{ name: a + a }}
+        swap(&mut w)
+        mut m = Named {{ name: a + a }}
+        m.set()
+        mut names = [a + a, a + a]
+        slot(&mut names)
+        n = n + s.len() + b.len() + r.name.len() + w.name.len() + m.name.len() + names[1].len()
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * (7 + 6 + 5 + 5 + 6 + 7)
+    );
+    let exit = test
+        .compile_and_run("stored_through_borrow.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}

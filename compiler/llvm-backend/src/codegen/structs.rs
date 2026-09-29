@@ -254,9 +254,29 @@ impl<'ctx> CodegenContext<'ctx> {
         // replacing itself, so its prior value loses its owner only once the new one
         // has been built.
         self.displace_held_position(object, field_name, value)?;
+        // A place a borrow reaches belongs to whoever lent it, so no flag of this frame
+        // tracks what the store displaces or what it leaves there.
+        let borrowed = match self.reached_through_borrow(object) {
+            true => self
+                .struct_defs
+                .get(&struct_name)
+                .and_then(|fields| fields.iter().find(|(name, _)| name == field_name))
+                .map(|(_, ty)| ty.clone()),
+            false => None,
+        };
+        let owners = match &borrowed {
+            Some(field_ty) => {
+                self.drop_displaced_through_borrow(field_ptr, field_ty)?;
+                self.stored_string_owners(value, field_ty)?
+            }
+            None => Vec::new(),
+        };
         self.builder
             .build_store(field_ptr, val)
             .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;
+        if let Some(field_ty) = &borrowed {
+            self.own_strings_stored_through_borrow(field_ptr, field_ty, &owners)?;
+        }
         self.mark_moved_for_drop(value);
         Ok(())
     }

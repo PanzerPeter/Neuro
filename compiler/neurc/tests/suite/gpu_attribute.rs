@@ -111,20 +111,24 @@ fn without_mlir_a_gpu_function_is_a_compile_error() {
 #[test]
 fn a_body_that_cannot_become_a_kernel_is_a_compile_error() {
     let test = CompileTest::new();
-    let source = test.write_source(
-        "not_a_kernel.nr",
-        "@gpu\nfunc add(a: Tensor<i32, [4]>, b: Tensor<i32, [4]>) -> Tensor<i32, [4]> {\n    a + b\n}\n@gpu\nfunc total(a: &Tensor<f32, [4]>) -> f32 {\n    a.sum()\n}\nfunc main() -> i32 { return 0 }\n",
-    );
-    let error = test
+    let text = "@gpu\nfunc add(a: Tensor<i32, [4]>, b: Tensor<i32, [4]>) -> Tensor<i32, [4]> {\n    a + b\n}\n@gpu\nfunc total(a: &Tensor<f32, [4]>) -> f32 {\n    a.sum()\n}\nfunc main() -> i32 { return 0 }\n";
+    let source = test.write_source("not_a_kernel.nr", text);
+    let compiled = test
         .compile(&source)
         .expect_err("neither body can run on a GPU");
-    for (name, line) in [("add", 2), ("total", 6)] {
-        assert!(
-            error.contains(&format!(
-                "`@gpu` function '{name}' cannot become a GPU kernel"
-            )) && error.contains(&format!("not_a_kernel.nr:{line}:1")),
-            "expected `{name}` refused at line {line}:\n{error}"
-        );
+    // `check` refuses what `compile` refuses, rather than passing the program.
+    let checked = test
+        .check("not_a_kernel.nr", text)
+        .expect_err("`check` should refuse the bodies `compile` refuses");
+    for error in [compiled, checked] {
+        for (name, line) in [("add", 2), ("total", 6)] {
+            assert!(
+                error.contains(&format!(
+                    "`@gpu` function '{name}' cannot become a GPU kernel"
+                )) && error.contains(&format!("not_a_kernel.nr:{line}:1")),
+                "expected `{name}` refused at line {line}:\n{error}"
+            );
+        }
     }
 }
 

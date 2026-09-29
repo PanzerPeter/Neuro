@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-09-29
+
+### Changed
+
+- A `@gpu` call waits on the GPU once instead of once per kernel. The GPU runtime hands every
+  launch the same stream, the kernels of one body queue on it without a host wait between them,
+  and the wrapper no longer waits between copying the operands in and launching. A small
+  two-kernel call costs less than half what it did. Results are unchanged.
+- `neurc check` on a `neurc` built with the MLIR backend refuses a `@gpu` body that cannot
+  become a kernel, as `compile` does. It used to pass it.
+
+### Fixed
+
+- A reference a call returns keeps its source borrowed (BUG-035). `val b = id(&s)` attached
+  the borrow to nothing, so `s` could be moved into another call while `b` still read its freed
+  buffer. A binding that takes a call's reference result, by declaration or assignment, now
+  holds the borrows of the call's `&` / `&mut` arguments and of its borrowed receiver.
+- A function that returns its own `string` parameter no longer leaks the buffer (BUG-039).
+  The binding its result initializes, or a `mut` binding it is assigned to, owns the buffer
+  exactly when the argument did, forwarded through any number of such functions.
+- A store through a borrow destroys the value it displaces when that value's type owns what it
+  holds (a user `Drop` type, a `Vec`, a map, or a holder of one). Through a `&mut` parameter, a
+  `&mut self` receiver or `*r`, the destructor never ran and the collection leaked. A displaced
+  `string` or tensor still leaks (BUG-077, narrowed).
+- A `string` literal stored through a borrow no longer aborts the program in `free`
+  (BUG-089). The owner of the place released it at scope exit as the heap buffer its flag
+  promised. A store through a borrow now leaves every `string` position it writes owning heap
+  bytes.
+
+### Docs
+
+- `docs/BUGS.md`: BUG-030 is closed as no longer reproducible (a collection read copies its
+  `string`, and no other element type can be moved out of one). BUG-088 no longer lists `@gpu`,
+  which is now a compile error where it cannot run. BUG-026 records why the borrow checker
+  blocks the fix.
+
 ## [4.4.0] - 2026-09-29
 
 ### Added

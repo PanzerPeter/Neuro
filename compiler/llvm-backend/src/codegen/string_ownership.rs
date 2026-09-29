@@ -15,7 +15,7 @@
 // errs the way the rest of the heap-string machinery errs: an unprovable case is `false`
 // and leaks one buffer, because the other direction frees `.rodata` or dangles.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::types::Type;
 use neuro_hir::{
@@ -44,6 +44,10 @@ pub(crate) struct StringOwnership {
     /// provably only reads it, so the caller may release the buffer it passed once the
     /// call returns.
     read_only_params: HashSet<(String, usize)>,
+    /// Functions, by the name a call site resolves to, whose every return path hands back
+    /// one `string` parameter unchanged, with that parameter's index. What such a call
+    /// yields is owned exactly when the argument it was passed was.
+    forwards: HashMap<String, usize>,
 }
 
 impl StringOwnership {
@@ -55,6 +59,11 @@ impl StringOwnership {
     /// Whether `name`'s `index`-th parameter is read and never retained.
     pub(crate) fn param_is_read_only(&self, name: &str, index: usize) -> bool {
         self.read_only_params.contains(&(name.to_string(), index))
+    }
+
+    /// The index of the `string` parameter a call to `name` hands back unchanged.
+    pub(crate) fn forwarded_param(&self, name: &str) -> Option<usize> {
+        self.forwards.get(name).copied()
     }
 }
 
@@ -119,10 +128,90 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
         read_only_params.extend(grown);
     }
 
+    // A fixpoint so a forward through another forwarder counts; it starts empty and
+    // grows, so a function forwarding only around a cycle never enters it.
+    let mut forwards: HashMap<String, usize> = HashMap::new();
+    loop {
+        let grown: Vec<(String, usize)> = callables
+            .iter()
+            .filter(|(name, _, _)| !forwards.contains_key(name) && !shadowed.contains(name))
+            .filter_map(|(name, params, body)| {
+                let (_, exits) = bodies.iter().find(|(returning, _)| returning == name)?;
+                let index = forwarded_by(exits.first()?, params, &forwards)?;
+                let all_forward = exits
+                    .iter()
+                    .all(|exit| forwarded_by(exit, params, &forwards) == Some(index));
+                (all_forward && !binds(body, params[index].0)).then(|| (name.clone(), index))
+            })
+            .collect();
+        if grown.is_empty() {
+            break;
+        }
+        forwards.extend(grown);
+    }
+
     StringOwnership {
         returns_owned,
         read_only_params,
+        forwards,
     }
+}
+
+/// The index of the `string` parameter `exit` hands back unchanged: a read of it, or a
+/// call to a known forwarder whose forwarded argument is one.
+fn forwarded_by(
+    exit: &HirExpr,
+    params: &[(&str, &HirType)],
+    forwards: &HashMap<String, usize>,
+) -> Option<usize> {
+    match &exit.kind {
+        HirExprKind::Variable(name) => params
+            .iter()
+            .position(|(param, ty)| *param == name && matches!(Type::from_hir(ty), Type::String)),
+        HirExprKind::Call { callee, args } => match &callee.kind {
+            HirExprKind::Variable(callee) => {
+                forwarded_by(args.get(*forwards.get(callee)?)?, params, forwards)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether anything in `body` binds `name`, which would let an exit reading `name`
+/// name that binding instead of the parameter: a forward it is not, and treating it as
+/// one would hand the caller a buffer it never passed.
+fn binds(body: &[HirStmt], name: &str) -> bool {
+    let mut bound = HashSet::new();
+    collect_bound_names(body, &mut bound);
+    walk_stmts(body, &mut |expr| match &expr.kind {
+        HirExprKind::If {
+            then_block,
+            else_if_blocks,
+            else_block,
+            ..
+        } => {
+            collect_bound_names(then_block, &mut bound);
+            for (_, block) in else_if_blocks {
+                collect_bound_names(block, &mut bound);
+            }
+            if let Some(block) = else_block {
+                collect_bound_names(block, &mut bound);
+            }
+        }
+        HirExprKind::Block { stmts }
+        | HirExprKind::Unsafe { stmts }
+        | HirExprKind::Pool { stmts, .. }
+        | HirExprKind::Loop { body: stmts, .. } => collect_bound_names(stmts, &mut bound),
+        HirExprKind::Match { arms, .. } => {
+            bound.extend(
+                arms.iter()
+                    .flat_map(|arm| arm.bindings.iter().map(|b| b.name.clone())),
+            );
+        }
+        _ => {}
+    });
+    bound.contains(name)
 }
 
 /// One callable a call site can name: the name it resolves to, its parameters, and the

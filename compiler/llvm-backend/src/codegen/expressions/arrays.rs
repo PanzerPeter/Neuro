@@ -163,9 +163,20 @@ impl<'ctx> CodegenContext<'ctx> {
                 value,
             )?,
         }
+        let borrowed = self.reached_through_borrow(object);
+        let owners = match borrowed {
+            true => {
+                self.drop_displaced_through_borrow(elem_ptr, &element_ty)?;
+                self.stored_string_owners(value, &element_ty)?
+            }
+            false => Vec::new(),
+        };
         self.builder.build_store(elem_ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store array element: {}", e))
         })?;
+        if borrowed {
+            self.own_strings_stored_through_borrow(elem_ptr, &element_ty, &owners)?;
+        }
         self.mark_moved_for_drop(value);
         Ok(())
     }

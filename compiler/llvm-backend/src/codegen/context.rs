@@ -358,6 +358,18 @@ pub(crate) struct CodegenContext<'ctx> {
     /// including while a position that is not itself a literal is evaluated.
     pub(crate) literal_string_moves: Option<LiteralStringMoves<'ctx>>,
 
+    /// The callee and the ownership of the argument the last call to a `string`
+    /// forwarder handed back: whether the buffer that call yields is owned, read before
+    /// the call's move cleared the argument's flag. A declaration or an assignment
+    /// clears it, evaluates its value and takes it only for its own call, so a stale
+    /// answer is never read.
+    pub(crate) forwarded_string_owner: Option<(String, IntValue<'ctx>)>,
+
+    /// Whether the body being generated is a `&mut self` method, whose `self` is the
+    /// caller's storage rather than a value this frame owns. A store into it displaces a
+    /// value no drop entry here tracks.
+    pub(crate) borrowed_self: bool,
+
     /// Stack of lexical name scopes, innermost last and pushed in lockstep with
     /// `drop_scopes`. Each frame lists what the bindings declared in that scope
     /// displaced, so leaving the scope can restore the names it shadowed.
@@ -444,6 +456,8 @@ impl<'ctx> CodegenContext<'ctx> {
             pool_aware_types: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
             literal_string_moves: None,
+            forwarded_string_owner: None,
+            borrowed_self: false,
             name_scopes: Vec::new(),
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),
