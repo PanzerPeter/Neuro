@@ -40,18 +40,29 @@ use neuro_hir::HirProgram;
 /// `bufferize-function-boundaries`, and `buffer-deallocation-pipeline` is a
 /// pipeline, not a pass. Half the pipeline typed and half in text would be two
 /// spellings of one sequence.
-const LLVM_LOWERING_PIPELINE: &str = "builtin.module(\
+///
+/// The GPU pipeline shares both halves around its own middle, so they are named
+/// once here as [`BUFFERIZE`] and [`LLVM_DESCENT`].
+fn llvm_lowering_pipeline() -> String {
+    format!(
+        "builtin.module({BUFFERIZE},func.func(convert-linalg-to-loops),{LLVM_DESCENT},reconcile-unrealized-casts)"
+    )
+}
+
+/// Tensor values into buffers, with the boundary the LLVM backend calls across.
+pub(crate) const BUFFERIZE: &str = "\
     one-shot-bufferize{bufferize-function-boundaries=true function-boundary-type-conversion=identity-layout-map},\
     buffer-results-to-out-params{hoist-static-allocs=true modify-public-functions=true},\
-    buffer-deallocation-pipeline,\
-    func.func(convert-linalg-to-loops),\
+    buffer-deallocation-pipeline";
+
+/// Loops over buffers into the `llvm` dialect, short of reconciling the casts.
+pub(crate) const LLVM_DESCENT: &str = "\
     convert-scf-to-cf,\
     finalize-memref-to-llvm,\
     convert-func-to-llvm,\
     convert-arith-to-llvm,\
     convert-cf-to-llvm,\
-    convert-index-to-llvm,\
-    reconcile-unrealized-casts)";
+    convert-index-to-llvm";
 
 /// Lower a typed HIR program through MLIR all the way to verified LLVM IR.
 ///
@@ -124,7 +135,12 @@ pub(crate) fn translate_module(
     module: &mut Module<'_>,
 ) -> Result<String, MlirError> {
     convert_to_llvm_dialect(context, module)?;
+    translate_llvm_dialect(module)
+}
 
+/// Translate a module already wholly in the `llvm` dialect (plus any `gpu.binary`
+/// it embeds) to LLVM IR, verified by LLVM.
+pub(crate) fn translate_llvm_dialect(module: &Module<'_>) -> Result<String, MlirError> {
     let llvm_context = inkwell::context::Context::create();
 
     // SAFETY: the operation is the module's own, alive for this call, and the
@@ -159,7 +175,10 @@ pub(crate) fn translate_module(
 /// `mlirTranslateModuleToLLVMIR` accepts.
 fn convert_to_llvm_dialect(context: &Context, module: &mut Module<'_>) -> Result<(), MlirError> {
     let manager = PassManager::new(context);
-    parse_pass_pipeline(manager.as_operation_pass_manager(), LLVM_LOWERING_PIPELINE)?;
+    parse_pass_pipeline(
+        manager.as_operation_pass_manager(),
+        &llvm_lowering_pipeline(),
+    )?;
 
     manager
         .run(module)
@@ -167,7 +186,7 @@ fn convert_to_llvm_dialect(context: &Context, module: &mut Module<'_>) -> Result
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use crate::smoke::build_smoke_module;
@@ -229,7 +248,7 @@ mod tests {
         );
     }
 
-    fn tensor(shape: Vec<Option<usize>>) -> HirType {
+    pub(crate) fn tensor(shape: Vec<Option<usize>>) -> HirType {
         HirType::Tensor {
             element: Box::new(HirType::F32),
             shape,
@@ -238,7 +257,7 @@ mod tests {
     }
 
     /// `func f(a: Tensor<f32, L>, b: Tensor<f32, R>) -> Tensor<f32, Out> { return a <op> b }`
-    fn program_with_tensor_operator(
+    pub(crate) fn program_with_tensor_operator(
         op: BinaryOp,
         left: HirType,
         right: HirType,

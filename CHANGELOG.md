@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-09-29
+
+### Added
+
+- The MLIR backend lowers tensor bodies to GPU kernels. `lower_for_gpu` takes the same bodies
+  the `mlir` build links (straight-line element-wise arithmetic and matrix products over static
+  `f32` / `f64` tensors) and turns each `linalg` op into a kernel, tiled into blocks and threads.
+  NVIDIA targets go through `nvvm` and embed PTX, so compiling needs no CUDA toolkit. AMD targets
+  go through `rocdl` and embed a code object for the named chip; building it needs ROCm. The
+  host side keeps the CPU path's calling convention and launches through MLIR's GPU runtime ABI.
+  Nothing in `neurc` calls it yet: programs still run on the CPU until `@gpu` lands.
+
 ## [4.1.0] - 2026-09-29
 
 ### Added

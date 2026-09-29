@@ -10,8 +10,9 @@
 //! toolchain. With the feature disabled this crate is an empty placeholder; with
 //! it enabled it pulls in `melior` and exposes `lower_program` (HIR → MLIR),
 //! `translate_to_llvm_ir` (that module carried on through the `llvm` dialect into
-//! an inkwell LLVM module) and `lower_for_link` (the bodies the driver links into
-//! the LLVM backend's module).
+//! an inkwell LLVM module), `lower_for_link` (the bodies the driver links into
+//! the LLVM backend's module) and `lower_for_gpu` (those bodies as NVIDIA or AMD
+//! kernels behind host launchers).
 
 #[cfg(feature = "mlir")]
 mod bridge;
@@ -19,6 +20,8 @@ mod bridge;
 mod context;
 #[cfg(feature = "mlir")]
 mod errors;
+#[cfg(feature = "mlir")]
+mod gpu;
 #[cfg(feature = "mlir")]
 mod lower;
 #[cfg(all(feature = "mlir", test))]
@@ -30,5 +33,7 @@ mod tensor_arithmetic;
 pub use bridge::{lower_for_link, translate_to_llvm_ir, LinkableBodies};
 #[cfg(feature = "mlir")]
 pub use errors::MlirError;
+#[cfg(feature = "mlir")]
+pub use gpu::{lower_for_gpu, GpuTarget};
 #[cfg(feature = "mlir")]
 pub use lower::lower_program;

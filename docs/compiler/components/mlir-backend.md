@@ -6,8 +6,8 @@
 
 ## Overview
 
-The MLIR backend is the tensor lowering path that GPU dialects will extend later (see the
-[Quick Roadmap](../../../README.md#quick-roadmap)). It consumes the same typed High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
+The MLIR backend is the tensor lowering path, on the CPU and as NVIDIA or AMD GPU kernels (see
+[GPU kernels](#gpu-kernels)). It consumes the same typed High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
 MLIR module: one `func.func` *declaration* per function and `impl` method, except where a body is
 element-wise tensor arithmetic or a matrix product, which becomes a definition built from the
 `linalg` and `tensor` dialects. That module can be carried on through bufferization and the
@@ -25,7 +25,7 @@ copies.
 - **Dependencies** (all behind the `mlir` feature): `neuro-hir` (the HIR it lowers), `ast-types`,
   `melior`, `mlir-sys`, `inkwell`, `thiserror`. It depends on no feature slice.
 - **Public API** (feature `mlir`): `lower_program`, `translate_to_llvm_ir`, `lower_for_link`,
-  `LinkableBodies`, `MlirError`.
+  `lower_for_gpu`, `GpuTarget`, `LinkableBodies`, `MlirError`.
 - **Reached from `neurc`** through `lower_for_link`, when `neurc` is built with its `mlir` feature.
 
 ### Feature gate
@@ -55,6 +55,7 @@ for the MLIR 22 toolchain setup.
 pub fn lower_program(program: &HirProgram) -> Result<String, MlirError>;
 pub fn translate_to_llvm_ir(program: &HirProgram) -> Result<String, MlirError>;
 pub fn lower_for_link(program: &HirProgram) -> Result<LinkableBodies, MlirError>;
+pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<LinkableBodies, MlirError>;
 ```
 
 - `lower_program`, the HIR → MLIR lowering: registers all dialects, walks the typed HIR, and returns
@@ -63,6 +64,8 @@ pub fn lower_for_link(program: &HirProgram) -> Result<LinkableBodies, MlirError>
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
 - `lower_for_link`, the driver's entry: only the bodies worth linking, as LLVM IR, with the
   function each symbol computes.
+- `lower_for_gpu`, the same bodies as GPU kernels with host functions that launch them. No
+  `neurc` path calls it yet.
 - The HIR-independent `melior` wiring check (a verified `func.func @neuro_smoke` with an
   `arith.addi` body) is `pub(crate)` and compiled only under `test`.
 
@@ -246,6 +249,25 @@ The [LLVM backend](llvm-backend.md#mlir-bodies) defines each such function as a 
 symbol and links the IR in. The result buffer is the LLVM backend's allocation, so it is a
 DLPack tensor like any other; a buffer the body needs in between is allocated and freed inside
 it.
+
+## GPU kernels
+
+`lower_for_gpu` takes the module `lower_for_link` builds and lowers each `linalg` op to a GPU
+kernel instead of a loop nest. `GpuTarget::Nvidia { chip }` (an `sm_NN`) goes through `nvvm` and
+embeds PTX, which the CUDA driver compiles for the GPU it runs on, so compiling needs no CUDA
+toolkit. `GpuTarget::Amd { chip }` (a `gfxNNN`) goes through `rocdl` and embeds a code object
+for exactly that chip. Building the code object runs ROCm's `ld.lld`, so an AMD target needs ROCm
+installed and fails with `GpuSerializationFailed` without it.
+
+The parallel loops are tiled 16 × 16 over their first two axes, with a bounds guard rather than
+a clamped extent, so blocks cover the grid and each block runs a tile of threads. A matrix
+product is two kernels, the zero fill and the contraction.
+
+The `(function, symbol)` pairs and each symbol's signature are exactly `lower_for_link`'s, so the
+[LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The symbol's body calls
+MLIR's GPU runtime ABI (`mgpuModuleLoad` or `mgpuModuleLoadJIT`, `mgpuLaunchKernel`, the
+`mgpuStream*` calls), which the IR declares and this crate does not define, and it passes the
+caller's buffers straight to the kernel, so they have to be device-accessible memory.
 
 ## Coexistence with inkwell
 

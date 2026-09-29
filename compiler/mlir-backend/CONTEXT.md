@@ -1,7 +1,7 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the tensor path, which Phase 4 extends to GPU dialects. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end. The bodies it computes exactly as the LLVM backend would are also handed to the driver as linkable LLVM IR, which `neurc` built with its own `mlir` feature links into every compile.
+Lower the typed HIR to MLIR for the tensor path, on the CPU and as NVIDIA or AMD GPU kernels. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end. The bodies it computes exactly as the LLVM backend would are also handed to the driver as linkable LLVM IR, which `neurc` built with its own `mlir` feature links into every compile.
 
 ## Feature Gate
 The whole crate is opt-in behind the off-by-default `mlir` feature
@@ -22,6 +22,10 @@ legs build the placeholder.
   of only the bodies worth linking, each defined as `__neuro_mlir_<function>`, carried through the
   same pipeline and returned as LLVM IR with its `(function, symbol)` pairs. Empty IR and no pairs
   when nothing qualifies.
+- `lower_for_gpu(&HirProgram, &GpuTarget) -> Result<LinkableBodies, MlirError>`: the same bodies,
+  pairs and symbol signatures as `lower_for_link`, but each symbol launches its `linalg` ops as GPU
+  kernels for `GpuTarget::Nvidia { chip }` (`nvvm`, PTX) or `GpuTarget::Amd { chip }` (`rocdl`, a
+  code object). Nothing in the driver calls it yet.
 The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
 from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
 because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
@@ -39,8 +43,8 @@ The crate adds no business logic of its own beyond the lowering; it otherwise us
 third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
 
 ## Notes
-**The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `LLVM_LOWERING_PIPELINE`, named in
-text and parsed by `melior::utility::parse_pass_pipeline`: melior's typed `one-shot-bufferize`
+**The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `llvm_lowering_pipeline()`, named in
+text (its two halves, `BUFFERIZE` and `LLVM_DESCENT`, are constants the GPU pipeline shares) and parsed by `melior::utility::parse_pass_pipeline`: melior's typed `one-shot-bufferize`
 constructor takes no options, and `buffer-deallocation-pipeline` is a pipeline with no
 constructor at all. Its first four entries are what carry a `linalg` body: `one-shot-bufferize` (with
 `bufferize-function-boundaries=true`, or a `func.func` keeps `tensor` in its signature and never
@@ -82,6 +86,22 @@ means both bindings load one `libLLVM` 22, which the crossing above depends on. 
 stock `llvm` package is 22 and `aur/mlir` installs MLIR 22 beside it in `/usr`; on Ubuntu,
 apt.llvm.org's `libmlir-22-dev` does the same under `/usr/lib/llvm-22`. `mlir-sys` uses Rust
 2024 let-chains in its build script, so the `mlir` feature needs Rust 1.88 or newer.
+
+**The GPU pipeline.** `lower_for_gpu` builds the `lower_for_link` module and swaps the middle of
+the CPU pipeline: `convert-linalg-to-parallel-loops`, `scf-parallel-loop-tiling` (16 × 16 over the
+first two axes, guarded rather than clamped, so the outer loop maps to blocks and the inner to
+threads), `gpu-map-parallel-loops`, `convert-parallel-loops-to-gpu`, `gpu-kernel-outlining`, then
+`nvvm-attach-target` / `rocdl-attach-target` with the chip and `convert-gpu-to-nvvm` /
+`convert-gpu-to-rocdl` inside each `gpu.module`. `lower-affine` is added for the index arithmetic
+the GPU mapping writes; `gpu-to-llvm` turns each launch into calls to MLIR's GPU runtime ABI
+(`mgpuModuleLoad[JIT]`, `mgpuLaunchKernel`, `mgpuStream*`), which the IR declares and nothing in
+this crate defines. `gpu-module-to-binary` runs as a second pass manager so a missing toolkit is
+`GpuSerializationFailed` and a lowering bug stays `PassPipelineFailed`. NVIDIA embeds PTX (`isa`),
+which the CUDA driver JITs for its GPU, so a compile needs no CUDA toolkit. AMD embeds a code
+object (`bin`): HIP cannot load assembly, and linking one runs `$ROCM_PATH/llvm/bin/ld.lld`. The
+chip is spliced into the pipeline text, so anything but letters, digits and `_` is
+`InvalidGpuChip`. The host symbol keeps `lower_for_link`'s exploded-descriptor signature, so one
+LLVM-backend wrapper serves either path; the pointers it passes must be device-accessible.
 
 **Tensor arithmetic is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` or tail expression over

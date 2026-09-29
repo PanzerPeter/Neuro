@@ -190,8 +190,8 @@ are additional and feature-gated.
 ## Future Enhancements
 
 Planned on the [Quick Roadmap](../../README.md#quick-roadmap): debug information (`-g`),
-incremental compilation with a persistent cache, LTO defaults for release builds, and lowering
-the tensor bodies `mlir-backend` computes on to MLIR GPU dialects.
+incremental compilation with a persistent cache, LTO defaults for release builds, and running the
+GPU kernels `mlir-backend` already lowers those tensor bodies to.
 
 ## Setup
 
