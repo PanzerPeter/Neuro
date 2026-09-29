@@ -2,6 +2,7 @@ pub(crate) mod arena;
 pub(crate) mod closures;
 pub(crate) mod collections;
 pub(crate) mod context;
+pub(crate) mod device_memory;
 pub(crate) mod dispatch;
 pub(crate) mod dlpack;
 pub(crate) mod drops;

@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-09-29
+
+### Added
+
+- GPU tensor bodies run on device memory. When the LLVM backend links bodies marked as GPU
+  launchers, the function around each one copies every tensor operand to the device, gives the
+  kernels a device buffer for the result and copies the result back. Callers still pass and
+  receive host tensors. A buffer a body needs between two kernels comes from the same device
+  allocator. That allocator is a second linear arena: one 64 MiB chunk of device memory, one
+  release per call, and a spill to the GPU runtime when a buffer does not fit. A failed device
+  allocation aborts with a diagnostic rather than handing a kernel a null buffer. Nothing in
+  `neurc` runs GPU bodies yet; that arrives with `@gpu`.
+- `pool` blocks release device memory too. In a program with GPU bodies, a `pool` block marks
+  the device arena on entry and restores it at exit after its `PoolAware` sweep: one batched
+  release per device.
+
+### Changed
+
+- `llvm_backend::ExternalBodies` has a `memory` field, `BodyMemory::Host` or
+  `BodyMemory::Device`, saying where the linked bodies' buffers must live.
+- `mlir_backend::lower_for_gpu` leaves out a body with a rank-0 tensor in it. Such a body has no
+  parallel axis to launch over, so it stays on the LLVM backend.
+
 ## [4.2.0] - 2026-09-29
 
 ### Added

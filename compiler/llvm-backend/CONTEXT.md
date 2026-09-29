@@ -97,6 +97,27 @@ the other backend never shares an `LLVMContext` with this one), links it, and ma
 function has scalar, tensor or `&Tensor` parameters and a statically shaped tensor result; the
 descriptor needs a compile-time extent per axis.
 
+`ExternalBodies::memory` (`BodyMemory`) says where a symbol's buffers must live. `Host` passes
+each tensor's own buffer. `Device` is for bodies that launch GPU kernels, and
+`codegen/device_memory.rs` stages every one of their buffers: the wrapper opens a staging region
+(the device arena's mark, and a stream from `mgpuStreamCreate`), copies each tensor operand into a
+device buffer with `mgpuMemcpy`, gives the symbol a device result buffer, synchronizes the stream
+before the call (the launcher's own streams do not wait for it), then copies the result back into
+the host tensor it returns, releases each staged buffer and restores the mark. Callers still pass
+and receive host tensors.
+
+The device allocator is a second linear arena built from `arena.rs`'s `Arena` descriptor, the same
+bump (`build_bump_body`) and ownership test (`build_arena_owns`) over `__neuro_device_arena_base` /
+`__neuro_device_arena_offset`: a 64 MiB chunk of plain device memory from `mgpuMemAlloc`, reserved
+on the first allocation (not at a mark, so a program that never reaches a GPU body never touches
+the device), 256-byte alignment, and a spill to `mgpuMemAlloc` / `mgpuMemFree` for what does not
+fit. It is defined under the names a launcher's IR allocates its scratch buffers through,
+`_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, with external linkage so the launchers'
+declarations resolve to it at the link, which then internalizes both. An allocation that comes
+back null aborts with a diagnostic rather than hand a kernel a null buffer, which is how a missing
+GPU is reported today. The GPU runtime ABI (`mgpu*`) is declared, never defined: the runtime
+library is the linker's to supply.
+
 ## Stack Slot Placement
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,
 allocates, and restores. **Every** local binding, result slot, induction variable, scratch temp,
@@ -1360,10 +1381,15 @@ reverse registration order, unlinks each cell before calling its `bulk_release(&
 indirectly, honours the cell's flag so a moved-out value is passed over, and runs before
 `__neuro_arena_release` reclaims the memory the instances and the cells live in.
 
+In a program whose external bodies run on a device, `codegen_pool_expr` also reads the device
+arena's offset on entry and stores it back after the host arena's release. The sweep dispatches
+`bulk_release` per registered instance; the release per device is the mark restore of that
+device's arena, once the LIFO walk is done.
+
 **Known limits**: the chunk is reserved once and never released, an allocation that does not fit
 falls back to the heap (correct, not fast), and `Vec` / `String` buffers and map tables stay off
 the arena for the reasons above. Registration follows bindings, so a `PoolAware` temporary is never
-registered, and the sweep issues one call per instance rather than batching per device.
+registered. There is one device arena, on the GPU runtime's default device.
 
 ## Collections ABI
 `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header:

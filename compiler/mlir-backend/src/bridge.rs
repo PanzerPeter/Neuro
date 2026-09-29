@@ -42,10 +42,11 @@ use neuro_hir::HirProgram;
 /// spellings of one sequence.
 ///
 /// The GPU pipeline shares both halves around its own middle, so they are named
-/// once here as [`BUFFERIZE`] and [`LLVM_DESCENT`].
+/// once here as [`BUFFERIZE`] and [`llvm_descent`].
 fn llvm_lowering_pipeline() -> String {
     format!(
-        "builtin.module({BUFFERIZE},func.func(convert-linalg-to-loops),{LLVM_DESCENT},reconcile-unrealized-casts)"
+        "builtin.module({BUFFERIZE},func.func(convert-linalg-to-loops),{descent},reconcile-unrealized-casts)",
+        descent = llvm_descent(HOST_MEMREF_TO_LLVM)
     )
 }
 
@@ -55,14 +56,19 @@ pub(crate) const BUFFERIZE: &str = "\
     buffer-results-to-out-params{hoist-static-allocs=true modify-public-functions=true},\
     buffer-deallocation-pipeline";
 
+/// A buffer the body allocates for itself comes from libc `malloc`.
+const HOST_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm";
+
 /// Loops over buffers into the `llvm` dialect, short of reconciling the casts.
-pub(crate) const LLVM_DESCENT: &str = "\
-    convert-scf-to-cf,\
-    finalize-memref-to-llvm,\
-    convert-func-to-llvm,\
-    convert-arith-to-llvm,\
-    convert-cf-to-llvm,\
-    convert-index-to-llvm";
+///
+/// `memref_to_llvm` is where the CPU and GPU paths part: it decides which allocator
+/// a buffer the body allocates for itself calls.
+pub(crate) fn llvm_descent(memref_to_llvm: &str) -> String {
+    format!(
+        "convert-scf-to-cf,{memref_to_llvm},convert-func-to-llvm,convert-arith-to-llvm,\
+         convert-cf-to-llvm,convert-index-to-llvm"
+    )
+}
 
 /// Lower a typed HIR program through MLIR all the way to verified LLVM IR.
 ///
@@ -115,7 +121,7 @@ pub struct LinkableBodies {
 /// As [`translate_to_llvm_ir`].
 pub fn lower_for_link(program: &HirProgram) -> Result<LinkableBodies, MlirError> {
     let context = new_context();
-    let (mut module, functions) = build_linkable_module(&context, program)?;
+    let (mut module, functions) = build_linkable_module(&context, program, |_| true)?;
     if functions.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),

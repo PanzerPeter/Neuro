@@ -64,8 +64,8 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
 - `lower_for_link`, the driver's entry: only the bodies worth linking, as LLVM IR, with the
   function each symbol computes.
-- `lower_for_gpu`, the same bodies as GPU kernels with host functions that launch them. No
-  `neurc` path calls it yet.
+- `lower_for_gpu`, the same bodies as GPU kernels with host functions that launch them, reading
+  and writing device memory only. No `neurc` path calls it yet.
 - The HIR-independent `melior` wiring check (a verified `func.func @neuro_smoke` with an
   `arith.addi` body) is `pub(crate)` and compiled only under `test`.
 
@@ -263,11 +263,19 @@ The parallel loops are tiled 16 × 16 over their first two axes, with a bounds g
 a clamped extent, so blocks cover the grid and each block runs a tile of threads. A matrix
 product is two kernels, the zero fill and the contraction.
 
-The `(function, symbol)` pairs and each symbol's signature are exactly `lower_for_link`'s, so the
-[LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The symbol's body calls
-MLIR's GPU runtime ABI (`mgpuModuleLoad` or `mgpuModuleLoadJIT`, `mgpuLaunchKernel`, the
-`mgpuStream*` calls), which the IR declares and this crate does not define, and it passes the
-caller's buffers straight to the kernel, so they have to be device-accessible memory.
+Each symbol keeps `lower_for_link`'s signature, so the
+[LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The set of pairs is the
+same, minus any body with a rank-0 tensor in it: a rank-0 operation has no parallel axis to launch
+over, so it would run on the host against device buffers, and it stays on the LLVM backend
+instead. The symbol's body calls MLIR's GPU runtime ABI (`mgpuModuleLoad` or `mgpuModuleLoadJIT`,
+`mgpuLaunchKernel`, the `mgpuStream*` calls), which the IR declares and this crate does not
+define.
+
+Every buffer a symbol is handed has to be device memory; the LLVM backend's wrapper stages them.
+A buffer the body needs between two kernels, such as the sum in `(a + b) * c`, is allocated
+through `_mlir_memref_to_llvm_alloc` and freed through `_mlir_memref_to_llvm_free` rather than
+`malloc` / `free` (`finalize-memref-to-llvm{use-generic-functions=true}`). The LLVM backend
+defines both as its device allocator.
 
 ## Coexistence with inkwell
 

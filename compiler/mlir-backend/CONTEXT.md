@@ -22,10 +22,12 @@ legs build the placeholder.
   of only the bodies worth linking, each defined as `__neuro_mlir_<function>`, carried through the
   same pipeline and returned as LLVM IR with its `(function, symbol)` pairs. Empty IR and no pairs
   when nothing qualifies.
-- `lower_for_gpu(&HirProgram, &GpuTarget) -> Result<LinkableBodies, MlirError>`: the same bodies,
-  pairs and symbol signatures as `lower_for_link`, but each symbol launches its `linalg` ops as GPU
-  kernels for `GpuTarget::Nvidia { chip }` (`nvvm`, PTX) or `GpuTarget::Amd { chip }` (`rocdl`, a
-  code object). Nothing in the driver calls it yet.
+- `lower_for_gpu(&HirProgram, &GpuTarget) -> Result<LinkableBodies, MlirError>`: the bodies,
+  pairs and symbol signatures of `lower_for_link` less any with a rank-0 tensor, but each symbol
+  launches its `linalg` ops as GPU kernels for `GpuTarget::Nvidia { chip }` (`nvvm`, PTX) or
+  `GpuTarget::Amd { chip }` (`rocdl`, a code object). Every buffer it is handed must be device
+  memory, and it allocates a buffer between two kernels through `_mlir_memref_to_llvm_alloc` /
+  `_mlir_memref_to_llvm_free`, which the caller defines. Nothing in the driver calls it yet.
 The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
 from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
 because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
@@ -44,7 +46,7 @@ third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
 
 ## Notes
 **The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `llvm_lowering_pipeline()`, named in
-text (its two halves, `BUFFERIZE` and `LLVM_DESCENT`, are constants the GPU pipeline shares) and parsed by `melior::utility::parse_pass_pipeline`: melior's typed `one-shot-bufferize`
+text (its two halves, the `BUFFERIZE` constant and `llvm_descent`, are shared with the GPU pipeline, which passes the descent its own `finalize-memref-to-llvm` spelling) and parsed by `melior::utility::parse_pass_pipeline`: melior's typed `one-shot-bufferize`
 constructor takes no options, and `buffer-deallocation-pipeline` is a pipeline with no
 constructor at all. Its first four entries are what carry a `linalg` body: `one-shot-bufferize` (with
 `bufferize-function-boundaries=true`, or a `func.func` keeps `tensor` in its signature and never
@@ -101,7 +103,18 @@ which the CUDA driver JITs for its GPU, so a compile needs no CUDA toolkit. AMD 
 object (`bin`): HIP cannot load assembly, and linking one runs `$ROCM_PATH/llvm/bin/ld.lld`. The
 chip is spliced into the pipeline text, so anything but letters, digits and `_` is
 `InvalidGpuChip`. The host symbol keeps `lower_for_link`'s exploded-descriptor signature, so one
-LLVM-backend wrapper serves either path; the pointers it passes must be device-accessible.
+LLVM-backend wrapper serves either path; the pointers it passes must be device memory, which the
+wrapper stages.
+
+**GPU memory.** The descent runs `finalize-memref-to-llvm{use-generic-functions=true}`, so a buffer
+bufferization allocates between two kernels (the sum in `(a + b) * c`) calls
+`_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free` instead of `malloc` / `free`, and the
+LLVM backend defines those as its device allocator. Only the kernels read or write these buffers.
+The exception would be an operation with no parallel axis, which has no loop to map
+and so runs on the host against device buffers; only a rank-0 operation has none, and a rank-0
+operation needs rank-0 operands, which come from the parameters. `launches_every_op` therefore
+keeps a body with a rank-0 tensor parameter or result off the GPU module, through the admission
+rule `build_linkable_module` takes (the CPU path admits everything).
 
 **Tensor arithmetic is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` or tail expression over

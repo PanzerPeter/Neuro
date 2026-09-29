@@ -272,9 +272,21 @@ its body is a call: the backend loads each tensor's buffer out of its DLPack han
 as an exploded row-major `memref` descriptor, allocates the result tensor itself and passes that
 buffer as one more descriptor, then releases every tensor the function took by value. The IR is
 parsed into the module's own context and linked in after every body, and each linked symbol is
-made internal so the optimizer can inline it. The GPU dialects after it are planned on the
-[Quick Roadmap](../../../README.md#quick-roadmap); inkwell stays the terminal code-emission layer
-on every path.
+made internal so the optimizer can inline it. inkwell stays the terminal code-emission layer on
+every path.
+
+Bodies marked `BodyMemory::Device` launch GPU kernels, which read and write device memory only,
+so the wrapper stages them. It copies each tensor operand into a device buffer, hands the kernels
+a device buffer for the result, copies the result back into the host tensor it returns, and
+releases the staged buffers before returning. Callers still pass and receive host tensors. Device
+buffers come from a second linear arena, the `pool` arena's rules over a 64 MiB chunk of device
+memory: one call's staging is one region released by a single mark restore, and a buffer that
+does not fit spills to the GPU runtime's allocator. The same allocator serves the buffers a
+launcher allocates for itself between two kernels. In a program with device bodies, each `pool`
+block marks the device arena on entry and restores it at exit, after its `PoolAware` sweep: one
+batched release per device. The GPU runtime library itself (MLIR's `mgpu*` ABI) is supplied at
+link time. Running these bodies from `neurc` is planned on the
+[Quick Roadmap](../../../README.md#quick-roadmap).
 
 ## Resources
 

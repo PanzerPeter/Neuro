@@ -8,9 +8,10 @@ use neuro_hir::HirFunction;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
-use crate::ExternalBodies;
+use crate::{BodyMemory, ExternalBodies};
 
 use super::context::CodegenContext;
+use super::device_memory::{DEVICE_ALLOC_FN, DEVICE_RELEASE_FN};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Define `func_def` as a call to `symbol`, a body lowered outside this backend.
@@ -22,6 +23,11 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Ownership is the ordinary function's: a by-value tensor parameter was moved in,
     /// so it is released once the body has read it, and a `&Tensor` one is only read.
+    ///
+    /// When the bodies run on a device, every buffer `symbol` sees is staged: each
+    /// tensor operand is copied into device memory, the result is written to a device
+    /// buffer and copied back into the host tensor returned, and all of it is released
+    /// before the function returns. A caller still passes and receives host tensors.
     pub(crate) fn codegen_external_body(
         &mut self,
         func_def: &HirFunction,
@@ -39,6 +45,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_types: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
         let mut args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
         let mut consumed = Vec::new();
+        let mut staging = match self.body_memory {
+            BodyMemory::Host => None,
+            BodyMemory::Device => Some(self.open_device_staging()?),
+        };
 
         for (index, param) in func_def.params.iter().enumerate() {
             let value = function
@@ -61,12 +71,25 @@ impl<'ctx> CodegenContext<'ctx> {
                     continue;
                 }
             };
-            self.push_memref_descriptor(ty.referent(), handle, &mut arg_types, &mut args)?;
+            let host = self.load_dlpack_data(handle)?;
+            let data = match staging.as_mut() {
+                Some(staging) => self.copy_to_device(staging, ty.referent(), host)?,
+                None => host,
+            };
+            self.push_memref_descriptor(ty.referent(), data, &mut arg_types, &mut args)?;
         }
 
         let result_ty = Type::from_hir(&func_def.return_type);
         let result = self.alloc_dlpack_tensor(&result_ty, "external.result")?;
-        self.push_memref_descriptor(&result_ty, result, &mut arg_types, &mut args)?;
+        let host_result = self.load_dlpack_data(result)?;
+        let written = match staging.as_mut() {
+            Some(staging) => self.device_buffer(staging, &result_ty)?,
+            None => host_result,
+        };
+        self.push_memref_descriptor(&result_ty, written, &mut arg_types, &mut args)?;
+        if let Some(staging) = &staging {
+            self.await_device_staging(staging)?;
+        }
 
         let callee = self.module.get_function(symbol).unwrap_or_else(|| {
             self.module.add_function(
@@ -77,6 +100,9 @@ impl<'ctx> CodegenContext<'ctx> {
         });
         self.builder.build_call(callee, &args, "")?;
 
+        if let Some(staging) = staging {
+            self.close_device_staging(staging, &result_ty, host_result, written)?;
+        }
         for handle in consumed {
             self.build_dlpack_release(handle)?;
         }
@@ -84,13 +110,13 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Append the `memref` descriptor for the tensor behind `handle`: its buffer as
+    /// Append the `memref` descriptor for a `tensor_ty` buffer at `data`: the buffer as
     /// both the allocated and the aligned pointer (the callee frees neither), a zero
     /// offset, then the extents and the row-major element strides.
     fn push_memref_descriptor(
         &self,
         tensor_ty: &Type,
-        handle: PointerValue<'ctx>,
+        data: PointerValue<'ctx>,
         arg_types: &mut Vec<BasicMetadataTypeEnum<'ctx>>,
         args: &mut Vec<BasicMetadataValueEnum<'ctx>>,
     ) -> CodegenResult<()> {
@@ -100,7 +126,6 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
         let extents = crate::types::static_extents(shape)?;
-        let data = self.load_dlpack_data(handle)?;
         let i64_type = self.context.i64_type();
 
         let mut strides = vec![1u64; extents.len()];
@@ -149,12 +174,19 @@ pub(crate) fn link_external_bodies<'ctx>(
         })?;
         function.set_linkage(Linkage::Internal);
     }
+    // The device allocator stayed external only so the launchers' declarations of its
+    // names would resolve to it.
+    for name in [DEVICE_ALLOC_FN, DEVICE_RELEASE_FN] {
+        if let Some(function) = module.get_function(name) {
+            function.set_linkage(Linkage::Internal);
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{build_module, ExternalBodies, OptimizationLevelSetting};
+    use crate::{build_module, BodyMemory, ExternalBodies, OptimizationLevelSetting};
     use inkwell::context::Context;
     use inkwell::module::Linkage;
 
@@ -178,22 +210,38 @@ mod tests {
         }
     "#;
 
-    fn linked_ir() -> String {
-        let ast = syntax_parsing::parse(SOURCE).expect("parsing failed");
+    /// The same stand-ins as a GPU launcher: `ext_consume` also takes a scratch buffer
+    /// between two kernels through the allocator the LLVM backend defines.
+    const DEVICE_BODIES: &str = r#"
+        declare ptr @_mlir_memref_to_llvm_alloc(i64)
+        declare void @_mlir_memref_to_llvm_free(ptr)
+        define void @ext_scale(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, float %5, ptr %6, ptr %7, i64 %8, i64 %9, i64 %10) {
+          ret void
+        }
+        define void @ext_consume(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9) {
+          %scratch = call ptr @_mlir_memref_to_llvm_alloc(i64 72)
+          call void @_mlir_memref_to_llvm_free(ptr %scratch)
+          ret void
+        }
+    "#;
+
+    fn linked_ir(source: &str, bodies_ir: &str, memory: BodyMemory) -> String {
+        let ast = syntax_parsing::parse(source).expect("parsing failed");
         let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
         let bodies = ExternalBodies {
-            llvm_ir: BODIES.to_string(),
+            llvm_ir: bodies_ir.to_string(),
             functions: vec![
                 ("scale".to_string(), "ext_scale".to_string()),
                 ("consume".to_string(), "ext_consume".to_string()),
             ],
+            memory,
         };
         let context = Context::create();
         let codegen_ctx = build_module(
             &context,
             &hir,
             OptimizationLevelSetting::O0,
-            SOURCE,
+            source,
             "external.nr",
             Some(&bodies),
         )
@@ -208,6 +256,14 @@ mod tests {
         codegen_ctx.module.print_to_string().to_string()
     }
 
+    fn host_ir() -> String {
+        linked_ir(SOURCE, BODIES, BodyMemory::Host)
+    }
+
+    fn device_ir(source: &str) -> String {
+        linked_ir(source, DEVICE_BODIES, BodyMemory::Device)
+    }
+
     fn body<'a>(ir: &'a str, name: &str) -> &'a str {
         let start = ir
             .find(&format!("define ptr @{name}("))
@@ -218,7 +274,7 @@ mod tests {
 
     #[test]
     fn a_borrowed_tensor_is_passed_by_descriptor_and_kept() {
-        let ir = linked_ir();
+        let ir = host_ir();
         let scale = body(&ir, "scale");
         assert!(
             scale.contains(
@@ -238,7 +294,7 @@ mod tests {
 
     #[test]
     fn an_owned_tensor_is_released_after_the_call() {
-        let ir = linked_ir();
+        let ir = host_ir();
         let consume = body(&ir, "consume");
         let call = consume
             .find("call void @ext_consume(")
@@ -246,6 +302,92 @@ mod tests {
         assert!(
             consume[call..].contains("dlpack.deleter"),
             "a tensor moved in is released once the body has read it:\n{consume}"
+        );
+    }
+
+    /// The text of `needle`'s first occurrence at or after `from`, or a panic naming it.
+    fn position(haystack: &str, needle: &str, from: usize) -> usize {
+        haystack[from..]
+            .find(needle)
+            .map(|at| from + at)
+            .unwrap_or_else(|| panic!("expected `{needle}` after byte {from} in:\n{haystack}"))
+    }
+
+    #[test]
+    fn a_device_body_is_handed_only_staged_buffers() {
+        let ir = device_ir(SOURCE);
+        let scale = body(&ir, "scale");
+
+        let stream = position(scale, "call ptr @mgpuStreamCreate()", 0);
+        let copy_in = position(scale, "call void @mgpuMemcpy(", stream);
+        let settled = position(scale, "call void @mgpuStreamSynchronize(", copy_in);
+        let call = position(scale, "call void @ext_scale(ptr %device.buffer", settled);
+        let copy_out = position(scale, "call void @mgpuMemcpy(", call);
+        position(scale, "call void @mgpuStreamDestroy(", copy_out);
+        position(scale, "call void @_mlir_memref_to_llvm_free(", copy_out);
+        position(
+            scale,
+            "store i64 %device.mark, ptr @__neuro_device_arena_offset",
+            copy_out,
+        );
+
+        assert_eq!(
+            scale
+                .matches("call ptr @_mlir_memref_to_llvm_alloc(")
+                .count(),
+            2,
+            "one device buffer for the operand and one for the result:\n{scale}"
+        );
+        assert!(
+            !scale[call..].contains("%dlpack.data,"),
+            "a host buffer must not reach the kernel:\n{scale}"
+        );
+    }
+
+    #[test]
+    fn a_launchers_scratch_buffer_resolves_to_the_device_allocator() {
+        let ir = device_ir(SOURCE);
+        for name in ["_mlir_memref_to_llvm_alloc", "_mlir_memref_to_llvm_free"] {
+            assert!(
+                ir.lines().any(|line| line.starts_with("define internal")
+                    && line.contains(&format!("@{name}("))),
+                "expected `{name}` defined here and internalized after the link:\n{ir}"
+            );
+        }
+        assert!(
+            ir.contains("device memory allocation failed"),
+            "an allocation that fails must abort rather than hand a kernel null:\n{ir}"
+        );
+        assert!(
+            ir.contains("call ptr @mgpuMemAlloc(i64 67108864, ptr null, i8 0)"),
+            "expected the chunk reserved as plain device memory:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_pool_releases_the_device_arena_after_its_sweep() {
+        let source = format!(
+            "{SOURCE}
+            func main() -> i32 {{
+                pool {{
+                    val n = 1
+                }}
+                return 0
+            }}"
+        );
+        let device = device_ir(&source);
+        let main = &device[position(&device, "define i32 @main(", 0)..];
+        let released = position(main, "call void @__neuro_arena_release(", 0);
+        position(
+            main,
+            "store i64 %device.mark, ptr @__neuro_device_arena_offset",
+            released,
+        );
+
+        let host = linked_ir(&source, BODIES, BodyMemory::Host);
+        assert!(
+            !host.contains("__neuro_device_arena"),
+            "a host-only program owes the device nothing:\n{host}"
         );
     }
 }

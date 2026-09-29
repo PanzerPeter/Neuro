@@ -151,11 +151,19 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// A body that cannot fall through (a panic) leaves the block terminated and needs
     /// no restore: the process is on its way out, and the arena dies with it.
+    ///
+    /// In a program that runs bodies on a device, the device arena is marked and
+    /// restored alongside the host one, after the sweep: one batched release per device,
+    /// once the LIFO walk is done.
     pub(crate) fn codegen_pool_expr(
         &mut self,
         stmts: &[HirStmt],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let mark = self.emit_arena_mark()?;
+        let device_mark = match self.body_memory {
+            crate::BodyMemory::Host => None,
+            crate::BodyMemory::Device => Some(self.mark_device_arena()?),
+        };
         // Nothing can register unless the program implements the trait somewhere, and a
         // block with no registrations must keep costing exactly one store to leave.
         let registered = match self.pool_aware_types.is_empty() {
@@ -178,6 +186,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.emit_pool_sweep(registered)?;
             }
             self.emit_arena_release(mark)?;
+            if let Some(device_mark) = device_mark {
+                self.restore_device_arena(device_mark)?;
+            }
         }
         Ok(self.context.i32_type().const_int(0, false).into())
     }

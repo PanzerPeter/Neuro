@@ -61,6 +61,22 @@ pub struct ExternalBodies {
     pub llvm_ir: String,
     /// `(function, symbol)`: a HIR function, and the symbol in `llvm_ir` computing its body.
     pub functions: Vec<(String, String)>,
+    /// Where every buffer a symbol reads or writes must live.
+    pub memory: BodyMemory,
+}
+
+/// Where an external body's buffers live, which decides what its wrapper passes it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BodyMemory {
+    /// Host memory: the wrapper passes each tensor's own buffer.
+    #[default]
+    Host,
+    /// Device memory, for bodies that launch GPU kernels through MLIR's GPU runtime ABI
+    /// (`mgpu*`). The wrapper copies each tensor operand to the device and the result
+    /// back, and this backend defines `_mlir_memref_to_llvm_alloc` /
+    /// `_mlir_memref_to_llvm_free` as its device allocator for the buffers a body
+    /// allocates itself. The runtime library is the linker's to supply.
+    Device,
 }
 
 /// Compile a typed HIR program to linkable LLVM object code.
@@ -314,6 +330,10 @@ fn build_module<'ctx>(
 
     // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
+
+    if let Some(bodies) = external.filter(|bodies| !bodies.functions.is_empty()) {
+        codegen_ctx.set_body_memory(bodies.memory);
+    }
 
     // Emit module-level constants as LLVM global constants before any function.
     // This ensures all globals are defined before function bodies reference them.

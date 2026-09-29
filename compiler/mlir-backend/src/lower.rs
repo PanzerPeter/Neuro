@@ -131,12 +131,14 @@ pub(crate) fn build_module<'c>(
 /// [`LINKED_SYMBOL_PREFIX`] plus its function's name, and return it with the
 /// `(function, symbol)` pairs it defines.
 ///
-/// A function reaches it only when [`linkable_signature`] holds and its body
-/// lowers. Nothing is declared: the linked module is read for its definitions,
-/// and a declaration here would name a Neuro-ABI function at an MLIR signature.
+/// A function reaches it only when [`linkable_signature`] holds, `admit` accepts it
+/// and its body lowers. Nothing is declared: the linked module is read for its
+/// definitions, and a declaration here would name a Neuro-ABI function at an MLIR
+/// signature.
 pub(crate) fn build_linkable_module<'c>(
     context: &'c Context,
     program: &HirProgram,
+    admit: fn(&HirFunction) -> bool,
 ) -> Result<(Module<'c>, Vec<(String, String)>), MlirError> {
     let location = Location::unknown(context);
     let module = Module::new(location);
@@ -146,7 +148,7 @@ pub(crate) fn build_linkable_module<'c>(
         let HirItem::Function(function) = item else {
             continue;
         };
-        if !linkable_signature(function) {
+        if !linkable_signature(function) || !admit(function) {
             continue;
         }
         let Some(region) = tensor_arithmetic::build_body(context, location, function)? else {

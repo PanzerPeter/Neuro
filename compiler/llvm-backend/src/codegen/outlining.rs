@@ -90,7 +90,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Get or create the parameterless thunk printing `text`.
-    fn cold_panic_thunk(&mut self, text: &str) -> CodegenResult<FunctionValue<'ctx>> {
+    pub(crate) fn cold_panic_thunk(&mut self, text: &str) -> CodegenResult<FunctionValue<'ctx>> {
         let key = (false, text.to_string());
         if let Some(existing) = self.cold_thunks.get(&key) {
             return Ok(*existing);

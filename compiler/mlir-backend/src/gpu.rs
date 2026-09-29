@@ -1,12 +1,13 @@
 use crate::{
-    bridge::{translate_llvm_dialect, LinkableBodies, BUFFERIZE, LLVM_DESCENT},
+    bridge::{llvm_descent, translate_llvm_dialect, LinkableBodies, BUFFERIZE},
     context::new_context,
     errors::MlirError,
     lower::build_linkable_module,
+    tensor_arithmetic::read_type,
 };
 
 use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
-use neuro_hir::HirProgram;
+use neuro_hir::{HirFunction, HirProgram, HirType};
 
 /// The GPU a set of kernels is compiled for, and the chip that fixes its ISA.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,16 +59,29 @@ impl GpuTarget {
 /// block. Pick per rank and chip once kernels run and can be measured.
 const TILE_SIZES: &str = "16,16";
 
+/// A buffer a launcher needs between two kernels is allocated through
+/// `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free` instead of libc, so
+/// the caller can hand out device memory: only kernels ever touch it.
+const DEVICE_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm{use-generic-functions=true}";
+
 /// Lower the bodies [`lower_for_link`](crate::lower_for_link) would link into
 /// GPU kernels for `target`, with host functions that launch them.
 ///
-/// Each `(function, symbol)` pair and each symbol's signature are exactly
+/// Each `(function, symbol)` pair and each symbol's signature are
 /// `lower_for_link`'s: the host side of a symbol takes the same exploded
-/// descriptors and out-param, so the LLVM backend's wrapper serves either. Its
-/// body launches one kernel per `linalg` operation through MLIR's GPU runtime ABI
-/// (`mgpuModuleLoad` / `mgpuModuleLoadJIT`, `mgpuLaunchKernel`, the `mgpuStream*`
-/// family), which the returned IR declares and nothing here defines. The kernels
-/// are embedded in the IR as device objects and loaded by a global constructor.
+/// descriptors and out-param, so the LLVM backend's wrapper serves either. The one
+/// difference in the set is a body with a rank-0 tensor in it, which is left out:
+/// an operation with no parallel axis has no loop to map, so the launcher would
+/// run it on the host against buffers that live on the device.
+///
+/// A symbol's body launches one kernel per `linalg` operation through MLIR's GPU
+/// runtime ABI (`mgpuModuleLoad` / `mgpuModuleLoadJIT`, `mgpuLaunchKernel`, the
+/// `mgpuStream*` family), which the returned IR declares and nothing here defines.
+/// Every pointer in its descriptors must address device memory, and a buffer it
+/// needs between two kernels comes from `_mlir_memref_to_llvm_alloc(i64) -> ptr`
+/// and goes back through `_mlir_memref_to_llvm_free(ptr)`, both declared and left
+/// for the caller to define as device allocations. The kernels are embedded in the
+/// IR as device objects and loaded by a global constructor.
 ///
 /// # Errors
 ///
@@ -95,7 +109,7 @@ pub(crate) fn lower_with_format(
     }
 
     let context = new_context();
-    let (mut module, functions) = build_linkable_module(&context, program)?;
+    let (mut module, functions) = build_linkable_module(&context, program, launches_every_op)?;
     if functions.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),
@@ -118,6 +132,16 @@ pub(crate) fn lower_with_format(
     })
 }
 
+/// Whether every operation in `function` has a parallel axis to launch over. An
+/// operation's rank is its broadcast result's, so a rank-0 one needs every tensor
+/// operand to be rank 0, and those come from the parameters: a body with no rank-0
+/// tensor parameter or result computes nothing on the host.
+fn launches_every_op(function: &HirFunction) -> bool {
+    std::iter::once(&function.return_type)
+        .chain(function.params.iter().map(|param| read_type(&param.ty)))
+        .all(|ty| !matches!(ty, HirType::Tensor { shape, .. } if shape.is_empty()))
+}
+
 /// The CPU pipeline with its middle swapped: instead of sequential loops, each
 /// `linalg` op becomes `scf.parallel` loops, tiled so the outer loop maps to blocks
 /// and the inner one to threads, then a `gpu.launch` outlined into a kernel of its
@@ -137,10 +161,11 @@ fn gpu_lowering_pipeline(target: &GpuTarget) -> String {
          gpu-kernel-outlining,\
          {attach}{{chip={chip}}},\
          gpu.module({convert}),\
-         lower-affine,{LLVM_DESCENT},gpu-to-llvm,reconcile-unrealized-casts)",
+         lower-affine,{descent},gpu-to-llvm,reconcile-unrealized-casts)",
         attach = target.attach_target_pass(),
         chip = target.chip(),
         convert = target.kernel_conversion_pass(),
+        descent = llvm_descent(DEVICE_MEMREF_TO_LLVM),
     )
 }
 
@@ -161,7 +186,8 @@ mod tests {
     use crate::bridge::tests::{program_with_tensor_operator, tensor};
     use crate::lower_for_link;
     use ast_types::BinaryOp;
-    use neuro_hir::{static_shape, HirType};
+    use neuro_hir::{static_shape, HirExpr, HirExprKind, HirItem, HirStmt};
+    use shared_types::Span;
 
     fn nvidia() -> GpuTarget {
         GpuTarget::Nvidia {
@@ -302,6 +328,63 @@ mod tests {
             lower_for_gpu(&element_wise(&[2]), &empty),
             Err(MlirError::InvalidGpuChip(_))
         ));
+    }
+
+    #[test]
+    fn a_buffer_between_two_kernels_comes_from_the_callers_allocator() {
+        // `(a + b) * b`: the sum lives only between the two launches.
+        let ty = tensor(static_shape(&[37, 45]));
+        let mut program = element_wise(&[37, 45]);
+        let HirItem::Function(function) = &mut program.items[0] else {
+            unreachable!("the fixture is one function");
+        };
+        let Some(HirStmt::Return {
+            value: Some(sum), ..
+        }) = function.body.pop()
+        else {
+            unreachable!("the fixture returns its operation");
+        };
+        let product = HirExpr::new(
+            HirExprKind::Binary {
+                op: BinaryOp::Multiply,
+                left: Box::new(sum),
+                right: Box::new(HirExpr::new(
+                    HirExprKind::Variable("b".to_string()),
+                    ty.clone(),
+                    Span::new(0, 0),
+                )),
+            },
+            ty,
+            Span::new(0, 0),
+        );
+        function.body.push(HirStmt::Expr(product));
+
+        let ir = lower_for_gpu(&program, &nvidia())
+            .expect("a two-operation body should lower")
+            .llvm_ir;
+
+        assert_eq!(ir.matches("call void @mgpuLaunchKernel").count(), 2, "{ir}");
+        assert!(
+            ir.contains("call ptr @_mlir_memref_to_llvm_alloc(")
+                && ir.contains("call void @_mlir_memref_to_llvm_free("),
+            "expected the intermediate to go through the caller's allocator:\n{ir}"
+        );
+        assert!(
+            !ir.contains("@malloc") && !ir.contains("@free("),
+            "a host allocation would hand a kernel host memory:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn a_rank_zero_body_stays_off_the_gpu() {
+        // No parallel axis, so no kernel: the host would compute it against device
+        // buffers. The CPU path still links it.
+        let program = element_wise(&[]);
+        let bodies = lower_for_gpu(&program, &nvidia()).expect("the program should still lower");
+        assert!(bodies.functions.is_empty(), "{}", bodies.llvm_ir);
+
+        let cpu = lower_for_link(&program).expect("the CPU path should lower");
+        assert_eq!(cpu.functions.len(), 1, "{}", cpu.llvm_ir);
     }
 
     #[test]

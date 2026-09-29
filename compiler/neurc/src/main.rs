@@ -568,6 +568,7 @@ fn tensor_bodies(hir: &neuro_hir::HirProgram) -> Result<Option<llvm_backend::Ext
     Ok(Some(llvm_backend::ExternalBodies {
         llvm_ir: bodies.llvm_ir,
         functions: bodies.functions,
+        memory: llvm_backend::BodyMemory::Host,
     }))
 }
 
