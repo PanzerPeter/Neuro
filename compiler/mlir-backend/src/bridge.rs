@@ -1,16 +1,31 @@
-use crate::{context::new_context, errors::MlirError, lower::build_module};
+use crate::{
+    context::new_context,
+    errors::MlirError,
+    lower::{build_linkable_module, build_module},
+};
 
 use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
 use neuro_hir::HirProgram;
 
 /// The route from the dialects this slice builds in down to the `llvm` dialect.
 ///
-/// The first three entries are what carry a `linalg` body: `one-shot-bufferize`
+/// The first four entries are what carry a `linalg` body: `one-shot-bufferize`
 /// rewrites the tensor value semantics into `memref` buffers (function boundaries
 /// included, or a `func.func` would keep tensors in its signature and never
-/// convert), `buffer-deallocation-pipeline` gives every buffer it allocated an
-/// owner and a release, and only then can `convert-linalg-to-loops` turn the
-/// structured op into `scf` loops over loads and stores.
+/// convert), `buffer-results-to-out-params` turns each returned buffer into a
+/// trailing parameter the caller allocates, `buffer-deallocation-pipeline` gives
+/// every buffer still allocated inside an owner and a release, and only then can
+/// `convert-linalg-to-loops` turn the structured op into `scf` loops over loads and
+/// stores.
+///
+/// The two options on the first pair fix the boundary the LLVM backend calls
+/// across. `identity-layout-map` makes a parameter a plain row-major `memref`,
+/// which is what a DLPack buffer is; left at its default, the layout is fully
+/// strided and a copy into it lowers to a runtime-library call nothing links.
+/// Out-params (`modify-public-functions`, since every definition is public, and
+/// `hoist-static-allocs`, so the body writes straight into the caller's buffer
+/// rather than into its own and copying) leave the result's allocation to the
+/// caller, which is the only side that knows how a Neuro tensor is allocated.
 ///
 /// The rest is the descent those loops land in: `scf` becomes `cf` branches,
 /// `memref` becomes pointer arithmetic against `malloc`, and each remaining
@@ -26,7 +41,8 @@ use neuro_hir::HirProgram;
 /// pipeline, not a pass. Half the pipeline typed and half in text would be two
 /// spellings of one sequence.
 const LLVM_LOWERING_PIPELINE: &str = "builtin.module(\
-    one-shot-bufferize{bufferize-function-boundaries=true},\
+    one-shot-bufferize{bufferize-function-boundaries=true function-boundary-type-conversion=identity-layout-map},\
+    buffer-results-to-out-params{hoist-static-allocs=true modify-public-functions=true},\
     buffer-deallocation-pipeline,\
     func.func(convert-linalg-to-loops),\
     convert-scf-to-cf,\
@@ -60,6 +76,46 @@ pub fn translate_to_llvm_ir(program: &HirProgram) -> Result<String, MlirError> {
     let mut module = build_module(&context, program)?;
 
     translate_module(&context, &mut module)
+}
+
+/// Function bodies lowered through MLIR for the LLVM backend to link in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkableBodies {
+    /// A textual LLVM module defining every symbol in `functions`, and nothing else.
+    pub llvm_ir: String,
+    /// `(function, symbol)`: a HIR function, and the symbol in `llvm_ir` that computes its
+    /// body.
+    pub functions: Vec<(String, String)>,
+}
+
+/// Lower every function this path computes exactly as the LLVM backend would into
+/// linkable LLVM IR: element-wise arithmetic and matrix products over `f32` /
+/// `f64` tensors of static shape, straight-line, with owned or `&` operands.
+///
+/// Each symbol has MLIR's calling convention rather than Neuro's. A tensor
+/// parameter crosses as an exploded row-major `memref` descriptor (allocated
+/// pointer, aligned pointer, offset, then one size and one stride per axis), a
+/// scalar crosses as itself, and the result is one more descriptor appended after
+/// the parameters, naming a buffer the caller allocated; the function returns
+/// nothing. Wrapping each in a Neuro-ABI function is the caller's side.
+///
+/// # Errors
+///
+/// As [`translate_to_llvm_ir`].
+pub fn lower_for_link(program: &HirProgram) -> Result<LinkableBodies, MlirError> {
+    let context = new_context();
+    let (mut module, functions) = build_linkable_module(&context, program)?;
+    if functions.is_empty() {
+        return Ok(LinkableBodies {
+            llvm_ir: String::new(),
+            functions,
+        });
+    }
+
+    Ok(LinkableBodies {
+        llvm_ir: translate_module(&context, &mut module)?,
+        functions,
+    })
 }
 
 /// Run the `llvm`-dialect conversion and the LLVM-IR translation over a built module.
@@ -295,6 +351,119 @@ mod tests {
             ir.contains("@malloc"),
             "expected the destination buffer to be allocated at run time:\n{ir}"
         );
+    }
+
+    fn borrowed(ty: HirType) -> HirType {
+        HirType::Reference {
+            inner: Box::new(ty),
+            mutable: false,
+        }
+    }
+
+    #[test]
+    fn a_float_body_is_linked_under_its_own_symbol_with_an_out_param() {
+        let shape = static_shape(&[2, 3]);
+        let bodies = lower_for_link(&program_with_tensor_operator(
+            BinaryOp::Add,
+            tensor(shape.clone()),
+            tensor(shape.clone()),
+            tensor(shape),
+        ))
+        .expect("a float body should lower for linking");
+
+        assert_eq!(
+            bodies.functions,
+            vec![("f".to_string(), "__neuro_mlir_f".to_string())]
+        );
+        // Two rank-2 operands and the out-param: three descriptors of seven fields.
+        let ir = &bodies.llvm_ir;
+        let signature = ir
+            .lines()
+            .find(|line| line.starts_with("define void @__neuro_mlir_f("))
+            .unwrap_or_else(|| {
+                panic!("expected a void body taking its result as a parameter:\n{ir}")
+            });
+        assert_eq!(signature.matches("ptr").count(), 6, "{signature}");
+        assert_eq!(signature.matches("i64").count(), 15, "{signature}");
+        assert!(
+            !ir.contains("@f("),
+            "the Neuro-ABI name is the LLVM backend's to define:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn borrowed_operands_are_read_as_tensors() {
+        let ty = tensor(static_shape(&[2, 2]));
+        let bodies = lower_for_link(&program_with_tensor_operator(
+            BinaryOp::MatMul,
+            borrowed(ty.clone()),
+            borrowed(ty.clone()),
+            ty,
+        ))
+        .expect("borrowed operands should lower for linking");
+
+        assert_eq!(bodies.functions.len(), 1, "{}", bodies.llvm_ir);
+        assert!(bodies.llvm_ir.contains("fmul float"), "{}", bodies.llvm_ir);
+    }
+
+    #[test]
+    fn an_integer_body_stays_with_the_llvm_backend() {
+        // The LLVM backend guards integer elements against overflow and a zero
+        // divisor; `arith` does not, so linking one would drop the guard.
+        let ty = HirType::Tensor {
+            element: Box::new(HirType::I32),
+            shape: static_shape(&[2]),
+            names: AxisNames::default(),
+        };
+        let bodies = lower_for_link(&program_with_tensor_operator(
+            BinaryOp::Add,
+            ty.clone(),
+            ty.clone(),
+            ty,
+        ))
+        .expect("an integer program should still lower");
+
+        assert!(bodies.functions.is_empty());
+        assert!(bodies.llvm_ir.is_empty());
+    }
+
+    #[test]
+    fn a_body_handing_back_its_argument_is_not_linked() {
+        let ty = tensor(static_shape(&[2]));
+        let mut program =
+            program_with_tensor_operator(BinaryOp::Add, ty.clone(), ty.clone(), ty.clone());
+        let HirItem::Function(function) = &mut program.items[0] else {
+            unreachable!("the fixture is one function");
+        };
+        function.body = vec![HirStmt::Expr(HirExpr::new(
+            HirExprKind::Variable("a".to_string()),
+            ty,
+            Span::new(0, 0),
+        ))];
+
+        let bodies = lower_for_link(&program).expect("the program should still lower");
+        assert!(bodies.functions.is_empty(), "{}", bodies.llvm_ir);
+    }
+
+    #[test]
+    fn a_tail_expression_is_a_body() {
+        let ty = tensor(static_shape(&[2]));
+        let mut program =
+            program_with_tensor_operator(BinaryOp::Subtract, ty.clone(), ty.clone(), ty);
+        let HirItem::Function(function) = &mut program.items[0] else {
+            unreachable!("the fixture is one function");
+        };
+        let Some(HirStmt::Return {
+            value: Some(value), ..
+        }) = function.body.pop()
+        else {
+            unreachable!("the fixture returns its operation");
+        };
+        function.body.push(HirStmt::Expr(value));
+
+        let bodies = lower_for_link(&program).expect("a tail expression should lower");
+        assert_eq!(bodies.functions.len(), 1, "{}", bodies.llvm_ir);
+        assert!(bodies.llvm_ir.contains("fsub float"), "{}", bodies.llvm_ir);
     }
 
     #[test]

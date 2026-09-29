@@ -234,6 +234,16 @@ cargo test -p mlir-backend --features mlir
 `mlir-sys` uses Rust 2024 let-chains in its build script, so the `mlir` feature needs
 Rust 1.88 or newer.
 
+With the same environment, `neurc` can be built with a feature of the same name. That
+compiler hands straight-line `f32` / `f64` tensor arithmetic to the MLIR path and links the
+result into the program; every other body still comes from the LLVM backend, and programs
+behave identically either way:
+
+```bash
+cargo build -p neurc --features mlir
+cargo test -p neurc --features mlir   # the whole end-to-end suite on that path
+```
+
 ## Verifying the Installation
 
 ```bash

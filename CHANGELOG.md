@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-09-29
+
+### Added
+
+- `neurc` built with `--features mlir` routes tensor arithmetic through the MLIR backend. A
+  function whose body is straight-line element-wise arithmetic or a matrix product over `f32` /
+  `f64` tensors of static shape (owned or `&`, with scalar operands broadcast) is lowered to MLIR
+  `linalg`, bufferized and linked into the program, wrapped so its callers see the ordinary
+  tensor ABI. Every other body, integer tensor arithmetic included, stays on the LLVM backend,
+  and a program computes the same answers on either build. The default build is unchanged and
+  still needs no MLIR.
+- The MLIR lowering accepts borrowed tensor operands (`&Tensor` parameters, `&a + &b`) and a tail
+  expression as a body's value.
+
+### Changed
+
+- `llvm_backend::compile` and `compile_to_ir` take a fifth argument, the bodies another backend
+  computed (`None` for none).
+- CI runs the `neurc` end-to-end suite and every example again with MLIR routing on.
+
 ## [4.0.0] - 2026-09-28
 
 Phase 3, automatic differentiation, is complete. The derivative is Neuro's own reverse-mode

@@ -20,6 +20,7 @@ argument-binding = { path = "../argument-binding" }
 semantic-analysis = { path = "../semantic-analysis" }
 hir-lowering = { path = "../hir-lowering" }
 llvm-backend = { path = "../llvm-backend" }
+mlir-backend = { path = "../mlir-backend", optional = true }
 
 # CLI Dependencies
 clap = { workspace = true }
@@ -29,6 +30,13 @@ anyhow = { workspace = true }
 
 # Compilation and Linking
 tempfile = "3.8"
+
+[features]
+# Route the tensor bodies MLIR computes exactly as the LLVM backend would through
+# mlir-backend. Needs an MLIR 22 toolchain at build time, like mlir-backend's own
+# feature; without it every body stays on the LLVM backend. See CONTEXT.md.
+default = []
+mlir = ["dep:mlir-backend", "mlir-backend/mlir"]
 
 [[bin]]
 name = "neurc"

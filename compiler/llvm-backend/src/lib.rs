@@ -1,5 +1,6 @@
 // Feature slice for LLVM IR generation and optimization.
-// Public API: the `compile()` and `compile_to_ir()` entry points.
+// Public API: the `compile()` and `compile_to_ir()` entry points, and the
+// `ExternalBodies` they may link in.
 
 mod codegen;
 mod errors;
@@ -46,6 +47,22 @@ impl OptimizationLevelSetting {
     }
 }
 
+/// Function bodies computed outside this backend, linked into its module as LLVM IR.
+///
+/// Each named function keeps its Neuro ABI: this backend defines it as a call to its
+/// symbol, which takes every tensor as an exploded row-major `memref` descriptor
+/// (allocated pointer, aligned pointer, offset, one size and one stride per axis) and
+/// every scalar as itself, and writes its tensor result into one more descriptor
+/// appended after them. Only a function whose parameters are scalars, tensors or
+/// `&Tensor`s and whose result is a statically shaped tensor may be named.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExternalBodies {
+    /// A textual LLVM module defining every symbol in `functions`.
+    pub llvm_ir: String,
+    /// `(function, symbol)`: a HIR function, and the symbol in `llvm_ir` computing its body.
+    pub functions: Vec<(String, String)>,
+}
+
 /// Compile a typed HIR program to linkable LLVM object code.
 ///
 /// The backend's entry point. It consumes the HIR produced by `hir-lowering`
@@ -57,6 +74,7 @@ impl OptimizationLevelSetting {
 /// * `optimization` - Optimization level (also selects overflow trapping at -O0)
 /// * `source` / `source_path` - Original module text and path, used only to render
 ///   `file:line:col` in panic-family runtime diagnostics
+/// * `external` - Bodies another backend computed, linked in place of this one's
 ///
 /// # Examples
 ///
@@ -69,7 +87,7 @@ impl OptimizationLevelSetting {
 /// let ast = parse(source).unwrap();
 /// let hir = lower_program(&ast).unwrap();
 /// let object_code =
-///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr").unwrap();
+///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr", None).unwrap();
 /// // Write object_code to file or link to executable
 /// ```
 pub fn compile(
@@ -77,9 +95,17 @@ pub fn compile(
     optimization: OptimizationLevelSetting,
     source: &str,
     source_path: &str,
+    external: Option<&ExternalBodies>,
 ) -> CodegenResult<Vec<u8>> {
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(&context, program, optimization, source, source_path)?;
+    let codegen_ctx = build_module(
+        &context,
+        program,
+        optimization,
+        source,
+        source_path,
+        external,
+    )?;
     emit_object_code(&codegen_ctx, optimization)
 }
 
@@ -94,9 +120,17 @@ pub fn compile_to_ir(
     optimization: OptimizationLevelSetting,
     source: &str,
     source_path: &str,
+    external: Option<&ExternalBodies>,
 ) -> CodegenResult<String> {
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(&context, program, optimization, source, source_path)?;
+    let codegen_ctx = build_module(
+        &context,
+        program,
+        optimization,
+        source,
+        source_path,
+        external,
+    )?;
     // The target machine is built for its data layout and triple as much as for the
     // passes: IR without them is re-interpreted against the consumer's defaults.
     let (target_machine, target_triple) = host_target_machine(optimization)?;
@@ -114,8 +148,18 @@ fn build_module<'ctx>(
     optimization: OptimizationLevelSetting,
     source: &str,
     source_path: &str,
+    external: Option<&ExternalBodies>,
 ) -> CodegenResult<CodegenContext<'ctx>> {
     let items = &program.items;
+    let external_symbol = |name: &str| {
+        external.and_then(|bodies| {
+            bodies
+                .functions
+                .iter()
+                .find(|(function, _)| function == name)
+                .map(|(_, symbol)| symbol.as_str())
+        })
+    };
 
     // Collect struct definitions first so struct field/parameter types resolve below.
     let mut struct_defs: HashMap<String, Vec<(String, Type)>> = HashMap::new();
@@ -306,9 +350,10 @@ fn build_module<'ctx>(
     // Generate code for each function and impl method
     for item in items {
         match item {
-            HirItem::Function(func_def) => {
-                codegen_ctx.codegen_function(func_def, &func_types)?;
-            }
+            HirItem::Function(func_def) => match external_symbol(&func_def.name) {
+                Some(symbol) => codegen_ctx.codegen_external_body(func_def, symbol)?,
+                None => codegen_ctx.codegen_function(func_def, &func_types)?,
+            },
             HirItem::Impl(impl_def) => {
                 codegen_ctx.codegen_impl(impl_def, &func_types)?;
             }
@@ -323,6 +368,16 @@ fn build_module<'ctx>(
     // only a finished module knows whether it prints at all, and because the exit paths
     // it edits (`main`'s returns, `abort`, `llvm.trap`) are all emitted by now.
     codegen_ctx.finalize_stdout_buffer()?;
+
+    // Linked after every body so each wrapper's declaration of its symbol is already
+    // there for the definition to resolve.
+    if let Some(bodies) = external.filter(|bodies| !bodies.functions.is_empty()) {
+        codegen::external_bodies::link_external_bodies(
+            codegen_ctx.context,
+            &codegen_ctx.module,
+            bodies,
+        )?;
+    }
 
     // Link self-contained soft-float conversion builtins when the module uses
     // f16/bf16, so the emitted object resolves the half-precision libcalls

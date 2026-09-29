@@ -259,8 +259,9 @@ compiler/
 
 Today a `.nr` file travels: **tokens → AST → merged program → type-checked AST → typed HIR →
 LLVM object code → system linker**. Automatic differentiation runs inside HIR lowering. The
-`mlir-backend` slice lowers the same typed HIR to MLIR `linalg`, but the driver does not route
-through it yet; that route, and the GPU dialects behind it, arrive with Phase 4. Stage by stage:
+`mlir-backend` slice lowers the same typed HIR to MLIR `linalg`, and a `neurc` built with its
+`mlir` feature links the tensor bodies it computes into the program; the GPU dialects behind it
+arrive with Phase 4. Stage by stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---
@@ -285,9 +286,8 @@ Everything is published at [neuro-lang.netlify.app](https://neuro-lang.netlify.a
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the architecture rules, coding standards, quality gates and
 pull request process. Open defects are in [docs/BUGS.md](docs/BUGS.md), and fixing one is the best
-way to start. Work is most useful in **Phase 4 (GPU acceleration)**, which starts by routing
-tensor lowering through the `mlir-backend` slice in the driver and then lowers it to the MLIR
-GPU dialects.
+way to start. Work is most useful in **Phase 4 (GPU acceleration)**, which lowers the tensor bodies the
+driver already routes through the `mlir-backend` slice on to the MLIR GPU dialects.
 
 See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 

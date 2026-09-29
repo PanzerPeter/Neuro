@@ -73,7 +73,7 @@ current entry points when this directory disagrees.
 | Component | Library | Status |
 |---|---|---|
 | CPU codegen | inkwell (LLVM 22) | In use |
-| MLIR construction | melior (LLVM/MLIR 22) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR, behind the off-by-default `mlir` feature |
+| MLIR construction | melior (LLVM/MLIR 22) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR and linked into compiled programs, behind the off-by-default `mlir` feature |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
 | GPU | MLIR nvgpu / rocdl / Triton | Planned |
 

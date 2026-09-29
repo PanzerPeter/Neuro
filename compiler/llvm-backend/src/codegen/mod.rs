@@ -6,6 +6,7 @@ pub(crate) mod dispatch;
 pub(crate) mod dlpack;
 pub(crate) mod drops;
 pub(crate) mod expressions;
+pub(crate) mod external_bodies;
 pub(crate) mod functions;
 pub(crate) mod io;
 pub(crate) mod loop_index;

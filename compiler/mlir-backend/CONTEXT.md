@@ -1,7 +1,7 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the tensor path, which Phase 4 extends to GPU dialects. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end.
+Lower the typed HIR to MLIR for the tensor path, which Phase 4 extends to GPU dialects. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end. The bodies it computes exactly as the LLVM backend would are also handed to the driver as linkable LLVM IR, which `neurc` built with its own `mlir` feature links into every compile.
 
 ## Feature Gate
 The whole crate is opt-in behind the off-by-default `mlir` feature
@@ -18,6 +18,10 @@ legs build the placeholder.
 - `translate_to_llvm_ir(&HirProgram) -> Result<String, MlirError>`: the same module carried on
   through a bufferization and conversion pipeline into the `llvm` dialect, translated into an
   inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
+- `lower_for_link(&HirProgram) -> Result<LinkableBodies, MlirError>`: the driver's entry. A module
+  of only the bodies worth linking, each defined as `__neuro_mlir_<function>`, carried through the
+  same pipeline and returned as LLVM IR with its `(function, symbol)` pairs. Empty IR and no pairs
+  when nothing qualifies.
 The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
 from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
 because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
@@ -38,10 +42,15 @@ third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
 **The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `LLVM_LOWERING_PIPELINE`, named in
 text and parsed by `melior::utility::parse_pass_pipeline`: melior's typed `one-shot-bufferize`
 constructor takes no options, and `buffer-deallocation-pipeline` is a pipeline with no
-constructor at all. Its first three entries are what carry a `linalg` body: `one-shot-bufferize` (with
+constructor at all. Its first four entries are what carry a `linalg` body: `one-shot-bufferize` (with
 `bufferize-function-boundaries=true`, or a `func.func` keeps `tensor` in its signature and never
-converts) rewrites tensor values into `memref` buffers, `buffer-deallocation-pipeline` gives each
-one an owner, and only then does `convert-linalg-to-loops` (nested under `func.func`, which is
+converts, and `function-boundary-type-conversion=identity-layout-map`, so a parameter is a plain
+row-major `memref` and a copy into one lowers to `llvm.memcpy` rather than to a runtime-library
+call nothing links) rewrites tensor values into `memref` buffers, `buffer-results-to-out-params`
+(`modify-public-functions`, since every definition is public, and `hoist-static-allocs`, so a
+static result is written straight into the caller's buffer) turns each returned buffer into a
+trailing parameter, `buffer-deallocation-pipeline` gives every buffer still allocated inside an
+owner, and only then does `convert-linalg-to-loops` (nested under `func.func`, which is
 what it is anchored on) produce `scf` loops; run before bufferization it silently leaves the op
 alone. The rest is the descent those loops land in: `convert-scf-to-cf`, `finalize-memref-to-llvm`,
 then `func` / `arith` / `cf` / `index` to LLVM and `reconcile-unrealized-casts` last by necessity,
@@ -75,8 +84,13 @@ apt.llvm.org's `libmlir-22-dev` does the same under `/usr/lib/llvm-22`. `mlir-sy
 2024 let-chains in its build script, so the `mlir` feature needs Rust 1.88 or newer.
 
 **Tensor arithmetic is the only body lowered here.** `tensor_arithmetic::build_body` turns a
-function whose statements are `val` bindings and a final `return` over element-wise `+ - * /`
-on tensors into a `func.func` definition: one `tensor.empty` destination plus one
+function whose statements are `val` bindings and a final `return` or tail expression over
+element-wise `+ - * /` on tensors into a `func.func` definition. An operand may be borrowed: a
+`&Tensor` parameter is a tensor block argument (`read_type`, which also gives the defined
+function's signature), and `&a` lowers to `a`, since reading is all an operand does; a `&mut`
+borrow is left alone. A body that hands back one of its arguments unchanged is refused, since it
+performs no arithmetic and linking it would copy a buffer the LLVM backend returns as is. The
+definition is one `tensor.empty` destination plus one
 `linalg.generic` per operator, with one indexing map per operand, all-`parallel` iterators, and
 an `arith` body terminated by `linalg.yield`. `@` is the exception and is described below. Float elements use the `arith` float operations
 and integer elements theirs, with division splitting on signedness.
@@ -118,10 +132,22 @@ static here: `tensor.dim` can recover a dynamic result axis but not the contract
 appears in no operand of the destination, so a `?` anywhere answers `Ok(None)`.
 
 **The bufferized function has MLIR's tensor ABI, not Neuro's.** A tensor parameter crosses as an
-exploded `memref` descriptor (allocated pointer, aligned pointer, offset, sizes, strides) where
-the LLVM backend's tensor is one pointer to a flat buffer behind a DLPack handle, and the result
-buffer is the caller's to free. Nothing calls the MLIR path from a compile, so the two never meet;
-the boundary layout is deliberately left at MLIR's default until something does.
+exploded row-major `memref` descriptor (allocated pointer, aligned pointer, offset, then one size
+and one stride per axis), a scalar as itself, and the result as one more descriptor after them;
+the function returns nothing. The LLVM backend's tensor is one pointer to a DLPack handle, so the
+two meet through a wrapper the LLVM backend emits: it defines the Neuro-ABI function as a call to
+the linked symbol, passing each buffer out of its handle and a result buffer it allocated itself.
+That keeps every allocation a Neuro tensor owns on the LLVM backend's side.
+
+**What `lower_for_link` links.** `build_linkable_module` takes a free function only when
+`linkable_signature` holds (an `f32` / `f64` scalar or static tensor of one for every parameter,
+owned or behind `&`, and a static tensor result) and `build_body` lowers it. Floats only, because
+the LLVM backend guards integer elements (an overflow panics on the debug tier, a zero divisor in
+every build) and `arith` has neither guard, so the two would not be interchangeable. Static only,
+because the frontend gives a `?` axis no arithmetic. The module declares nothing: a declaration
+would name a Neuro-ABI function at an MLIR signature, and the linked IR is read for its
+definitions alone. The `__neuro_mlir_` prefix keeps each symbol off the Neuro-ABI name the LLVM
+backend defines.
 
 **What `lower_program` emits.** It registers all dialects, then maps each top-level `HirItem`:
 free functions, `impl` methods, and lifted closures become `func.func` *declarations* (empty

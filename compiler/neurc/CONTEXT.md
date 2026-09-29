@@ -38,6 +38,12 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
 4. `hir_lowering::lower_program`: the typed HIR. `check` reports the lowered item count;
    `compile` hands the HIR to `llvm_backend::compile`, which lowers native object code from it
    (the backend does not consume the AST).
+5. Built with the `mlir` feature, `compile` first hands the HIR to `mlir_backend::lower_for_link`
+   (`tensor_bodies`) and passes the bodies it returns to the LLVM backend as `ExternalBodies`,
+   which links them in place of its own. The two slices' types are mapped here, field for field,
+   since neither may name the other's. A failure there stops the compile: it is a compiler bug,
+   and handing the body back to the LLVM backend would hide it. Without the feature
+   `tensor_bodies` answers `None` and nothing about the compile changes.
 
 `run_file` adds nothing to that order. It calls `compile_file` with an output path inside a
 temporary directory, executes the result, and exits with the child's own status, so a Neuro
@@ -81,9 +87,15 @@ whatever the consumer assumes, and `-O` still selects the pass pipeline, so `-O0
 unoptimized module a rewriting consumer wants and `-O2` is what the object path would have
 handed to the backend.
 
-`--emit obj` does not reach the MLIR backend. That path is still unreferenced by the driver
-(the MLIR backend is off by default and `neurc` has no dependency on it); `--emit` names the
-artifact, not the pipeline that produced it.
+`--emit` names the artifact, not the pipeline that produced it: with the `mlir` feature an
+object file or an `llvm-ir` module carries the linked MLIR bodies exactly as an executable does.
+
+### The `mlir` feature
+`mlir-backend` is an optional dependency, enabled by `neurc`'s own `mlir` feature (which turns on
+`mlir-backend/mlir`). Cargo decides dependencies before any build script runs, so the feature is
+the build-time switch: nothing probes for an MLIR toolchain, and a build that asks for the feature
+without one fails in `mlir-sys`'s build script. Off by default, like `mlir-backend`'s own gate,
+because LLVM's Windows development build ships no MLIR.
 
 ### The prelude
 `prelude::load()` parses `prelude.nr` once into a `Prelude` value that answers two questions:

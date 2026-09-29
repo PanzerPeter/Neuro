@@ -8,9 +8,10 @@
 //! The MLIR path is gated behind the off-by-default `mlir` feature so the
 //! workspace still builds and tests on a stock LLVM 22 install without an MLIR
 //! toolchain. With the feature disabled this crate is an empty placeholder; with
-//! it enabled it pulls in `melior` and exposes `lower_program` (HIR → MLIR) and
+//! it enabled it pulls in `melior` and exposes `lower_program` (HIR → MLIR),
 //! `translate_to_llvm_ir` (that module carried on through the `llvm` dialect into
-//! an inkwell LLVM module).
+//! an inkwell LLVM module) and `lower_for_link` (the bodies the driver links into
+//! the LLVM backend's module).
 
 #[cfg(feature = "mlir")]
 mod bridge;
@@ -26,7 +27,7 @@ mod smoke;
 mod tensor_arithmetic;
 
 #[cfg(feature = "mlir")]
-pub use bridge::translate_to_llvm_ir;
+pub use bridge::{lower_for_link, translate_to_llvm_ir, LinkableBodies};
 #[cfg(feature = "mlir")]
 pub use errors::MlirError;
 #[cfg(feature = "mlir")]

@@ -78,6 +78,7 @@ mod loop_adapters;
 mod loop_stack_slots;
 mod loop_value;
 mod methods;
+mod mlir_routing;
 mod modules;
 mod move_semantics;
 mod mutable_borrows;

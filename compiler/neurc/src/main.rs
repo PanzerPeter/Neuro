@@ -485,11 +485,18 @@ fn compile_file(
     let optimization =
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
+    let external = tensor_bodies(&hir)?;
+
     if emit == EmitKind::LlvmIr {
-        let ir =
-            llvm_backend::compile_to_ir(&hir, optimization, &source, &input.display().to_string())
-                .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
-                .context("Failed to generate LLVM IR")?;
+        let ir = llvm_backend::compile_to_ir(
+            &hir,
+            optimization,
+            &source,
+            &input.display().to_string(),
+            external.as_ref(),
+        )
+        .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
+        .context("Failed to generate LLVM IR")?;
         let output_path = output
             .map(Path::to_path_buf)
             .unwrap_or_else(|| input.with_extension("ll"));
@@ -498,10 +505,15 @@ fn compile_file(
         return Ok(output_path);
     }
 
-    let object_code =
-        llvm_backend::compile(&hir, optimization, &source, &input.display().to_string())
-            .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
-            .context("Failed to generate object code")?;
+    let object_code = llvm_backend::compile(
+        &hir,
+        optimization,
+        &source,
+        &input.display().to_string(),
+        external.as_ref(),
+    )
+    .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
+    .context("Failed to generate object code")?;
 
     // MSVC expects .obj on Windows; .o is conventional on Unix.
     log::debug!("Writing object file...");
@@ -543,6 +555,27 @@ fn compile_file(
         .context("Failed to link object file to executable")?;
 
     Ok(output_path)
+}
+
+/// The tensor bodies `mlir-backend` computes, for the LLVM backend to link in place of
+/// its own. A failure here is a compiler bug, so it stops the build rather than quietly
+/// handing the body back to the LLVM backend, which would hide it.
+#[cfg(feature = "mlir")]
+fn tensor_bodies(hir: &neuro_hir::HirProgram) -> Result<Option<llvm_backend::ExternalBodies>> {
+    let bodies = mlir_backend::lower_for_link(hir)
+        .map_err(|e| anyhow::anyhow!("MLIR lowering error: {}", e))
+        .context("Failed to lower tensor bodies through MLIR")?;
+    Ok(Some(llvm_backend::ExternalBodies {
+        llvm_ir: bodies.llvm_ir,
+        functions: bodies.functions,
+    }))
+}
+
+/// Without the `mlir` feature there is no MLIR toolchain, and every body is the LLVM
+/// backend's.
+#[cfg(not(feature = "mlir"))]
+fn tensor_bodies(_hir: &neuro_hir::HirProgram) -> Result<Option<llvm_backend::ExternalBodies>> {
+    Ok(None)
 }
 
 /// Record why one linker did not produce the executable, for the error the last one raises.

@@ -44,6 +44,11 @@ jobs:
       - name: Run MLIR backend smoke test
         run: cargo test -p mlir-backend --features mlir
 
+      # The driver routes tensor bodies through mlir-backend under this feature, so the
+      # whole end-to-end suite and every example runs again on that path.
+      - name: Run neurc suite with MLIR routing
+        run: cargo test -p neurc --features mlir
+
   docs_hygiene:
     name: Docs Hygiene
     runs-on: ubuntu-latest

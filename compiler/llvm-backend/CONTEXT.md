@@ -6,7 +6,7 @@ Emit native object code, or the textual LLVM module behind it, from the typed Ne
 ## Entry Point
 - Type: Library function
 - Input: `program: &neuro_hir::HirProgram, optimization: OptimizationLevelSetting, source: &str,
-  source_path: &str`
+  source_path: &str, external: Option<&ExternalBodies>`
 - Output: `Result<Vec<u8>, CodegenError>` from `compile`, or `Result<String, CodegenError>`
   from `compile_to_ir`, which prints the module instead of selecting instructions
 
@@ -20,6 +20,8 @@ resolved type (`HirExpr::ty`), so codegen reads types inline rather than re-deri
 **There is no backend type-collection pass**. A single `type_env` (binding name → resolved type),
 populated as bindings are lowered, exists only so the place statements `obj.field = …` and
 `arr[i] = …` can recover a binding's nominal struct/array type.
+
+`external` names function bodies computed outside this backend; see External Bodies.
 
 `source` / `source_path` are the original module text and path, kept solely to render
 `file:line:col` in panic-family runtime diagnostics. The column counts characters, as
@@ -70,8 +72,30 @@ load-bearing:
 4. **Standard-output drain** (`finalize_stdout_buffer`): inserted after all bodies, because only
    a finished module knows whether it prints at all and because the exit paths it edits are all
    emitted by then. See Standard-Output ABI.
-5. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
+5. **External bodies** (`link_external_bodies`), when any were handed in: after every body, so
+   each wrapper's declaration of its symbol is already there for the linked definition to
+   resolve. See External Bodies.
+6. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
    before `verify`.
+
+## External Bodies
+`ExternalBodies` is LLVM IR text plus `(function, symbol)` pairs: a free function whose body some
+other backend computed (today `mlir-backend`, through `neurc`'s `mlir` feature). The function is
+declared like any other, so every call site and every function value is unchanged; only its body
+differs. `codegen_external_body` (`codegen/external_bodies.rs`) emits it as a call to the symbol
+in MLIR's calling convention: each tensor as an exploded row-major `memref` descriptor (its `data`
+pointer as both the allocated and the aligned pointer, offset 0, then its extents and element
+strides as constants), each scalar as itself, and a result descriptor over a tensor this backend
+allocates through `alloc_dlpack_tensor`, so the value handed back is an ordinary handle. A
+`&Tensor` parameter is loaded through to its handle and only read; a by-value one was moved in
+and is released through `build_dlpack_release` after the call, the same release the ordinary body
+would have reached at scope exit.
+
+`link_external_bodies` parses the text into the module's own context (the IR crosses as text, so
+the other backend never shares an `LLVMContext` with this one), links it, and makes each symbol
+`internal` so the optimizer may inline it into its one caller. The caller promises every named
+function has scalar, tensor or `&Tensor` parameters and a statically shaped tensor result; the
+descriptor needs a compile-time extent per axis.
 
 ## Stack Slot Placement
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,

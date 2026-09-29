@@ -15,19 +15,22 @@ optimized machine code for the host platform.
 **Entry points:**
 ```rust
 pub fn compile(program: &HirProgram, optimization: OptimizationLevelSetting,
-               source: &str, source_path: &str) -> CodegenResult<Vec<u8>>
+               source: &str, source_path: &str,
+               external: Option<&ExternalBodies>) -> CodegenResult<Vec<u8>>
 pub fn compile_to_ir(program: &HirProgram, optimization: OptimizationLevelSetting,
-                     source: &str, source_path: &str) -> CodegenResult<String>
+                     source: &str, source_path: &str,
+                     external: Option<&ExternalBodies>) -> CodegenResult<String>
 ```
 
 `compile` returns object code; `compile_to_ir` stops after the pass pipeline and returns the
 textual module (`neurc compile --emit llvm-ir`). `source` / `source_path` are carried through for
 located runtime-panic diagnostics (array bounds, slice boundaries, integer overflow).
+`external` names function bodies another backend computed; see [MLIR bodies](#mlir-bodies).
 
 ## Architecture
 
 - **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `inkwell 0.10.0`, `thiserror`; `syntax-parsing` and `hir-lowering` are dev-dependencies (tests and benches lower before compiling)
-- **Public API**: `compile`, `compile_to_ir`, `OptimizationLevelSetting`, `CodegenError`
+- **Public API**: `compile`, `compile_to_ir`, `ExternalBodies`, `OptimizationLevelSetting`, `CodegenError`
 - **All internals**: `pub(crate)`, `CodegenContext`, `TypeMapper`, `codegen_*` helpers
 - **Output**: platform object code (`.o`) passed to the system linker by `neurc`
 
@@ -94,11 +97,12 @@ build_module
   2. Emit vtables for every `impl Trait for Type`
   3. Generate bodies
   4. Insert the standard-output drain on every exit path, if the module prints
-  5. Link the soft-float builtins, if the module uses `half` / `bfloat`
-  6. Verify the module
+  5. Link the external bodies, if any were handed in
+  6. Link the soft-float builtins, if the module uses `half` / `bfloat`
+  7. Verify the module
 then
-  7. Create a target machine for the host triple and run the `-O` pass pipeline
-  8. Emit object code to a memory buffer (`compile`) or print the module (`compile_to_ir`)
+  8. Create a target machine for the host triple and run the `-O` pass pipeline
+  9. Emit object code to a memory buffer (`compile`) or print the module (`compile_to_ir`)
 ```
 
 Why the order is fixed is recorded under *Module Emission Order* in the slice's
@@ -180,7 +184,7 @@ let source = r#"
 
 let ast = parse(source)?;
 let hir = lower_program(&ast)?;                  // hir-lowering: AST → typed HIR
-let object_code = compile(&hir, OptimizationLevelSetting::O2, source, "add.nr")?;
+let object_code = compile(&hir, OptimizationLevelSetting::O2, source, "add.nr", None)?;
 std::fs::write("output.o", &object_code)?;
 ```
 
@@ -259,13 +263,18 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 | `O2` | Default | Standard release build |
 | `O3` | Aggressive | Maximum optimization |
 
-## Future: MLIR Integration
+## MLIR bodies
 
-The `mlir-backend` slice already lowers the same typed HIR this backend consumes to MLIR
-`linalg`, behind the off-by-default `mlir` feature, and both link against the same LLVM 22
-libraries. The driver does not route through it yet; that routing, and the GPU dialects after
-it, are planned on the [Quick Roadmap](../../../README.md#quick-roadmap). inkwell remains the terminal code-emission layer on every path. See
-[MLIR Backend](mlir-backend.md).
+A `neurc` built with its `mlir` feature hands this backend the tensor bodies the
+[MLIR backend](mlir-backend.md) computed, as LLVM IR text plus the function each symbol stands
+for. Each named function is still declared and defined here, with its ordinary tensor ABI, but
+its body is a call: the backend loads each tensor's buffer out of its DLPack handle and passes it
+as an exploded row-major `memref` descriptor, allocates the result tensor itself and passes that
+buffer as one more descriptor, then releases every tensor the function took by value. The IR is
+parsed into the module's own context and linked in after every body, and each linked symbol is
+made internal so the optimizer can inline it. The GPU dialects after it are planned on the
+[Quick Roadmap](../../../README.md#quick-roadmap); inkwell stays the terminal code-emission layer
+on every path.
 
 ## Resources
 

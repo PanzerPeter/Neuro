@@ -64,9 +64,10 @@ Native Executable (`.exe` on Windows, no extension on Unix)
 
 The typed HIR (`neuro-hir`) is the stable, backend-agnostic contract between the frontend (parser +
 type checker) and the backends. `llvm-backend` consumes it today; the experimental `mlir-backend`
-consumes the same HIR behind the off-by-default `mlir` feature, and can carry its scaffold module
-on through the `llvm` dialect into a verified inkwell LLVM module. That path is not reachable from
-`neurc`: it runs from the slice's own tests. See the [HIR Lowering](components/hir-lowering.md),
+consumes the same HIR behind the off-by-default `mlir` feature. A `neurc` built with its own
+`mlir` feature asks it for the straight-line `f32` / `f64` tensor bodies it computes exactly as the
+LLVM backend would, and the LLVM backend links those in, wrapped in the program's own tensor ABI,
+instead of generating them. See the [HIR Lowering](components/hir-lowering.md),
 [LLVM Backend](components/llvm-backend.md) and [MLIR Backend](components/mlir-backend.md) component
 docs.
 
@@ -189,8 +190,8 @@ are additional and feature-gated.
 ## Future Enhancements
 
 Planned on the [Quick Roadmap](../../README.md#quick-roadmap): debug information (`-g`),
-incremental compilation with a persistent cache, LTO defaults for release builds, and routing
-tensor lowering through `mlir-backend` in the driver, then on to MLIR GPU dialects.
+incremental compilation with a persistent cache, LTO defaults for release builds, and lowering
+the tensor bodies `mlir-backend` computes on to MLIR GPU dialects.
 
 ## Setup
 

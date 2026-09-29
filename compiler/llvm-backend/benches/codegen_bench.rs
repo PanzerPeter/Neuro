@@ -56,7 +56,13 @@ fn bench_codegen(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("compile", case), &hir, |b, program| {
             b.iter(|| {
-                let result = compile(program, OptimizationLevelSetting::O2, source, "bench.nr");
+                let result = compile(
+                    program,
+                    OptimizationLevelSetting::O2,
+                    source,
+                    "bench.nr",
+                    None,
+                );
                 assert!(
                     result.is_ok(),
                     "benchmark compilation failed: {:?}",

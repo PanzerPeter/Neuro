@@ -10,7 +10,11 @@ use melior::{
     },
     Context,
 };
-use neuro_hir::{HirItem, HirProgram, HirSelfParam, HirType};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirType};
+
+/// Prepended to a linked body's symbol, so it never collides with the Neuro-ABI
+/// function of the same name the LLVM backend defines around it.
+const LINKED_SYMBOL_PREFIX: &str = "__neuro_mlir_";
 
 /// Bit widths for the fixed-size integer scalars, keyed off the HIR type.
 const I8_BITS: u32 = 8;
@@ -65,7 +69,7 @@ pub(crate) fn build_module<'c>(
                         context,
                         location,
                         &function.name,
-                        &params,
+                        &read_types(function),
                         &function.return_type,
                         region,
                     )?,
@@ -121,6 +125,86 @@ pub(crate) fn build_module<'c>(
     }
 
     Ok(module)
+}
+
+/// Build a module holding only the bodies the LLVM backend links in, each under
+/// [`LINKED_SYMBOL_PREFIX`] plus its function's name, and return it with the
+/// `(function, symbol)` pairs it defines.
+///
+/// A function reaches it only when [`linkable_signature`] holds and its body
+/// lowers. Nothing is declared: the linked module is read for its definitions,
+/// and a declaration here would name a Neuro-ABI function at an MLIR signature.
+pub(crate) fn build_linkable_module<'c>(
+    context: &'c Context,
+    program: &HirProgram,
+) -> Result<(Module<'c>, Vec<(String, String)>), MlirError> {
+    let location = Location::unknown(context);
+    let module = Module::new(location);
+    let mut linked = Vec::new();
+
+    for item in &program.items {
+        let HirItem::Function(function) = item else {
+            continue;
+        };
+        if !linkable_signature(function) {
+            continue;
+        }
+        let Some(region) = tensor_arithmetic::build_body(context, location, function)? else {
+            continue;
+        };
+        let symbol = format!("{LINKED_SYMBOL_PREFIX}{}", function.name);
+        module.body().append_operation(define_function(
+            context,
+            location,
+            &symbol,
+            &read_types(function),
+            &function.return_type,
+            region,
+        )?);
+        linked.push((function.name.clone(), symbol));
+    }
+
+    if !module.as_operation().verify() {
+        return Err(MlirError::ModuleVerificationFailed);
+    }
+
+    Ok((module, linked))
+}
+
+/// Whether this path computes a function exactly as the LLVM backend would, so the
+/// two are interchangeable: a static tensor result, and parameters that are `f32` /
+/// `f64` scalars or static tensors of them, owned or behind `&`.
+///
+/// Floats only, because the LLVM backend guards integer elements (an overflowing
+/// element panics on the debug tier, a zero divisor in every build) and `arith`
+/// has neither guard. Static extents only, because the frontend gives a `?` axis no
+/// arithmetic, so a dynamic signature never has a body worth linking.
+fn linkable_signature(function: &HirFunction) -> bool {
+    matches!(function.return_type, HirType::Tensor { .. })
+        && linkable_type(&function.return_type)
+        && function
+            .params
+            .iter()
+            .all(|param| linkable_type(tensor_arithmetic::read_type(&param.ty)))
+}
+
+fn linkable_type(ty: &HirType) -> bool {
+    match ty {
+        HirType::F32 | HirType::F64 => true,
+        HirType::Tensor { element, shape, .. } => {
+            matches!(**element, HirType::F32 | HirType::F64) && shape.iter().all(Option::is_some)
+        }
+        _ => false,
+    }
+}
+
+/// A defined function's parameter types, each as its body reads it.
+fn read_types(function: &HirFunction) -> Vec<HirType> {
+    function
+        .params
+        .iter()
+        .map(|param| tensor_arithmetic::read_type(&param.ty).clone())
+        .collect()
 }
 
 /// The HIR type of a method receiver: a borrow of the impl's target (a struct or an

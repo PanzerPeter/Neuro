@@ -61,13 +61,13 @@ pub(crate) fn build_body<'c>(
 ) -> Result<Option<Region<'c>>, MlirError> {
     // Cheap filter first: a function that does not hand a tensor back cannot be
     // one of these, and every scalar function in the program hits it.
-    if tensor_parts(&function.return_type).is_none() {
+    if !matches!(function.return_type, HirType::Tensor { .. }) {
         return Ok(None);
     }
 
     let mut slots = Vec::with_capacity(function.params.len());
     for param in &function.params {
-        slots.push((map_type(context, &param.ty)?, location));
+        slots.push((map_type(context, read_type(&param.ty))?, location));
     }
 
     let block = Block::new(&slots);
@@ -90,13 +90,28 @@ pub(crate) fn build_body<'c>(
     Ok(Some(region))
 }
 
-/// A tensor's element type and its shape, `None` for every other type.
+/// A tensor's element type and its shape, `None` for every other type. A shared
+/// borrow of a tensor answers for the tensor, since reading is all an operand does.
 fn tensor_parts(ty: &HirType) -> Option<(&HirType, &[Option<usize>])> {
-    let HirType::Tensor { element, shape, .. } = ty else {
-        return None;
-    };
+    match read_type(ty) {
+        HirType::Tensor { element, shape, .. } => Some((element.as_ref(), shape.as_slice())),
+        _ => None,
+    }
+}
 
-    Some((element.as_ref(), shape.as_slice()))
+/// The type a body reads through `ty`: the tensor itself for `&Tensor`, `ty` otherwise.
+///
+/// A `&mut` borrow is left alone. It is the one parameter a body could write
+/// through, and no `linalg` body here writes an operand, so it has no business
+/// reaching one as a plain tensor.
+pub(crate) fn read_type(ty: &HirType) -> &HirType {
+    match ty {
+        HirType::Reference {
+            inner,
+            mutable: false,
+        } if matches!(**inner, HirType::Tensor { .. }) => inner,
+        _ => ty,
+    }
 }
 
 /// Append the statements to `block`, reporting whether all of them were expressible.
@@ -126,17 +141,26 @@ fn build_statements<'c, 'a>(
         scope.push((name.clone(), value));
     }
 
-    // The body must end in a `return`: this path produces a value, and a function
-    // that falls off its end has none to hand back.
-    let HirStmt::Return {
+    // The body must end in a value: a `return` or a tail expression. A function
+    // that falls off its end has nothing to hand back.
+    let (HirStmt::Return {
         value: Some(value), ..
-    } = last
+    }
+    | HirStmt::Expr(value)) = last
     else {
         return Ok(false);
     };
     let Some(result) = build_expression(context, location, block, value, scope)? else {
         return Ok(false);
     };
+    // Handing an argument back unchanged is no arithmetic. Through this path it
+    // would also cost a copy into a fresh buffer, where the LLVM backend returns
+    // the handle it was given.
+    for index in 0..block.argument_count() {
+        if Value::from(block.argument(index)?) == result {
+            return Ok(false);
+        }
+    }
     block.append_operation(func::r#return(&[result], location));
 
     Ok(true)
@@ -157,6 +181,12 @@ fn build_expression<'c, 'a>(
             .rev()
             .find(|(bound, _)| bound == name)
             .map(|(_, value)| *value)),
+        // `&a + &b` reads the same elements `a + b` does; tensor values carry no
+        // identity for a borrow to preserve.
+        HirExprKind::Reference {
+            operand,
+            mutable: false,
+        } => build_expression(context, location, block, operand, scope),
         // `@` contracts an axis instead of walking the result element for element, so it
         // is a different index space rather than a different body.
         HirExprKind::Binary {
