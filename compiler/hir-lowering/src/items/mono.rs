@@ -383,6 +383,7 @@ impl Lowerer {
             params,
             return_type,
             body,
+            target: super::target_of(&template.attributes),
             span: template.span,
         })
     }

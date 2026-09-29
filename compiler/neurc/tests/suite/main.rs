@@ -54,6 +54,7 @@ mod forward_references;
 mod functions;
 mod generic_structs;
 mod generics;
+mod gpu_attribute;
 mod gradient_control;
 mod gradient_slot;
 mod half_precision;

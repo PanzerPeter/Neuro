@@ -75,7 +75,9 @@ pub enum BodyMemory {
     /// (`mgpu*`). The wrapper copies each tensor operand to the device and the result
     /// back, and this backend defines `_mlir_memref_to_llvm_alloc` /
     /// `_mlir_memref_to_llvm_free` as its device allocator for the buffers a body
-    /// allocates itself. The runtime library is the linker's to supply.
+    /// allocates itself. It links its own runtime for that ABI, over the CUDA driver,
+    /// which it opens at run time: the program needs `dlopen` from the platform C
+    /// library, and a GPU only once it runs.
     Device,
 }
 
@@ -90,7 +92,8 @@ pub enum BodyMemory {
 /// * `optimization` - Optimization level (also selects overflow trapping at -O0)
 /// * `source` / `source_path` - Original module text and path, used only to render
 ///   `file:line:col` in panic-family runtime diagnostics
-/// * `external` - Bodies another backend computed, linked in place of this one's
+/// * `external` - Bodies another backend computed, linked in place of this one's; each
+///   set names where its buffers live, and a function may appear in at most one
 ///
 /// # Examples
 ///
@@ -103,7 +106,7 @@ pub enum BodyMemory {
 /// let ast = parse(source).unwrap();
 /// let hir = lower_program(&ast).unwrap();
 /// let object_code =
-///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr", None).unwrap();
+///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr", &[]).unwrap();
 /// // Write object_code to file or link to executable
 /// ```
 pub fn compile(
@@ -111,7 +114,7 @@ pub fn compile(
     optimization: OptimizationLevelSetting,
     source: &str,
     source_path: &str,
-    external: Option<&ExternalBodies>,
+    external: &[ExternalBodies],
 ) -> CodegenResult<Vec<u8>> {
     let context = LLVMContext::create();
     let codegen_ctx = build_module(
@@ -136,7 +139,7 @@ pub fn compile_to_ir(
     optimization: OptimizationLevelSetting,
     source: &str,
     source_path: &str,
-    external: Option<&ExternalBodies>,
+    external: &[ExternalBodies],
 ) -> CodegenResult<String> {
     let context = LLVMContext::create();
     let codegen_ctx = build_module(
@@ -164,18 +167,21 @@ fn build_module<'ctx>(
     optimization: OptimizationLevelSetting,
     source: &str,
     source_path: &str,
-    external: Option<&ExternalBodies>,
+    external: &[ExternalBodies],
 ) -> CodegenResult<CodegenContext<'ctx>> {
     let items = &program.items;
     let external_symbol = |name: &str| {
-        external.and_then(|bodies| {
+        external.iter().find_map(|bodies| {
             bodies
                 .functions
                 .iter()
                 .find(|(function, _)| function == name)
-                .map(|(_, symbol)| symbol.as_str())
+                .map(|(_, symbol)| (symbol.as_str(), bodies.memory))
         })
     };
+    let device_bodies = external
+        .iter()
+        .any(|bodies| bodies.memory == BodyMemory::Device && !bodies.functions.is_empty());
 
     // Collect struct definitions first so struct field/parameter types resolve below.
     let mut struct_defs: HashMap<String, Vec<(String, Type)>> = HashMap::new();
@@ -331,8 +337,9 @@ fn build_module<'ctx>(
     // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
 
-    if let Some(bodies) = external.filter(|bodies| !bodies.functions.is_empty()) {
-        codegen_ctx.set_body_memory(bodies.memory);
+    if device_bodies {
+        codegen_ctx.set_body_memory(BodyMemory::Device);
+        codegen_ctx.define_gpu_panic()?;
     }
 
     // Emit module-level constants as LLVM global constants before any function.
@@ -371,7 +378,9 @@ fn build_module<'ctx>(
     for item in items {
         match item {
             HirItem::Function(func_def) => match external_symbol(&func_def.name) {
-                Some(symbol) => codegen_ctx.codegen_external_body(func_def, symbol)?,
+                Some((symbol, memory)) => {
+                    codegen_ctx.codegen_external_body(func_def, symbol, memory)?
+                }
                 None => codegen_ctx.codegen_function(func_def, &func_types)?,
             },
             HirItem::Impl(impl_def) => {
@@ -391,12 +400,18 @@ fn build_module<'ctx>(
 
     // Linked after every body so each wrapper's declaration of its symbol is already
     // there for the definition to resolve.
-    if let Some(bodies) = external.filter(|bodies| !bodies.functions.is_empty()) {
+    for bodies in external
+        .iter()
+        .filter(|bodies| !bodies.functions.is_empty())
+    {
         codegen::external_bodies::link_external_bodies(
             codegen_ctx.context,
             &codegen_ctx.module,
             bodies,
         )?;
+    }
+    if device_bodies {
+        codegen::external_bodies::link_gpu_runtime(codegen_ctx.context, &codegen_ctx.module)?;
     }
 
     // Link self-contained soft-float conversion builtins when the module uses

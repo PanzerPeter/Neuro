@@ -198,3 +198,42 @@ fn const_param_value_reference_lowers_to_literal() {
     ));
     assert_eq!(e.ty, HirType::U32);
 }
+
+/// An instance is lowered from its template, so it keeps the template's `@gpu`.
+#[test]
+fn a_gpu_generic_instance_keeps_its_target() {
+    let program = lower(
+        r#"
+@gpu
+func pick<T>(x: T) -> T {
+    x
+}
+
+func plain(x: i32) -> i32 {
+    x
+}
+
+func main() -> i32 {
+    return pick(1) + plain(2)
+}
+"#,
+    );
+    let targets: Vec<_> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Function(f) => Some((f.name.as_str(), f.target)),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        targets
+            .iter()
+            .any(|(name, target)| name.starts_with("pick") && *target == neuro_hir::HirTarget::Gpu),
+        "{targets:?}"
+    );
+    assert!(
+        targets.contains(&("plain", neuro_hir::HirTarget::Host)),
+        "{targets:?}"
+    );
+}

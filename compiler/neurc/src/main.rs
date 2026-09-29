@@ -10,6 +10,16 @@ use std::process::{self, Command};
 /// The entry point every compiled executable must define.
 const MAIN_FUNCTION: &str = "main";
 
+/// The compute capability `@gpu` kernels are compiled for. They ship as PTX, which the
+/// CUDA driver compiles for the GPU it finds, so the floor is what matters: every GPU at
+/// or above it runs them, and element-wise arithmetic needs nothing newer.
+#[cfg(feature = "mlir")]
+const GPU_CHIP: &str = "sm_60";
+
+/// What the GPU runtime linked beside a device body needs from the platform: `dlopen`,
+/// which only glibc 2.34 and later keep in libc itself.
+const GPU_RUNTIME_LIBS: &[&str] = &["-ldl"];
+
 mod prelude;
 
 #[derive(Parser)]
@@ -485,7 +495,15 @@ fn compile_file(
     let optimization =
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
-    let external = tensor_bodies(&hir)?;
+    let rendered = (module_count == 1).then_some(source.as_str());
+    let external = tensor_bodies(&hir, input, rendered)?;
+    let libs: &[&str] = match external
+        .iter()
+        .any(|bodies| bodies.memory == llvm_backend::BodyMemory::Device)
+    {
+        true => GPU_RUNTIME_LIBS,
+        false => &[],
+    };
 
     if emit == EmitKind::LlvmIr {
         let ir = llvm_backend::compile_to_ir(
@@ -493,7 +511,7 @@ fn compile_file(
             optimization,
             &source,
             &input.display().to_string(),
-            external.as_ref(),
+            &external,
         )
         .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
         .context("Failed to generate LLVM IR")?;
@@ -510,7 +528,7 @@ fn compile_file(
         optimization,
         &source,
         &input.display().to_string(),
-        external.as_ref(),
+        &external,
     )
     .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
     .context("Failed to generate object code")?;
@@ -551,32 +569,103 @@ fn compile_file(
     };
 
     log::debug!("Linking to create executable: {}", output_path.display());
-    link_object_to_executable(&object_path, &output_path)
+    link_object_to_executable(&object_path, &output_path, libs)
         .context("Failed to link object file to executable")?;
 
     Ok(output_path)
 }
 
+/// The `@gpu` functions in `hir`.
+fn gpu_functions(hir: &neuro_hir::HirProgram) -> impl Iterator<Item = &neuro_hir::HirFunction> {
+    hir.items.iter().filter_map(|item| match item {
+        neuro_hir::HirItem::Function(f) if f.target == neuro_hir::HirTarget::Gpu => Some(f),
+        _ => None,
+    })
+}
+
 /// The tensor bodies `mlir-backend` computes, for the LLVM backend to link in place of
-/// its own. A failure here is a compiler bug, so it stops the build rather than quietly
-/// handing the body back to the LLVM backend, which would hide it.
+/// its own: the host ones, and the `@gpu` ones as NVIDIA kernels. A failure lowering a
+/// host body is a compiler bug, so it stops the build rather than quietly handing the
+/// body back to the LLVM backend, which would hide it. A `@gpu` body that cannot become
+/// a kernel is the user's error, reported at its function.
 #[cfg(feature = "mlir")]
-fn tensor_bodies(hir: &neuro_hir::HirProgram) -> Result<Option<llvm_backend::ExternalBodies>> {
-    let bodies = mlir_backend::lower_for_link(hir)
+fn tensor_bodies(
+    hir: &neuro_hir::HirProgram,
+    path: &Path,
+    source: Option<&str>,
+) -> Result<Vec<llvm_backend::ExternalBodies>> {
+    let host = mlir_backend::lower_for_link(hir)
         .map_err(|e| anyhow::anyhow!("MLIR lowering error: {}", e))
         .context("Failed to lower tensor bodies through MLIR")?;
-    Ok(Some(llvm_backend::ExternalBodies {
-        llvm_ir: bodies.llvm_ir,
-        functions: bodies.functions,
+    let mut bodies = vec![llvm_backend::ExternalBodies {
+        llvm_ir: host.llvm_ir,
+        functions: host.functions,
         memory: llvm_backend::BodyMemory::Host,
-    }))
+    }];
+    if gpu_functions(hir).next().is_none() {
+        return Ok(bodies);
+    }
+    // The runtime opens the CUDA driver with `dlopen`, which Windows does not have.
+    if cfg!(target_os = "windows") {
+        refuse_gpu_functions(hir, path, source, "is not supported on Windows yet");
+        anyhow::bail!("`@gpu` is not supported on Windows yet");
+    }
+
+    let target = mlir_backend::GpuTarget::Nvidia {
+        chip: GPU_CHIP.to_string(),
+    };
+    let device = mlir_backend::lower_for_gpu(hir, &target).map_err(|e| {
+        if let mlir_backend::MlirError::GpuBodiesNotLowered(functions) = &e {
+            for (name, span) in functions {
+                let message = format!("`@gpu` function '{name}' cannot become a GPU kernel");
+                eprintln!("{}\n", render_diagnostic(path, source, &message, *span));
+            }
+        }
+        anyhow::anyhow!("MLIR lowering error: {}", e)
+    })?;
+    bodies.push(llvm_backend::ExternalBodies {
+        llvm_ir: device.llvm_ir,
+        functions: device.functions,
+        memory: llvm_backend::BodyMemory::Device,
+    });
+    Ok(bodies)
 }
 
 /// Without the `mlir` feature there is no MLIR toolchain, and every body is the LLVM
-/// backend's.
+/// backend's. A `@gpu` body cannot be one of them: running it on the host is what the
+/// attribute forbids.
 #[cfg(not(feature = "mlir"))]
-fn tensor_bodies(_hir: &neuro_hir::HirProgram) -> Result<Option<llvm_backend::ExternalBodies>> {
-    Ok(None)
+fn tensor_bodies(
+    hir: &neuro_hir::HirProgram,
+    path: &Path,
+    source: Option<&str>,
+) -> Result<Vec<llvm_backend::ExternalBodies>> {
+    if gpu_functions(hir).next().is_none() {
+        return Ok(Vec::new());
+    }
+    refuse_gpu_functions(
+        hir,
+        path,
+        source,
+        "needs a GPU, and this neurc was built without the MLIR backend (`--features mlir`)",
+    );
+    anyhow::bail!("`@gpu` needs a neurc built with the MLIR backend")
+}
+
+/// Report every `@gpu` function at its declaration, with `problem` after its name.
+fn refuse_gpu_functions(
+    hir: &neuro_hir::HirProgram,
+    path: &Path,
+    source: Option<&str>,
+    problem: &str,
+) {
+    for function in gpu_functions(hir) {
+        let message = format!("`@gpu` function '{}' {problem}", function.name);
+        eprintln!(
+            "{}\n",
+            render_diagnostic(path, source, &message, function.span)
+        );
+    }
 }
 
 /// Record why one linker did not produce the executable, for the error the last one raises.
@@ -616,8 +705,11 @@ fn record_attempt(
 /// Link an object file to a native executable via the platform's C compiler,
 /// which acts as a linker driver (C runtime, startup code, etc.). Windows tries
 /// clang, then lld-link, then MSVC cl.exe.
+///
+/// `libs` is ignored: the only libraries a program asks for serve `@gpu`, which is
+/// refused on Windows before anything is linked.
 #[cfg(target_os = "windows")]
-fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<()> {
+fn link_object_to_executable(object_path: &Path, output_path: &Path, _libs: &[&str]) -> Result<()> {
     let mut attempts: Vec<String> = Vec::new();
 
     log::debug!("Attempting to link with clang");
@@ -688,9 +780,10 @@ fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<(
     ))
 }
 
-/// Link an object file to a native executable via `cc`, the Unix linker driver.
+/// Link an object file to a native executable via `cc`, the Unix linker driver, adding
+/// the platform libraries in `libs`.
 #[cfg(not(target_os = "windows"))]
-fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<()> {
+fn link_object_to_executable(object_path: &Path, output_path: &Path, libs: &[&str]) -> Result<()> {
     // cc (gcc or clang) acts as the linker driver. `-lm` is explicit because
     // `Tensor::random_normal` and the elementwise math methods emit `log`, `exp`, `tanh`,
     // `pow` and `cos`, and the C math library is a separate archive on the older glibc
@@ -700,6 +793,7 @@ fn link_object_to_executable(object_path: &Path, output_path: &Path) -> Result<(
         .arg("-o")
         .arg(output_path)
         .arg("-lm")
+        .args(libs)
         .output()
         .context("Failed to execute cc - ensure a C compiler (gcc/clang) is installed")?;
 

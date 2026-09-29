@@ -6,7 +6,7 @@ Emit native object code, or the textual LLVM module behind it, from the typed Ne
 ## Entry Point
 - Type: Library function
 - Input: `program: &neuro_hir::HirProgram, optimization: OptimizationLevelSetting, source: &str,
-  source_path: &str, external: Option<&ExternalBodies>`
+  source_path: &str, external: &[ExternalBodies]`
 - Output: `Result<Vec<u8>, CodegenError>` from `compile`, or `Result<String, CodegenError>`
   from `compile_to_ir`, which prints the module instead of selecting instructions
 
@@ -80,7 +80,7 @@ load-bearing:
 
 ## External Bodies
 `ExternalBodies` is LLVM IR text plus `(function, symbol)` pairs: a free function whose body some
-other backend computed (today `mlir-backend`, through `neurc`'s `mlir` feature). The function is
+other backend computed. `external` is a list of them, one per memory kind, each linked in turn (today `mlir-backend`, through `neurc`'s `mlir` feature). The function is
 declared like any other, so every call site and every function value is unchanged; only its body
 differs. `codegen_external_body` (`codegen/external_bodies.rs`) emits it as a call to the symbol
 in MLIR's calling convention: each tensor as an exploded row-major `memref` descriptor (its `data`
@@ -97,7 +97,8 @@ the other backend never shares an `LLVMContext` with this one), links it, and ma
 function has scalar, tensor or `&Tensor` parameters and a statically shaped tensor result; the
 descriptor needs a compile-time extent per axis.
 
-`ExternalBodies::memory` (`BodyMemory`) says where a symbol's buffers must live. `Host` passes
+`ExternalBodies::memory` (`BodyMemory`) says where a symbol's buffers must live, and
+`codegen_external_body` takes it per function. `Host` passes
 each tensor's own buffer. `Device` is for bodies that launch GPU kernels, and
 `codegen/device_memory.rs` stages every one of their buffers: the wrapper opens a staging region
 (the device arena's mark, and a stream from `mgpuStreamCreate`), copies each tensor operand into a
@@ -114,9 +115,20 @@ the device), 256-byte alignment, and a spill to `mgpuMemAlloc` / `mgpuMemFree` f
 fit. It is defined under the names a launcher's IR allocates its scratch buffers through,
 `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, with external linkage so the launchers'
 declarations resolve to it at the link, which then internalizes both. An allocation that comes
-back null aborts with a diagnostic rather than hand a kernel a null buffer, which is how a missing
-GPU is reported today. The GPU runtime ABI (`mgpu*`) is declared, never defined: the runtime
-library is the linker's to supply.
+back null aborts with a diagnostic rather than hand a kernel a null buffer.
+
+**The GPU runtime.** A module with any `Device` bodies links `codegen/gpu_runtime.ll`
+(`link_gpu_runtime`), which defines MLIR's GPU runtime ABI (`mgpuModuleLoad[JIT]`,
+`mgpuModuleUnload`, `mgpuModuleGetFunction`, `mgpuLaunchKernel`, `mgpuStream*`, `mgpuMem*`) over the
+CUDA driver API, and internalizes every entry point after the link. It is generated from
+`gpu_runtime.c` like `softfloat`'s builtins, and opens `libcuda.so.1` with `dlopen` on first use,
+so the binary does not need the driver to load and a missing GPU becomes a diagnostic rather than
+a dynamic-loader error. First use is the launchers' module-load constructor, so a program with a
+`@gpu` function checks for a GPU before `main`. The runtime reports every failure through
+`__neuro_gpu_panic(ptr, i64)`, which `define_gpu_panic` emits as an ordinary panic (`panic:`
+prefix, stdout drained first, `abort`); only `mgpuMemAlloc` answers null instead, for the device
+allocator's own diagnostic. It makes device 0's primary context current once and assumes one
+thread. The executable needs `dlopen`, which `neurc` links `-ldl` for.
 
 ## Stack Slot Placement
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,

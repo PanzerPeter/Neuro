@@ -4,17 +4,32 @@
 use std::collections::HashSet;
 
 use ast_types::{
-    ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef, VariantPayload,
+    Attribute, ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef,
+    VariantPayload,
 };
 use neuro_hir::{
     HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction, HirImpl, HirItem,
-    HirMethod, HirParam, HirProgram, HirSelfParam, HirStmt, HirStruct, HirType,
+    HirMethod, HirParam, HirProgram, HirSelfParam, HirStmt, HirStruct, HirTarget, HirType,
 };
 
 use crate::{Lowerer, LoweringError};
 
 mod mono;
 mod register;
+
+/// The attribute pinning a function's body to a GPU. Its form (bare, on a free
+/// function) is the checker's rule; here it only has to be recognised.
+const GPU_ATTRIBUTE: &str = "gpu";
+
+fn target_of(attributes: &[Attribute]) -> HirTarget {
+    match attributes
+        .iter()
+        .any(|attr| attr.name.name == GPU_ATTRIBUTE)
+    {
+        true => HirTarget::Gpu,
+        false => HirTarget::Host,
+    }
+}
 
 impl Lowerer {
     /// Lower every top-level item to its HIR form.
@@ -229,6 +244,7 @@ impl Lowerer {
             params,
             return_type,
             body,
+            target: target_of(&func.attributes),
             span: func.span,
         })
     }

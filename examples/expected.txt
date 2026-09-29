@@ -18,6 +18,11 @@
 # `module` in place of an exit code marks a non-root module of a multi-file
 # program: it has no `main`, and is compiled as part of the root that reaches
 # into it rather than on its own.
+#
+# `gpu` after an exit code marks a program with `@gpu` functions. It is pinned
+# like any other where a GPU runs it; with no usable GPU it must abort at
+# startup with the GPU runtime's diagnostic, and a compiler built without the
+# MLIR backend only type-checks it.
 
 # --- basics: functions, variables, arithmetic, recursion, stdout ------------
 basics/assignment.nr           15
@@ -81,6 +86,7 @@ tensors/tensor_sorting.nr             21
 tensors/tensor_einsum.nr              40
 tensors/tensor_functional.nr          24
 tensors/tensor_math.nr                10
+tensors/tensor_gpu.nr                 2  gpu
 
 # --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
 ownership/borrow_exclusivity.nr  31
@@ -158,6 +164,7 @@ showcase/enum_records.nr             46
 showcase/field_report.nr             63
 showcase/frozen_features.nr          23
 showcase/generic_toolkit.nr          87
+showcase/gpu_layer.nr                3  gpu
 showcase/gradient_loss.nr            45
 showcase/grid_update.nr              50
 showcase/held_destruction.nr         5

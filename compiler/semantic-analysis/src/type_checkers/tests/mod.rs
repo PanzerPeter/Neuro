@@ -11,6 +11,7 @@ mod elementwise_math_tests;
 mod enum_expr_tests;
 mod enum_tests;
 mod generic_tests;
+mod gpu_tests;
 mod grad_tests;
 mod intrinsic_tests;
 mod iteration_tests;

@@ -413,6 +413,7 @@ mod tests {
                 params: vec![param("a", HirType::I32), param("b", HirType::I32)],
                 return_type: HirType::I32,
                 body: vec![],
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         };
@@ -499,6 +500,7 @@ mod tests {
                 ],
                 return_type: HirType::F32,
                 body: vec![],
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         };
@@ -530,6 +532,7 @@ mod tests {
                 ],
                 return_type: HirType::Tuple(vec![HirType::I32, HirType::I32]),
                 body: vec![],
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         };

@@ -21,13 +21,16 @@ legs build the placeholder.
 - `lower_for_link(&HirProgram) -> Result<LinkableBodies, MlirError>`: the driver's entry. A module
   of only the bodies worth linking, each defined as `__neuro_mlir_<function>`, carried through the
   same pipeline and returned as LLVM IR with its `(function, symbol)` pairs. Empty IR and no pairs
-  when nothing qualifies.
-- `lower_for_gpu(&HirProgram, &GpuTarget) -> Result<LinkableBodies, MlirError>`: the bodies,
-  pairs and symbol signatures of `lower_for_link` less any with a rank-0 tensor, but each symbol
+  when nothing qualifies. A `@gpu` function (`HirTarget::Gpu`) never qualifies here.
+- `lower_for_gpu(&HirProgram, &GpuTarget) -> Result<LinkableBodies, MlirError>`: every `@gpu`
+  function, with the pairs and symbol signatures `lower_for_link` would give it, but each symbol
   launches its `linalg` ops as GPU kernels for `GpuTarget::Nvidia { chip }` (`nvvm`, PTX) or
-  `GpuTarget::Amd { chip }` (`rocdl`, a code object). Every buffer it is handed must be device
-  memory, and it allocates a buffer between two kernels through `_mlir_memref_to_llvm_alloc` /
-  `_mlir_memref_to_llvm_free`, which the caller defines. Nothing in the driver calls it yet.
+  `GpuTarget::Amd { chip }` (`rocdl`, a code object). A `@gpu` body that would not reach
+  `lower_for_link`, or that has a rank-0 tensor, is `GpuBodiesNotLowered` with every such
+  function's name and span: running it on the host is what `@gpu` forbids. Every buffer a symbol
+  is handed must be device memory, and it allocates a buffer between two kernels through
+  `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which the caller defines. `neurc`
+  calls it only for a program with a `@gpu` function.
 The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
 from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
 because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
@@ -40,6 +43,8 @@ rather than only declarations.
 - `neuro-hir`: the typed HIR contract `lower_program` consumes, gated under `mlir`.
 - `ast-types`: `BinaryOp`, which the HIR's `Binary` expression carries rather than redeclaring,
   gated under `mlir`.
+- `shared-types`: `Span`, which `GpuBodiesNotLowered` carries per refused function, gated under
+  `mlir`.
 
 The crate adds no business logic of its own beyond the lowering; it otherwise uses only
 third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
@@ -114,7 +119,8 @@ The exception would be an operation with no parallel axis, which has no loop to 
 and so runs on the host against device buffers; only a rank-0 operation has none, and a rank-0
 operation needs rank-0 operands, which come from the parameters. `launches_every_op` therefore
 keeps a body with a rank-0 tensor parameter or result off the GPU module, through the admission
-rule `build_linkable_module` takes (the CPU path admits everything).
+rule `build_linkable_module` takes (the CPU path admits every `Host` function, the GPU path every
+`Gpu` one that passes this test), and `refused_bodies` turns what is left out into the error.
 
 **Tensor arithmetic is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` or tail expression over

@@ -5,7 +5,7 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
 
 ## Entry Point
 - Type: Library (no entry function: pure data)
-- Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirParam`, `HirStruct`, `HirField`,
+- Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirTarget`, `HirParam`, `HirStruct`, `HirField`,
   `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
   `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirPlace`, `HirExpr`, `HirExprKind`,
   `HirFieldInit`, `HirBindingSource`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,

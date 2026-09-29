@@ -35,7 +35,8 @@ pub use expressions::{
 };
 pub use items::{
     HirCapture, HirClosure, HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction,
-    HirImpl, HirItem, HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTrait,
+    HirImpl, HirItem, HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTarget,
+    HirTrait,
 };
 pub use statements::{HirPlace, HirStmt};
 pub use types::{extent_display, static_shape, AxisNames, HirCollectionKind, HirType};
@@ -140,6 +141,7 @@ mod tests {
                 params: vec![],
                 return_type: HirType::I32,
                 body,
+                target: HirTarget::Host,
                 span: span(),
             })],
         };

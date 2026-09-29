@@ -1237,3 +1237,47 @@ func loss(t: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
         "t) * 2.0",
     );
 }
+
+const GPU_CALLEE: &str = r#"
+@gpu
+func double(x: &Tensor<f32, [2]>) -> Tensor<f32, [2]> {
+    x + x
+}
+"#;
+
+/// Inlining a `@gpu` callee onto the tape would run its body on the host.
+#[test]
+fn a_gpu_call_in_a_grad_body_is_refused_at_the_call() {
+    let src = format!(
+        "{GPU_CALLEE}
+@grad
+func loss(t: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {{
+    val d = double(t)
+    return Tensor::scalar(d.sum())
+}}
+"
+    );
+    refusal_at(&src, "double(t)");
+}
+
+#[test]
+fn a_gpu_function_marked_no_grad_is_called_as_a_constant() {
+    let program = lower(&format!(
+        "@no_grad{GPU_CALLEE}
+@grad
+func loss(t: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {{
+    val d = double(t)
+    val s = t * d
+    return Tensor::scalar(s.sum())
+}}
+"
+    ));
+    assert_eq!(
+        item_function(&program, "double").target,
+        neuro_hir::HirTarget::Gpu
+    );
+    assert_eq!(
+        item_function(&program, "__loss__rev").target,
+        neuro_hir::HirTarget::Host
+    );
+}

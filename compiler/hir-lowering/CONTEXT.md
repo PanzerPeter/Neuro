@@ -91,6 +91,11 @@ hands them to `derive_reverses` / `derive_method_reverses`, which put them in `F
 inlined: `constant_call` replays the call as written, an owned tensor argument as a `.clone()`
 of its leaf, a `&T` argument as a shared borrow, a number as it is. A `&mut` argument, or one
 taken by value that is neither, is refused at the argument: the reverse pass reads it again.
+A call to a `@gpu` function that is not also `@no_grad` is refused at the call: inlining it would
+run its body on the host, which `@gpu` forbids.
+
+`@gpu` sets `HirFunction::target` to `HirTarget::Gpu` (`target_of`), on a concrete function and
+on every instance of a generic template alike. Every function the transform generates is `Host`.
 
 A `@grad` function with a function-typed parameter is never derived on its own
 (`derive_reverses` skips it): only a call site knows the target. `lower_backward` resolves each

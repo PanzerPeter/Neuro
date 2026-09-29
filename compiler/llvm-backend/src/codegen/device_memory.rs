@@ -34,6 +34,11 @@ use super::context::CodegenContext;
 pub(crate) const DEVICE_ALLOC_FN: &str = "_mlir_memref_to_llvm_alloc";
 pub(crate) const DEVICE_RELEASE_FN: &str = "_mlir_memref_to_llvm_free";
 
+/// What the GPU runtime calls on any failure, `(ptr, i64)` message included. Defined
+/// here so a runtime failure is a Neuro panic: same `panic:` text, same abort, and
+/// buffered standard output drained first.
+pub(crate) const GPU_PANIC_FN: &str = "__neuro_gpu_panic";
+
 const DEVICE_BUMP_FN: &str = "__neuro_device_bump";
 const DEVICE_ARENA_BASE_GLOBAL: &str = "__neuro_device_arena_base";
 const DEVICE_ARENA_OFFSET_GLOBAL: &str = "__neuro_device_arena_offset";
@@ -71,6 +76,41 @@ pub(crate) struct DeviceStaging<'ctx> {
 }
 
 impl<'ctx> CodegenContext<'ctx> {
+    /// Define [`GPU_PANIC_FN`] for the GPU runtime to call. External until the runtime is
+    /// linked, like [`device_alloc_fn`](CodegenContext::device_alloc_fn), and emitted
+    /// before the module is finished so the stdout drain lands ahead of its message.
+    pub(crate) fn define_gpu_panic(&mut self) -> CodegenResult<()> {
+        let ptr = self.ptr();
+        let function = self.module.add_function(
+            GPU_PANIC_FN,
+            self.context
+                .void_type()
+                .fn_type(&[ptr.into(), self.context.i64_type().into()], false),
+            None,
+        );
+        let entry = self.context.append_basic_block(function, "entry");
+        let resume_at = self.builder.get_insert_block();
+        self.builder.position_at_end(entry);
+        let message = function
+            .get_first_param()
+            .ok_or_else(|| CodegenError::InternalError("GPU panic lost its message".into()))?;
+        let length = function
+            .get_nth_param(1)
+            .ok_or_else(|| CodegenError::InternalError("GPU panic lost its length".into()))?
+            .into_int_value();
+        self.emit_write_cstr("panic: ")?;
+        self.emit_write(message, length)?;
+        self.emit_write_cstr("\n")?;
+        self.emit_abort_unreachable()?;
+        if let Some(first) = entry.get_first_instruction() {
+            self.process_exit_points.push(first);
+        }
+        if let Some(block) = resume_at {
+            self.builder.position_at_end(block);
+        }
+        Ok(())
+    }
+
     /// Read the device arena's mark, for
     /// [`restore_device_arena`](CodegenContext::restore_device_arena) to hand back.
     pub(crate) fn mark_device_arena(&self) -> CodegenResult<IntValue<'ctx>> {

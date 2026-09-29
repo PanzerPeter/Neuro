@@ -103,7 +103,19 @@ pub struct HirFunction {
     pub params: Vec<HirParam>,
     pub return_type: HirType,
     pub body: Vec<HirStmt>,
+    pub target: HirTarget,
     pub span: Span,
+}
+
+/// Where a function's body must execute.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HirTarget {
+    /// Wherever its backend puts it: the host, or the host MLIR path.
+    #[default]
+    Host,
+    /// A GPU kernel, and nowhere else: `@gpu`. A backend that cannot lower the body to
+    /// one must refuse the program rather than run it on the host.
+    Gpu,
 }
 
 /// A function or method parameter with its resolved type.

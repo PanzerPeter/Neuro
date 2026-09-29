@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-09-29
+
+### Added
+
+- `@gpu` runs a function on the GPU. Put bare `@gpu` on a free function whose body is
+  straight-line element-wise `+ - * /` or `@` over `f32` / `f64` tensors of static shape, and
+  every call runs that body as NVIDIA kernels. Callers still pass and receive ordinary tensors.
+  Generic functions qualify per instance, and a `pool` block releases the device memory its
+  calls used. See `examples/tensors/tensor_gpu.nr` and `examples/showcase/gpu_layer.nr`.
+- `@gpu` never falls back to the CPU. A body the GPU path cannot lower is a compile error at
+  the function, and so is any `@gpu` function on a `neurc` built without the MLIR backend. A
+  program run with no usable NVIDIA GPU stops before `main` with
+  ``panic: `@gpu` needs an NVIDIA GPU, and none is usable: <reason>``.
+- A GPU runtime for the kernels, linked into the program. It opens the CUDA driver when the
+  program starts, so a binary needs only the NVIDIA driver to run, and compiling needs no CUDA
+  toolkit.
+- The examples harness accepts a `gpu` marker in `examples/expected.txt` for programs that need
+  a GPU.
+
+### Changed
+
+- The checker refuses `@gpu` on a method, with arguments, or next to `@grad`.
+  `@gpu(fallback: true)` is refused as not supported yet.
+- A `@grad` body can no longer differentiate through a call to a `@gpu` function, which would
+  have run its body on the host. Mark the callee `@no_grad` to call it as a constant.
+- `llvm_backend::compile` and `compile_to_ir` take `&[ExternalBodies]`, one set per memory kind,
+  instead of `Option<&ExternalBodies>`.
+- `mlir_backend::lower_for_gpu` lowers only `@gpu` functions and returns
+  `MlirError::GpuBodiesNotLowered` for any it cannot lower. `lower_for_link` no longer takes
+  `@gpu` functions.
+
 ## [4.3.0] - 2026-09-29
 
 ### Added

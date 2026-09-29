@@ -13,7 +13,7 @@ the three platforms CI builds, tests, and ships release binaries for.
 
 **Optional:**
 - MLIR 22 for the experimental MLIR backend; see [MLIR Backend](#optional-mlir-backend) below. Not needed for a normal build.
-- CUDA Toolkit 12+ for GPU support, once it lands (planned, not yet implemented)
+- An NVIDIA GPU and its driver, to run a program with `@gpu` functions (Linux only). Compiling one needs the MLIR backend, not a CUDA toolkit.
 
 ---
 
@@ -188,7 +188,7 @@ WebAssembly, which is why the workspace pins inkwell to `target-x86` rather than
 
 ## Optional: MLIR Backend
 
-The MLIR lowering path for tensors (and, later, GPU dialects) lives in the
+The MLIR lowering path for tensors and GPU kernels lives in the
 `mlir-backend` slice, built on the `melior` Rust MLIR bindings. It is **off by
 default** behind the `mlir` cargo feature, so nothing here is required for a
 normal Neuro build: the default `cargo build/test --workspace` compiles a
@@ -237,7 +237,8 @@ Rust 1.88 or newer.
 With the same environment, `neurc` can be built with a feature of the same name. That
 compiler hands straight-line `f32` / `f64` tensor arithmetic to the MLIR path and links the
 result into the program; every other body still comes from the LLVM backend, and programs
-behave identically either way:
+behave identically either way. It is also the only compiler that accepts `@gpu`: a build without
+the feature refuses a `@gpu` function rather than run it on the CPU.
 
 ```bash
 cargo build -p neurc --features mlir

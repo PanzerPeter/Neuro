@@ -18,7 +18,7 @@ fn lower(source: &str) -> neuro_hir::HirProgram {
 fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
     let hir = lower(source);
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(&context, &hir, optimization, source, "outlining.nr", None)
+    let codegen_ctx = build_module(&context, &hir, optimization, source, "outlining.nr", &[])
         .expect("module generation failed");
     codegen_ctx.module.print_to_string().to_string()
 }
@@ -29,7 +29,7 @@ fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
 fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
     let hir = lower(source);
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(&context, &hir, optimization, source, "optimized.nr", None)
+    let codegen_ctx = build_module(&context, &hir, optimization, source, "optimized.nr", &[])
         .expect("module generation failed");
     let (machine, triple) =
         host_target_machine(optimization).expect("host target machine unavailable");
@@ -1087,7 +1087,7 @@ fn test_compile_simple_function() {
     "#;
 
     let hir = lower(source);
-    let result = compile(&hir, OptimizationLevelSetting::O0, source, "test.nr", None);
+    let result = compile(&hir, OptimizationLevelSetting::O0, source, "test.nr", &[]);
 
     assert!(result.is_ok(), "compilation failed: {:?}", result.err());
     let object_code = result.unwrap();
@@ -1108,7 +1108,7 @@ fn test_compile_milestone_program() {
     "#;
 
     let hir = lower(source);
-    let result = compile(&hir, OptimizationLevelSetting::O2, source, "test.nr", None);
+    let result = compile(&hir, OptimizationLevelSetting::O2, source, "test.nr", &[]);
 
     assert!(result.is_ok(), "compilation failed: {:?}", result.err());
     let object_code = result.unwrap();
@@ -1129,7 +1129,7 @@ fn test_overflow_checks_emit_valid_ir_at_o0() {
     "#;
 
     let hir = lower(source);
-    let result = compile(&hir, OptimizationLevelSetting::O0, source, "test.nr", None);
+    let result = compile(&hir, OptimizationLevelSetting::O0, source, "test.nr", &[]);
 
     assert!(result.is_ok(), "compilation failed: {:?}", result.err());
     assert!(
@@ -1151,7 +1151,7 @@ fn test_overflow_wraps_emit_valid_ir_at_o2() {
     "#;
 
     let hir = lower(source);
-    let result = compile(&hir, OptimizationLevelSetting::O2, source, "test.nr", None);
+    let result = compile(&hir, OptimizationLevelSetting::O2, source, "test.nr", &[]);
 
     assert!(result.is_ok(), "compilation failed: {:?}", result.err());
     assert!(

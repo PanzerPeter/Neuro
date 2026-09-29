@@ -11,7 +11,27 @@ use crate::types::Type;
 use crate::{BodyMemory, ExternalBodies};
 
 use super::context::CodegenContext;
-use super::device_memory::{DEVICE_ALLOC_FN, DEVICE_RELEASE_FN};
+use super::device_memory::{DEVICE_ALLOC_FN, DEVICE_RELEASE_FN, GPU_PANIC_FN};
+
+/// The CUDA implementation of the GPU runtime ABI a device body calls, linked in with
+/// the first set of device bodies. See `gpu_runtime.c`, its provenance.
+const GPU_RUNTIME_IR: &str = include_str!("gpu_runtime.ll");
+
+/// What the runtime defines for the launchers and the staging, made internal once linked.
+const GPU_RUNTIME_ENTRY_POINTS: [&str; 12] = [
+    "mgpuModuleLoad",
+    "mgpuModuleLoadJIT",
+    "mgpuModuleUnload",
+    "mgpuModuleGetFunction",
+    "mgpuLaunchKernel",
+    "mgpuStreamCreate",
+    "mgpuStreamSynchronize",
+    "mgpuStreamDestroy",
+    "mgpuMemAlloc",
+    "mgpuMemFree",
+    "mgpuMemcpy",
+    GPU_PANIC_FN,
+];
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Define `func_def` as a call to `symbol`, a body lowered outside this backend.
@@ -24,7 +44,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Ownership is the ordinary function's: a by-value tensor parameter was moved in,
     /// so it is released once the body has read it, and a `&Tensor` one is only read.
     ///
-    /// When the bodies run on a device, every buffer `symbol` sees is staged: each
+    /// When `memory` is a device's, every buffer `symbol` sees is staged: each
     /// tensor operand is copied into device memory, the result is written to a device
     /// buffer and copied back into the host tensor returned, and all of it is released
     /// before the function returns. A caller still passes and receives host tensors.
@@ -32,6 +52,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         func_def: &HirFunction,
         symbol: &str,
+        memory: BodyMemory,
     ) -> CodegenResult<()> {
         let function = *self
             .functions
@@ -45,7 +66,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_types: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
         let mut args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
         let mut consumed = Vec::new();
-        let mut staging = match self.body_memory {
+        let mut staging = match memory {
             BodyMemory::Host => None,
             BodyMemory::Device => Some(self.open_device_staging()?),
         };
@@ -157,16 +178,7 @@ pub(crate) fn link_external_bodies<'ctx>(
     module: &Module<'ctx>,
     bodies: &ExternalBodies,
 ) -> CodegenResult<()> {
-    // The IR parser reads a C string, so the text needs the terminator it lacks.
-    let mut bytes = bodies.llvm_ir.as_bytes().to_vec();
-    bytes.push(0);
-    let buffer = MemoryBuffer::create_from_memory_range_copy(&bytes, "external_bodies");
-    let external = context
-        .create_module_from_ir(buffer)
-        .map_err(|e| CodegenError::LlvmError(format!("failed to parse external bodies: {e}")))?;
-    module
-        .link_in_module(external)
-        .map_err(|e| CodegenError::LlvmError(format!("failed to link external bodies: {e}")))?;
+    link_ir(context, module, &bodies.llvm_ir, "external bodies")?;
 
     for (_, symbol) in &bodies.functions {
         let function = module.get_function(symbol).ok_or_else(|| {
@@ -176,12 +188,45 @@ pub(crate) fn link_external_bodies<'ctx>(
     }
     // The device allocator stayed external only so the launchers' declarations of its
     // names would resolve to it.
-    for name in [DEVICE_ALLOC_FN, DEVICE_RELEASE_FN] {
+    internalize(module, &[DEVICE_ALLOC_FN, DEVICE_RELEASE_FN]);
+    Ok(())
+}
+
+/// Link the GPU runtime into `module`, whose device bodies and staging call it, and
+/// make its entry points internal: nothing outside the program calls them.
+pub(crate) fn link_gpu_runtime<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+) -> CodegenResult<()> {
+    link_ir(context, module, GPU_RUNTIME_IR, "the GPU runtime")?;
+    internalize(module, &GPU_RUNTIME_ENTRY_POINTS);
+    Ok(())
+}
+
+fn link_ir<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+    ir: &str,
+    what: &str,
+) -> CodegenResult<()> {
+    // The IR parser reads a C string, so the text needs the terminator it lacks.
+    let mut bytes = ir.as_bytes().to_vec();
+    bytes.push(0);
+    let buffer = MemoryBuffer::create_from_memory_range_copy(&bytes, what);
+    let parsed = context
+        .create_module_from_ir(buffer)
+        .map_err(|e| CodegenError::LlvmError(format!("failed to parse {what}: {e}")))?;
+    module
+        .link_in_module(parsed)
+        .map_err(|e| CodegenError::LlvmError(format!("failed to link {what}: {e}")))
+}
+
+fn internalize(module: &Module<'_>, names: &[&str]) {
+    for name in names {
         if let Some(function) = module.get_function(name) {
             function.set_linkage(Linkage::Internal);
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -225,17 +270,24 @@ mod tests {
         }
     "#;
 
-    fn linked_ir(source: &str, bodies_ir: &str, memory: BodyMemory) -> String {
-        let ast = syntax_parsing::parse(source).expect("parsing failed");
-        let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
-        let bodies = ExternalBodies {
+    fn both(bodies_ir: &str, memory: BodyMemory) -> ExternalBodies {
+        ExternalBodies {
             llvm_ir: bodies_ir.to_string(),
             functions: vec![
                 ("scale".to_string(), "ext_scale".to_string()),
                 ("consume".to_string(), "ext_consume".to_string()),
             ],
             memory,
-        };
+        }
+    }
+
+    fn linked_ir(source: &str, bodies_ir: &str, memory: BodyMemory) -> String {
+        linked(source, &[both(bodies_ir, memory)])
+    }
+
+    fn linked(source: &str, external: &[ExternalBodies]) -> String {
+        let ast = syntax_parsing::parse(source).expect("parsing failed");
+        let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
         let context = Context::create();
         let codegen_ctx = build_module(
             &context,
@@ -243,7 +295,7 @@ mod tests {
             OptimizationLevelSetting::O0,
             source,
             "external.nr",
-            Some(&bodies),
+            external,
         )
         .expect("a module with linked bodies should build and verify");
         for symbol in ["ext_scale", "ext_consume"] {
@@ -388,6 +440,78 @@ mod tests {
         assert!(
             !host.contains("__neuro_device_arena"),
             "a host-only program owes the device nothing:\n{host}"
+        );
+    }
+
+    /// A defined function's linkage line, or `None` when `name` is only declared.
+    fn definition<'a>(ir: &'a str, name: &str) -> Option<&'a str> {
+        ir.lines()
+            .find(|line| line.starts_with("define") && line.contains(&format!("@{name}(")))
+    }
+
+    #[test]
+    fn host_and_device_bodies_link_side_by_side() {
+        const DEVICE_SCALE: &str = r#"
+            define void @ext_scale(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, float %5, ptr %6, ptr %7, i64 %8, i64 %9, i64 %10) {
+              ret void
+            }
+        "#;
+        const HOST_CONSUME: &str = r#"
+            define void @ext_consume(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9) {
+              ret void
+            }
+        "#;
+        let ir = linked(
+            SOURCE,
+            &[
+                ExternalBodies {
+                    llvm_ir: DEVICE_SCALE.to_string(),
+                    functions: vec![("scale".to_string(), "ext_scale".to_string())],
+                    memory: BodyMemory::Device,
+                },
+                ExternalBodies {
+                    llvm_ir: HOST_CONSUME.to_string(),
+                    functions: vec![("consume".to_string(), "ext_consume".to_string())],
+                    memory: BodyMemory::Host,
+                },
+            ],
+        );
+        assert!(
+            body(&ir, "scale").contains("call void @ext_scale(ptr %device.buffer"),
+            "the device body is handed staged buffers:\n{ir}"
+        );
+        let consume = body(&ir, "consume");
+        assert!(
+            consume.contains("call void @ext_consume(ptr %dlpack.data")
+                && !consume.contains("mgpu"),
+            "the host body is handed its own buffers:\n{consume}"
+        );
+    }
+
+    #[test]
+    fn a_device_body_brings_the_gpu_runtime() {
+        let ir = device_ir(SOURCE);
+        for name in super::GPU_RUNTIME_ENTRY_POINTS {
+            let line = definition(&ir, name)
+                .unwrap_or_else(|| panic!("expected `{name}` defined by the runtime:\n{ir}"));
+            assert!(line.starts_with("define internal"), "{line}");
+        }
+        assert!(
+            ir.contains("libcuda.so.1") && ir.contains("needs an NVIDIA GPU"),
+            "the driver is opened at run time, and its absence is reported:\n{ir}"
+        );
+
+        let panic = &ir[position(&ir, "@__neuro_gpu_panic(ptr", 0)..];
+        let write = position(panic, "call i64 @write(", 0);
+        position(panic, "call void @abort()", write);
+    }
+
+    #[test]
+    fn a_host_body_brings_no_gpu_runtime() {
+        let ir = host_ir();
+        assert!(
+            definition(&ir, "mgpuModuleLoadJIT").is_none() && !ir.contains("__neuro_gpu_panic"),
+            "{ir}"
         );
     }
 }

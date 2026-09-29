@@ -1,3 +1,4 @@
+use shared_types::Span;
 use thiserror::Error;
 
 /// Failures that can arise while constructing or verifying MLIR through melior.
@@ -46,7 +47,20 @@ pub enum MlirError {
     #[error("GPU kernels could not be serialized; an AMD target needs ROCm installed (ld.lld under $ROCM_PATH/llvm/bin, /opt/rocm by default)")]
     GpuSerializationFailed,
 
+    /// `@gpu` functions whose bodies this path cannot turn into kernels, each with its
+    /// declaration's span. Running one on the host instead is what `@gpu` forbids.
+    #[error("no GPU kernel for `@gpu` {}: the GPU path lowers straight-line element-wise `+ - * /` and `@` over `f32` / `f64` tensors of static shape and rank 1 or more, with a tensor result", names(.0))]
+    GpuBodiesNotLowered(Vec<(String, Span)>),
+
     /// A melior call (block argument access, operation result access, ...) failed.
     #[error("melior operation failed: {0}")]
     Melior(#[from] melior::Error),
+}
+
+fn names(functions: &[(String, Span)]) -> String {
+    let quoted: Vec<String> = functions
+        .iter()
+        .map(|(name, _)| format!("'{name}'"))
+        .collect();
+    quoted.join(", ")
 }

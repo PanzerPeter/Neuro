@@ -322,6 +322,7 @@ mod collections;
 mod const_eval;
 mod declarations;
 mod expressions;
+mod gpu;
 mod grad;
 mod iteration;
 mod literals;
@@ -904,6 +905,7 @@ impl TypeChecker {
         // Pass 3c: `@grad` signatures, which need every signature registered so the names
         // the derivative transform generates can be tested against the whole program.
         self.check_grad_attributes(items);
+        self.check_gpu_attributes(items);
 
         // Pass 4: check function, method, and const bodies. Each body is checked as the
         // module it was written in, which is what a private field is measured against.

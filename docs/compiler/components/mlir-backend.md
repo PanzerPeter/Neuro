@@ -22,7 +22,7 @@ copies.
 
 ## Architecture
 
-- **Dependencies** (all behind the `mlir` feature): `neuro-hir` (the HIR it lowers), `ast-types`,
+- **Dependencies** (all behind the `mlir` feature): `neuro-hir` (the HIR it lowers), `ast-types`, `shared-types`,
   `melior`, `mlir-sys`, `inkwell`, `thiserror`. It depends on no feature slice.
 - **Public API** (feature `mlir`): `lower_program`, `translate_to_llvm_ir`, `lower_for_link`,
   `lower_for_gpu`, `GpuTarget`, `LinkableBodies`, `MlirError`.
@@ -64,8 +64,9 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
 - `lower_for_link`, the driver's entry: only the bodies worth linking, as LLVM IR, with the
   function each symbol computes.
-- `lower_for_gpu`, the same bodies as GPU kernels with host functions that launch them, reading
-  and writing device memory only. No `neurc` path calls it yet.
+- `lower_for_gpu`, the `@gpu` functions as GPU kernels with host functions that launch them,
+  reading and writing device memory only, or an error naming each `@gpu` function it cannot
+  lower. `neurc` calls it for a program with a `@gpu` function.
 - The HIR-independent `melior` wiring check (a verified `func.func @neuro_smoke` with an
   `arith.addi` body) is `pub(crate)` and compiled only under `test`.
 
@@ -264,12 +265,14 @@ a clamped extent, so blocks cover the grid and each block runs a tile of threads
 product is two kernels, the zero fill and the contraction.
 
 Each symbol keeps `lower_for_link`'s signature, so the
-[LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The set of pairs is the
-same, minus any body with a rank-0 tensor in it: a rank-0 operation has no parallel axis to launch
-over, so it would run on the host against device buffers, and it stays on the LLVM backend
-instead. The symbol's body calls MLIR's GPU runtime ABI (`mgpuModuleLoad` or `mgpuModuleLoadJIT`,
-`mgpuLaunchKernel`, the `mgpuStream*` calls), which the IR declares and this crate does not
-define.
+[LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The two paths split the
+program by `HirFunction::target`: `lower_for_link` takes only host functions and `lower_for_gpu`
+only `@gpu` ones. A `@gpu` body `lower_for_link` would not take, or one with a rank-0 tensor in it
+(a rank-0 operation has no parallel axis to launch over, so it would run on the host against
+device buffers), is `GpuBodiesNotLowered`, with the name and span of each: `@gpu` forbids running
+it anywhere but a GPU. The symbol's body calls MLIR's GPU runtime ABI (`mgpuModuleLoad` or
+`mgpuModuleLoadJIT`, `mgpuLaunchKernel`, the `mgpuStream*` calls), which the IR declares and the
+LLVM backend's runtime defines.
 
 Every buffer a symbol is handed has to be device memory; the LLVM backend's wrapper stages them.
 A buffer the body needs between two kernels, such as the sum in `(a + b) * c`, is allocated

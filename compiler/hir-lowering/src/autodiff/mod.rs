@@ -59,7 +59,7 @@ use std::collections::{HashMap, HashSet};
 use ast_types::{Attribute, BinaryOp, Expr};
 use neuro_hir::{
     HirCapture, HirExpr, HirExprKind, HirField, HirFieldInit, HirFunction, HirItem, HirMethod,
-    HirParam, HirPlace, HirStmt, HirStruct, HirTensorAxis, HirType,
+    HirParam, HirPlace, HirStmt, HirStruct, HirTarget, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -497,6 +497,7 @@ pub(crate) fn derive_method_reverses(
                 params: method.params.clone(),
                 return_type: method.return_type.clone(),
                 body: method.body.clone(),
+                target: HirTarget::Host,
                 span: method.span,
             };
             let key = format!("{type_name}{METHOD_SEPARATOR}{method_name}");
@@ -778,6 +779,7 @@ fn derive_reverse(
             params,
             return_type: result_ty,
             body,
+            target: HirTarget::Host,
             span,
         }),
     ];
@@ -855,6 +857,7 @@ fn hessian_vector_product(
         params,
         return_type: loss_ty,
         body,
+        target: HirTarget::Host,
         span,
     };
     let wrt = Wrt::Listed {
@@ -877,6 +880,7 @@ fn hessian_vector_product(
         params: projection.params,
         return_type: gradient.ty.clone(),
         body,
+        target: HirTarget::Host,
         span,
     })
 }

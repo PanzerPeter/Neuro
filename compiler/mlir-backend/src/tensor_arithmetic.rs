@@ -804,6 +804,7 @@ mod tests {
                 ],
                 return_type: ty,
                 body,
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         }
@@ -858,6 +859,7 @@ mod tests {
                     value: Some(sum),
                     span: span(),
                 }],
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         }
@@ -1147,6 +1149,7 @@ mod tests {
                     value: Some(product),
                     span: span(),
                 }],
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         }
@@ -1248,6 +1251,7 @@ mod tests {
                     value: Some(product),
                     span: span(),
                 }],
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         };
@@ -1287,6 +1291,7 @@ mod tests {
                     )),
                     span: span(),
                 }],
+                target: neuro_hir::HirTarget::Host,
                 span: span(),
             })],
         };

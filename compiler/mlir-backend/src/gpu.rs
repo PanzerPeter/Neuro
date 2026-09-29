@@ -7,7 +7,8 @@ use crate::{
 };
 
 use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
-use neuro_hir::{HirFunction, HirProgram, HirType};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
+use shared_types::Span;
 
 /// The GPU a set of kernels is compiled for, and the chip that fixes its ISA.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,15 +65,15 @@ const TILE_SIZES: &str = "16,16";
 /// the caller can hand out device memory: only kernels ever touch it.
 const DEVICE_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm{use-generic-functions=true}";
 
-/// Lower the bodies [`lower_for_link`](crate::lower_for_link) would link into
-/// GPU kernels for `target`, with host functions that launch them.
+/// Lower every `@gpu` function into GPU kernels for `target`, with host functions
+/// that launch them, or refuse the program if any of them cannot become one.
 ///
-/// Each `(function, symbol)` pair and each symbol's signature are
-/// `lower_for_link`'s: the host side of a symbol takes the same exploded
-/// descriptors and out-param, so the LLVM backend's wrapper serves either. The one
-/// difference in the set is a body with a rank-0 tensor in it, which is left out:
-/// an operation with no parallel axis has no loop to map, so the launcher would
-/// run it on the host against buffers that live on the device.
+/// A body qualifies exactly when [`lower_for_link`](crate::lower_for_link) would link
+/// it were it not `@gpu`, and has no rank-0 tensor in it: an operation with no
+/// parallel axis has no loop to map, so the launcher would run it on the host
+/// against buffers that live on the device. Each symbol's signature is
+/// `lower_for_link`'s: the host side takes the same exploded descriptors and
+/// out-param, so the LLVM backend's wrapper serves either.
 ///
 /// A symbol's body launches one kernel per `linalg` operation through MLIR's GPU
 /// runtime ABI (`mgpuModuleLoad` / `mgpuModuleLoadJIT`, `mgpuLaunchKernel`, the
@@ -86,7 +87,8 @@ const DEVICE_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm{use-generic-functio
 /// # Errors
 ///
 /// [`MlirError::InvalidGpuChip`] for a chip name that is not letters, digits and
-/// `_`. [`MlirError::GpuSerializationFailed`] when a device object cannot be
+/// `_`. [`MlirError::GpuBodiesNotLowered`] naming every `@gpu` function whose body
+/// does not qualify. [`MlirError::GpuSerializationFailed`] when a device object cannot be
 /// produced, which for an AMD target means ROCm is not installed. Otherwise as
 /// [`translate_to_llvm_ir`](crate::translate_to_llvm_ir).
 pub fn lower_for_gpu(
@@ -109,7 +111,11 @@ pub(crate) fn lower_with_format(
     }
 
     let context = new_context();
-    let (mut module, functions) = build_linkable_module(&context, program, launches_every_op)?;
+    let (mut module, functions) = build_linkable_module(&context, program, runs_on_gpu)?;
+    let refused = refused_bodies(program, &functions);
+    if !refused.is_empty() {
+        return Err(MlirError::GpuBodiesNotLowered(refused));
+    }
     if functions.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),
@@ -130,6 +136,24 @@ pub(crate) fn lower_with_format(
         llvm_ir: translate_llvm_dialect(&module)?,
         functions,
     })
+}
+
+fn runs_on_gpu(function: &HirFunction) -> bool {
+    function.target == HirTarget::Gpu && launches_every_op(function)
+}
+
+/// Every `@gpu` function missing from `lowered`, with where it is declared.
+fn refused_bodies(program: &HirProgram, lowered: &[(String, String)]) -> Vec<(String, Span)> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Function(function) if function.target == HirTarget::Gpu => Some(function),
+            _ => None,
+        })
+        .filter(|function| !lowered.iter().any(|(name, _)| *name == function.name))
+        .map(|function| (function.name.clone(), function.span))
+        .collect()
 }
 
 /// Whether every operation in `function` has a parallel axis to launch over. An
@@ -186,8 +210,7 @@ mod tests {
     use crate::bridge::tests::{program_with_tensor_operator, tensor};
     use crate::lower_for_link;
     use ast_types::BinaryOp;
-    use neuro_hir::{static_shape, HirExpr, HirExprKind, HirItem, HirStmt};
-    use shared_types::Span;
+    use neuro_hir::{static_shape, HirExpr, HirExprKind, HirStmt};
 
     fn nvidia() -> GpuTarget {
         GpuTarget::Nvidia {
@@ -195,18 +218,44 @@ mod tests {
         }
     }
 
-    fn element_wise(shape: &[usize]) -> neuro_hir::HirProgram {
-        let ty = tensor(static_shape(shape));
-        program_with_tensor_operator(BinaryOp::Add, ty.clone(), ty.clone(), ty)
+    /// Every function in `program` marked `@gpu`.
+    fn on_gpu(mut program: HirProgram) -> HirProgram {
+        for item in &mut program.items {
+            if let HirItem::Function(function) = item {
+                function.target = HirTarget::Gpu;
+            }
+        }
+        program
     }
 
-    fn matmul() -> neuro_hir::HirProgram {
+    fn element_wise(shape: &[usize]) -> HirProgram {
+        let ty = tensor(static_shape(shape));
+        on_gpu(program_with_tensor_operator(
+            BinaryOp::Add,
+            ty.clone(),
+            ty.clone(),
+            ty,
+        ))
+    }
+
+    fn host_matmul() -> HirProgram {
         program_with_tensor_operator(
             BinaryOp::MatMul,
             tensor(static_shape(&[2, 3])),
             tensor(static_shape(&[3, 4])),
             tensor(static_shape(&[2, 4])),
         )
+    }
+
+    fn matmul() -> HirProgram {
+        on_gpu(host_matmul())
+    }
+
+    fn refused(program: &HirProgram) -> Vec<(String, Span)> {
+        match lower_for_gpu(program, &nvidia()) {
+            Err(MlirError::GpuBodiesNotLowered(functions)) => functions,
+            other => panic!("expected the `@gpu` body refused, got {other:?}"),
+        }
     }
 
     /// The host side is the launch and nothing of the computation: the arithmetic
@@ -282,9 +331,8 @@ mod tests {
 
     #[test]
     fn the_symbols_match_the_cpu_path() {
-        let program = matmul();
-        let gpu = lower_for_gpu(&program, &nvidia()).expect("the GPU path should lower");
-        let cpu = lower_for_link(&program).expect("the CPU path should lower");
+        let gpu = lower_for_gpu(&matmul(), &nvidia()).expect("the GPU path should lower");
+        let cpu = lower_for_link(&host_matmul()).expect("the CPU path should lower");
 
         assert_eq!(gpu.functions, cpu.functions);
         let signature = |ir: &str| {
@@ -376,28 +424,51 @@ mod tests {
     }
 
     #[test]
-    fn a_rank_zero_body_stays_off_the_gpu() {
+    fn a_rank_zero_body_is_refused() {
         // No parallel axis, so no kernel: the host would compute it against device
-        // buffers. The CPU path still links it.
+        // buffers, which `@gpu` forbids.
         let program = element_wise(&[]);
-        let bodies = lower_for_gpu(&program, &nvidia()).expect("the program should still lower");
-        assert!(bodies.functions.is_empty(), "{}", bodies.llvm_ir);
-
-        let cpu = lower_for_link(&program).expect("the CPU path should lower");
-        assert_eq!(cpu.functions.len(), 1, "{}", cpu.llvm_ir);
+        let functions = refused(&program);
+        assert_eq!(functions.len(), 1, "{functions:?}");
+        assert_eq!(functions[0].0, "f");
     }
 
     #[test]
-    fn an_integer_body_launches_nothing() {
+    fn an_integer_body_is_refused() {
         let ty = HirType::Tensor {
             element: Box::new(HirType::I32),
             shape: static_shape(&[2]),
             names: neuro_hir::AxisNames::default(),
         };
-        let program = program_with_tensor_operator(BinaryOp::Add, ty.clone(), ty.clone(), ty);
-        let bodies = lower_for_gpu(&program, &nvidia()).expect("the program should still lower");
+        let program = on_gpu(program_with_tensor_operator(
+            BinaryOp::Add,
+            ty.clone(),
+            ty.clone(),
+            ty,
+        ));
+        assert_eq!(refused(&program).len(), 1);
+    }
 
-        assert!(bodies.functions.is_empty());
-        assert!(bodies.llvm_ir.is_empty());
+    #[test]
+    fn each_path_lowers_only_its_own_functions() {
+        let mut program = element_wise(&[2, 3]);
+        let HirItem::Function(gpu) = &program.items[0] else {
+            unreachable!("the fixture is one function");
+        };
+        let mut host = gpu.clone();
+        host.name = "g".to_string();
+        host.target = HirTarget::Host;
+        program.items.push(HirItem::Function(host));
+
+        let gpu = lower_for_gpu(&program, &nvidia()).expect("the GPU path should lower");
+        let cpu = lower_for_link(&program).expect("the CPU path should lower");
+        assert_eq!(gpu.functions, [("f".into(), "__neuro_mlir_f".into())]);
+        assert_eq!(cpu.functions, [("g".into(), "__neuro_mlir_g".into())]);
+    }
+
+    #[test]
+    fn a_program_with_no_gpu_function_lowers_to_nothing() {
+        let bodies = lower_for_gpu(&host_matmul(), &nvidia()).expect("nothing to refuse");
+        assert!(bodies.functions.is_empty() && bodies.llvm_ir.is_empty());
     }
 }

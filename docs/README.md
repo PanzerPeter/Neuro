@@ -11,14 +11,14 @@ once, in the page that owns it.
 
 A compiled language for high-performance AI workloads. It generates native code through an LLVM 22
 backend, and it checks tensor shapes and differentiates tensor code while compiling. GPU
-acceleration through MLIR GPU dialects is on the roadmap.
+acceleration through MLIR GPU dialects has begun: a `@gpu` function runs as NVIDIA kernels.
 
 Design goals:
 
 - **Static typing** with inference, for safety and performance
 - **Tensor primitives** as first-class language types
 - **Compile-time AD** as a source-to-source transform over typed HIR, with no runtime gradient tape
-- **GPU acceleration** via MLIR `nvgpu` / `rocdl` / Triton dialects
+- **GPU acceleration** via the MLIR GPU dialects, `nvvm` for NVIDIA and `rocdl` for AMD
 - **Zero-copy Python interop** via DLPack
 
 ## Getting Started
@@ -75,7 +75,7 @@ current entry points when this directory disagrees.
 | CPU codegen | inkwell (LLVM 22) | In use |
 | MLIR construction | melior (LLVM/MLIR 22) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR and linked into compiled programs, behind the off-by-default `mlir` feature |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
-| GPU | MLIR nvgpu / rocdl / Triton | Planned |
+| GPU | MLIR `gpu` to `nvvm` (PTX) | `@gpu` functions run as NVIDIA kernels on an `mlir` build; AMD, CPU fallback and device management planned |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.
 

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use ast_types::BinaryOp;
-use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirTensorApply, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirTarget, HirTensorApply, HirType};
 use shared_types::{Literal, Span};
 
 use crate::autodiff::emit::{self, tensor_parts};
@@ -12,7 +12,7 @@ use crate::LoweringError;
 
 use super::leaf::{clone_call, is_copied_field};
 use super::positions::coordinates;
-use super::{ArmBody, Leaf, Linearizer, Op, MAX_UNROLLED_ELEMENTS, RUN_TIME_TARGET};
+use super::{ArmBody, Leaf, Linearizer, Op, GPU_CALL, MAX_UNROLLED_ELEMENTS, RUN_TIME_TARGET};
 
 impl<'f> Linearizer<'f> {
     /// A call to a user function, or through a function value whose target is known here,
@@ -123,6 +123,13 @@ impl<'f> Linearizer<'f> {
         let Some(callee) = self.functions.callee(target) else {
             return Err(self.malformed("a function value names no function"));
         };
+        if self
+            .functions
+            .function(target)
+            .is_some_and(|function| function.target == HirTarget::Gpu)
+        {
+            return Err(self.refuse(GPU_CALL, span));
+        }
         if self.inlining.contains(&callee.name) {
             return Err(self.refuse("a recursive call", span));
         }

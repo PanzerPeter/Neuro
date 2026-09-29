@@ -403,8 +403,8 @@ pub(crate) struct CodegenContext<'ctx> {
     /// store and never its safety.
     pub(crate) pool_locals: Vec<HashSet<String>>,
 
-    /// Where the linked bodies' buffers live. `Device` stages every tensor a wrapper
-    /// passes, and has each `pool` block release the device arena at its exit too.
+    /// `Device` when any linked body runs on a device, which has each `pool` block
+    /// release the device arena at its exit too.
     pub(crate) body_memory: crate::BodyMemory,
 
     /// Every `abort` and `llvm.trap` call emitted, in emission order. Neither runs an

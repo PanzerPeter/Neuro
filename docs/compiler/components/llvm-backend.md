@@ -16,10 +16,10 @@ optimized machine code for the host platform.
 ```rust
 pub fn compile(program: &HirProgram, optimization: OptimizationLevelSetting,
                source: &str, source_path: &str,
-               external: Option<&ExternalBodies>) -> CodegenResult<Vec<u8>>
+               external: &[ExternalBodies]) -> CodegenResult<Vec<u8>>
 pub fn compile_to_ir(program: &HirProgram, optimization: OptimizationLevelSetting,
                      source: &str, source_path: &str,
-                     external: Option<&ExternalBodies>) -> CodegenResult<String>
+                     external: &[ExternalBodies]) -> CodegenResult<String>
 ```
 
 `compile` returns object code; `compile_to_ir` stops after the pass pipeline and returns the
@@ -284,9 +284,14 @@ memory: one call's staging is one region released by a single mark restore, and 
 does not fit spills to the GPU runtime's allocator. The same allocator serves the buffers a
 launcher allocates for itself between two kernels. In a program with device bodies, each `pool`
 block marks the device arena on entry and restores it at exit, after its `PoolAware` sweep: one
-batched release per device. The GPU runtime library itself (MLIR's `mgpu*` ABI) is supplied at
-link time. Running these bodies from `neurc` is planned on the
-[Quick Roadmap](../../../README.md#quick-roadmap).
+batched release per device.
+
+`external` is a list, one set of bodies per memory kind, so a program's `@gpu` bodies and its
+host MLIR bodies link side by side. A module with device bodies also links the backend's own GPU
+runtime: MLIR's `mgpu*` ABI implemented over the CUDA driver, which it opens with `dlopen` on first
+use rather than linking against it. The launchers load their kernels from a global constructor,
+so a program checks for a usable GPU before `main`, and every runtime failure, a missing GPU
+included, is an ordinary `panic:` that drains buffered output and aborts.
 
 ## Resources
 

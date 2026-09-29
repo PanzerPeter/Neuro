@@ -22,7 +22,7 @@ not what each one does.
 | `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
 | `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `String` | [Strings](../docs/language-reference/strings.md) |
-| `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes | [Tensors](../docs/language-reference/tensors.md) |
+| `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes, `@gpu` kernels | [Tensors](../docs/language-reference/tensors.md) |
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
@@ -36,6 +36,12 @@ A multi-file program registers its root with an exit code and each of its other
 modules with the marker `module`: those have no `main` of their own and are
 compiled as part of the root that reaches into them, so only the root has output
 of its own to pin.
+
+A program with `@gpu` functions carries `gpu` after its exit code. Only a compiler
+built with the MLIR backend can compile it, and only a machine with an NVIDIA GPU
+can run it, so the harness checks what each setup can: both pins where a GPU runs
+it, the startup abort where none is usable, and a type check on a build without
+MLIR.
 
 ## Compiling and running
 
@@ -111,6 +117,7 @@ One line each. The program's own header comment is the full description.
 - [`enum_records.nr`](showcase/enum_records.nr): pattern matching over enums, structs, methods and arrays
 - [`field_report.nr`](showcase/field_report.nr): standard I/O driving a field report
 - [`frozen_features.nr`](showcase/frozen_features.nr): a model fine-tuned through a `@grad(wrt: [self.head.w, self.head.b])` method, so `.backward()` fills only the head's gradient slots and the feature layer stays a constant, each step inside a `pool`, three budgets compared in a `Vec` of `Copy` structs
+- [`gpu_layer.nr`](showcase/gpu_layer.nr): a dense layer whose `x @ w + bias` runs as `@gpu` kernels, checked against the same layer on the host, with the ReLU as a closure through `.map`, each batch inside a `pool` that also releases the call's device memory, and the results in a `Vec` of `Copy` structs
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together, plus a non-`Copy` type argument and `Drop` across a generic boundary
 - [`gradient_loss.nr`](showcase/gradient_loss.nr): a least-squares fit over `@` and broadcasting trained by gradient descent, each step a `@grad` call, `.backward()`, a `w -= rate * w.grad()` update, `.zero_grad()` and a `.item()` read of the loss inside a `pool`, with progress collected in a `Vec` of `Copy` structs
 - [`grid_update.nr`](showcase/grid_update.nr): a heat grid whose every mutation names the storage it writes to: a field, a field of a field, a nested array element, a `Vec` element and a tensor coordinate

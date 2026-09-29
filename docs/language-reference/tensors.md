@@ -92,10 +92,10 @@ To keep the source, clone first: `t.clone().to(Device::CPU)`.
 A borrow cannot be consumed, so `.to` is not offered on `&Tensor<T, S>`: calling it there
 reports that the borrowed type has no such method.
 
-The host is the only device this compiler can lower to today; the GPU backend is later
-work. `.to(Device::CPU)` is therefore the move itself and copies nothing, and a transfer to
-any other device aborts at run time with a diagnostic rather than quietly leaving the
-buffer on the host.
+No tensor value lives on a GPU yet: device management is later work, and tensor code
+reaches a GPU through [`@gpu`](#running-on-a-gpu-gpu) instead. `.to(Device::CPU)` is
+therefore the move itself and copies nothing, and a transfer to any other device aborts at
+run time with a diagnostic rather than quietly leaving the buffer on the host.
 
 `Tensor` is a prelude name rather than a keyword, so a module declaring its own
 `Tensor` shadows it; a shape argument is what marks a type application as a tensor, and
@@ -909,6 +909,42 @@ helpers and tensor literals (no size to allocate), `.clone()` and `.to(device)` 
 copy), indexing and slicing (no strides), the four shape casts (no element count), and
 in-place compound assignment. Build such a tensor at a static shape and pass it where the
 `?` is expected.
+
+## Running on a GPU: `@gpu`
+
+`@gpu` pins a function's body to the GPU. Each operation in it becomes a kernel. Every call
+copies the tensor arguments to the device, runs the kernels and copies the result back, so a
+caller still passes and receives ordinary tensors:
+
+```neuro
+@gpu
+func blend(a: &Tensor<f32, [4, 6]>, b: &Tensor<f32, [4, 6]>, t: f32) -> Tensor<f32, [4, 6]> {
+    val scaled = a * t
+    scaled + b
+}
+```
+
+Bare `@gpu` requires a GPU, and the compiler never runs the body anywhere else. A body the
+GPU path cannot lower is a compile error at the function. That path takes straight-line
+element-wise `+ - * /` and `@` over `f32` / `f64` tensors of static shape and rank 1 or more,
+with scalar or tensor parameters (owned or `&`) and a tensor result, and a generic function
+qualifies per instance.
+
+A program with a `@gpu` function checks for a usable NVIDIA GPU when it starts, before `main`.
+If there is none, it prints ``panic: `@gpu` needs an NVIDIA GPU, and none is usable:`` followed
+by the reason, and aborts.
+
+The attribute is bare and goes on a free function. It is refused on a method, next to `@grad`,
+and with arguments; `@gpu(fallback: true)`, which would add a CPU copy chosen at startup, is not
+supported yet. A `@grad` body cannot differentiate through a `@gpu` call unless the callee is
+also `@no_grad`, because the derivative would compute it on the host.
+
+Compiling `@gpu` needs a `neurc` built with the MLIR backend (`--features mlir`, see
+[installation](../getting-started/installation.md#optional-mlir-backend)) on Linux; any other
+build refuses the function. Only NVIDIA GPUs run it today. The kernels ship as PTX that the
+CUDA driver compiles for the GPU it finds, so the machine that compiles needs no CUDA toolkit,
+and the one that runs needs only the NVIDIA driver.
+[examples/tensors/tensor_gpu.nr](../../examples/tensors/tensor_gpu.nr) runs the snippet above.
 
 ## What tensors cannot do yet
 

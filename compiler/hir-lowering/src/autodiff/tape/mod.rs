@@ -57,6 +57,10 @@ const MAX_UNROLLED_ELEMENTS: usize = 1024;
 const RUN_TIME_TARGET: &str =
     "a function value chosen at run time; call each function directly where the choice is made";
 
+/// What a call to a `@gpu` function is refused as. Differentiating through a call inlines
+/// the callee onto the tape, so its body would run on the host, which `@gpu` forbids.
+const GPU_CALL: &str = "a call to a `@gpu` function, whose body would run on the host inside the derivative; mark it `@no_grad` to call it as a constant";
+
 /// What a `.step(n)` whose stride is not a literal is refused as.
 const RUN_TIME_STRIDE: &str =
     "a `.step(n)` whose stride is not an integer literal; write the stride as a literal";

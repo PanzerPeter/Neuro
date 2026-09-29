@@ -73,19 +73,30 @@ fn collect_by_extension(dir: &Path, ext: &str) -> Vec<String> {
     found
 }
 
+/// The manifest marker after an exit code naming an example that needs a GPU.
+const GPU_MARKER: &str = "gpu";
+
+/// How the GPU runtime begins its diagnostic when the machine has no usable GPU.
+const NO_GPU_PANIC: &str = "panic: `@gpu` needs an NVIDIA GPU, and none is usable: ";
+
 /// What the manifest says about one `.nr` file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expectation {
     /// A standalone program: compile it and assert this exit code.
     Exit(i32),
+    /// A program with `@gpu` functions, which only a neurc built with the `mlir`
+    /// feature compiles and only a machine with an NVIDIA GPU runs. On such a machine it
+    /// is held to its exit code and output like any other; with no GPU it must abort at
+    /// startup with the runtime's diagnostic; and without `mlir` it must type-check.
+    Gpu(i32),
     /// A non-root module of a multi-file program. It has no `main` of its own and is
     /// compiled only as part of the root that reaches into it, so the harness records
     /// that it is accounted for and moves on.
     Module,
 }
 
-/// Parse `expected.txt`: `<relative-path>  <exit-code|module>` per line; `#` comments
-/// and blank lines ignored.
+/// Parse `expected.txt`: `<relative-path>  <exit-code|module>` per line, the exit code
+/// optionally followed by `gpu`; `#` comments and blank lines ignored.
 fn parse_manifest(path: &Path) -> BTreeMap<String, Expectation> {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("read manifest {}: {}", path.display(), e));
@@ -102,14 +113,17 @@ fn parse_manifest(path: &Path) -> BTreeMap<String, Expectation> {
         let marker = parts
             .next()
             .unwrap_or_else(|| panic!("manifest line {}: missing exit code", lineno + 1));
-        let expectation =
-            if marker == "module" {
-                Expectation::Module
-            } else {
-                Expectation::Exit(marker.parse().unwrap_or_else(|e| {
-                    panic!("manifest line {}: bad exit code: {}", lineno + 1, e)
-                }))
-            };
+        let code = || -> i32 {
+            marker
+                .parse()
+                .unwrap_or_else(|e| panic!("manifest line {}: bad exit code: {}", lineno + 1, e))
+        };
+        let expectation = match (marker, parts.next()) {
+            ("module", None) => Expectation::Module,
+            (_, None) => Expectation::Exit(code()),
+            (_, Some(GPU_MARKER)) => Expectation::Gpu(code()),
+            (_, Some(other)) => panic!("manifest line {}: unknown marker `{other}`", lineno + 1),
+        };
         if map.insert(rel.to_string(), expectation).is_some() {
             panic!("manifest line {}: duplicate entry for {}", lineno + 1, rel);
         }
@@ -217,6 +231,54 @@ fn quote_lines(text: &str) -> String {
         .join("\n")
 }
 
+/// What a `gpu` example's first look decided.
+enum GpuOutcome {
+    /// Nothing more to check (it type-checked, or aborted for want of a GPU), or why not.
+    Settled(Result<(), String>),
+    /// A GPU ran it: hold it to its pins like any other example.
+    RanOnGpu,
+}
+
+/// Without `mlir` a `gpu` example cannot compile, so it must at least type-check. With it,
+/// it is compiled and run once: a machine with no GPU must produce the runtime's startup
+/// abort, and a machine with one goes on to the ordinary pin checks, which run it again.
+fn gpu_example_outcome(examples_dir: &Path, rel: &str) -> GpuOutcome {
+    if !cfg!(feature = "mlir") {
+        let output = Command::new(neurc_path())
+            .arg("check")
+            .arg(examples_dir.join(rel))
+            .output();
+        return GpuOutcome::Settled(match output {
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(output) => Err(format!(
+                "does not type-check:\n{}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )),
+            Err(e) => Err(format!("failed to run neurc: {e}")),
+        });
+    }
+    let exe = match compile_example(examples_dir, rel) {
+        Ok(exe) => exe,
+        Err(e) => return GpuOutcome::Settled(Err(e)),
+    };
+    let output = match Command::new(&exe).output() {
+        Ok(output) => output,
+        Err(e) => return GpuOutcome::Settled(Err(format!("failed to run: {e}"))),
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.starts_with(NO_GPU_PANIC) {
+        return GpuOutcome::RanOnGpu;
+    }
+    GpuOutcome::Settled(
+        match output.stdout.is_empty() && output.status.code() != Some(0) {
+            true => Ok(()),
+            false => Err(format!(
+                "reported no GPU but did not abort at startup: {stderr}"
+            )),
+        },
+    )
+}
+
 #[test]
 fn all_examples_compile_run_and_match_manifest() {
     let examples_dir = workspace_root().join("examples");
@@ -234,8 +296,17 @@ fn all_examples_compile_run_and_match_manifest() {
             ));
             continue;
         };
-        let Expectation::Exit(expected_code) = expectation else {
-            continue;
+        let expected_code = match expectation {
+            Expectation::Module => continue,
+            Expectation::Exit(code) => code,
+            Expectation::Gpu(code) => match gpu_example_outcome(&examples_dir, rel) {
+                GpuOutcome::Settled(Ok(())) => continue,
+                GpuOutcome::Settled(Err(e)) => {
+                    failures.push(format!("{rel}: {e}"));
+                    continue;
+                }
+                GpuOutcome::RanOnGpu => code,
+            },
         };
         let expected_text = match expected_stdout(&examples_dir, rel) {
             Ok(text) => text,

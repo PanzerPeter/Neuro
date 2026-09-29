@@ -42,8 +42,13 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    (`tensor_bodies`) and passes the bodies it returns to the LLVM backend as `ExternalBodies`,
    which links them in place of its own. The two slices' types are mapped here, field for field,
    since neither may name the other's. A failure there stops the compile: it is a compiler bug,
-   and handing the body back to the LLVM backend would hide it. Without the feature
-   `tensor_bodies` answers `None` and nothing about the compile changes.
+   and handing the body back to the LLVM backend would hide it. A program with a `@gpu` function
+   also goes through `mlir_backend::lower_for_gpu` for NVIDIA (`GPU_CHIP`, PTX the driver JITs
+   for any newer GPU), and those bodies are a second `ExternalBodies` with `BodyMemory::Device`.
+   A `@gpu` body that cannot become a kernel is rendered at its function
+   (`GpuBodiesNotLowered`) and stops the compile. Without the feature `tensor_bodies` answers no
+   bodies, and any `@gpu` function is an error at its declaration: there is no host fallback.
+   Windows refuses `@gpu` either way, since the GPU runtime needs `dlopen`.
 
 `run_file` adds nothing to that order. It calls `compile_file` with an output path inside a
 temporary directory, executes the result, and exits with the child's own status, so a Neuro
@@ -197,6 +202,8 @@ required because LLVM object files need a platform linker driver to attach the C
 code: neurc cannot ship its own linker. The Unix link passes `-lm` explicitly:
 `Tensor::random_normal` emits `log` and `cos`, and the C math library is a separate archive on
 the older glibc still in wide use. It is a no-op where the platform has folded libm into libc.
+A program with device bodies also gets `-ldl` (`GPU_RUNTIME_LIBS`), for the GPU runtime's
+`dlopen` on glibc older than 2.34.
 
 `link_windows` keeps **every** driver's diagnosis and reports them together when the last one
 fails, rather than logging each at `debug` and raising only the last. The two failures look

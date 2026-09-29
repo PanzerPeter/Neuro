@@ -5,7 +5,7 @@ use crate::{
 };
 
 use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
-use neuro_hir::HirProgram;
+use neuro_hir::{HirProgram, HirTarget};
 
 /// The route from the dialects this slice builds in down to the `llvm` dialect.
 ///
@@ -107,7 +107,8 @@ pub struct LinkableBodies {
 
 /// Lower every function this path computes exactly as the LLVM backend would into
 /// linkable LLVM IR: element-wise arithmetic and matrix products over `f32` /
-/// `f64` tensors of static shape, straight-line, with owned or `&` operands.
+/// `f64` tensors of static shape, straight-line, with owned or `&` operands. A
+/// `@gpu` function is never one of them: it is [`lower_for_gpu`](crate::lower_for_gpu)'s.
 ///
 /// Each symbol has MLIR's calling convention rather than Neuro's. A tensor
 /// parameter crosses as an exploded row-major `memref` descriptor (allocated
@@ -121,7 +122,9 @@ pub struct LinkableBodies {
 /// As [`translate_to_llvm_ir`].
 pub fn lower_for_link(program: &HirProgram) -> Result<LinkableBodies, MlirError> {
     let context = new_context();
-    let (mut module, functions) = build_linkable_module(&context, program, |_| true)?;
+    let (mut module, functions) = build_linkable_module(&context, program, |function| {
+        function.target == HirTarget::Host
+    })?;
     if functions.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),
@@ -221,6 +224,7 @@ pub(crate) mod tests {
                 ],
                 return_type: HirType::I32,
                 body: Vec::new(),
+                target: neuro_hir::HirTarget::Host,
                 span: Span::new(0, 0),
             })],
         }
@@ -299,6 +303,7 @@ pub(crate) mod tests {
                     )),
                     span: Span::new(0, 0),
                 }],
+                target: neuro_hir::HirTarget::Host,
                 span: Span::new(0, 0),
             })],
         }

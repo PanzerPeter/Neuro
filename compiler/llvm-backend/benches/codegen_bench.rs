@@ -61,7 +61,7 @@ fn bench_codegen(c: &mut Criterion) {
                     OptimizationLevelSetting::O2,
                     source,
                     "bench.nr",
-                    None,
+                    &[],
                 );
                 assert!(
                     result.is_ok(),
