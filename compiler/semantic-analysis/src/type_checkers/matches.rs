@@ -146,8 +146,14 @@ impl TypeChecker {
         let binds_owner = bindings
             .iter()
             .any(|(_, ty, _)| self.is_type_move_tracked(ty));
-        for (name, ty, _span) in &bindings {
-            let _ = self.symbols.define(name.clone(), ty.clone(), false);
+        // The arm's scope is fresh, so a failed define is a name the pattern binds twice.
+        for (name, ty, span) in &bindings {
+            if let Err(duplicate) = self.symbols.define(name.clone(), ty.clone(), false) {
+                self.record_error(TypeError::VariableAlreadyDefined {
+                    name: duplicate,
+                    span: *span,
+                });
+            }
         }
 
         if let Some(guard) = &arm.guard {

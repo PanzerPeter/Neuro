@@ -184,13 +184,11 @@ impl<'ctx> CodegenContext<'ctx> {
             HirSortKind::Values => Ok(handle(&targets.values)?.into()),
             HirSortKind::Indices => Ok(handle(&targets.indices)?.into()),
             HirSortKind::TopK(_) => {
-                let struct_ty = match self.get_any_llvm_type(result_ty)? {
-                    BasicTypeEnum::StructType(ty) => ty,
-                    _ => {
-                        return Err(CodegenError::InternalError(
-                            "`.topk` result type is not a tuple".to_string(),
-                        ));
-                    }
+                let BasicTypeEnum::StructType(struct_ty) = self.get_any_llvm_type(result_ty)?
+                else {
+                    return Err(CodegenError::InternalError(
+                        "`.topk` result type is not a tuple".to_string(),
+                    ));
                 };
                 let mut agg = struct_ty.get_undef();
                 for (index, slot) in [&targets.values, &targets.indices].into_iter().enumerate() {

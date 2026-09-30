@@ -205,9 +205,7 @@ impl TypeChecker {
             return Some(self.check_generic_struct_literal(name, fields, base, expected, *span));
         }
 
-        let def = if let Some(d) = self.struct_defs.get(&name.name).cloned() {
-            d
-        } else {
+        let Some(def) = self.struct_defs.get(&name.name).cloned() else {
             self.record_error(TypeError::UnknownStruct {
                 name: name.name.clone(),
                 span: name.span,

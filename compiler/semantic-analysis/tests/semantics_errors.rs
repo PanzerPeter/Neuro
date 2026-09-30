@@ -182,6 +182,50 @@ fn error_duplicate_variable() {
     );
 }
 
+/// A name bound twice by one closure's parameter list is a redefinition, as it is
+/// in a function's. It compiled, and the body read the last argument.
+#[test]
+fn regression_bug_090_closure_repeated_parameter_is_rejected() {
+    let source = r#"func test() -> i32 {
+        val g = |a: i32, a: i32| a
+        return g(5, 6)
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let errors = type_check(&items).unwrap_err();
+    let second = source.rfind("a: i32").unwrap();
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::VariableAlreadyDefined { name, span } if name == "a" && span.start == second
+        )),
+        "expected a redefinition at the second `a`, got {errors:?}"
+    );
+}
+
+/// A name bound twice by one match arm's pattern is a redefinition, as it is in a
+/// destructuring `val`. It compiled, and the arm read the last payload.
+#[test]
+fn regression_bug_090_match_pattern_repeated_binding_is_rejected() {
+    let source = r#"
+        enum E { P(i32, i32) }
+        func test() -> i32 {
+            val e = E::P(1, 2)
+            match e {
+                E::P(q, q) => q
+            }
+        }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let errors = type_check(&items).unwrap_err();
+    let second = source.find("q, q").unwrap() + 3;
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::VariableAlreadyDefined { name, span } if name == "q" && span.start == second
+        )),
+        "expected a redefinition at the second `q`, got {errors:?}"
+    );
+}
+
 #[test]
 fn error_duplicate_function() {
     let source = r#"

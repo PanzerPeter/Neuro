@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.2] - 2026-09-30
+
+### Fixed
+
+- A name bound twice in one closure's parameter list, or in one `match` arm's pattern, is a
+  compile error (BUG-090). `|a: i32, a: i32| a` and `E::P(q, q) => q` compiled and read the
+  last value. A function's parameter list and a destructuring `val` already refused a repeated
+  name.
+
+### Changed
+
+- `tools/clean_stale_target.py` also scans build directories nested one level inside the
+  target directory, which is where a build with its own `CARGO_TARGET_DIR` (usually an MLIR
+  build) keeps its profiles. It skipped them before, so their stale artifacts were never removed.
+
 ## [4.5.1] - 2026-09-30
 
 ### Changed

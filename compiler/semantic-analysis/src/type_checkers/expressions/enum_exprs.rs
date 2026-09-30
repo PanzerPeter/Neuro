@@ -117,19 +117,16 @@ impl TypeChecker {
     ) -> Type {
         let enum_name = &self.enum_construction_target(base, expected);
         let recovery = Type::Enum(enum_name.clone());
-        let info = match self.lookup_enum_variant(enum_name, variant) {
-            Some(info) => info,
-            None => {
-                self.record_error(TypeError::UnknownEnumVariant {
-                    enum_name: enum_name.clone(),
-                    variant: variant.to_string(),
-                    span,
-                });
-                for arg in args {
-                    let _ = self.check_expr(arg, None);
-                }
-                return recovery;
+        let Some(info) = self.lookup_enum_variant(enum_name, variant) else {
+            self.record_error(TypeError::UnknownEnumVariant {
+                enum_name: enum_name.clone(),
+                variant: variant.to_string(),
+                span,
+            });
+            for arg in args {
+                let _ = self.check_expr(arg, None);
             }
+            return recovery;
         };
 
         match info.form {

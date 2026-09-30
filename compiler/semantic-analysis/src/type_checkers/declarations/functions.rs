@@ -173,14 +173,11 @@ impl TypeChecker {
         // same `Type::Generic` placeholders and const-parameter values.
         self.enter_generic_scope(&func.generics, &func.lifetimes);
 
-        let (param_types, return_type) = match self.lookup_registered_signature(func) {
-            Some(sig) => sig,
-            // Signature registration failed (a duplicate definition, already reported);
-            // there is nothing sound to check the body against.
-            None => {
-                self.exit_generic_scope();
-                return None;
-            }
+        // Signature registration failed (a duplicate definition, already reported);
+        // there is nothing sound to check the body against.
+        let Some((param_types, return_type)) = self.lookup_registered_signature(func) else {
+            self.exit_generic_scope();
+            return None;
         };
 
         self.refuse_function_valued_return(&return_type, func.name.span);

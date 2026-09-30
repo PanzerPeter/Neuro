@@ -474,9 +474,8 @@ impl TypeChecker {
                 if self.functions.contains_key(&inst_key) {
                     continue;
                 }
-                let sig = match self.functions.get(&base_key).cloned() {
-                    Some(s) => s,
-                    None => continue,
+                let Some(sig) = self.functions.get(&base_key).cloned() else {
+                    continue;
                 };
                 let inst_sig = remap_method_type(&sig, &impl_subst, base, mangled);
                 self.functions.insert(inst_key.clone(), inst_sig);

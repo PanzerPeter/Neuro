@@ -431,9 +431,8 @@ impl TypeChecker {
 
             // A method whose signature failed to register (a duplicate name, say) never
             // entered `functions`; skip its body rather than check it against nothing.
-            let func_ty = match self.functions.get(&mangled).cloned() {
-                Some(ty) => ty,
-                None => continue,
+            let Some(func_ty) = self.functions.get(&mangled).cloned() else {
+                continue;
             };
 
             let (param_types, return_type) = match func_ty {

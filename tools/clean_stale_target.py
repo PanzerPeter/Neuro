@@ -166,8 +166,11 @@ def main() -> int:
         print(f"no target directory at {target}", file=sys.stderr)
         return 1
 
+    # One level deeper too: a build given its own CARGO_TARGET_DIR inside the target
+    # directory (an MLIR build usually is) keeps its profiles at <dir>/<profile>.
+    profiles = [d.parent for d in (*target.glob("*/deps"), *target.glob("*/*/deps"))]
     total_freed = 0
-    for profile in sorted(p for p in target.iterdir() if (p / "deps").is_dir()):
+    for profile in sorted(p for p in profiles if p.is_dir()):
         units = collect(profile / "deps")
         attach_siblings(units, profile)
         stale = select_stale(units, args.keep, args.grace_days)
@@ -177,7 +180,7 @@ def main() -> int:
         freed = sum(unit.size for unit in stale)
         files = sum(len(unit.paths) for unit in stale)
         print(
-            f"{profile.name}: {len(units)} units, "
+            f"{profile.relative_to(target)}: {len(units)} units, "
             f"{len(stale)} stale ({files} paths, {freed / GIB:.1f} GiB)"
         )
         if not args.dry_run:

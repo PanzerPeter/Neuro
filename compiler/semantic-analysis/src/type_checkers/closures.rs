@@ -61,8 +61,14 @@ impl TypeChecker {
         let saved_loops = std::mem::take(&mut self.loop_stack);
 
         self.symbols.push_scope();
+        // The parameter scope is fresh, so a failed define is a repeated parameter name.
         for (p, ty) in params.iter().zip(param_types.iter()) {
-            let _ = self.symbols.define(p.name.name.clone(), ty.clone(), false);
+            if let Err(duplicate) = self.symbols.define(p.name.name.clone(), ty.clone(), false) {
+                self.record_error(TypeError::VariableAlreadyDefined {
+                    name: duplicate,
+                    span: p.name.span,
+                });
+            }
         }
 
         // A block body is checked like a function body (a trailing expression is the

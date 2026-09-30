@@ -109,15 +109,12 @@ impl TypeChecker {
         struct_name: &str,
         trait_name: &str,
     ) {
-        let info = match self.traits.get(trait_name).cloned() {
-            Some(i) => i,
-            None => {
-                self.record_error(TypeError::UnknownTrait {
-                    trait_name: trait_name.to_string(),
-                    span: def.trait_name.as_ref().map(|t| t.span).unwrap_or(def.span),
-                });
-                return;
-            }
+        let Some(info) = self.traits.get(trait_name).cloned() else {
+            self.record_error(TypeError::UnknownTrait {
+                trait_name: trait_name.to_string(),
+                span: def.trait_name.as_ref().map(|t| t.span).unwrap_or(def.span),
+            });
+            return;
         };
 
         // Compare each impl method against its trait declaration. Collect diagnostics
@@ -148,16 +145,13 @@ impl TypeChecker {
             }
         }
         for method in &def.methods {
-            let sig = match info.methods.get(&method.name.name) {
-                Some(s) => s,
-                None => {
-                    errors.push(TypeError::NotATraitMethod {
-                        trait_name: trait_name.to_string(),
-                        method: method.name.name.clone(),
-                        span: method.name.span,
-                    });
-                    continue;
-                }
+            let Some(sig) = info.methods.get(&method.name.name) else {
+                errors.push(TypeError::NotATraitMethod {
+                    trait_name: trait_name.to_string(),
+                    method: method.name.name.clone(),
+                    span: method.name.span,
+                });
+                continue;
             };
             if let Some(detail) = self.trait_signature_mismatch(method, sig) {
                 errors.push(TypeError::TraitMethodSignatureMismatch {

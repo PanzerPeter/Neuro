@@ -254,3 +254,30 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 24);
 }
+
+/// BUG-090: a pattern that binds one name twice compiled and the arm read the last
+/// payload. A destructuring `val` already refused it; a `match` arm now does too.
+#[test]
+fn regression_bug_090_match_arm_binding_a_name_twice_is_rejected() {
+    let test = CompileTest::new();
+    let source = r#"
+enum E {
+    P(i32, i32)
+}
+
+func main() -> i32 {
+    val e = E::P(1, 2)
+    match e {
+        E::P(q, q) => q
+    }
+}
+"#;
+    let source_path = test.write_source("match_repeated_binding.nr", source);
+    let err = test
+        .compile(&source_path)
+        .expect_err("a pattern binding `q` twice should be a type error");
+    assert!(
+        err.contains("variable 'q' already defined"),
+        "expected a redefinition diagnostic, got: {err}"
+    );
+}

@@ -792,7 +792,8 @@ concrete type at zero cost. Errors: `ImplTraitNotAllowedHere`, `ImplReturnNotInf
 `type_checkers/closures.rs`. `check_closure` types an `Expr::Closure` as
 `Type::Function { params, ret }`: parameters require an annotation (`ClosureParamNeedsType`), a
 block body requires an explicit return type and is checked like a function body
-(`ClosureBlockNeedsReturnType`), and a single-expression body infers its return type. Capture
+(`ClosureBlockNeedsReturnType`), and a single-expression body infers its return type. Two
+parameters with one name are `VariableAlreadyDefined` at the second, as in a function's list. Capture
 analysis (a free-variable walk) rejects capturing a non-Copy enclosing local
 (`ClosureCapturesNonCopy`) or assigning to a captured variable (`ClosureAssignsCapture`); module
 constants and functions are referenced directly, not captured. The body is checked with
@@ -859,7 +860,8 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
 per-arm scope for the guard and body, unifies arm-body types (the first arm drives literal
 inference), and verifies exhaustiveness: enum variant coverage, both `bool` values, or a `_`
 catch-all, with guarded arms never counting. Payload sub-patterns are restricted to bindings and
-`_` this phase, and or-patterns cannot bind. An arm that binds a move-tracked value takes it
+`_` this phase, and or-patterns cannot bind. A pattern that binds one name twice is
+`VariableAlreadyDefined` at the second binding, as in a destructuring `val`. An arm that binds a move-tracked value takes it
 out of the scrutinee, so `take_from_scrutinee` records a move of an owned scrutinee and reports
 `CannotMoveOutOfBorrow` for a borrowed one (a `&self` receiver, a `&Enum`, a `*r`): binding a
 `Vec` payload out of a borrow freed it twice. Errors: `NonExhaustiveMatch`,

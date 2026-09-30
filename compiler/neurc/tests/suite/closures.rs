@@ -164,3 +164,24 @@ func main() -> i32 {
         "expected a parameter-annotation diagnostic, got: {err}"
     );
 }
+
+/// BUG-090: a closure naming two parameters alike compiled and its body read the
+/// last argument. A function with the same list was already refused.
+#[test]
+fn regression_bug_090_closure_parameter_named_twice_is_rejected() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val g = |a: i32, a: i32| a
+    g(5, 6)
+}
+"#;
+    let source_path = test.write_source("closure_repeated_param.nr", source);
+    let err = test
+        .compile(&source_path)
+        .expect_err("a closure naming `a` twice should be a type error");
+    assert!(
+        err.contains("variable 'a' already defined"),
+        "expected a redefinition diagnostic, got: {err}"
+    );
+}
