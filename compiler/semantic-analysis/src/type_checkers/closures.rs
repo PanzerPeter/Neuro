@@ -20,21 +20,39 @@ impl TypeChecker {
     /// Type-check a closure literal, returning its [`Type::Function`] type.
     ///
     /// Parameters require an explicit type annotation this phase (parameter-type
-    /// inference is deferred). The body is checked with the parameters bound on top
-    /// of the still-visible enclosing scope, so captured variables resolve normally.
+    /// inference is deferred), unless `expected` fixes the signature: the closure a
+    /// compiler-known method takes, whose parameters and result are the method's to say.
+    /// An annotation must then match the expected type. The body is checked with the
+    /// parameters bound on top of the still-visible enclosing scope, so captured
+    /// variables resolve normally.
     pub(crate) fn check_closure(
         &mut self,
         params: &[ClosureParam],
         ret: Option<&ast_types::Type>,
         body: &Expr,
-        _is_move: bool,
+        expected: Option<(&[Type], &Type)>,
         span: Span,
     ) -> Type {
         let mut param_types = Vec::with_capacity(params.len());
-        for p in params {
-            match &p.ty {
-                Some(ty) => param_types.push(self.resolve_type(ty).unwrap_or(Type::Unknown)),
-                None => {
+        for (index, p) in params.iter().enumerate() {
+            let fixed = expected.and_then(|(types, _)| types.get(index));
+            match (&p.ty, fixed) {
+                (Some(ty), Some(fixed)) => {
+                    let written = self.resolve_type(ty).unwrap_or(Type::Unknown);
+                    if !matches!(written, Type::Unknown) && written != *fixed {
+                        self.record_error(TypeError::Mismatch {
+                            expected: fixed.clone(),
+                            found: written,
+                            span: p.span,
+                        });
+                    }
+                    param_types.push(fixed.clone());
+                }
+                (Some(ty), None) => {
+                    param_types.push(self.resolve_type(ty).unwrap_or(Type::Unknown))
+                }
+                (None, Some(fixed)) => param_types.push(fixed.clone()),
+                (None, None) => {
                     self.record_error(TypeError::ClosureParamNeedsType {
                         name: p.name.name.clone(),
                         span: p.span,
@@ -48,7 +66,22 @@ impl TypeChecker {
 
         // Resolve an explicit return annotation up front so the body is checked
         // against it; without one, the body's type is the closure's return type.
-        let ret_ty = ret.and_then(|t| self.resolve_type(t));
+        let written_ret = ret.and_then(|t| self.resolve_type(t));
+        let ret_ty = match expected {
+            Some((_, fixed)) => {
+                if let Some(written) = written_ret
+                    && written != *fixed
+                {
+                    self.record_error(TypeError::Mismatch {
+                        expected: fixed.clone(),
+                        found: written,
+                        span,
+                    });
+                }
+                Some(fixed.clone())
+            }
+            None => written_ret,
+        };
 
         // An early `return` inside the closure body returns from the *closure*, not the
         // enclosing function, so redirect the return-type context for the body check.

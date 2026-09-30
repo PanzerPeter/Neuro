@@ -5,6 +5,41 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-091: `for i in 0..xs.len()` is refused: the literal start is typed before the end
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; the `Stmt::ForRange` arm in `type_checkers/statements/mod.rs`,
+  and its mirror in `hir-lowering`
+- **Severity**: minor. Nothing miscompiles, but the natural loop over a length does not compile
+
+**Minimal repro**
+
+```neuro
+func total(xs: &[f32]) -> f32 {
+    mut sum = 0.0f32
+    for i in 0..xs.len() {
+        sum += xs[i]
+    }
+    sum
+}
+
+func main() -> i32 { return 0 }
+```
+
+Observed: `type mismatch: expected i32, found u64` at `xs.len()`. The same happens for a
+`partition` slice in a `@kernel` body, `for i in 0..slice.len()`, which is how the specification
+writes that loop.
+
+**Root cause**: the start bound is checked with no expected type, so the unsuffixed `0` takes the
+default `i32`, and the end is then checked against it. The inference runs only from start to end.
+
+**Workaround**: suffix the literal, `for i in 0u64..xs.len()`, or cast the end,
+`0..xs.len() as i32`.
+
+**Fix sketch**: when the start is an unsuffixed integer literal and the end is not, check the end
+first and type the start by it; lowering must derive the loop variable's type the same way.
+Regression tests: `0..xs.len()` over a slice and a `Vec`, and `0..n` with `n: i32` unchanged.
+
 ## BUG-088: an attribute the compiler does not know is accepted and ignored
 
 - **Status**: open, specification gap

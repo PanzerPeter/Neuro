@@ -110,6 +110,9 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::GridPosition { .. } => Err(CodegenError::InternalError(
                 "a grid position outside a `@kernel` body".to_string(),
             )),
+            HirExprKind::KernelPartition { .. } => Err(CodegenError::InternalError(
+                "a `partition` outside a `@kernel` body".to_string(),
+            )),
 
             HirExprKind::StructLiteral { name, fields, base } => {
                 self.codegen_struct_literal(name, fields, base.as_deref())

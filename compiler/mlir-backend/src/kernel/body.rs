@@ -86,11 +86,24 @@ fn int_width(ty: &HirType) -> Option<u32> {
     }
 }
 
-/// A name the body can read: a local's slot, or a parameter's block argument.
+/// A name the body can read: a local's slot, a parameter's block argument, or the
+/// `slice` of a `partition`.
 #[derive(Clone)]
 enum Binding {
     Slot { slot: String, ty: HirType },
     Param { value: String, ty: HirType },
+    Slice(SliceView),
+}
+
+/// One thread's run of a partitioned output: `chunk` elements from the row-major
+/// position `base`, an `i64` value, of the tensor behind `memref`.
+#[derive(Clone)]
+struct SliceView {
+    memref: String,
+    ty: String,
+    extents: Vec<usize>,
+    base: String,
+    chunk: usize,
 }
 
 /// Where `break` and `continue` go for one enclosing loop.
@@ -106,6 +119,8 @@ pub(crate) struct BodyEmitter<'f> {
     guard: GuardStyle,
     /// The launch's block shape, a constant the body multiplies block positions by.
     threads: [u32; 3],
+    /// The grid tensor's extents: which threads own an element, and so a `partition` run.
+    grid: Vec<usize>,
     /// The slots, emitted at the top of the region's entry block.
     slots: String,
     /// Everything after them.
@@ -120,7 +135,12 @@ pub(crate) struct BodyEmitter<'f> {
 }
 
 impl<'f> BodyEmitter<'f> {
-    pub(crate) fn new(function: &'f HirFunction, guard: GuardStyle, threads: [u32; 3]) -> Self {
+    pub(crate) fn new(
+        function: &'f HirFunction,
+        guard: GuardStyle,
+        threads: [u32; 3],
+        grid: Vec<usize>,
+    ) -> Self {
         let params = function
             .params
             .iter()
@@ -137,6 +157,7 @@ impl<'f> BodyEmitter<'f> {
             function,
             guard,
             threads,
+            grid,
             slots: String::new(),
             text: String::new(),
             next_value: 0,
@@ -351,9 +372,7 @@ impl<'f> BodyEmitter<'f> {
                 Ok(())
             }
             HirPlace::Index { object, index, .. } => {
-                let (memref, ty, extents) = self.tensor(object)?;
-                let axes = [HirTensorAxis::Position((**index).clone())];
-                let indices = self.indices(&axes, &extents, span, exit)?;
+                let (memref, ty, indices) = self.indexed(object, index, span, exit)?;
                 let value = self.expr(value, exit)?;
                 self.line(&format!("memref.store {value}, {memref}[{indices}] : {ty}"));
                 Ok(())
@@ -615,6 +634,10 @@ impl<'f> BodyEmitter<'f> {
                 Some(Binding::Param { .. }) => {
                     Err(Refused::new(expr.span, "a tensor used as a whole"))
                 }
+                Some(Binding::Slice(_)) => Err(Refused::new(
+                    expr.span,
+                    "a `partition` slice used other than by index or `.len()`",
+                )),
                 None => Err(Refused::new(expr.span, "a name from outside the kernel")),
             },
             HirExprKind::GridPosition { of, axis } => Ok(self.grid_position(*of, *axis)),
@@ -627,10 +650,18 @@ impl<'f> BodyEmitter<'f> {
                 Ok(self.assign(&format!("memref.load {memref}[{indices}] : {ty}")))
             }
             HirExprKind::Index { object, index } if scalar_type(&expr.ty).is_some() => {
-                let (memref, ty, extents) = self.tensor(object)?;
-                let axes = [HirTensorAxis::Position((**index).clone())];
-                let indices = self.indices(&axes, &extents, expr.span, exit)?;
+                let (memref, ty, indices) = self.indexed(object, index, expr.span, exit)?;
                 Ok(self.assign(&format!("memref.load {memref}[{indices}] : {ty}")))
+            }
+            HirExprKind::Call { callee, args } => self.call(callee, args, expr.span),
+            HirExprKind::KernelPartition {
+                out,
+                base,
+                slice,
+                body,
+            } => {
+                self.partition(out, base, slice, body, expr.span)?;
+                Ok(String::new())
             }
             HirExprKind::If {
                 condition,
@@ -681,22 +712,182 @@ impl<'f> BodyEmitter<'f> {
         Ok(self.assign(&format!("memref.load {slot}[] : memref<{mlir}>")))
     }
 
-    /// The block size is written as the constant it is rather than read with
-    /// `gpu.block_dim`, which ROCDL lowers to a call into ROCm's device library.
     fn grid_position(&mut self, of: HirGridIndex, axis: u8) -> String {
         let axis = usize::from(axis).min(GRID_DIMENSIONS.len() - 1);
-        let dimension = GRID_DIMENSIONS[axis];
-        let block = self.assign(&format!("gpu.block_id {dimension}"));
         let position = match of {
-            HirGridIndex::Block => block,
-            HirGridIndex::Thread => {
-                let size = self.assign(&format!("arith.constant {} : index", self.threads[axis]));
-                let local = self.assign(&format!("gpu.thread_id {dimension}"));
-                let first = self.assign(&format!("arith.muli {block}, {size} : index"));
-                self.assign(&format!("arith.addi {first}, {local} : index"))
-            }
+            HirGridIndex::Block => self.assign(&format!("gpu.block_id {}", GRID_DIMENSIONS[axis])),
+            HirGridIndex::Thread => self.thread_position(axis),
         };
         self.assign(&format!("arith.index_cast {position} : index to i32"))
+    }
+
+    /// The thread's global position along grid axis `axis`, as an `index`. The block size
+    /// is written as the constant it is rather than read with `gpu.block_dim`, which ROCDL
+    /// lowers to a call into ROCm's device library.
+    fn thread_position(&mut self, axis: usize) -> String {
+        let dimension = GRID_DIMENSIONS[axis];
+        let block = self.assign(&format!("gpu.block_id {dimension}"));
+        let size = self.assign(&format!("arith.constant {} : index", self.threads[axis]));
+        let local = self.assign(&format!("gpu.thread_id {dimension}"));
+        let first = self.assign(&format!("arith.muli {block}, {size} : index"));
+        self.assign(&format!("arith.addi {first}, {local} : index"))
+    }
+
+    /// `out.partition(|base, slice| body)`. A thread's number is the row-major position
+    /// of the grid element it owns, so thread `n` gets elements `n * chunk` up to
+    /// `(n + 1) * chunk` of `out`: every run disjoint, and every element in one. A thread
+    /// in the overhang owns no grid element and skips the body. The body's `return`
+    /// leaves the closure, so it ends at the partition's own exit.
+    fn partition(
+        &mut self,
+        out: &HirExpr,
+        base: &str,
+        slice: &str,
+        body: &[HirStmt],
+        span: Span,
+    ) -> Lowered<()> {
+        let (memref, ty, extents) = self.tensor(out)?;
+        let threads: usize = self.grid.iter().product();
+        let elements: usize = extents.iter().product();
+        if threads == 0 || !elements.is_multiple_of(threads) {
+            return Err(Refused::new(
+                span,
+                &format!(
+                    "a `partition` of {elements} elements, which the grid's {threads} threads cannot share equally,"
+                ),
+            ));
+        }
+        let chunk = elements / threads;
+
+        let mut owned = None;
+        let mut number = None;
+        for (axis, extent) in self.grid.clone().into_iter().enumerate() {
+            let position = self.thread_position(axis);
+            let bound = self.assign(&format!("arith.constant {extent} : index"));
+            let inside = self.assign(&format!("arith.cmpi ult, {position}, {bound} : index"));
+            owned = Some(match owned {
+                None => inside,
+                Some(all) => self.assign(&format!("arith.andi {all}, {inside} : i1")),
+            });
+            number = Some(match number {
+                None => position,
+                Some(outer) => {
+                    let scaled = self.assign(&format!("arith.muli {outer}, {bound} : index"));
+                    self.assign(&format!("arith.addi {scaled}, {position} : index"))
+                }
+            });
+        }
+        let (Some(owned), Some(number)) = (owned, number) else {
+            return Err(Refused::new(span, "a `partition` in a kernel with no grid"));
+        };
+        let run = self.block();
+        let after = self.block();
+        self.cond_branch(&owned, &run, &after);
+        self.start(&run);
+        let number = self.assign(&format!("arith.index_cast {number} : index to i64"));
+        let size = self.assign(&format!("arith.constant {chunk} : i64"));
+        let first = self.assign(&format!("arith.muli {number}, {size} : i64"));
+        let slot = self.slot("i64");
+        self.line(&format!("memref.store {first}, {slot}[] : memref<i64>"));
+        let view = SliceView {
+            memref,
+            ty,
+            extents,
+            base: first,
+            chunk,
+        };
+        self.scopes.push(vec![
+            (
+                base.to_string(),
+                Binding::Slot {
+                    slot,
+                    ty: HirType::U64,
+                },
+            ),
+            (slice.to_string(), Binding::Slice(view)),
+        ]);
+        let loops = std::mem::take(&mut self.loops);
+        let walked = self.statements(body, &after);
+        self.loops = loops;
+        self.scopes.pop();
+        walked?;
+        self.branch(&after);
+        self.start(&after);
+        Ok(())
+    }
+
+    /// The partition slice `object` names, if it names one.
+    fn slice(&self, object: &HirExpr) -> Option<SliceView> {
+        let inner = match &object.kind {
+            HirExprKind::Deref { operand } => operand.as_ref(),
+            _ => object,
+        };
+        let HirExprKind::Variable(name) = &inner.kind else {
+            return None;
+        };
+        match self.lookup(name) {
+            Some(Binding::Slice(view)) => Some(view),
+            _ => None,
+        }
+    }
+
+    /// Where `object[index]` lives: an element of a partition slice or of a rank-1 tensor
+    /// parameter, as the `memref`, its type and the bounds-checked indices into it.
+    fn indexed(
+        &mut self,
+        object: &HirExpr,
+        index: &HirExpr,
+        span: Span,
+        exit: &str,
+    ) -> Lowered<(String, String, String)> {
+        let Some(view) = self.slice(object) else {
+            let (memref, ty, extents) = self.tensor(object)?;
+            let axes = [HirTensorAxis::Position(index.clone())];
+            let indices = self.indices(&axes, &extents, span, exit)?;
+            return Ok((memref, ty, indices));
+        };
+        let raw = self.expr(index, exit)?;
+        let wide = self.widen_to_i64(&raw, &index.ty, span)?;
+        let bound = self.assign(&format!("arith.constant {} : i64", view.chunk));
+        let inside = self.assign(&format!("arith.cmpi ult, {wide}, {bound} : i64"));
+        self.guard(&inside, INDEX_OUT_OF_BOUNDS);
+        let flat = self.assign(&format!("arith.addi {}, {wide} : i64", view.base));
+        let indices = self.delinearize(&flat, &view.extents);
+        Ok((view.memref, view.ty, indices))
+    }
+
+    /// `flat`, an `i64` row-major position already known to be in range, as one `index`
+    /// per axis of `extents`. An empty axis gets the unwrapped quotient, as `.flat` does.
+    fn delinearize(&mut self, flat: &str, extents: &[usize]) -> String {
+        let mut indices = Vec::with_capacity(extents.len());
+        for (axis, &extent) in extents.iter().enumerate() {
+            let stride: usize = extents[axis + 1..].iter().map(|&e| e.max(1)).product();
+            let mut value = flat.to_string();
+            if stride > 1 {
+                let divisor = self.assign(&format!("arith.constant {stride} : i64"));
+                value = self.assign(&format!("arith.divui {value}, {divisor} : i64"));
+            }
+            if axis > 0 && extent > 0 {
+                let modulus = self.assign(&format!("arith.constant {extent} : i64"));
+                value = self.assign(&format!("arith.remui {value}, {modulus} : i64"));
+            }
+            indices.push(self.assign(&format!("arith.index_cast {value} : i64 to index")));
+        }
+        indices.join(", ")
+    }
+
+    /// The one call a body makes: `slice.len()` on a partition slice, its run length.
+    fn call(&mut self, callee: &HirExpr, args: &[HirExpr], span: Span) -> Lowered<String> {
+        let length = match &callee.kind {
+            HirExprKind::FieldAccess { object, field } if field == "len" && args.is_empty() => {
+                self.slice(object).map(|view| view.chunk)
+            }
+            _ => None,
+        };
+        let Some(length) = length else {
+            return Err(Refused::new(span, "a function call"));
+        };
+        Ok(self.assign(&format!("arith.constant {length} : i64")))
     }
 
     fn literal(&mut self, literal: &Literal, ty: &HirType, span: Span) -> Lowered<String> {
@@ -988,7 +1179,6 @@ fn statement_kind(statement: &HirStmt) -> &'static str {
 
 fn expression_kind(kind: &HirExprKind) -> &'static str {
     match kind {
-        HirExprKind::Call { .. } => "a function call",
         HirExprKind::Closure { .. } => "a closure",
         HirExprKind::Math { .. } => "a math function",
         HirExprKind::Match { .. } => "a `match`",

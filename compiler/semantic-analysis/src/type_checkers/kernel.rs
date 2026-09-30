@@ -18,7 +18,7 @@ use ast_types::{Attribute, Expr, FunctionDef, GenericArg, Item};
 use shared_types::{Identifier, Literal, Span};
 
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, Type};
+use crate::types::{ArrayLen, TensorAxis, Type};
 
 use super::TypeChecker;
 
@@ -29,6 +29,9 @@ pub(crate) const KERNEL_ATTRIBUTE: &str = "kernel";
 const KERNEL_OUT_TYPE: &str = "KernelOut";
 
 const THREADS_LABEL: &str = "threads";
+
+/// The safe write form: `out.partition(|base, slice| { ... })`.
+const PARTITION_METHOD: &str = "partition";
 
 /// No NVIDIA or AMD GPU runs a block of more threads than this.
 const MAX_THREADS_PER_BLOCK: u64 = 1024;
@@ -211,7 +214,13 @@ impl TypeChecker {
             .filter(|param| {
                 matches!(&param.ty, ast_types::Type::Generic { name, .. } if self.is_kernel_out(&name.name))
             })
-            .map(|param| param.name.name.clone())
+            .map(|param| {
+                let tensor = self
+                    .symbols
+                    .lookup(&param.name.name)
+                    .map_or(Type::Unknown, |info| info.ty.referent().clone());
+                (param.name.name.clone(), tensor)
+            })
             .collect();
         self.kernel_out_scope = self.symbols.depth().saturating_sub(1);
     }
@@ -230,8 +239,92 @@ impl TypeChecker {
     /// Whether `name`, read here, is one of the kernel's `KernelOut` parameters rather
     /// than a binding that shadows one.
     pub(crate) fn names_kernel_out(&self, name: &str) -> bool {
-        self.kernel_outs.iter().any(|out| out == name)
+        self.kernel_outs.iter().any(|(out, _)| out == name)
             && self.symbols.defining_depth(name) == Some(self.kernel_out_scope)
+    }
+
+    /// `out.partition(|base, slice| { ... })` on one of the kernel's output handles, the
+    /// write form whose disjointness the compiler proves: every thread that owns an
+    /// element of the grid tensor gets its own run of `out`, all runs equal. `None` when
+    /// the call is not one, so it is checked as any other method call.
+    pub(crate) fn check_kernel_partition(
+        &mut self,
+        object: &Expr,
+        method: &Identifier,
+        args: &[Expr],
+        span: Span,
+    ) -> Option<Type> {
+        let Expr::Identifier(out) = object else {
+            return None;
+        };
+        if method.name != PARTITION_METHOD || !self.in_kernel || !self.names_kernel_out(&out.name) {
+            return None;
+        }
+        let form = format!(
+            "output '{}' is partitioned by one closure of two parameters, `{}.partition(|base, slice| {{ ... }})`",
+            out.name, out.name
+        );
+        let [
+            Expr::Closure {
+                params,
+                ret,
+                body,
+                span: closure_span,
+                ..
+            },
+        ] = args
+        else {
+            self.kernel_error(&form, span);
+            return Some(Type::Void);
+        };
+        if params.len() != 2 {
+            self.kernel_error(&form, *closure_span);
+            return Some(Type::Void);
+        }
+        let tensor = self
+            .kernel_outs
+            .iter()
+            .find(|(name, _)| *name == out.name)
+            .map(|(_, tensor)| tensor.clone());
+        let Some(Type::Tensor { element, shape }) = tensor else {
+            return Some(Type::Void);
+        };
+        let fixed = [
+            Type::U64,
+            Type::Reference {
+                inner: Box::new(Type::Slice(element)),
+                mutable: true,
+            },
+        ];
+        self.check_closure(
+            params,
+            ret.as_ref(),
+            body,
+            Some((&fixed, &Type::Void)),
+            *closure_span,
+        );
+        self.check_partition_share(&out.name, &shape, span);
+        Some(Type::Void)
+    }
+
+    /// Refuse a partition of `out` whose elements the grid's threads cannot share
+    /// equally. A shape a generic parameter sizes is only known per instance, so the GPU
+    /// lowering checks that one.
+    fn check_partition_share(&mut self, out: &str, shape: &[TensorAxis], span: Span) {
+        let grid = match self.kernel_outs.first() {
+            Some((_, Type::Tensor { shape, .. })) => element_count(shape),
+            _ => None,
+        };
+        let (Some(elements), Some(threads)) = (element_count(shape), grid) else {
+            return;
+        };
+        if threads == 0 || elements.is_multiple_of(threads) {
+            return;
+        }
+        let problem = format!(
+            "output '{out}' has {elements} elements, which the grid's {threads} threads cannot share equally: `partition` gives each thread the same number"
+        );
+        self.kernel_error(&problem, span);
     }
 
     /// Refuse a `KernelOut` handle read other than as an index base: bound, returned,
@@ -245,7 +338,7 @@ impl TypeChecker {
 
     pub(crate) fn refuse_kernel_out_use(&mut self, name: &str, span: Span) {
         let problem = format!(
-            "output '{name}' is written one element at a time, `{name}[i] = v`; the handle cannot be bound, returned, passed, borrowed or captured"
+            "output '{name}' is written one element at a time, `{name}[i] = v`, or through `{name}.partition(...)`; the handle cannot be bound, returned, passed, borrowed or captured"
         );
         self.kernel_error(&problem, span);
     }
@@ -345,6 +438,16 @@ fn threads_argument(attr: &Attribute) -> Result<Vec<u64>, String> {
         ));
     }
     Ok(threads)
+}
+
+/// How many elements a tensor of `shape` holds, when every extent is a number.
+fn element_count(shape: &[TensorAxis]) -> Option<u64> {
+    shape
+        .iter()
+        .try_fold(1u64, |count, axis| match axis.extent {
+            ArrayLen::Fixed(extent) => count.checked_mul(extent as u64),
+            _ => None,
+        })
 }
 
 /// Why a kernel cannot take a parameter written `written` and resolved to `ty`, if it

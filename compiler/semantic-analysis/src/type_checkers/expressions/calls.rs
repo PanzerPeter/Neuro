@@ -532,6 +532,10 @@ impl TypeChecker {
                 field,
                 span: fa_span,
             } => {
+                // The handle is not a value, so it is never checked as one here.
+                if let Some(ty) = self.check_kernel_partition(object, field, args, *span) {
+                    return Some(ty);
+                }
                 let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
                 if matches!(obj_ty, Type::Unknown) {
                     return Some(Type::Unknown);

@@ -237,3 +237,111 @@ fn a_kernel_call_borrows_its_inputs() {
         "got {errors:?}"
     );
 }
+
+const PARTITION: &str = "@kernel(threads: [4])
+func split(a: Tensor<f32, [2, 4]>, out: KernelOut<Tensor<f32, [8]>>, wide: KernelOut<Tensor<i32, [8, 3]>>) {
+    out.partition(|base, slice| {
+        for i in 0u64..slice.len() {
+            slice[i] = a.flat(base + i) * 2.0
+        }
+    })
+    wide.partition(|base: u64, s: &mut [i32]| {
+        s[0] = base as i32
+        s[2] += s[0]
+        if base > 3u64 { return }
+    })
+}
+";
+
+#[test]
+fn a_partition_closure_takes_its_types_from_the_output() {
+    let errors = semantic_errors(PARTITION);
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+#[test]
+fn a_partition_takes_one_closure_of_two_parameters() {
+    for call in [
+        "out.partition(5)",
+        "out.partition(|base| {})",
+        "out.partition(|a, b| {}, |c, d| {})",
+    ] {
+        let src = PARTITION.replace(
+            "    wide.partition(",
+            &format!("    {call}\n    wide.partition("),
+        );
+        let (problem, _) = kernel_error(&src);
+        assert!(
+            problem.contains("one closure of two parameters"),
+            "{call}: {problem}"
+        );
+    }
+}
+
+#[test]
+fn a_partition_parameter_annotation_must_match() {
+    for (fixed, written) in [
+        ("base: u64", "base: i32"),
+        ("s: &mut [i32]", "s: &mut [f32]"),
+    ] {
+        let src = PARTITION.replace(fixed, written);
+        let errors = semantic_errors(&src);
+        let found = &written[written.find(": ").expect("annotated") + 2..];
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                TypeError::Mismatch { found: ty, .. } if ty.to_string() == found
+            )),
+            "{written}: got {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn a_partition_needs_a_run_length_the_grid_divides() {
+    let src = PARTITION.replace("[8, 3]", "[9, 3]");
+    let (problem, at) = kernel_error(&src);
+    assert!(
+        problem.contains("27 elements") && problem.contains("8 threads"),
+        "{problem}"
+    );
+    assert_eq!(at, src.find("wide.partition").expect("the call"));
+}
+
+#[test]
+fn a_partition_closure_cannot_capture_a_handle_or_write_through_one() {
+    let src = PARTITION.replace(
+        "s[0] = base as i32",
+        "s[0] = base as i32\n        out[0] = 1.0",
+    );
+    let errors = semantic_errors(&src);
+    assert!(
+        errors.iter().any(|error| matches!(
+            error,
+            TypeError::KernelForm { problem, .. } if problem.contains("output 'out' is written one element")
+        )),
+        "got {errors:?}"
+    );
+    let src = PARTITION.replace("a.flat(base + i)", "out.flat(base + i)");
+    let errors = semantic_errors(&src);
+    assert!(!errors.is_empty(), "reading `out` whole is refused");
+}
+
+#[test]
+fn flat_takes_a_u64_position_of_a_static_shape() {
+    let src = "func f(t: &Tensor<f32, [2, 3]>, d: &Tensor<f32, [?, 3]>) -> f32 {
+    t.flat(4) + d.flat(1)
+}
+";
+    let errors = semantic_errors(src);
+    assert!(
+        matches!(errors.as_slice(), [TypeError::TensorDynamicExtent { operation, .. }] if operation == "`.flat`"),
+        "got {errors:?}"
+    );
+    let errors =
+        semantic_errors("func f(t: &Tensor<f32, [2, 3]>, i: i32) -> f32 {\n    t.flat(i)\n}\n");
+    assert!(
+        matches!(errors.as_slice(), [TypeError::Mismatch { .. }]),
+        "got {errors:?}"
+    );
+}

@@ -117,7 +117,7 @@ fn launcher(
         text.push_str("    return\n  }\n");
         return Ok(text);
     }
-    let region = BodyEmitter::new(function, guard, threads).emit()?;
+    let region = BodyEmitter::new(function, guard, threads, extents).emit()?;
     for (axis, (count, per_block)) in blocks.iter().zip(threads).enumerate() {
         text.push_str(&format!(
             "    %grid{axis} = arith.constant {count} : index\n    %block{axis} = arith.constant {per_block} : index\n"
@@ -281,6 +281,67 @@ func main() -> i32 {
         assert_eq!(
             refusal.span.start,
             source.find("relu(sum)").expect("the call in the source")
+        );
+    }
+
+    const PARTITION: &str = r#"
+@kernel(threads: [4])
+func split<M>(a: Tensor<f32, [6]>, out: KernelOut<Tensor<f32, [6]>>, wide: KernelOut<Tensor<i64, [M]>>) {
+    out.partition(|base, slice| {
+        for i in 0u64..slice.len() {
+            slice[i] = a.flat(base + i)
+        }
+    })
+    wide.partition(|base, s| {
+        s[1] = base as i64
+    })
+}
+
+func main() -> i32 {
+    val a: Tensor<f32, [6]> = Tensor::ones()
+    mut r: Tensor<f32, [6]> = Tensor::zeros()
+    mut w: Tensor<i64, [18]> = Tensor::zeros()
+    split(a, &mut r, &mut w)
+    return 0
+}
+"#;
+
+    #[test]
+    fn a_partition_runs_in_each_thread_that_owns_a_grid_element() {
+        let text = kernel_launchers(&program(PARTITION), &nvidia())
+            .expect("the body lowers")
+            .text;
+        // Threads 6 and 7 of the two blocks of 4 own no element of the grid tensor.
+        assert!(
+            text.contains("arith.constant 6 : index"),
+            "the overhang test against the grid extent:\n{text}"
+        );
+        // 18 elements over 6 threads is a run of 3, which both `.len()` and the
+        // slice's own bounds check read.
+        assert!(text.contains("arith.constant 3 : i64"), "{text}");
+        assert!(text.contains("arith.constant 1 : i64"), "{text}");
+        lower_with_format(&program(PARTITION), &nvidia(), "isa").expect("it lowers for NVIDIA");
+    }
+
+    #[test]
+    fn a_partition_the_grid_cannot_share_is_refused_per_instance() {
+        let source = PARTITION.replace("[18]", "[20]");
+        let Err(MlirError::KernelBodiesNotLowered(refusals)) =
+            lower_with_format(&program(&source), &nvidia(), "isa")
+        else {
+            panic!("expected the partition refused");
+        };
+        let [refusal] = refusals.as_slice() else {
+            panic!("expected one refusal, got {refusals:?}");
+        };
+        assert!(
+            refusal.what.contains("20 elements") && refusal.what.contains("6 threads"),
+            "{}",
+            refusal.what
+        );
+        assert_eq!(
+            refusal.span.start,
+            source.find("wide.partition").expect("the call")
         );
     }
 

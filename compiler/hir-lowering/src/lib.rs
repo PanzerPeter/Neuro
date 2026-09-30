@@ -255,6 +255,9 @@ struct Lowerer {
     /// protocol desugar introduces (`__iter_N` / `__iter_pos_N`), so nested loops over
     /// two iterators never shadow each other.
     protocol_counter: usize,
+    /// Monotonic counter naming the position binding each `.flat(i)` on a tensor of rank
+    /// two or more introduces (`__flat_N`), since every axis reads it.
+    flat_counter: usize,
     /// Lowered name of each `@grad` function, generic instances included → its parameter
     /// names in order and what it differentiates.
     grad_params: HashMap<String, autodiff::GradParams>,
@@ -384,6 +387,7 @@ impl Lowerer {
             try_counter: 0,
             operand_counter: 0,
             protocol_counter: 0,
+            flat_counter: 0,
             grad_params: HashMap::new(),
             grad_specializations: Vec::new(),
             backward_counter: 0,

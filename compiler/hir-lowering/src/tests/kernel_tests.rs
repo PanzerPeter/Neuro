@@ -137,3 +137,74 @@ fn kernel_tensors_are_references_the_call_lends() {
         }
     }
 }
+
+const PARTITION: &str = r#"
+@kernel(threads: [4])
+func split(a: Tensor<f32, [8]>, out: KernelOut<Tensor<f32, [8]>>) {
+    out.partition(|base, slice| {
+        slice[0] = a.flat(base)
+        return
+    })
+}
+
+func main() -> i32 {
+    val a: Tensor<f32, [8]> = Tensor::ones()
+    mut r: Tensor<f32, [8]> = Tensor::zeros()
+    split(a, &mut r)
+    val t: Tensor<i32, [2, 3, 4]> = Tensor::zeros()
+    val x = t.flat(13)
+    return 0
+}
+"#;
+
+/// The closure is not lifted: its body sits in the node, over two locals of the
+/// types the output fixes, so a kernel never has a closure to call.
+#[test]
+fn a_partition_inlines_its_closure_over_the_output() {
+    let program = lower(PARTITION);
+    let [HirStmt::Expr(partition)] = function_body(&program, "split") else {
+        panic!("expected one statement");
+    };
+    let HirExprKind::KernelPartition {
+        out,
+        base,
+        slice,
+        body,
+    } = &partition.kind
+    else {
+        panic!("{:?}", partition.kind);
+    };
+    assert_eq!(partition.ty, HirType::Void);
+    assert!(matches!(&out.kind, HirExprKind::Variable(name) if name == "out"));
+    assert_eq!((base.as_str(), slice.as_str()), ("base", "slice"));
+    assert!(matches!(
+        body.as_slice(),
+        [HirStmt::Assign { .. }, HirStmt::Return { value: None, .. }]
+    ));
+    assert!(
+        !program
+            .items
+            .iter()
+            .any(|item| matches!(item, HirItem::Closure(_))),
+        "nothing is lifted"
+    );
+}
+
+/// `.flat` is the index its row-major position names, over a position bound once.
+#[test]
+fn flat_is_an_index_over_the_row_major_strides() {
+    let program = lower(PARTITION);
+    let init = binding_init(function_body(&program, "main"), "x");
+    assert_eq!(init.ty, HirType::I32);
+    let HirExprKind::Block { stmts } = &init.kind else {
+        panic!("{:?}", init.kind);
+    };
+    let [HirStmt::VarDecl { name, .. }, HirStmt::Expr(index)] = stmts.as_slice() else {
+        panic!("{stmts:?}");
+    };
+    assert!(name.starts_with("__flat_"));
+    let HirExprKind::TensorIndex { axes, .. } = &index.kind else {
+        panic!("{:?}", index.kind);
+    };
+    assert_eq!(axes.len(), 3);
+}

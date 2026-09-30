@@ -3,9 +3,11 @@
 //! Reached from the `lower_expr_uncoerced` dispatch in this module's `mod.rs`.
 //! Every file here adds methods to the same `impl Lowerer` block.
 
-use ast_types::Expr;
-use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirFieldInit, HirStmt, HirType};
+use ast_types::{BinaryOp, Expr};
+use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirFieldInit, HirStmt, HirTensorAxis, HirType};
+use shared_types::Literal;
 
+use super::grid::PARTITION_METHOD;
 use super::{
     CHAR_AT_METHOD, CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT,
     CLONE_METHOD, DEVICE_TYPE_NAME, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD, TENSOR_TO_METHOD,
@@ -19,6 +21,7 @@ const HESSIAN_METHOD: &str = "hessian";
 const ZERO_GRAD_METHOD: &str = "zero_grad";
 const DETACH_METHOD: &str = "detach";
 const ITEM_METHOD: &str = "item";
+const FLAT_METHOD: &str = "flat";
 
 impl Lowerer {
     /// Lower a call, dispatching on the callee shape: free/builtin function,
@@ -511,6 +514,27 @@ impl Lowerer {
             return Ok(HirExpr::new(kind, element, span));
         }
 
+        if method == FLAT_METHOD
+            && let HirType::Tensor { element, shape, .. } = recv.referent()
+        {
+            let element = (**element).clone();
+            let extents = shape
+                .iter()
+                .copied()
+                .collect::<Option<Vec<usize>>>()
+                .ok_or_else(|| LoweringError::Malformed {
+                    detail: "`.flat` on a tensor with a `?` extent".to_string(),
+                })?;
+            return self.lower_tensor_flat(object, element, &extents, args, span);
+        }
+
+        if method == PARTITION_METHOD
+            && self.in_kernel
+            && matches!(recv, HirType::Reference { mutable: true, .. })
+        {
+            return self.lower_kernel_partition(object, args, span);
+        }
+
         // A reduction reads its receiver rather than consuming it, so a borrowed one is
         // lowered here too. Its `axis:` argument is never lowered as a value:
         // `.sum(axis: width)` names an axis, not a variable.
@@ -628,6 +652,78 @@ impl Lowerer {
             result_ty,
             span,
         ))
+    }
+
+    /// `t.flat(i)` as the index `t[i / s0, (i / s1) % e1, ...]` over the row-major strides,
+    /// which every backend already lowers and bounds-checks: the first axis is in range
+    /// exactly when `i` is below the element count. A tensor with an empty axis has no
+    /// element to wrap onto, so that axis takes the unwrapped quotient and fails its check.
+    fn lower_tensor_flat(
+        &mut self,
+        object: HirExpr,
+        element: HirType,
+        extents: &[usize],
+        args: &[Expr],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let position = self
+            .lower_args(args, &[HirType::U64])?
+            .into_iter()
+            .next()
+            .ok_or_else(|| LoweringError::Malformed {
+                detail: "`.flat` expects a position".to_string(),
+            })?;
+        let u64_expr = |kind| HirExpr::new(kind, HirType::U64, span);
+        let literal =
+            |value: usize| u64_expr(HirExprKind::Literal(Literal::Integer(value as i128, None)));
+        let binary = |op, left: HirExpr, right: HirExpr| {
+            u64_expr(HirExprKind::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        };
+
+        let mut stmts = Vec::new();
+        let read = if extents.len() > 1 {
+            let name = format!("__flat_{}", self.flat_counter);
+            self.flat_counter += 1;
+            stmts.push(HirStmt::VarDecl {
+                name: name.clone(),
+                ty: HirType::U64,
+                init: Some(position),
+                mutable: false,
+                span,
+            });
+            u64_expr(HirExprKind::Variable(name))
+        } else {
+            position
+        };
+        let mut axes = Vec::with_capacity(extents.len());
+        for (axis, &extent) in extents.iter().enumerate() {
+            let stride: usize = extents[axis + 1..].iter().map(|&e| e.max(1)).product();
+            let mut index = read.clone();
+            if stride > 1 {
+                index = binary(BinaryOp::Divide, index, literal(stride));
+            }
+            if axis > 0 && extent > 0 {
+                index = binary(BinaryOp::Modulo, index, literal(extent));
+            }
+            axes.push(HirTensorAxis::Position(index));
+        }
+        let index = HirExpr::new(
+            HirExprKind::TensorIndex {
+                object: Box::new(object),
+                axes,
+            },
+            element.clone(),
+            span,
+        );
+        if stmts.is_empty() {
+            return Ok(index);
+        }
+        stmts.push(HirStmt::Expr(index));
+        Ok(HirExpr::new(HirExprKind::Block { stmts }, element, span))
     }
 
     /// Build the `Chars` iterator `text.chars()` yields: a borrow of the receiver's UTF-8

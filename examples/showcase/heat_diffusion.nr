@@ -3,7 +3,7 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   `@kernel` with `thread_id`, an early `return`, borrowed `Tensor` inputs and
-//   `KernelOut` outputs · `.to(Device::GPU(0))` /
+//   `KernelOut` outputs · `out.partition` with `.flat` · `.to(Device::GPU(0))` /
 //   `.to(Device::CPU)` · a `@gpu` function over device tensors · `pool` arena blocks · a
 //   closure through `.map` · a `.sum()` reduction · a `Vec` of `Copy` structs.
 //
@@ -14,7 +14,7 @@
 // so no step copies anything to or from the host. Every 25 steps a `@gpu` function measures
 // how far the rod has moved since the last report, that difference comes back to the host
 // to be summed, and a second kernel keeps the new temperatures on the GPU for the next
-// report. The same simulation also runs on the host, and the two must agree.
+// report, writing through `partition` so each thread can only reach its own cell. The same simulation also runs on the host, and the two must agree.
 // Without a usable NVIDIA GPU the program stops before `main` with a `panic:` line.
 
 @kernel(threads: [32])
@@ -31,12 +31,16 @@ func diffuse(t: Tensor<f32, [100]>, rate: f32, next: KernelOut<Tensor<f32, [100]
     next[i] = t[i] + rate * spread
 }
 
+// `partition` hands each thread that owns a cell its run of `out`: one element here,
+// since `out` is the grid tensor, starting at row-major position `base`. The threads
+// past cell 99 get no run, so the body needs no range check of its own.
 @kernel(threads: [32])
 func copy_into(t: Tensor<f32, [100]>, out: KernelOut<Tensor<f32, [100]>>) {
-    val i = thread_id.x
-    if i < 100 {
-        out[i] = t[i]
-    }
+    out.partition(|base, cells| {
+        for i in 0u64..cells.len() {
+            cells[i] = t.flat(base + i)
+        }
+    })
 }
 
 @gpu

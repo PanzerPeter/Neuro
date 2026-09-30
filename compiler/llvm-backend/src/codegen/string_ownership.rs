@@ -759,7 +759,8 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
         HirExprKind::Block { stmts }
         | HirExprKind::Unsafe { stmts }
         | HirExprKind::Pool { stmts, .. }
-        | HirExprKind::Loop { body: stmts, .. } => walk_stmts(stmts, visit),
+        | HirExprKind::Loop { body: stmts, .. }
+        | HirExprKind::KernelPartition { body: stmts, .. } => walk_stmts(stmts, visit),
         HirExprKind::Range { start, end, .. } => {
             walk(start, visit);
             walk(end, visit);

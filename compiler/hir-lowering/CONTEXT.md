@@ -105,6 +105,12 @@ call's input arguments in `&` (`borrow_kernel_inputs`), so the HIR of a kernel a
 the plain reference form. `lower_function_body` marks the body so that
 `thread_id.x` / `block_id.z` lower to `HirExprKind::GridPosition` (`expressions/grid.rs`) unless a
 local of that name shadows it. A kernel call inside a `@grad` body is refused like a `@gpu` one.
+In a kernel body, `out.partition(closure)` on a `&mut Tensor` lowers to
+`HirExprKind::KernelPartition` (`lower_kernel_partition`): the closure's body is lowered in place
+over `base: u64` and `slice: &mut [T]` locals with the loop stack cleared, and nothing is lifted.
+`t.flat(i)` on any tensor is `lower_tensor_flat`'s `TensorIndex` over the row-major strides, axis
+`k` reading `(i / stride_k) % extent_k` (no modulo on axis 0, so its bounds check is the whole
+tensor's), with `i` bound once to a `__flat_N` local when the rank is two or more.
 
 A `@grad` function with a function-typed parameter is never derived on its own
 (`derive_reverses` skips it): only a call site knows the target. `lower_backward` resolves each

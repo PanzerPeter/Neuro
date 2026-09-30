@@ -106,6 +106,14 @@ module per declaration kind beside it. `tests/` is split by subject.
   like any other. It also records the `KernelOut` parameters (`enter_kernel_outs`); the
   identifier arm refuses any read of one (`check_kernel_out_read`) except as the object of an
   index, which `check_index_base` marks, and `validate_captures` refuses a closure capturing one.
+  The other place a handle may be named is the receiver of `out.partition(...)`, which the
+  method-call arm hands to `check_kernel_partition` before checking the receiver as a value: one
+  closure literal of two parameters, checked by `check_closure` against the fixed signature
+  `(u64, &mut [T]) -> void` (an annotation must match it, and one may be left out), and, when
+  every extent is a number, an element count the grid tensor's divides (`check_partition_share`;
+  a generic instance is left to the GPU lowering). `enter_kernel_outs` keeps each handle's tensor
+  type for this, the first being the grid tensor. `.flat(i)` (`expressions/builtins.rs`) reads
+  any tensor of static shape at a `u64` row-major position and moves nothing.
   A kernel named as a value is refused (`refuse_kernel_value`): a function type cannot carry the
   borrow at the call.
   `.detach()` (`expressions/builtins.rs`) consumes an owned tensor like `.to` (`record_move`)

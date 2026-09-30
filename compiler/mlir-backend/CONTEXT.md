@@ -138,7 +138,14 @@ has no `cf.assert`; the trap block branches on, since `gpu.launch` wants every e
 end in `gpu.terminator`. `thread_id` is `block_id * threads[axis] + gpu.thread_id` with the block
 size as a constant, because `gpu.block_dim` lowers to a ROCm device-library call. Float to integer
 casts saturate through `llvm.call_intrinsic "llvm.fptosi.sat..."`, as on the host. Integer
-arithmetic wraps. The launchers run a pipeline of their own (`kernel_lowering_pipeline`: outline,
+arithmetic wraps. A `KernelPartition` runs its body in each thread whose global position is
+inside the grid tensor; the thread's number is that position read row-major, and its run of
+`out` starts at `number * chunk`, `chunk` being `out`'s element count over the grid tensor's (a
+count the grid cannot share is a refusal, which reaches only a generic instance, the checker
+having caught the rest). `slice` is a `Binding::Slice`: `slice[i]` is checked against `chunk`
+and then turned from `base + i` back into one index per axis with `divui` / `remui` by constant
+strides (no `memref.collapse_shape`), and `slice.len()` is the constant `chunk`. The body's
+`return` branches to the block after the partition. The launchers run a pipeline of their own (`kernel_lowering_pipeline`: outline,
 async region, vendor attach and conversion, the shared descent) with no bufferization prefix,
 because `buffer-deallocation-pipeline` refuses unstructured loops and `gpu.launch_func`; the
 `@gpu` module and the kernel module are translated separately and linked in one LLVM context

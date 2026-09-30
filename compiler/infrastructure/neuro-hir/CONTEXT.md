@@ -126,8 +126,10 @@ need them land, and not before. `@gpu` is `HirFunction::target`: `Gpu` for bare 
 `GpuOrHost` for `@gpu(fallback: true)`, whose backends must emit a kernel and a host copy and
 pick one at startup. `@kernel(threads: [...])` is `Kernel { threads }`, the block shape padded
 with 1s to three axes; its body reads `thread_id.x` / `block_id.y` as
-`HirExprKind::GridPosition { of, axis }`, a node no host body contains, so the LLVM backend's
-arm for it is an internal error.
+`HirExprKind::GridPosition { of, axis }`, and `out.partition(|base, slice| { ... })` is
+`HirExprKind::KernelPartition { out, base, slice, body }`, the closure inlined with its two
+parameters as locals. No host body contains either node, so the LLVM backend's arms for them are
+internal errors. `.flat(i)` has no node: lowering spells it as a `TensorIndex`.
 
 ### Nodes that carry a deliberate design decision
 

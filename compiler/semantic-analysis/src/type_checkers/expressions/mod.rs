@@ -376,9 +376,9 @@ impl TypeChecker {
                 params,
                 ret,
                 body,
-                is_move,
                 span,
-            } => Some(self.check_closure(params, ret.as_ref(), body, *is_move, *span)),
+                ..
+            } => Some(self.check_closure(params, ret.as_ref(), body, None, *span)),
 
             Expr::Compose { functions, span } => Some(self.check_compose(functions, *span)),
         }

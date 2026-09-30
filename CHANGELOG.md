@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.11.0] - 2026-09-30
+
+### Added
+
+- `out.partition(|base, slice| { ... })` in a `@kernel` body writes a `KernelOut` output so that
+  no two threads can reach the same element. Each thread that owns an element of the
+  grid tensor gets its own run of `out`: with `k` elements of `out` per grid element, thread `n`
+  gets elements `n * k` up to `(n + 1) * k` in row-major order, where `n` is the row-major
+  position of its grid element. `slice` is that run as a `&mut [T]`, indexed from 0 up to
+  `slice.len()` and bounds-checked against the run, and `base` is the `u64` position of its
+  first element. Threads in the overhang past the grid tensor's edge run nothing. The closure
+  takes two parameters whose types may be left out, returns nothing, and a `return` in it ends
+  only the closure. An output whose element count the grid tensor's does not divide is a
+  compile error naming both counts.
+- `tensor.flat(i)` reads the element at row-major position `i` (a `u64`) of a tensor of any rank
+  and static shape, on the host and in a kernel, bounds-checked like any index. It is how a
+  partition's `base + i` becomes an input element.
+
 ## [4.10.0] - 2026-09-30
 
 ### Changed

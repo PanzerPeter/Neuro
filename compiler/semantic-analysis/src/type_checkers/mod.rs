@@ -158,9 +158,10 @@ pub(crate) struct TypeChecker {
     /// Whether the body being checked is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
-    /// The `KernelOut` parameters of the kernel being checked, bound in the scope
-    /// `kernel_out_scope` indexes; a same-named binding anywhere else shadows one.
-    kernel_outs: Vec<String>,
+    /// The `KernelOut` parameters of the kernel being checked, in order and with the
+    /// tensor each writes, bound in the scope `kernel_out_scope` indexes; a same-named
+    /// binding anywhere else shadows one. The first is the grid tensor.
+    kernel_outs: Vec<(String, Type)>,
     kernel_out_scope: usize,
     /// The identifier an index is about to check as its object: the one read of a
     /// `KernelOut` handle a kernel body may make.

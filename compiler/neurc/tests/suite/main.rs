@@ -75,6 +75,7 @@ mod integer_overflow;
 mod integer_suffixes;
 mod iterator_protocol;
 mod kernel_attribute;
+mod kernel_partition;
 mod labeled_breaks;
 mod lifetimes;
 mod lints;

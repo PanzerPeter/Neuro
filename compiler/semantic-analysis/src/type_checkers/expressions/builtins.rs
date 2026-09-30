@@ -39,6 +39,9 @@ const DETACH_METHOD: &str = "detach";
 /// `tensor.item()`, the read of a rank-0 tensor's one element.
 const ITEM_METHOD: &str = "item";
 
+/// `tensor.flat(i)`, the read of an element by its row-major position.
+const FLAT_METHOD: &str = "flat";
+
 /// `float.to_checked::<T>()`, the float-to-integer conversion that reports a value `T`
 /// cannot hold instead of saturating it.
 pub(super) const TO_CHECKED_METHOD: &str = "to_checked";
@@ -354,6 +357,15 @@ impl TypeChecker {
                         span: call_span,
                     });
                 }
+                Some(element)
+            }
+            // `.flat(i)` reads the element at row-major position `i` whatever the rank, and
+            // borrows like an index. The position is turned into one per axis by the
+            // extents, so they have to be known.
+            (Type::Tensor { element, shape }, FLAT_METHOD) => {
+                let (element, shape) = ((**element).clone(), shape.clone());
+                self.check_call_args(args, &[Type::U64], call_span);
+                self.reject_dynamic_extent(&shape, "`.flat`", recv, call_span);
                 Some(element)
             }
             // `.detach()` CONSUMES the receiver as a shape cast does: its buffer is handed

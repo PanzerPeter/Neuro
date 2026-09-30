@@ -453,6 +453,13 @@ An index that leaves an axis standing produces a fresh tensor rather than naming
 so `t[0, ..] = 5` is a compile error. Name every axis. The target must be a writable
 place: a `mut` tensor binding, or a tensor reached through one, such as a struct field.
 
+### Reading by row-major position
+
+`.flat(i)` reads the element at row-major position `i`, whatever the rank: on the tensor
+above, `t.flat(5)` is `t[1, 1]`. The position is a `u64`, and it is bounds-checked against the
+element count like any index. Like an index, it reads through a borrow and moves nothing. The
+shape must be static, since the extents are what turn a position into one index per axis.
+
 ## Shape generics
 
 A tensor extent may be a **generic parameter** rather than a literal, so one function
@@ -1060,20 +1067,62 @@ input and an output. A call copies each host tensor to the GPU and copies each o
 the kernel has run; a tensor already moved with [`.to(Device::GPU(n))`](#device-transfer) is used
 where it is, and an output is written in place.
 
-Inside the body a `KernelOut` handle is only ever indexed: `out[i, j] = v`, `out[i] += v`, or a
-read of one element. It cannot be bound to a local, borrowed, passed to a function, captured by
-a closure or returned, and `KernelOut` is not a type anywhere but a kernel's parameter list. An
-input is read-only; writing one of its elements is an error.
+Inside the body a `KernelOut` handle is only ever indexed (`out[i, j] = v`, `out[i] += v`, or a
+read of one element) or partitioned (below). It cannot be bound to a local, borrowed, passed to
+a function, captured by a closure or returned, and `KernelOut` is not a type anywhere but a
+kernel's parameter list. An input is read-only; writing one of its elements is an error.
+
+### Writing through `partition`
+
+An index write puts a value wherever its index says, and nothing stops two threads from
+writing the same element. `out.partition(|base, slice| { ... })` hands each thread its own run
+of `out` instead, so no two threads can meet:
+
+```neuro
+@kernel(threads: [4])
+func scale_rows(m: Tensor<f32, [6, 5]>, factor: Tensor<f32, [6]>, totals: KernelOut<Tensor<f32, [6]>>, scaled: KernelOut<Tensor<f32, [6, 5]>>) {
+    scaled.partition(|base, row| {
+        val f = factor.flat(base / row.len())
+        for i in 0u64..row.len() {
+            row[i] = m.flat(base + i) * f
+        }
+    })
+    totals.partition(|base, total| {
+        mut sum = 0.0f32
+        for k in 0u64..5u64 {
+            sum += m.flat(base * 5u64 + k)
+        }
+        total[0] = sum * factor.flat(base)
+    })
+}
+```
+
+The threads that share `out` are the ones that own an element of the grid tensor, and a
+thread's number is the row-major position of that element. With `k` elements of `out` to each
+thread, thread `n` gets elements `n * k` up to `(n + 1) * k` in row-major order. `slice` is
+that run, a `&mut [T]` indexed from 0 up to `slice.len()` and bounds-checked against the run,
+and `base` is the `u64` position of its first element. [`.flat(base + i)`](#reading-by-row-major-position)
+reads the input element under `slice[i]`. A thread in the overhang owns no grid element and
+runs nothing, so the body needs no `row < M` guard. Partitioning the grid tensor itself gives
+every thread one element.
+
+The element count of `out` has to be a multiple of the grid tensor's, and the compiler refuses
+a partition where it is not. The argument is one closure of two parameters, whose types may be
+left out (`u64` and `&mut [T]` are the only ones it takes), and it returns nothing: a `return`
+in it ends the closure, not the kernel. The closure may read the kernel's inputs and scalars,
+but not name a `KernelOut` handle. Inside it, `slice` is only indexed or asked its `.len()`.
 
 The body may use locals, arithmetic and comparisons, casts, `&&` / `||`, `if` (as a statement
-or with a value), `while`, `loop`, `for` over a range, `break`, `continue`, `return`, and reads
-and writes of single tensor elements. Integer arithmetic wraps on overflow, as in a release
-build. Anything else, such as a function call, is a compile error at that construct.
+or with a value), `while`, `loop`, `for` over a range, `break`, `continue`, `return`, reads
+and writes of single tensor elements, `.flat(i)` and `partition`. Integer arithmetic wraps on
+overflow, as in a release build. Anything else, such as a function call, is a compile error at
+that construct.
 
 The attribute goes on a free function, never beside `@gpu` or `@grad`, and a kernel needs a GPU
 and a `neurc` built with the MLIR backend, exactly as bare `@gpu` does.
-[examples/tensors/tensor_kernel.nr](../../examples/tensors/tensor_kernel.nr) runs the snippet
-above, and [examples/showcase/heat_diffusion.nr](../../examples/showcase/heat_diffusion.nr) steps
+[examples/tensors/tensor_kernel.nr](../../examples/tensors/tensor_kernel.nr) runs the first
+snippet above, [examples/tensors/kernel_partition.nr](../../examples/tensors/kernel_partition.nr)
+the second, and [examples/showcase/heat_diffusion.nr](../../examples/showcase/heat_diffusion.nr) steps
 a simulation with two kernels over tensors that stay on the GPU.
 
 ## What tensors cannot do yet

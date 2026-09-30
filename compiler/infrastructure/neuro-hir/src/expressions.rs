@@ -108,6 +108,18 @@ pub enum HirExprKind {
         of: HirGridIndex,
         axis: u8,
     },
+    /// `out.partition(|base, slice| { ... })` in a `@kernel` body, where `out` is a
+    /// `&mut Tensor` parameter. `body` runs once in each thread that owns an element of
+    /// the grid tensor, with `base` a `u64` local and `slice` a `&mut [T]` local over
+    /// that thread's run of `out`'s row-major elements. The runs are the backend's to
+    /// compute from the grid: disjoint, equal, and in thread order. The closure is
+    /// inlined, so a `return` in `body` ends the partition, not the kernel. Unit-typed.
+    KernelPartition {
+        out: Box<HirExpr>,
+        base: String,
+        slice: String,
+        body: Vec<HirStmt>,
+    },
     /// `pool { ... }` block: an arena region. Allocations emitted inside the body
     /// are taken from a bump arena the block releases in one step at its exit;
     /// allocations a callee makes are not the block's and stay on the heap. Always
