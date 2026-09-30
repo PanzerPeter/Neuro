@@ -66,7 +66,10 @@ fn run(exe: &std::path::Path, hide_devices: bool) -> Output {
 fn assert_ran(output: &Output) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "6.0 6.0\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        "6.0 6.0\n"
+    );
 }
 
 #[test]

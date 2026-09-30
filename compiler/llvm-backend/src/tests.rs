@@ -2563,7 +2563,8 @@ const DEVICE_PRELUDE: &str = "
 
 /// `.to(device)` re-points the tensor's own handle at a buffer on the other side, through
 /// the GPU runtime, which a program with a transfer links whether or not it has a `@gpu`
-/// function.
+/// function. Windows has no GPU runtime yet, so there a transfer to a GPU is refused at
+/// run time and nothing is linked.
 #[test]
 fn a_transfer_repoints_the_handle_through_the_gpu_runtime() {
     let source = format!(
@@ -2577,6 +2578,17 @@ fn a_transfer_repoints_the_handle_through_the_gpu_runtime() {
     );
     let ir = module_ir(&source, OptimizationLevelSetting::O0);
     let main = function_body(&ir, "main");
+    if cfg!(target_os = "windows") {
+        assert!(
+            ir.contains("panic: a tensor transfer to a GPU is not supported on Windows yet at"),
+            "a transfer to a GPU is refused with a located diagnostic:\n{ir}"
+        );
+        assert!(
+            !ir.contains("@__neuro_device_upload("),
+            "no GPU runtime is linked on Windows:\n{ir}"
+        );
+        return;
+    }
     let upload = main
         .find("call ptr @__neuro_device_upload(")
         .unwrap_or_else(|| panic!("expected an upload:\n{main}"));

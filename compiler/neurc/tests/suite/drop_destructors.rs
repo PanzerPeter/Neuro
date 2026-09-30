@@ -925,7 +925,7 @@ func main() -> i32 {
     let output = Command::new(&exe).output().expect("failed to run");
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
         "drop 1\ndrop 2\ndrop 4\ndrop 7\nend\ndrop 6\ndrop 8\ndrop 5\ndrop 3\n",
         "each displaced token goes at its store, the rest at scope exit in reverse order"
     );
