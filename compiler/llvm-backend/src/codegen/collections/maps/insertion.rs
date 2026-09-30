@@ -39,7 +39,6 @@ impl<'ctx> CodegenContext<'ctx> {
         })
     }
 
-    /// Body of the hashed insert.
     pub(super) fn emit_hashed_insert_body(
         &mut self,
         func: FunctionValue<'ctx>,

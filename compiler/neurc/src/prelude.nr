@@ -165,9 +165,9 @@ impl Iterator for Chars {
 
 // The device a tensor's buffer lives on, and the argument `tensor.to(device)` takes.
 //
-// `CPU` is declared first because it is the only device the compiler can lower to
-// today: the backend reads its discriminant to decide whether a transfer is a no-op
-// or an abort, so reordering these variants changes what `.to()` accepts.
+// The backend finds the host variant by its name and treats every other variant as a
+// GPU whose index is its one payload field, so renaming `CPU` or reshaping `GPU`
+// breaks every transfer.
 export enum Device {
     CPU,
     GPU(i32)

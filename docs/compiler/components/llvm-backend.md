@@ -301,10 +301,14 @@ A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging w
 that finds no usable GPU leaves the module unloaded instead of aborting, and every call takes
 its host body.
 
-## Resources
+## Source
+
+- [`compiler/llvm-backend/src/`](../../../compiler/llvm-backend/src/)
+- [`compiler/llvm-backend/CONTEXT.md`](../../../compiler/llvm-backend/CONTEXT.md)
+
+## See Also
 
 - [LLVM Language Reference](https://llvm.org/docs/LangRef.html)
 - [inkwell Documentation](https://thedan64.github.io/inkwell/)
 - [inkwell GitHub](https://github.com/TheDan64/inkwell)
 - [LLVM Kaleidoscope Tutorial](https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/index.html)
-- Source: [compiler/llvm-backend/src/](../../../compiler/llvm-backend/src/)

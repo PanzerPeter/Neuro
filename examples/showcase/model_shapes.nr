@@ -163,8 +163,8 @@ func main() -> i32 {
 
     // A tensor is not `Copy`, and `embedding_rows` below takes one by value, so a
     // second owner has to be asked for. `.clone()` is that request, and
-    // `.to(Device::CPU)` consumes the copy in turn, handing back the same tensor on
-    // the host, the only device this compiler can lower to today.
+    // `.to(Device::CPU)` consumes the copy in turn and hands it back untouched, since
+    // a tensor already on the requested device is not copied.
     val on_host = embeddings.clone().to(Device::CPU)
     mut total = embedding_rows(embeddings) * embedding_width(&on_host)
     println("embeddings [3, 4] via literal   = {total:>6} params")

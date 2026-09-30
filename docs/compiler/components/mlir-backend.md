@@ -290,8 +290,12 @@ Both bindings then load one `libLLVM` 22, which the handoff above relies on.
 
 `melior 0.27.x` is the last line on MLIR 22 (via `mlir-sys 220`); `melior 0.28` moved to MLIR 23.
 
-## Resources
+## Source
 
-- [mlir-backend CONTEXT](../../../compiler/mlir-backend/CONTEXT.md), slice contract
+- [`compiler/mlir-backend/src/lib.rs`](../../../compiler/mlir-backend/src/lib.rs)
+- [`compiler/mlir-backend/CONTEXT.md`](../../../compiler/mlir-backend/CONTEXT.md)
+
+## See Also
+
 - [melior](https://github.com/raviqqe/melior), Rust MLIR bindings
 - [MLIR](https://mlir.llvm.org/), Multi-Level Intermediate Representation

@@ -69,12 +69,17 @@ untouched. Only a path of three or more segments whose head resolves to nothing 
 ## Known Limitations
 
 - Spans stay per-file, and merged modules share one offset space, so a runtime diagnostic
-  from a non-root module reports a position in the root file's coordinates. Per-file
-  attribution needs a multi-source backend contract.
+  from a non-root module reports a position in the root file's coordinates, and a
+  compile-time error in a program of more than one module is printed without a location.
+  Per-file attribution needs a multi-source backend contract.
 - Rewriting does not track locals: a bare name bound by an import is replaced whether or not
   a local of the same name is in scope. Rename the import with `as` instead of shadowing it.
 
-## Resources
+## Source
 
-- [module-resolution CONTEXT](../../../compiler/module-resolution/CONTEXT.md), slice contract
+- [`compiler/module-resolution/src/lib.rs`](../../../compiler/module-resolution/src/lib.rs)
+- [`compiler/module-resolution/CONTEXT.md`](../../../compiler/module-resolution/CONTEXT.md)
+
+## See Also
+
 - [Modules language reference](../../language-reference/modules.md)

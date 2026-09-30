@@ -113,7 +113,14 @@ construct's span, and `neurc` renders it like a type error. See
 Slice unit tests cover the lowering rules; `compiler/neurc/tests/suite/hir_lowering.rs` provides end-to-end
 coverage. The workspace architecture test enforces the slice's infrastructure-only dependencies.
 
-## Resources
+## Source
 
-- [neuro-hir CONTEXT](../../../compiler/infrastructure/neuro-hir/CONTEXT.md), the HIR node set
-- [hir-lowering CONTEXT](../../../compiler/hir-lowering/CONTEXT.md), slice contract
+- [`compiler/hir-lowering/src/lib.rs`](../../../compiler/hir-lowering/src/lib.rs)
+- [`compiler/hir-lowering/CONTEXT.md`](../../../compiler/hir-lowering/CONTEXT.md)
+- [`compiler/infrastructure/neuro-hir/CONTEXT.md`](../../../compiler/infrastructure/neuro-hir/CONTEXT.md), the HIR node set
+
+## See Also
+
+- [Semantic Analysis](semantic-analysis.md), the stage before this one
+- [LLVM Backend](llvm-backend.md) and [MLIR Backend](mlir-backend.md), the consumers of the HIR
+- [Automatic differentiation](../../language-reference/autodiff.md), whose transform runs here

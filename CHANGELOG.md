@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.8.1] - 2026-09-30
+
+### Docs
+
+- The README's tensor row says `@gpu` functions run as NVIDIA or AMD kernels. AMD shipped in
+  4.7.0, but the row still said NVIDIA only. The contributing note links to the Quick Roadmap
+  instead of describing GPU lowering as open work.
+- `docs/compiler/compilation.md` says an `mlir` build lowers `@gpu` bodies to NVIDIA or AMD
+  kernels, and no longer lists running them as a future enhancement.
+- The `hir-lowering`, `module-resolution`, `llvm-backend` and `mlir-backend` component docs end
+  with `Source` and `See Also`, like the other four, instead of `Resources`. The
+  `module-resolution` page also says that a compile-time error in a program of more than one
+  module is printed without a location.
+- The `argument-binding` and `module-resolution` `CONTEXT.md` files name their entry functions,
+  `bind_arguments` and `resolve_program`.
+- The comment on the prelude's `Device` enum and one in the `model_shapes` showcase no longer
+  say the host is the only device the compiler can target.
+
 ## [4.8.0] - 2026-09-30
 
 ### Added

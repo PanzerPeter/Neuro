@@ -4,7 +4,7 @@
 Expand a root `.nr` file into the single item list its program is built from, loading every module a qualified path reaches into (file, directory, or inline `module { }` block), enforcing what each module exports, binding the implicit prelude's variant names, and erasing the qualifier.
 
 ## Entry Point
-- Type: Library function
+- Type: Library function, `resolve_program`
 - Input: `root: &Path`, a `&ParseModule` (`dyn Fn(&str, &str) -> Result<Vec<Item>, String>`) parser supplied by the caller (called with a module's source and the path that names it in a diagnostic), and `prelude: &[PreludeVariant]`: the enum variants every module may write bare
 - Output: `Result<ResolvedProgram, ModuleError>`: `items: Vec<ast_types::Item>`, each stamped with the module it came from, one `ResolvedModule` per loaded file, and `no_prelude`, the root file's opt-out
 

@@ -173,7 +173,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Structs, enums, newtypes** | Fields, functional update `..base`, `impl` blocks and trait impls on structs, enums and newtypes with `&self` / `&mut self` / consuming receivers; unit, tuple and struct-field variants carrying any sized payload; `@derive(Copy, Clone, Debug, PartialEq)` |
 | **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |
 | **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` ([reference](docs/language-reference/types.md)) |
-| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce`, `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`, and `@gpu` functions run as NVIDIA kernels on an `mlir` build, with an opt-in CPU fallback chosen at startup and tensors kept on any GPU between calls with `.to(Device::GPU(n))` ([reference](docs/language-reference/tensors.md)) |
+| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce`, `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`, and `@gpu` functions run as NVIDIA or AMD kernels on an `mlir` build, with an opt-in CPU fallback chosen at startup and tensors kept on any GPU between calls with `.to(Device::GPU(n))` ([reference](docs/language-reference/tensors.md)) |
 | **Automatic differentiation** | `@grad` compiles a reverse-mode derivative beside a function or method, with no gradient tape; `wrt:` selection, `.backward()` / `.grad()` / `.zero_grad()`, `order: 2` Hessians, `.detach()` / `@no_grad`, each checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
 | **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `String` buffer ([reference](docs/language-reference/strings.md)) |
 | **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic and float `.to_checked::<T>()` report what does not fit |
@@ -286,8 +286,7 @@ Everything is published at [neuro-lang.netlify.app](https://neuro-lang.netlify.a
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the architecture rules, coding standards, quality gates and
 pull request process. Open defects are in [docs/BUGS.md](docs/BUGS.md), and fixing one is the best
-way to start. Work is most useful in **Phase 4 (GPU acceleration)**, which lowers the tensor bodies the
-driver already routes through the `mlir-backend` slice on to the MLIR GPU dialects.
+way to start. Work is most useful in the phase the [Quick Roadmap](#quick-roadmap) marks in progress.
 
 See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
