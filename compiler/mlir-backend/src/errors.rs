@@ -37,10 +37,11 @@ pub enum MlirError {
     #[error("MLIR rejected the generated attribute `{0}`")]
     AttributeSyntax(String),
 
-    /// A GPU chip name that is not letters, digits and `_`. It is spliced into a
-    /// textual pass pipeline, so anything else could rewrite the pipeline.
+    /// A GPU chip LLVM has no processor model for. LLVM would ignore it with a warning,
+    /// and crash selecting AMD instructions; it is also spliced into a textual pass
+    /// pipeline, so only a name on the list may reach it.
     #[error(
-        "invalid GPU chip name `{0}`: expected letters, digits and `_`, such as `sm_80` or `gfx90a`"
+        "unknown GPU chip `{0}`: expected a processor LLVM 22 knows, such as `sm_80` or `gfx90a`"
     )]
     InvalidGpuChip(String),
 

@@ -14,6 +14,7 @@ the three platforms CI builds, tests, and ships release binaries for.
 **Optional:**
 - MLIR 22 for the experimental MLIR backend; see [MLIR Backend](#optional-mlir-backend) below. Not needed for a normal build.
 - An NVIDIA GPU and its driver, to run a program with `@gpu` functions (Linux only). Compiling one needs the MLIR backend, not a CUDA toolkit.
+- For an AMD GPU instead: ROCm to compile with `--gpu-arch gfxNNN`, and the HIP runtime to run the result. See [Choosing a GPU](../guides/cli-usage.md#choosing-a-gpu).
 
 ---
 

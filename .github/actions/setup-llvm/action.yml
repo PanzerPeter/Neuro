@@ -109,11 +109,13 @@ runs:
           return 1
         }
 
+        # lld links the AMD code objects the neurc suite builds for `--gpu-arch gfx*`.
         apt_retry apt-get install -y \
           libmlir-22-dev \
           mlir-22-tools \
           libclang-22-dev \
-          libclang-common-22-dev
+          libclang-common-22-dev \
+          lld-22
 
         test -f /usr/lib/llvm-22/include/mlir-c/IR.h \
           || { echo "ERROR: MLIR-C headers missing"; exit 1; }

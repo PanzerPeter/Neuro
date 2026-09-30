@@ -419,6 +419,9 @@ pub(crate) struct CodegenContext<'ctx> {
     /// release the device arena at its exit too.
     pub(crate) body_memory: crate::BodyMemory,
 
+    /// Whose runtime a device body or tensor links, and what DLPack calls its memory.
+    pub(crate) gpu_vendor: crate::GpuVendor,
+
     /// Every `abort` and `llvm.trap` call emitted, in emission order. Neither runs an
     /// exit hook, so buffered standard output has to be drained immediately in front of
     /// them; `finalize_stdout_buffer` does that once the module is known to print at all.
@@ -466,6 +469,7 @@ impl<'ctx> CodegenContext<'ctx> {
             pool_marks: Vec::new(),
             pool_locals: Vec::new(),
             body_memory: crate::BodyMemory::Host,
+            gpu_vendor: crate::GpuVendor::Nvidia,
         }
     }
 

@@ -288,8 +288,9 @@ batched release per device.
 
 `external` is a list, one set of bodies per memory kind, so a program's `@gpu` bodies and its
 host MLIR bodies link side by side. A module with device bodies also links the backend's own GPU
-runtime: MLIR's `mgpu*` ABI implemented over the CUDA driver, which it opens with `dlopen` on first
-use rather than linking against it. The launchers load their kernels from a global constructor,
+runtime: MLIR's `mgpu*` ABI implemented over the CUDA driver, or over HIP when `compile` is given
+`GpuVendor::Amd`, which it opens with `dlopen` on first use rather than linking against it. An
+AMD build's device tensors report `kDLROCM` over DLPack instead of `kDLCUDA`. The launchers load their kernels from a global constructor,
 so a program checks for a usable GPU before `main`, and every runtime failure, a missing GPU
 included, is an ordinary `panic:` that drains buffered output and aborts.
 

@@ -1,11 +1,13 @@
-// MLIR's GPU runtime ABI (`mgpu*`) over the CUDA driver API: the calls a `@gpu`
-// launcher makes (module load and launch, streams) and the ones the device staging
-// around it makes (allocation and copies). Provenance of gpu_runtime.ll.
+// MLIR's GPU runtime ABI (`mgpu*`) over the CUDA driver API, or over HIP when built with
+// `-DNEURO_HIP`: the calls a `@gpu` launcher makes (module load and launch, streams) and
+// the ones the device staging around it makes (allocation and copies). Provenance of
+// gpu_runtime.ll (CUDA) and gpu_runtime_hip.ll (HIP). Only the vendor block below differs
+// between the two; everything after it is shared, so a fix lands in both.
 //
-// The driver is opened with dlopen rather than linked, so a binary built with `@gpu`
-// still starts on a machine without an NVIDIA driver and says why it cannot run,
-// instead of failing in the dynamic loader. Every launcher's module is loaded by a
-// global constructor, so that check happens at startup, before `main`.
+// The vendor library is opened with dlopen rather than linked, so a binary built with
+// `@gpu` still starts on a machine without that GPU and says why it cannot run, instead
+// of failing in the dynamic loader. Every launcher's module is loaded by a global
+// constructor, so that check happens at startup, before `main`.
 //
 // When every `@gpu` function in the program has a host fallback, the backend defines
 // `__neuro_gpu_fallback` as 1: a module load then leaves its module null instead of
@@ -23,75 +25,214 @@
 // even when it has no `@gpu` function, and finds out whether a GPU is usable at its first
 // transfer rather than at startup.
 //
-// Single-threaded by design: the primary context of device 0 is made current once, on
-// the thread that loads the first module, and Neuro programs run on that thread.
+// Single-threaded by design: device 0 is made current once, on the thread that loads the
+// first module, and Neuro programs run on that thread.
 //
-// Regenerate gpu_runtime.ll with tools/regen_gpu_runtime.sh.
+// Regenerate both .ll files with tools/regen_gpu_runtime.sh.
 
 #include <dlfcn.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
-typedef int CUresult;
-typedef int CUdevice;
-typedef void *CUcontext;
-typedef void *CUmodule;
-typedef void *CUfunction;
-typedef void *CUstream;
-typedef unsigned long long CUdeviceptr;
+#ifdef NEURO_HIP
 
-#define CU_STREAM_NON_BLOCKING 1u
-#define CU_MEM_ATTACH_GLOBAL 1u
+// HIP, ROCm's runtime API. It keeps a primary context per device itself, so selecting
+// device 0 is all the setup there is, and its device pointers are plain pointers.
+typedef int gpu_result;
+typedef void *gpu_module;
+typedef void *gpu_function;
+typedef void *gpu_stream;
 
-extern void __neuro_gpu_panic(const char *message, int64_t length)
-    __attribute__((noreturn));
+#define VENDOR "AMD"
+#define NAME(cuda, hip) hip
+#define STREAM_NON_BLOCKING 1u
+#define MEM_ATTACH_GLOBAL 1u
+#define MEMCPY_DEFAULT 4
 
-extern const uint8_t __neuro_gpu_fallback;
+// The unversioned name is what a ROCm install puts on the loader path; a runtime-only
+// package ships just the versioned one, and a stock install leaves /opt/rocm/lib off it.
+static const char *const libraries[] = {
+    "libamdhip64.so",
+    "libamdhip64.so.7",
+    "libamdhip64.so.6",
+    "/opt/rocm/lib/libamdhip64.so",
+};
+static const char NO_LIBRARY[] = "the HIP runtime (libamdhip64.so) could not be loaded";
+static const char TOO_OLD[] = "the HIP runtime is too old";
+static const char NO_DEVICE[] = "the HIP runtime reports no device";
 
 static struct {
-    CUresult (*init)(unsigned);
-    CUresult (*get_error_name)(CUresult, const char **);
-    CUresult (*device_get_count)(int *);
-    CUresult (*device_get)(CUdevice *, int);
-    CUresult (*primary_ctx_retain)(CUcontext *, CUdevice);
-    CUresult (*ctx_set_current)(CUcontext);
-    CUresult (*module_load_data)(CUmodule *, const void *);
-    CUresult (*module_unload)(CUmodule);
-    CUresult (*module_get_function)(CUfunction *, CUmodule, const char *);
-    CUresult (*launch_kernel)(CUfunction, unsigned, unsigned, unsigned, unsigned,
-                              unsigned, unsigned, unsigned, CUstream, void **,
-                              void **);
-    CUresult (*stream_create)(CUstream *, unsigned);
-    CUresult (*stream_synchronize)(CUstream);
-    CUresult (*mem_alloc)(CUdeviceptr *, size_t);
-    CUresult (*mem_alloc_managed)(CUdeviceptr *, size_t, unsigned);
-    CUresult (*mem_free)(CUdeviceptr);
-    CUresult (*memcpy_async)(CUdeviceptr, CUdeviceptr, size_t, CUstream);
-} cu;
+    gpu_result (*init)(unsigned);
+    const char *(*get_error_name)(gpu_result);
+    gpu_result (*device_get_count)(int *);
+    gpu_result (*set_device)(int);
+    gpu_result (*module_load_data)(gpu_module *, const void *);
+    gpu_result (*module_unload)(gpu_module);
+    gpu_result (*module_get_function)(gpu_function *, gpu_module, const char *);
+    gpu_result (*launch_kernel)(gpu_function, unsigned, unsigned, unsigned, unsigned,
+                                unsigned, unsigned, unsigned, gpu_stream, void **,
+                                void **);
+    gpu_result (*stream_create)(gpu_stream *, unsigned);
+    gpu_result (*stream_synchronize)(gpu_stream);
+    gpu_result (*mem_alloc)(void **, size_t);
+    gpu_result (*mem_alloc_managed)(void **, size_t, unsigned);
+    gpu_result (*mem_free)(void *);
+    gpu_result (*memcpy_async)(void *, const void *, size_t, int, gpu_stream);
+} drv;
+
+static const struct {
+    const char *name;
+    void **slot;
+} entry_points[] = {
+    {"hipInit", (void **)&drv.init},
+    {"hipGetErrorName", (void **)&drv.get_error_name},
+    {"hipGetDeviceCount", (void **)&drv.device_get_count},
+    {"hipSetDevice", (void **)&drv.set_device},
+    {"hipModuleLoadData", (void **)&drv.module_load_data},
+    {"hipModuleUnload", (void **)&drv.module_unload},
+    {"hipModuleGetFunction", (void **)&drv.module_get_function},
+    {"hipModuleLaunchKernel", (void **)&drv.launch_kernel},
+    {"hipStreamCreateWithFlags", (void **)&drv.stream_create},
+    {"hipStreamSynchronize", (void **)&drv.stream_synchronize},
+    {"hipMalloc", (void **)&drv.mem_alloc},
+    {"hipMallocManaged", (void **)&drv.mem_alloc_managed},
+    {"hipFree", (void **)&drv.mem_free},
+    {"hipMemcpyAsync", (void **)&drv.memcpy_async},
+};
+
+static const char *error_name(gpu_result result) {
+    const char *name = drv.get_error_name(result);
+    return name != NULL ? name : "an unknown HIP error";
+}
+
+static gpu_result open_device(void) {
+    return drv.set_device(0);
+}
+
+static gpu_result allocate(void **pointer, size_t size, int managed) {
+    *pointer = NULL;
+    return managed ? drv.mem_alloc_managed(pointer, size, MEM_ATTACH_GLOBAL)
+                   : drv.mem_alloc(pointer, size);
+}
+
+static gpu_result release(void *pointer) {
+    return drv.mem_free(pointer);
+}
+
+// Device and host pointers share one address space, so the runtime tells the direction.
+static gpu_result copy(void *dst, void *src, size_t size, gpu_stream stream) {
+    return drv.memcpy_async(dst, src, size, MEMCPY_DEFAULT, stream);
+}
+
+#else
+
+// The CUDA driver API. Its device pointers are integers, and a context has to be
+// retained and made current by hand.
+typedef int gpu_result;
+typedef int CUdevice;
+typedef void *CUcontext;
+typedef void *gpu_module;
+typedef void *gpu_function;
+typedef void *gpu_stream;
+typedef unsigned long long CUdeviceptr;
+
+#define VENDOR "NVIDIA"
+#define NAME(cuda, hip) cuda
+#define STREAM_NON_BLOCKING 1u
+#define MEM_ATTACH_GLOBAL 1u
+
+static const char *const libraries[] = {"libcuda.so.1"};
+static const char NO_LIBRARY[] = "the CUDA driver (libcuda.so.1) could not be loaded";
+static const char TOO_OLD[] = "the CUDA driver is too old";
+static const char NO_DEVICE[] = "the CUDA driver reports no device";
+
+static struct {
+    gpu_result (*init)(unsigned);
+    gpu_result (*get_error_name)(gpu_result, const char **);
+    gpu_result (*device_get_count)(int *);
+    gpu_result (*device_get)(CUdevice *, int);
+    gpu_result (*primary_ctx_retain)(CUcontext *, CUdevice);
+    gpu_result (*ctx_set_current)(CUcontext);
+    gpu_result (*module_load_data)(gpu_module *, const void *);
+    gpu_result (*module_unload)(gpu_module);
+    gpu_result (*module_get_function)(gpu_function *, gpu_module, const char *);
+    gpu_result (*launch_kernel)(gpu_function, unsigned, unsigned, unsigned, unsigned,
+                                unsigned, unsigned, unsigned, gpu_stream, void **,
+                                void **);
+    gpu_result (*stream_create)(gpu_stream *, unsigned);
+    gpu_result (*stream_synchronize)(gpu_stream);
+    gpu_result (*mem_alloc)(CUdeviceptr *, size_t);
+    gpu_result (*mem_alloc_managed)(CUdeviceptr *, size_t, unsigned);
+    gpu_result (*mem_free)(CUdeviceptr);
+    gpu_result (*memcpy_async)(CUdeviceptr, CUdeviceptr, size_t, gpu_stream);
+} drv;
 
 // The `_v2` names are what cuda.h's macros resolve the unsuffixed ones to.
 static const struct {
     const char *name;
     void **slot;
 } entry_points[] = {
-    {"cuInit", (void **)&cu.init},
-    {"cuGetErrorName", (void **)&cu.get_error_name},
-    {"cuDeviceGetCount", (void **)&cu.device_get_count},
-    {"cuDeviceGet", (void **)&cu.device_get},
-    {"cuDevicePrimaryCtxRetain", (void **)&cu.primary_ctx_retain},
-    {"cuCtxSetCurrent", (void **)&cu.ctx_set_current},
-    {"cuModuleLoadData", (void **)&cu.module_load_data},
-    {"cuModuleUnload", (void **)&cu.module_unload},
-    {"cuModuleGetFunction", (void **)&cu.module_get_function},
-    {"cuLaunchKernel", (void **)&cu.launch_kernel},
-    {"cuStreamCreate", (void **)&cu.stream_create},
-    {"cuStreamSynchronize", (void **)&cu.stream_synchronize},
-    {"cuMemAlloc_v2", (void **)&cu.mem_alloc},
-    {"cuMemAllocManaged", (void **)&cu.mem_alloc_managed},
-    {"cuMemFree_v2", (void **)&cu.mem_free},
-    {"cuMemcpyAsync", (void **)&cu.memcpy_async},
+    {"cuInit", (void **)&drv.init},
+    {"cuGetErrorName", (void **)&drv.get_error_name},
+    {"cuDeviceGetCount", (void **)&drv.device_get_count},
+    {"cuDeviceGet", (void **)&drv.device_get},
+    {"cuDevicePrimaryCtxRetain", (void **)&drv.primary_ctx_retain},
+    {"cuCtxSetCurrent", (void **)&drv.ctx_set_current},
+    {"cuModuleLoadData", (void **)&drv.module_load_data},
+    {"cuModuleUnload", (void **)&drv.module_unload},
+    {"cuModuleGetFunction", (void **)&drv.module_get_function},
+    {"cuLaunchKernel", (void **)&drv.launch_kernel},
+    {"cuStreamCreate", (void **)&drv.stream_create},
+    {"cuStreamSynchronize", (void **)&drv.stream_synchronize},
+    {"cuMemAlloc_v2", (void **)&drv.mem_alloc},
+    {"cuMemAllocManaged", (void **)&drv.mem_alloc_managed},
+    {"cuMemFree_v2", (void **)&drv.mem_free},
+    {"cuMemcpyAsync", (void **)&drv.memcpy_async},
 };
+
+static const char *error_name(gpu_result result) {
+    const char *name = NULL;
+    if (drv.get_error_name(result, &name) != 0 || name == NULL) {
+        return "an unknown CUDA error";
+    }
+    return name;
+}
+
+static gpu_result open_device(void) {
+    CUdevice device;
+    CUcontext context;
+    gpu_result result;
+    if ((result = drv.device_get(&device, 0)) != 0 ||
+        (result = drv.primary_ctx_retain(&context, device)) != 0) {
+        return result;
+    }
+    return drv.ctx_set_current(context);
+}
+
+static gpu_result allocate(void **pointer, size_t size, int managed) {
+    CUdeviceptr address = 0;
+    gpu_result result = managed ? drv.mem_alloc_managed(&address, size, MEM_ATTACH_GLOBAL)
+                                : drv.mem_alloc(&address, size);
+    *pointer = (void *)(uintptr_t)address;
+    return result;
+}
+
+static gpu_result release(void *pointer) {
+    return drv.mem_free((CUdeviceptr)(uintptr_t)pointer);
+}
+
+static gpu_result copy(void *dst, void *src, size_t size, gpu_stream stream) {
+    return drv.memcpy_async((CUdeviceptr)(uintptr_t)dst, (CUdeviceptr)(uintptr_t)src, size,
+                            stream);
+}
+
+#endif
+
+extern void __neuro_gpu_panic(const char *message, int64_t length)
+    __attribute__((noreturn));
+
+extern const uint8_t __neuro_gpu_fallback;
 
 static int probed;
 static int ready;
@@ -120,21 +261,14 @@ static void __attribute__((noreturn)) fail(const char *format, const char *detai
 static void __attribute__((noreturn)) unusable(const char *what, const char *reason) {
     char message[MESSAGE_CAPACITY];
     report(message, snprintf(message, sizeof message,
-                             "%s needs an NVIDIA GPU, and none is usable: %s", what, reason));
+                             "%s needs an " VENDOR " GPU, and none is usable: %s", what,
+                             reason));
 }
 
 static const char LAUNCH[] = "`@gpu`";
 static const char TRANSFER[] = "`Device::GPU`";
 
-static const char *error_name(CUresult result) {
-    const char *name = NULL;
-    if (cu.get_error_name(result, &name) != 0 || name == NULL) {
-        return "an unknown CUDA error";
-    }
-    return name;
-}
-
-static void check(CUresult result, const char *call) {
+static void check(gpu_result result, const char *call) {
     if (result == 0) {
         return;
     }
@@ -143,40 +277,39 @@ static void check(CUresult result, const char *call) {
     fail("GPU error: %s", context);
 }
 
-// Open the driver and make device 0's primary context current, once. A failure is
-// recorded rather than reported: whether it is fatal is the caller's to decide.
+// Open the vendor library and make device 0 current, once. A failure is recorded rather
+// than reported: whether it is fatal is the caller's to decide.
 static void probe(void) {
     if (probed) {
         return;
     }
     probed = 1;
-    void *driver = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
-    if (driver == NULL) {
-        unusable_reason = "the CUDA driver (libcuda.so.1) could not be loaded";
+    void *library = NULL;
+    for (size_t i = 0; library == NULL && i < sizeof libraries / sizeof libraries[0]; i++) {
+        library = dlopen(libraries[i], RTLD_NOW | RTLD_LOCAL);
+    }
+    if (library == NULL) {
+        unusable_reason = NO_LIBRARY;
         return;
     }
     for (size_t i = 0; i < sizeof entry_points / sizeof entry_points[0]; i++) {
-        *entry_points[i].slot = dlsym(driver, entry_points[i].name);
+        *entry_points[i].slot = dlsym(library, entry_points[i].name);
         if (*entry_points[i].slot == NULL) {
-            unusable_reason = "the CUDA driver is too old";
+            unusable_reason = TOO_OLD;
             return;
         }
     }
-    CUresult result = cu.init(0);
+    gpu_result result = drv.init(0);
     if (result != 0) {
         unusable_reason = error_name(result);
         return;
     }
     int count = 0;
-    if (cu.device_get_count(&count) != 0 || count == 0) {
-        unusable_reason = "the CUDA driver reports no device";
+    if (drv.device_get_count(&count) != 0 || count == 0) {
+        unusable_reason = NO_DEVICE;
         return;
     }
-    CUdevice device;
-    CUcontext context;
-    if ((result = cu.device_get(&device, 0)) != 0 ||
-        (result = cu.primary_ctx_retain(&context, device)) != 0 ||
-        (result = cu.ctx_set_current(context)) != 0) {
+    if ((result = open_device()) != 0) {
         unusable_reason = error_name(result);
         return;
     }
@@ -201,10 +334,10 @@ int32_t __neuro_gpu_usable(void) {
 }
 
 // Why a present GPU is still unusable: its driver refused a module, say PTX newer than
-// it reads or a chip too old to JIT it.
+// it reads, a chip too old to JIT it, or a code object built for another chip.
 static char load_failure[128];
 
-static CUmodule load(const void *data) {
+static gpu_module load(const void *data) {
     probe();
     if (!ready && __neuro_gpu_fallback) {
         return NULL;
@@ -212,8 +345,8 @@ static CUmodule load(const void *data) {
     if (!ready) {
         unusable(LAUNCH, unusable_reason);
     }
-    CUmodule module = NULL;
-    CUresult result = cu.module_load_data(&module, data);
+    gpu_module module = NULL;
+    gpu_result result = drv.module_load_data(&module, data);
     if (result != 0 && __neuro_gpu_fallback) {
         // Loads run in global constructors, before any call has picked its GPU body, so
         // clearing `ready` sends every call to its host body. Modules already loaded
@@ -224,44 +357,46 @@ static CUmodule load(const void *data) {
         ready = 0;
         return NULL;
     }
-    check(result, "cuModuleLoadData");
+    check(result, NAME("cuModuleLoadData", "hipModuleLoadData"));
     return module;
 }
 
-CUmodule mgpuModuleLoad(void *data, size_t size) {
+// An AMD kernel is a code object, which carries its own size.
+gpu_module mgpuModuleLoad(void *data, size_t size) {
     (void)size;
     return load(data);
 }
 
-// PTX is NUL-terminated text, so the driver needs no size; the optimization level is
-// left to the driver's default, its highest.
-CUmodule mgpuModuleLoadJIT(void *data, int32_t optimization_level) {
+// Only NVIDIA's launchers call this. PTX is NUL-terminated text, so the driver needs no
+// size; the optimization level is left to the driver's default, its highest.
+gpu_module mgpuModuleLoadJIT(void *data, int32_t optimization_level) {
     (void)optimization_level;
     return load(data);
 }
 
 // Runs from a global destructor, which may come after the driver has shut down at
 // exit; a failure there has nothing left to protect.
-void mgpuModuleUnload(CUmodule module) {
+void mgpuModuleUnload(gpu_module module) {
     if (ready) {
-        cu.module_unload(module);
+        drv.module_unload(module);
     }
 }
 
-CUfunction mgpuModuleGetFunction(CUmodule module, const char *name) {
-    CUfunction function;
-    check(cu.module_get_function(&function, module, name), "cuModuleGetFunction");
+gpu_function mgpuModuleGetFunction(gpu_module module, const char *name) {
+    gpu_function function;
+    check(drv.module_get_function(&function, module, name),
+          NAME("cuModuleGetFunction", "hipModuleGetFunction"));
     return function;
 }
 
-void mgpuLaunchKernel(CUfunction function, intptr_t grid_x, intptr_t grid_y,
+void mgpuLaunchKernel(gpu_function function, intptr_t grid_x, intptr_t grid_y,
                       intptr_t grid_z, intptr_t block_x, intptr_t block_y,
-                      intptr_t block_z, int32_t shared_bytes, CUstream stream,
+                      intptr_t block_z, int32_t shared_bytes, gpu_stream stream,
                       void **params, void **extra, size_t param_count) {
     (void)param_count;
-    check(cu.launch_kernel(function, grid_x, grid_y, grid_z, block_x, block_y,
-                           block_z, shared_bytes, stream, params, extra),
-          "cuLaunchKernel");
+    check(drv.launch_kernel(function, grid_x, grid_y, grid_z, block_x, block_y, block_z,
+                            shared_bytes, stream, params, extra),
+          NAME("cuLaunchKernel", "hipModuleLaunchKernel"));
 }
 
 // Every caller gets the same stream, created on first use and kept for the life of the
@@ -269,60 +404,56 @@ void mgpuLaunchKernel(CUfunction function, intptr_t grid_x, intptr_t grid_y,
 // per call; creating and destroying each costs more than a small kernel runs, and one
 // in-order stream is also what orders a call's copies before its kernels and its
 // kernels before the copy back. The driver releases it at exit.
-static CUstream shared_stream;
+static gpu_stream shared_stream;
 
-CUstream mgpuStreamCreate(void) {
+gpu_stream mgpuStreamCreate(void) {
     if (shared_stream == NULL) {
         ensure_ready();
-        check(cu.stream_create(&shared_stream, CU_STREAM_NON_BLOCKING), "cuStreamCreate");
+        check(drv.stream_create(&shared_stream, STREAM_NON_BLOCKING),
+              NAME("cuStreamCreate", "hipStreamCreateWithFlags"));
     }
     return shared_stream;
 }
 
-void mgpuStreamSynchronize(CUstream stream) {
-    check(cu.stream_synchronize(stream), "cuStreamSynchronize");
+void mgpuStreamSynchronize(gpu_stream stream) {
+    check(drv.stream_synchronize(stream), NAME("cuStreamSynchronize", "hipStreamSynchronize"));
 }
 
-void mgpuStreamDestroy(CUstream stream) {
+void mgpuStreamDestroy(gpu_stream stream) {
     (void)stream;
 }
 
 // `host_shared` is a byte, not a `bool`, to match the `i8` the callers declare.
-void *mgpuMemAlloc(uint64_t size, CUstream stream, uint8_t host_shared) {
+void *mgpuMemAlloc(uint64_t size, gpu_stream stream, uint8_t host_shared) {
     (void)stream;
     ensure_ready();
     if (size == 0) {
         return NULL;
     }
-    CUdeviceptr pointer = 0;
-    CUresult result = host_shared
-                          ? cu.mem_alloc_managed(&pointer, size, CU_MEM_ATTACH_GLOBAL)
-                          : cu.mem_alloc(&pointer, size);
-    return result == 0 ? (void *)(uintptr_t)pointer : NULL;
+    void *pointer = NULL;
+    return allocate(&pointer, size, host_shared) == 0 ? pointer : NULL;
 }
 
-void mgpuMemFree(void *pointer, CUstream stream) {
+void mgpuMemFree(void *pointer, gpu_stream stream) {
     (void)stream;
-    check(cu.mem_free((CUdeviceptr)(uintptr_t)pointer), "cuMemFree");
+    check(release(pointer), NAME("cuMemFree", "hipFree"));
 }
 
-void mgpuMemcpy(void *dst, void *src, size_t size, CUstream stream) {
-    check(cu.memcpy_async((CUdeviceptr)(uintptr_t)dst, (CUdeviceptr)(uintptr_t)src,
-                          size, stream),
-          "cuMemcpyAsync");
+void mgpuMemcpy(void *dst, void *src, size_t size, gpu_stream stream) {
+    check(copy(dst, src, size, stream), NAME("cuMemcpyAsync", "hipMemcpyAsync"));
 }
 
 // A device tensor's buffer is an allocation of its own rather than a piece of the device
 // arena: it lives until the tensor is dropped, which no call's mark can see.
 
-// Only device 0's context is ever made current, so a tensor can live on GPU 0 alone.
+// Only device 0 is ever made current, so a tensor can live on GPU 0 alone.
 void __neuro_device_check(int32_t device) {
     ensure_ready_for(TRANSFER);
     if (device == 0) {
         return;
     }
     int count = 0;
-    cu.device_get_count(&count);
+    drv.device_get_count(&count);
     char message[MESSAGE_CAPACITY];
     if (device < 0 || device >= count) {
         report(message, snprintf(message, sizeof message,
@@ -337,17 +468,17 @@ void __neuro_device_check(int32_t device) {
 
 void *__neuro_device_alloc(uint64_t size) {
     ensure_ready_for(TRANSFER);
-    CUdeviceptr pointer = 0;
+    void *pointer = NULL;
     // A tensor with a zero extent still gets an address of its own.
-    check(cu.mem_alloc(&pointer, size == 0 ? 1 : size), "cuMemAlloc");
-    return (void *)(uintptr_t)pointer;
+    check(allocate(&pointer, size == 0 ? 1 : size, 0), NAME("cuMemAlloc", "hipMalloc"));
+    return pointer;
 }
 
 // Waits for the copy: the caller releases the host buffer next.
 void *__neuro_device_upload(void *host, uint64_t size, int32_t device) {
     __neuro_device_check(device);
     void *buffer = __neuro_device_alloc(size);
-    CUstream stream = mgpuStreamCreate();
+    gpu_stream stream = mgpuStreamCreate();
     mgpuMemcpy(buffer, host, size, stream);
     mgpuStreamSynchronize(stream);
     return buffer;
@@ -355,7 +486,7 @@ void *__neuro_device_upload(void *host, uint64_t size, int32_t device) {
 
 // Queued behind every kernel still writing `device`, on the one stream they run on.
 void __neuro_device_download(void *host, void *device, uint64_t size) {
-    CUstream stream = mgpuStreamCreate();
+    gpu_stream stream = mgpuStreamCreate();
     mgpuMemcpy(host, device, size, stream);
     mgpuStreamSynchronize(stream);
 }
@@ -363,5 +494,5 @@ void __neuro_device_download(void *host, void *device, uint64_t size) {
 // A kernel still queued may read the buffer, so the stream drains first.
 void __neuro_device_free(void *device) {
     mgpuStreamSynchronize(mgpuStreamCreate());
-    check(cu.mem_free((CUdeviceptr)(uintptr_t)device), "cuMemFree");
+    check(release(device), NAME("cuMemFree", "hipFree"));
 }

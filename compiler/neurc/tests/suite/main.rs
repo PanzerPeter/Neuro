@@ -55,6 +55,7 @@ mod forward_references;
 mod functions;
 mod generic_structs;
 mod generics;
+mod gpu_amd;
 mod gpu_attribute;
 mod gpu_fallback;
 mod gradient_control;

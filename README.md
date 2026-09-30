@@ -261,7 +261,7 @@ Today a `.nr` file travels: **tokens → AST → merged program → type-checked
 LLVM object code → system linker**. Automatic differentiation runs inside HIR lowering. The
 `mlir-backend` slice lowers the same typed HIR to MLIR `linalg`, and a `neurc` built with its
 `mlir` feature links the tensor bodies it computes into the program, and lowers `@gpu` bodies on
-through the MLIR GPU dialects to NVIDIA kernels. Stage by stage:
+through the MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---

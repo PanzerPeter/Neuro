@@ -6,8 +6,8 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 ## Entry Point
 - Type: CLI
 - Input: `neurc check <file.nr>` |
-  `neurc compile <file.nr> [-O<0-3>] [-o <output>] [--emit exe|obj|llvm-ir]` |
-  `neurc run <file.nr> [-O<0-3>]`
+  `neurc compile <file.nr> [-O<0-3>] [-o <output>] [--emit exe|obj|llvm-ir] [--gpu-arch <chip>]` |
+  `neurc run <file.nr> [-O<0-3>] [--gpu-arch <chip>]`
 - Output: an executable binary on success, an unlinked object file under `--emit obj`, or a
   textual LLVM module under `--emit llvm-ir`;
   diagnostics and non-fatal lint warnings to stderr
@@ -43,8 +43,9 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    which links them in place of its own. The two slices' types are mapped here, field for field,
    since neither may name the other's. A failure there stops the compile: it is a compiler bug,
    and handing the body back to the LLVM backend would hide it. A program with a `@gpu` function
-   also goes through `mlir_backend::lower_for_gpu` for NVIDIA (`GPU_CHIP`, PTX the driver JITs
-   for any newer GPU), and those bodies are a second `ExternalBodies` with `BodyMemory::Device`.
+   also goes through `mlir_backend::lower_for_gpu` for the `--gpu-arch` chip, and those bodies
+   are a second `ExternalBodies` with `BodyMemory::Device`. `check` always lowers for the
+   default: which bodies qualify does not depend on the vendor.
    A `@gpu` body that cannot become a kernel is rendered at its function
    (`GpuBodiesNotLowered`) and stops the compile, `fallback: true` or not. Without the feature
    `tensor_bodies` answers no bodies, and every bare `@gpu` function is an error at its
@@ -64,6 +65,16 @@ object file. Without that check the pipeline ran to completion and handed a `mai
 to the system linker, so the user saw `undefined reference to 'main'` naming the C runtime's
 startup object rather than their own program. `check` is unaffected: type-checking a module
 with no `main` is legitimate.
+
+### `--gpu-arch`
+`--gpu-arch` names a chip, and the vendor is read off its prefix, as clang's `--offload-arch`
+does: `sm_NN` is NVIDIA (`GpuTarget::Nvidia`, `GpuVendor::Nvidia`), `gfxNNN` is AMD
+(`GpuTarget::Amd`, `GpuVendor::Amd`), anything else is a CLI error. The rest of the name is
+checked by `mlir-backend`, which splices it into a pass pipeline. Unset, it is `sm_60`
+(`DEFAULT_GPU_CHIP`): NVIDIA kernels ship as PTX the driver JITs for any newer GPU, so the floor
+is what matters. AMD gets no default, because a code object runs on exactly its chip. The
+vendor also reaches the LLVM backend without MLIR, since a `.to(Device::GPU(0))` links the GPU
+runtime on either build.
 
 ### `--emit`
 `--emit obj` stops the pipeline one step earlier and writes the object file to the output path

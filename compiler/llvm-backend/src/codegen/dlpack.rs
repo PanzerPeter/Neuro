@@ -19,10 +19,12 @@ use crate::types::Type;
 const DLPACK_VERSION_MAJOR: u64 = 1;
 const DLPACK_VERSION_MINOR: u64 = 1;
 
-/// `kDLCPU` and `kDLCUDA`: a buffer in host memory, or in an NVIDIA GPU's. A transfer
-/// flips this field and the buffer it describes rather than changing the layout.
+/// `kDLCPU`, `kDLCUDA` and `kDLROCM`: a buffer in host memory, or in an NVIDIA or AMD
+/// GPU's. A transfer flips this field and the buffer it describes rather than changing
+/// the layout.
 const DLPACK_DEVICE_CPU: u64 = 1;
 const DLPACK_DEVICE_CUDA: u64 = 2;
+const DLPACK_DEVICE_ROCM: u64 = 10;
 
 /// What a host operation that reached a device tensor reports. The host cannot read
 /// device memory, so the alternative is a segmentation fault.
@@ -292,7 +294,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.get_or_define_dlpack_deleter()?,
             ),
             TensorHome::Gpu(index) => (
-                DLPACK_DEVICE_CUDA,
+                match self.gpu_vendor {
+                    crate::GpuVendor::Nvidia => DLPACK_DEVICE_CUDA,
+                    crate::GpuVendor::Amd => DLPACK_DEVICE_ROCM,
+                },
                 index,
                 self.get_or_define_dlpack_device_deleter()?,
             ),

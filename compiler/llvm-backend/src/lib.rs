@@ -1,6 +1,6 @@
 // Feature slice for LLVM IR generation and optimization.
-// Public API: the `compile()` and `compile_to_ir()` entry points, and the
-// `ExternalBodies` they may link in.
+// Public API: the `compile()` and `compile_to_ir()` entry points, the
+// `ExternalBodies` they may link in, and the `GpuVendor` whose runtime they link.
 
 mod codegen;
 mod errors;
@@ -75,12 +75,23 @@ pub enum BodyMemory {
     /// (`mgpu*`). The wrapper copies each tensor operand to the device and the result
     /// back, and this backend defines `_mlir_memref_to_llvm_alloc` /
     /// `_mlir_memref_to_llvm_free` as its device allocator for the buffers a body
-    /// allocates itself. It links its own runtime for that ABI, over the CUDA driver,
-    /// which it opens at run time: the program needs `dlopen` from the platform C
-    /// library, and a GPU only once it runs. A tensor already moved to the GPU with
+    /// allocates itself. It links its own runtime for that ABI, over the [`GpuVendor`]'s
+    /// library, which it opens at run time: the program needs `dlopen` from the platform
+    /// C library, and a GPU only once it runs. A tensor already moved to the GPU with
     /// `.to(Device::GPU(0))` is passed without a copy, and a call given one leaves its
     /// result on the GPU too.
     Device,
+}
+
+/// The GPU a program's device bodies and device tensors are built for, which picks the
+/// runtime linked for them and the device type a device tensor reports over DLPack.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GpuVendor {
+    /// The CUDA driver (`libcuda.so.1`); device tensors are `kDLCUDA`.
+    #[default]
+    Nvidia,
+    /// HIP (`libamdhip64.so`); device tensors are `kDLROCM`.
+    Amd,
 }
 
 /// Compile a typed HIR program to linkable LLVM object code.
@@ -96,19 +107,21 @@ pub enum BodyMemory {
 ///   `file:line:col` in panic-family runtime diagnostics
 /// * `external` - Bodies another backend computed, linked in place of this one's; each
 ///   set names where its buffers live, and a function may appear in at most one
+/// * `gpu` - The GPU `external`'s device bodies were built for, and device tensors live on
 ///
 /// # Examples
 ///
 /// ```
 /// use syntax_parsing::parse;
 /// use hir_lowering::lower_program;
-/// use llvm_backend::{compile, OptimizationLevelSetting};
+/// use llvm_backend::{compile, GpuVendor, OptimizationLevelSetting};
 ///
 /// let source = "func add(a: i32, b: i32) -> i32 { return a + b }";
 /// let ast = parse(source).unwrap();
 /// let hir = lower_program(&ast).unwrap();
 /// let object_code =
-///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr", &[]).unwrap();
+///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr", &[], GpuVendor::Nvidia)
+///         .unwrap();
 /// // Write object_code to file or link to executable
 /// ```
 pub fn compile(
@@ -117,6 +130,7 @@ pub fn compile(
     source: &str,
     source_path: &str,
     external: &[ExternalBodies],
+    gpu: GpuVendor,
 ) -> CodegenResult<Vec<u8>> {
     let context = LLVMContext::create();
     let codegen_ctx = build_module(
@@ -126,6 +140,7 @@ pub fn compile(
         source,
         source_path,
         external,
+        gpu,
     )?;
     emit_object_code(&codegen_ctx, optimization)
 }
@@ -142,6 +157,7 @@ pub fn compile_to_ir(
     source: &str,
     source_path: &str,
     external: &[ExternalBodies],
+    gpu: GpuVendor,
 ) -> CodegenResult<String> {
     let context = LLVMContext::create();
     let codegen_ctx = build_module(
@@ -151,6 +167,7 @@ pub fn compile_to_ir(
         source,
         source_path,
         external,
+        gpu,
     )?;
     // The target machine is built for its data layout and triple as much as for the
     // passes: IR without them is re-interpreted against the consumer's defaults.
@@ -170,6 +187,7 @@ fn build_module<'ctx>(
     source: &str,
     source_path: &str,
     external: &[ExternalBodies],
+    gpu: GpuVendor,
 ) -> CodegenResult<CodegenContext<'ctx>> {
     let items = &program.items;
     let external_symbol = |name: &str| {
@@ -318,6 +336,7 @@ fn build_module<'ctx>(
     }
 
     let mut codegen_ctx = CodegenContext::new(context, "neuro_module");
+    codegen_ctx.gpu_vendor = gpu;
     codegen_ctx.set_struct_defs(struct_defs);
     codegen_ctx.set_struct_written_names(struct_written_names);
     codegen_ctx.set_enum_payloads(enum_payloads);
@@ -423,7 +442,11 @@ fn build_module<'ctx>(
     }
     // A device body brings the runtime, and so does a tensor transfer in a program with none.
     if codegen_ctx.requires_gpu_runtime() {
-        codegen::external_bodies::link_gpu_runtime(codegen_ctx.context, &codegen_ctx.module)?;
+        codegen::external_bodies::link_gpu_runtime(
+            codegen_ctx.context,
+            &codegen_ctx.module,
+            codegen_ctx.gpu_vendor,
+        )?;
     }
 
     // Link self-contained soft-float conversion builtins when the module uses

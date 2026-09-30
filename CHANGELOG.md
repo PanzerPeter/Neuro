@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.7.0] - 2026-09-30
+
+### Added
+
+- `neurc compile` and `neurc run` take `--gpu-arch <CHIP>`. An `sm_NN` chip builds for NVIDIA, as
+  before, and `sm_60` is still the default. A `gfxNNN` chip lowers `@gpu` bodies through `rocdl`
+  to an AMD code object for that chip, and links a GPU runtime over HIP (`libamdhip64.so`, opened
+  at run time) instead of the CUDA driver. `@gpu(fallback: true)`, device-tensor transfers with
+  `.to(Device::GPU(0))` and the missing-GPU diagnostics (`needs an AMD GPU, and none is usable`)
+  work the same on both. Compiling for AMD needs ROCm's `ld.lld`. An AMD build's device tensors
+  report `kDLROCM` over DLPack. A chip LLVM 22 does not know is refused with a diagnostic; an
+  unknown AMD chip would otherwise have crashed instruction selection.
+
+### Changed
+
+- The CUDA and HIP runtimes are generated from the same C source, `gpu_runtime.c`, and differ
+  only in a vendor block. `tools/regen_gpu_runtime.sh` writes both.
+- CI's MLIR job installs `lld`, so the suite's AMD builds run there.
+
 ## [4.6.1] - 2026-09-30
 
 ### Fixed

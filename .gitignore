@@ -74,6 +74,7 @@ cross/
 # via include_str! (not generated artifacts).
 !compiler/llvm-backend/src/softfloat/builtins.ll
 !compiler/llvm-backend/src/codegen/gpu_runtime.ll
+!compiler/llvm-backend/src/codegen/gpu_runtime_hip.ll
 
 # linker / package manager artifacts
 *.map

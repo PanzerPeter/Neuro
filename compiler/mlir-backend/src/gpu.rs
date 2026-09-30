@@ -21,10 +21,36 @@ pub enum GpuTarget {
     Amd { chip: String },
 }
 
+/// The chips LLVM 22 has a processor model for (`llc -march=nvptx64 -mcpu=help`, and
+/// `-march=amdgcn`, less the `gfxN-generic` families). LLVM only warns about any other name,
+/// then crashes selecting AMD instructions without one, so a chip must be on its list.
+const NVIDIA_CHIPS: &[&str] = &[
+    "sm_20", "sm_21", "sm_30", "sm_32", "sm_35", "sm_37", "sm_50", "sm_52", "sm_53", "sm_60",
+    "sm_61", "sm_62", "sm_70", "sm_72", "sm_75", "sm_80", "sm_86", "sm_87", "sm_88", "sm_89",
+    "sm_90", "sm_90a", "sm_100", "sm_100a", "sm_100f", "sm_101", "sm_101a", "sm_101f", "sm_103",
+    "sm_103a", "sm_103f", "sm_110", "sm_110a", "sm_110f", "sm_120", "sm_120a", "sm_120f", "sm_121",
+    "sm_121a", "sm_121f",
+];
+const AMD_CHIPS: &[&str] = &[
+    "gfx600", "gfx601", "gfx602", "gfx700", "gfx701", "gfx702", "gfx703", "gfx704", "gfx705",
+    "gfx801", "gfx802", "gfx803", "gfx805", "gfx810", "gfx900", "gfx902", "gfx904", "gfx906",
+    "gfx908", "gfx909", "gfx90a", "gfx90c", "gfx942", "gfx950", "gfx1010", "gfx1011", "gfx1012",
+    "gfx1013", "gfx1030", "gfx1031", "gfx1032", "gfx1033", "gfx1034", "gfx1035", "gfx1036",
+    "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153",
+    "gfx1200", "gfx1201", "gfx1250", "gfx1251",
+];
+
 impl GpuTarget {
     fn chip(&self) -> &str {
         match self {
             GpuTarget::Nvidia { chip } | GpuTarget::Amd { chip } => chip,
+        }
+    }
+
+    fn known_chips(&self) -> &'static [&'static str] {
+        match self {
+            GpuTarget::Nvidia { .. } => NVIDIA_CHIPS,
+            GpuTarget::Amd { .. } => AMD_CHIPS,
         }
     }
 
@@ -87,8 +113,8 @@ const DEVICE_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm{use-generic-functio
 ///
 /// # Errors
 ///
-/// [`MlirError::InvalidGpuChip`] for a chip name that is not letters, digits and
-/// `_`. [`MlirError::GpuBodiesNotLowered`] naming every `@gpu` function whose body
+/// [`MlirError::InvalidGpuChip`] for a chip LLVM has no processor model for, which
+/// also keeps anything but a plain name out of the pass pipeline text it is spliced into. [`MlirError::GpuBodiesNotLowered`] naming every `@gpu` function whose body
 /// does not qualify. [`MlirError::GpuSerializationFailed`] when a device object cannot be
 /// produced, which for an AMD target means ROCm is not installed. Otherwise as
 /// [`translate_to_llvm_ir`](crate::translate_to_llvm_ir).
@@ -107,7 +133,7 @@ pub(crate) fn lower_with_format(
     format: &str,
 ) -> Result<LinkableBodies, MlirError> {
     let chip = target.chip();
-    if chip.is_empty() || !chip.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    if !target.known_chips().contains(&chip) {
         return Err(MlirError::InvalidGpuChip(chip.to_string()));
     }
 
@@ -382,6 +408,31 @@ mod tests {
             lower_for_gpu(&element_wise(&[2]), &empty),
             Err(MlirError::InvalidGpuChip(_))
         ));
+    }
+
+    #[test]
+    fn a_chip_llvm_does_not_know_is_refused_before_it_can_crash_isel() {
+        // An unknown AMD processor used to reach instruction selection and abort the compiler.
+        for target in [
+            GpuTarget::Amd {
+                chip: "gfx9999".to_string(),
+            },
+            GpuTarget::Nvidia {
+                chip: "sm_9999".to_string(),
+            },
+            // A real chip under the other vendor's dialect.
+            GpuTarget::Amd {
+                chip: "sm_80".to_string(),
+            },
+        ] {
+            assert!(
+                matches!(
+                    lower_with_format(&element_wise(&[2]), &target, "isa"),
+                    Err(MlirError::InvalidGpuChip(_))
+                ),
+                "{target:?}"
+            );
+        }
     }
 
     #[test]

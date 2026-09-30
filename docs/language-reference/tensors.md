@@ -92,7 +92,7 @@ To keep the source, clone first: `t.clone().to(Device::GPU(0))`.
 A borrow cannot be consumed, so `.to` is not offered on `&Tensor<T, S>`: calling it there
 reports that the borrowed type has no such method.
 
-`.to(Device::GPU(0))` copies the elements into the memory of the first NVIDIA GPU and frees the
+`.to(Device::GPU(0))` copies the elements into the memory of the first GPU and frees the
 host buffer. `.to(Device::CPU)` copies them back and frees the device buffer. Transferring a
 tensor to the device it is already on copies nothing. A [`@gpu`](#running-on-a-gpu-gpu)
 function reads a device tensor in place instead of copying it over, and returns its result on
@@ -125,9 +125,11 @@ reducing it, cloning it or using it in arithmetic outside a `@gpu` function abor
 `.to(Device::CPU)` first`` and the location of the operation. Moving it, passing it,
 returning it, storing it in a struct and dropping it all work as they do for a host tensor.
 
-A transfer needs a usable NVIDIA GPU when it runs. A program whose only GPU use is `.to` looks
-for one at its first transfer, not at startup, and if none is usable the transfer aborts with
-``panic: `Device::GPU` needs an NVIDIA GPU, and none is usable:`` followed by the reason. A tensor
+A transfer needs a usable GPU of the vendor the program was built for (NVIDIA unless
+[`--gpu-arch`](../guides/cli-usage.md#choosing-a-gpu) names an AMD chip) when it runs. A program
+whose only GPU use is `.to` looks for one at its first transfer, not at startup, and if none is
+usable the transfer aborts with ``panic: `Device::GPU` needs an NVIDIA GPU, and none is usable:``
+(or `an AMD GPU`) followed by the reason. A tensor
 can live on GPU 0 only for now: `Device::GPU(n)` with any other `n` aborts with a diagnostic
 naming `n`. Transfers need no MLIR backend, so any `neurc` compiles them, but on Windows a
 transfer to a GPU aborts.
@@ -969,9 +971,9 @@ element-wise `+ - * /` and `@` over `f32` / `f64` tensors of static shape and ra
 with scalar or tensor parameters (owned or `&`) and a tensor result, and a generic function
 qualifies per instance.
 
-A program with a `@gpu` function checks for a usable NVIDIA GPU when it starts, before `main`.
-If there is none, it prints ``panic: `@gpu` needs an NVIDIA GPU, and none is usable:`` followed
-by the reason, and aborts.
+A program with a `@gpu` function checks for a usable GPU when it starts, before `main`.
+If there is none, it prints ``panic: `@gpu` needs an NVIDIA GPU, and none is usable:`` (or
+`an AMD GPU`) followed by the reason, and aborts.
 
 The attribute goes on a free function. It is refused on a method, next to `@grad`, and with
 any argument other than `fallback:`. A `@grad` body cannot differentiate through a `@gpu` call,
@@ -980,15 +982,17 @@ compute it on the host.
 
 Compiling `@gpu` needs a `neurc` built with the MLIR backend (`--features mlir`, see
 [installation](../getting-started/installation.md#optional-mlir-backend)) on Linux; any other
-build refuses a bare `@gpu` function. Only NVIDIA GPUs run it today. The kernels ship as PTX
+build refuses a bare `@gpu` function. By default the kernels are for NVIDIA and ship as PTX
 that the CUDA driver compiles for the GPU it finds, so the machine that compiles needs no CUDA
-toolkit, and the one that runs needs only the NVIDIA driver.
+toolkit, and the one that runs needs only the NVIDIA driver. `--gpu-arch gfxNNN` builds for that
+AMD chip instead, which needs ROCm to compile and HIP to run; see
+[Choosing a GPU](../guides/cli-usage.md#choosing-a-gpu).
 [examples/tensors/tensor_gpu.nr](../../examples/tensors/tensor_gpu.nr) runs the snippet above.
 
 ### A CPU fallback: `@gpu(fallback: true)`
 
 `@gpu(fallback: true)` builds the body twice, as kernels and as ordinary host code. The program
-picks one when it starts: the kernels if it finds a usable NVIDIA GPU, the host copy if not.
+picks one when it starts: the kernels if it finds a usable GPU, the host copy if not.
 Every call in a run takes the same path, and both give the same result.
 
 ```neuro

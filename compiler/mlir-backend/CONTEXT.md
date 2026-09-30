@@ -109,8 +109,10 @@ this crate defines. `gpu-module-to-binary` runs as a second pass manager so a mi
 `GpuSerializationFailed` and a lowering bug stays `PassPipelineFailed`. NVIDIA embeds PTX (`isa`),
 which the CUDA driver JITs for its GPU, so a compile needs no CUDA toolkit. AMD embeds a code
 object (`bin`): HIP cannot load assembly, and linking one runs `$ROCM_PATH/llvm/bin/ld.lld`. The
-chip is spliced into the pipeline text, so anything but letters, digits and `_` is
-`InvalidGpuChip`. The host symbol keeps `lower_for_link`'s exploded-descriptor signature, so one
+chip must be one LLVM 22 has a processor model for (`NVIDIA_CHIPS` / `AMD_CHIPS`), or it is
+`InvalidGpuChip`: LLVM only warns about an unknown one and then crashes selecting AMD
+instructions, and the list also keeps anything but a plain name out of the pipeline text the
+chip is spliced into. The host symbol keeps `lower_for_link`'s exploded-descriptor signature, so one
 LLVM-backend wrapper serves either path; the pointers it passes must be device memory, which the
 wrapper stages.
 

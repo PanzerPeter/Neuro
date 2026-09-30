@@ -10,11 +10,48 @@ use std::process::{self, Command};
 /// The entry point every compiled executable must define.
 const MAIN_FUNCTION: &str = "main";
 
-/// The compute capability `@gpu` kernels are compiled for. They ship as PTX, which the
-/// CUDA driver compiles for the GPU it finds, so the floor is what matters: every GPU at
-/// or above it runs them, and element-wise arithmetic needs nothing newer.
-#[cfg(feature = "mlir")]
-const GPU_CHIP: &str = "sm_60";
+/// The chip `@gpu` kernels are compiled for unless `--gpu-arch` names another. NVIDIA
+/// kernels ship as PTX, which the CUDA driver compiles for the GPU it finds, so the floor
+/// is what matters: every GPU at or above it runs them, and element-wise arithmetic needs
+/// nothing newer. An AMD code object has no such floor, so AMD has no default chip.
+const DEFAULT_GPU_CHIP: &str = "sm_60";
+
+/// The GPU a build targets: the vendor whose runtime is linked and whose dialect the
+/// kernels lower through, and the chip that fixes their ISA.
+#[derive(Clone)]
+struct GpuArch {
+    vendor: llvm_backend::GpuVendor,
+    // Without MLIR no kernel is compiled, and only the vendor's runtime matters.
+    #[cfg_attr(not(feature = "mlir"), expect(dead_code))]
+    chip: String,
+}
+
+impl Default for GpuArch {
+    fn default() -> Self {
+        Self {
+            vendor: llvm_backend::GpuVendor::Nvidia,
+            chip: DEFAULT_GPU_CHIP.to_string(),
+        }
+    }
+}
+
+/// The vendor is read off the chip name, the way clang's `--offload-arch` reads it. The
+/// rest of the name is checked by `mlir-backend`, which splices it into a pass pipeline.
+fn parse_gpu_arch(chip: &str) -> Result<GpuArch, String> {
+    let vendor = if chip.starts_with("sm_") {
+        llvm_backend::GpuVendor::Nvidia
+    } else if chip.starts_with("gfx") {
+        llvm_backend::GpuVendor::Amd
+    } else {
+        return Err(format!(
+            "expected an NVIDIA `sm_NN` or an AMD `gfxNNN` chip, such as `sm_80` or `gfx90a`, found `{chip}`"
+        ));
+    };
+    Ok(GpuArch {
+        vendor,
+        chip: chip.to_string(),
+    })
+}
 
 /// What the GPU runtime needs from the platform: `dlopen`, which only glibc 2.34 and
 /// later keep in libc itself.
@@ -70,6 +107,10 @@ enum Commands {
         /// Artifact to write
         #[arg(long, value_name = "KIND", default_value = "exe")]
         emit: EmitKind,
+
+        /// GPU chip for `@gpu` kernels and device tensors: an NVIDIA `sm_NN` (default `sm_60`) or an AMD `gfxNNN`, which builds for HIP and needs ROCm
+        #[arg(long, value_name = "CHIP", value_parser = parse_gpu_arch)]
+        gpu_arch: Option<GpuArch>,
     },
 
     /// Compile a Neuro source file and run it immediately
@@ -81,6 +122,10 @@ enum Commands {
         /// Optimization level (0-3). 0 is a debug build: integer overflow panics. 1-3 are release builds: overflow wraps. Use 2 for speed
         #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
         optimization: u8,
+
+        /// GPU chip for `@gpu` kernels and device tensors: an NVIDIA `sm_NN` (default `sm_60`) or an AMD `gfxNNN`, which builds for HIP and needs ROCm
+        #[arg(long, value_name = "CHIP", value_parser = parse_gpu_arch)]
+        gpu_arch: Option<GpuArch>,
     },
 
     /// Check syntax and types without generating code
@@ -102,7 +147,14 @@ fn main() {
             output,
             optimization,
             emit,
-        } => match compile_file(&input, output.as_deref(), optimization, emit) {
+            gpu_arch,
+        } => match compile_file(
+            &input,
+            output.as_deref(),
+            optimization,
+            emit,
+            &gpu_arch.unwrap_or_default(),
+        ) {
             Ok(output_path) => {
                 println!(
                     "Successfully compiled {} -> {}",
@@ -118,7 +170,8 @@ fn main() {
         Commands::Run {
             input,
             optimization,
-        } => match run_file(&input, optimization) {
+            gpu_arch,
+        } => match run_file(&input, optimization, &gpu_arch.unwrap_or_default()) {
             Ok(code) => process::exit(code),
             Err(e) => report_failure("Run failed", &e),
         },
@@ -152,7 +205,7 @@ fn report_failure(prefix: &str, error: &anyhow::Error) -> ! {
 /// The executable is never written beside the source: a `run` leaves no artifact behind,
 /// which is what separates it from `compile` followed by an invocation. The temporary
 /// directory is removed when this function returns, after the child has exited.
-fn run_file(input: &Path, optimization: u8) -> Result<i32> {
+fn run_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<i32> {
     let dir = tempfile::tempdir().context("Failed to create temporary directory")?;
 
     // Keep the source's own name so the program sees a meaningful argv[0] and a crash
@@ -163,7 +216,7 @@ fn run_file(input: &Path, optimization: u8) -> Result<i32> {
         executable.set_extension("exe");
     }
 
-    compile_file(input, Some(&executable), optimization, EmitKind::Exe)?;
+    compile_file(input, Some(&executable), optimization, EmitKind::Exe, gpu)?;
 
     let status = Command::new(&executable)
         .status()
@@ -396,10 +449,11 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             // Whether a `@gpu` body can become a kernel is decided by the backend that
             // lowers it, so a `check` that stopped at HIR would pass a body `compile`
             // refuses. Without MLIR nothing can compile one, and `check` stays the
-            // type check it is.
+            // type check it is. Which bodies qualify does not depend on the vendor, and
+            // NVIDIA's needs no toolkit to serialize, so `check` lowers for it.
             if cfg!(feature = "mlir") && gpu_functions(&hir).next().is_some() {
                 let source = single_module_source(path, module_count);
-                tensor_bodies(&hir, path, source.as_deref())?;
+                tensor_bodies(&hir, path, source.as_deref(), &GpuArch::default())?;
             }
             println!(
                 "Type checking passed for {:?} ({} module(s), {} HIR items)",
@@ -438,13 +492,14 @@ fn print_warnings(warnings: &[semantic_analysis::Warning]) {
 /// code → link. `emit` decides where it stops. For an executable `output` defaults to
 /// the input name without its extension (plus `.exe` on Windows); for an object it
 /// defaults to the input name with the platform object extension, and for IR to the
-/// input name with `.ll`. Returns the path it wrote, which `run` needs and `compile`
-/// reports.
+/// input name with `.ll`. `gpu` is what `@gpu` bodies and device tensors are built for.
+/// Returns the path it wrote, which `run` needs and `compile` reports.
 fn compile_file(
     input: &Path,
     output: Option<&Path>,
     optimization: u8,
     emit: EmitKind,
+    gpu: &GpuArch,
 ) -> Result<PathBuf> {
     validate_source_file(input)?;
 
@@ -504,7 +559,7 @@ fn compile_file(
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
     let rendered = (module_count == 1).then_some(source.as_str());
-    let external = tensor_bodies(&hir, input, rendered)?;
+    let external = tensor_bodies(&hir, input, rendered, gpu)?;
     // A `.to(device)` links the GPU runtime as surely as a `@gpu` body does, and only the
     // backend sees which programs make one, so every link where the runtime can exist
     // offers what it needs.
@@ -521,6 +576,7 @@ fn compile_file(
             &source,
             &input.display().to_string(),
             &external,
+            gpu.vendor,
         )
         .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
         .context("Failed to generate LLVM IR")?;
@@ -538,6 +594,7 @@ fn compile_file(
         &source,
         &input.display().to_string(),
         &external,
+        gpu.vendor,
     )
     .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
     .context("Failed to generate object code")?;
@@ -593,7 +650,7 @@ fn gpu_functions(hir: &neuro_hir::HirProgram) -> impl Iterator<Item = &neuro_hir
 }
 
 /// The tensor bodies `mlir-backend` computes, for the LLVM backend to link in place of
-/// its own: the host ones, and the `@gpu` ones as NVIDIA kernels. A failure lowering a
+/// its own: the host ones, and the `@gpu` ones as kernels for `gpu`. A failure lowering a
 /// host body is a compiler bug, so it stops the build rather than quietly handing the
 /// body back to the LLVM backend, which would hide it. A `@gpu` body that cannot become
 /// a kernel is the user's error, reported at its function.
@@ -602,6 +659,7 @@ fn tensor_bodies(
     hir: &neuro_hir::HirProgram,
     path: &Path,
     source: Option<&str>,
+    gpu: &GpuArch,
 ) -> Result<Vec<llvm_backend::ExternalBodies>> {
     let host = mlir_backend::lower_for_link(hir)
         .map_err(|e| anyhow::anyhow!("MLIR lowering error: {}", e))
@@ -614,7 +672,7 @@ fn tensor_bodies(
     if gpu_functions(hir).next().is_none() {
         return Ok(bodies);
     }
-    // The runtime opens the CUDA driver with `dlopen`, which Windows does not have.
+    // The runtime opens the vendor library with `dlopen`, which Windows does not have.
     if cfg!(target_os = "windows") {
         if without_gpu_bodies(
             hir,
@@ -628,8 +686,10 @@ fn tensor_bodies(
         return Ok(bodies);
     }
 
-    let target = mlir_backend::GpuTarget::Nvidia {
-        chip: GPU_CHIP.to_string(),
+    let chip = gpu.chip.clone();
+    let target = match gpu.vendor {
+        llvm_backend::GpuVendor::Nvidia => mlir_backend::GpuTarget::Nvidia { chip },
+        llvm_backend::GpuVendor::Amd => mlir_backend::GpuTarget::Amd { chip },
     };
     let device = mlir_backend::lower_for_gpu(hir, &target).map_err(|e| {
         if let mlir_backend::MlirError::GpuBodiesNotLowered(functions) = &e {
@@ -656,6 +716,7 @@ fn tensor_bodies(
     hir: &neuro_hir::HirProgram,
     path: &Path,
     source: Option<&str>,
+    _gpu: &GpuArch,
 ) -> Result<Vec<llvm_backend::ExternalBodies>> {
     if without_gpu_bodies(
         hir,

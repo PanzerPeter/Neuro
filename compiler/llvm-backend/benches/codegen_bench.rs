@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use llvm_backend::{OptimizationLevelSetting, compile};
+use llvm_backend::{GpuVendor, OptimizationLevelSetting, compile};
 
 fn build_source(name: &str) -> &'static str {
     match name {
@@ -62,6 +62,7 @@ fn bench_codegen(c: &mut Criterion) {
                     source,
                     "bench.nr",
                     &[],
+                    GpuVendor::Nvidia,
                 );
                 assert!(
                     result.is_ok(),

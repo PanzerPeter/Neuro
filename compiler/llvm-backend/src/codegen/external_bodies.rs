@@ -19,9 +19,10 @@ use super::device_memory::{
     GPU_PANIC_FN,
 };
 
-/// The CUDA implementation of the GPU runtime ABI a device body calls, linked in with
-/// the first set of device bodies. See `gpu_runtime.c`, its provenance.
-const GPU_RUNTIME_IR: &str = include_str!("gpu_runtime.ll");
+/// The GPU runtime ABI a device body calls, over CUDA and over HIP, one of them linked in
+/// with the first set of device bodies. See `gpu_runtime.c`, the provenance of both.
+const CUDA_RUNTIME_IR: &str = include_str!("gpu_runtime.ll");
+const HIP_RUNTIME_IR: &str = include_str!("gpu_runtime_hip.ll");
 
 /// The runtime's answer to which body a `@gpu(fallback: true)` function runs: nonzero
 /// when it found a usable GPU.
@@ -300,13 +301,18 @@ pub(crate) fn link_external_bodies<'ctx>(
     Ok(())
 }
 
-/// Link the GPU runtime into `module`, whose device bodies and staging call it, and
-/// make its entry points internal: nothing outside the program calls them.
+/// Link `vendor`'s GPU runtime into `module`, whose device bodies and staging call it,
+/// and make its entry points internal: nothing outside the program calls them.
 pub(crate) fn link_gpu_runtime<'ctx>(
     context: &'ctx Context,
     module: &Module<'ctx>,
+    vendor: crate::GpuVendor,
 ) -> CodegenResult<()> {
-    link_ir(context, module, GPU_RUNTIME_IR, "the GPU runtime")?;
+    let runtime = match vendor {
+        crate::GpuVendor::Nvidia => CUDA_RUNTIME_IR,
+        crate::GpuVendor::Amd => HIP_RUNTIME_IR,
+    };
+    link_ir(context, module, runtime, "the GPU runtime")?;
     internalize(module, &GPU_RUNTIME_ENTRY_POINTS);
     if let Some(flag) = module.get_global(GPU_FALLBACK_GLOBAL) {
         flag.set_linkage(Linkage::Internal);
@@ -342,7 +348,7 @@ fn internalize(module: &Module<'_>, names: &[&str]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{BodyMemory, ExternalBodies, OptimizationLevelSetting, build_module};
+    use crate::{BodyMemory, ExternalBodies, GpuVendor, OptimizationLevelSetting, build_module};
     use inkwell::context::Context;
     use inkwell::module::Linkage;
 
@@ -393,10 +399,10 @@ mod tests {
     }
 
     fn linked_ir(source: &str, bodies_ir: &str, memory: BodyMemory) -> String {
-        linked(source, &[both(bodies_ir, memory)])
+        linked(source, &[both(bodies_ir, memory)], GpuVendor::Nvidia)
     }
 
-    fn linked(source: &str, external: &[ExternalBodies]) -> String {
+    fn linked(source: &str, external: &[ExternalBodies], gpu: GpuVendor) -> String {
         let ast = syntax_parsing::parse(source).expect("parsing failed");
         let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
         let context = Context::create();
@@ -407,6 +413,7 @@ mod tests {
             source,
             "external.nr",
             external,
+            gpu,
         )
         .expect("a module with linked bodies should build and verify");
         for symbol in ["ext_scale", "ext_consume"] {
@@ -645,6 +652,7 @@ mod tests {
                     memory: BodyMemory::Host,
                 },
             ],
+            GpuVendor::Nvidia,
         );
         assert!(
             body(&ir, "scale").contains("call void @ext_scale(ptr %device.operand"),
@@ -678,6 +686,34 @@ mod tests {
         let panic = &ir[position(&ir, "@__neuro_gpu_panic(ptr", 0)..];
         let write = position(panic, "call i64 @write(", 0);
         position(panic, "call void @abort()", write);
+    }
+
+    #[test]
+    fn an_amd_build_brings_the_hip_runtime() {
+        let device = both(DEVICE_BODIES, BodyMemory::Device);
+        let ir = linked(SOURCE, &[device], GpuVendor::Amd);
+        for name in super::GPU_RUNTIME_ENTRY_POINTS {
+            let line = definition(&ir, name).unwrap_or_else(|| {
+                panic!(
+                    "expected `{name}` defined by the runtime:
+{ir}"
+                )
+            });
+            assert!(line.starts_with("define internal"), "{line}");
+        }
+        assert!(
+            ir.contains("libamdhip64.so")
+                && ir.contains("needs an AMD GPU")
+                && ir.contains("hipModuleLaunchKernel")
+                && !ir.contains("libcuda"),
+            "HIP is opened at run time in place of the CUDA driver:
+{ir}"
+        );
+        assert!(
+            body(&ir, "scale").contains("store { i32, i32 } { i32 10, i32 0 }"),
+            "a result left on an AMD GPU is a kDLROCM tensor:
+{ir}"
+        );
     }
 
     /// `SOURCE` with an attribute on each function.

@@ -55,6 +55,7 @@ neurc compile <file.nr> [options]
 - `-o, --output <FILE>`: output path (default: the input filename without its extension)
 - `-O, --optimization <0-3>`: optimization level (default: `0`); see [Optimization](#optimization)
 - `--emit <exe|obj|llvm-ir>`: artifact to write (default: `exe`); see [Emitting an object file](#emitting-an-object-file) and [Emitting LLVM IR](#emitting-llvm-ir)
+- `--gpu-arch <CHIP>`: the GPU that `@gpu` kernels and `Device::GPU` tensors are built for (default: `sm_60`); see [Choosing a GPU](#choosing-a-gpu). `run` takes it too
 
 **Examples**:
 ```bash
@@ -73,6 +74,24 @@ neurc compile ../path/to/program.nr
 # With debug logging
 RUST_LOG=debug neurc compile examples/basics/hello.nr
 ```
+
+#### Choosing a GPU
+
+`--gpu-arch` names a chip, and the prefix picks the vendor. `sm_NN` is an NVIDIA compute
+capability. The kernels ship as PTX, which the CUDA driver compiles for any GPU at or above it,
+so the default `sm_60` covers every recent NVIDIA card. `gfxNNN` is an AMD architecture. The
+kernels are compiled to a code object for exactly that chip, and the program opens HIP
+(`libamdhip64.so`) instead of the CUDA driver.
+
+```bash
+neurc compile --gpu-arch gfx90a model.nr    # an MI200-series GPU
+```
+
+Compiling for AMD needs ROCm, because the code object is linked with ROCm's `ld.lld`
+(`$ROCM_PATH/llvm/bin/ld.lld`, `/opt/rocm` by default); without it the compile fails and says
+so. Running needs the HIP runtime and a GPU of that architecture. A program that only moves
+tensors with `.to(Device::GPU(0))` links the same runtime, so the flag matters for it too.
+`neurc` refuses a chip name with neither prefix, or one LLVM 22 has no processor for.
 
 #### Emitting an object file
 
