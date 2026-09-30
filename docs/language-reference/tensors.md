@@ -119,12 +119,32 @@ func main() -> i32 {
 }
 ```
 
-Only `@gpu` and [`@kernel`](#writing-a-kernel-kernel) functions compute on a device tensor.
-Host code cannot read one: indexing it, reducing it, cloning it or using it in arithmetic
-outside such a function aborts with
+Outside `@gpu`, an operation on a device tensor runs on that tensor's GPU as well, and its
+result stays there. This covers `+ - * /` and `@` on `f32` / `f64` tensors, `.sum()`,
+`.mean()`, `.max()` and `.min()`, reading or writing one element, and `.clone()`. A host
+operand next to a device operand is copied over for the operation. If every operand is a host
+tensor, the operation runs on the host as usual. The results are the same values the host
+computes.
+
+```neuro
+val g = Tensor::<f32, [8, 8]>::ones().to(Device::GPU(0))
+val halved = &g * 0.5f32          // computed on GPU 0, and stays there
+val total = halved.sum()          // reduced on GPU 0; the scalar comes back
+val first = halved[0, 0]          // copies that one element back
+```
+
+Reading or writing a single element copies only that element between the host and the GPU, and
+waits for the copy to finish. A loop over the elements of a device tensor therefore pays one copy
+per element, so move the tensor back with `.to(Device::CPU)` before reading many of them. The
+operators and reductions need a `neurc` built with the MLIR backend. Without it, element access
+and `.clone()` still run on the device.
+
+Other operations have no device form yet: integer tensor arithmetic, compound assignment,
+slicing, the elementwise math methods, `einsum`, `.map` / `.zip` / `.reduce`, sorting and a
+permuting shape cast. Given a device tensor, each one aborts at the operation with
 ``panic: this tensor lives on a GPU, where host code cannot read it: move it back with
-`.to(Device::CPU)` first`` and the location of the operation. Moving it, passing it,
-returning it, storing it in a struct and dropping it all work as they do for a host tensor.
+`.to(Device::CPU)` first``, plus its location. Moving a device tensor, passing it, returning it,
+storing it in a struct and dropping it all work as they do for a host tensor.
 
 A transfer needs a usable GPU of the vendor the program was built for (NVIDIA unless
 [`--gpu-arch`](../guides/cli-usage.md#choosing-a-gpu) names an AMD chip) when it runs. A program
@@ -976,9 +996,9 @@ func blend(a: &Tensor<f32, [4, 6]>, b: &Tensor<f32, [4, 6]>, t: f32) -> Tensor<f
 
 Bare `@gpu` requires a GPU, and the compiler never runs the body anywhere else. A body the
 GPU path cannot lower is a compile error at the function. That path takes straight-line
-element-wise `+ - * /` and `@` over `f32` / `f64` tensors of static shape and rank 1 or more,
-with scalar or tensor parameters (owned or `&`) and a tensor result, and a generic function
-qualifies per instance.
+element-wise `+ - * /`, `@`, and `.sum()` / `.mean()` / `.max()` / `.min()` along an axis over
+`f32` / `f64` tensors of static shape and rank 1 or more, with scalar or tensor parameters
+(owned or `&`) and a tensor result. A generic function qualifies per instance.
 
 A program with a `@gpu` function checks for a usable GPU when it starts, before `main`.
 If there is none, it prints ``panic: `@gpu` needs an NVIDIA GPU, and none is usable:`` (or

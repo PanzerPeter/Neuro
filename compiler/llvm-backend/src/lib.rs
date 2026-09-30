@@ -407,6 +407,11 @@ fn build_module<'ctx>(
                 Some((symbol, BodyMemory::Device)) if func_def.target == HirTarget::GpuOrHost => {
                     codegen_ctx.codegen_gpu_fallback(func_def, symbol, &func_types)?
                 }
+                Some((symbol, BodyMemory::Device))
+                    if func_def.target == HirTarget::FollowsOperands =>
+                {
+                    codegen_ctx.codegen_follows_operands(func_def, symbol, &func_types)?
+                }
                 Some((symbol, memory)) => {
                     codegen_ctx.codegen_external_body(func_def, symbol, memory)?
                 }

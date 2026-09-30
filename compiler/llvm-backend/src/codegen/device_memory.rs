@@ -57,7 +57,8 @@ pub(crate) const GPU_FALLBACK_GLOBAL: &str = "__neuro_gpu_fallback";
 /// make.
 pub(crate) const DEVICE_TENSOR_ALLOC_FN: &str = "__neuro_device_alloc";
 pub(crate) const DEVICE_UPLOAD_FN: &str = "__neuro_device_upload";
-pub(crate) const DEVICE_DOWNLOAD_FN: &str = "__neuro_device_download";
+pub(crate) const DEVICE_COPY_FN: &str = "__neuro_device_copy";
+pub(crate) const DEVICE_CLONE_FN: &str = "__neuro_device_clone";
 pub(crate) const DEVICE_MOVE_FN: &str = "__neuro_device_move";
 pub(crate) const DEVICE_TENSOR_FREE_FN: &str = "__neuro_device_free";
 pub(crate) const DEVICE_CHECK_FN: &str = "__neuro_device_check";
@@ -226,10 +227,23 @@ impl<'ctx> CodegenContext<'ctx> {
         index: IntValue<'ctx>,
         tensor_ty: &Type,
     ) -> CodegenResult<()> {
+        let bytes = self.dlpack_copy_length(tensor_ty)?;
+        self.device_copy(host, buffer, bytes, index)
+    }
+
+    /// Copy `bytes` from `from` to `to`, one of them memory on GPU `index` and the other
+    /// host memory, in the order of every kernel queued there, and wait for it.
+    pub(crate) fn device_copy(
+        &mut self,
+        to: PointerValue<'ctx>,
+        from: PointerValue<'ctx>,
+        bytes: IntValue<'ctx>,
+        index: IntValue<'ctx>,
+    ) -> CodegenResult<()> {
         self.require_gpu_runtime()?;
         let ptr = self.ptr();
-        let download = self.extern_fn(
-            DEVICE_DOWNLOAD_FN,
+        let copy = self.extern_fn(
+            DEVICE_COPY_FN,
             self.context.void_type().fn_type(
                 &[
                     ptr.into(),
@@ -240,13 +254,40 @@ impl<'ctx> CodegenContext<'ctx> {
                 false,
             ),
         );
-        let bytes = self.dlpack_copy_length(tensor_ty)?;
         self.builder.build_call(
-            download,
-            &[host.into(), buffer.into(), bytes.into(), index.into()],
+            copy,
+            &[to.into(), from.into(), bytes.into(), index.into()],
             "",
         )?;
         Ok(())
+    }
+
+    /// A new buffer on GPU `index` holding the `tensor_ty` elements at `buffer`, which lives
+    /// there too.
+    pub(crate) fn device_clone(
+        &mut self,
+        buffer: PointerValue<'ctx>,
+        tensor_ty: &Type,
+        index: IntValue<'ctx>,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        self.require_gpu_runtime()?;
+        let clone = self.extern_fn(
+            DEVICE_CLONE_FN,
+            self.ptr().fn_type(
+                &[
+                    self.ptr().into(),
+                    self.context.i64_type().into(),
+                    self.context.i32_type().into(),
+                ],
+                false,
+            ),
+        );
+        let bytes = self.dlpack_copy_length(tensor_ty)?;
+        self.pointer_call(
+            clone,
+            &[buffer.into(), bytes.into(), index.into()],
+            "device.clone",
+        )
     }
 
     /// The `tensor_ty` buffer at `buffer`, on GPU `from`, moved to GPU `to`: the same

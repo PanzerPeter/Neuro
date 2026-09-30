@@ -181,6 +181,54 @@ fn a_gpu_program_runs_on_the_gpu_or_aborts_at_startup() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "main ran\n");
 }
 
+/// A `@gpu` body reduces along an axis with one thread per result element, folding in the
+/// host's order, so the answer matches the host's exactly.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn a_gpu_body_reduces_along_an_axis_as_the_host_does() {
+    const SOURCE: &str = r#"
+@gpu
+func row_means(t: &Tensor<f32, [5, 7]>) -> Tensor<f32, [5]> {
+    t.mean(axis: 1)
+}
+
+func main() -> i32 {
+    mut m: Tensor<f32, [5, 7]> = Tensor::zeros()
+    mut i = 0
+    while i < 5 {
+        mut j = 0
+        while j < 7 {
+            m[i, j] = (i * 7 + j) as f32 * 0.3
+            j += 1
+        }
+        i += 1
+    }
+    val gpu = row_means(&m)
+    val host = m.mean(axis: 1)
+    mut wrong = 0
+    i = 0
+    while i < 5 {
+        if gpu[i] != host[i] { wrong += 1 }
+        i += 1
+    }
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("reduce.nr", SOURCE))
+        .expect("an axis reduction lowers to a kernel");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        assert_aborted_at_startup(&output);
+        return;
+    }
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+}
+
 #[cfg(all(feature = "mlir", unix))]
 #[test]
 fn without_a_visible_gpu_the_program_aborts_before_main() {

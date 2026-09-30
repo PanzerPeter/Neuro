@@ -307,6 +307,12 @@ A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging w
 that finds no usable GPU leaves the module unloaded instead of aborting, and every call takes
 its host body.
 
+A tensor operation lowering outlined to follow its operands (`HirTarget::FollowsOperands`) is
+emitted the same three ways, but `f` picks per call: `f.gpu` when any tensor operand lives on a
+GPU, `f.host` when every one is a host tensor. Element reads and writes and `.clone()` need no
+kernel. They branch on the tensor's DLPack device where they stand, copying one element through
+the runtime or cloning the buffer on its GPU, so they work on a device tensor in any build.
+
 ## Source
 
 - [`compiler/llvm-backend/src/`](../../../compiler/llvm-backend/src/)

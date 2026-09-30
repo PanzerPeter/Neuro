@@ -66,7 +66,9 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
   function each symbol computes.
 - `lower_for_gpu`, the `@gpu` functions (`fallback: true` ones included) and the `@kernel` ones
   as GPU kernels with host functions that launch them, reading and writing device memory only,
-  or an error naming each function it cannot lower. `neurc` calls it for a program with either.
+  or an error naming each function it cannot lower. It also takes the tensor operations lowering
+  outlined to run where their operands live, without refusing any it cannot lower. `neurc` calls
+  it for a program with any of them.
 - The HIR-independent `melior` wiring check (a verified `func.func @neuro_smoke` with an
   `arith.addi` body) is `pub(crate)` and compiled only under `test`.
 
@@ -262,13 +264,17 @@ installed and fails with `GpuSerializationFailed` without it.
 
 The parallel loops are tiled 16 × 16 over their first two axes, with a bounds guard rather than
 a clamped extent, so blocks cover the grid and each block runs a tile of threads. A matrix
-product is two kernels, the zero fill and the contraction.
+product is two kernels, the zero fill and the contraction. A reduction (`.sum()`, `.mean()`,
+`.max()`, `.min()`), which only a GPU body lowers here, is a seed and a fold, plus a division for
+a mean: one thread per result element folds its run in order, which is the LLVM backend's order,
+so the device and host answers match exactly.
 
 Each symbol keeps `lower_for_link`'s signature, so the
 [LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The two paths split the
 program by `HirFunction::target`: `lower_for_link` takes only host functions and `lower_for_gpu`
-only `@gpu` ones, with or without a fallback. A fallback's host copy is the LLVM backend's own
-body, not this crate's CPU path. A `@gpu` body `lower_for_link` would not take, or one with a rank-0 tensor in it
+only `@gpu` ones, with or without a fallback, and `FollowsOperands` ones. The host copy of a
+fallback or `FollowsOperands` function is the LLVM backend's own body, not this crate's CPU
+path. A `FollowsOperands` body it cannot lower keeps that host copy alone. A `@gpu` body `lower_for_link` would not take, or one with a rank-0 tensor in it
 (a rank-0 operation has no parallel axis to launch over, so it would run on the host against
 device buffers), is `GpuBodiesNotLowered`, with the name and span of each: `@gpu` forbids running
 it anywhere but a GPU. The symbol's body calls MLIR's GPU runtime ABI (`mgpuModuleLoad` or

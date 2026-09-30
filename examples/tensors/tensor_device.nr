@@ -6,9 +6,10 @@
 // tensors therefore keeps its data on the GPU the whole way, and only `.to(Device::CPU)`
 // brings the answer back.
 //
-// Host code cannot read a device tensor. Indexing one, reducing it or using it in
-// arithmetic outside a `@gpu` function aborts with a diagnostic asking for
-// `.to(Device::CPU)` first.
+// Outside `@gpu`, a tensor operation runs on the device its tensors live on too: `+ - * /`
+// and `@` on float tensors, `.sum()` / `.mean()` / `.max()` / `.min()`, reading or writing
+// one element, and `.clone()`. An operation with no device form (`.map`, a slice, integer
+// arithmetic) aborts with a diagnostic asking for `.to(Device::CPU)` first.
 //
 // On a machine with several GPUs, `Device::GPU(1)` and up name the others, and a `@gpu`
 // call runs on the GPU its tensors are on. Like every program with a bare `@gpu`
@@ -32,6 +33,14 @@ func main() -> i32 {
         state = step(&state, &resident, 2.0f32)
         i += 1
     }
+
+    // Still on the GPU: no `@gpu` function, and nothing crosses to the host but the two
+    // numbers printed.
+    val halved = &state * 0.5f32
+    mut copy = halved.clone()
+    copy[0, 0] = 0.0f32
+    println("on the device: sum {halved.sum()}, row max {halved.max(axis: 1)[7]}, first {copy[0, 0]} and {halved[0, 0]}")
+
     val result = state.to(Device::CPU)
 
     mut expected = Tensor::<f32, [8, 8]>::ones()

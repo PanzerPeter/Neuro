@@ -624,13 +624,25 @@ void *__neuro_device_upload(void *host, uint64_t size, int32_t device) {
     return buffer;
 }
 
-// Queued behind every kernel still writing `buffer`, on the stream they run on.
-void __neuro_device_download(void *host, void *buffer, uint64_t size, int32_t device) {
+// `size` bytes from `from` to `to`, either of which may be `device`'s memory and the other
+// host memory: unified addressing tells the driver which way the copy goes. Queued behind
+// every kernel still using the device buffer, on the stream they run on, and waited for.
+void __neuro_device_copy(void *to, void *from, uint64_t size, int32_t device) {
     int32_t previous = __neuro_device_switch(device);
     gpu_stream stream = mgpuStreamCreate();
-    mgpuMemcpy(host, buffer, size, stream);
+    mgpuMemcpy(to, from, size, stream);
     mgpuStreamSynchronize(stream);
     __neuro_device_switch(previous);
+}
+
+// A new buffer on `device` holding `buffer`'s bytes. The copy is queued, not waited for:
+// only the device reads either buffer until a copy or a free drains the stream.
+void *__neuro_device_clone(void *buffer, uint64_t size, int32_t device) {
+    int32_t previous = __neuro_device_switch(device);
+    void *copy = __neuro_device_alloc(size);
+    mgpuMemcpy(copy, buffer, size, mgpuStreamCreate());
+    __neuro_device_switch(previous);
+    return copy;
 }
 
 // A kernel still queued may read the buffer, so the stream drains first.

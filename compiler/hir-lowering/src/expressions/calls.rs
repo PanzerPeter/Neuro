@@ -906,6 +906,7 @@ impl Lowerer {
                 if !matches!(recv, HirType::Reference { .. }) =>
             {
                 let device = HirType::Enum(DEVICE_TYPE_NAME.to_string());
+                self.transfers = true;
                 Ok((self.lower_args(args, &[device])?, recv.clone()))
             }
             _ => Err(LoweringError::UnresolvedCall {

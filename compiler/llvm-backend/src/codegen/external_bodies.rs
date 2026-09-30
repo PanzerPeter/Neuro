@@ -4,7 +4,7 @@ use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::BasicMetadataTypeEnum;
-use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
 use neuro_hir::HirFunction;
 
@@ -14,9 +14,10 @@ use crate::{BodyMemory, ExternalBodies};
 
 use super::context::CodegenContext;
 use super::device_memory::{
-    DEVICE_ALLOC_FN, DEVICE_CHECK_FN, DEVICE_DOWNLOAD_FN, DEVICE_JOIN_FN, DEVICE_MARK_FN,
-    DEVICE_MOVE_FN, DEVICE_RELEASE_FN, DEVICE_RESTORE_FN, DEVICE_SWITCH_FN, DEVICE_TENSOR_ALLOC_FN,
-    DEVICE_TENSOR_FREE_FN, DEVICE_UPLOAD_FN, GPU_FALLBACK_GLOBAL, GPU_PANIC_FN,
+    DEVICE_ALLOC_FN, DEVICE_CHECK_FN, DEVICE_CLONE_FN, DEVICE_COPY_FN, DEVICE_JOIN_FN,
+    DEVICE_MARK_FN, DEVICE_MOVE_FN, DEVICE_RELEASE_FN, DEVICE_RESTORE_FN, DEVICE_SWITCH_FN,
+    DEVICE_TENSOR_ALLOC_FN, DEVICE_TENSOR_FREE_FN, DEVICE_UPLOAD_FN, GPU_FALLBACK_GLOBAL,
+    GPU_PANIC_FN,
 };
 
 /// The GPU runtime ABI a device body calls, over CUDA and over HIP, one of them linked in
@@ -35,7 +36,7 @@ const HOST_BODY_SUFFIX: &str = ".host";
 
 /// What the runtime defines for the launchers, the staging and device tensors, made
 /// internal once linked.
-const GPU_RUNTIME_ENTRY_POINTS: [&str; 25] = [
+const GPU_RUNTIME_ENTRY_POINTS: [&str; 26] = [
     "mgpuModuleLoad",
     "mgpuModuleLoadJIT",
     "mgpuModuleUnload",
@@ -55,7 +56,8 @@ const GPU_RUNTIME_ENTRY_POINTS: [&str; 25] = [
     DEVICE_JOIN_FN,
     DEVICE_TENSOR_ALLOC_FN,
     DEVICE_UPLOAD_FN,
-    DEVICE_DOWNLOAD_FN,
+    DEVICE_COPY_FN,
+    DEVICE_CLONE_FN,
     DEVICE_MOVE_FN,
     DEVICE_TENSOR_FREE_FN,
     DEVICE_CHECK_FN,
@@ -206,6 +208,70 @@ impl<'ctx> CodegenContext<'ctx> {
         symbol: &str,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
+        self.codegen_body_choice(func_def, symbol, func_types, |this, _| {
+            let i32_type = this.context.i32_type();
+            let probe = this.extern_fn(GPU_USABLE_FN, i32_type.fn_type(&[], false));
+            let usable = this
+                .builder
+                .build_call(probe, &[], "gpu.usable")?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| {
+                    CodegenError::InternalError(format!("{GPU_USABLE_FN} returned void"))
+                })?
+                .into_int_value();
+            Ok(this.builder.build_int_compare(
+                IntPredicate::NE,
+                usable,
+                i32_type.const_zero(),
+                "gpu.chosen",
+            )?)
+        })
+    }
+
+    /// Define `func_def`, a function outlined from one tensor operation whose kernels
+    /// `symbol` launches, as a choice made per call: the staged device body when any tensor
+    /// operand lives on a GPU, and this backend's own host body when every one is a host
+    /// tensor, so a host program runs exactly as it did before a device existed.
+    pub(crate) fn codegen_follows_operands(
+        &mut self,
+        func_def: &HirFunction,
+        symbol: &str,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        self.codegen_body_choice(func_def, symbol, func_types, |this, function| {
+            let ptr_type = this.context.ptr_type(AddressSpace::default());
+            let mut resident = this.context.bool_type().const_zero();
+            for (index, param) in func_def.params.iter().enumerate() {
+                let value = function.get_nth_param(index as u32).ok_or_else(|| {
+                    CodegenError::InternalError(format!("missing parameter {index}"))
+                })?;
+                let handle = match Type::from_hir(&param.ty) {
+                    Type::Tensor { .. } => value.into_pointer_value(),
+                    Type::Reference { inner, .. } if matches!(*inner, Type::Tensor { .. }) => this
+                        .builder
+                        .build_load(ptr_type, value.into_pointer_value(), "operand.handle")?
+                        .into_pointer_value(),
+                    _ => continue,
+                };
+                let on_host = this.dlpack_on_host(handle)?;
+                let here = this.builder.build_not(on_host, "operand.resident")?;
+                resident = this.builder.build_or(resident, here, "device.chosen")?;
+            }
+            Ok(resident)
+        })
+    }
+
+    /// Define `func_def` as a branch between two bodies of its own: the staged device one
+    /// launching `symbol`'s kernels where `choose` answers true, and this backend's host
+    /// body elsewhere. `choose` is emitted at the entry of the function being defined.
+    fn codegen_body_choice(
+        &mut self,
+        func_def: &HirFunction,
+        symbol: &str,
+        func_types: &HashMap<String, Type>,
+        choose: impl FnOnce(&mut Self, FunctionValue<'ctx>) -> CodegenResult<IntValue<'ctx>>,
+    ) -> CodegenResult<()> {
         let function = *self
             .functions
             .get(&func_def.name)
@@ -225,21 +291,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let on_host = self.context.append_basic_block(function, "on_host");
         self.builder.position_at_end(entry);
         self.current_function = Some(function);
-        let i32_type = self.context.i32_type();
-        let probe = self.extern_fn(GPU_USABLE_FN, i32_type.fn_type(&[], false));
-        let usable = self
-            .builder
-            .build_call(probe, &[], "gpu.usable")?
-            .try_as_basic_value()
-            .basic()
-            .ok_or_else(|| CodegenError::InternalError(format!("{GPU_USABLE_FN} returned void")))?
-            .into_int_value();
-        let chosen = self.builder.build_int_compare(
-            IntPredicate::NE,
-            usable,
-            i32_type.const_zero(),
-            "gpu.chosen",
-        )?;
+        let chosen = choose(self, function)?;
         self.builder
             .build_conditional_branch(chosen, on_gpu, on_host)?;
 

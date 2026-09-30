@@ -995,7 +995,7 @@ define dso_local ptr @__neuro_device_upload(ptr noundef %0, i64 noundef %1, i32 
   ret ptr %19
 }
 
-define dso_local void @__neuro_device_download(ptr noundef %0, ptr noundef %1, i64 noundef %2, i32 noundef %3) local_unnamed_addr {
+define dso_local void @__neuro_device_copy(ptr noundef %0, ptr noundef %1, i64 noundef %2, i32 noundef %3) local_unnamed_addr {
   %5 = alloca [128 x i8], align 16
   %6 = alloca [128 x i8], align 16
   %7 = tail call i32 @__neuro_device_switch(i32 noundef %3)
@@ -1034,6 +1034,31 @@ define dso_local void @__neuro_device_download(ptr noundef %0, ptr noundef %1, i
 28:                                               ; preds = %18
   %29 = tail call i32 @__neuro_device_switch(i32 noundef %7)
   ret void
+}
+
+define dso_local ptr @__neuro_device_clone(ptr noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr {
+  %4 = alloca [128 x i8], align 16
+  %5 = tail call i32 @__neuro_device_switch(i32 noundef %2)
+  %6 = tail call ptr @__neuro_device_alloc(i64 noundef %1)
+  %7 = tail call ptr @mgpuStreamCreate()
+  %8 = load ptr, ptr @drv.13, align 8
+  %9 = tail call i32 %8(ptr noundef %6, ptr noundef %0, i64 noundef %1, i32 noundef 4, ptr noundef %7)
+  %10 = icmp eq i32 %9, 0
+  br i1 %10, label %17, label %11
+
+11:                                               ; preds = %3
+  call void @llvm.lifetime.start.p0(ptr nonnull %4)
+  %12 = load ptr, ptr @drv.1, align 8
+  %13 = tail call ptr %12(i32 noundef range(i32 1, 0) %9)
+  %14 = icmp eq ptr %13, null
+  %15 = select i1 %14, ptr @.str.20, ptr %13
+  %16 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.21, ptr noundef nonnull @.str.8, ptr noundef nonnull %15)
+  call fastcc void @fail(ptr noundef nonnull %4)
+  unreachable
+
+17:                                               ; preds = %3
+  %18 = tail call i32 @__neuro_device_switch(i32 noundef %5)
+  ret ptr %6
 }
 
 define dso_local void @__neuro_device_free(ptr noundef %0, i32 noundef %1) local_unnamed_addr {

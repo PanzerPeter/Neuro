@@ -108,6 +108,15 @@ set, so a construct it has no rule for is a `LoweringError::NotDifferentiable` t
 construct's span, and `neurc` renders it like a type error. See
 [Automatic Differentiation](../../language-reference/autodiff.md) for the accepted body.
 
+### Device operations
+
+In a program that moves a tensor to a device with `.to(...)`, the last step of lowering outlines
+each tensor operation a GPU can compute (a tree of `+ - * / @`, or a reduction, over float
+tensors of static shape) into a function of its own whose target is
+`HirTarget::FollowsOperands`. The backends then choose per call where it runs, from where its
+operands live. The operands are passed exactly as written, so ownership is unchanged. The source
+lives in [`src/device_ops.rs`](../../../compiler/hir-lowering/src/device_ops.rs).
+
 ## Testing
 
 Slice unit tests cover the lowering rules; `compiler/neurc/tests/suite/hir_lowering.rs` provides end-to-end

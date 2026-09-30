@@ -1,1 +1,2 @@
+on the device: sum 352.0, row max 5.5, first 0.0 and 5.5
 after 10 steps: 11.0 on the GPU, 11.0 on the host

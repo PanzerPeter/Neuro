@@ -42,8 +42,9 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    (`tensor_bodies`) and passes the bodies it returns to the LLVM backend as `ExternalBodies`,
    which links them in place of its own. The two slices' types are mapped here, field for field,
    since neither may name the other's. A failure there stops the compile: it is a compiler bug,
-   and handing the body back to the LLVM backend would hide it. A program with a `@gpu` function
-   also goes through `mlir_backend::lower_for_gpu` for the `--gpu-arch` chip, and those bodies
+   and handing the body back to the LLVM backend would hide it. A program with a `@gpu` function,
+   or with a tensor operation lowering outlined to follow its operands (`FollowsOperands`), also
+   goes through `mlir_backend::lower_for_gpu` for the `--gpu-arch` chip, and those bodies
    are a second `ExternalBodies` with `BodyMemory::Device`. `check` always lowers for the
    default: which bodies qualify does not depend on the vendor.
    A `@gpu` body that cannot become a kernel is rendered at its function

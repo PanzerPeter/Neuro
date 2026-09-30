@@ -424,6 +424,20 @@ nothing because every stage is a named function the backend references directly.
 an identifier that is no local but names a function becomes a closure forwarding its
 `__fn_value_argN` parameters to it. Both share `lift_capture_free`.
 
+### Device operations
+`device_ops.rs` runs last in `lower_program`, after the derivatives, and only when the program
+lowered a tensor `.to(...)` (`transfers`), the one way a device tensor comes to exist. It
+outlines each tensor operation a GPU body can compute (a float tensor of static shape, rank 1 or
+more) out of host code (`Host` functions, methods, closures) into a `HirTarget::FollowsOperands`
+function named `__device_op_N`: a maximal tree of `+ - * / @` becomes one function over its
+leaves, and a reduction one over its receiver. Parameters are the operands exactly as written
+(`&a` stays a borrow, `a` a move), except that a named receiver of a reduction, which the
+reduction only reads, is passed as `&receiver`. A whole-tensor reduction yields a scalar, which a
+GPU body cannot return, so its function returns a `[1]` tensor (`TensorLiteral` of the reduction)
+and the call site reads element 0. Operands keep their spans inside the body, so a host body
+refusing a device tensor still reports the operation's position. Integer tensors and rank-0
+operations stay inline: the MLIR path could not lower them anyway.
+
 ### Dynamic dispatch
 A `traits` table (name → methods in declaration order, with their visible parameter and return
 types) is registered before impls, and each `Item::Trait` lowers to a `HirItem::Trait` carrying

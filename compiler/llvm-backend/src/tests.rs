@@ -1416,15 +1416,23 @@ fn a_tensor_clone_duplicates_the_allocation() {
 
     let ir = module_ir(source, OptimizationLevelSetting::O0);
     let body = function_body(&ir, "main");
+    // Outside Windows the clone has a device form too, whose handle is one more `malloc`
+    // and whose elements the runtime copies on the GPU.
+    let device_form = usize::from(!cfg!(target_os = "windows"));
     assert_eq!(
         body.matches("call ptr @malloc(").count(),
-        2,
+        2 + device_form,
         "the clone allocates a buffer of its own:\n{body}"
     );
     assert_eq!(
         body.matches("call ptr @memcpy(").count(),
         2,
         "the clone copies the elements rather than aliasing them:\n{body}"
+    );
+    assert_eq!(
+        body.matches("call ptr @__neuro_device_clone(").count(),
+        device_form,
+        "a device tensor is cloned on its GPU:\n{body}"
     );
 }
 
@@ -2593,7 +2601,7 @@ fn a_transfer_repoints_the_handle_through_the_gpu_runtime() {
         .find("call ptr @__neuro_device_upload(")
         .unwrap_or_else(|| panic!("expected an upload:\n{main}"));
     let download = main
-        .find("call void @__neuro_device_download(")
+        .find("call void @__neuro_device_copy(")
         .unwrap_or_else(|| panic!("expected a download:\n{main}"));
     let uploaded = &main[upload..];
     assert!(

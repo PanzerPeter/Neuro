@@ -31,6 +31,8 @@ legs build the placeholder.
   function's name and span: running it on the host is what `@gpu` forbids. Every buffer a symbol
   is handed must be device memory, and it allocates a buffer between two kernels through
   `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which the caller defines. It also
+  admits every `FollowsOperands` function (a tensor operation lowering outlined out of host code)
+  the same way, but leniently: one it cannot lower keeps its host body alone and is no error. It
   lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
   returns nothing and launches the body once per thread; a body construct the kernel lowering
   lacks is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
@@ -162,7 +164,20 @@ keeps a body with a rank-0 tensor parameter or result off the GPU module, throug
 rule `build_linkable_module` takes (the CPU path admits every `Host` function, the GPU path every
 `Gpu` one that passes this test), and `refused_bodies` turns what is left out into the error.
 
-**Tensor arithmetic is the only body lowered here.** `tensor_arithmetic::build_body` turns a
+**Reductions, for GPU bodies only.** `tensor_reduce::build_reduce` lowers `.sum()` / `.mean()` /
+`.max()` / `.min()` when the function's target is not `Host`; on the CPU path they stay the LLVM
+backend's, with every other 2B tensor operation. The index space is the result's axes
+(`parallel`, so one GPU thread per result element) followed by the reduced ones (`reduction`, a
+sequential loop inside the thread), which folds each run in the source's order, as the LLVM
+backend does, so the two give the same bits. The destination is seeded first: `-0.0` for a sum
+(the additive identity, signed zeros included), the run's first element for `.max()` / `.min()`,
+whose fold keeps the element when it is a number that sorts before the accumulator or the
+accumulator is NaN (the LLVM backend's sorting comparator). A mean divides by the run length in
+a third generic. A whole-tensor reduction arrives boxed in a one-element `TensorLiteral` (a GPU
+body returns buffers only) and becomes a reduction into `tensor<1xT>` with one parallel axis of
+extent 1.
+
+**Tensor arithmetic (and, on the GPU, reductions) is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` or tail expression over
 element-wise `+ - * /` on tensors into a `func.func` definition. An operand may be borrowed: a
 `&Tensor` parameter is a tensor block argument (`read_type`, which also gives the defined

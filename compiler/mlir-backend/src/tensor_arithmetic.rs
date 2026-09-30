@@ -1,4 +1,4 @@
-use crate::{errors::MlirError, lower::map_type};
+use crate::{errors::MlirError, lower::map_type, tensor_reduce::build_reduce};
 
 use ast_types::BinaryOp;
 use melior::{
@@ -11,7 +11,7 @@ use melior::{
         operation::OperationBuilder,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirStmt, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirStmt, HirTarget, HirType};
 
 /// How many region arguments `linalg.generic` passes an element-wise binary body:
 /// one per operand, the destination's included.
@@ -44,7 +44,7 @@ type ScalarOp = for<'c, 'a> fn(Value<'c, 'a>, Value<'c, 'a>, Location<'c>) -> Op
 /// results and `linalg.generic` hands the same value to every point. `Some(axes)`
 /// is a tensor, one entry per axis of that operand: the result axis it walks, or
 /// `None` where a size-1 extent is stretched and the operand is read at index 0.
-type OperandAxes = Option<Vec<Option<usize>>>;
+pub(crate) type OperandAxes = Option<Vec<Option<usize>>>;
 
 /// Build the body region of a function whose statements are all tensor arithmetic.
 ///
@@ -71,13 +71,23 @@ pub(crate) fn build_body<'c>(
     }
 
     let block = Block::new(&slots);
+    // A reduction is lowered for a GPU body only. On the host it stays the LLVM backend's,
+    // like every other tensor operation beyond the arithmetic this path was built for.
+    let reductions = function.target != HirTarget::Host;
 
     let built = {
         let mut scope: Vec<(String, Value<'c, '_>)> = Vec::with_capacity(function.params.len());
         for (index, param) in function.params.iter().enumerate() {
             scope.push((param.name.clone(), block.argument(index)?.into()));
         }
-        build_statements(context, location, &block, &function.body, &mut scope)?
+        build_statements(
+            context,
+            location,
+            &block,
+            &function.body,
+            &mut scope,
+            reductions,
+        )?
     };
 
     if !built {
@@ -92,7 +102,7 @@ pub(crate) fn build_body<'c>(
 
 /// A tensor's element type and its shape, `None` for every other type. A shared
 /// borrow of a tensor answers for the tensor, since reading is all an operand does.
-fn tensor_parts(ty: &HirType) -> Option<(&HirType, &[Option<usize>])> {
+pub(crate) fn tensor_parts(ty: &HirType) -> Option<(&HirType, &[Option<usize>])> {
     match read_type(ty) {
         HirType::Tensor { element, shape, .. } => Some((element.as_ref(), shape.as_slice())),
         _ => None,
@@ -121,6 +131,7 @@ fn build_statements<'c, 'a>(
     block: &'a Block<'c>,
     statements: &[HirStmt],
     scope: &mut Vec<(String, Value<'c, 'a>)>,
+    reductions: bool,
 ) -> Result<bool, MlirError> {
     let Some((last, leading)) = statements.split_last() else {
         return Ok(false);
@@ -135,7 +146,8 @@ fn build_statements<'c, 'a>(
         else {
             return Ok(false);
         };
-        let Some(value) = build_expression(context, location, block, init, scope)? else {
+        let Some(value) = build_expression(context, location, block, init, scope, reductions)?
+        else {
             return Ok(false);
         };
         scope.push((name.clone(), value));
@@ -150,7 +162,7 @@ fn build_statements<'c, 'a>(
     else {
         return Ok(false);
     };
-    let Some(result) = build_expression(context, location, block, value, scope)? else {
+    let Some(result) = build_expression(context, location, block, value, scope, reductions)? else {
         return Ok(false);
     };
     // Handing an argument back unchanged is no arithmetic. Through this path it
@@ -166,13 +178,15 @@ fn build_statements<'c, 'a>(
     Ok(true)
 }
 
-/// Lower one expression, yielding the SSA value it produces.
-fn build_expression<'c, 'a>(
+/// Lower one expression, yielding the SSA value it produces. `reductions` admits
+/// `.sum()` / `.mean()` / `.max()` / `.min()`, which only a GPU body lowers here.
+pub(crate) fn build_expression<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
+    reductions: bool,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     match &expression.kind {
         // Searched from the back so a shadowing binding wins over the one it hides.
@@ -186,15 +200,29 @@ fn build_expression<'c, 'a>(
         HirExprKind::Reference {
             operand,
             mutable: false,
-        } => build_expression(context, location, block, operand, scope),
+        } => build_expression(context, location, block, operand, scope, reductions),
+        HirExprKind::TensorReduce { .. } if reductions => {
+            build_reduce(context, location, block, expression, &expression.ty, scope)
+        }
+        // A whole-tensor reduction reaches a GPU body boxed in a one-element tensor, since
+        // a body hands back buffers only.
+        HirExprKind::TensorLiteral { elements } if reductions => match elements.as_slice() {
+            [
+                reduce @ HirExpr {
+                    kind: HirExprKind::TensorReduce { axis: None, .. },
+                    ..
+                },
+            ] => build_reduce(context, location, block, reduce, &expression.ty, scope),
+            _ => Ok(None),
+        },
         // `@` contracts an axis instead of walking the result element for element, so it
         // is a different index space rather than a different body.
         HirExprKind::Binary {
             op: BinaryOp::MatMul,
             ..
-        } => build_matmul(context, location, block, expression, scope),
+        } => build_matmul(context, location, block, expression, scope, reductions),
         HirExprKind::Binary { .. } => {
-            build_elementwise(context, location, block, expression, scope)
+            build_elementwise(context, location, block, expression, scope, reductions)
         }
         _ => Ok(None),
     }
@@ -207,6 +235,7 @@ fn build_elementwise<'c, 'a>(
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
+    reductions: bool,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::Binary { op, left, right } = &expression.kind else {
         return Ok(None);
@@ -224,10 +253,10 @@ fn build_elementwise<'c, 'a>(
     else {
         return Ok(None);
     };
-    let Some(lhs) = build_expression(context, location, block, left, scope)? else {
+    let Some(lhs) = build_expression(context, location, block, left, scope, reductions)? else {
         return Ok(None);
     };
-    let Some(rhs) = build_expression(context, location, block, right, scope)? else {
+    let Some(rhs) = build_expression(context, location, block, right, scope, reductions)? else {
         return Ok(None);
     };
     let Some(sizes) = dynamic_sizes(context, location, block, result_shape, &[lhs, rhs], &axes)?
@@ -278,6 +307,7 @@ fn build_matmul<'c, 'a>(
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
+    reductions: bool,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::Binary { left, right, .. } = &expression.kind else {
         return Ok(None);
@@ -300,10 +330,10 @@ fn build_matmul<'c, 'a>(
     if !contraction_is_static(left, right, result_shape) {
         return Ok(None);
     }
-    let Some(lhs) = build_expression(context, location, block, left, scope)? else {
+    let Some(lhs) = build_expression(context, location, block, left, scope, reductions)? else {
         return Ok(None);
     };
-    let Some(rhs) = build_expression(context, location, block, right, scope)? else {
+    let Some(rhs) = build_expression(context, location, block, right, scope, reductions)? else {
         return Ok(None);
     };
 
@@ -417,7 +447,10 @@ fn zero_attribute<'c>(
 }
 
 /// The zero-fill body: hand the scalar input straight through to the destination slot.
-fn fill_block<'c>(location: Location<'c>, element: Type<'c>) -> Result<Block<'c>, MlirError> {
+pub(crate) fn fill_block<'c>(
+    location: Location<'c>,
+    element: Type<'c>,
+) -> Result<Block<'c>, MlirError> {
     let block = Block::new(&[(element, location); FILL_BODY_ARGUMENTS]);
     let value = block.argument(0)?.into();
 
@@ -548,11 +581,11 @@ fn dynamic_sizes<'c, 'a>(
 
 /// What one `linalg.generic` needs beyond its types: the inputs it reads, the
 /// destination it writes into, and the two attributes that say how each is walked.
-struct Generic<'c, 'a> {
-    inputs: &'a [Value<'c, 'a>],
-    destination: Value<'c, 'a>,
-    indexing_maps: Attribute<'c>,
-    iterators: Attribute<'c>,
+pub(crate) struct Generic<'c, 'a> {
+    pub(crate) inputs: &'a [Value<'c, 'a>],
+    pub(crate) destination: Value<'c, 'a>,
+    pub(crate) indexing_maps: Attribute<'c>,
+    pub(crate) iterators: Attribute<'c>,
 }
 
 /// Assemble one `linalg.generic`, with `body` as its region.
@@ -560,7 +593,7 @@ struct Generic<'c, 'a> {
 /// Every shape this crate emits goes through here — the element-wise operation, the
 /// zero fill, and the matrix product — because the three differ only in their maps,
 /// their iterators and their body, which are exactly the arguments.
-fn generic_op<'c>(
+pub(crate) fn generic_op<'c>(
     context: &'c Context,
     location: Location<'c>,
     generic: Generic<'c, '_>,
@@ -622,7 +655,7 @@ fn scalar_body<'c>(
 
 /// The destination `linalg.generic` writes its result into. `sizes` carries one
 /// extent per dynamic axis, in shape order, which is what `tensor.empty` expects.
-fn empty_tensor<'c>(
+pub(crate) fn empty_tensor<'c>(
     location: Location<'c>,
     tensor: Type<'c>,
     sizes: &[Value<'c, '_>],
@@ -682,7 +715,7 @@ fn scalar_op(op: BinaryOp, element: &HirType) -> Option<ScalarOp> {
 
 /// One affine map per `linalg.generic` operand, in operand order, saying where
 /// that operand is read at each point of the result's index space.
-fn indexing_maps<'c>(
+pub(crate) fn indexing_maps<'c>(
     context: &'c Context,
     rank: usize,
     operands: &[&OperandAxes],
@@ -725,7 +758,7 @@ fn affine_map(rank: usize, axes: &OperandAxes) -> String {
 /// An element-wise operation has no reduction — every one of its axes is independent.
 /// A matrix product has exactly one, the contracted axis, and it comes last because
 /// that is the order the affine maps above number the dimensions in.
-fn iterator_types<'c>(
+pub(crate) fn iterator_types<'c>(
     context: &'c Context,
     rank: usize,
     reductions: usize,

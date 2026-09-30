@@ -13,6 +13,7 @@
 // `strides`, `byte_offset` of zero — true of every tensor value.
 
 use inkwell::IntPredicate;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirTensorAxis};
 
@@ -46,7 +47,6 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let shape = crate::types::static_extents(&shape)?;
         let handle = self.tensor_receiver_handle(object, &source_ty)?;
-        let data = self.load_host_data(handle, object.span.start)?;
         let strides = row_major_strides(&shape);
         let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
         let elem_llvm = self.get_any_llvm_type(&element)?;
@@ -58,34 +58,90 @@ impl<'ctx> CodegenContext<'ctx> {
                 shape: result_shape,
                 ..
             } => {
+                let data = self.load_host_data(handle, object.span.start)?;
                 let result_shape = crate::types::static_extents(result_shape)?;
                 self.copy_tensor_slice(result_ty, &result_shape, axes, &strides, data, base)?
             }
-            _ => {
-                let slot = self.tensor_element_ptr(elem_llvm, data, base)?;
-                self.builder.build_load(elem_llvm, slot, "tensor.elem")?
-            }
+            _ => self.read_tensor_element(handle, elem_llvm, base)?,
         };
         self.release_receiver_temporary(object, handle)?;
         Ok(value)
     }
 
-    /// The element buffer of the indexed tensor. A borrowed receiver lowers to the
-    /// address of the handle pointer, an owned one to the handle pointer itself.
-    pub(super) fn tensor_index_data(
+    /// Element `base` of `handle`'s buffer. A device tensor's element is copied to the
+    /// host on its own, after every kernel queued before it.
+    fn read_tensor_element(
         &mut self,
-        object: &HirExpr,
-        source_ty: &Type,
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        let handle = self.tensor_receiver_handle(object, source_ty)?;
-        self.load_host_data(handle, object.span.start)
+        handle: PointerValue<'ctx>,
+        elem_llvm: BasicTypeEnum<'ctx>,
+        base: IntValue<'ctx>,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let value = self.split_on_home(
+            handle,
+            |this| {
+                let data = this.load_dlpack_data(handle)?;
+                let slot = this.tensor_element_ptr(elem_llvm, data, base)?;
+                Ok(Some(this.builder.build_load(
+                    elem_llvm,
+                    slot,
+                    "tensor.elem",
+                )?))
+            },
+            |this, index| {
+                let data = this.load_dlpack_data(handle)?;
+                let slot = this.tensor_element_ptr(elem_llvm, data, base)?;
+                let local = this.entry_alloca(elem_llvm, "tensor.elem.copy")?;
+                let bytes = this.element_bytes(elem_llvm)?;
+                this.device_copy(local, slot, bytes, index)?;
+                Ok(Some(this.builder.build_load(
+                    elem_llvm,
+                    local,
+                    "tensor.elem",
+                )?))
+            },
+        )?;
+        value.ok_or_else(|| CodegenError::InternalError("an element read produced no value".into()))
     }
 
-    /// The DLPack handle a tensor receiver lowers to, evaluated exactly once.
-    ///
-    /// Separate from [`Self::tensor_index_data`] because a caller that has to release the
-    /// receiver afterwards needs the handle, and re-lowering the expression to recover it
-    /// would emit the whole computation a second time.
+    /// Store `value` into element `base` of `handle`'s buffer, copying it over on its own
+    /// for a device tensor.
+    fn write_tensor_element(
+        &mut self,
+        handle: PointerValue<'ctx>,
+        elem_llvm: BasicTypeEnum<'ctx>,
+        base: IntValue<'ctx>,
+        value: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<()> {
+        self.split_on_home(
+            handle,
+            |this| {
+                let data = this.load_dlpack_data(handle)?;
+                let slot = this.tensor_element_ptr(elem_llvm, data, base)?;
+                this.builder.build_store(slot, value)?;
+                Ok(None)
+            },
+            |this, index| {
+                let data = this.load_dlpack_data(handle)?;
+                let slot = this.tensor_element_ptr(elem_llvm, data, base)?;
+                let local = this.entry_alloca(elem_llvm, "tensor.elem.copy")?;
+                this.builder.build_store(local, value)?;
+                let bytes = this.element_bytes(elem_llvm)?;
+                this.device_copy(slot, local, bytes, index)?;
+                Ok(None)
+            },
+        )?;
+        Ok(())
+    }
+
+    fn element_bytes(&self, elem_llvm: BasicTypeEnum<'ctx>) -> CodegenResult<IntValue<'ctx>> {
+        elem_llvm
+            .size_of()
+            .ok_or_else(|| CodegenError::InternalError("a tensor element has no size".into()))
+    }
+
+    /// The DLPack handle a tensor receiver lowers to, evaluated exactly once, so a caller
+    /// that has to release the receiver afterwards does not re-lower the expression to
+    /// recover it.
     pub(super) fn tensor_receiver_handle(
         &mut self,
         object: &HirExpr,
@@ -136,11 +192,10 @@ impl<'ctx> CodegenContext<'ctx> {
         // data pointer read before it would still address.
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element)?;
-        let data = self.tensor_index_data(object, &source_ty)?;
+        let handle = self.tensor_receiver_handle(object, &source_ty)?;
         let strides = row_major_strides(&shape);
         let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
-        let slot = self.tensor_element_ptr(elem_llvm, data, base)?;
-        self.builder.build_store(slot, val)?;
+        self.write_tensor_element(handle, elem_llvm, base, val)?;
         self.mark_moved_for_drop(value);
         Ok(())
     }

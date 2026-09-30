@@ -139,7 +139,7 @@ device-tensor operation defines it on first use through `require_gpu_runtime`, s
 `.to(...)` and no `@gpu` function carries the runtime too. The runtime defines MLIR's GPU runtime
 ABI (`mgpuModuleLoad[JIT]`, `mgpuModuleUnload`, `mgpuModuleGetFunction`, `mgpuLaunchKernel`,
 `mgpuStream*`, `mgpuMem*`) over the CUDA driver API or HIP, plus the device arena, the current-device calls (`__neuro_device_switch` / `_join`) and the
-device-tensor calls (`__neuro_device_upload` / `_download` / `_move` / `_alloc` / `_free` /
+device-tensor calls (`__neuro_device_upload` / `_copy` / `_clone` / `_move` / `_alloc` / `_free` /
 `_check`), and every entry point is internalized after the link. Both are generated from `gpu_runtime.c`, like `softfloat`'s
 builtins: one source whose vendor block (`-DNEURO_HIP`) holds every call that differs, so the
 logic is shared. The runtime opens `libcuda.so.1` or `libamdhip64.so` with `dlopen` on first use,
@@ -173,6 +173,15 @@ load panics on a failed probe, or on a module the driver refuses (`cuModuleLoadD
 exactly when the program has no bare `@gpu` function; the load then answers a null module that
 nothing reads, since every call takes its host body. A refused module clears `ready` too: loads
 run in global constructors, so no call has picked its GPU body yet.
+
+**Operations outlined to follow their operands.** A `Device` body whose target is
+`FollowsOperands` (a tensor operation lowering lifted out of host code) goes through
+`codegen_follows_operands`, which shares `codegen_body_choice` with the fallback: the same `f.gpu`
+and `f.host`, but `f` picks per call, `f.gpu` when any tensor operand's DLPack device is not
+`kDLCPU`. So a call over host tensors is this backend's own body, exactly as before a device
+existed, and a call over a device tensor runs and leaves its result there (the staging's resident
+path). One without a `Device` body is an ordinary function whose host body refuses a device
+operand through `load_host_data`.
 
 ## Stack Slot Placement
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,
@@ -494,7 +503,8 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
 - `tensor.clone()` → `BuiltinMethod::TensorClone` → `codegen_tensor_clone`
   (`expressions/tensors.rs`). A tensor value is a DLPack handle, so the clone allocates a second
   handle and a second buffer and `memcpy`s the elements across: the copy is independent and both
-  `data` addresses stay stable. An owned
+  `data` addresses stay stable. A device tensor's clone is `__neuro_device_clone`, a buffer on the
+  same GPU filled device to device, behind a handle `device_tensor_over` builds. An owned
   receiver lowers to the tensor pointer; a `&Tensor` receiver lowers to the *address of* that
   pointer. Both are `ptr` in LLVM, so the distinction comes from `recv_ty`, not from the value:
   the one auto-deref site the value-driven rule below cannot decide.
@@ -621,7 +631,10 @@ with a device operand made it device memory (`kDLCUDA`, or `kDLROCM` for an AMD 
 `TensorHome::Gpu`), and every host read of
 an existing tensor goes through `load_host_data`, whose guard aborts with a located diagnostic
 rather than dereference device memory. A freshly allocated handle is read with
-`load_dlpack_data` directly. At `-O2` the guard hoists out of an indexing loop.
+`load_dlpack_data` directly. At `-O2` the guard hoists out of an indexing loop. The operations
+with a device form branch on the handle instead (`split_on_home`): an element read or write
+copies the one element through `__neuro_device_copy`, and `.clone()` copies on the GPU. On
+Windows, where no tensor reaches a GPU and no runtime is linked, only the host form is emitted.
 
 The buffer is out of line because the language has a tensor *own* it and promises that buffer a
 stable address across an in-place update: neither is expressible for an SSA value, which has no

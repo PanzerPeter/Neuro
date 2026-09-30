@@ -8,7 +8,7 @@
 // consumer to race with.
 
 use inkwell::module::Linkage;
-use inkwell::values::{FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 
 use crate::codegen::context::{ALIGNED_ALLOC_FN, CodegenContext};
 use crate::errors::{CodegenError, CodegenResult};
@@ -148,10 +148,78 @@ impl<'ctx> CodegenContext<'ctx> {
         name: &str,
         index: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        let handle = self.alloc_dlpack_storage(name)?;
         let data = self.alloc_device_tensor_buffer(tensor_ty)?;
+        self.device_tensor_over(data, tensor_ty, name, index)
+    }
+
+    /// A `tensor_ty` handle over `data`, a buffer on GPU `index` that the handle's device
+    /// deleter will release.
+    pub(crate) fn device_tensor_over(
+        &mut self,
+        data: PointerValue<'ctx>,
+        tensor_ty: &Type,
+        name: &str,
+        index: IntValue<'ctx>,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let handle = self.alloc_dlpack_storage(name)?;
         self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Gpu(index))?;
         Ok(handle)
+    }
+
+    /// Emit `host` where `handle`'s buffer is host memory and `device` (given the GPU's
+    /// index) where it is a GPU's, and join the value each produces, if they produce one.
+    ///
+    /// Nothing in a tensor's type says where it lives, so an operation with a form for
+    /// each place asks at run time.
+    pub(crate) fn split_on_home(
+        &mut self,
+        handle: PointerValue<'ctx>,
+        host: impl FnOnce(&mut Self) -> CodegenResult<Option<BasicValueEnum<'ctx>>>,
+        device: impl FnOnce(&mut Self, IntValue<'ctx>) -> CodegenResult<Option<BasicValueEnum<'ctx>>>,
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
+        // No tensor reaches a GPU on Windows, whose transfers are refused, and no GPU runtime
+        // is linked there for a device form to call.
+        if cfg!(target_os = "windows") {
+            return host(self);
+        }
+        let function = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("a tensor operation outside a function".to_string())
+        })?;
+        let on_host = self.dlpack_on_host(handle)?;
+        let host_block = self.context.append_basic_block(function, "tensor.on_host");
+        let device_block = self
+            .context
+            .append_basic_block(function, "tensor.on_device");
+        let join = self.context.append_basic_block(function, "tensor.homed");
+        self.builder
+            .build_conditional_branch(on_host, host_block, device_block)?;
+
+        self.builder.position_at_end(host_block);
+        let host_value = host(self)?;
+        let host_end = self.insertion_block()?;
+        self.builder.build_unconditional_branch(join)?;
+
+        self.builder.position_at_end(device_block);
+        let index = self.dlpack_device_index(handle)?;
+        let device_value = device(self, index)?;
+        let device_end = self.insertion_block()?;
+        self.builder.build_unconditional_branch(join)?;
+
+        self.builder.position_at_end(join);
+        let (Some(host_value), Some(device_value)) = (host_value, device_value) else {
+            return Ok(None);
+        };
+        let phi = self
+            .builder
+            .build_phi(host_value.get_type(), "tensor.homed")?;
+        phi.add_incoming(&[(&host_value, host_end), (&device_value, device_end)]);
+        Ok(Some(phi.as_basic_value()))
+    }
+
+    fn insertion_block(&self) -> CodegenResult<inkwell::basic_block::BasicBlock<'ctx>> {
+        self.builder
+            .get_insert_block()
+            .ok_or_else(|| CodegenError::InternalError("the builder is not positioned".into()))
     }
 
     /// The handle and its control block, uninitialized.

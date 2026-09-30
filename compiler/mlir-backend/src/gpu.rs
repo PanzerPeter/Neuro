@@ -214,8 +214,11 @@ fn is_gpu_body(function: &HirFunction) -> bool {
     matches!(function.target, HirTarget::Gpu | HirTarget::GpuOrHost)
 }
 
+/// A `FollowsOperands` function joins the `@gpu` ones, but leniently: one the `linalg`
+/// path cannot take keeps its host body alone, which is no error.
 fn runs_on_gpu(function: &HirFunction) -> bool {
-    is_gpu_body(function) && launches_every_op(function)
+    (is_gpu_body(function) || function.target == HirTarget::FollowsOperands)
+        && launches_every_op(function)
 }
 
 /// Every `@gpu` function missing from `lowered`, with where it is declared.

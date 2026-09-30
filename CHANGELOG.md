@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.0] - 2026-09-30
+
+### Added
+
+- Tensor operations outside `@gpu` now run on the GPU a device tensor lives on, where before they
+  aborted. With `g` moved there by `.to(Device::GPU(0))`, `&g * 0.5f32`, `&a @ &g` and any tree of
+  `+ - * /` and `@` on `f32` / `f64` tensors run as GPU kernels, and their result stays on that
+  GPU. `.sum()`, `.mean()`, `.max()` and `.min()` work the same way, both over one axis and over
+  the whole tensor. A host operand next to a device one is copied over for the operation. The
+  results are the values the host computes, bit for bit: a reduction folds each result element in
+  the host's order. An operation whose operands are all host tensors still runs on the host, so a
+  program that only moves tensors to `Device::CPU` behaves as it did before. The operators and
+  reductions need a `neurc` built with the MLIR backend. Other operations on a device tensor
+  still abort at the operation, asking for `.to(Device::CPU)` first: integer tensor arithmetic,
+  compound assignment, slicing, the elementwise math methods, `einsum`, `.map` / `.zip` /
+  `.reduce`, sorting, and a permuting shape cast.
+- Reading or writing one element of a device tensor (`g[i, j]`, `g[i] = v`, `g[i] += v`) copies
+  that single element between the host and the GPU. `.clone()` of a device tensor is a second
+  buffer on the same GPU. Both work in every `neurc` build.
+- A `@gpu` body can use `.sum()`, `.mean()`, `.max()` and `.min()` along an axis.
+
 ## [4.12.1] - 2026-09-30
 
 ### Changed

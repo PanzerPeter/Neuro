@@ -290,6 +290,11 @@ impl Lowerer {
             &self.structs,
             &no_grad,
         )?;
+        // After the derivatives, which are host code of their own and read the operations
+        // as written.
+        if self.transfers {
+            crate::device_ops::outline(&mut hir_items);
+        }
 
         Ok(HirProgram { items: hir_items })
     }

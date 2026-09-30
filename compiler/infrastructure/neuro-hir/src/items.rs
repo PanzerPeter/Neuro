@@ -125,6 +125,13 @@ pub enum HirTarget {
     /// the attribute does not name is 1. The function returns nothing; what it computes is
     /// what it writes through its `&mut` tensors.
     Kernel { threads: [u32; 3] },
+    /// Where its tensor operands live, decided per call: on the GPU holding a device
+    /// operand (a host operand beside one is copied there, and the result stays on that
+    /// GPU), on the host when every operand is a host tensor. Never written by the user:
+    /// lowering outlines a tensor operation into one of these in a program that moves a
+    /// tensor to a device. A backend that cannot lower the body to a kernel keeps only the
+    /// host body, which refuses a device operand at run time.
+    FollowsOperands,
 }
 
 impl HirTarget {

@@ -38,6 +38,7 @@ mod copy_clone;
 mod derives;
 mod destructuring;
 mod device_management;
+mod device_operations;
 mod dispatch;
 mod divergent_arms;
 mod dlpack;

@@ -32,6 +32,7 @@ use shared_types::Span;
 mod autodiff;
 mod closures;
 mod collections;
+mod device_ops;
 mod elementwise_math;
 mod expressions;
 mod items;
@@ -197,6 +198,9 @@ struct Lowerer {
     /// Whether the body being lowered is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
+    /// Whether the program moves a tensor to a device anywhere, which is what makes its
+    /// tensor operations worth outlining for the GPU (`device_ops`).
+    transfers: bool,
     /// For each `@kernel` function, which parameters are bare `Tensor` inputs: a call
     /// borrows those arguments instead of moving them.
     kernel_inputs: HashMap<String, Vec<bool>>,
@@ -369,6 +373,7 @@ impl Lowerer {
             loop_stack: Vec::new(),
             current_return: HirType::Void,
             in_kernel: false,
+            transfers: false,
             kernel_inputs: HashMap::new(),
             generic_templates: HashMap::new(),
             generic_structs: HashMap::new(),

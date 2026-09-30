@@ -669,7 +669,12 @@ fn tensor_bodies(
         functions: host.functions,
         memory: llvm_backend::BodyMemory::Host,
     }];
-    if gpu_functions(hir).next().is_none() {
+    // A tensor operation outlined to run where its operands live wants a GPU body too,
+    // though lacking one is no error.
+    let follows_operands = hir.items.iter().any(|item| {
+        matches!(item, neuro_hir::HirItem::Function(f) if f.target == neuro_hir::HirTarget::FollowsOperands)
+    });
+    if gpu_functions(hir).next().is_none() && !follows_operands {
         return Ok(bodies);
     }
     // The runtime opens the vendor library with `dlopen`, which Windows does not have.

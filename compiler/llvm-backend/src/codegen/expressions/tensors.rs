@@ -303,7 +303,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// The clone allocates and `memcpy`s, so the result owns storage of its own and the
     /// receiver keeps its address: the deep copy the language specifies, rather than a
-    /// second name for one buffer.
+    /// second name for one buffer. A device tensor's clone is a buffer on the same GPU,
+    /// copied there without passing through the host.
     ///
     /// An owned receiver lowers to the tensor pointer itself; a `&Tensor<T, S>` receiver
     /// lowers to the *address of* that pointer, so it is loaded through first. Both are
@@ -331,11 +332,23 @@ impl<'ctx> CodegenContext<'ctx> {
         } else {
             ptr
         };
-        let source_data = self.load_host_data(source, receiver.span.start)?;
-        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.clone")?;
-        let size = self.dlpack_copy_length(tensor_ty)?;
-        self.build_memcpy_call(data, source_data, size)?;
-        Ok(handle.into())
+        let cloned = self.split_on_home(
+            source,
+            |this| {
+                let source_data = this.load_dlpack_data(source)?;
+                let (handle, data) = this.alloc_tensor(tensor_ty, "tensor.clone")?;
+                let size = this.dlpack_copy_length(tensor_ty)?;
+                this.build_memcpy_call(data, source_data, size)?;
+                Ok(Some(handle.into()))
+            },
+            |this, index| {
+                let source_data = this.load_dlpack_data(source)?;
+                let data = this.device_clone(source_data, tensor_ty, index)?;
+                let handle = this.device_tensor_over(data, tensor_ty, "tensor.clone", index)?;
+                Ok(Some(handle.into()))
+            },
+        )?;
+        cloned.ok_or_else(|| CodegenError::InternalError("a clone produced no tensor".into()))
     }
 
     /// Lower `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`.
