@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.6.1] - 2026-09-30
+
+### Fixed
+
+- A program whose `@gpu` functions all have `fallback: true` runs their host bodies when the GPU
+  is present but its driver cannot load the program's kernels (a driver older than the PTX, or a
+  chip too old to compile it). It aborted with `GPU error: cuModuleLoadData failed` before
+  `main`. A later `.to(Device::GPU(0))` reports the refused kernels as the reason no GPU is
+  usable.
+
+### Changed
+
+- `tools/regen_gpu_runtime.sh` regenerates the GPU runtime's IR from its C source in one step,
+  and the IR no longer carries `; Function Attrs:` comments for attribute groups it does not have.
+
 ## [4.6.0] - 2026-09-30
 
 ### Added

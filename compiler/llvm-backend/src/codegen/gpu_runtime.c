@@ -9,8 +9,9 @@
 //
 // When every `@gpu` function in the program has a host fallback, the backend defines
 // `__neuro_gpu_fallback` as 1: a module load then leaves its module null instead of
-// aborting, and each call asks `__neuro_gpu_usable` which body to run. Nothing reaches a
-// null module, because the host body is chosen whenever the probe failed.
+// aborting, whether the probe failed or the driver refused the module, and each call
+// asks `__neuro_gpu_usable` which body to run. Nothing reaches a null module, because
+// the host body is chosen whenever either happened.
 //
 // Failures end in `__neuro_gpu_panic`, which the LLVM backend defines: it prints
 // `panic: <message>` and aborts like every other runtime panic, flushing buffered
@@ -25,10 +26,7 @@
 // Single-threaded by design: the primary context of device 0 is made current once, on
 // the thread that loads the first module, and Neuro programs run on that thread.
 //
-// Regenerate with:
-//   clang -O2 -S -emit-llvm -fno-stack-protector -fno-unwind-tables \
-//     -fno-asynchronous-unwind-tables gpu_runtime.c -o gpu_runtime.ll
-// then strip the target datalayout and triple, attribute groups and metadata.
+// Regenerate gpu_runtime.ll with tools/regen_gpu_runtime.sh.
 
 #include <dlfcn.h>
 #include <stddef.h>
@@ -202,14 +200,31 @@ int32_t __neuro_gpu_usable(void) {
     return ready;
 }
 
+// Why a present GPU is still unusable: its driver refused a module, say PTX newer than
+// it reads or a chip too old to JIT it.
+static char load_failure[128];
+
 static CUmodule load(const void *data) {
     probe();
     if (!ready && __neuro_gpu_fallback) {
         return NULL;
     }
-    ensure_ready();
-    CUmodule module;
-    check(cu.module_load_data(&module, data), "cuModuleLoadData");
+    if (!ready) {
+        unusable(LAUNCH, unusable_reason);
+    }
+    CUmodule module = NULL;
+    CUresult result = cu.module_load_data(&module, data);
+    if (result != 0 && __neuro_gpu_fallback) {
+        // Loads run in global constructors, before any call has picked its GPU body, so
+        // clearing `ready` sends every call to its host body. Modules already loaded
+        // sit unused until exit.
+        snprintf(load_failure, sizeof load_failure,
+                 "its driver cannot load this program's kernels (%s)", error_name(result));
+        unusable_reason = load_failure;
+        ready = 0;
+        return NULL;
+    }
+    check(result, "cuModuleLoadData");
     return module;
 }
 

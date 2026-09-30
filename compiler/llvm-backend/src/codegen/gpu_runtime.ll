@@ -10,9 +10,10 @@
 ; runtime panic.
 ;
 ; Generated from compiler/llvm-backend/src/codegen/gpu_runtime.c with clang -O2
-; -emit-llvm (the exact command is in that file), then stripped of the target
-; datalayout and triple, attribute groups and metadata. Regenerate it the same way.
+; -emit-llvm, then stripped of the target datalayout and triple, attribute groups and
+; metadata. Regenerate it with tools/regen_gpu_runtime.sh.
 ;
+
 %struct.anon = type { ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr }
 %struct.anon.0 = type { ptr, ptr }
 
@@ -49,12 +50,13 @@
 @.str.23 = private unnamed_addr constant [13 x i8] c"cuMemFree_v2\00", align 1
 @.str.24 = private unnamed_addr constant [22 x i8] c"an unknown CUDA error\00", align 1
 @__neuro_gpu_fallback = external local_unnamed_addr constant i8, align 1
-@.str.25 = private unnamed_addr constant [18 x i8] c"%s failed with %s\00", align 1
-@.str.26 = private unnamed_addr constant [14 x i8] c"GPU error: %s\00", align 1
 @LAUNCH = internal constant [7 x i8] c"`@gpu`\00", align 1
-@.str.27 = private unnamed_addr constant [47 x i8] c"%s needs an NVIDIA GPU, and none is usable: %s\00", align 1
+@load_failure = internal global [128 x i8] zeroinitializer, align 16
+@.str.25 = private unnamed_addr constant [51 x i8] c"its driver cannot load this program's kernels (%s)\00", align 1
+@.str.26 = private unnamed_addr constant [47 x i8] c"%s needs an NVIDIA GPU, and none is usable: %s\00", align 1
+@.str.27 = private unnamed_addr constant [18 x i8] c"%s failed with %s\00", align 1
+@.str.28 = private unnamed_addr constant [14 x i8] c"GPU error: %s\00", align 1
 
-; Function Attrs: nounwind
 define dso_local range(i32 0, 2) i32 @__neuro_gpu_usable() local_unnamed_addr {
   tail call fastcc void @probe()
   %1 = load i1, ptr @ready, align 4
@@ -62,7 +64,6 @@ define dso_local range(i32 0, 2) i32 @__neuro_gpu_usable() local_unnamed_addr {
   ret i32 %2
 }
 
-; Function Attrs: nounwind
 define internal fastcc void @probe() unnamed_addr {
   %1 = alloca ptr, align 8
   %2 = alloca ptr, align 8
@@ -191,64 +192,86 @@ define internal fastcc void @probe() unnamed_addr {
   ret void
 }
 
-; Function Attrs: nounwind
 define dso_local ptr @mgpuModuleLoad(ptr noundef %0, i64 noundef %1) local_unnamed_addr {
   %3 = tail call fastcc ptr @load(ptr noundef %0)
   ret ptr %3
 }
 
-; Function Attrs: nounwind
 define internal fastcc ptr @load(ptr noundef %0) unnamed_addr {
   %2 = alloca [128 x i8], align 16
   %3 = alloca ptr, align 8
+  %4 = alloca ptr, align 8
   tail call fastcc void @probe()
-  %4 = load i1, ptr @ready, align 4
-  %5 = load i8, ptr @__neuro_gpu_fallback, align 1
-  %6 = icmp eq i8 %5, 0
-  %7 = select i1 %4, i1 true, i1 %6
-  br i1 %7, label %8, label %21
+  %5 = load i1, ptr @ready, align 4
+  %6 = load i8, ptr @__neuro_gpu_fallback, align 1
+  %7 = icmp eq i8 %6, 0
+  %8 = select i1 %5, i1 true, i1 %7
+  br i1 %8, label %9, label %36
 
-8:                                                ; preds = %1
-  tail call fastcc void @probe()
-  %9 = load i1, ptr @ready, align 4
-  br i1 %9, label %12, label %10
+9:                                                ; preds = %1
+  br i1 %5, label %12, label %10
 
-10:                                               ; preds = %8
+10:                                               ; preds = %9
   %11 = load ptr, ptr @unusable_reason, align 8
   tail call fastcc void @unusable(ptr noundef nonnull @LAUNCH, ptr noundef %11)
   unreachable
 
-12:                                               ; preds = %8
-  call void @llvm.lifetime.start.p0(ptr nonnull %3)
+12:                                               ; preds = %9
+  call void @llvm.lifetime.start.p0(ptr nonnull %4)
+  store ptr null, ptr %4, align 8
   %13 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 48), align 8
-  %14 = call i32 %13(ptr noundef nonnull %3, ptr noundef %0)
-  %15 = icmp eq i32 %14, 0
-  br i1 %15, label %19, label %16
+  %14 = call i32 %13(ptr noundef nonnull %4, ptr noundef %0)
+  %15 = icmp ne i32 %14, 0
+  %16 = icmp ne i8 %6, 0
+  %17 = select i1 %15, i1 %16, i1 false
+  br i1 %17, label %18, label %27
 
-16:                                               ; preds = %12
+18:                                               ; preds = %12
+  call void @llvm.lifetime.start.p0(ptr nonnull %3)
+  store ptr null, ptr %3, align 8
+  %19 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 8), align 8
+  %20 = call i32 %19(i32 noundef range(i32 1, 0) %14, ptr noundef nonnull %3)
+  %21 = icmp ne i32 %20, 0
+  %22 = load ptr, ptr %3, align 8
+  %23 = icmp eq ptr %22, null
+  %24 = select i1 %21, i1 true, i1 %23
+  %25 = select i1 %24, ptr @.str.24, ptr %22
+  call void @llvm.lifetime.end.p0(ptr nonnull %3)
+  %26 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) @load_failure, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef %25)
+  store ptr @load_failure, ptr @unusable_reason, align 8
+  store i1 false, ptr @ready, align 4
+  br label %34
+
+27:                                               ; preds = %12
+  %28 = icmp eq i32 %14, 0
+  br i1 %28, label %32, label %29
+
+29:                                               ; preds = %27
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
-  %17 = call fastcc ptr @error_name(i32 noundef %14)
-  %18 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.19, ptr noundef %17)
+  %30 = call fastcc ptr @error_name(i32 noundef %14)
+  %31 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.19, ptr noundef %30)
   call fastcc void @fail(ptr noundef %2)
   unreachable
 
-19:                                               ; preds = %12
-  %20 = load ptr, ptr %3, align 8
-  call void @llvm.lifetime.end.p0(ptr nonnull %3)
-  br label %21
+32:                                               ; preds = %27
+  %33 = load ptr, ptr %4, align 8
+  br label %34
 
-21:                                               ; preds = %1, %19
-  %22 = phi ptr [ %20, %19 ], [ null, %1 ]
-  ret ptr %22
+34:                                               ; preds = %32, %18
+  %35 = phi ptr [ null, %18 ], [ %33, %32 ]
+  call void @llvm.lifetime.end.p0(ptr nonnull %4)
+  br label %36
+
+36:                                               ; preds = %1, %34
+  %37 = phi ptr [ %35, %34 ], [ null, %1 ]
+  ret ptr %37
 }
 
-; Function Attrs: nounwind
 define dso_local ptr @mgpuModuleLoadJIT(ptr noundef %0, i32 noundef %1) local_unnamed_addr {
   %3 = tail call fastcc ptr @load(ptr noundef %0)
   ret ptr %3
 }
 
-; Function Attrs: nounwind
 define dso_local void @mgpuModuleUnload(ptr noundef %0) local_unnamed_addr {
   %2 = load i1, ptr @ready, align 4
   br i1 %2, label %3, label %6
@@ -262,7 +285,6 @@ define dso_local void @mgpuModuleUnload(ptr noundef %0) local_unnamed_addr {
   ret void
 }
 
-; Function Attrs: nounwind
 define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) local_unnamed_addr {
   %3 = alloca [128 x i8], align 16
   %4 = alloca ptr, align 8
@@ -275,7 +297,7 @@ define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) loca
 8:                                                ; preds = %2
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
   %9 = call fastcc ptr @error_name(i32 noundef %6)
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str, ptr noundef %9)
+  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str, ptr noundef %9)
   call fastcc void @fail(ptr noundef %3)
   unreachable
 
@@ -285,13 +307,10 @@ define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) loca
   ret ptr %12
 }
 
-; Function Attrs: mustprogress nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
 declare void @llvm.lifetime.start.p0(ptr captures(none))
 
-; Function Attrs: mustprogress nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
 declare void @llvm.lifetime.end.p0(ptr captures(none))
 
-; Function Attrs: nounwind
 define dso_local void @mgpuLaunchKernel(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i64 noundef %6, i32 noundef %7, ptr noundef %8, ptr noundef %9, ptr noundef %10, i64 noundef %11) local_unnamed_addr {
   %13 = alloca [128 x i8], align 16
   %14 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 72), align 8
@@ -308,7 +327,7 @@ define dso_local void @mgpuLaunchKernel(ptr noundef %0, i64 noundef %1, i64 noun
 23:                                               ; preds = %12
   call void @llvm.lifetime.start.p0(ptr nonnull %13)
   %24 = tail call fastcc ptr @error_name(i32 noundef %21)
-  %25 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %13, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.1, ptr noundef %24)
+  %25 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %13, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.1, ptr noundef %24)
   call fastcc void @fail(ptr noundef %13)
   unreachable
 
@@ -316,7 +335,6 @@ define dso_local void @mgpuLaunchKernel(ptr noundef %0, i64 noundef %1, i64 noun
   ret void
 }
 
-; Function Attrs: nounwind
 define dso_local ptr @mgpuStreamCreate() local_unnamed_addr {
   %1 = alloca [128 x i8], align 16
   %2 = load ptr, ptr @shared_stream, align 8
@@ -346,7 +364,7 @@ define dso_local ptr @mgpuStreamCreate() local_unnamed_addr {
 14:                                               ; preds = %8
   call void @llvm.lifetime.start.p0(ptr nonnull %1)
   %15 = tail call fastcc ptr @error_name(i32 noundef %10)
-  %16 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %1, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.2, ptr noundef %15)
+  %16 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %1, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.2, ptr noundef %15)
   call fastcc void @fail(ptr noundef %1)
   unreachable
 
@@ -355,7 +373,6 @@ define dso_local ptr @mgpuStreamCreate() local_unnamed_addr {
   ret ptr %18
 }
 
-; Function Attrs: nounwind
 define dso_local void @mgpuStreamSynchronize(ptr noundef %0) local_unnamed_addr {
   %2 = alloca [128 x i8], align 16
   %3 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 88), align 8
@@ -366,7 +383,7 @@ define dso_local void @mgpuStreamSynchronize(ptr noundef %0) local_unnamed_addr 
 6:                                                ; preds = %1
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
   %7 = tail call fastcc ptr @error_name(i32 noundef %4)
-  %8 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.3, ptr noundef %7)
+  %8 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.3, ptr noundef %7)
   call fastcc void @fail(ptr noundef %2)
   unreachable
 
@@ -374,12 +391,10 @@ define dso_local void @mgpuStreamSynchronize(ptr noundef %0) local_unnamed_addr 
   ret void
 }
 
-; Function Attrs: mustprogress nofree norecurse nosync nounwind willreturn memory(none)
 define dso_local void @mgpuStreamDestroy(ptr noundef readnone captures(none) %0) local_unnamed_addr {
   ret void
 }
 
-; Function Attrs: nounwind
 define dso_local ptr @mgpuMemAlloc(i64 noundef %0, ptr noundef readnone captures(none) %1, i8 noundef zeroext %2) local_unnamed_addr {
   %4 = alloca i64, align 8
   tail call fastcc void @probe()
@@ -425,7 +440,6 @@ define dso_local ptr @mgpuMemAlloc(i64 noundef %0, ptr noundef readnone captures
   ret ptr %25
 }
 
-; Function Attrs: nounwind
 define dso_local void @mgpuMemFree(ptr noundef %0, ptr noundef readnone captures(none) %1) local_unnamed_addr {
   %3 = alloca [128 x i8], align 16
   %4 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 112), align 8
@@ -437,7 +451,7 @@ define dso_local void @mgpuMemFree(ptr noundef %0, ptr noundef readnone captures
 8:                                                ; preds = %2
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
   %9 = tail call fastcc ptr @error_name(i32 noundef %6)
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.4, ptr noundef %9)
+  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.4, ptr noundef %9)
   call fastcc void @fail(ptr noundef %3)
   unreachable
 
@@ -445,7 +459,6 @@ define dso_local void @mgpuMemFree(ptr noundef %0, ptr noundef readnone captures
   ret void
 }
 
-; Function Attrs: nounwind
 define dso_local void @mgpuMemcpy(ptr noundef %0, ptr noundef %1, i64 noundef %2, ptr noundef %3) local_unnamed_addr {
   %5 = alloca [128 x i8], align 16
   %6 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 120), align 8
@@ -458,7 +471,7 @@ define dso_local void @mgpuMemcpy(ptr noundef %0, ptr noundef %1, i64 noundef %2
 11:                                               ; preds = %4
   call void @llvm.lifetime.start.p0(ptr nonnull %5)
   %12 = tail call fastcc ptr @error_name(i32 noundef %9)
-  %13 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.5, ptr noundef %12)
+  %13 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.5, ptr noundef %12)
   call fastcc void @fail(ptr noundef %5)
   unreachable
 
@@ -466,7 +479,6 @@ define dso_local void @mgpuMemcpy(ptr noundef %0, ptr noundef %1, i64 noundef %2
   ret void
 }
 
-; Function Attrs: nounwind
 define dso_local void @__neuro_device_check(i32 noundef %0) local_unnamed_addr {
   %2 = alloca i32, align 4
   %3 = alloca [256 x i8], align 16
@@ -509,7 +521,6 @@ define dso_local void @__neuro_device_check(i32 noundef %0) local_unnamed_addr {
   unreachable
 }
 
-; Function Attrs: noreturn nounwind
 define internal fastcc void @report(ptr noundef nonnull %0, i32 noundef %1) unnamed_addr {
   %3 = tail call i32 @llvm.smax.i32(i32 %1, i32 0)
   %4 = tail call i32 @llvm.umin.i32(i32 %3, i32 255)
@@ -518,10 +529,8 @@ define internal fastcc void @report(ptr noundef nonnull %0, i32 noundef %1) unna
   unreachable
 }
 
-; Function Attrs: nofree nounwind
 declare noundef i32 @snprintf(ptr noalias noundef writeonly captures(none), i64 noundef, ptr noundef readonly captures(none), ...) local_unnamed_addr
 
-; Function Attrs: nounwind
 define dso_local ptr @__neuro_device_alloc(i64 noundef %0) local_unnamed_addr {
   %2 = alloca [128 x i8], align 16
   %3 = alloca i64, align 8
@@ -546,7 +555,7 @@ define dso_local ptr @__neuro_device_alloc(i64 noundef %0) local_unnamed_addr {
 12:                                               ; preds = %7
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
   %13 = call fastcc ptr @error_name(i32 noundef %10)
-  %14 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.8, ptr noundef %13)
+  %14 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.8, ptr noundef %13)
   call fastcc void @fail(ptr noundef %2)
   unreachable
 
@@ -557,7 +566,6 @@ define dso_local ptr @__neuro_device_alloc(i64 noundef %0) local_unnamed_addr {
   ret ptr %17
 }
 
-; Function Attrs: nounwind
 define dso_local ptr @__neuro_device_upload(ptr noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr {
   %4 = alloca [128 x i8], align 16
   %5 = alloca [128 x i8], align 16
@@ -574,7 +582,7 @@ define dso_local ptr @__neuro_device_upload(ptr noundef %0, i64 noundef %1, i32 
 13:                                               ; preds = %3
   call void @llvm.lifetime.start.p0(ptr nonnull %5)
   %14 = tail call fastcc ptr @error_name(i32 noundef %11)
-  %15 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.5, ptr noundef %14)
+  %15 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.5, ptr noundef %14)
   call fastcc void @fail(ptr noundef %5)
   unreachable
 
@@ -587,7 +595,7 @@ define dso_local ptr @__neuro_device_upload(ptr noundef %0, i64 noundef %1, i32 
 20:                                               ; preds = %16
   call void @llvm.lifetime.start.p0(ptr nonnull %4)
   %21 = tail call fastcc ptr @error_name(i32 noundef %18)
-  %22 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.3, ptr noundef %21)
+  %22 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.3, ptr noundef %21)
   call fastcc void @fail(ptr noundef %4)
   unreachable
 
@@ -595,7 +603,6 @@ define dso_local ptr @__neuro_device_upload(ptr noundef %0, i64 noundef %1, i32 
   ret ptr %6
 }
 
-; Function Attrs: nounwind
 define dso_local void @__neuro_device_download(ptr noundef %0, ptr noundef %1, i64 noundef %2) local_unnamed_addr {
   %4 = alloca [128 x i8], align 16
   %5 = alloca [128 x i8], align 16
@@ -610,7 +617,7 @@ define dso_local void @__neuro_device_download(ptr noundef %0, ptr noundef %1, i
 12:                                               ; preds = %3
   call void @llvm.lifetime.start.p0(ptr nonnull %5)
   %13 = tail call fastcc ptr @error_name(i32 noundef %10)
-  %14 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.5, ptr noundef %13)
+  %14 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.5, ptr noundef %13)
   call fastcc void @fail(ptr noundef %5)
   unreachable
 
@@ -623,7 +630,7 @@ define dso_local void @__neuro_device_download(ptr noundef %0, ptr noundef %1, i
 19:                                               ; preds = %15
   call void @llvm.lifetime.start.p0(ptr nonnull %4)
   %20 = tail call fastcc ptr @error_name(i32 noundef %17)
-  %21 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.3, ptr noundef %20)
+  %21 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.3, ptr noundef %20)
   call fastcc void @fail(ptr noundef %4)
   unreachable
 
@@ -631,7 +638,6 @@ define dso_local void @__neuro_device_download(ptr noundef %0, ptr noundef %1, i
   ret void
 }
 
-; Function Attrs: nounwind
 define dso_local void @__neuro_device_free(ptr noundef %0) local_unnamed_addr {
   %2 = alloca [128 x i8], align 16
   %3 = alloca [128 x i8], align 16
@@ -644,7 +650,7 @@ define dso_local void @__neuro_device_free(ptr noundef %0) local_unnamed_addr {
 8:                                                ; preds = %1
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
   %9 = tail call fastcc ptr @error_name(i32 noundef %6)
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.3, ptr noundef %9)
+  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.3, ptr noundef %9)
   call fastcc void @fail(ptr noundef %3)
   unreachable
 
@@ -658,7 +664,7 @@ define dso_local void @__neuro_device_free(ptr noundef %0) local_unnamed_addr {
 16:                                               ; preds = %11
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
   %17 = tail call fastcc ptr @error_name(i32 noundef %14)
-  %18 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.25, ptr noundef nonnull @.str.4, ptr noundef %17)
+  %18 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.27, ptr noundef nonnull @.str.4, ptr noundef %17)
   call fastcc void @fail(ptr noundef %2)
   unreachable
 
@@ -666,13 +672,10 @@ define dso_local void @__neuro_device_free(ptr noundef %0) local_unnamed_addr {
   ret void
 }
 
-; Function Attrs: nounwind
 declare ptr @dlopen(ptr noundef, i32 noundef) local_unnamed_addr
 
-; Function Attrs: nounwind
 declare ptr @dlsym(ptr noundef, ptr noundef) local_unnamed_addr
 
-; Function Attrs: nounwind
 define internal fastcc ptr @error_name(i32 noundef range(i32 1, 0) %0) unnamed_addr {
   %2 = alloca ptr, align 8
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
@@ -688,32 +691,27 @@ define internal fastcc ptr @error_name(i32 noundef range(i32 1, 0) %0) unnamed_a
   ret ptr %9
 }
 
-; Function Attrs: noreturn nounwind
-define internal fastcc void @fail(ptr noundef nonnull %0) unnamed_addr {
-  %2 = alloca [256 x i8], align 16
-  call void @llvm.lifetime.start.p0(ptr nonnull %2)
-  %3 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 256, ptr noundef nonnull @.str.26, ptr noundef nonnull %0)
-  call fastcc void @report(ptr noundef %2, i32 noundef %3)
-  unreachable
-}
-
-; Function Attrs: noreturn nounwind
 define internal fastcc void @unusable(ptr noundef %0, ptr noundef %1) unnamed_addr {
   %3 = alloca [256 x i8], align 16
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
-  %4 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 256, ptr noundef nonnull @.str.27, ptr noundef %0, ptr noundef %1)
+  %4 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 256, ptr noundef nonnull @.str.26, ptr noundef %0, ptr noundef %1)
   call fastcc void @report(ptr noundef %3, i32 noundef %4)
   unreachable
 }
 
-; Function Attrs: noreturn
+define internal fastcc void @fail(ptr noundef nonnull %0) unnamed_addr {
+  %2 = alloca [256 x i8], align 16
+  call void @llvm.lifetime.start.p0(ptr nonnull %2)
+  %3 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 256, ptr noundef nonnull @.str.28, ptr noundef nonnull %0)
+  call fastcc void @report(ptr noundef %2, i32 noundef %3)
+  unreachable
+}
+
 declare void @__neuro_gpu_panic(ptr noundef, i64 noundef) local_unnamed_addr
 
-; Function Attrs: nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)
 declare i32 @llvm.smax.i32(i32, i32)
 
-; Function Attrs: nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)
 declare i32 @llvm.umin.i32(i32, i32)
 
-; Function Attrs: nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)
 declare i64 @llvm.umax.i64(i64, i64)
+

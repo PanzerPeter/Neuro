@@ -670,6 +670,10 @@ mod tests {
             ir.contains("libcuda.so.1") && ir.contains("needs an NVIDIA GPU"),
             "the driver is opened at run time, and its absence is reported:\n{ir}"
         );
+        assert!(
+            ir.contains("cannot load this program's kernels"),
+            "a module the driver refuses makes the GPU unusable, for a fallback to take:\n{ir}"
+        );
 
         let panic = &ir[position(&ir, "@__neuro_gpu_panic(ptr", 0)..];
         let write = position(panic, "call i64 @write(", 0);

@@ -148,10 +148,11 @@ through `codegen_gpu_fallback` instead: it emits `f.gpu` (the staging wrapper), 
 backend's own body, via `codegen_function`), both internal, and makes `f` call the one
 `__neuro_gpu_usable()` picks. The runtime's driver probe records why it failed instead of
 panicking, and `ensure_ready` turns that into the panic for callers that need a GPU. A module
-load panics on a failed probe unless `__neuro_gpu_fallback`, an `i8` constant
-`define_gpu_fallback_flag` emits, is 1, which it is exactly when the program has no bare `@gpu`
-function; the load then answers a null module that nothing reads, since every call takes its
-host body.
+load panics on a failed probe, or on a module the driver refuses (`cuModuleLoadData`), unless
+`__neuro_gpu_fallback`, an `i8` constant `define_gpu_fallback_flag` emits, is 1, which it is
+exactly when the program has no bare `@gpu` function; the load then answers a null module that
+nothing reads, since every call takes its host body. A refused module clears `ready` too: loads
+run in global constructors, so no call has picked its GPU body yet.
 
 ## Stack Slot Placement
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,
