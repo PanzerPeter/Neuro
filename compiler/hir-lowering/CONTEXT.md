@@ -97,6 +97,10 @@ run its body on the host, which `@gpu` forbids.
 `@gpu` sets `HirFunction::target` to `HirTarget::Gpu` (`target_of`), or to `GpuOrHost` for
 `@gpu(fallback: true)`, on a concrete function and on every instance of a generic template
 alike. A call to a fallback function is refused in a `@grad` body like a bare one. Every function the transform generates is `Host`.
+`@kernel(threads: [...])` sets `HirTarget::Kernel { threads }` (`block_shape` pads the literals
+to three axes with 1s), on instances as well, and `lower_function_body` marks the body so that
+`thread_id.x` / `block_id.z` lower to `HirExprKind::GridPosition` (`expressions/grid.rs`) unless a
+local of that name shadows it. A kernel call inside a `@grad` body is refused like a `@gpu` one.
 
 A `@grad` function with a function-typed parameter is never derived on its own
 (`derive_reverses` skips it): only a call site knows the target. `lower_backward` resolves each

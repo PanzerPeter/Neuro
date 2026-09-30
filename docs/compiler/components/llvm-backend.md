@@ -294,6 +294,12 @@ AMD build's device tensors report `kDLROCM` over DLPack instead of `kDLCUDA`. Th
 so a program checks for a usable GPU before `main`, and every runtime failure, a missing GPU
 included, is an ordinary `panic:` that drains buffered output and aborts.
 
+A `@kernel` function's wrapper stages the same way but has no result: it returns nothing, and
+each `&mut` tensor it was handed is staged like an operand, then copied back over the host
+buffer once the kernel has run. A `&mut` tensor already on the device is written in place. A
+program with a `@kernel` function, like one with a bare `@gpu` function, has no host body to
+fall back on, so a missing GPU is fatal at startup.
+
 A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging wrapper above;
 `f.host`, the backend's own body; and `f` itself, which asks the runtime's
 `__neuro_gpu_usable` which of the two to call. The backend also defines the constant

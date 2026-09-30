@@ -119,8 +119,9 @@ func main() -> i32 {
 }
 ```
 
-Only `@gpu` functions compute on a device tensor. Host code cannot read one: indexing it,
-reducing it, cloning it or using it in arithmetic outside a `@gpu` function aborts with
+Only `@gpu` and [`@kernel`](#writing-a-kernel-kernel) functions compute on a device tensor.
+Host code cannot read one: indexing it, reducing it, cloning it or using it in arithmetic
+outside such a function aborts with
 ``panic: this tensor lives on a GPU, where host code cannot read it: move it back with
 `.to(Device::CPU)` first`` and the location of the operation. Moving it, passing it,
 returning it, storing it in a struct and dropping it all work as they do for a host tensor.
@@ -1013,6 +1014,55 @@ A `neurc` built without the MLIR backend, or running on Windows, compiles a fall
 to its host copy only and warns that it always runs on the host.
 [examples/showcase/gpu_fallback.nr](../../examples/showcase/gpu_fallback.nr) uses two fallback
 layers and prints the same output with or without a GPU.
+
+## Writing a kernel: `@kernel`
+
+`@kernel(threads: [...])` runs a function's body once per GPU thread. Where `@gpu` turns
+whole-tensor operations into kernels for you, a kernel is the per-thread code itself. The
+launch has one thread per element of the first `&mut` tensor parameter, the grid tensor, in
+blocks shaped `threads`: one to three positive integer literals, one per axis of the grid
+tensor, at most 1024 threads a block.
+
+```neuro
+@kernel(threads: [16, 16])
+func add_relu(a: &Tensor<f32, [37, 45]>, b: &Tensor<f32, [37, 45]>, out: &mut Tensor<f32, [37, 45]>) {
+    val row = thread_id.x
+    val col = thread_id.y
+    if row < 37 && col < 45 {
+        val sum = a[row, col] + b[row, col]
+        out[row, col] = if sum > 0.0 { sum } else { 0.0 }
+    }
+}
+```
+
+Inside the body, `thread_id` is the thread's position in the whole grid and `block_id` its
+block's, each read one axis at a time as a `u32`: `.x`, `.y`, `.z`. `thread_id.x` is
+`block_id.x` times the block's `x` size plus the thread's place in its block, so it indexes the
+grid tensor directly, and an axis the grid does not have reads 0. Neither name exists outside a
+kernel body, and a local of the same name hides it.
+
+Each axis runs enough blocks to cover its extent, rounded up, so the 37 × 45 tensor above gets a
+3 × 3 grid of 16 × 16 blocks, and the threads past the edge have no element. A body guards its
+writes, as `row < 37 && col < 45` does. Every index is still checked when the kernel runs: a
+thread that reads or writes past an extent, or divides an integer by zero, stops the kernel, and
+the program aborts at the call with a `panic:` naming the GPU error.
+
+A kernel takes tensors it reads as `&Tensor`, tensors it writes as `&mut Tensor`, and numbers
+or `bool`s by value. Every tensor has a static shape. It returns nothing: what it computes is
+what it writes. A call copies each host tensor to the GPU and copies each `&mut` one back after
+the kernel has run; a tensor already moved with [`.to(Device::GPU(n))`](#device-transfer) is used
+where it is, and a `&mut` one is written in place.
+
+The body may use locals, arithmetic and comparisons, casts, `&&` / `||`, `if` (as a statement
+or with a value), `while`, `loop`, `for` over a range, `break`, `continue`, `return`, and reads
+and writes of single tensor elements. Integer arithmetic wraps on overflow, as in a release
+build. Anything else, such as a function call, is a compile error at that construct.
+
+The attribute goes on a free function, never beside `@gpu` or `@grad`, and a kernel needs a GPU
+and a `neurc` built with the MLIR backend, exactly as bare `@gpu` does.
+[examples/tensors/tensor_kernel.nr](../../examples/tensors/tensor_kernel.nr) runs the snippet
+above, and [examples/showcase/heat_diffusion.nr](../../examples/showcase/heat_diffusion.nr) steps
+a simulation with two kernels over tensors that stay on the GPU.
 
 ## What tensors cannot do yet
 

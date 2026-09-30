@@ -102,6 +102,12 @@ pub enum HirExprKind {
     Unsafe {
         stmts: Vec<HirStmt>,
     },
+    /// `thread_id.x` / `block_id.z` in a `@kernel` body: the running thread's position
+    /// along grid axis `axis` (0 for `x`), a `u32`. Nothing outside a kernel body has one.
+    GridPosition {
+        of: HirGridIndex,
+        axis: u8,
+    },
     /// `pool { ... }` block: an arena region. Allocations emitted inside the body
     /// are taken from a bump arena the block releases in one step at its exit;
     /// allocations a callee makes are not the block's and stay on the heap. Always
@@ -446,6 +452,14 @@ pub enum HirTensorAxis {
         reversed: bool,
         step: usize,
     },
+}
+
+/// Which position a [`HirExprKind::GridPosition`] reads: the thread's across the whole
+/// grid (`thread_id`), or its block's (`block_id`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirGridIndex {
+    Thread,
+    Block,
 }
 
 /// Which reduction a [`HirExprKind::TensorReduce`] performs.

@@ -173,7 +173,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Structs, enums, newtypes** | Fields, functional update `..base`, `impl` blocks and trait impls on structs, enums and newtypes with `&self` / `&mut self` / consuming receivers; unit, tuple and struct-field variants carrying any sized payload; `@derive(Copy, Clone, Debug, PartialEq)` |
 | **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |
 | **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, and heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` ([reference](docs/language-reference/types.md)) |
-| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce`, `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`, and `@gpu` functions run as NVIDIA or AMD kernels on an `mlir` build, with an opt-in CPU fallback chosen at startup and tensors kept on any GPU between calls with `.to(Device::GPU(n))` ([reference](docs/language-reference/tensors.md)) |
+| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce`, `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`, and `@gpu` functions run as NVIDIA or AMD kernels on an `mlir` build, with an opt-in CPU fallback chosen at startup, hand-written `@kernel` functions launched one thread per element, and tensors kept on any GPU between calls with `.to(Device::GPU(n))` ([reference](docs/language-reference/tensors.md)) |
 | **Automatic differentiation** | `@grad` compiles a reverse-mode derivative beside a function or method, with no gradient tape; `wrt:` selection, `.backward()` / `.grad()` / `.zero_grad()`, `order: 2` Hessians, `.detach()` / `@no_grad`, each checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
 | **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `String` buffer ([reference](docs/language-reference/strings.md)) |
 | **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums; `??` unwraps with a lazy fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic and float `.to_checked::<T>()` report what does not fit |
@@ -260,8 +260,8 @@ compiler/
 Today a `.nr` file travels: **tokens → AST → merged program → type-checked AST → typed HIR →
 LLVM object code → system linker**. Automatic differentiation runs inside HIR lowering. The
 `mlir-backend` slice lowers the same typed HIR to MLIR `linalg`, and a `neurc` built with its
-`mlir` feature links the tensor bodies it computes into the program, and lowers `@gpu` bodies on
-through the MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
+`mlir` feature links the tensor bodies it computes into the program, and lowers `@gpu` and
+`@kernel` bodies on through the MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---

@@ -1463,6 +1463,9 @@ pub enum TypeError {
     #[error("`@gpu` {problem}")]
     GpuForm { problem: String, span: Span },
 
+    #[error("`@kernel` {problem}")]
+    KernelForm { problem: String, span: Span },
+
     #[error("`@grad` function '{function}' {problem}")]
     GradSignature {
         function: String,
@@ -1701,6 +1704,7 @@ impl TypeError {
             | Self::GradOrderUnsupported { span, .. }
             | Self::NoGradForm { span, .. }
             | Self::GpuForm { span, .. }
+            | Self::KernelForm { span, .. }
             | Self::GradSignature { span, .. }
             | Self::GradGeneratedNameTaken { span, .. }
             | Self::BackwardUnavailable { span, .. }

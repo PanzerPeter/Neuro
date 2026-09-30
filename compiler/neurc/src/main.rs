@@ -641,7 +641,7 @@ fn compile_file(
     Ok(output_path)
 }
 
-/// The `@gpu` functions in `hir`, `fallback: true` ones included.
+/// The `@gpu` functions in `hir`, `fallback: true` ones included, and the `@kernel` ones.
 fn gpu_functions(hir: &neuro_hir::HirProgram) -> impl Iterator<Item = &neuro_hir::HirFunction> {
     hir.items.iter().filter_map(|item| match item {
         neuro_hir::HirItem::Function(f) if f.target.has_gpu_body() => Some(f),
@@ -681,7 +681,7 @@ fn tensor_bodies(
             "is not supported on Windows yet",
             "`@gpu` is not supported on Windows yet",
         ) {
-            anyhow::bail!("`@gpu` is not supported on Windows yet");
+            anyhow::bail!("`@gpu` and `@kernel` are not supported on Windows yet");
         }
         return Ok(bodies);
     }
@@ -692,11 +692,26 @@ fn tensor_bodies(
         llvm_backend::GpuVendor::Amd => mlir_backend::GpuTarget::Amd { chip },
     };
     let device = mlir_backend::lower_for_gpu(hir, &target).map_err(|e| {
-        if let mlir_backend::MlirError::GpuBodiesNotLowered(functions) = &e {
-            for (name, span) in functions {
-                let message = format!("`@gpu` function '{name}' cannot become a GPU kernel");
-                eprintln!("{}\n", render_diagnostic(path, source, &message, *span));
+        match &e {
+            mlir_backend::MlirError::GpuBodiesNotLowered(functions) => {
+                for (name, span) in functions {
+                    let message = format!("`@gpu` function '{name}' cannot become a GPU kernel");
+                    eprintln!("{}\n", render_diagnostic(path, source, &message, *span));
+                }
             }
+            mlir_backend::MlirError::KernelBodiesNotLowered(refusals) => {
+                for refusal in refusals {
+                    let message = format!(
+                        "`@kernel` function '{}' cannot lower {} to the GPU",
+                        refusal.function, refusal.what
+                    );
+                    eprintln!(
+                        "{}\n",
+                        render_diagnostic(path, source, &message, refusal.span)
+                    );
+                }
+            }
+            _ => {}
         }
         anyhow::anyhow!("MLIR lowering error: {}", e)
     })?;
@@ -725,7 +740,7 @@ fn tensor_bodies(
         "needs a GPU, and this neurc was built without the MLIR backend (`--features mlir`)",
         "this neurc was built without the MLIR backend (`--features mlir`)",
     ) {
-        anyhow::bail!("`@gpu` needs a neurc built with the MLIR backend");
+        anyhow::bail!("`@gpu` and `@kernel` need a neurc built with the MLIR backend");
     }
     Ok(Vec::new())
 }
@@ -749,6 +764,10 @@ fn without_gpu_bodies(
                 "warning",
                 format!("`@gpu(fallback: true)` function '{name}' always runs on the host: {why}"),
             ),
+            neuro_hir::HirTarget::Kernel { .. } => {
+                refused = true;
+                ("error", format!("`@kernel` function '{name}' {problem}"))
+            }
             _ => {
                 refused = true;
                 ("error", format!("`@gpu` function '{name}' {problem}"))

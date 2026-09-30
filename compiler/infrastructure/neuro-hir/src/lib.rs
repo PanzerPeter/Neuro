@@ -29,7 +29,7 @@ pub mod statements;
 pub mod types;
 
 pub use expressions::{
-    HirBindingSource, HirExpr, HirExprKind, HirFieldInit, HirInterpPart, HirMatchArm,
+    HirBindingSource, HirExpr, HirExprKind, HirFieldInit, HirGridIndex, HirInterpPart, HirMatchArm,
     HirMatchBinding, HirMatchTest, HirMathOp, HirReduceOp, HirSortKind, HirTensorApply,
     HirTensorAxis,
 };

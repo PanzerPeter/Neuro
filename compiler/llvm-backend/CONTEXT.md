@@ -117,7 +117,10 @@ write scratch and `close_device_staging` copies it into the host tensor returned
 call is unchanged. The close synchronizes once in both cases, because a spilled scratch buffer
 goes back through `cuMemFree`, then releases each staged buffer (null for a resident operand, which
 `_mlir_memref_to_llvm_free` skips), restores the mark, and switches back to the device it
-replaced. No wait sits between the copies in and the call: the runtime hands every
+replaced. A `@kernel` wrapper returns `void`: it builds no result, and each `&mut` tensor operand
+goes through `stage_output`, which stages it like an operand and hands `close_device_staging` the
+host buffer to copy the kernel's writes back over (null, and no copy, for a device-resident one);
+the close takes every such write-back plus the result, if any. No wait sits between the copies in and the call: the runtime hands every
 `mgpuStreamCreate` on a device the same in-order stream, so the kernels queue behind the copies.
 
 The device allocator lives in the runtime, one linear arena per device over the current one

@@ -47,9 +47,11 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    are a second `ExternalBodies` with `BodyMemory::Device`. `check` always lowers for the
    default: which bodies qualify does not depend on the vendor.
    A `@gpu` body that cannot become a kernel is rendered at its function
-   (`GpuBodiesNotLowered`) and stops the compile, `fallback: true` or not. Without the feature
-   `tensor_bodies` answers no bodies, and every bare `@gpu` function is an error at its
-   declaration: it has no host body. A `@gpu(fallback: true)` function is a warning instead
+   (`GpuBodiesNotLowered`) and stops the compile, `fallback: true` or not. A `@kernel` function
+   goes through the same call; a body construct it cannot lower is rendered at the construct
+   (`KernelBodiesNotLowered`, one `KernelRefusal` per function). Without the feature
+   `tensor_bodies` answers no bodies, and every bare `@gpu` or `@kernel` function is an error at
+   its declaration: it has no host body. A `@gpu(fallback: true)` function is a warning instead
    (`without_gpu_bodies`) and builds with its host body only. Windows does the same either way,
    since the GPU runtime needs `dlopen`.
 

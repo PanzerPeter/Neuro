@@ -8,11 +8,11 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
 - Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirTarget`, `HirParam`, `HirStruct`, `HirField`,
   `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
   `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirPlace`, `HirExpr`, `HirExprKind`,
-  `HirFieldInit`, `HirBindingSource`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,
+  `HirFieldInit`, `HirBindingSource`, `HirGridIndex`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,
   `HirMatchTest`, `HirMathOp`, `HirReduceOp`, `HirSortKind`, `HirTensorApply`, `HirTensorAxis`,
   `HirType`, `HirCollectionKind`, `AxisNames`
-- Pure functions over those types: `static_shape`, `extent_display` and
-  `HirTarget::has_gpu_body`
+- Pure functions over those types: `static_shape`, `extent_display`,
+  `HirTarget::has_gpu_body` and `HirTarget::requires_gpu`
 
 ## Shared Kernel
 - shared-types: `Span`, `Literal`, `FormatSpec` embedded in HIR nodes
@@ -124,7 +124,10 @@ Nothing frontend-only survives into the HIR: lint-suppression attributes such as
 consumed before lowering. Backend attributes (`@grad`, `@gpu`) belong here when the features that
 need them land, and not before. `@gpu` is `HirFunction::target`: `Gpu` for bare `@gpu`,
 `GpuOrHost` for `@gpu(fallback: true)`, whose backends must emit a kernel and a host copy and
-pick one at startup.
+pick one at startup. `@kernel(threads: [...])` is `Kernel { threads }`, the block shape padded
+with 1s to three axes; its body reads `thread_id.x` / `block_id.y` as
+`HirExprKind::GridPosition { of, axis }`, a node no host body contains, so the LLVM backend's
+arm for it is an internal error.
 
 ### Nodes that carry a deliberate design decision
 

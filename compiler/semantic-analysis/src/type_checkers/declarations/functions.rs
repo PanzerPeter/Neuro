@@ -185,6 +185,7 @@ impl TypeChecker {
         // Enter function scope
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
+        self.in_kernel = crate::type_checkers::kernel::kernel_attribute(&func.attributes).is_some();
         let warnings_before = self.warnings.len();
 
         // Reference-typed parameters outlive the call, so a returned reference may
@@ -251,6 +252,7 @@ impl TypeChecker {
         // Exit function scope
         self.symbols.pop_scope();
         self.current_function_return_type = None;
+        self.in_kernel = false;
         self.current_fn_outliving.clear();
         self.exit_generic_scope();
 
@@ -339,7 +341,10 @@ impl TypeChecker {
 
     /// The `(parameter types, return type)` recorded for `func` by the signature pass,
     /// read back from whichever table its genericity put it in.
-    fn lookup_registered_signature(&self, func: &FunctionDef) -> Option<(Vec<Type>, Type)> {
+    pub(crate) fn lookup_registered_signature(
+        &self,
+        func: &FunctionDef,
+    ) -> Option<(Vec<Type>, Type)> {
         if func.generics.is_empty() {
             let Some(Type::Function { params, ret }) = self.functions.get(&func.name.name) else {
                 return None;

@@ -360,11 +360,11 @@ fn build_module<'ctx>(
     if device_bodies {
         codegen_ctx.set_body_memory(BodyMemory::Device);
         codegen_ctx.define_gpu_panic()?;
-        // A bare `@gpu` function has no host body, so one is enough to make a missing GPU
-        // fatal at startup.
+        // A bare `@gpu` or a `@kernel` function has no host body, so one is enough to make
+        // a missing GPU fatal at startup.
         let every_function_falls_back = !items
             .iter()
-            .any(|item| matches!(item, HirItem::Function(f) if f.target == HirTarget::Gpu));
+            .any(|item| matches!(item, HirItem::Function(f) if f.target.requires_gpu()));
         codegen_ctx.define_gpu_fallback_flag(every_function_falls_back);
     }
 

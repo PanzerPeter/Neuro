@@ -161,6 +161,9 @@ impl TypeChecker {
                         span: ident.span,
                     });
                     None
+                } else if self.is_grid_name(&ident.name) {
+                    self.refuse_whole_grid_name(ident);
+                    None
                 } else {
                     self.record_error(TypeError::UndefinedVariable {
                         name: ident.name.clone(),

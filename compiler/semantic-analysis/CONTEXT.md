@@ -88,6 +88,15 @@ module per declaration kind beside it. `tests/` is split by subject.
   on a free function that is not also `@grad`, with no argument or one `fallback:` whose value
   is the literal `true` or `false` (`GpuForm` at the attribute otherwise). Whether the body can become a kernel is the GPU
   backend's rule, decided at compile time, so `check` accepts a body `compile` refuses.
+  `check_kernel_attributes` (`type_checkers/kernel.rs`) holds `@kernel` to its form (`KernelForm`
+  throughout): a free function, not beside `@gpu` or `@grad`, with one `threads:` array of one to
+  three positive integer literals whose product is at most 1024; a `void` return; parameters that
+  are numbers, `bool`s, `&Tensor` or `&mut Tensor` of a numeric element and no `?` extent (a
+  by-value tensor is refused); and a first `&mut Tensor`, the grid tensor, whose rank is the
+  length of `threads`. `check_function` sets `in_kernel` for a `@kernel` body, where
+  `thread_id` and `block_id` not shadowed by a local read as `u32` through `.x` / `.y` / `.z`
+  (`check_grid_position`, called first in field access) and are refused read whole; anywhere
+  else they are undefined names like any other.
   `.detach()` (`expressions/builtins.rs`) consumes an owned tensor like `.to` (`record_move`)
   and keeps its type; a borrowed receiver falls through to `MethodNotFound`.
 - **4. full check**: `check_function` / `check_impl` / `check_const_item`.

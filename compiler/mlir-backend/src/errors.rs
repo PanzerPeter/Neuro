@@ -57,9 +57,31 @@ pub enum MlirError {
     #[error("no GPU kernel for `@gpu` {}: the GPU path lowers straight-line element-wise `+ - * /` and `@` over `f32` / `f64` tensors of static shape and rank 1 or more, with a tensor result", names(.0))]
     GpuBodiesNotLowered(Vec<(String, Span)>),
 
+    /// `@kernel` functions whose bodies this path cannot lower, each with the construct
+    /// it stopped at: its span and what it is. A kernel has no host body to fall back on.
+    #[error("no GPU kernel for `@kernel` {}", kernel_names(.0))]
+    KernelBodiesNotLowered(Vec<KernelRefusal>),
+
     /// A melior call (block argument access, operation result access, ...) failed.
     #[error("melior operation failed: {0}")]
     Melior(#[from] melior::Error),
+}
+
+/// Where a `@kernel` body stopped lowering: the function, the construct's span, and what
+/// the construct is, completing "cannot lower ...".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelRefusal {
+    pub function: String,
+    pub span: Span,
+    pub what: String,
+}
+
+fn kernel_names(refusals: &[KernelRefusal]) -> String {
+    let quoted: Vec<String> = refusals
+        .iter()
+        .map(|refusal| format!("'{}' ({})", refusal.function, refusal.what))
+        .collect();
+    quoted.join(", ")
 }
 
 fn names(functions: &[(String, Span)]) -> String {

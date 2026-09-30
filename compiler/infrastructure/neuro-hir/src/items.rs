@@ -120,12 +120,22 @@ pub enum HirTarget {
     /// `@gpu(fallback: true)`. The body must still lower to a kernel; the host copy is
     /// what runs where no GPU does.
     GpuOrHost,
+    /// A hand-written kernel, `@kernel(threads: [...])`: the body runs once per thread of a
+    /// grid covering the first `&mut` tensor parameter, in blocks shaped `threads`. An axis
+    /// the attribute does not name is 1. The function returns nothing; what it computes is
+    /// what it writes through its `&mut` tensors.
+    Kernel { threads: [u32; 3] },
 }
 
 impl HirTarget {
     /// Whether the function has a GPU body, with or without a host fallback.
     pub fn has_gpu_body(self) -> bool {
-        matches!(self, Self::Gpu | Self::GpuOrHost)
+        matches!(self, Self::Gpu | Self::GpuOrHost | Self::Kernel { .. })
+    }
+
+    /// Whether the function runs on a GPU or not at all: a program with one needs a GPU.
+    pub fn requires_gpu(self) -> bool {
+        matches!(self, Self::Gpu | Self::Kernel { .. })
     }
 }
 

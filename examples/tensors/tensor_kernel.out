@@ -1,0 +1,2 @@
+add_relu: [0, 3] = 0.0, [36, 0] = 36.5
+row_max: row 0 = 10, row 9 = 8, row 9 ran in block 2

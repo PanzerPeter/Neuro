@@ -194,6 +194,9 @@ struct Lowerer {
     loop_stack: Vec<LoopCtx>,
     /// The current function/method's resolved return type (for `return` typing).
     current_return: HirType,
+    /// Whether the body being lowered is a `@kernel` function's, the only place
+    /// `thread_id` and `block_id` exist.
+    in_kernel: bool,
     /// Generic free-function templates, keyed by name. A generic function is
     /// never lowered as-is; each distinct set of type arguments produces one
     /// monomorphized concrete function instead.
@@ -358,6 +361,7 @@ impl Lowerer {
             scopes: Vec::new(),
             loop_stack: Vec::new(),
             current_return: HirType::Void,
+            in_kernel: false,
             generic_templates: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),

@@ -150,8 +150,36 @@ pub(crate) fn translate_module(
 /// Translate a module already wholly in the `llvm` dialect (plus any `gpu.binary`
 /// it embeds) to LLVM IR, verified by LLVM.
 pub(crate) fn translate_llvm_dialect(module: &Module<'_>) -> Result<String, MlirError> {
-    let llvm_context = inkwell::context::Context::create();
+    translate_llvm_dialects(std::slice::from_ref(module))
+}
 
+/// [`translate_llvm_dialect`] over several modules, linked into one LLVM module. Modules
+/// that went through different pass pipelines meet here rather than as MLIR.
+pub(crate) fn translate_llvm_dialects(modules: &[Module<'_>]) -> Result<String, MlirError> {
+    let llvm_context = inkwell::context::Context::create();
+    let mut linked: Option<inkwell::module::Module<'_>> = None;
+    for module in modules {
+        let translated = translate_into(&llvm_context, module)?;
+        match &linked {
+            Some(first) => first
+                .link_in_module(translated)
+                .map_err(|error| MlirError::LlvmVerificationFailed(error.to_string()))?,
+            None => linked = Some(translated),
+        }
+    }
+    let llvm_module = linked.ok_or(MlirError::TranslationFailed)?;
+
+    llvm_module
+        .verify()
+        .map_err(|error| MlirError::LlvmVerificationFailed(error.to_string()))?;
+
+    Ok(llvm_module.print_to_string().to_string())
+}
+
+fn translate_into<'ctx>(
+    llvm_context: &'ctx inkwell::context::Context,
+    module: &Module<'_>,
+) -> Result<inkwell::module::Module<'ctx>, MlirError> {
     // SAFETY: the operation is the module's own, alive for this call, and the
     // context pointer is the live inkwell context's. Both bindings generate their
     // own opaque `LLVMContextRef` alias over the same C type, hence the cast. The
@@ -170,13 +198,7 @@ pub(crate) fn translate_llvm_dialect(module: &Module<'_>) -> Result<String, Mlir
     // SAFETY: `raw` is the non-null module MLIR just built in `llvm_context`, and
     // ownership transfers here: the inkwell `Module` is the single owner and
     // disposes of it on drop, before the context it lives in is dropped.
-    let llvm_module = unsafe { inkwell::module::Module::new(raw.cast()) };
-
-    llvm_module
-        .verify()
-        .map_err(|error| MlirError::LlvmVerificationFailed(error.to_string()))?;
-
-    Ok(llvm_module.print_to_string().to_string())
+    Ok(unsafe { inkwell::module::Module::new(raw.cast()) })
 }
 
 /// Rewrite a module built from the `func` / `arith` / `index` / `linalg` /

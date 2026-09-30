@@ -132,32 +132,46 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
+        // What the kernels write back: a `&mut` tensor operand, and the result.
+        let mut written_back = Vec::new();
         for (value, ty, handle) in operands {
             let Some(handle) = handle else {
                 arg_types.push(value.get_type().into());
                 args.push(value.into());
                 continue;
             };
+            let tensor_ty = ty.referent();
             let data = match staging.as_mut() {
-                Some(staging) => self.stage_operand(staging, ty.referent(), handle)?,
+                Some(staging) if matches!(ty, Type::Reference { mutable: true, .. }) => {
+                    let output = self.stage_output(staging, tensor_ty, handle)?;
+                    let written = output.written;
+                    written_back.push((tensor_ty.clone(), output));
+                    written
+                }
+                Some(staging) => self.stage_operand(staging, tensor_ty, handle)?,
                 None => self.load_host_data(handle, func_def.span.start)?,
             };
-            self.push_memref_descriptor(ty.referent(), data, &mut arg_types, &mut args)?;
+            self.push_memref_descriptor(tensor_ty, data, &mut arg_types, &mut args)?;
         }
 
+        // A `@kernel` returns nothing: it computes into its `&mut` tensors.
         let result_ty = Type::from_hir(&func_def.return_type);
-        let staged_result = match staging.as_mut() {
-            Some(staging) => Some(self.stage_result(staging, &result_ty)?),
-            None => None,
-        };
-        let (result, written) = match &staged_result {
-            Some(staged) => (staged.handle, staged.written),
-            None => {
+        let result = match (&result_ty, staging.as_mut()) {
+            (Type::Void, _) => None,
+            (_, Some(staging)) => {
+                let staged = self.stage_result(staging, &result_ty)?;
+                let (handle, written) = (staged.handle, staged.written);
+                written_back.push((result_ty.clone(), staged));
+                Some((handle, written))
+            }
+            (_, None) => {
                 let result = self.alloc_dlpack_tensor(&result_ty, "external.result")?;
-                (result, self.load_dlpack_data(result)?)
+                Some((result, self.load_dlpack_data(result)?))
             }
         };
-        self.push_memref_descriptor(&result_ty, written, &mut arg_types, &mut args)?;
+        if let Some((_, written)) = result {
+            self.push_memref_descriptor(&result_ty, written, &mut arg_types, &mut args)?;
+        }
 
         let callee = self.module.get_function(symbol).unwrap_or_else(|| {
             self.module.add_function(
@@ -168,13 +182,16 @@ impl<'ctx> CodegenContext<'ctx> {
         });
         self.builder.build_call(callee, &args, "")?;
 
-        if let (Some(staging), Some(staged)) = (staging, staged_result) {
-            self.close_device_staging(staging, &result_ty, &staged)?;
+        if let Some(staging) = staging {
+            self.close_device_staging(staging, &written_back)?;
         }
         for handle in consumed {
             self.build_dlpack_release(handle)?;
         }
-        self.builder.build_return(Some(&result))?;
+        match result {
+            Some((handle, _)) => self.builder.build_return(Some(&handle))?,
+            None => self.builder.build_return(None)?,
+        };
         Ok(())
     }
 
@@ -596,6 +613,59 @@ mod tests {
             scale,
             "br i1 %device.returning, label %device.copy_out, label %device.settle",
             returned,
+        );
+    }
+
+    #[test]
+    fn a_kernel_returns_nothing_and_copies_its_mut_tensor_back() {
+        const KERNEL: &str = r#"
+            @kernel(threads: [2])
+            func fill(a: &Tensor<f32, [2]>, out: &mut Tensor<f32, [2]>) {
+                out[thread_id.x] = a[thread_id.x]
+            }
+        "#;
+        const LAUNCHER: &str = r#"
+            define void @ext_fill(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9) {
+              ret void
+            }
+        "#;
+        let ast = syntax_parsing::parse(KERNEL).expect("parsing failed");
+        let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
+        let context = Context::create();
+        let external = [ExternalBodies {
+            llvm_ir: LAUNCHER.to_string(),
+            functions: vec![("fill".to_string(), "ext_fill".to_string())],
+            memory: BodyMemory::Device,
+        }];
+        let ir = build_module(
+            &context,
+            &hir,
+            OptimizationLevelSetting::O0,
+            KERNEL,
+            "kernel.nr",
+            &external,
+            GpuVendor::Nvidia,
+        )
+        .expect("a module with a kernel launcher should build and verify")
+        .module
+        .print_to_string()
+        .to_string();
+
+        let start = ir
+            .find("define void @fill(")
+            .unwrap_or_else(|| panic!("a kernel is a void function:\n{ir}"));
+        let fill = &ir[start..start + ir[start..].find("\n}").unwrap_or(0)];
+        let call = position(fill, "call void @ext_fill(", 0);
+        let copy_back = position(fill, "call void @mgpuMemcpy(ptr %device.written_back", call);
+        position(fill, "call void @mgpuStreamSynchronize(", copy_back);
+        assert_eq!(
+            fill.matches("call void @mgpuMemcpy(").count(),
+            3,
+            "each tensor is staged in and only the `&mut` one is copied back:\n{fill}"
+        );
+        assert!(
+            !fill.contains("__neuro_device_alloc(") && fill.contains("ret void"),
+            "a kernel builds no result tensor:\n{fill}"
         );
     }
 

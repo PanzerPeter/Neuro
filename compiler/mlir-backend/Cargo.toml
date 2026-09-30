@@ -26,3 +26,9 @@ shared-types = { path = "../infrastructure/shared-types", optional = true }
 # LLVM 22 without MLIR. See CONTEXT.md.
 default = []
 mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types", "dep:shared-types"]
+
+[dev-dependencies]
+# `@kernel` tests build HIR from source through the frontend slices. Test-only, never a
+# production cross-slice dependency (the same setup as llvm-backend's).
+syntax-parsing = { path = "../syntax-parsing" }
+hir-lowering = { path = "../hir-lowering" }

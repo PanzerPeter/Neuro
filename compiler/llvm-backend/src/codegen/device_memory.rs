@@ -89,6 +89,13 @@ pub(crate) struct DeviceStaging<'ctx> {
     on_device: IntValue<'ctx>,
 }
 
+/// Whether a kernel only reads a staged operand, or also writes it through `&mut`.
+#[derive(Clone, Copy)]
+enum OperandUse {
+    Read,
+    Write,
+}
+
 /// Where a staged call's kernels write their result, and the tensor that hands it back.
 pub(crate) struct StagedResult<'ctx> {
     /// The tensor the call returns.
@@ -372,6 +379,33 @@ impl<'ctx> CodegenContext<'ctx> {
         tensor_ty: &Type,
         handle: PointerValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
+        Ok(self
+            .stage_buffer(staging, tensor_ty, handle, OperandUse::Read)?
+            .written)
+    }
+
+    /// The device buffer a kernel writes for the `&mut` tensor operand `handle`, whose old
+    /// elements it may also read. A host tensor's staged copy goes back over it when the
+    /// call closes; a device tensor is written in place.
+    pub(crate) fn stage_output(
+        &mut self,
+        staging: &mut DeviceStaging<'ctx>,
+        tensor_ty: &Type,
+        handle: PointerValue<'ctx>,
+    ) -> CodegenResult<StagedResult<'ctx>> {
+        self.stage_buffer(staging, tensor_ty, handle, OperandUse::Write)
+    }
+
+    /// `handle`'s buffer where the kernels can reach it. For a written operand, `copy_back`
+    /// is the host buffer it was copied from (null when it already lived on the device);
+    /// a read one is never copied back, and its `copy_back` is null.
+    fn stage_buffer(
+        &mut self,
+        staging: &mut DeviceStaging<'ctx>,
+        tensor_ty: &Type,
+        handle: PointerValue<'ctx>,
+        operand_use: OperandUse,
+    ) -> CodegenResult<StagedResult<'ctx>> {
         let function = self.staging_function()?;
         let on_host = self.dlpack_on_host(handle)?;
         let data = self.load_dlpack_data(handle)?;
@@ -388,18 +422,27 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(staged)?;
 
         self.builder.position_at_end(staged);
+        let null = self.ptr().const_null();
         let operand =
             self.build_pointer_phi(&[(copy, copied), (data, resident)], "device.operand")?;
-        let scratch = self.build_pointer_phi(
-            &[(copy, copied), (self.ptr().const_null(), resident)],
-            "device.scratch",
-        )?;
+        let scratch =
+            self.build_pointer_phi(&[(copy, copied), (null, resident)], "device.scratch")?;
+        let copy_back = match operand_use {
+            OperandUse::Read => null,
+            OperandUse::Write => {
+                self.build_pointer_phi(&[(data, copied), (null, resident)], "device.written_back")?
+            }
+        };
         staging.buffers.push(scratch);
         let resident_here = self.builder.build_not(on_host, "device.resident")?;
         staging.on_device =
             self.builder
                 .build_or(staging.on_device, resident_here, "device.any_resident")?;
-        Ok(operand)
+        Ok(StagedResult {
+            handle,
+            written: operand,
+            copy_back,
+        })
     }
 
     /// Where the kernels write a `tensor_ty` result. With any operand on the device the
@@ -458,10 +501,10 @@ impl<'ctx> CodegenContext<'ctx> {
         })
     }
 
-    /// Copy the kernels' result back to the host when it is not staying on the device,
-    /// wait for the stream, then release everything the call staged: each buffer (a no-op
-    /// for the ones in the chunk) and then the chunk itself back to the mark. The device
-    /// current before the call is current again after it.
+    /// Copy each of the kernels' `results` back to the host when it is not staying on the
+    /// device, wait for the stream, then release everything the call staged: each buffer
+    /// (a no-op for the ones in the chunk) and then the chunk itself back to the mark. The
+    /// device current before the call is current again after it.
     ///
     /// The wait comes before the release even for a result left on the device: a buffer
     /// that spilled out of the chunk goes back through the runtime's free, which must not
@@ -469,23 +512,23 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn close_device_staging(
         &mut self,
         staging: DeviceStaging<'ctx>,
-        tensor_ty: &Type,
-        result: &StagedResult<'ctx>,
+        results: &[(Type, StagedResult<'ctx>)],
     ) -> CodegenResult<()> {
         let function = self.staging_function()?;
-        let copy = self.context.append_basic_block(function, "device.copy_out");
-        let settle = self.context.append_basic_block(function, "device.settle");
-        let returning = self
-            .builder
-            .build_is_not_null(result.copy_back, "device.returning")?;
-        self.builder
-            .build_conditional_branch(returning, copy, settle)?;
+        for (tensor_ty, result) in results {
+            let copy = self.context.append_basic_block(function, "device.copy_out");
+            let settle = self.context.append_basic_block(function, "device.settle");
+            let returning = self
+                .builder
+                .build_is_not_null(result.copy_back, "device.returning")?;
+            self.builder
+                .build_conditional_branch(returning, copy, settle)?;
 
-        self.builder.position_at_end(copy);
-        self.build_device_copy(&staging, result.copy_back, result.written, tensor_ty)?;
-        self.builder.build_unconditional_branch(settle)?;
-
-        self.builder.position_at_end(settle);
+            self.builder.position_at_end(copy);
+            self.build_device_copy(&staging, result.copy_back, result.written, tensor_ty)?;
+            self.builder.build_unconditional_branch(settle)?;
+            self.builder.position_at_end(settle);
+        }
         self.build_stream_call(MGPU_STREAM_SYNCHRONIZE, staging.stream)?;
         let release = self.device_release_fn();
         for buffer in &staging.buffers {

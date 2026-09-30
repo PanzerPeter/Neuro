@@ -15,6 +15,7 @@ mod gpu_tests;
 mod grad_tests;
 mod intrinsic_tests;
 mod iteration_tests;
+mod kernel_tests;
 mod literal_tests;
 mod loop_adapter_tests;
 mod loop_tests;

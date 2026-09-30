@@ -23,6 +23,8 @@ mod errors;
 #[cfg(feature = "mlir")]
 mod gpu;
 #[cfg(feature = "mlir")]
+mod kernel;
+#[cfg(feature = "mlir")]
 mod lower;
 #[cfg(all(feature = "mlir", test))]
 mod smoke;
@@ -32,7 +34,7 @@ mod tensor_arithmetic;
 #[cfg(feature = "mlir")]
 pub use bridge::{LinkableBodies, lower_for_link, translate_to_llvm_ir};
 #[cfg(feature = "mlir")]
-pub use errors::MlirError;
+pub use errors::{KernelRefusal, MlirError};
 #[cfg(feature = "mlir")]
 pub use gpu::{GpuTarget, lower_for_gpu};
 #[cfg(feature = "mlir")]

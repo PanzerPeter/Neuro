@@ -30,8 +30,11 @@ legs build the placeholder.
   `lower_for_link`, or that has a rank-0 tensor, is `GpuBodiesNotLowered` with every such
   function's name and span: running it on the host is what `@gpu` forbids. Every buffer a symbol
   is handed must be device memory, and it allocates a buffer between two kernels through
-  `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which the caller defines. `neurc`
-  calls it only for a program with a `@gpu` function.
+  `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which the caller defines. It also
+  lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
+  returns nothing and launches the body once per thread; a body construct the kernel lowering
+  lacks is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
+  function. `neurc` calls it only for a program with a `@gpu` or `@kernel` function.
 The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
 from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
 because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
@@ -49,6 +52,9 @@ rather than only declarations.
 
 The crate adds no business logic of its own beyond the lowering; it otherwise uses only
 third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
+
+`syntax-parsing` and `hir-lowering` are `[dev-dependencies]` only: the `@kernel` tests build
+their HIR from source. Never a production dependency.
 
 ## Notes
 **The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `llvm_lowering_pipeline()`, named in
@@ -115,6 +121,28 @@ instructions, and the list also keeps anything but a plain name out of the pipel
 chip is spliced into. The host symbol keeps `lower_for_link`'s exploded-descriptor signature, so one
 LLVM-backend wrapper serves either path; the pointers it passes must be device memory, which the
 wrapper stages.
+
+**`@kernel` launchers.** `kernel/mod.rs` writes each `@kernel` function as MLIR text, parsed
+with `Module::parse`: a `func.func` taking `memref`s for its tensors, the grid (per axis,
+`ceil(extent / threads)` blocks over the first `&mut` tensor's extents, 1 past its rank; no launch
+at all for a zero extent), and a `gpu.launch` whose region `kernel/body.rs` emits. Text rather
+than builders because `gpu.launch` has segmented operands and a twelve-argument region. This is
+device code the LLVM backend cannot emit, so it is not a second host scalar codegen. Locals and
+the values of `if` / `&&` / `||` / blocks are `memref.alloca` slots hoisted to the region's
+entry; control flow is `cf` branches, so loops carry nothing in SSA and `break` / `continue` /
+`return` are branches (`return` to the block holding `gpu.terminator`). Every tensor index is
+widened to `i64` (sign-extended when signed, so a negative one fails the same `ult` test) and
+bounds-checked; an integer divisor is tested for zero and `MIN / -1` divides by 1, the release
+build's wrap. The guard is `cf.assert` on NVIDIA and a trap block on AMD, whose ROCDL lowering
+has no `cf.assert`; the trap block branches on, since `gpu.launch` wants every exiting block to
+end in `gpu.terminator`. `thread_id` is `block_id * threads[axis] + gpu.thread_id` with the block
+size as a constant, because `gpu.block_dim` lowers to a ROCm device-library call. Float to integer
+casts saturate through `llvm.call_intrinsic "llvm.fptosi.sat..."`, as on the host. Integer
+arithmetic wraps. The launchers run a pipeline of their own (`kernel_lowering_pipeline`: outline,
+async region, vendor attach and conversion, the shared descent) with no bufferization prefix,
+because `buffer-deallocation-pipeline` refuses unstructured loops and `gpu.launch_func`; the
+`@gpu` module and the kernel module are translated separately and linked in one LLVM context
+(`translate_llvm_dialects`).
 
 **GPU memory.** The descent runs `finalize-memref-to-llvm{use-generic-functions=true}`, so a buffer
 bufferization allocates between two kernels (the sum in `(a + b) * c`) calls

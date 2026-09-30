@@ -64,9 +64,9 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
 - `lower_for_link`, the driver's entry: only the bodies worth linking, as LLVM IR, with the
   function each symbol computes.
-- `lower_for_gpu`, the `@gpu` functions (`fallback: true` ones included) as GPU kernels with
-  host functions that launch them, reading and writing device memory only, or an error naming
-  each `@gpu` function it cannot lower. `neurc` calls it for a program with a `@gpu` function.
+- `lower_for_gpu`, the `@gpu` functions (`fallback: true` ones included) and the `@kernel` ones
+  as GPU kernels with host functions that launch them, reading and writing device memory only,
+  or an error naming each function it cannot lower. `neurc` calls it for a program with either.
 - The HIR-independent `melior` wiring check (a verified `func.func @neuro_smoke` with an
   `arith.addi` body) is `pub(crate)` and compiled only under `test`.
 
@@ -280,6 +280,26 @@ A buffer the body needs between two kernels, such as the sum in `(a + b) * c`, i
 through `_mlir_memref_to_llvm_alloc` and freed through `_mlir_memref_to_llvm_free` rather than
 `malloc` / `free` (`finalize-memref-to-llvm{use-generic-functions=true}`). The LLVM backend
 defines both as its device allocator.
+
+### `@kernel` functions
+
+A `@kernel` body is the per-thread code itself, so it does not go through `linalg`. The
+[`kernel`](../../../compiler/mlir-backend/src/kernel/mod.rs) module writes each one as MLIR text: a
+`func.func` whose tensor parameters are `memref`s, a grid sized from the first `&mut` tensor's
+extents and the `threads` block shape, and a `gpu.launch` whose region is the body. Locals are
+`memref.alloca` slots hoisted to the region's entry and control flow is `cf` branches, so a loop
+needs no loop-carried values and `break` or `return` is a plain branch. Every tensor index is
+bounds-checked and every integer divisor tested for zero: NVIDIA stops the thread with
+`cf.assert` (a device assertion with a message), and AMD, whose `rocdl` lowering has no
+`cf.assert`, with a trap. The block size is written as a constant, because `gpu.block_dim`
+lowers to a ROCm device-library call on AMD.
+
+The launchers go through a pipeline of their own: outlining, the vendor conversion and the
+shared descent to the `llvm` dialect, without the bufferization prefix. Their buffers are the
+caller's from the start, and the deallocation pass that follows bufferization refuses a body that
+branches in a loop. The two modules are translated to LLVM IR separately and linked into one.
+A construct the body lowering does not cover (a function call, a slice, a `match`) is
+`KernelBodiesNotLowered`, with the construct's span and what it is.
 
 ## Coexistence with inkwell
 

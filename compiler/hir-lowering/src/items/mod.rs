@@ -24,7 +24,21 @@ const GPU_ATTRIBUTE: &str = "gpu";
 
 const FALLBACK_LABEL: &str = "fallback";
 
+/// The attribute making a function a hand-written kernel. Its form (a `threads:` array of
+/// one to three positive integer literals) is the checker's rule.
+const KERNEL_ATTRIBUTE: &str = "kernel";
+
+const THREADS_LABEL: &str = "threads";
+
 fn target_of(attributes: &[Attribute]) -> HirTarget {
+    if let Some(kernel) = attributes
+        .iter()
+        .find(|attr| attr.name.name == KERNEL_ATTRIBUTE)
+    {
+        return HirTarget::Kernel {
+            threads: block_shape(kernel),
+        };
+    }
     let Some(gpu) = attributes
         .iter()
         .find(|attr| attr.name.name == GPU_ATTRIBUTE)
@@ -41,7 +55,40 @@ fn target_of(attributes: &[Attribute]) -> HirTarget {
     }
 }
 
+/// `threads:` as a block shape, 1 along every axis it does not name.
+fn block_shape(kernel: &Attribute) -> [u32; 3] {
+    let mut threads = [1; 3];
+    let elements = kernel
+        .named
+        .iter()
+        .filter(|arg| arg.label.name == THREADS_LABEL)
+        .find_map(|arg| match &arg.value {
+            Expr::ArrayLiteral { elements, .. } => Some(elements),
+            _ => None,
+        });
+    for (slot, element) in threads.iter_mut().zip(elements.into_iter().flatten()) {
+        if let Expr::Literal(Literal::Integer(n, _), _) = element {
+            *slot = u32::try_from(*n).unwrap_or(1);
+        }
+    }
+    threads
+}
+
 impl Lowerer {
+    /// Lower a function body, marking it as a kernel's when `target` says so: only there
+    /// do `thread_id` and `block_id` name the thread's grid position.
+    fn lower_function_body(
+        &mut self,
+        body: &[ast_types::Stmt],
+        return_type: &HirType,
+        target: HirTarget,
+    ) -> Result<Vec<HirStmt>, LoweringError> {
+        self.in_kernel = matches!(target, HirTarget::Kernel { .. });
+        let lowered = self.lower_body(body, return_type);
+        self.in_kernel = false;
+        lowered
+    }
+
     /// Lower every top-level item to its HIR form.
     pub(crate) fn lower_program(&mut self, items: &[Item]) -> Result<HirProgram, LoweringError> {
         let mut hir_items = Vec::with_capacity(items.len());
@@ -242,11 +289,12 @@ impl Lowerer {
         }
         let return_type = self.declared_return_type(&func.return_type, &func.body)?;
 
+        let target = target_of(&func.attributes);
         self.push_scope();
         for param in &params {
             self.define(param.name.clone(), param.ty.clone());
         }
-        let body = self.lower_body(&func.body, &return_type)?;
+        let body = self.lower_function_body(&func.body, &return_type, target)?;
         self.pop_scope();
 
         Ok(HirFunction {
@@ -254,7 +302,7 @@ impl Lowerer {
             params,
             return_type,
             body,
-            target: target_of(&func.attributes),
+            target,
             span: func.span,
         })
     }

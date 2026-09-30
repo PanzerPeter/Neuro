@@ -7,6 +7,7 @@ mod calls;
 mod coalesce;
 pub(crate) mod coercion;
 mod enums;
+mod grid;
 mod interpolation;
 mod matches;
 mod sequences;
@@ -346,6 +347,9 @@ impl Lowerer {
                 field,
                 span,
             } => {
+                if let Some(position) = self.grid_position(object, &field.name) {
+                    return Ok(HirExpr::new(position, HirType::U32, *span));
+                }
                 let object = self.lower_expr(object, None)?;
                 let HirType::Struct(struct_name) = object.ty.referent().clone() else {
                     return Err(LoweringError::Malformed {

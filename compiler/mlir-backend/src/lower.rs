@@ -14,7 +14,7 @@ use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirType};
 
 /// Prepended to a linked body's symbol, so it never collides with the Neuro-ABI
 /// function of the same name the LLVM backend defines around it.
-const LINKED_SYMBOL_PREFIX: &str = "__neuro_mlir_";
+pub(crate) const LINKED_SYMBOL_PREFIX: &str = "__neuro_mlir_";
 
 /// Bit widths for the fixed-size integer scalars, keyed off the HIR type.
 const I8_BITS: u32 = 8;

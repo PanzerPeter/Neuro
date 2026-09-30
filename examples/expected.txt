@@ -19,7 +19,7 @@
 # program: it has no `main`, and is compiled as part of the root that reaches
 # into it rather than on its own.
 #
-# `gpu` after an exit code marks a program with bare `@gpu` functions. It is
+# `gpu` after an exit code marks a program with bare `@gpu` or `@kernel` functions. It is
 # pinned like any other where a GPU runs it; with no usable GPU it must abort at
 # startup with the GPU runtime's diagnostic, and a compiler built without the
 # MLIR backend only type-checks it. A program whose `@gpu` functions all carry
@@ -89,6 +89,7 @@ tensors/tensor_functional.nr          24
 tensors/tensor_math.nr                10
 tensors/tensor_gpu.nr                 2  gpu
 tensors/tensor_device.nr              11  gpu
+tensors/tensor_kernel.nr              2  gpu
 
 # --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
 ownership/borrow_exclusivity.nr  31
@@ -168,6 +169,7 @@ showcase/frozen_features.nr          23
 showcase/generic_toolkit.nr          87
 showcase/gpu_fallback.nr             3
 showcase/gpu_layer.nr                3  gpu
+showcase/heat_diffusion.nr           100  gpu
 showcase/gradient_loss.nr            45
 showcase/grid_update.nr              50
 showcase/held_destruction.nr         5

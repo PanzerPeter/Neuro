@@ -155,6 +155,9 @@ pub(crate) struct TypeChecker {
     warnings: Vec<Warning>,
     /// Current function's return type (for validating return statements)
     current_function_return_type: Option<Type>,
+    /// Whether the body being checked is a `@kernel` function's, the only place
+    /// `thread_id` and `block_id` exist.
+    in_kernel: bool,
     /// Names of bindings in the current function whose storage outlives the call:
     /// reference-typed parameters and the `self` receiver of an instance method.
     /// A returned reference is only safe when it ultimately borrows one of these:
@@ -325,6 +328,7 @@ mod expressions;
 mod gpu;
 mod grad;
 mod iteration;
+mod kernel;
 mod literals;
 mod loop_adapters;
 mod matches;
@@ -389,6 +393,7 @@ impl TypeChecker {
             errors: Vec::new(),
             warnings: Vec::new(),
             current_function_return_type: None,
+            in_kernel: false,
             current_fn_outliving: HashSet::new(),
             backward_losses: HashSet::new(),
             self_is_owned: false,
@@ -906,6 +911,7 @@ impl TypeChecker {
         // the derivative transform generates can be tested against the whole program.
         self.check_grad_attributes(items);
         self.check_gpu_attributes(items);
+        self.check_kernel_attributes(items);
 
         // Pass 4: check function, method, and const bodies. Each body is checked as the
         // module it was written in, which is what a private field is measured against.

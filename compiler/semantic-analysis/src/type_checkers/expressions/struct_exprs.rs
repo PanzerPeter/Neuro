@@ -317,6 +317,9 @@ impl TypeChecker {
         field: &Identifier,
         span: &Span,
     ) -> Option<Type> {
+        if let Some(position) = self.check_grid_position(object, field) {
+            return Some(position);
+        }
         let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
         if matches!(obj_ty, Type::Unknown) {
             return Some(Type::Unknown);

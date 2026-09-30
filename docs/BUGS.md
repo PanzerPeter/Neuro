@@ -9,9 +9,8 @@ never reused, so numbering stays stable as entries are removed.
 
 - **Status**: open, specification gap
 - **Area**: `semantic-analysis`; attributes are read by name where each one matters
-  (`grad`, `no_grad`, `gpu`, `derive`, `allow`) and never checked as a set
-- **Severity**: minor. Nothing miscompiles, but a misspelled attribute silently does nothing,
-  and `@kernel`, which the next GPU items add, already compiles today as a no-op
+  (`grad`, `no_grad`, `gpu`, `kernel`, `derive`, `allow`) and never checked as a set
+- **Severity**: minor. Nothing miscompiles, but a misspelled attribute silently does nothing
 
 **Minimal repro**
 
@@ -19,24 +18,20 @@ never reused, so numbering stays stable as entries are removed.
 @no_grda
 func scale() -> f32 { 2.0f32 }
 
-@kernel
-func k() -> i32 { 1 }
-
 func main() -> i32 {
-    scale() as i32 + k()
+    scale() as i32
 }
 ```
 
-Observed: compiles and exits 3. The misspelled `@no_grda` is dropped, so inside a `@grad` body
-the call would be differentiated rather than held constant, and `@kernel` runs the function as
-an ordinary host function. `@gpu` is no longer part of this: a `@gpu` function whose body cannot
-become a kernel is now a compile error at the function.
+Observed: compiles and exits 2. The misspelled `@no_grda` is dropped, so inside a `@grad` body
+the call would be differentiated rather than held constant. `@gpu` and `@kernel` are no longer
+part of this: each one's form is checked, and a body that cannot run on a GPU is a compile
+error.
 
 **Open question for the specification**: the custom attributes section says the `@name(args)`
 syntax is extensible, and says nothing about a name no one defined. Either an unknown attribute
 is an error (the usual choice, and the one that keeps a typo from changing a program's meaning),
-or it is ignored, in which case `@kernel` should still be refused until it is implemented,
-since a program written against it today would change behaviour when it lands.
+or it is ignored.
 
 **Root cause**: confirmed in the code. Each consumer looks for its own attribute name on the
 item and skips everything else; no pass checks an item's attributes against the known set.
@@ -45,7 +40,7 @@ item and skips everything else; no pass checks an item's attributes against the 
 
 **Fix sketch**: once the rule is settled, one pass over every item's attributes against the
 recognized names, reporting the unknown one at its span. Regression tests: a misspelled
-`@no_grad`, `@kernel` before it is implemented, and every recognized attribute still accepted.
+`@no_grad`, and every recognized attribute still accepted.
 
 ## BUG-085: a struct passed by value never releases the `string` buffers it holds
 

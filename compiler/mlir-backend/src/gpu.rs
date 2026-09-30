@@ -1,13 +1,19 @@
 use crate::{
-    bridge::{BUFFERIZE, LinkableBodies, llvm_descent, translate_llvm_dialect},
+    bridge::{BUFFERIZE, LinkableBodies, llvm_descent, translate_llvm_dialects},
     context::new_context,
     errors::MlirError,
+    kernel::kernel_launchers,
     lower::build_linkable_module,
     tensor_arithmetic::read_type,
 };
 
-use melior::{Context, ir::Module, pass::PassManager, utility::parse_pass_pipeline};
-use neuro_hir::{HirFunction, HirItem, HirProgram, HirType};
+use melior::{
+    Context,
+    ir::{Module, operation::OperationLike},
+    pass::PassManager,
+    utility::parse_pass_pipeline,
+};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
 use shared_types::Span;
 
 /// The GPU a set of kernels is compiled for, and the chip that fixes its ISA.
@@ -138,35 +144,78 @@ pub(crate) fn lower_with_format(
     }
 
     let context = new_context();
-    let (mut module, functions) = build_linkable_module(&context, program, runs_on_gpu)?;
+    let (mut module, mut functions) = build_linkable_module(&context, program, runs_on_gpu)?;
     let refused = refused_bodies(program, &functions);
     if !refused.is_empty() {
         return Err(MlirError::GpuBodiesNotLowered(refused));
     }
-    if functions.is_empty() {
+    let kernels = kernel_launchers(program, target).map_err(MlirError::KernelBodiesNotLowered)?;
+
+    let mut lowered = Vec::with_capacity(2);
+    if !functions.is_empty() {
+        lower_module(
+            &context,
+            &mut module,
+            &gpu_lowering_pipeline(target),
+            format,
+        )?;
+        lowered.push(module);
+    }
+    // Kernels take a pipeline of their own: their buffers are the caller's from the start,
+    // so there is nothing to bufferize, and the deallocation pass that follows
+    // bufferization refuses the loops a kernel body branches through.
+    if !kernels.functions.is_empty() {
+        let mut kernel_module =
+            Module::parse(&context, &kernels.text).ok_or(MlirError::ModuleVerificationFailed)?;
+        if !kernel_module.as_operation().verify() {
+            return Err(MlirError::ModuleVerificationFailed);
+        }
+        lower_module(
+            &context,
+            &mut kernel_module,
+            &kernel_lowering_pipeline(target),
+            format,
+        )?;
+        lowered.push(kernel_module);
+        functions.extend(kernels.functions);
+    }
+    if lowered.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),
             functions,
         });
     }
 
-    run_pipeline(&context, &mut module, &gpu_lowering_pipeline(target))
-        .map_err(|_| MlirError::PassPipelineFailed)?;
-    run_pipeline(
-        &context,
-        &mut module,
-        &format!("builtin.module(gpu-module-to-binary{{format={format}}})"),
-    )
-    .map_err(|_| MlirError::GpuSerializationFailed)?;
-
     Ok(LinkableBodies {
-        llvm_ir: translate_llvm_dialect(&module)?,
+        llvm_ir: translate_llvm_dialects(&lowered)?,
         functions,
     })
 }
 
+/// Run `pipeline` over `module`, then embed its kernels as `format` device objects.
+fn lower_module(
+    context: &Context,
+    module: &mut Module<'_>,
+    pipeline: &str,
+    format: &str,
+) -> Result<(), MlirError> {
+    run_pipeline(context, module, pipeline).map_err(|_| MlirError::PassPipelineFailed)?;
+    run_pipeline(
+        context,
+        module,
+        &format!("builtin.module(gpu-module-to-binary{{format={format}}})"),
+    )
+    .map_err(|_| MlirError::GpuSerializationFailed)
+}
+
+/// Whether `function` is a `@gpu` one whose whole-tensor body the `linalg` path maps
+/// onto a grid. A `@kernel` body is the per-thread code itself, lowered apart.
+fn is_gpu_body(function: &HirFunction) -> bool {
+    matches!(function.target, HirTarget::Gpu | HirTarget::GpuOrHost)
+}
+
 fn runs_on_gpu(function: &HirFunction) -> bool {
-    function.target.has_gpu_body() && launches_every_op(function)
+    is_gpu_body(function) && launches_every_op(function)
 }
 
 /// Every `@gpu` function missing from `lowered`, with where it is declared.
@@ -175,7 +224,7 @@ fn refused_bodies(program: &HirProgram, lowered: &[(String, String)]) -> Vec<(St
         .items
         .iter()
         .filter_map(|item| match item {
-            HirItem::Function(function) if function.target.has_gpu_body() => Some(function),
+            HirItem::Function(function) if is_gpu_body(function) => Some(function),
             _ => None,
         })
         .filter(|function| !lowered.iter().any(|(name, _)| *name == function.name))
@@ -215,6 +264,22 @@ fn gpu_lowering_pipeline(target: &GpuTarget) -> String {
          scf-parallel-loop-tiling{{parallel-loop-tile-sizes={TILE_SIZES} no-min-max-bounds=true}},\
          gpu-map-parallel-loops,convert-parallel-loops-to-gpu),\
          gpu-kernel-outlining,func.func(gpu-async-region),\
+         {attach}{{chip={chip}}},\
+         gpu.module({convert}),\
+         lower-affine,{descent},gpu-to-llvm,reconcile-unrealized-casts)",
+        attach = target.attach_target_pass(),
+        chip = target.chip(),
+        convert = target.kernel_conversion_pass(),
+        descent = llvm_descent(DEVICE_MEMREF_TO_LLVM),
+    )
+}
+
+/// A `@kernel` launcher's descent: the `gpu.launch` outlined into a kernel of its own
+/// module, converted for the vendor, and the host side turned into runtime calls, as in
+/// [`gpu_lowering_pipeline`] after its `linalg` mapping.
+fn kernel_lowering_pipeline(target: &GpuTarget) -> String {
+    format!(
+        "builtin.module(gpu-kernel-outlining,func.func(gpu-async-region),\
          {attach}{{chip={chip}}},\
          gpu.module({convert}),\
          lower-affine,{descent},gpu-to-llvm,reconcile-unrealized-casts)",

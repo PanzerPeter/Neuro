@@ -707,6 +707,7 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
         HirExprKind::Literal(_)
         | HirExprKind::Variable(_)
         | HirExprKind::Path { .. }
+        | HirExprKind::GridPosition { .. }
         | HirExprKind::TensorIdentity
         | HirExprKind::CollectionNew => {}
         HirExprKind::Closure { .. } => {}

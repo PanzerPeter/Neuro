@@ -366,11 +366,12 @@ impl Lowerer {
             None => HirType::Void,
         };
 
+        let target = super::target_of(&template.attributes);
         self.push_scope();
         for param in &params {
             self.define(param.name.clone(), param.ty.clone());
         }
-        let body = self.lower_body(&template.body, &return_type)?;
+        let body = self.lower_function_body(&template.body, &return_type, target)?;
         self.pop_scope();
 
         self.type_subst = saved_ty;
@@ -382,7 +383,7 @@ impl Lowerer {
             params,
             return_type,
             body,
-            target: super::target_of(&template.attributes),
+            target,
             span: template.span,
         })
     }

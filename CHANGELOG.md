@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.9.0] - 2026-09-30
+
+### Added
+
+- `@kernel(threads: [...])` runs a function's body once per GPU thread. The launch has one thread
+  per element of the first `&mut Tensor` parameter, in blocks shaped `threads` (one to three
+  positive integer literals, one per axis, at most 1024 threads a block), with each axis rounded
+  up to whole blocks. Inside the body, `thread_id.x` / `.y` / `.z` is the thread's position in the
+  grid and `block_id` its block's, as `u32`; neither name exists outside a kernel. A kernel reads
+  tensors through `&Tensor`, writes them through `&mut Tensor`, takes numbers and `bool`s by
+  value, and returns nothing. Its body may use locals, arithmetic, casts, `if`, `while`, `loop`,
+  `for` over a range, `break`, `continue`, `return` and single tensor elements; any other
+  construct is a compile error at that construct. Every index is bounds-checked on the GPU, and a
+  thread that goes past an extent or divides an integer by zero aborts the program at the call.
+  A call stages host tensors to the GPU and copies each `&mut` one back; a tensor already on
+  the GPU is used in place. Like bare `@gpu`, a kernel needs a `neurc` built with the MLIR backend
+  and a GPU at run time. A malformed `@kernel`, including one with no `threads:`, is now a type
+  error; it used to compile as an ordinary function (the `@kernel` half of
+  [BUG-088](docs/BUGS.md#bug-088-an-attribute-the-compiler-does-not-know-is-accepted-and-ignored)).
+- `examples/tensors/tensor_kernel.nr` and the `heat_diffusion` showcase, which steps a
+  simulation with two kernels over tensors that stay on the GPU.
+
 ## [4.8.1] - 2026-09-30
 
 ### Docs

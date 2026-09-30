@@ -67,9 +67,9 @@ type checker) and the backends. `llvm-backend` consumes it today; the experiment
 consumes the same HIR behind the off-by-default `mlir` feature. A `neurc` built with its own
 `mlir` feature asks it for the straight-line `f32` / `f64` tensor bodies it computes exactly as the
 LLVM backend would, and the LLVM backend links those in, wrapped in the program's own tensor ABI,
-instead of generating them. The same build lowers each `@gpu` function's body through the MLIR GPU
-dialects to an NVIDIA or AMD kernel, and the LLVM backend links that kernel in with its launcher
-and the GPU runtime. See the [HIR Lowering](components/hir-lowering.md),
+instead of generating them. The same build lowers each `@gpu` function's body, and each
+`@kernel` function's per-thread body, through the MLIR GPU dialects to an NVIDIA or AMD kernel,
+and the LLVM backend links that kernel in with its launcher and the GPU runtime. See the [HIR Lowering](components/hir-lowering.md),
 [LLVM Backend](components/llvm-backend.md) and [MLIR Backend](components/mlir-backend.md) component
 docs.
 
@@ -192,8 +192,8 @@ are additional and feature-gated.
 ## Future Enhancements
 
 Planned on the [Quick Roadmap](../../README.md#quick-roadmap): debug information (`-g`),
-incremental compilation with a persistent cache, LTO defaults for release builds, and the `@kernel`
-attribute for hand-written GPU kernels.
+incremental compilation with a persistent cache, LTO defaults for release builds, and the
+`KernelOut<T>` aliasing boundary for `@kernel` outputs.
 
 ## Setup
 
