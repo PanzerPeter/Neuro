@@ -166,6 +166,9 @@ pub(crate) struct TypeChecker {
     /// The identifier an index is about to check as its object: the one read of a
     /// `KernelOut` handle a kernel body may make.
     indexed_kernel_out: Option<shared_types::Span>,
+    /// How many `unsafe` blocks enclose the code being checked; a raw `KernelOut` write
+    /// needs at least one.
+    unsafe_depth: u32,
     /// For each `@kernel` function, which parameters are bare `Tensor` inputs, the ones
     /// a call borrows rather than moves.
     kernel_inputs: HashMap<String, Vec<bool>>,
@@ -408,6 +411,7 @@ impl TypeChecker {
             kernel_outs: Vec::new(),
             kernel_out_scope: 0,
             indexed_kernel_out: None,
+            unsafe_depth: 0,
             kernel_inputs: HashMap::new(),
             current_fn_outliving: HashSet::new(),
             backward_losses: HashSet::new(),

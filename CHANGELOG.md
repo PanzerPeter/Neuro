@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.12.0] - 2026-09-30
+
+### Changed
+
+- **Breaking:** in a `@kernel` body, writing a `KernelOut` output by index (`out[i] = v`,
+  `out[i] += v`) is now a compile error outside an `unsafe { }` block. The compiler cannot prove
+  that no two threads write the same element, so `unsafe { out[i] = v }` marks where you vouch
+  for it. Reading an element needs no `unsafe`, and `out.partition(...)` stays the safe form.
+  Wrapping an existing write in `unsafe { }` is the whole migration. This is the first thing an
+  `unsafe` block means; everywhere else it still behaves like a bare block.
+
 ## [4.11.0] - 2026-09-30
 
 ### Added

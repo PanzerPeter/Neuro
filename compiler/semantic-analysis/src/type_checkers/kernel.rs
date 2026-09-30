@@ -338,9 +338,26 @@ impl TypeChecker {
 
     pub(crate) fn refuse_kernel_out_use(&mut self, name: &str, span: Span) {
         let problem = format!(
-            "output '{name}' is written one element at a time, `{name}[i] = v`, or through `{name}.partition(...)`; the handle cannot be bound, returned, passed, borrowed or captured"
+            "output '{name}' is written one element at a time, `unsafe {{ {name}[i] = v }}`, or through `{name}.partition(...)`; the handle cannot be bound, returned, passed, borrowed or captured"
         );
         self.kernel_error(&problem, span);
+    }
+
+    /// Refuse a store through a `KernelOut` handle's index outside `unsafe`: the compiler
+    /// cannot prove that no two threads write one element, so the block marks where the
+    /// programmer vouches for it.
+    pub(crate) fn check_kernel_out_write(&mut self, object: &Expr) {
+        let Expr::Identifier(out) = object else {
+            return;
+        };
+        if self.unsafe_depth > 0 || !self.names_kernel_out(&out.name) {
+            return;
+        }
+        let problem = format!(
+            "output '{0}' is written by index only inside `unsafe {{ }}`, which vouches that no two threads write one element; `{0}.partition(...)` needs no `unsafe`",
+            out.name
+        );
+        self.kernel_error(&problem, out.span);
     }
 
     /// The arguments of a call to `callee`, with each one a kernel borrows written as the

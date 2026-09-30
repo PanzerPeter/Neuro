@@ -106,6 +106,9 @@ module per declaration kind beside it. `tests/` is split by subject.
   like any other. It also records the `KernelOut` parameters (`enter_kernel_outs`); the
   identifier arm refuses any read of one (`check_kernel_out_read`) except as the object of an
   index, which `check_index_base` marks, and `validate_captures` refuses a closure capturing one.
+  A store through that index (`out[i] = v`, `out[i] += v`) is refused outside an `unsafe` block
+  (`check_kernel_out_write`, called from `resolve_place`; the `Unsafe` arm counts the enclosing
+  blocks in `unsafe_depth`). A read of one element needs none.
   The other place a handle may be named is the receiver of `out.partition(...)`, which the
   method-call arm hands to `check_kernel_partition` before checking the receiver as a value: one
   closure literal of two parameters, checked by `check_closure` against the fixed signature
@@ -176,7 +179,7 @@ Four rules interlock here, each fixing a shape that silently mis-typed:
    arm's type once known. Without it, an arm naming no type of its own (a bare `None`, an untyped
    integer literal) resolved against nothing even when the `val` it initialized was annotated,
    and `if`/`else` disagreed with the `match` spelling of the same computation.
-   `check_bare_block_expr`, `check_unsafe_block_expr`, and `check_block_expr_type` thread the same
+   `check_bare_block_expr` (bare and `unsafe` blocks) and `check_block_expr_type` thread the same
    expected type down to the tail.
 3. **An arm that LEAVES the scope contributes no type.** `check_if_expr` routes every arm through
    `arm_value_type`, and `check_arm` consults `expr_diverges`: a block ending in `return` /

@@ -296,10 +296,11 @@ val x: i32 = unsafe {
 }
 ```
 
-`unsafe` is currently **inert**: it is a reserved keyword and produces a
-distinct AST node, but carries no special semantics. It is reserved for the
-planned GPU-kernel aliasing model, where `unsafe { }` will gate raw `KernelOut`
-index writes. Until then it behaves identically to `{ }`.
+`unsafe` has one meaning so far. Inside a `@kernel` body, writing an output
+element by index (`out[i] = v`, `out[i] += v`) is legal only in an `unsafe`
+block, which marks where the programmer vouches that no two threads write the
+same element. See [Writing a kernel](tensors.md#writing-a-kernel-kernel).
+Everywhere else an `unsafe` block behaves like `{ }`.
 
 ### Parenthesized Expressions
 

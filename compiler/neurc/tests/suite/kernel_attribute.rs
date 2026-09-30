@@ -16,7 +16,8 @@ func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut
     val col = thread_id.y
     if row < 37 && col < 45 {
         val sum = a[row, col] + b[row, col]
-        out[row, col] = if sum > 0.0 { sum } else { 0.0 }
+        // SAFETY: thread (row, col) is the only one to write out[row, col].
+        unsafe { out[row, col] = if sum > 0.0 { sum } else { 0.0 } }
     }
 }
 
@@ -33,8 +34,10 @@ func row_sums(m: Tensor<i64, [9, 7]>, out: KernelOut<Tensor<i64, [9]>>, blocks: 
         }
         total += m[row, k]
     }
-    out[row] = total
-    blocks[row] = block_id.x
+    unsafe {
+        out[row] = total
+        blocks[row] = block_id.x
+    }
 }
 
 func main() -> i32 {
@@ -111,6 +114,10 @@ fn a_malformed_kernel_is_refused_by_the_checker() {
             "output 'out' is written one element at a time",
         ),
         (
+            "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<i32, [4]>>) {\n    out[thread_id.x] += 1\n}\nfunc main() -> i32 { return 0 }\n",
+            "output 'out' is written by index only inside `unsafe { }`",
+        ),
+        (
             "@kernel(threads: [4])\nfunc k(a: Tensor<f32, [4]>, out: KernelOut<Tensor<f32, [4]>>) {}\nfunc main() -> i32 {\n    val a: Tensor<f32, [4]> = Tensor::ones()\n    mut r: Tensor<f32, [4]> = Tensor::zeros()\n    k(&a, &mut r)\n    return 0\n}\n",
             "pass the tensor, not `&`",
         ),
@@ -126,7 +133,7 @@ fn a_malformed_kernel_is_refused_by_the_checker() {
 /// and writes the tensor its `KernelOut` is built from.
 #[test]
 fn a_kernel_call_borrows_its_inputs_and_lends_its_output() {
-    let source = "@kernel(threads: [4])\nfunc scale(a: Tensor<f32, [4]>, s: f32, out: KernelOut<Tensor<f32, [4]>>) {\n    val i = thread_id.x\n    if i < 4 {\n        out[i] = a[i] * s\n    }\n}\nfunc main() -> i32 {\n    val a: Tensor<f32, [4]> = Tensor::ones()\n    mut r: Tensor<f32, [4]> = Tensor::zeros()\n    scale(a, 2.0, &mut r)\n    scale(a, 3.0, &mut r)\n    return (a[0] + r[0]) as i32\n}\n";
+    let source = "@kernel(threads: [4])\nfunc scale(a: Tensor<f32, [4]>, s: f32, out: KernelOut<Tensor<f32, [4]>>) {\n    val i = thread_id.x\n    if i < 4 {\n        unsafe { out[i] = a[i] * s }\n    }\n}\nfunc main() -> i32 {\n    val a: Tensor<f32, [4]> = Tensor::ones()\n    mut r: Tensor<f32, [4]> = Tensor::zeros()\n    scale(a, 2.0, &mut r)\n    scale(a, 3.0, &mut r)\n    return (a[0] + r[0]) as i32\n}\n";
     CompileTest::new()
         .check("borrows.nr", source)
         .expect("a kernel input stays usable after the call");
@@ -159,7 +166,7 @@ fn without_mlir_a_kernel_is_a_compile_error() {
     let test = CompileTest::new();
     let source = test.write_source(
         "no_mlir.nr",
-        "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<f32, [4]>>) {\n    out[thread_id.x] = 1.0\n}\nfunc main() -> i32 { return 0 }\n",
+        "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<f32, [4]>>) {\n    unsafe { out[thread_id.x] = 1.0 }\n}\nfunc main() -> i32 { return 0 }\n",
     );
     let error = test
         .compile(&source)
@@ -176,7 +183,7 @@ fn without_mlir_a_kernel_is_a_compile_error() {
 #[test]
 fn a_body_the_gpu_path_cannot_lower_is_refused_at_the_construct() {
     let test = CompileTest::new();
-    let text = "func twice(x: f32) -> f32 {\n    x * 2.0\n}\n@kernel(threads: [4])\nfunc k(a: Tensor<f32, [4]>, out: KernelOut<Tensor<f32, [4]>>) {\n    val i = thread_id.x\n    out[i] = twice(a[i])\n}\nfunc main() -> i32 { return 0 }\n";
+    let text = "func twice(x: f32) -> f32 {\n    x * 2.0\n}\n@kernel(threads: [4])\nfunc k(a: Tensor<f32, [4]>, out: KernelOut<Tensor<f32, [4]>>) {\n    val i = thread_id.x\n    unsafe { out[i] = twice(a[i]) }\n}\nfunc main() -> i32 { return 0 }\n";
     let source = test.write_source("call_in_kernel.nr", text);
     let compiled = test
         .compile(&source)
@@ -187,7 +194,7 @@ fn a_body_the_gpu_path_cannot_lower_is_refused_at_the_construct() {
     for error in [compiled, checked] {
         assert!(
             error.contains("`@kernel` function 'k' cannot lower a function call to the GPU")
-                && error.contains("call_in_kernel.nr:7:14"),
+                && error.contains("call_in_kernel.nr:7:23"),
             "{error}"
         );
     }
@@ -230,7 +237,7 @@ fn an_index_past_an_extent_stops_the_kernel_and_the_program() {
     let exe = test
         .compile(&test.write_source(
             "overhang.nr",
-            "@kernel(threads: [8])\nfunc double(a: Tensor<i32, [10]>, out: KernelOut<Tensor<i32, [10]>>) {\n    val i = thread_id.x\n    out[i] = a[i] * 2\n}\nfunc main() -> i32 {\n    val a: Tensor<i32, [10]> = Tensor::ones()\n    mut out: Tensor<i32, [10]> = Tensor::zeros()\n    double(a, &mut out)\n    return out[0]\n}\n",
+            "@kernel(threads: [8])\nfunc double(a: Tensor<i32, [10]>, out: KernelOut<Tensor<i32, [10]>>) {\n    val i = thread_id.x\n    unsafe { out[i] = a[i] * 2 }\n}\nfunc main() -> i32 {\n    val a: Tensor<i32, [10]> = Tensor::ones()\n    mut out: Tensor<i32, [10]> = Tensor::zeros()\n    double(a, &mut out)\n    return out[0]\n}\n",
         ))
         .expect("the kernel should compile");
     let output = std::process::Command::new(&exe)

@@ -1,8 +1,9 @@
 // Writing from a GPU kernel so that no two threads touch one element: `out.partition(...)`.
 //
-// `out[i] = v` in a `@kernel` writes wherever `i` says, and nothing stops two threads
-// from writing the same element. `out.partition(|base, slice| { ... })` instead hands
-// each thread its own run of `out`, so no two threads can meet. The grid runs one thread
+// `unsafe { out[i] = v }` in a `@kernel` writes wherever `i` says, and nothing stops two
+// threads from writing the same element: the `unsafe` block is where you vouch they never do.
+// `out.partition(|base, slice| { ... })` instead hands each thread its own run of `out`,
+// so no two threads can meet, and needs no `unsafe`. The grid runs one thread
 // per element of the kernel's first `KernelOut` (the grid tensor). Partitioning a tensor
 // with `k` times as many elements gives each of those threads `k` of them, in row-major
 // order: `slice` is the run, indexed from 0 up to `slice.len()`, and `base` is the

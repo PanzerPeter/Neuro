@@ -3,7 +3,7 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   `@kernel` with `thread_id`, an early `return`, borrowed `Tensor` inputs and
-//   `KernelOut` outputs · `out.partition` with `.flat` · `.to(Device::GPU(0))` /
+//   `KernelOut` outputs written in `unsafe` blocks · `out.partition` with `.flat` · `.to(Device::GPU(0))` /
 //   `.to(Device::CPU)` · a `@gpu` function over device tensors · `pool` arena blocks · a
 //   closure through `.map` · a `.sum()` reduction · a `Vec` of `Copy` structs.
 //
@@ -24,11 +24,12 @@ func diffuse(t: Tensor<f32, [100]>, rate: f32, next: KernelOut<Tensor<f32, [100]
         return
     }
     if i == 0 || i == 99 {
-        next[i] = t[i]
+        unsafe { next[i] = t[i] }
         return
     }
     val spread = t[i - 1] + t[i + 1] - 2.0f32 * t[i]
-    next[i] = t[i] + rate * spread
+    // SAFETY: thread i writes cell i and no other.
+    unsafe { next[i] = t[i] + rate * spread }
 }
 
 // `partition` hands each thread that owns a cell its run of `out`: one element here,

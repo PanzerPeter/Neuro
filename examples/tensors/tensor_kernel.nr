@@ -16,7 +16,9 @@
 // `KernelOut<Tensor>`, and numbers or `bool`s by value. It returns nothing; what it
 // computes is what it writes. The call borrows every tensor: pass an input as `a` (you
 // still own it afterwards) and an output as `&mut r`. Inside the body an output is only
-// ever indexed, `out[i] = v`: the handle cannot be stored, passed on or returned.
+// ever indexed, and a write goes in an `unsafe { }` block: `unsafe { out[i] = v }`. The
+// compiler cannot prove that no two threads write one element, so `unsafe` marks where
+// you vouch for it. The handle cannot be stored, passed on or returned.
 // The body may use locals, arithmetic, casts, `if`, `while`, `loop`, `for` over a range,
 // `break`, `continue` and `return`, and tensor elements. It cannot call functions yet.
 //
@@ -30,7 +32,8 @@ func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut
     val col = thread_id.y
     if row < 37 && col < 45 {
         val sum = a[row, col] + b[row, col]
-        out[row, col] = if sum > 0.0 { sum } else { 0.0 }
+        // SAFETY: thread (row, col) is the only one to write out[row, col].
+        unsafe { out[row, col] = if sum > 0.0 { sum } else { 0.0 } }
     }
 }
 
@@ -48,8 +51,11 @@ func row_max(m: Tensor<i32, [10, 6]>, out: KernelOut<Tensor<i32, [10]>>, block_o
             best = m[row, col]
         }
     }
-    out[row] = best
-    block_of[row] = block_id.x
+    // SAFETY: each thread writes only its own row's slot of both outputs.
+    unsafe {
+        out[row] = best
+        block_of[row] = block_id.x
+    }
 }
 
 func main() -> i32 {

@@ -281,9 +281,14 @@ impl TypeChecker {
             // divergent contract the panic-family builtins carry.
             Expr::Loop { label, body, .. } => self.check_loop_expr(label, body, expected),
 
-            // `unsafe` is inert in Phase 1.7: it introduces a scope and yields
-            // its trailing expression's type, exactly like a bare block.
-            Expr::Unsafe { stmts, .. } => self.check_bare_block_expr(stmts, expected),
+            // `unsafe` checks like a bare block. Its one meaning so far: inside it, a
+            // kernel may write a `KernelOut` element by index.
+            Expr::Unsafe { stmts, .. } => {
+                self.unsafe_depth += 1;
+                let ty = self.check_bare_block_expr(stmts, expected);
+                self.unsafe_depth -= 1;
+                ty
+            }
 
             Expr::Pool { label, stmts, .. } => {
                 let label = label.as_ref().map(|id| id.name.clone());

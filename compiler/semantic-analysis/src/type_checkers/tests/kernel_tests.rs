@@ -9,7 +9,7 @@ func add(a: Tensor<f32, [37, 45]>, s: f32, on: bool, out: KernelOut<Tensor<f32, 
     val col = thread_id.y
     val block = block_id.z
     if on && row < 37 && col < 45 {
-        out[row, col] = a[row, col] * s + (block as f32)
+        unsafe { out[row, col] = a[row, col] * s + (block as f32) }
     }
 }
 ";
@@ -173,7 +173,7 @@ fn a_kernel_out_handle_is_only_indexed() {
             &format!("    val block = block_id.z\n{line}\n"),
         )
     };
-    let fine = with("    out[0, 0] += out[1, 1]");
+    let fine = with("    unsafe { out[0, 0] += out[1, 1] }");
     let errors = semantic_errors(&fine);
     assert!(errors.is_empty(), "got {errors:?}");
 
@@ -198,6 +198,46 @@ fn a_kernel_out_handle_is_only_indexed() {
             "{line}: got {errors:?}"
         );
     }
+}
+
+/// An index store into an output is legal only inside `unsafe`, however deep; a read of
+/// one element, a shadowing local and a partition's slice need none.
+#[test]
+fn a_raw_kernel_out_write_needs_unsafe() {
+    let with = |line: &str| {
+        KERNEL.replace(
+            "    val block = block_id.z\n",
+            &format!("    val block = block_id.z\n{line}\n"),
+        )
+    };
+    for line in [
+        "    out[0, 0] = 1.0",
+        "    out[0, 0] += 1.0",
+        "    if on { out[0, 0] = out[1, 1] }",
+        "    for i in 0..2 { unsafe { val x = 1.0 }\n out[i, 0] = 1.0 }",
+    ] {
+        let src = with(line);
+        let (problem, at) = kernel_error(&src);
+        assert!(
+            problem.contains("output 'out' is written by index only inside `unsafe { }`"),
+            "{line}: {problem}"
+        );
+        assert_eq!(
+            at,
+            src.find(line).expect("line") + line.find("out[").expect("write")
+        );
+    }
+    for line in [
+        "    val x = out[1, 1]",
+        "    unsafe { if on { out[0, 0] = 1.0 } }",
+        "    unsafe { unsafe { out[0, 0] = 1.0 } }",
+        "    if on {\n        mut out: [f32; 2] = [0.0, 0.0]\n        out[0] = 1.0\n    }",
+    ] {
+        let errors = semantic_errors(&with(line));
+        assert!(errors.is_empty(), "{line}: got {errors:?}");
+    }
+    let errors = semantic_errors(PARTITION);
+    assert!(errors.is_empty(), "got {errors:?}");
 }
 
 /// A bare `Tensor` input is borrowed by the call: the caller keeps it, may not pass it

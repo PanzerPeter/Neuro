@@ -1037,7 +1037,8 @@ func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut
     val col = thread_id.y
     if row < 37 && col < 45 {
         val sum = a[row, col] + b[row, col]
-        out[row, col] = if sum > 0.0 { sum } else { 0.0 }
+        // SAFETY: thread (row, col) is the only one to write out[row, col].
+        unsafe { out[row, col] = if sum > 0.0 { sum } else { 0.0 } }
     }
 }
 ```
@@ -1068,7 +1069,10 @@ the kernel has run; a tensor already moved with [`.to(Device::GPU(n))`](#device-
 where it is, and an output is written in place.
 
 Inside the body a `KernelOut` handle is only ever indexed (`out[i, j] = v`, `out[i] += v`, or a
-read of one element) or partitioned (below). It cannot be bound to a local, borrowed, passed to
+read of one element) or partitioned (below). A write by index must sit in an `unsafe { }` block:
+the compiler cannot prove that no two threads write the same element, so `unsafe` marks each
+place where you vouch for it, and searching a kernel for `unsafe` finds every one. Reading an
+element needs no `unsafe`. `partition` is the safe alternative. The handle cannot be bound to a local, borrowed, passed to
 a function, captured by a closure or returned, and `KernelOut` is not a type anywhere but a
 kernel's parameter list. An input is read-only; writing one of its elements is an error.
 

@@ -122,6 +122,7 @@ impl TypeChecker {
                 span: index_span,
             } => {
                 let obj_ty = self.check_index_base(object)?;
+                self.check_kernel_out_write(object);
                 if !self.place_is_writable(&obj_ty, place) {
                     self.report_immutable_place(place);
                     return None;
@@ -160,6 +161,7 @@ impl TypeChecker {
                 span: index_span,
             } => {
                 let obj_ty = self.check_index_base(object)?;
+                self.check_kernel_out_write(object);
                 if !self.place_is_writable(&obj_ty, place) {
                     self.report_immutable_place(place);
                     return None;
