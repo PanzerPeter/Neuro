@@ -154,9 +154,9 @@ own `Iterator` shadows them like any other prelude name. `type Iter` carries no 
 bound because an associated-type *declaration* has no bound syntax yet; the requirement is
 enforced where the loop is built, on the type `into_iter` actually returns.
 
-`Device` is `CPU | GPU(i32)`, and its variant ORDER is load-bearing: the LLVM backend reads
-`CPU`'s discriminant to decide whether a `.to(device)` transfer is the move itself or a runtime
-abort, so reordering the variants changes which devices a program may transfer to. It is
+`Device` is `CPU | GPU(i32)`, and its variant names and `GPU`'s one `i32` field are
+load-bearing: the LLVM backend looks `CPU` up by name to tell a transfer to the host from one to a
+GPU, and reads the index out of `GPU`'s payload. It is
 otherwise an ordinary prelude enum: a program declaring its own `Device` shadows it, and then
 `.to` no longer accepts that program's values.
 
@@ -204,8 +204,9 @@ required because LLVM object files need a platform linker driver to attach the C
 code: neurc cannot ship its own linker. The Unix link passes `-lm` explicitly:
 `Tensor::random_normal` emits `log` and `cos`, and the C math library is a separate archive on
 the older glibc still in wide use. It is a no-op where the platform has folded libm into libc.
-A program with device bodies also gets `-ldl` (`GPU_RUNTIME_LIBS`), for the GPU runtime's
-`dlopen` on glibc older than 2.34.
+Every Unix link also passes `-ldl` (`GPU_RUNTIME_LIBS`), for the GPU runtime's `dlopen` on glibc
+older than 2.34. A `.to(device)` links the runtime as surely as a `@gpu` body does, and only the
+backend sees which programs make one, so the driver cannot restrict the flag to them.
 
 `link_windows` keeps **every** driver's diagnosis and reports them together when the last one
 fails, rather than logging each at `debug` and raising only the last. The two failures look

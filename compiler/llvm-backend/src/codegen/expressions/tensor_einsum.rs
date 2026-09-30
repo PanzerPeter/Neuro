@@ -75,7 +75,7 @@ impl<'ctx> CodegenContext<'ctx> {
         for (operand, subscript) in operands.iter().zip(inputs.iter()) {
             let operand_ty = Type::from_hir(&operand.ty);
             let handle = self.tensor_receiver_handle(operand, &operand_ty)?;
-            let data = self.load_dlpack_data(handle)?;
+            let data = self.load_host_data(handle, operand.span.start)?;
             handles.push(handle);
             plans.push(OperandPlan {
                 data,

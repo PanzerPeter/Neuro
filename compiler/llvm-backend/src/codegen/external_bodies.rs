@@ -13,7 +13,11 @@ use crate::types::Type;
 use crate::{BodyMemory, ExternalBodies};
 
 use super::context::CodegenContext;
-use super::device_memory::{DEVICE_ALLOC_FN, DEVICE_RELEASE_FN, GPU_FALLBACK_GLOBAL, GPU_PANIC_FN};
+use super::device_memory::{
+    DEVICE_ALLOC_FN, DEVICE_CHECK_FN, DEVICE_DOWNLOAD_FN, DEVICE_RELEASE_FN,
+    DEVICE_TENSOR_ALLOC_FN, DEVICE_TENSOR_FREE_FN, DEVICE_UPLOAD_FN, GPU_FALLBACK_GLOBAL,
+    GPU_PANIC_FN,
+};
 
 /// The CUDA implementation of the GPU runtime ABI a device body calls, linked in with
 /// the first set of device bodies. See `gpu_runtime.c`, its provenance.
@@ -28,8 +32,9 @@ const GPU_USABLE_FN: &str = "__neuro_gpu_usable";
 const GPU_BODY_SUFFIX: &str = ".gpu";
 const HOST_BODY_SUFFIX: &str = ".host";
 
-/// What the runtime defines for the launchers and the staging, made internal once linked.
-const GPU_RUNTIME_ENTRY_POINTS: [&str; 13] = [
+/// What the runtime defines for the launchers, the staging and device tensors, made
+/// internal once linked.
+const GPU_RUNTIME_ENTRY_POINTS: [&str; 18] = [
     "mgpuModuleLoad",
     "mgpuModuleLoadJIT",
     "mgpuModuleUnload",
@@ -41,6 +46,11 @@ const GPU_RUNTIME_ENTRY_POINTS: [&str; 13] = [
     "mgpuMemAlloc",
     "mgpuMemFree",
     "mgpuMemcpy",
+    DEVICE_TENSOR_ALLOC_FN,
+    DEVICE_UPLOAD_FN,
+    DEVICE_DOWNLOAD_FN,
+    DEVICE_TENSOR_FREE_FN,
+    DEVICE_CHECK_FN,
     GPU_USABLE_FN,
     GPU_PANIC_FN,
 ];
@@ -56,10 +66,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Ownership is the ordinary function's: a by-value tensor parameter was moved in,
     /// so it is released once the body has read it, and a `&Tensor` one is only read.
     ///
-    /// When `memory` is a device's, every buffer `symbol` sees is staged: each
-    /// tensor operand is copied into device memory, the result is written to a device
-    /// buffer and copied back into the host tensor returned, and all of it is released
-    /// before the function returns. A caller still passes and receives host tensors.
+    /// When `memory` is a device's, every buffer `symbol` sees is device memory. A host
+    /// tensor operand is copied there and a device one passed as it is. With every operand
+    /// on the host, the result is written to a device buffer and copied back into the host
+    /// tensor returned, so such a caller still passes and receives host tensors; with any
+    /// operand on the device, the result is a device tensor. Every staged copy is released
+    /// before the function returns. A host body refuses a device tensor at run time.
     pub(crate) fn codegen_external_body(
         &mut self,
         func_def: &HirFunction,
@@ -104,20 +116,24 @@ impl<'ctx> CodegenContext<'ctx> {
                     continue;
                 }
             };
-            let host = self.load_dlpack_data(handle)?;
             let data = match staging.as_mut() {
-                Some(staging) => self.copy_to_device(staging, ty.referent(), host)?,
-                None => host,
+                Some(staging) => self.stage_operand(staging, ty.referent(), handle)?,
+                None => self.load_host_data(handle, func_def.span.start)?,
             };
             self.push_memref_descriptor(ty.referent(), data, &mut arg_types, &mut args)?;
         }
 
         let result_ty = Type::from_hir(&func_def.return_type);
-        let result = self.alloc_dlpack_tensor(&result_ty, "external.result")?;
-        let host_result = self.load_dlpack_data(result)?;
-        let written = match staging.as_mut() {
-            Some(staging) => self.device_buffer(staging, &result_ty)?,
-            None => host_result,
+        let staged_result = match staging.as_mut() {
+            Some(staging) => Some(self.stage_result(staging, &result_ty)?),
+            None => None,
+        };
+        let (result, written) = match &staged_result {
+            Some(staged) => (staged.handle, staged.written),
+            None => {
+                let result = self.alloc_dlpack_tensor(&result_ty, "external.result")?;
+                (result, self.load_dlpack_data(result)?)
+            }
         };
         self.push_memref_descriptor(&result_ty, written, &mut arg_types, &mut args)?;
 
@@ -130,8 +146,8 @@ impl<'ctx> CodegenContext<'ctx> {
         });
         self.builder.build_call(callee, &args, "")?;
 
-        if let Some(staging) = staging {
-            self.close_device_staging(staging, &result_ty, host_result, written)?;
+        if let (Some(staging), Some(staged)) = (staging, staged_result) {
+            self.close_device_staging(staging, &result_ty, &staged)?;
         }
         for handle in consumed {
             self.build_dlpack_release(handle)?;
@@ -461,14 +477,32 @@ mod tests {
     }
 
     #[test]
-    fn a_device_body_is_handed_only_staged_buffers() {
+    fn a_device_body_stages_a_host_operand_and_passes_a_device_one_as_it_is() {
         let ir = device_ir(SOURCE);
         let scale = body(&ir, "scale");
 
         let stream = position(scale, "call ptr @mgpuStreamCreate()", 0);
-        let copy_in = position(scale, "call void @mgpuMemcpy(", stream);
-        let call = position(scale, "call void @ext_scale(ptr %device.buffer", copy_in);
-        let copy_out = position(scale, "call void @mgpuMemcpy(", call);
+        let placed = position(
+            scale,
+            "br i1 %dlpack.on_host, label %device.stage, label %device.staged",
+            stream,
+        );
+        let copy_in = position(
+            scale,
+            "call void @mgpuMemcpy(ptr %device.buffer, ptr %dlpack.data,",
+            placed,
+        );
+        position(
+            scale,
+            "%device.operand = phi ptr [ %device.buffer, %device.stage ], [ %dlpack.data, %entry ]",
+            copy_in,
+        );
+        let call = position(scale, "call void @ext_scale(ptr %device.operand", copy_in);
+        let copy_out = position(
+            scale,
+            "call void @mgpuMemcpy(ptr %device.copy_back, ptr %device.written,",
+            call,
+        );
         let settled = position(scale, "call void @mgpuStreamSynchronize(", copy_out);
         assert!(
             !scale[..copy_out].contains("@mgpuStreamSynchronize("),
@@ -486,11 +520,49 @@ mod tests {
                 .matches("call ptr @_mlir_memref_to_llvm_alloc(")
                 .count(),
             2,
-            "one device buffer for the operand and one for the result:\n{scale}"
+            "one scratch buffer for the operand and one for a host result:\n{scale}"
         );
+    }
+
+    #[test]
+    fn a_device_operand_leaves_the_result_on_the_device() {
+        let ir = device_ir(SOURCE);
+        let scale = body(&ir, "scale");
+
+        let choice = position(
+            scale,
+            "br i1 %device.any_resident, label %device.result, label %host.result",
+            0,
+        );
+        let resident = position(scale, "call ptr @__neuro_device_alloc(i64 8)", choice);
+        let returned = position(scale, "host.result:", resident);
+        let on_device = &scale[resident..returned];
         assert!(
-            !scale[call..].contains("%dlpack.data,"),
-            "a host buffer must not reach the kernel:\n{scale}"
+            on_device.contains("store ptr @__neuro_dlpack_device_deleter")
+                && on_device.contains("store { i32, i32 } { i32 2, i32 0 }"),
+            "a result left on the device is a kDLCUDA tensor released by the runtime:\n{on_device}"
+        );
+        position(
+            scale,
+            "%device.copy_back = phi ptr [ null, %device.result ]",
+            returned,
+        );
+        position(
+            scale,
+            "br i1 %device.returning, label %device.copy_out, label %device.settle",
+            returned,
+        );
+    }
+
+    #[test]
+    fn a_host_body_refuses_a_device_tensor() {
+        let ir = host_ir();
+        let consume = body(&ir, "consume");
+        let guard = position(consume, "%dlpack.on_host = icmp eq i32", 0);
+        position(consume, "call void @ext_consume(ptr %dlpack.data", guard);
+        assert!(
+            ir.contains("this tensor lives on a GPU"),
+            "a host body must not read device memory:\n{consume}"
         );
     }
 
@@ -575,8 +647,8 @@ mod tests {
             ],
         );
         assert!(
-            body(&ir, "scale").contains("call void @ext_scale(ptr %device.buffer"),
-            "the device body is handed staged buffers:\n{ir}"
+            body(&ir, "scale").contains("call void @ext_scale(ptr %device.operand"),
+            "the device body is handed device buffers:\n{ir}"
         );
         let consume = body(&ir, "consume");
         assert!(

@@ -2,15 +2,17 @@
 //
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
-//   `@gpu` · `@` and broadcast `+` in one kernel body · `pool` arena blocks
-//   · a closure through `.map` · a `.sum()` reduction
+//   `@gpu` · `.to(Device::GPU(0))` / `.to(Device::CPU)` · `@` and broadcast `+` in one
+//   kernel body · `pool` arena blocks · a closure through `.map` · a `.sum()` reduction
 //   · a `Vec` of `Copy` structs.
 //
-// Each batch goes through `dense` on the GPU, and its ReLU and totals run on the host.
-// The same layer is also computed inline on the host, and the two must agree exactly.
-// Every batch is processed inside a `pool`, whose exit also releases the device memory
-// the call staged. Without a usable NVIDIA GPU the program stops before `main` with a
-// `panic:` line, since bare `@gpu` never falls back to the CPU.
+// The weights and bias move to the GPU once, before the first batch, and stay there: each
+// call reads them in place and stages only the batch. Because a weight lives on the GPU,
+// so does each call's result, and `.to(Device::CPU)` brings it back for the ReLU and totals,
+// which run on the host. The same layer is also computed inline on the host, and the two
+// must agree exactly. Every batch is processed inside a `pool`, whose exit also releases
+// the device memory the call staged. Without a usable NVIDIA GPU the program stops before
+// `main` with a `panic:` line, since bare `@gpu` never falls back to the CPU.
 
 @gpu
 func dense(x: &Tensor<f32, [4, 3]>, w: &Tensor<f32, [3, 2]>, bias: &Tensor<f32, [2]>) -> Tensor<f32, [4, 2]> {
@@ -32,6 +34,8 @@ func main() -> i32 {
         [-0.5, 1.0]
     ]
     val bias: Tensor<f32, [2]> = [0.5, -0.25]
+    val w_gpu = w.clone().to(Device::GPU(0))
+    val bias_gpu = bias.clone().to(Device::GPU(0))
     val relu = |v: f32| if v > 0.0f32 { v } else { 0.0f32 }
 
     mut reports: Vec<BatchReport> = Vec::new()
@@ -40,7 +44,7 @@ func main() -> i32 {
         pool {
             val scale = (batch + 1) as f32
             val x = Tensor::<f32, [4, 3]>::ones() * scale
-            val on_gpu = dense(&x, &w, &bias)
+            val on_gpu = dense(&x, &w_gpu, &bias_gpu).to(Device::CPU)
             val on_host = &x @ &w + &bias
             val agrees = on_gpu[0, 0] == on_host[0, 0] && on_gpu[3, 1] == on_host[3, 1]
             val activated = on_gpu.map(relu)

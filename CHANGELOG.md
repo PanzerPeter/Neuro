@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-09-30
+
+### Added
+
+- `.to(Device::GPU(0))` moves a tensor's elements into the memory of the first NVIDIA GPU, and
+  `.to(Device::CPU)` brings them back. The tensor keeps its handle, the old buffer is freed,
+  and a tensor already on the requested device is not copied. A `@gpu` call reads a device
+  tensor where it is instead of copying it over, and a call given one returns its result on the
+  GPU too, so a chain of `@gpu` calls keeps its data on the device until `.to(Device::CPU)`.
+  Host operands next to a device one are still copied in. A call with only host tensors
+  behaves as before.
+- Host code refuses a device tensor. Indexing, arithmetic, reductions, `.clone()` and the other
+  host operations abort with ``panic: this tensor lives on a GPU, where host code cannot read
+  it: move it back with `.to(Device::CPU)` first`` at the operation, instead of dereferencing
+  device memory.
+- Transfers need no MLIR backend. A program whose only GPU use is `.to` looks for a GPU at its
+  first transfer, and without one aborts with ``panic: `Device::GPU` needs an NVIDIA GPU, and
+  none is usable: <reason>``. Only GPU 0 can hold a tensor for now: `Device::GPU(n)` for any
+  other `n` aborts with a diagnostic naming it. On Windows a transfer to a GPU still aborts.
+- `examples/tensors/tensor_device.nr` keeps a tensor on the GPU across ten `@gpu` calls. The
+  `gpu_layer` showcase moves its weights to the GPU once, before the first batch.
+
+### Changed
+
+- Every Unix link passes `-ldl`, not only a program with `@gpu` functions, since any `.to`
+  links the GPU runtime.
+
 ## [4.5.2] - 2026-09-30
 
 ### Fixed

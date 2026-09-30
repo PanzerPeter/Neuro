@@ -27,17 +27,19 @@ use neuro_hir::HirExpr;
 
 use super::row_major_strides;
 use crate::codegen::context::CodegenContext;
+use crate::codegen::dlpack::TensorHome;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-/// The prelude enum `.to(device)` takes, and the one variant this backend can lower a
-/// transfer to. Any other device is a run-time abort rather than a silent no-op: the
-/// buffer would still be host memory, and a program that believed otherwise would be
-/// wrong about where its compute runs.
+/// The prelude enum `.to(device)` takes, and its host variant; every other variant is a
+/// GPU, carrying its index as the one payload field.
 const DEVICE_ENUM: &str = "Device";
 const DEVICE_HOST_VARIANT: &str = "CPU";
-const DEVICE_UNAVAILABLE: &str = "tensor transfer to a non-host device requires the GPU backend, which this compiler \
-     does not have yet";
+
+/// Windows has no GPU runtime to move a buffer with (it opens the driver with `dlopen`),
+/// and a transfer that left the buffer where it was would leave the program wrong about
+/// where its compute runs.
+const DEVICE_UNAVAILABLE: &str = "a tensor transfer to a GPU is not supported on Windows yet";
 
 impl<'ctx> CodegenContext<'ctx> {
     /// The element type and buffer length of a tensor type.
@@ -329,8 +331,8 @@ impl<'ctx> CodegenContext<'ctx> {
         } else {
             ptr
         };
+        let source_data = self.load_host_data(source, receiver.span.start)?;
         let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.clone")?;
-        let source_data = self.load_dlpack_data(source)?;
         let size = self.dlpack_copy_length(tensor_ty)?;
         self.build_memcpy_call(data, source_data, size)?;
         Ok(handle.into())
@@ -394,7 +396,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         let buffer_ty = self.type_mapper.tensor_buffer_type(result_ty)?;
-        let source_data = self.load_dlpack_data(source)?;
+        let source_data = self.load_host_data(source, receiver.span.start)?;
         let (handle, data) = self.alloc_tensor(result_ty, "tensor.permute")?;
         self.emit_permuted_copy(
             buffer_ty,
@@ -510,20 +512,25 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Lower `tensor.to(device)`: the consuming device transfer.
     ///
-    /// Every buffer this backend can build is host memory, so a transfer to the host is
-    /// the move itself and costs nothing. A transfer anywhere else has no lowering at all,
-    /// and the device is an ordinary run-time value, so the mismatch is caught where the
-    /// value is known: a guard on the discriminant that aborts with a diagnostic rather
-    /// than letting the program run somewhere it did not ask for.
+    /// Both the device and where the tensor lives now are run-time values, so the choice
+    /// is made at run time: a tensor already where it is asked to go is left alone, and
+    /// one elsewhere has its elements copied into a buffer at the destination and its old
+    /// buffer released. Either way the result is the receiver's own handle, re-pointed at
+    /// the new buffer, so a transfer allocates no second tensor. The GPU runtime checks the
+    /// index, and aborts with a diagnostic when no usable GPU answers to it.
     ///
-    /// The result is the receiver's own buffer pointer, so the transfer hands ownership on:
-    /// the receiver's drop flag is cleared here, or the one buffer would be freed twice.
+    /// The transfer hands ownership on: the receiver's drop flag is cleared here, or the
+    /// one handle would be released twice.
     pub(crate) fn codegen_tensor_to(
         &mut self,
         receiver: &HirExpr,
         args: &[HirExpr],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let tensor = self.codegen_expr(receiver)?;
+        let BasicValueEnum::PointerValue(handle) = self.codegen_expr(receiver)? else {
+            return Err(CodegenError::InternalError(
+                "a tensor receiver does not lower to a pointer".to_string(),
+            ));
+        };
         self.mark_moved_for_drop(receiver);
         let device = args.first().ok_or_else(|| {
             CodegenError::InternalError("`.to` reached codegen without a device".to_string())
@@ -538,14 +545,86 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_extract_value(device_val, 0, "device.tag")?
             .into_int_value();
         let host = self.enum_variant_tag(DEVICE_ENUM, DEVICE_HOST_VARIANT)?;
-        let is_host = self.builder.build_int_compare(
+        let to_host = self.builder.build_int_compare(
             IntPredicate::EQ,
             tag,
             self.context.i32_type().const_int(host as u64, false),
-            "device.is_host",
+            "device.to_host",
         )?;
-        self.codegen_guard_or_panic(is_host, DEVICE_UNAVAILABLE, device.span.start)?;
-        Ok(tensor)
+        if cfg!(target_os = "windows") {
+            self.codegen_guard_or_panic(to_host, DEVICE_UNAVAILABLE, device.span.start)?;
+            return Ok(handle.into());
+        }
+
+        let tensor_ty = Type::from_hir(&receiver.ty);
+        let function = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("a device transfer outside a function".to_string())
+        })?;
+        let on_host = self.dlpack_on_host(handle)?;
+        let to_gpu = self.context.append_basic_block(function, "to.gpu");
+        let upload = self.context.append_basic_block(function, "to.upload");
+        let resident = self.context.append_basic_block(function, "to.resident");
+        let to_cpu = self.context.append_basic_block(function, "to.cpu");
+        let download = self.context.append_basic_block(function, "to.download");
+        let done = self.context.append_basic_block(function, "to.done");
+        self.builder
+            .build_conditional_branch(to_host, to_cpu, to_gpu)?;
+
+        self.builder.position_at_end(to_gpu);
+        let index = self.device_index(device_val)?;
+        self.builder
+            .build_conditional_branch(on_host, upload, resident)?;
+
+        self.builder.position_at_end(upload);
+        let host_data = self.load_dlpack_data(handle)?;
+        let device_data = self.device_upload(host_data, &tensor_ty, index)?;
+        let release_host = self.aligned_release_fn()?;
+        self.builder
+            .build_call(release_host, &[host_data.into()], "")?;
+        self.set_dlpack_home(handle, device_data, TensorHome::Gpu(index))?;
+        self.builder.build_unconditional_branch(done)?;
+
+        self.builder.position_at_end(resident);
+        self.device_check(index)?;
+        self.builder.build_unconditional_branch(done)?;
+
+        self.builder.position_at_end(to_cpu);
+        self.builder
+            .build_conditional_branch(on_host, done, download)?;
+
+        self.builder.position_at_end(download);
+        let device_data = self.load_dlpack_data(handle)?;
+        let host_data = self.alloc_host_buffer(&tensor_ty)?;
+        self.device_download(host_data, device_data, &tensor_ty)?;
+        let release_device = self.device_tensor_free_fn()?;
+        self.builder
+            .build_call(release_device, &[device_data.into()], "")?;
+        self.set_dlpack_home(handle, host_data, TensorHome::Host)?;
+        self.builder.build_unconditional_branch(done)?;
+
+        self.builder.position_at_end(done);
+        Ok(handle.into())
+    }
+
+    /// The `i32` index a `Device::GPU(n)` value carries, read back out of its payload's
+    /// raw words the way a `match` binding reads it.
+    fn device_index(
+        &self,
+        device_val: inkwell::values::StructValue<'ctx>,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let payload = self
+            .builder
+            .build_extract_value(device_val, 1, "device.payload")?
+            .into_array_value();
+        let words = self
+            .builder
+            .build_extract_value(payload, 0, "device.words")?;
+        let cell = self.enum_payload_cell(self.type_mapper.enum_slot_type(DEVICE_ENUM)?)?;
+        self.builder.build_store(cell, words)?;
+        Ok(self
+            .builder
+            .build_load(self.context.i32_type(), cell, "device.index")?
+            .into_int_value())
     }
 
     /// An LLVM constant array over `values`, which must themselves be constants.

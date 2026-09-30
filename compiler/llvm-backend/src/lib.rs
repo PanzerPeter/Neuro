@@ -77,7 +77,9 @@ pub enum BodyMemory {
     /// `_mlir_memref_to_llvm_free` as its device allocator for the buffers a body
     /// allocates itself. It links its own runtime for that ABI, over the CUDA driver,
     /// which it opens at run time: the program needs `dlopen` from the platform C
-    /// library, and a GPU only once it runs.
+    /// library, and a GPU only once it runs. A tensor already moved to the GPU with
+    /// `.to(Device::GPU(0))` is passed without a copy, and a call given one leaves its
+    /// result on the GPU too.
     Device,
 }
 
@@ -419,7 +421,8 @@ fn build_module<'ctx>(
             bodies,
         )?;
     }
-    if device_bodies {
+    // A device body brings the runtime, and so does a tensor transfer in a program with none.
+    if codegen_ctx.requires_gpu_runtime() {
         codegen::external_bodies::link_gpu_runtime(codegen_ctx.context, &codegen_ctx.module)?;
     }
 

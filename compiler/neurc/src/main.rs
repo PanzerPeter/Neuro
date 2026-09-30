@@ -16,8 +16,8 @@ const MAIN_FUNCTION: &str = "main";
 #[cfg(feature = "mlir")]
 const GPU_CHIP: &str = "sm_60";
 
-/// What the GPU runtime linked beside a device body needs from the platform: `dlopen`,
-/// which only glibc 2.34 and later keep in libc itself.
+/// What the GPU runtime needs from the platform: `dlopen`, which only glibc 2.34 and
+/// later keep in libc itself.
 const GPU_RUNTIME_LIBS: &[&str] = &["-ldl"];
 
 mod prelude;
@@ -505,12 +505,13 @@ fn compile_file(
 
     let rendered = (module_count == 1).then_some(source.as_str());
     let external = tensor_bodies(&hir, input, rendered)?;
-    let libs: &[&str] = match external
-        .iter()
-        .any(|bodies| bodies.memory == llvm_backend::BodyMemory::Device)
-    {
-        true => GPU_RUNTIME_LIBS,
-        false => &[],
+    // A `.to(device)` links the GPU runtime as surely as a `@gpu` body does, and only the
+    // backend sees which programs make one, so every link where the runtime can exist
+    // offers what it needs.
+    let libs: &[&str] = if cfg!(target_os = "windows") {
+        &[]
+    } else {
+        GPU_RUNTIME_LIBS
     };
 
     if emit == EmitKind::LlvmIr {

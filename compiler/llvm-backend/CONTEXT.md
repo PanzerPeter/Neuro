@@ -99,14 +99,19 @@ descriptor needs a compile-time extent per axis.
 
 `ExternalBodies::memory` (`BodyMemory`) says where a symbol's buffers must live, and
 `codegen_external_body` takes it per function. `Host` passes
-each tensor's own buffer. `Device` is for bodies that launch GPU kernels, and
-`codegen/device_memory.rs` stages every one of their buffers: the wrapper opens a staging region
-(the device arena's mark, and a stream from `mgpuStreamCreate`), copies each tensor operand into a
-device buffer with `mgpuMemcpy`, gives the symbol a device result buffer, calls it, copies the
-result back into the host tensor it returns, synchronizes once, releases each staged buffer and
-restores the mark. Callers still pass and receive host tensors. No wait sits between the copies in
-and the call: the runtime hands every `mgpuStreamCreate` the same in-order stream, so the kernels
-queue behind the copies, and the one synchronization is where the host is about to read.
+each tensor's own buffer, after `load_host_data` checks it is a host tensor. `Device` is for
+bodies that launch GPU kernels, and `codegen/device_memory.rs` gives the symbol device buffers
+only: the wrapper opens a staging region (the device arena's mark, and a stream from
+`mgpuStreamCreate`), and `stage_operand` branches on each operand's DLPack `device` field, copying
+a host tensor into a scratch buffer with `mgpuMemcpy` and passing a device tensor's own buffer as
+it is. `stage_result` branches on whether any operand was resident: if one was, the result is a
+fresh device tensor (`alloc_device_tensor`) the kernels write directly; if none was, the kernels
+write scratch and `close_device_staging` copies it into the host tensor returned, so an all-host
+call is unchanged. The close synchronizes once in both cases, because a spilled scratch buffer
+goes back through `cuMemFree`, then releases each staged buffer (null for a resident operand, which
+`_mlir_memref_to_llvm_free` skips) and restores the mark. No wait sits between the copies in and
+the call: the runtime hands every `mgpuStreamCreate` the same in-order stream, so the kernels queue
+behind the copies.
 
 The device allocator is a second linear arena built from `arena.rs`'s `Arena` descriptor, the same
 bump (`build_bump_body`) and ownership test (`build_arena_owns`) over `__neuro_device_arena_base` /
@@ -118,10 +123,14 @@ fit. It is defined under the names a launcher's IR allocates its scratch buffers
 declarations resolve to it at the link, which then internalizes both. An allocation that comes
 back null aborts with a diagnostic rather than hand a kernel a null buffer.
 
-**The GPU runtime.** A module with any `Device` bodies links `codegen/gpu_runtime.ll`
-(`link_gpu_runtime`), which defines MLIR's GPU runtime ABI (`mgpuModuleLoad[JIT]`,
-`mgpuModuleUnload`, `mgpuModuleGetFunction`, `mgpuLaunchKernel`, `mgpuStream*`, `mgpuMem*`) over the
-CUDA driver API, and internalizes every entry point after the link. It is generated from
+**The GPU runtime.** A module that defines `__neuro_gpu_panic` links `codegen/gpu_runtime.ll`
+(`link_gpu_runtime`): one with any `Device` bodies defines it before the first function, and a
+device-tensor operation defines it on first use through `require_gpu_runtime`, so a program with a
+`.to(...)` and no `@gpu` function carries the runtime too. The runtime defines MLIR's GPU runtime
+ABI (`mgpuModuleLoad[JIT]`, `mgpuModuleUnload`, `mgpuModuleGetFunction`, `mgpuLaunchKernel`,
+`mgpuStream*`, `mgpuMem*`) over the CUDA driver API, plus the device-tensor calls
+(`__neuro_device_upload` / `_download` / `_alloc` / `_free` / `_check`), and every entry point is
+internalized after the link. It is generated from
 `gpu_runtime.c` like `softfloat`'s builtins, and opens `libcuda.so.1` with `dlopen` on first use,
 creates one non-blocking stream the first time a stream is asked for and hands it to every caller
 (`mgpuStreamDestroy` leaves it alone; a stream per launch cost more than a small kernel runs),
@@ -131,7 +140,8 @@ a dynamic-loader error. First use is the launchers' module-load constructor, so 
 `__neuro_gpu_panic(ptr, i64)`, which `define_gpu_panic` emits as an ordinary panic (`panic:`
 prefix, stdout drained first, `abort`); only `mgpuMemAlloc` answers null instead, for the device
 allocator's own diagnostic. It makes device 0's primary context current once and assumes one
-thread. The executable needs `dlopen`, which `neurc` links `-ldl` for.
+thread, which is why `__neuro_device_check` refuses every index but 0. The executable needs
+`dlopen`, which `neurc` links `-ldl` for.
 
 **`@gpu(fallback: true)`.** A `Device` body whose `HirFunction::target` is `GpuOrHost` goes
 through `codegen_gpu_fallback` instead: it emits `f.gpu` (the staging wrapper), `f.host` (this
@@ -469,9 +479,14 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   the one auto-deref site the value-driven rule below cannot decide.
 - `tensor.to(device)` → `BuiltinMethod::TensorTo` → `codegen_tensor_to` (same file). The device
   argument is the prelude `Device` enum; its tag (`extractvalue` field 0) is compared against
-  `enum_variant_tag("Device", "CPU")` and routed through `codegen_guard_or_panic`, so a transfer
-  to any other device aborts with a diagnostic rather than silently leaving the buffer on the
-  host. A host transfer is the move itself and emits no copy: the receiver's value is the result.
+  `enum_variant_tag("Device", "CPU")`, and `GPU`'s index is read out of its payload words. Both
+  the target and the tensor's current device are run-time values, so the lowering branches: a
+  tensor already there is left alone (`__neuro_device_check` still vets a GPU index), a host
+  tensor bound for a GPU is uploaded and its host buffer released, and a device tensor bound for
+  the host is downloaded into a fresh host buffer and its device buffer freed. `set_dlpack_home`
+  re-points the receiver's own handle (`data`, `device`, deleter), so the result is the receiver's
+  handle and a transfer allocates no second tensor. On Windows, which has no GPU runtime, a
+  transfer to a GPU is a `codegen_guard_or_panic` abort instead.
   `resolve_builtin_method` matches `.to` on the receiver type rather than its referent, so a
   `&Tensor` resolves to nothing: a borrow cannot be consumed. Because the result *is* the
   receiver's buffer pointer, `codegen_tensor_to` calls `mark_moved_for_drop` on the receiver;
@@ -579,9 +594,11 @@ tensor's buffer is `[1 x T]` (the empty product), not a zero-length array. Becau
 just the handle, a tensor with a dynamic `?` axis maps, moves and releases like any other;
 `types::static_extents` guards the sites that do need a number (the buffer layout, its byte
 size, an index's strides) and reports `UnsupportedType` rather than sizing an allocation from a
-guess. Host memory only:
-`.to(device)` guards on the requested device rather than moving anything, and the handle reports
-`kDLCPU` until a device backend flips that field.
+guess. A handle's buffer is host memory (`kDLCPU`) unless `.to(Device::GPU(0))` or a `@gpu` call
+with a device operand made it device memory (`kDLCUDA`, `TensorHome::Gpu`), and every host read of
+an existing tensor goes through `load_host_data`, whose guard aborts with a located diagnostic
+rather than dereference device memory. A freshly allocated handle is read with
+`load_dlpack_data` directly. At `-O2` the guard hoists out of an indexing loop.
 
 The buffer is out of line because the language has a tensor *own* it and promises that buffer a
 stable address across an in-place update: neither is expressible for an SSA value, which has no
@@ -771,7 +788,9 @@ boundary. `type_mapping.rs` holds the layout (`dlpack_managed_tensor_type`), the
 
 Fields are filled at construction: `version` `{1, 1}`, `manager_ctx` the control block below,
 `deleter` the shared
-`__neuro_dlpack_deleter`, `flags` 0 (the buffer is writable), `device` `{kDLCPU, 0}`, `ndim` the
+`__neuro_dlpack_deleter` (`__neuro_dlpack_device_deleter` for a device tensor, which returns the
+buffer through `__neuro_device_free`), `flags` 0 (the buffer is writable), `device` `{kDLCPU, 0}`
+or `{kDLCUDA, 0}`, `ndim` the
 rank, `dtype` from the table with `lanes` 1, `byte_offset` 0, and `shape` / `strides` pointing at
 private constants named `__neuro_dlpack_shape_<mangle>` / `__neuro_dlpack_strides_<mangle>` and
 shared by every value of that tensor type. Strides count **elements, not bytes**. Rank 0 has no

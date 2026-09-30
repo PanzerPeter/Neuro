@@ -46,7 +46,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let shape = crate::types::static_extents(&shape)?;
         let handle = self.tensor_receiver_handle(object, &source_ty)?;
-        let data = self.load_dlpack_data(handle)?;
+        let data = self.load_host_data(handle, object.span.start)?;
         let strides = row_major_strides(&shape);
         let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
         let elem_llvm = self.get_any_llvm_type(&element)?;
@@ -78,7 +78,7 @@ impl<'ctx> CodegenContext<'ctx> {
         source_ty: &Type,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let handle = self.tensor_receiver_handle(object, source_ty)?;
-        self.load_dlpack_data(handle)
+        self.load_host_data(handle, object.span.start)
     }
 
     /// The DLPack handle a tensor receiver lowers to, evaluated exactly once.

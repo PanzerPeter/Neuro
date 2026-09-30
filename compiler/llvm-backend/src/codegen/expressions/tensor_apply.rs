@@ -183,7 +183,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let elem_llvm = self.get_any_llvm_type(&element)?;
         let handle = self.tensor_receiver_handle(expr, &ty)?;
-        let data = self.load_dlpack_data(handle)?;
+        let data = self.load_host_data(handle, expr.span.start)?;
         Ok(Walked {
             handle,
             data,

@@ -70,7 +70,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let element = (*element).clone();
         let elem_llvm = self.get_any_llvm_type(&element)?;
         let receiver_handle = self.tensor_receiver_handle(receiver, &source_ty)?;
-        let source = self.load_dlpack_data(receiver_handle)?;
+        let source = self.load_host_data(receiver_handle, receiver.span.start)?;
         let targets = self.allocate_targets(kind, &layout, result_ty)?;
 
         let i64_type = self.context.i64_type();

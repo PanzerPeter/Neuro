@@ -87,15 +87,52 @@ func main() -> i32 {
 }
 ```
 
-To keep the source, clone first: `t.clone().to(Device::CPU)`.
+To keep the source, clone first: `t.clone().to(Device::GPU(0))`.
 
 A borrow cannot be consumed, so `.to` is not offered on `&Tensor<T, S>`: calling it there
 reports that the borrowed type has no such method.
 
-No tensor value lives on a GPU yet: device management is later work, and tensor code
-reaches a GPU through [`@gpu`](#running-on-a-gpu-gpu) instead. `.to(Device::CPU)` is
-therefore the move itself and copies nothing, and a transfer to any other device aborts at
-run time with a diagnostic rather than quietly leaving the buffer on the host.
+`.to(Device::GPU(0))` copies the elements into the memory of the first NVIDIA GPU and frees the
+host buffer. `.to(Device::CPU)` copies them back and frees the device buffer. Transferring a
+tensor to the device it is already on copies nothing. A [`@gpu`](#running-on-a-gpu-gpu)
+function reads a device tensor in place instead of copying it over, and returns its result on
+the GPU as well.
+
+```neuro
+@gpu
+func step(state: &Tensor<f32, [8, 8]>, delta: &Tensor<f32, [8, 8]>, rate: f32) -> Tensor<f32, [8, 8]> {
+    val moved = delta * rate
+    state + moved
+}
+
+func main() -> i32 {
+    val delta = Tensor::<f32, [8, 8]>::ones() * 0.5f32
+    mut state = Tensor::<f32, [8, 8]>::ones().to(Device::GPU(0))
+    val resident = delta.clone().to(Device::GPU(0))
+    mut i = 0
+    while i < 10 {
+        state = step(&state, &resident, 2.0f32)   // never leaves the GPU
+        i += 1
+    }
+    val result = state.to(Device::CPU)
+    return result[7, 7] as i32                    // 11
+}
+```
+
+Only `@gpu` functions compute on a device tensor. Host code cannot read one: indexing it,
+reducing it, cloning it or using it in arithmetic outside a `@gpu` function aborts with
+``panic: this tensor lives on a GPU, where host code cannot read it: move it back with
+`.to(Device::CPU)` first`` and the location of the operation. Moving it, passing it,
+returning it, storing it in a struct and dropping it all work as they do for a host tensor.
+
+A transfer needs a usable NVIDIA GPU when it runs. A program whose only GPU use is `.to` looks
+for one at its first transfer, not at startup, and if none is usable the transfer aborts with
+``panic: `Device::GPU` needs an NVIDIA GPU, and none is usable:`` followed by the reason. A tensor
+can live on GPU 0 only for now: `Device::GPU(n)` with any other `n` aborts with a diagnostic
+naming `n`. Transfers need no MLIR backend, so any `neurc` compiles them, but on Windows a
+transfer to a GPU aborts.
+[examples/tensors/tensor_device.nr](../../examples/tensors/tensor_device.nr) runs the snippet
+above and checks it against the host.
 
 `Tensor` is a prelude name rather than a keyword, so a module declaring its own
 `Tensor` shadows it; a shape argument is what marks a type application as a tensor, and
@@ -912,9 +949,11 @@ in-place compound assignment. Build such a tensor at a static shape and pass it 
 
 ## Running on a GPU: `@gpu`
 
-`@gpu` pins a function's body to the GPU. Each operation in it becomes a kernel. Every call
-copies the tensor arguments to the device, runs the kernels and copies the result back, so a
-caller still passes and receives ordinary tensors:
+`@gpu` pins a function's body to the GPU. Each operation in it becomes a kernel. A call copies
+its host tensor arguments to the device, runs the kernels and copies the result back, so a
+caller with host tensors still passes and receives ordinary ones. An argument already moved
+with [`.to(Device::GPU(0))`](#device-transfer) is read where it is, and a call given one leaves
+its result on the GPU too:
 
 ```neuro
 @gpu

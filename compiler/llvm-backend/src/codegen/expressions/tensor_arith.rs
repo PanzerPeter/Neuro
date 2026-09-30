@@ -140,7 +140,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let rhs = self.codegen_operand_source(value, &result_shape)?;
 
         let lhs_handle = self.tensor_receiver_handle(receiver, &Type::from_hir(&receiver.ty))?;
-        let lhs_data = self.load_dlpack_data(lhs_handle)?;
+        let lhs_data = self.load_host_data(lhs_handle, receiver.span.start)?;
         // The target is both the left operand and the destination, so it is walked slot
         // for slot: it is the shape everything else broadcasts to.
         let lhs = ElementSource::Buffer {
@@ -502,7 +502,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         Ok(Some((
             TensorBuffer {
-                data: self.load_dlpack_data(handle)?,
+                data: self.load_host_data(handle, operand.span.start)?,
                 handle,
                 owned,
             },

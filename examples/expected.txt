@@ -88,6 +88,7 @@ tensors/tensor_einsum.nr              40
 tensors/tensor_functional.nr          24
 tensors/tensor_math.nr                10
 tensors/tensor_gpu.nr                 2  gpu
+tensors/tensor_device.nr              11  gpu
 
 # --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
 ownership/borrow_exclusivity.nr  31

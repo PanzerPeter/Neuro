@@ -2507,3 +2507,74 @@ fn regression_a_long_array_binding_is_planned_without_listing_its_elements() {
         function_body(&ir, "f")
     );
 }
+
+/// The prelude enum `.to` takes. `module_ir` drives the pipeline without `neurc`, which
+/// is what prepends the real prelude.
+const DEVICE_PRELUDE: &str = "
+    enum Device {
+        CPU,
+        GPU(i32)
+    }
+";
+
+/// `.to(device)` re-points the tensor's own handle at a buffer on the other side, through
+/// the GPU runtime, which a program with a transfer links whether or not it has a `@gpu`
+/// function.
+#[test]
+fn a_transfer_repoints_the_handle_through_the_gpu_runtime() {
+    let source = format!(
+        "{DEVICE_PRELUDE}
+        func main() -> i32 {{
+            val a = Tensor::<f32, [4]>::ones()
+            val g = a.to(Device::GPU(0))
+            val h = g.to(Device::CPU)
+            return 0
+        }}"
+    );
+    let ir = module_ir(&source, OptimizationLevelSetting::O0);
+    let main = function_body(&ir, "main");
+    let upload = main
+        .find("call ptr @__neuro_device_upload(")
+        .unwrap_or_else(|| panic!("expected an upload:\n{main}"));
+    let download = main
+        .find("call void @__neuro_device_download(")
+        .unwrap_or_else(|| panic!("expected a download:\n{main}"));
+    let uploaded = &main[upload..];
+    assert!(
+        uploaded.contains("store ptr @__neuro_dlpack_device_deleter"),
+        "an uploaded tensor is released by the runtime:\n{uploaded}"
+    );
+    let downloaded = &main[download..];
+    assert!(
+        downloaded.contains("call void @__neuro_device_free(")
+            && downloaded.contains("store ptr @__neuro_dlpack_deleter"),
+        "a downloaded tensor frees its device buffer and goes back to the host deleter:\n{downloaded}"
+    );
+    assert!(
+        ir.lines()
+            .any(|line| line.starts_with("define internal ptr @__neuro_device_upload(")),
+        "the runtime is linked in and internalized:\n{ir}"
+    );
+}
+
+/// Host code reading a tensor checks where it lives first, so a device tensor aborts with
+/// a diagnostic instead of handing the host an address it cannot dereference. A program
+/// with no transfer carries the check but not the runtime.
+#[test]
+fn a_host_read_checks_the_tensor_is_on_the_host() {
+    let source = r#"
+        func main() -> i32 {
+            val a = Tensor::<f32, [4]>::ones()
+            val s = a.sum()
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let main = function_body(&ir, "main");
+    assert!(
+        main.contains("%dlpack.on_host = icmp eq i32 %dlpack.device.type, 1"),
+        "expected the device check before the read:\n{main}"
+    );
+    assert!(ir.contains("this tensor lives on a GPU"), "{ir}");
+    assert!(!ir.contains("__neuro_device_"), "{ir}");
+}

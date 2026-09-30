@@ -53,7 +53,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let element = (*element).clone();
         let elem_llvm = self.get_any_llvm_type(&element)?;
         let receiver_handle = self.tensor_receiver_handle(receiver, &source_ty)?;
-        let source = self.load_dlpack_data(receiver_handle)?;
+        let source = self.load_host_data(receiver_handle, receiver.span.start)?;
 
         // The accumulator doubles as the result of a whole-tensor reduction, which has
         // exactly one run and so leaves its finished value here. A half-precision run is

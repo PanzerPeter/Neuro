@@ -1,9 +1,11 @@
 // Device memory for the tensor bodies a GPU computes.
 //
 // A GPU launcher reads and writes device memory only, so the wrapper around one stages
-// every tensor it passes: each operand is copied into a device buffer, the kernels write
-// a device result, and that result is copied back into the host tensor the caller
-// receives. The buffers a launcher needs between two kernels come from the same
+// every host tensor it passes: each is copied into a device buffer, the kernels write a
+// device result, and that result is copied back into the host tensor the caller receives.
+// A tensor `.to(Device::GPU(0))` already moved is passed as it is, and a call with any such
+// operand leaves its result on the device as well, in a device tensor of its own that
+// outlives the call. The buffers a launcher needs between two kernels come from the same
 // allocator, because its IR allocates them through `_mlir_memref_to_llvm_alloc` /
 // `_mlir_memref_to_llvm_free`, and those are the names this module defines.
 //
@@ -24,6 +26,7 @@
 // synchronization is after the copy back, where the host is about to read the result.
 
 use inkwell::AddressSpace;
+use inkwell::basic_block::BasicBlock;
 use inkwell::module::Linkage;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
@@ -52,6 +55,14 @@ const DEVICE_BUMP_FN: &str = "__neuro_device_bump";
 const DEVICE_ARENA_BASE_GLOBAL: &str = "__neuro_device_arena_base";
 const DEVICE_ARENA_OFFSET_GLOBAL: &str = "__neuro_device_arena_offset";
 
+/// The runtime's device-tensor calls (see `gpu_runtime.c`): a buffer that outlives the
+/// call making it, the two transfers, its release, and the device-index check.
+pub(crate) const DEVICE_TENSOR_ALLOC_FN: &str = "__neuro_device_alloc";
+pub(crate) const DEVICE_UPLOAD_FN: &str = "__neuro_device_upload";
+pub(crate) const DEVICE_DOWNLOAD_FN: &str = "__neuro_device_download";
+pub(crate) const DEVICE_TENSOR_FREE_FN: &str = "__neuro_device_free";
+pub(crate) const DEVICE_CHECK_FN: &str = "__neuro_device_check";
+
 const MGPU_MEM_ALLOC: &str = "mgpuMemAlloc";
 const MGPU_MEM_FREE: &str = "mgpuMemFree";
 const MGPU_MEMCPY: &str = "mgpuMemcpy";
@@ -76,11 +87,24 @@ const DEVICE_ALLOC_FAILED: &str =
     "panic: device memory allocation failed: no GPU is available, or it is out of memory\n";
 
 /// One call's device staging: the arena mark it restores, the stream its copies run on,
-/// and the buffers it took, released one by one in case the chunk was full.
+/// the buffers it took (null where an operand needed none), released one by one in case
+/// the chunk was full, and whether any operand already lived on the device.
 pub(crate) struct DeviceStaging<'ctx> {
     mark: IntValue<'ctx>,
     stream: PointerValue<'ctx>,
     buffers: Vec<PointerValue<'ctx>>,
+    on_device: IntValue<'ctx>,
+}
+
+/// Where a staged call's kernels write their result, and the tensor that hands it back.
+pub(crate) struct StagedResult<'ctx> {
+    /// The tensor the call returns.
+    pub(crate) handle: PointerValue<'ctx>,
+    /// The device buffer the kernels write.
+    pub(crate) written: PointerValue<'ctx>,
+    /// The host buffer `written` is copied back into, or null when the result stays on
+    /// the device.
+    copy_back: PointerValue<'ctx>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -117,6 +141,136 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.position_at_end(block);
         }
         Ok(())
+    }
+
+    /// Make the module carry the GPU runtime, for a device tensor in a program that may
+    /// have no `@gpu` body to bring it: define what the runtime calls back into. A module
+    /// that defines [`GPU_PANIC_FN`] is one the build links the runtime into.
+    pub(crate) fn require_gpu_runtime(&mut self) -> CodegenResult<()> {
+        if self.requires_gpu_runtime() {
+            return Ok(());
+        }
+        self.define_gpu_panic()?;
+        // A `@gpu` body would have defined both before any function was generated, so
+        // there is none, and a missing GPU is fatal only to the transfer that needs one.
+        self.define_gpu_fallback_flag(true);
+        Ok(())
+    }
+
+    pub(crate) fn requires_gpu_runtime(&self) -> bool {
+        self.module.get_function(GPU_PANIC_FN).is_some()
+    }
+
+    /// `__neuro_device_free(ptr)`, the release a device tensor's deleter makes.
+    pub(crate) fn device_tensor_free_fn(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
+        self.require_gpu_runtime()?;
+        Ok(self.extern_fn(
+            DEVICE_TENSOR_FREE_FN,
+            self.context
+                .void_type()
+                .fn_type(&[self.ptr().into()], false),
+        ))
+    }
+
+    /// A device buffer for a `tensor_ty` tensor's elements, released only by its deleter.
+    pub(crate) fn alloc_device_tensor_buffer(
+        &mut self,
+        tensor_ty: &Type,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        self.require_gpu_runtime()?;
+        let i64_type = self.context.i64_type();
+        let alloc = self.extern_fn(
+            DEVICE_TENSOR_ALLOC_FN,
+            self.ptr().fn_type(&[i64_type.into()], false),
+        );
+        let bytes = self.dlpack_copy_length(tensor_ty)?;
+        self.pointer_call(alloc, &[bytes.into()], "device.tensor")
+    }
+
+    /// Copy a `tensor_ty` buffer at `host` to a new device buffer on GPU `index`, and
+    /// return it. The runtime checks `index` and waits for the copy, so `host` may be
+    /// released as soon as this returns.
+    pub(crate) fn device_upload(
+        &mut self,
+        host: PointerValue<'ctx>,
+        tensor_ty: &Type,
+        index: IntValue<'ctx>,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        self.require_gpu_runtime()?;
+        let i64_type = self.context.i64_type();
+        let upload = self.extern_fn(
+            DEVICE_UPLOAD_FN,
+            self.ptr().fn_type(
+                &[
+                    self.ptr().into(),
+                    i64_type.into(),
+                    self.context.i32_type().into(),
+                ],
+                false,
+            ),
+        );
+        let bytes = self.dlpack_copy_length(tensor_ty)?;
+        self.pointer_call(
+            upload,
+            &[host.into(), bytes.into(), index.into()],
+            "device.upload",
+        )
+    }
+
+    /// Copy the `tensor_ty` elements at `device` into `host`, once every kernel queued
+    /// before it has written them.
+    pub(crate) fn device_download(
+        &mut self,
+        host: PointerValue<'ctx>,
+        device: PointerValue<'ctx>,
+        tensor_ty: &Type,
+    ) -> CodegenResult<()> {
+        self.require_gpu_runtime()?;
+        let ptr = self.ptr();
+        let download = self.extern_fn(
+            DEVICE_DOWNLOAD_FN,
+            self.context.void_type().fn_type(
+                &[ptr.into(), ptr.into(), self.context.i64_type().into()],
+                false,
+            ),
+        );
+        let bytes = self.dlpack_copy_length(tensor_ty)?;
+        self.builder
+            .build_call(download, &[host.into(), device.into(), bytes.into()], "")?;
+        Ok(())
+    }
+
+    /// Abort unless GPU `index` is one a tensor can live on.
+    pub(crate) fn device_check(&mut self, index: IntValue<'ctx>) -> CodegenResult<()> {
+        self.require_gpu_runtime()?;
+        let check = self.extern_fn(
+            DEVICE_CHECK_FN,
+            self.context
+                .void_type()
+                .fn_type(&[self.context.i32_type().into()], false),
+        );
+        self.builder.build_call(check, &[index.into()], "")?;
+        Ok(())
+    }
+
+    fn pointer_call(
+        &self,
+        function: FunctionValue<'ctx>,
+        args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
+        name: &str,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        Ok(self
+            .builder
+            .build_call(function, args, name)?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| {
+                CodegenError::InternalError(format!(
+                    "{} returned void",
+                    function.get_name().to_string_lossy()
+                ))
+            })?
+            .into_pointer_value())
     }
 
     /// Define [`GPU_FALLBACK_GLOBAL`], external until the runtime is linked like
@@ -166,63 +320,171 @@ impl<'ctx> CodegenContext<'ctx> {
             mark,
             stream,
             buffers: Vec::new(),
+            on_device: self.context.bool_type().const_zero(),
         })
     }
 
-    /// A device buffer sized for `tensor_ty`, for a kernel to write.
-    pub(crate) fn device_buffer(
+    /// The device buffer a kernel reads for the `tensor_ty` operand `handle`: its own
+    /// buffer when the tensor already lives on the device, and a staged copy otherwise.
+    pub(crate) fn stage_operand(
         &mut self,
         staging: &mut DeviceStaging<'ctx>,
         tensor_ty: &Type,
+        handle: PointerValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        // A zero-extent tensor still gets an address: the runtime answers a zero-byte
-        // request with null, which the allocator would report as a failure.
-        let bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?.max(1);
-        let alloc = self.device_alloc_fn()?;
-        let buffer = self
-            .builder
-            .build_call(
-                alloc,
-                &[self.context.i64_type().const_int(bytes, false).into()],
-                "device.buffer",
-            )?
-            .try_as_basic_value()
-            .basic()
-            .ok_or_else(|| CodegenError::InternalError(format!("{DEVICE_ALLOC_FN} returned void")))?
-            .into_pointer_value();
-        staging.buffers.push(buffer);
-        Ok(buffer)
+        let function = self.staging_function()?;
+        let on_host = self.dlpack_on_host(handle)?;
+        let data = self.load_dlpack_data(handle)?;
+        let resident = self.current_block()?;
+        let stage = self.context.append_basic_block(function, "device.stage");
+        let staged = self.context.append_basic_block(function, "device.staged");
+        self.builder
+            .build_conditional_branch(on_host, stage, staged)?;
+
+        self.builder.position_at_end(stage);
+        let copy = self.device_scratch(tensor_ty)?;
+        self.build_device_copy(staging, copy, data, tensor_ty)?;
+        let copied = self.current_block()?;
+        self.builder.build_unconditional_branch(staged)?;
+
+        self.builder.position_at_end(staged);
+        let operand =
+            self.build_pointer_phi(&[(copy, copied), (data, resident)], "device.operand")?;
+        let scratch = self.build_pointer_phi(
+            &[(copy, copied), (self.ptr().const_null(), resident)],
+            "device.scratch",
+        )?;
+        staging.buffers.push(scratch);
+        let resident_here = self.builder.build_not(on_host, "device.resident")?;
+        staging.on_device =
+            self.builder
+                .build_or(staging.on_device, resident_here, "device.any_resident")?;
+        Ok(operand)
     }
 
-    /// A device buffer holding a copy of the `tensor_ty` elements at `host`.
-    pub(crate) fn copy_to_device(
+    /// Where the kernels write a `tensor_ty` result. With any operand on the device the
+    /// result stays there too, in a device tensor of its own; otherwise it goes to scratch
+    /// and is copied back into a host tensor, so an all-host call is what it always was.
+    pub(crate) fn stage_result(
         &mut self,
         staging: &mut DeviceStaging<'ctx>,
         tensor_ty: &Type,
-        host: PointerValue<'ctx>,
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        let device = self.device_buffer(staging, tensor_ty)?;
-        self.build_device_copy(staging, device, host, tensor_ty)?;
-        Ok(device)
+    ) -> CodegenResult<StagedResult<'ctx>> {
+        let function = self.staging_function()?;
+        let resident = self.context.append_basic_block(function, "device.result");
+        let returned = self.context.append_basic_block(function, "host.result");
+        let join = self.context.append_basic_block(function, "result.staged");
+        self.builder
+            .build_conditional_branch(staging.on_device, resident, returned)?;
+
+        self.builder.position_at_end(resident);
+        let device_handle = self.alloc_device_tensor(tensor_ty, "external.result")?;
+        let device_data = self.load_dlpack_data(device_handle)?;
+        let resident_end = self.current_block()?;
+        self.builder.build_unconditional_branch(join)?;
+
+        self.builder.position_at_end(returned);
+        let host_handle = self.alloc_dlpack_tensor(tensor_ty, "external.result")?;
+        let host_data = self.load_dlpack_data(host_handle)?;
+        let scratch = self.device_scratch(tensor_ty)?;
+        let returned_end = self.current_block()?;
+        self.builder.build_unconditional_branch(join)?;
+
+        self.builder.position_at_end(join);
+        let null = self.ptr().const_null();
+        let handle = self.build_pointer_phi(
+            &[(device_handle, resident_end), (host_handle, returned_end)],
+            "external.result",
+        )?;
+        let written = self.build_pointer_phi(
+            &[(device_data, resident_end), (scratch, returned_end)],
+            "device.written",
+        )?;
+        let copy_back = self.build_pointer_phi(
+            &[(null, resident_end), (host_data, returned_end)],
+            "device.copy_back",
+        )?;
+        let scratch = self.build_pointer_phi(
+            &[(null, resident_end), (scratch, returned_end)],
+            "device.scratch",
+        )?;
+        staging.buffers.push(scratch);
+        Ok(StagedResult {
+            handle,
+            written,
+            copy_back,
+        })
     }
 
-    /// Copy the kernels' result at `device` back into `host`, then release everything
-    /// the call staged: each buffer (a no-op for the ones in the chunk) and then the
-    /// chunk itself back to the mark.
+    /// Copy the kernels' result back to the host when it is not staying on the device,
+    /// wait for the stream, then release everything the call staged: each buffer (a no-op
+    /// for the ones in the chunk) and then the chunk itself back to the mark.
+    ///
+    /// The wait comes before the release even for a result left on the device: a buffer
+    /// that spilled out of the chunk goes back through the runtime's free, which must not
+    /// run under a kernel still reading it.
     pub(crate) fn close_device_staging(
         &mut self,
         staging: DeviceStaging<'ctx>,
         tensor_ty: &Type,
-        host: PointerValue<'ctx>,
-        device: PointerValue<'ctx>,
+        result: &StagedResult<'ctx>,
     ) -> CodegenResult<()> {
-        self.build_device_copy(&staging, host, device, tensor_ty)?;
+        let function = self.staging_function()?;
+        let copy = self.context.append_basic_block(function, "device.copy_out");
+        let settle = self.context.append_basic_block(function, "device.settle");
+        let returning = self
+            .builder
+            .build_is_not_null(result.copy_back, "device.returning")?;
+        self.builder
+            .build_conditional_branch(returning, copy, settle)?;
+
+        self.builder.position_at_end(copy);
+        self.build_device_copy(&staging, result.copy_back, result.written, tensor_ty)?;
+        self.builder.build_unconditional_branch(settle)?;
+
+        self.builder.position_at_end(settle);
         self.build_stream_call(MGPU_STREAM_SYNCHRONIZE, staging.stream)?;
         let release = self.device_release_fn()?;
         for buffer in &staging.buffers {
             self.builder.build_call(release, &[(*buffer).into()], "")?;
         }
         self.restore_device_arena(staging.mark)
+    }
+
+    /// A device buffer sized for `tensor_ty` from the device arena, for one call.
+    fn device_scratch(&mut self, tensor_ty: &Type) -> CodegenResult<PointerValue<'ctx>> {
+        // A zero-extent tensor still gets an address: the runtime answers a zero-byte
+        // request with null, which the allocator would report as a failure.
+        let bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?.max(1);
+        let alloc = self.device_alloc_fn()?;
+        self.pointer_call(
+            alloc,
+            &[self.context.i64_type().const_int(bytes, false).into()],
+            "device.buffer",
+        )
+    }
+
+    fn build_pointer_phi(
+        &self,
+        incoming: &[(PointerValue<'ctx>, BasicBlock<'ctx>)],
+        name: &str,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let phi = self.builder.build_phi(self.ptr(), name)?;
+        for (value, block) in incoming {
+            phi.add_incoming(&[(value, *block)]);
+        }
+        Ok(phi.as_basic_value().into_pointer_value())
+    }
+
+    fn current_block(&self) -> CodegenResult<BasicBlock<'ctx>> {
+        self.builder
+            .get_insert_block()
+            .ok_or_else(|| CodegenError::InternalError("device staging outside a block".into()))
+    }
+
+    fn staging_function(&self) -> CodegenResult<FunctionValue<'ctx>> {
+        self.current_function
+            .ok_or_else(|| CodegenError::InternalError("device staging outside a function".into()))
     }
 
     fn build_device_copy(
@@ -411,8 +673,9 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// `_mlir_memref_to_llvm_free(ptr)`: nothing for a buffer in the chunk, which the
-    /// mark restore reclaims, and a runtime free for one that spilled. External until
-    /// the link, like [`device_alloc_fn`](CodegenContext::device_alloc_fn).
+    /// mark restore reclaims, nor for null, the scratch a resident operand never took, and
+    /// a runtime free for one that spilled. External until the link, like
+    /// [`device_alloc_fn`](CodegenContext::device_alloc_fn).
     fn device_release_fn(&self) -> CodegenResult<FunctionValue<'ctx>> {
         if let Some(existing) = self.module.get_function(DEVICE_RELEASE_FN) {
             return Ok(existing);
@@ -442,8 +705,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
             self.builder.position_at_end(entry);
             let owned = self.build_arena_owns(self.device_arena(), target)?;
-            self.builder
-                .build_conditional_branch(owned, done, spilled)?;
+            let absent = self.builder.build_is_null(target, "device.absent")?;
+            let kept = self.builder.build_or(owned, absent, "device.kept")?;
+            self.builder.build_conditional_branch(kept, done, spilled)?;
 
             self.builder.position_at_end(spilled);
             self.builder

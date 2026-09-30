@@ -19,9 +19,14 @@ use crate::types::Type;
 const DLPACK_VERSION_MAJOR: u64 = 1;
 const DLPACK_VERSION_MINOR: u64 = 1;
 
-/// `kDLCPU`. Every buffer this backend can build is host memory; a device backend flips
-/// this field rather than changing the layout.
+/// `kDLCPU` and `kDLCUDA`: a buffer in host memory, or in an NVIDIA GPU's. A transfer
+/// flips this field and the buffer it describes rather than changing the layout.
 const DLPACK_DEVICE_CPU: u64 = 1;
+const DLPACK_DEVICE_CUDA: u64 = 2;
+
+/// What a host operation that reached a device tensor reports. The host cannot read
+/// device memory, so the alternative is a segmentation fault.
+const DEVICE_TENSOR_ON_HOST: &str = "this tensor lives on a GPU, where host code cannot read it: move it back with `.to(Device::CPU)` first";
 
 /// The alignment the SIMD and device-transfer paths want, and what this backend
 /// guarantees. It is deliberately NOT what the DLPack header asks for: that header
@@ -36,8 +41,18 @@ const DLPACK_DATA_ALIGN: u64 = 64;
 const DLPACK_LANES: u64 = 1;
 
 /// The release function every tensor handle carries. One definition serves every tensor
-/// type, because the structure holds everything the free needs.
+/// type, because the structure holds everything the free needs; a device tensor carries
+/// the second, which returns its buffer to the GPU runtime.
 const DLPACK_DELETER_FN: &str = "__neuro_dlpack_deleter";
+const DLPACK_DEVICE_DELETER_FN: &str = "__neuro_dlpack_device_deleter";
+
+/// Where a tensor's elements live, which decides its handle's `device` field and deleter.
+#[derive(Clone, Copy)]
+pub(crate) enum TensorHome<'ctx> {
+    Host,
+    /// Device memory on the GPU with this index.
+    Gpu(IntValue<'ctx>),
+}
 
 /// Field indices into `DLManagedTensorVersioned`, mirroring the C header's order.
 const FIELD_VERSION: u32 = 0;
@@ -105,26 +120,54 @@ impl<'ctx> CodegenContext<'ctx> {
         tensor_ty: &Type,
         name: &str,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        let Type::Tensor { element, shape } = tensor_ty else {
-            return Err(CodegenError::InternalError(
-                "a DLPack handle is only built for a tensor type".to_string(),
-            ));
-        };
+        let handle = self.alloc_dlpack_storage(name)?;
+        let data = self.alloc_host_buffer(tensor_ty)?;
+        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Host)?;
+        Ok(handle)
+    }
 
-        let storage_ty = self.type_mapper.dlpack_tensor_storage_type();
-        let i64_type = self.context.i64_type();
-        let storage_size = storage_ty.size_of().ok_or_else(|| {
-            CodegenError::InternalError("the DLPack storage block has no size".to_string())
-        })?;
+    /// [`alloc_dlpack_tensor`](CodegenContext::alloc_dlpack_tensor) for a tensor whose
+    /// elements a GPU writes: the buffer is device memory, and the handle carries the
+    /// device deleter. Device 0, because it is the only one the runtime lets a tensor
+    /// live on.
+    pub(crate) fn alloc_device_tensor(
+        &mut self,
+        tensor_ty: &Type,
+        name: &str,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let handle = self.alloc_dlpack_storage(name)?;
+        let data = self.alloc_device_tensor_buffer(tensor_ty)?;
+        let first_gpu = self.context.i32_type().const_zero();
+        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Gpu(first_gpu))?;
+        Ok(handle)
+    }
+
+    /// The handle and its control block, uninitialized.
+    fn alloc_dlpack_storage(&self, name: &str) -> CodegenResult<PointerValue<'ctx>> {
+        let storage_size = self
+            .type_mapper
+            .dlpack_tensor_storage_type()
+            .size_of()
+            .ok_or_else(|| {
+                CodegenError::InternalError("the DLPack storage block has no size".to_string())
+            })?;
         // Field 0 of the storage block is the exchange structure, and a struct's first
         // field sits at offset 0, so this pointer is already the `DLManagedTensorVersioned*`
         // a foreign consumer takes: the control block trailing it is invisible to them.
-        let handle = self.build_malloc(storage_size, name)?;
+        self.build_malloc(storage_size, name)
+    }
 
+    /// A host element buffer for `tensor_ty`, from the allocator the deleter's release
+    /// pairs with.
+    pub(crate) fn alloc_host_buffer(
+        &mut self,
+        tensor_ty: &Type,
+    ) -> CodegenResult<PointerValue<'ctx>> {
         // `aligned_alloc` wants a size that is a multiple of the alignment; a tensor
         // buffer is rounded up rather than passed through, since a small tensor's
         // element run is routinely shorter than one alignment unit. `_aligned_malloc`
         // has no such requirement, and the rounding is harmless there.
+        let i64_type = self.context.i64_type();
         let bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?;
         let padded = bytes.div_ceil(DLPACK_DATA_ALIGN) * DLPACK_DATA_ALIGN;
         let aligned_alloc = self.aligned_alloc_fn()?;
@@ -137,7 +180,7 @@ impl<'ctx> CodegenContext<'ctx> {
         } else {
             [alignment.into(), size.into()]
         };
-        let data = self
+        Ok(self
             .builder
             .build_call(aligned_alloc, &args, "tensor.data")?
             .try_as_basic_value()
@@ -145,16 +188,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| {
                 CodegenError::InternalError(format!("{ALIGNED_ALLOC_FN} returned void"))
             })?
-            .into_pointer_value();
-
-        self.init_dlpack_handle(
-            handle,
-            data,
-            bytes,
-            element,
-            &crate::types::static_extents(shape)?,
-        )?;
-        Ok(handle)
+            .into_pointer_value())
     }
 
     /// Write every field of a freshly allocated handle.
@@ -162,10 +196,16 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         handle: PointerValue<'ctx>,
         data: PointerValue<'ctx>,
-        data_bytes: u64,
-        element: &Type,
-        shape: &[usize],
+        tensor_ty: &Type,
+        home: TensorHome<'ctx>,
     ) -> CodegenResult<()> {
+        let Type::Tensor { element, shape } = tensor_ty else {
+            return Err(CodegenError::InternalError(
+                "a DLPack handle is only built for a tensor type".to_string(),
+            ));
+        };
+        let shape = crate::types::static_extents(shape)?;
+        let data_bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?;
         let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
         let i8_type = self.context.i8_type();
         let i16_type = self.context.i16_type();
@@ -182,13 +222,6 @@ impl<'ctx> CodegenContext<'ctx> {
         self.store_handle_field(handle_ty, handle, &[FIELD_VERSION], version.into())?;
         let control = self.init_dlpack_control_block(handle, data_bytes)?;
         self.store_handle_field(handle_ty, handle, &[FIELD_MANAGER_CTX], control.into())?;
-        let deleter = self.get_or_define_dlpack_deleter()?;
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_DELETER],
-            deleter.as_global_value().as_pointer_value().into(),
-        )?;
         // The buffer is writable, so DLPACK_FLAG_BITMASK_READ_ONLY stays clear.
         self.store_handle_field(
             handle_ty,
@@ -196,26 +229,7 @@ impl<'ctx> CodegenContext<'ctx> {
             &[FIELD_FLAGS],
             i64_type.const_zero().into(),
         )?;
-
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_DL_TENSOR, FIELD_DATA],
-            data.into(),
-        )?;
-        let device = self
-            .context
-            .struct_type(&[i32_type.into(), i32_type.into()], false)
-            .const_named_struct(&[
-                i32_type.const_int(DLPACK_DEVICE_CPU, false).into(),
-                i32_type.const_zero().into(),
-            ]);
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_DL_TENSOR, FIELD_DEVICE],
-            device.into(),
-        )?;
+        self.set_dlpack_home(handle, data, home)?;
         self.store_handle_field(
             handle_ty,
             handle,
@@ -238,7 +252,7 @@ impl<'ctx> CodegenContext<'ctx> {
             dtype.into(),
         )?;
 
-        let (shape_global, strides_global) = self.dlpack_shape_globals(element, shape)?;
+        let (shape_global, strides_global) = self.dlpack_shape_globals(element, &shape)?;
         self.store_handle_field(
             handle_ty,
             handle,
@@ -258,6 +272,96 @@ impl<'ctx> CodegenContext<'ctx> {
             i64_type.const_zero().into(),
         )?;
         Ok(())
+    }
+
+    /// Point `handle` at `data`, a buffer living at `home`: its `data` and `device` fields,
+    /// and the deleter that releases a buffer there. A transfer calls this on a live
+    /// handle, which is what keeps the tensor's address across `.to(...)`.
+    pub(crate) fn set_dlpack_home(
+        &mut self,
+        handle: PointerValue<'ctx>,
+        data: PointerValue<'ctx>,
+        home: TensorHome<'ctx>,
+    ) -> CodegenResult<()> {
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
+        let i32_type = self.context.i32_type();
+        let (device_type, index, deleter) = match home {
+            TensorHome::Host => (
+                DLPACK_DEVICE_CPU,
+                i32_type.const_zero(),
+                self.get_or_define_dlpack_deleter()?,
+            ),
+            TensorHome::Gpu(index) => (
+                DLPACK_DEVICE_CUDA,
+                index,
+                self.get_or_define_dlpack_device_deleter()?,
+            ),
+        };
+        let device_ty = self
+            .context
+            .struct_type(&[i32_type.into(), i32_type.into()], false);
+        let device = self.builder.build_insert_value(
+            device_ty.const_named_struct(&[
+                i32_type.const_int(device_type, false).into(),
+                i32_type.const_zero().into(),
+            ]),
+            index,
+            1,
+            "dlpack.device",
+        )?;
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DELETER],
+            deleter.as_global_value().as_pointer_value().into(),
+        )?;
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_DATA],
+            data.into(),
+        )?;
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_DEVICE],
+            device.into_struct_value().into(),
+        )
+    }
+
+    /// An `i1` that is true when `handle`'s buffer is host memory.
+    pub(crate) fn dlpack_on_host(
+        &self,
+        handle: PointerValue<'ctx>,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
+        let i32_type = self.context.i32_type();
+        // The device type is the first `i32` of the `device` pair.
+        let device_type =
+            self.handle_field_ptr(handle_ty, handle, &[FIELD_DL_TENSOR, FIELD_DEVICE])?;
+        let device_type = self
+            .builder
+            .build_load(i32_type, device_type, "dlpack.device.type")?
+            .into_int_value();
+        Ok(self.builder.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            device_type,
+            i32_type.const_int(DLPACK_DEVICE_CPU, false),
+            "dlpack.on_host",
+        )?)
+    }
+
+    /// [`load_dlpack_data`](CodegenContext::load_dlpack_data) for host code about to read
+    /// or write the elements: a tensor living on a GPU aborts with a diagnostic located at
+    /// `offset` instead of handing the host an address it cannot dereference.
+    pub(crate) fn load_host_data(
+        &mut self,
+        handle: PointerValue<'ctx>,
+        offset: usize,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let on_host = self.dlpack_on_host(handle)?;
+        self.codegen_guard_or_panic(on_host, DEVICE_TENSOR_ON_HOST, offset)?;
+        self.load_dlpack_data(handle)
     }
 
     /// Fill the control block trailing `handle` and return its address, the value
@@ -439,6 +543,19 @@ impl<'ctx> CodegenContext<'ctx> {
         path: &[u32],
         value: inkwell::values::BasicValueEnum<'ctx>,
     ) -> CodegenResult<()> {
+        let ptr = self.handle_field_ptr(handle_ty, handle, path)?;
+        self.builder.build_store(ptr, value)?;
+        Ok(())
+    }
+
+    /// The address of the handle field `path` reaches, walked as
+    /// [`store_handle_field`](CodegenContext::store_handle_field) walks it.
+    fn handle_field_ptr(
+        &self,
+        handle_ty: inkwell::types::StructType<'ctx>,
+        handle: PointerValue<'ctx>,
+        path: &[u32],
+    ) -> CodegenResult<PointerValue<'ctx>> {
         let mut current_ty = handle_ty;
         let mut ptr = handle;
         for (depth, index) in path.iter().enumerate() {
@@ -462,8 +579,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     })?;
             }
         }
-        self.builder.build_store(ptr, value)?;
-        Ok(())
+        Ok(ptr)
     }
 
     /// The `shape` and `strides` arrays for a statically shaped tensor, as private
@@ -538,11 +654,33 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some(existing) = self.module.get_function(DLPACK_DELETER_FN) {
             return Ok(existing);
         }
+        // The buffer goes back to the release paired with the over-aligned allocation and
+        // the structure to plain `free`: the two blocks come from different allocators on
+        // Windows, where crossing them corrupts the heap.
+        let release_data = self.aligned_release_fn()?;
+        self.define_dlpack_deleter(DLPACK_DELETER_FN, release_data)
+    }
+
+    /// The deleter a device tensor carries: the host deleter, with the buffer returned to
+    /// the GPU runtime instead of the host allocator.
+    fn get_or_define_dlpack_device_deleter(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
+        if let Some(existing) = self.module.get_function(DLPACK_DEVICE_DELETER_FN) {
+            return Ok(existing);
+        }
+        let release_data = self.device_tensor_free_fn()?;
+        self.define_dlpack_deleter(DLPACK_DEVICE_DELETER_FN, release_data)
+    }
+
+    fn define_dlpack_deleter(
+        &mut self,
+        name: &str,
+        release_data: FunctionValue<'ctx>,
+    ) -> CodegenResult<FunctionValue<'ctx>> {
         let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
         let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
-        let function =
-            self.module
-                .add_function(DLPACK_DELETER_FN, fn_type, Some(Linkage::Internal));
+        let function = self
+            .module
+            .add_function(name, fn_type, Some(Linkage::Internal));
         let entry = self.context.append_basic_block(function, "entry");
 
         let saved_block = self.builder.get_insert_block();
@@ -556,13 +694,8 @@ impl<'ctx> CodegenContext<'ctx> {
         // A derivative cannot outlive the parameter it belongs to: the slot owns it.
         self.release_derivatives(handle)?;
         let data = self.load_dlpack_data(handle)?;
-        // The buffer goes back to the release paired with the over-aligned allocation and
-        // the structure to plain `free`: the two blocks come from different allocators on
-        // Windows, where crossing them corrupts the heap.
-        let aligned_free_fn = self.aligned_release_fn()?;
         let free_fn = self.release_fn()?;
-        self.builder
-            .build_call(aligned_free_fn, &[data.into()], "")?;
+        self.builder.build_call(release_data, &[data.into()], "")?;
         self.builder.build_call(free_fn, &[handle.into()], "")?;
         self.builder.build_return(None)?;
         if let Some(block) = saved_block {

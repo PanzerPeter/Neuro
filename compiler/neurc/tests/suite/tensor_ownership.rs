@@ -153,27 +153,3 @@ func main() -> i32 {
         "expected a method-not-found diagnostic, got: {printed}"
     );
 }
-
-/// There is no device but the host yet, and the device is an ordinary runtime value, so
-/// the mismatch is caught where the value is known: the program aborts with a diagnostic
-/// rather than pretending the buffer moved.
-#[test]
-fn a_transfer_to_an_absent_device_aborts_with_a_diagnostic() {
-    let source = r#"
-func main() -> i32 {
-    val a = Tensor::<f32, [2, 2]>::identity()
-    val there = a.to(Device::GPU(0))
-    return 0
-}
-"#;
-    let test = CompileTest::new();
-    let path = test.write_source("tensor_to_gpu.nr", source);
-    let binary = test.compile(&path).expect("a device transfer compiles");
-    let output = Command::new(&binary).output().expect("run the program");
-    assert!(!output.status.success(), "a missing device is not a no-op");
-    let printed = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        printed.contains("non-host device"),
-        "expected the device diagnostic, got: {printed}"
-    );
-}

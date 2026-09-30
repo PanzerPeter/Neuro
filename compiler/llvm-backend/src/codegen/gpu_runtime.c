@@ -17,6 +17,11 @@
 // standard output first. Only `mgpuMemAlloc` reports failure by returning null, which
 // the device allocator turns into its own diagnostic.
 //
+// The `__neuro_device_*` functions are the other client: `.to(Device::GPU(n))` and a
+// `@gpu` result left on the device. A program that transfers a tensor links this file
+// even when it has no `@gpu` function, and finds out whether a GPU is usable at its first
+// transfer rather than at startup.
+//
 // Single-threaded by design: the primary context of device 0 is made current once, on
 // the thread that loads the first module, and Neuro programs run on that thread.
 //
@@ -95,21 +100,33 @@ static int ready;
 // Why the probe found no usable GPU: a literal or a driver-owned error name, both static.
 static const char *unusable_reason;
 
-static void __attribute__((noreturn)) fail(const char *format, const char *detail) {
-    char message[256];
-    int length = snprintf(message, sizeof message, format, detail);
+#define MESSAGE_CAPACITY 256
+
+// `length` is what snprintf returned for `message`, clamped here to what it holds.
+static void __attribute__((noreturn)) report(const char *message, int length) {
     if (length < 0) {
         length = 0;
     }
-    if ((size_t)length >= sizeof message) {
-        length = sizeof message - 1;
+    if (length >= MESSAGE_CAPACITY) {
+        length = MESSAGE_CAPACITY - 1;
     }
     __neuro_gpu_panic(message, length);
 }
 
-static void __attribute__((noreturn)) unusable(const char *reason) {
-    fail("`@gpu` needs an NVIDIA GPU, and none is usable: %s", reason);
+static void __attribute__((noreturn)) fail(const char *format, const char *detail) {
+    char message[MESSAGE_CAPACITY];
+    report(message, snprintf(message, sizeof message, format, detail));
 }
+
+// `what` names what asked for the GPU: a `@gpu` launch, or a tensor transfer.
+static void __attribute__((noreturn)) unusable(const char *what, const char *reason) {
+    char message[MESSAGE_CAPACITY];
+    report(message, snprintf(message, sizeof message,
+                             "%s needs an NVIDIA GPU, and none is usable: %s", what, reason));
+}
+
+static const char LAUNCH[] = "`@gpu`";
+static const char TRANSFER[] = "`Device::GPU`";
 
 static const char *error_name(CUresult result) {
     const char *name = NULL;
@@ -168,11 +185,15 @@ static void probe(void) {
     ready = 1;
 }
 
-static void ensure_ready(void) {
+static void ensure_ready_for(const char *what) {
     probe();
     if (!ready) {
-        unusable(unusable_reason);
+        unusable(what, unusable_reason);
     }
+}
+
+static void ensure_ready(void) {
+    ensure_ready_for(LAUNCH);
 }
 
 // Which body a `@gpu(fallback: true)` function runs: its kernels, or its host copy.
@@ -274,4 +295,58 @@ void mgpuMemcpy(void *dst, void *src, size_t size, CUstream stream) {
     check(cu.memcpy_async((CUdeviceptr)(uintptr_t)dst, (CUdeviceptr)(uintptr_t)src,
                           size, stream),
           "cuMemcpyAsync");
+}
+
+// A device tensor's buffer is an allocation of its own rather than a piece of the device
+// arena: it lives until the tensor is dropped, which no call's mark can see.
+
+// Only device 0's context is ever made current, so a tensor can live on GPU 0 alone.
+void __neuro_device_check(int32_t device) {
+    ensure_ready_for(TRANSFER);
+    if (device == 0) {
+        return;
+    }
+    int count = 0;
+    cu.device_get_count(&count);
+    char message[MESSAGE_CAPACITY];
+    if (device < 0 || device >= count) {
+        report(message, snprintf(message, sizeof message,
+                                 "`Device::GPU(%d)` names no GPU: this machine has %d",
+                                 device, count));
+    }
+    report(message, snprintf(message, sizeof message,
+                             "`Device::GPU(%d)` is not supported yet: a tensor can "
+                             "live on GPU 0 only",
+                             device));
+}
+
+void *__neuro_device_alloc(uint64_t size) {
+    ensure_ready_for(TRANSFER);
+    CUdeviceptr pointer = 0;
+    // A tensor with a zero extent still gets an address of its own.
+    check(cu.mem_alloc(&pointer, size == 0 ? 1 : size), "cuMemAlloc");
+    return (void *)(uintptr_t)pointer;
+}
+
+// Waits for the copy: the caller releases the host buffer next.
+void *__neuro_device_upload(void *host, uint64_t size, int32_t device) {
+    __neuro_device_check(device);
+    void *buffer = __neuro_device_alloc(size);
+    CUstream stream = mgpuStreamCreate();
+    mgpuMemcpy(buffer, host, size, stream);
+    mgpuStreamSynchronize(stream);
+    return buffer;
+}
+
+// Queued behind every kernel still writing `device`, on the one stream they run on.
+void __neuro_device_download(void *host, void *device, uint64_t size) {
+    CUstream stream = mgpuStreamCreate();
+    mgpuMemcpy(host, device, size, stream);
+    mgpuStreamSynchronize(stream);
+}
+
+// A kernel still queued may read the buffer, so the stream drains first.
+void __neuro_device_free(void *device) {
+    mgpuStreamSynchronize(mgpuStreamCreate());
+    check(cu.mem_free((CUdeviceptr)(uintptr_t)device), "cuMemFree");
 }
