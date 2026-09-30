@@ -196,7 +196,7 @@ impl TypeChecker {
         index: &Expr,
         span: &Span,
     ) -> Option<Type> {
-        let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+        let obj_ty = self.check_index_base(object).unwrap_or(Type::Unknown);
         // A rank-1 tensor is indexed with one argument, which parses as the ordinary
         // index form; the axis rules are the tensor's either way.
         if let Type::Tensor { element, shape } = obj_ty.referent().clone() {

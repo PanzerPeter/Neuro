@@ -168,11 +168,13 @@ impl Lowerer {
         // A call to a generic function: infer its type arguments, queue the
         // matching monomorphized instance, and emit a call to that instance's name.
         if self.generic_templates.contains_key(name) {
-            return self.lower_generic_call(name, type_args, args, span);
+            let args = self.borrow_kernel_inputs(name, args);
+            return self.lower_generic_call(name, type_args, &args, span);
         }
 
         if let Some((params, ret)) = self.functions.get(name).cloned() {
-            let args = self.lower_args(args, &params)?;
+            let args = self.borrow_kernel_inputs(name, args);
+            let args = self.lower_args(&args, &params)?;
             let callee = HirExpr::new(
                 HirExprKind::Variable(name.to_string()),
                 HirType::Function {

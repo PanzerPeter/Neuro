@@ -192,8 +192,7 @@ are additional and feature-gated.
 ## Future Enhancements
 
 Planned on the [Quick Roadmap](../../README.md#quick-roadmap): debug information (`-g`),
-incremental compilation with a persistent cache, LTO defaults for release builds, and the
-`KernelOut<T>` aliasing boundary for `@kernel` outputs.
+incremental compilation with a persistent cache, and LTO defaults for release builds.
 
 ## Setup
 

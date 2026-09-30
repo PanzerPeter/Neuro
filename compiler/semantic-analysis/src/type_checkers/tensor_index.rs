@@ -224,7 +224,7 @@ impl TypeChecker {
         indices: &[TensorIndexArg],
         span: Span,
     ) -> Option<Type> {
-        let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+        let obj_ty = self.check_index_base(object).unwrap_or(Type::Unknown);
         if matches!(obj_ty, Type::Unknown) {
             return Some(Type::Unknown);
         }

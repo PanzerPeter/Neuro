@@ -160,6 +160,11 @@ impl TypeChecker {
             if fv.bound.contains(name) || !seen.insert(name.clone()) {
                 continue;
             }
+            // A reference is `Copy`, so a kernel's output handle would pass the check below.
+            if self.in_kernel && self.names_kernel_out(name) {
+                self.refuse_kernel_out_use(name, *span);
+                continue;
+            }
             if let Some(info) = self.symbols.lookup(name) {
                 let ty = info.ty.clone();
                 if !self.is_type_copy(&ty) {

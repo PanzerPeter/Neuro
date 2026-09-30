@@ -87,7 +87,8 @@ impl TypeChecker {
             }
         };
 
-        self.check_call_args(args, &param_types, span);
+        let args = self.borrow_kernel_inputs(func_name, args);
+        self.check_call_args(&args, &param_types, span);
 
         Some(return_type)
     }
@@ -362,6 +363,7 @@ impl TypeChecker {
             Some(s) => s.clone(),
             None => return Type::Unknown,
         };
+        let args = &*self.borrow_kernel_inputs(func_name, args);
 
         if args.len() != sig.params.len() {
             self.record_error(TypeError::ArgumentCountMismatch {

@@ -70,10 +70,17 @@ impl TypeChecker {
             }
         }
 
-        // Resolve parameter types
+        // Resolve parameter types. A kernel's tensors are borrowed at the call, so its
+        // `Tensor` and `KernelOut` parameters resolve to the references they are.
+        let kernel = crate::type_checkers::kernel::kernel_attribute(&func.attributes).is_some();
         let mut param_types = Vec::new();
         for param in &func.params {
-            if let Some(param_ty) = self.resolve_type(&param.ty) {
+            let resolved = if kernel {
+                self.resolve_kernel_param(&param.ty)
+            } else {
+                self.resolve_type(&param.ty)
+            };
+            if let Some(param_ty) = resolved {
                 param_types.push(param_ty);
             } else {
                 // Skip this parameter if type resolution failed
@@ -108,6 +115,14 @@ impl TypeChecker {
             return None;
         }
 
+        if kernel {
+            let inputs = func
+                .params
+                .iter()
+                .map(|param| matches!(param.ty, ast_types::Type::Tensor { .. }))
+                .collect();
+            self.kernel_inputs.insert(func.name.name.clone(), inputs);
+        }
         if func.generics.is_empty() {
             self.functions.insert(
                 func.name.name.clone(),
@@ -216,6 +231,9 @@ impl TypeChecker {
                 });
             }
         }
+        if self.in_kernel {
+            self.enter_kernel_outs(func);
+        }
 
         // Check function body. The implicit return is checked once, below, against the
         // declared return type: checking it here as well would run its effects twice:
@@ -253,6 +271,7 @@ impl TypeChecker {
         self.symbols.pop_scope();
         self.current_function_return_type = None;
         self.in_kernel = false;
+        self.kernel_outs.clear();
         self.current_fn_outliving.clear();
         self.exit_generic_scope();
 

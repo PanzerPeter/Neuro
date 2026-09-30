@@ -197,6 +197,9 @@ struct Lowerer {
     /// Whether the body being lowered is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
+    /// For each `@kernel` function, which parameters are bare `Tensor` inputs: a call
+    /// borrows those arguments instead of moving them.
+    kernel_inputs: HashMap<String, Vec<bool>>,
     /// Generic free-function templates, keyed by name. A generic function is
     /// never lowered as-is; each distinct set of type arguments produces one
     /// monomorphized concrete function instead.
@@ -334,8 +337,9 @@ struct MonoEnum {
 /// program never triggers these.
 pub fn lower_program(items: &[Item]) -> Result<HirProgram, LoweringError> {
     let mut lowerer = Lowerer::new();
-    lowerer.register_items(items)?;
-    lowerer.lower_program(items)
+    let items = lowerer.kernel_signatures(items);
+    lowerer.register_items(&items)?;
+    lowerer.lower_program(&items)
 }
 
 impl Lowerer {
@@ -362,6 +366,7 @@ impl Lowerer {
             loop_stack: Vec::new(),
             current_return: HirType::Void,
             in_kernel: false,
+            kernel_inputs: HashMap::new(),
             generic_templates: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),

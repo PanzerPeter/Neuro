@@ -1,11 +1,12 @@
 //! Top-level item lowering: each item's HIR, with registration in [`register`] and
 //! generic instances in [`mono`].
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use ast_types::{
-    Attribute, ConstDef, EnumDef, Expr, FunctionDef, ImplDef, Item, MethodDef, SelfParam,
-    StructDef, VariantPayload,
+    Attribute, ConstDef, EnumDef, Expr, FunctionDef, GenericArg, ImplDef, Item, MethodDef,
+    SelfParam, StructDef, VariantPayload,
 };
 use neuro_hir::{
     HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction, HirImpl, HirItem,
@@ -29,6 +30,36 @@ const FALLBACK_LABEL: &str = "fallback";
 const KERNEL_ATTRIBUTE: &str = "kernel";
 
 const THREADS_LABEL: &str = "threads";
+
+/// The handle a kernel writes a tensor through: a `&mut` tensor the call lends it.
+const KERNEL_OUT_TYPE: &str = "KernelOut";
+
+fn is_kernel(func: &FunctionDef) -> bool {
+    func.attributes
+        .iter()
+        .any(|attr| attr.name.name == KERNEL_ATTRIBUTE)
+}
+
+/// A kernel parameter as the reference a launch passes: a bare `Tensor` input is `&Tensor`
+/// and `KernelOut<Tensor>` is `&mut Tensor`. `None` for a scalar, passed as written.
+fn kernel_param_reference(ty: &ast_types::Type) -> Option<ast_types::Type> {
+    let (inner, mutable, span) = match ty {
+        ast_types::Type::Tensor { span, .. } => (ty, false, *span),
+        ast_types::Type::Generic { name, args, span } if name.name == KERNEL_OUT_TYPE => {
+            let [GenericArg::Type(inner)] = args.as_slice() else {
+                return None;
+            };
+            (inner, true, *span)
+        }
+        _ => return None,
+    };
+    Some(ast_types::Type::Reference {
+        inner: Box::new(inner.clone()),
+        mutable,
+        lifetime: None,
+        span,
+    })
+}
 
 fn target_of(attributes: &[Attribute]) -> HirTarget {
     if let Some(kernel) = attributes
@@ -75,6 +106,58 @@ fn block_shape(kernel: &Attribute) -> [u32; 3] {
 }
 
 impl Lowerer {
+    /// `items` with each `@kernel` function's tensor parameters written as the references
+    /// its callers lend, so a kernel lowers like any function taking `&` and `&mut`
+    /// tensors. Records which parameters are bare inputs, the ones a call borrows.
+    pub(crate) fn kernel_signatures<'a>(&mut self, items: &'a [Item]) -> Cow<'a, [Item]> {
+        if !items
+            .iter()
+            .any(|item| matches!(item, Item::Function(func) if is_kernel(func)))
+        {
+            return Cow::Borrowed(items);
+        }
+        let mut items = items.to_vec();
+        for item in &mut items {
+            let Item::Function(func) = item else {
+                continue;
+            };
+            if !is_kernel(func) {
+                continue;
+            }
+            let mut inputs = Vec::with_capacity(func.params.len());
+            for param in &mut func.params {
+                inputs.push(matches!(param.ty, ast_types::Type::Tensor { .. }));
+                if let Some(reference) = kernel_param_reference(&param.ty) {
+                    param.ty = reference;
+                }
+            }
+            self.kernel_inputs.insert(func.name.name.clone(), inputs);
+        }
+        Cow::Owned(items)
+    }
+
+    /// The arguments of a call to `callee`, each tensor a kernel borrows written as the
+    /// borrow it is; unchanged when `callee` is not a kernel.
+    pub(crate) fn borrow_kernel_inputs<'a>(
+        &self,
+        callee: &str,
+        args: &'a [Expr],
+    ) -> Cow<'a, [Expr]> {
+        let Some(inputs) = self.kernel_inputs.get(callee) else {
+            return Cow::Borrowed(args);
+        };
+        let mut borrowed = args.to_vec();
+        for (arg, _) in borrowed.iter_mut().zip(inputs).filter(|(_, input)| **input) {
+            let span = arg.span();
+            *arg = Expr::Reference {
+                operand: Box::new(arg.clone()),
+                mutable: false,
+                span,
+            };
+        }
+        Cow::Owned(borrowed)
+    }
+
     /// Lower a function body, marking it as a kernel's when `target` says so: only there
     /// do `thread_id` and `block_id` name the thread's grid position.
     fn lower_function_body(

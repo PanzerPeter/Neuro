@@ -243,6 +243,10 @@ impl TypeChecker {
             // Generic type application `Name<T1, ...>`: resolve the arguments
             // and monomorphize the generic struct into a distinct nominal instance.
             ast_types::Type::Generic { name, args, span } => {
+                if self.is_kernel_out(&name.name) {
+                    self.refuse_kernel_out_type(*span);
+                    return None;
+                }
                 let mut resolved = Vec::with_capacity(args.len());
                 for arg in args {
                     match arg {

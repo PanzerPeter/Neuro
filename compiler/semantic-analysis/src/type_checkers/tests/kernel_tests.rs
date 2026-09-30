@@ -4,7 +4,7 @@ use super::semantic_errors;
 use crate::errors::TypeError;
 
 const KERNEL: &str = "@kernel(threads: [16, 16])
-func add(a: &Tensor<f32, [37, 45]>, s: f32, on: bool, out: &mut Tensor<f32, [37, 45]>) {
+func add(a: Tensor<f32, [37, 45]>, s: f32, on: bool, out: KernelOut<Tensor<f32, [37, 45]>>) {
     val row = thread_id.x
     val col = thread_id.y
     val block = block_id.z
@@ -24,7 +24,7 @@ fn kernel_error(src: &str) -> (String, usize) {
 }
 
 #[test]
-fn a_kernel_reads_its_grid_position_and_writes_its_mut_tensor() {
+fn a_kernel_reads_its_grid_position_and_writes_its_output() {
     let errors = semantic_errors(KERNEL);
     assert!(errors.is_empty(), "got {errors:?}");
 }
@@ -60,19 +60,31 @@ fn threads_needs_one_entry_per_axis_of_the_grid_tensor() {
 fn a_kernel_signature_is_checked_where_it_goes_wrong() {
     for (src, needle) in [
         (
-            "@kernel(threads: [4])\nfunc k(out: &mut Tensor<f32, [4]>) -> i32 {\n    0\n}\n",
+            "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<f32, [4]>>) -> i32 {\n    0\n}\n",
             "k(",
         ),
         (
-            "@kernel(threads: [4])\nfunc k(a: Tensor<f32, [4]>, out: &mut Tensor<f32, [4]>) {}\n",
+            "@kernel(threads: [4])\nfunc k(a: &Tensor<f32, [4]>, out: KernelOut<Tensor<f32, [4]>>) {}\n",
             "a:",
         ),
         (
-            "@kernel(threads: [4])\nfunc k(t: string, out: &mut Tensor<f32, [4]>) {}\n",
+            "@kernel(threads: [4])\nfunc k(out: &mut Tensor<f32, [4]>) {}\n",
+            "out:",
+        ),
+        (
+            "@kernel(threads: [4])\nfunc k(a: Tensor<f32, [?]>, out: KernelOut<Tensor<f32, [4]>>) {}\n",
+            "a:",
+        ),
+        (
+            "@kernel(threads: [4])\nfunc k(o: KernelOut<f32>, out: KernelOut<Tensor<f32, [4]>>) {}\n",
+            "KernelOut<f32>",
+        ),
+        (
+            "@kernel(threads: [4])\nfunc k(t: string, out: KernelOut<Tensor<f32, [4]>>) {}\n",
             "t:",
         ),
         (
-            "@kernel(threads: [4])\nfunc k(a: &Tensor<f32, [4]>) {}\n",
+            "@kernel(threads: [4])\nfunc k(a: Tensor<f32, [4]>) {}\n",
             "k(",
         ),
     ] {
@@ -131,4 +143,97 @@ fn grid_positions_exist_only_in_a_kernel_body_and_yield_to_a_local() {
     );
     let errors = semantic_errors(&src);
     assert!(errors.is_empty(), "got {errors:?}");
+}
+
+/// `KernelOut` names a kernel parameter's whole type and nothing else.
+#[test]
+fn kernel_out_is_only_a_kernel_parameter_type() {
+    for src in [
+        "func host(out: KernelOut<Tensor<f32, [4]>>) {}\n",
+        "struct S { out: KernelOut<Tensor<f32, [4]>> }\n",
+        "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<f32, [4]>>, o: [KernelOut<Tensor<f32, [4]>>; 1]) {}\n",
+    ] {
+        let errors = semantic_errors(src);
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                TypeError::KernelForm { problem, .. } if problem.contains("only a kernel parameter's type")
+            )),
+            "{src}: got {errors:?}"
+        );
+    }
+}
+
+/// An output is written element by element; the handle itself never leaves the body.
+#[test]
+fn a_kernel_out_handle_is_only_indexed() {
+    let with = |line: &str| {
+        KERNEL.replace(
+            "    val block = block_id.z\n",
+            &format!("    val block = block_id.z\n{line}\n"),
+        )
+    };
+    let fine = with("    out[0, 0] += out[1, 1]");
+    let errors = semantic_errors(&fine);
+    assert!(errors.is_empty(), "got {errors:?}");
+
+    for line in [
+        "    val o = out",
+        "    val o = &out",
+        "    sink(out)",
+        "    val f = |i: i64| out[0, 0]",
+    ] {
+        let src = format!(
+            "func sink(t: &mut Tensor<f32, [37, 45]>) {{}}\n{}",
+            with(line)
+        );
+        let errors = semantic_errors(&src);
+        assert!(!errors.is_empty(), "{line}: accepted");
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                TypeError::KernelForm { problem, span } if problem.contains("output 'out'")
+                    && span.start == src.find(line).expect("line") + line.rfind("out").expect("use")
+            )),
+            "{line}: got {errors:?}"
+        );
+    }
+}
+
+/// A bare `Tensor` input is borrowed by the call: the caller keeps it, may not pass it
+/// with `&` too, and may not lend it while the same call writes it.
+#[test]
+fn a_kernel_call_borrows_its_inputs() {
+    let call = |args: &str| {
+        format!(
+            "{KERNEL}func main() -> i32 {{\n    mut a: Tensor<f32, [37, 45]> = Tensor::zeros()\n    mut r: Tensor<f32, [37, 45]> = Tensor::zeros()\n    add({args})\n    add({args})\n    return 0\n}}\n"
+        )
+    };
+    let errors = semantic_errors(&call("a, 2.0, true, &mut r"));
+    assert!(errors.is_empty(), "got {errors:?}");
+
+    let src = call("a, 2.0, true, &mut r").replacen("    add(a", "    val f = add\n    add(a", 1);
+    let (problem, at) = kernel_error(&src);
+    assert!(problem.contains("called by name"), "{problem}");
+    assert_eq!(at, src.find("= add").expect("value") + 2);
+
+    let src = call("&a, 2.0, true, &mut r");
+    let errors = semantic_errors(&src);
+    assert!(
+        errors.iter().any(|error| matches!(
+            error,
+            TypeError::KernelForm { problem, .. } if problem.contains("pass the tensor, not `&`")
+        )),
+        "got {errors:?}"
+    );
+
+    let errors = semantic_errors(&call("r, 2.0, true, &mut r"));
+    assert!(
+        errors.iter().any(|error| matches!(
+            error,
+            TypeError::CannotMutablyBorrowWhileBorrowed { .. }
+                | TypeError::CannotBorrowWhileMutablyBorrowed { .. }
+        )),
+        "got {errors:?}"
+    );
 }

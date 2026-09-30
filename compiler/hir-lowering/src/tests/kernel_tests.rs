@@ -1,30 +1,33 @@
 // `@kernel`: the launch shape on the function, and the grid positions its body reads.
 
-use neuro_hir::{HirExprKind, HirGridIndex, HirItem, HirTarget, HirType};
+use neuro_hir::{HirExprKind, HirGridIndex, HirItem, HirStmt, HirTarget, HirType};
 
 use super::{binding_init, function_body, lower};
 
 const PROGRAM: &str = r#"
 @kernel(threads: [8, 4])
-func fill<N>(out: &mut Tensor<f32, [N, 3]>) {
+func fill<N>(a: Tensor<f32, [N, 3]>, out: KernelOut<Tensor<f32, [N, 3]>>) {
     val row = thread_id.x
     val block = block_id.y
     if row < 5 && block < 1 {
-        out[row, 0] = 1.0
+        out[row, 0] = a[row, 1]
     }
 }
 
 @kernel(threads: [32])
-func shadowed(out: &mut Tensor<i32, [4]>) {
+func shadowed(s: Tensor<i32, [4]>, out: KernelOut<Tensor<i32, [4]>>) {
     val thread_id = 2u32
-    out[0] = thread_id as i32
+    out[0] = s[1] + thread_id as i32
 }
 
 func main() -> i32 {
     mut t: Tensor<f32, [5, 3]> = Tensor::zeros()
-    fill(&mut t)
+    val a: Tensor<f32, [5, 3]> = Tensor::ones()
+    fill(a, &mut t)
     mut u: Tensor<i32, [4]> = Tensor::zeros()
-    shadowed(&mut u)
+    val s: Tensor<i32, [4]> = Tensor::zeros()
+    shadowed(s, &mut u)
+    shadowed(s, &mut u)
     return 0
 }
 "#;
@@ -88,4 +91,49 @@ fn a_local_named_like_a_grid_position_is_an_ordinary_variable() {
         "{:?}",
         init.kind
     );
+}
+
+/// A kernel takes each tensor as the reference its caller lends: a bare `Tensor` input is
+/// `&Tensor`, borrowed at the call, and `KernelOut<Tensor>` is `&mut Tensor`.
+#[test]
+fn kernel_tensors_are_references_the_call_lends() {
+    let program = lower(PROGRAM);
+    let shadowed = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Function(f) if f.name == "shadowed" => Some(f),
+            _ => None,
+        })
+        .expect("`shadowed`");
+    let mutability: Vec<_> = shadowed
+        .params
+        .iter()
+        .map(|param| match &param.ty {
+            HirType::Reference { mutable, .. } => Some(*mutable),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(mutability, [Some(false), Some(true)]);
+
+    let calls: Vec<_> = function_body(&program, "main")
+        .iter()
+        .filter_map(|stmt| match stmt {
+            HirStmt::Expr(expr) => match &expr.kind {
+                HirExprKind::Call { args, .. } => Some(args),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(calls.len(), 3);
+    for args in calls {
+        for (arg, mutable) in args.iter().zip([false, true]) {
+            assert!(
+                matches!(&arg.kind, HirExprKind::Reference { mutable: m, .. } if *m == mutable),
+                "{:?}",
+                arg.kind
+            );
+        }
+    }
 }

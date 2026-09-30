@@ -91,12 +91,23 @@ module per declaration kind beside it. `tests/` is split by subject.
   `check_kernel_attributes` (`type_checkers/kernel.rs`) holds `@kernel` to its form (`KernelForm`
   throughout): a free function, not beside `@gpu` or `@grad`, with one `threads:` array of one to
   three positive integer literals whose product is at most 1024; a `void` return; parameters that
-  are numbers, `bool`s, `&Tensor` or `&mut Tensor` of a numeric element and no `?` extent (a
-  by-value tensor is refused); and a first `&mut Tensor`, the grid tensor, whose rank is the
-  length of `threads`. `check_function` sets `in_kernel` for a `@kernel` body, where
-  `thread_id` and `block_id` not shadowed by a local read as `u32` through `.x` / `.y` / `.z`
-  (`check_grid_position`, called first in field access) and are refused read whole; anywhere
-  else they are undefined names like any other.
+  are numbers, `bool`s, `Tensor` inputs or `KernelOut<Tensor>` outputs of a numeric element and
+  no `?` extent (a written `&` / `&mut` is refused); and a first `KernelOut`, the grid tensor,
+  whose rank is the length of `threads`. `register_function_signature` resolves a kernel's
+  parameters through `resolve_kernel_param`: an input is `&Tensor` and a `KernelOut` is
+  `&mut Tensor`, so the body and the backends see ordinary references. `KernelOut` anywhere
+  else is refused in `resolve_type` (`refuse_kernel_out_type`). A call to a kernel
+  (`check_plain_call`, `check_generic_call`) rewrites each input argument to `&arg` first
+  (`borrow_kernel_inputs`, from the `kernel_inputs` table registration fills), so the call
+  borrows it under the ordinary rules, and an argument already written `&a` is refused.
+  `check_function` sets `in_kernel` for a `@kernel` body, where `thread_id` and `block_id` not
+  shadowed by a local read as `u32` through `.x` / `.y` / `.z` (`check_grid_position`, called
+  first in field access) and are refused read whole; anywhere else they are undefined names
+  like any other. It also records the `KernelOut` parameters (`enter_kernel_outs`); the
+  identifier arm refuses any read of one (`check_kernel_out_read`) except as the object of an
+  index, which `check_index_base` marks, and `validate_captures` refuses a closure capturing one.
+  A kernel named as a value is refused (`refuse_kernel_value`): a function type cannot carry the
+  borrow at the call.
   `.detach()` (`expressions/builtins.rs`) consumes an owned tensor like `.to` (`record_move`)
   and keeps its type; a borrowed receiver falls through to `MethodNotFound`.
 - **4. full check**: `check_function` / `check_impl` / `check_const_item`.

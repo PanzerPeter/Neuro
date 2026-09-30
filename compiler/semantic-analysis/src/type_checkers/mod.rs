@@ -158,6 +158,16 @@ pub(crate) struct TypeChecker {
     /// Whether the body being checked is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
+    /// The `KernelOut` parameters of the kernel being checked, bound in the scope
+    /// `kernel_out_scope` indexes; a same-named binding anywhere else shadows one.
+    kernel_outs: Vec<String>,
+    kernel_out_scope: usize,
+    /// The identifier an index is about to check as its object: the one read of a
+    /// `KernelOut` handle a kernel body may make.
+    indexed_kernel_out: Option<shared_types::Span>,
+    /// For each `@kernel` function, which parameters are bare `Tensor` inputs, the ones
+    /// a call borrows rather than moves.
+    kernel_inputs: HashMap<String, Vec<bool>>,
     /// Names of bindings in the current function whose storage outlives the call:
     /// reference-typed parameters and the `self` receiver of an instance method.
     /// A returned reference is only safe when it ultimately borrows one of these:
@@ -394,6 +404,10 @@ impl TypeChecker {
             warnings: Vec::new(),
             current_function_return_type: None,
             in_kernel: false,
+            kernel_outs: Vec::new(),
+            kernel_out_scope: 0,
+            indexed_kernel_out: None,
+            kernel_inputs: HashMap::new(),
             current_fn_outliving: HashSet::new(),
             backward_losses: HashSet::new(),
             self_is_owned: false,

@@ -142,6 +142,9 @@ impl TypeChecker {
                         });
                     }
                     self.check_borrowee_read(&ident.name, ident.span);
+                    if self.in_kernel {
+                        self.check_kernel_out_read(ident);
+                    }
                     Some(ty)
                 } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
                     Some(const_ty)
@@ -152,6 +155,9 @@ impl TypeChecker {
                 } else if let Some(function_ty) = self.functions.get(&ident.name).cloned() {
                     // A function named as a value is an ordinary value of its function
                     // type; lowering wraps it in a closure that captures nothing.
+                    if self.kernel_inputs.contains_key(&ident.name) {
+                        self.refuse_kernel_value(ident);
+                    }
                     Some(function_ty)
                 } else if self.generic_funcs.contains_key(&ident.name) {
                     // A generic function has no one type to be a value of until its type

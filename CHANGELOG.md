@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.10.0] - 2026-09-30
+
+### Changed
+
+- A `@kernel` function now takes the tensors it reads as bare `Tensor<T, S>` and the ones it
+  writes as `KernelOut<Tensor<T, S>>`. The call borrows both: an input is passed as `a` and
+  stays usable afterwards, an output as `&mut r`, and one call cannot pass the same tensor as
+  both. Inside the body a `KernelOut` handle is only ever indexed (`out[i, j] = v`, `out[i] += v`,
+  or an element read); binding, borrowing, passing, capturing or returning it is a compile error.
+  `KernelOut` is a type only in a kernel's parameter list, an input passed as `&a` is refused,
+  and a kernel cannot be named as a function value. The `&Tensor` / `&mut Tensor` parameters
+  4.9.0 took are now refused with a message naming the new form.
+
 ## [4.9.0] - 2026-09-30
 
 ### Added

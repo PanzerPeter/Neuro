@@ -2,7 +2,8 @@
 //
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
-//   `@kernel` with `thread_id` and an early `return` · `.to(Device::GPU(0))` /
+//   `@kernel` with `thread_id`, an early `return`, borrowed `Tensor` inputs and
+//   `KernelOut` outputs · `.to(Device::GPU(0))` /
 //   `.to(Device::CPU)` · a `@gpu` function over device tensors · `pool` arena blocks · a
 //   closure through `.map` · a `.sum()` reduction · a `Vec` of `Copy` structs.
 //
@@ -17,7 +18,7 @@
 // Without a usable NVIDIA GPU the program stops before `main` with a `panic:` line.
 
 @kernel(threads: [32])
-func diffuse(t: &Tensor<f32, [100]>, rate: f32, next: &mut Tensor<f32, [100]>) {
+func diffuse(t: Tensor<f32, [100]>, rate: f32, next: KernelOut<Tensor<f32, [100]>>) {
     val i = thread_id.x
     if i >= 100 {
         return
@@ -31,7 +32,7 @@ func diffuse(t: &Tensor<f32, [100]>, rate: f32, next: &mut Tensor<f32, [100]>) {
 }
 
 @kernel(threads: [32])
-func copy_into(t: &Tensor<f32, [100]>, out: &mut Tensor<f32, [100]>) {
+func copy_into(t: Tensor<f32, [100]>, out: KernelOut<Tensor<f32, [100]>>) {
     val i = thread_id.x
     if i < 100 {
         out[i] = t[i]
@@ -82,9 +83,9 @@ func main() -> i32 {
         pool {
             // Even steps read `a` and write `b`, odd steps the other way round.
             if step % 2 == 0 {
-                diffuse(&a, rate, &mut b)
+                diffuse(a, rate, &mut b)
             } else {
-                diffuse(&b, rate, &mut a)
+                diffuse(b, rate, &mut a)
             }
             host = host_step(&host, rate)
         }
@@ -98,9 +99,9 @@ func main() -> i32 {
                 change(&b, &last).to(Device::CPU).map(magnitude).sum()
             }
             if step % 2 == 0 {
-                copy_into(&a, &mut last)
+                copy_into(a, &mut last)
             } else {
-                copy_into(&b, &mut last)
+                copy_into(b, &mut last)
             }
             reports.push(Report { step: step, middle: host[50], moved: moved })
         }

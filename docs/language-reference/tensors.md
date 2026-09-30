@@ -1019,13 +1019,13 @@ layers and prints the same output with or without a GPU.
 
 `@kernel(threads: [...])` runs a function's body once per GPU thread. Where `@gpu` turns
 whole-tensor operations into kernels for you, a kernel is the per-thread code itself. The
-launch has one thread per element of the first `&mut` tensor parameter, the grid tensor, in
+launch has one thread per element of the first `KernelOut` parameter, the grid tensor, in
 blocks shaped `threads`: one to three positive integer literals, one per axis of the grid
 tensor, at most 1024 threads a block.
 
 ```neuro
 @kernel(threads: [16, 16])
-func add_relu(a: &Tensor<f32, [37, 45]>, b: &Tensor<f32, [37, 45]>, out: &mut Tensor<f32, [37, 45]>) {
+func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut<Tensor<f32, [37, 45]>>) {
     val row = thread_id.x
     val col = thread_id.y
     if row < 37 && col < 45 {
@@ -1047,11 +1047,23 @@ writes, as `row < 37 && col < 45` does. Every index is still checked when the ke
 thread that reads or writes past an extent, or divides an integer by zero, stops the kernel, and
 the program aborts at the call with a `panic:` naming the GPU error.
 
-A kernel takes tensors it reads as `&Tensor`, tensors it writes as `&mut Tensor`, and numbers
-or `bool`s by value. Every tensor has a static shape. It returns nothing: what it computes is
-what it writes. A call copies each host tensor to the GPU and copies each `&mut` one back after
+A kernel takes tensors it reads as `Tensor<T, S>`, tensors it writes as
+`KernelOut<Tensor<T, S>>`, and numbers or `bool`s by value. Every tensor has a static shape. It
+returns nothing: what it computes is what it writes.
+
+The call borrows every tensor it passes. An input is passed bare, `add_relu(a, b, &mut out)`,
+and the caller still owns it afterwards; it must be a named tensor, not a temporary such as
+`a + b`, and writing `&a` is an error. A kernel is called by name; it cannot be stored as a
+function value. An output is passed as `&mut out`, and the compiler turns
+that borrow into the kernel's `KernelOut` handle. One call may not pass the same tensor as an
+input and an output. A call copies each host tensor to the GPU and copies each output back after
 the kernel has run; a tensor already moved with [`.to(Device::GPU(n))`](#device-transfer) is used
-where it is, and a `&mut` one is written in place.
+where it is, and an output is written in place.
+
+Inside the body a `KernelOut` handle is only ever indexed: `out[i, j] = v`, `out[i] += v`, or a
+read of one element. It cannot be bound to a local, borrowed, passed to a function, captured by
+a closure or returned, and `KernelOut` is not a type anywhere but a kernel's parameter list. An
+input is read-only; writing one of its elements is an error.
 
 The body may use locals, arithmetic and comparisons, casts, `&&` / `||`, `if` (as a statement
 or with a value), `while`, `loop`, `for` over a range, `break`, `continue`, `return`, and reads
