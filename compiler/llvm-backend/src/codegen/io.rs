@@ -33,9 +33,9 @@
 // holding the retry loop rather than a bare call per site. Output is the language's
 // primary result channel; silently truncating it would be worse than the loop it costs.
 
+use inkwell::IntPredicate;
 use inkwell::module::Linkage;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, GlobalValue};
-use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;

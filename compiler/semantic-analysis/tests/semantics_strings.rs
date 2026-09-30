@@ -1,6 +1,6 @@
 // Integration tests: String type
 
-use semantic_analysis::{type_check, TypeError};
+use semantic_analysis::{TypeError, type_check};
 
 #[test]
 fn type_check_string_literal() {
@@ -74,9 +74,11 @@ fn type_check_string_mismatch_with_integer() {
         "Returning integer when string expected should fail"
     );
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. }))
+    );
 }
 
 #[test]

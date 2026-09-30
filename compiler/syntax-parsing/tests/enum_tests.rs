@@ -1,6 +1,6 @@
 // Enum declaration and struct-variant literal parsing.
 
-use syntax_parsing::{parse, Expr, Item, Stmt, VariantPayload};
+use syntax_parsing::{Expr, Item, Stmt, VariantPayload, parse};
 
 #[test]
 fn parses_all_three_variant_payload_shapes() {

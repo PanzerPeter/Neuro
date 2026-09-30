@@ -102,7 +102,9 @@ fn differentiated_param_problem(ty: &Type, generic: bool) -> Option<&'static str
         mutable: true,
     } = ty
     else {
-        return Some("must be borrowed `&mut`, because it is differentiated and its gradient is written after the call returns");
+        return Some(
+            "must be borrowed `&mut`, because it is differentiated and its gradient is written after the call returns",
+        );
     };
     differentiated_tensor_problem(inner, generic)
 }
@@ -125,7 +127,9 @@ fn differentiated_tensor_problem(ty: &Type, generic: bool) -> Option<&'static st
         ArrayLen::Param(_) => !generic,
         _ => true,
     }) {
-        return Some("has an extent that is not a literal; a gradient buffer is shaped like its parameter and needs a static shape");
+        return Some(
+            "has an extent that is not a literal; a gradient buffer is shaped like its parameter and needs a static shape",
+        );
     }
     None
 }
@@ -465,21 +469,23 @@ impl TypeChecker {
         let mut paths: Vec<String> = Vec::new();
         for entry in elements {
             let span = entry.span();
-            if let Expr::Identifier(ident) = entry {
-                if ident.name != RECEIVER {
-                    let problem = self.select_param(signature, params, &ident.name, &mut selection);
-                    if let Some(problem) = problem {
-                        report(self, problem, span);
-                    }
-                    continue;
+            if let Expr::Identifier(ident) = entry
+                && ident.name != RECEIVER
+            {
+                let problem = self.select_param(signature, params, &ident.name, &mut selection);
+                if let Some(problem) = problem {
+                    report(self, problem, span);
                 }
+                continue;
             }
             let Some(path) = field_path_text(entry) else {
                 report(self, "lists an entry in `wrt:` that is neither a parameter name nor a field path rooted at `self`".to_string(), span);
                 continue;
             };
             let problem = match receiver {
-                None => Some(format!("lists '{path}' in `wrt:`, but only a method's `wrt:` may name a field of `self`")),
+                None => Some(format!(
+                    "lists '{path}' in `wrt:`, but only a method's `wrt:` may name a field of `self`"
+                )),
                 Some(receiver) => self.select_field(&path, entry, receiver, signature.generic),
             };
             if let Some(problem) = problem {
@@ -542,7 +548,9 @@ impl TypeChecker {
             return Some(format!("lists '{path}' in `wrt:`, which {problem}"));
         }
         if !matches!(receiver.self_param, Some(SelfParam::RefMut)) {
-            return Some(format!("lists '{path}' in `wrt:`, reached through the receiver, so it must take `&mut self`: `.backward()` writes that field's gradient slot after the call returns"));
+            return Some(format!(
+                "lists '{path}' in `wrt:`, reached through the receiver, so it must take `&mut self`: `.backward()` writes that field's gradient slot after the call returns"
+            ));
         }
         None
     }
@@ -578,7 +586,10 @@ impl TypeChecker {
                     .get(owner)
                     .is_some_and(|private| private.contains(&field.name))
                 {
-                    return Err(format!("reaches through the private field '{owner}.{}'; `wrt:` may name only exported fields", field.name));
+                    return Err(format!(
+                        "reaches through the private field '{owner}.{}'; `wrt:` may name only exported fields",
+                        field.name
+                    ));
                 }
                 Ok(ty.clone())
             }

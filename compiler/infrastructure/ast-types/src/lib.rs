@@ -14,8 +14,8 @@ pub use expressions::{
 pub use items::{
     Attribute, AttributeNamedArg, ConstDef, EnumDef, EnumVariant, FieldDef, FunctionDef,
     GenericParam, GenericParamKind, ImplDef, ImportDef, ImportName, ImportSelection, Item,
-    MethodDef, ModuleDef, ModuleId, NewtypeDef, ParamLabel, Parameter, SelfParam, StructDef,
-    TraitBound, TraitDef, TraitMethod, VariantPayload, PRELUDE_MODULE,
+    MethodDef, ModuleDef, ModuleId, NewtypeDef, PRELUDE_MODULE, ParamLabel, Parameter, SelfParam,
+    StructDef, TraitBound, TraitDef, TraitMethod, VariantPayload,
 };
 pub use statements::{LoopAdapter, LoopAdapterKind, Place, Stmt};
 pub use types::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};

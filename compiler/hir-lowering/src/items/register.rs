@@ -52,10 +52,10 @@ impl Lowerer {
             }
         }
         for item in items {
-            if let Item::Enum(def) = item {
-                if def.generics.is_empty() {
-                    self.register_enum(def)?;
-                }
+            if let Item::Enum(def) = item
+                && def.generics.is_empty()
+            {
+                self.register_enum(def)?;
             }
         }
         // Traits before impls: an `impl Trait for T` and a `&dyn Trait` annotation both

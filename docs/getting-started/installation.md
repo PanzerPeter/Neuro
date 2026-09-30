@@ -7,7 +7,7 @@ the three platforms CI builds, tests, and ships release binaries for.
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Rust | 1.85+ | Install via rustup |
+| Rust | 1.98.1+ | Install via rustup |
 | LLVM | 22 | Development package required (headers + `llvm-config` + link libraries) |
 | C linker | any | `clang`, `gcc`, or the MSVC linker from Visual Studio Build Tools |
 

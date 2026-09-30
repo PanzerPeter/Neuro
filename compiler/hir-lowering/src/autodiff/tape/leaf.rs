@@ -5,10 +5,10 @@ use ast_types::BinaryOp;
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use crate::autodiff::{FieldPath, PathStep, RECEIVER};
-use crate::{is_numeric, LoweringError};
+use crate::{LoweringError, is_numeric};
 
 use super::positions::literal_position;
-use super::{Leaf, Linearizer, Op, Slot, CLONE_METHOD};
+use super::{CLONE_METHOD, Leaf, Linearizer, Op, Slot};
 
 pub(super) fn is_arithmetic(op: BinaryOp) -> bool {
     matches!(
@@ -155,7 +155,7 @@ impl<'f> Linearizer<'f> {
                     return Err(self.refuse(
                         "a field or element of a value that is neither a struct nor an array",
                         place.span,
-                    ))
+                    ));
                 }
             },
             _ => return Err(self.refuse("a field of a computed value", place.span)),

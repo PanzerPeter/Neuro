@@ -124,9 +124,11 @@ pub(super) fn slice_sources(object_ty: &HirType, axes: &[HirTensorAxis]) -> Opti
             HirTensorAxis::Position(HirExpr {
                 kind: HirExprKind::Literal(Literal::Integer(value, _)),
                 ..
-            }) => vec![usize::try_from(*value)
-                .ok()
-                .filter(|index| index < extent)?],
+            }) => vec![
+                usize::try_from(*value)
+                    .ok()
+                    .filter(|index| index < extent)?,
+            ],
             HirTensorAxis::Position(_) => return None,
             HirTensorAxis::Range {
                 start,

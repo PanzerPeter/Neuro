@@ -50,8 +50,8 @@ use shared_types::Span;
 use crate::{Lowerer, LoweringError};
 
 use super::{
-    bundle_name, field_key, field_place, hessian_field, hessian_type, reverse_name, Specialization,
-    Target,
+    Specialization, Target, bundle_name, field_key, field_place, hessian_field, hessian_type,
+    reverse_name,
 };
 
 const BACKWARD_METHOD: &str = "backward";
@@ -118,7 +118,7 @@ fn reverse_callee(
         _ => {
             return Err(LoweringError::Malformed {
                 detail: "a `@grad` call through neither a name nor a method".to_string(),
-            })
+            });
         }
     };
     Ok(HirExpr::new(kind, pair_ty.clone(), callee.span))

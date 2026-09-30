@@ -30,10 +30,10 @@ pub(super) fn lower(src: &str) -> HirProgram {
 /// The body of the first function named `name`.
 pub(super) fn function_body<'a>(program: &'a HirProgram, name: &str) -> &'a [HirStmt] {
     for item in &program.items {
-        if let HirItem::Function(f) = item {
-            if f.name == name {
-                return &f.body;
-            }
+        if let HirItem::Function(f) = item
+            && f.name == name
+        {
+            return &f.body;
         }
     }
     panic!("function '{}' not found", name);
@@ -42,10 +42,10 @@ pub(super) fn function_body<'a>(program: &'a HirProgram, name: &str) -> &'a [Hir
 /// The initializer expression of the first `val`/`mut` named `name` in `body`.
 pub(super) fn binding_init<'a>(body: &'a [HirStmt], name: &str) -> &'a HirExpr {
     for stmt in body {
-        if let HirStmt::VarDecl { name: n, init, .. } = stmt {
-            if n == name {
-                return init.as_ref().expect("binding should have an initializer");
-            }
+        if let HirStmt::VarDecl { name: n, init, .. } = stmt
+            && n == name
+        {
+            return init.as_ref().expect("binding should have an initializer");
         }
     }
     panic!("binding '{}' not found", name);
@@ -80,10 +80,10 @@ pub(super) fn struct_names(program: &HirProgram) -> Vec<String> {
 /// The method names of the first impl on `type_name` in the lowered program.
 pub(super) fn impl_method_names(program: &HirProgram, type_name: &str) -> Vec<String> {
     for item in &program.items {
-        if let HirItem::Impl(imp) = item {
-            if imp.type_name == type_name {
-                return imp.methods.iter().map(|m| m.name.clone()).collect();
-            }
+        if let HirItem::Impl(imp) = item
+            && imp.type_name == type_name
+        {
+            return imp.methods.iter().map(|m| m.name.clone()).collect();
         }
     }
     panic!("impl for '{}' not found", type_name);

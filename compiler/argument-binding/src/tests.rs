@@ -3,7 +3,7 @@ use ast_types::{
 };
 use shared_types::{Identifier, Literal, Span};
 
-use crate::{bind_arguments, ArgumentError};
+use crate::{ArgumentError, bind_arguments};
 
 fn span() -> Span {
     Span::new(0, 0)

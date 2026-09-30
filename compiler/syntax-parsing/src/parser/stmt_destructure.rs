@@ -11,8 +11,8 @@ use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 use ast_types::{Expr, Stmt};
 
-use super::statements::{ArrayPatternElem, DestructurePattern};
 use super::Parser;
+use super::statements::{ArrayPatternElem, DestructurePattern};
 
 impl Parser {
     /// Whether the tokens after the current `val`/`mut` keyword open a destructuring
@@ -202,7 +202,7 @@ impl Parser {
                 break;
             }
             if self.check(&TokenKind::DotDot) {
-                let dotdot = self.advance().ok_or(ParseError::UnexpectedEof {
+                let dotdot = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "'..' rest pattern".to_string(),
                 })?;
                 if seen_rest {
@@ -215,7 +215,7 @@ impl Parser {
                 seen_rest = true;
                 // An optional name binds the remainder; bare `..` discards it.
                 let name = if let Some(TokenKind::Identifier(_)) = self.peek_kind() {
-                    let tok = self.advance().ok_or(ParseError::UnexpectedEof {
+                    let tok = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                         expected: "rest binding name".to_string(),
                     })?;
                     let TokenKind::Identifier(n) = tok.kind else {

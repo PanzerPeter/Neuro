@@ -1,7 +1,4 @@
-#[allow(unused_imports)]
-use super::{
-    binding_init, enum_names, function_body, function_names, impl_method_names, lower, struct_names,
-};
+use super::{binding_init, function_body, lower};
 use neuro_hir::{HirExprKind, HirStmt, HirType};
 
 #[test]

@@ -5,8 +5,8 @@
 // has already required. That is how `BTreeMap<OrderedF32, V>` gets a total order over
 // values that `f32` itself cannot provide.
 
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};

@@ -1,5 +1,4 @@
-#[allow(unused_imports)]
-use super::{make_function, make_ident, make_type, semantic_errors};
+use super::semantic_errors;
 use crate::errors::TypeError;
 
 #[test]

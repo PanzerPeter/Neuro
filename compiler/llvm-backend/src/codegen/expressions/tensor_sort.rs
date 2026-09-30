@@ -189,7 +189,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     _ => {
                         return Err(CodegenError::InternalError(
                             "`.topk` result type is not a tuple".to_string(),
-                        ))
+                        ));
                     }
                 };
                 let mut agg = struct_ty.get_undef();
@@ -255,7 +255,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// A stable insertion sort: each position's index is carried left past every earlier
     /// index whose element it strictly precedes, and stops at the first it does not, so
     /// equal elements never cross.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn insertion_sort(
         &mut self,
         order: PointerValue<'ctx>,
@@ -378,7 +378,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Write one ordered run into whichever results the selection allocated.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn write_run(
         &mut self,
         order: PointerValue<'ctx>,

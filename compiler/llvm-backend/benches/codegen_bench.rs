@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use llvm_backend::{compile, OptimizationLevelSetting};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use llvm_backend::{OptimizationLevelSetting, compile};
 
 fn build_source(name: &str) -> &'static str {
     match name {

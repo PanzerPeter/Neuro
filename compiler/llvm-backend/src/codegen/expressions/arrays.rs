@@ -3,9 +3,9 @@
 // aggregates stored in an alloca; indexing is a `getelementptr` + load/store with
 // a bounds guard routed through the panic runtime.
 
+use inkwell::IntPredicate;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use inkwell::IntPredicate;
 use neuro_hir::{HirExpr, HirExprKind, HirStmt};
 use shared_types::Literal;
 
@@ -28,7 +28,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "array literal type is not an array".to_string(),
-                ))
+                ));
             }
         };
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
@@ -62,7 +62,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "array rest type is not an array".to_string(),
-                ))
+                ));
             }
         };
         let obj_ty = Type::from_hir(&array.ty);
@@ -291,10 +291,10 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         self.pop_drop_scope();
 
-        if let Some(tail_bb) = self.builder.get_insert_block() {
-            if tail_bb.get_terminator().is_none() {
-                self.builder.build_unconditional_branch(step_bb)?;
-            }
+        if let Some(tail_bb) = self.builder.get_insert_block()
+            && tail_bb.get_terminator().is_none()
+        {
+            self.builder.build_unconditional_branch(step_bb)?;
         }
 
         self.builder.position_at_end(step_bb);
@@ -348,7 +348,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Err(CodegenError::InternalError(format!(
                     "array place expression is not an array: {:?}",
                     other
-                )))
+                )));
             }
         };
 

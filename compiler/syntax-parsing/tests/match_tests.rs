@@ -1,6 +1,6 @@
 // Parsing for `match` expressions and their patterns.
 
-use syntax_parsing::{parse_expr, EnumPatternPayload, Expr, Pattern};
+use syntax_parsing::{EnumPatternPayload, Expr, Pattern, parse_expr};
 
 /// Parse `src` as a single expression, expecting a `match`.
 fn parse_match(src: &str) -> Expr {

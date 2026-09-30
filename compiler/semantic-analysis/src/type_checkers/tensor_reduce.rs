@@ -10,8 +10,8 @@
 // consumes the buffer it summarises, so nothing is moved and a borrowed receiver is
 // accepted: reading a shared weight's mean must not move it out of whatever owns it.
 
-use super::tensor_shape::{const_integer, declared_names};
 use super::TypeChecker;
+use super::tensor_shape::{const_integer, declared_names};
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::Expr;

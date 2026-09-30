@@ -138,7 +138,7 @@ fn resolve_alias(
                 return Ok(Type::Named(Identifier {
                     name: current,
                     span: start_span,
-                }))
+                }));
             }
         }
     }

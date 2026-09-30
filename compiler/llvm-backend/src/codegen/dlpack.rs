@@ -10,7 +10,7 @@
 use inkwell::module::Linkage;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
-use crate::codegen::context::{CodegenContext, ALIGNED_ALLOC_FN};
+use crate::codegen::context::{ALIGNED_ALLOC_FN, CodegenContext};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 

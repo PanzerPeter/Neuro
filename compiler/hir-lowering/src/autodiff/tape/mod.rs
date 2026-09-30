@@ -26,7 +26,7 @@ use neuro_hir::{
 };
 use shared_types::Span;
 
-use crate::{is_numeric, LoweringError};
+use crate::{LoweringError, is_numeric};
 
 use super::emit::{self, tensor_parts};
 use super::{FieldPath, WrtField};
@@ -483,12 +483,11 @@ impl<'f> Linearizer<'f> {
     /// Bind a declared name, remembering what it shadows so the enclosing scope gets the
     /// outer binding back.
     fn declare(&mut self, name: &str, leaf: Leaf) {
-        if let Some(scope) = self.scopes.last_mut() {
-            if scope.declared.insert(name.to_string()) {
-                if let Some(outer) = self.aliases.get(name) {
-                    let _ = scope.shadowed.insert(name.to_string(), outer.clone());
-                }
-            }
+        if let Some(scope) = self.scopes.last_mut()
+            && scope.declared.insert(name.to_string())
+            && let Some(outer) = self.aliases.get(name)
+        {
+            let _ = scope.shadowed.insert(name.to_string(), outer.clone());
         }
         let _ = self.aliases.insert(name.to_string(), leaf);
     }

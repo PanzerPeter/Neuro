@@ -1,14 +1,14 @@
 use crate::errors::MlirError;
 
 use melior::{
+    Context,
     dialect::{arith, func},
     ir::{
+        Block, BlockLike, Location, Module, Region, RegionLike, Type,
         attribute::{StringAttribute, TypeAttribute},
         operation::OperationLike,
         r#type::FunctionType,
-        Block, BlockLike, Location, Module, Region, RegionLike, Type,
     },
-    Context,
 };
 
 /// Build a trivial, verifiable MLIR module in a caller-owned context.

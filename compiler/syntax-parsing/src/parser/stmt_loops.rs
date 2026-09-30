@@ -11,8 +11,8 @@ use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 use ast_types::{Expr, LoopAdapter, LoopAdapterKind, Stmt};
 
-use super::statements::stmt_span;
 use super::Parser;
+use super::statements::stmt_span;
 
 impl Parser {
     /// Parse an if/else statement
@@ -411,13 +411,13 @@ impl Parser {
                     found: other,
                     expected: "loop label".to_string(),
                     span: label_token.span,
-                })
+                });
             }
         };
         self.consume(TokenKind::Colon, "':'")?;
         self.skip_newlines();
 
-        let keyword_token = self.advance().ok_or(ParseError::UnexpectedEof {
+        let keyword_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "loop keyword".to_string(),
         })?;
         let start_span = keyword_token.span;

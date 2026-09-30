@@ -1,6 +1,6 @@
 // Generic struct / impl / type-application parsing tests
 
-use syntax_parsing::{parse, Item, Type};
+use syntax_parsing::{Item, Type, parse};
 
 #[test]
 fn test_parse_generic_struct_definition() {

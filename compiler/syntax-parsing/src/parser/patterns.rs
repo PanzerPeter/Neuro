@@ -7,8 +7,8 @@ use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 use ast_types::{EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
 
-use super::statements::stmt_span;
 use super::Parser;
+use super::statements::stmt_span;
 
 impl Parser {
     /// Parse a `match` expression. The `match` keyword is already consumed;
@@ -95,7 +95,7 @@ impl Parser {
     /// variant pattern.
     pub(super) fn parse_pattern(&mut self) -> ParseResult<Pattern> {
         self.skip_newlines();
-        let token = self.peek().ok_or(ParseError::UnexpectedEof {
+        let token = self.peek().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "pattern".to_string(),
         })?;
 
@@ -229,13 +229,13 @@ impl Parser {
     /// Parse a literal in pattern position, including a leading `-` on a numeric
     /// literal. Returns the literal and its source span.
     fn parse_pattern_literal(&mut self) -> ParseResult<(Literal, Span)> {
-        let token = self.advance().ok_or(ParseError::UnexpectedEof {
+        let token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "literal pattern".to_string(),
         })?;
 
         match token.kind {
             TokenKind::Minus => {
-                let num = self.advance().ok_or(ParseError::UnexpectedEof {
+                let num = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "number after '-'".to_string(),
                 })?;
                 let span = token.span.merge(num.span);

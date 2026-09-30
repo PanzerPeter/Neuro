@@ -38,15 +38,15 @@ impl TypeChecker {
             return None;
         }
 
-        if let Some(expr_ty) = self.check_expr(&def.value, Some(&declared_ty)) {
-            if !expr_ty.is_compatible_with(&declared_ty) {
-                self.record_error(TypeError::Mismatch {
-                    expected: declared_ty,
-                    found: expr_ty,
-                    span: def.value.span(),
-                });
-                return None;
-            }
+        if let Some(expr_ty) = self.check_expr(&def.value, Some(&declared_ty))
+            && !expr_ty.is_compatible_with(&declared_ty)
+        {
+            self.record_error(TypeError::Mismatch {
+                expected: declared_ty,
+                found: expr_ty,
+                span: def.value.span(),
+            });
+            return None;
         }
         self.check_const_value(&def.value, &declared_ty);
 

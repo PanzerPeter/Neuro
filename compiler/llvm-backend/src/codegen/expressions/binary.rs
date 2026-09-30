@@ -337,7 +337,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "emit_wrapping_int_arith called with a non-arithmetic operator".to_string(),
-                ))
+                ));
             }
         };
         value.map_err(CodegenError::from)
@@ -486,15 +486,15 @@ impl<'ctx> CodegenContext<'ctx> {
         // `@derive(PartialEq)` equality expands over the struct's fields. Handled
         // before the numeric coercion below, which assumes a scalar left type and would
         // ask an aggregate value for its integer variant.
-        if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
-            if let Type::Struct(name) = left_ty.referent() {
-                let name = name.clone();
-                let eq = self.codegen_derived_struct_eq(&name, lhs, rhs)?;
-                return match op {
-                    BinaryOp::Equal => Ok(eq.into()),
-                    _ => Ok(self.builder.build_not(eq, "struct_ne")?.into()),
-                };
-            }
+        if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual)
+            && let Type::Struct(name) = left_ty.referent()
+        {
+            let name = name.clone();
+            let eq = self.codegen_derived_struct_eq(&name, lhs, rhs)?;
+            return match op {
+                BinaryOp::Equal => Ok(eq.into()),
+                _ => Ok(self.builder.build_not(eq, "struct_ne")?.into()),
+            };
         }
 
         // String concatenation: `string + string` allocates a fresh heap

@@ -289,14 +289,14 @@ impl TypeChecker {
     pub(super) fn check_implicit_return(&mut self, body: &[Stmt], return_type: &Type) {
         match body.last() {
             Some(Stmt::Expr(expr)) => {
-                if let Some(expr_type) = self.check_expr(expr, Some(return_type)) {
-                    if !self.assignable(&expr_type, return_type) {
-                        self.record_error(TypeError::ReturnTypeMismatch {
-                            expected: return_type.clone(),
-                            found: expr_type,
-                            span: expr.span(),
-                        });
-                    }
+                if let Some(expr_type) = self.check_expr(expr, Some(return_type))
+                    && !self.assignable(&expr_type, return_type)
+                {
+                    self.record_error(TypeError::ReturnTypeMismatch {
+                        expected: return_type.clone(),
+                        found: expr_type,
+                        span: expr.span(),
+                    });
                 }
                 self.symbols.clear_transient_borrows();
                 // Returning a value moves it out of the function, the same as `return`.

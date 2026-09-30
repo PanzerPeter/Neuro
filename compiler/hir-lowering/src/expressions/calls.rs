@@ -7,10 +7,10 @@ use ast_types::Expr;
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirFieldInit, HirStmt, HirType};
 
 use super::{
-    CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT, CHAR_AT_METHOD,
+    CHAR_AT_METHOD, CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT,
     CLONE_METHOD, DEVICE_TYPE_NAME, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD, TENSOR_TO_METHOD,
 };
-use crate::{is_full_float, is_integer, Lowerer, LoweringError};
+use crate::{Lowerer, LoweringError, is_full_float, is_integer};
 
 /// The gradient slot's two surface accessors. `.backward()` is a statement the block
 /// lowering pairs with its `@grad` call, never an expression.
@@ -497,17 +497,16 @@ impl Lowerer {
 
         // `.item()` is the index `t[]` with no axes, which the surface cannot spell: one
         // element at offset zero, read through a borrow as any index is.
-        if method == ITEM_METHOD {
-            if let HirType::Tensor { element, shape, .. } = recv.referent() {
-                if shape.is_empty() {
-                    let element = (**element).clone();
-                    let kind = HirExprKind::TensorIndex {
-                        object: Box::new(object),
-                        axes: Vec::new(),
-                    };
-                    return Ok(HirExpr::new(kind, element, span));
-                }
-            }
+        if method == ITEM_METHOD
+            && let HirType::Tensor { element, shape, .. } = recv.referent()
+            && shape.is_empty()
+        {
+            let element = (**element).clone();
+            let kind = HirExprKind::TensorIndex {
+                object: Box::new(object),
+                axes: Vec::new(),
+            };
+            return Ok(HirExpr::new(kind, element, span));
         }
 
         // A reduction reads its receiver rather than consuming it, so a borrowed one is
@@ -521,10 +520,10 @@ impl Lowerer {
 
         // Elementwise math reads a tensor receiver too, and takes a float scalar by value,
         // as the checker does.
-        if let Some(op) = crate::elementwise_math::math_op(method) {
-            if matches!(recv.referent(), HirType::Tensor { .. }) || is_full_float(&recv) {
-                return self.lower_elementwise_math(object, op, args, span);
-            }
+        if let Some(op) = crate::elementwise_math::math_op(method)
+            && (matches!(recv.referent(), HirType::Tensor { .. }) || is_full_float(&recv))
+        {
+            return self.lower_elementwise_math(object, op, args, span);
         }
 
         // A functional traversal reads its receiver too. Every argument IS a value here,

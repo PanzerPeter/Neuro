@@ -50,7 +50,7 @@ impl Parser {
         // A bare `..` is only a full-axis slice here: the four meanings of `..` are
         // separated by position, and no range, spread, or rest binding can open an index.
         if self.check(&TokenKind::DotDot) {
-            let token = self.advance().ok_or(ParseError::UnexpectedEof {
+            let token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'..'".to_string(),
             })?;
             return Ok(TensorIndexArg::FullAxis(token.span));

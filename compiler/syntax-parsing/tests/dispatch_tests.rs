@@ -1,7 +1,7 @@
 // Parsing of the two dispatch forms: `impl Trait` static-dispatch sugar and
 // `dyn Trait` trait objects.
 
-use syntax_parsing::{parse, GenericParamKind, Item, Type};
+use syntax_parsing::{GenericParamKind, Item, Type, parse};
 
 /// Argument-position `impl Trait` is anonymous-generic sugar, so the parser rewrites it
 /// into a fresh trait-bounded type parameter and leaves an ordinary named annotation.

@@ -8,14 +8,14 @@ use shared_types::{Identifier, Literal};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
+use super::Parser;
 use super::interpolation::parse_interp_string;
 use super::types::TENSOR_TYPE_NAME;
-use super::Parser;
 
 impl Parser {
     /// Parse a prefix expression (literals, identifiers, unary operators, parentheses)
     pub(super) fn parse_prefix(&mut self) -> ParseResult<Expr> {
-        let token = self.advance().ok_or(ParseError::UnexpectedEof {
+        let token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "expression".to_string(),
         })?;
 
@@ -262,7 +262,7 @@ impl Parser {
             // The `|` / `||` token has already been consumed as `token`; a leading
             // `move` is consumed here and the following pipe fetched.
             TokenKind::Move => {
-                let pipe = self.advance().ok_or(ParseError::UnexpectedEof {
+                let pipe = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "'|' or '||' after `move`".to_string(),
                 })?;
                 match pipe.kind {

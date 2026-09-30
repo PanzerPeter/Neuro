@@ -15,7 +15,7 @@ use ast_types::{BinaryOp, Expr, UnaryOp};
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::{Literal, Span};
 
-use crate::{malformed, Lowerer, LoweringError};
+use crate::{Lowerer, LoweringError, malformed};
 
 pub(crate) const TRANSPOSE_METHOD: &str = "t";
 pub(crate) const RESHAPE_METHOD: &str = "reshape";
@@ -174,7 +174,7 @@ fn reshape<'a>(
 
     let known: usize = extents.iter().flatten().product();
     if let Some(position) = inferred_at {
-        if known == 0 || total % known != 0 {
+        if known == 0 || !total.is_multiple_of(known) {
             return Err(malformed(
                 "`.reshape` reached lowering with an extent that cannot be inferred".to_string(),
             ));

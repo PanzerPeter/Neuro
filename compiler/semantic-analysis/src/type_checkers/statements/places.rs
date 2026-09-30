@@ -5,8 +5,8 @@ use ast_types::{BinaryOp, Expr, Place, TensorIndexArg};
 use shared_types::{Identifier, Span};
 
 use crate::errors::TypeError;
-use crate::type_checkers::backward::gradient_view_root;
 use crate::type_checkers::TypeChecker;
+use crate::type_checkers::backward::gradient_view_root;
 use crate::types::Type;
 
 use super::borrow_target_of;
@@ -490,13 +490,13 @@ impl TypeChecker {
         // so the borrowee rules apply to the write as much as to a read or a move.
         // Tested before the RHS is checked: a `&target` appearing in the RHS is a borrow
         // this assignment does not conflict with.
-        if let Some((shared, exclusive)) = self.symbols.borrow_counts(&target.name) {
-            if shared > 0 || exclusive > 0 {
-                self.record_error(TypeError::CannotAssignWhileBorrowed {
-                    name: target.name.clone(),
-                    span: target.span,
-                });
-            }
+        if let Some((shared, exclusive)) = self.symbols.borrow_counts(&target.name)
+            && (shared > 0 || exclusive > 0)
+        {
+            self.record_error(TypeError::CannotAssignWhileBorrowed {
+                name: target.name.clone(),
+                span: target.span,
+            });
         }
 
         // If the target was a reference binding, its previous borrow ends

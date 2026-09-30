@@ -19,7 +19,7 @@ use shared_types::Literal;
 
 use coercion::{apply_unsizing_coercion, binary_result_type, literal_scalar, literal_type};
 
-use crate::{is_integer, is_numeric, LoopCtx, Lowerer, LoweringError};
+use crate::{LoopCtx, Lowerer, LoweringError, is_integer, is_numeric};
 
 /// The divergent panic-family builtins. Each aborts and never returns, so a
 /// call takes on whatever type its context demands.
@@ -158,16 +158,15 @@ impl Lowerer {
                 // hit means the call resolves.
                 if let HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } =
                     left.ty.referent()
+                    && let Some(dispatch) = self.operator_binary_impls.get(&(name.clone(), *op))
                 {
-                    if let Some(dispatch) = self.operator_binary_impls.get(&(name.clone(), *op)) {
-                        let dispatch = crate::OpDispatch {
-                            method: dispatch.method.clone(),
-                            rhs_param: dispatch.rhs_param.clone(),
-                            result: dispatch.result.clone(),
-                        };
-                        let right = self.lower_expr(right, None)?;
-                        return self.build_operator_call(left, right, dispatch, *span);
-                    }
+                    let dispatch = crate::OpDispatch {
+                        method: dispatch.method.clone(),
+                        rhs_param: dispatch.rhs_param.clone(),
+                        result: dispatch.result.clone(),
+                    };
+                    let right = self.lower_expr(right, None)?;
+                    return self.build_operator_call(left, right, dispatch, *span);
                 }
                 let right_expected = coercion::tensor_element(&left.ty)
                     .cloned()
@@ -189,20 +188,18 @@ impl Lowerer {
                 if matches!(
                     op,
                     ast_types::BinaryOp::Equal | ast_types::BinaryOp::NotEqual
-                ) {
-                    if let HirType::Struct(name) = left.ty.referent() {
-                        if self.partial_eq_structs.contains(name) {
-                            return Ok(HirExpr::new(
-                                HirExprKind::Binary {
-                                    op: *op,
-                                    left: Box::new(left),
-                                    right: Box::new(right),
-                                },
-                                HirType::Bool,
-                                *span,
-                            ));
-                        }
-                    }
+                ) && let HirType::Struct(name) = left.ty.referent()
+                    && self.partial_eq_structs.contains(name)
+                {
+                    return Ok(HirExpr::new(
+                        HirExprKind::Binary {
+                            op: *op,
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        HirType::Bool,
+                        *span,
+                    ));
                 }
                 let ty = binary_result_type(*op, &left.ty, &right.ty)?;
                 Ok(HirExpr::new(
@@ -226,13 +223,11 @@ impl Lowerer {
                 // Operator-trait dispatch: `-a` → `a.neg()`, `~a` → `a.not()`.
                 if let HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } =
                     operand.ty.referent()
-                {
-                    if let Some((method, result)) =
+                    && let Some((method, result)) =
                         self.operator_unary_impls.get(&(name.clone(), *op))
-                    {
-                        let (method, result) = (method.clone(), result.clone());
-                        return Ok(self.build_unary_operator_call(operand, method, result, *span));
-                    }
+                {
+                    let (method, result) = (method.clone(), result.clone());
+                    return Ok(self.build_unary_operator_call(operand, method, result, *span));
                 }
                 let ty = match op {
                     UnaryOp::Negate | UnaryOp::BitNot => operand.ty.clone(),
@@ -497,7 +492,7 @@ impl Lowerer {
                         other => {
                             return Err(LoweringError::Malformed {
                                 detail: format!("index into non-indexable type '{}'", other),
-                            })
+                            });
                         }
                     },
                 };

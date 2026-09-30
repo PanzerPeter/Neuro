@@ -16,10 +16,10 @@ fn lower(src: &str) -> HirProgram {
 
 fn function_body<'a>(program: &'a HirProgram, name: &str) -> &'a [HirStmt] {
     for item in &program.items {
-        if let HirItem::Function(f) = item {
-            if f.name == name {
-                return &f.body;
-            }
+        if let HirItem::Function(f) = item
+            && f.name == name
+        {
+            return &f.body;
         }
     }
     panic!("function '{}' not found in HIR", name);
@@ -27,10 +27,10 @@ fn function_body<'a>(program: &'a HirProgram, name: &str) -> &'a [HirStmt] {
 
 fn binding_init<'a>(body: &'a [HirStmt], name: &str) -> &'a HirExpr {
     for stmt in body {
-        if let HirStmt::VarDecl { name: n, init, .. } = stmt {
-            if n == name {
-                return init.as_ref().expect("binding has an initializer");
-            }
+        if let HirStmt::VarDecl { name: n, init, .. } = stmt
+            && n == name
+        {
+            return init.as_ref().expect("binding has an initializer");
         }
     }
     panic!("binding '{}' not found in HIR body", name);
@@ -54,14 +54,18 @@ fn lowers_a_struct_method_program_end_to_end() {
     let program = lower(src);
 
     // Struct, impl, and two functions all lowered.
-    assert!(program
-        .items
-        .iter()
-        .any(|i| matches!(i, HirItem::Struct(s) if s.name == "Neuron")));
-    assert!(program
-        .items
-        .iter()
-        .any(|i| matches!(i, HirItem::Impl(im) if im.type_name == "Neuron")));
+    assert!(
+        program
+            .items
+            .iter()
+            .any(|i| matches!(i, HirItem::Struct(s) if s.name == "Neuron"))
+    );
+    assert!(
+        program
+            .items
+            .iter()
+            .any(|i| matches!(i, HirItem::Impl(im) if im.type_name == "Neuron"))
+    );
 
     let body = function_body(&program, "main");
     assert_eq!(

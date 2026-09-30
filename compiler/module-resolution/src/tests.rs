@@ -13,7 +13,7 @@ use ast_types::{
 use shared_types::{Identifier, Literal, Span};
 use tempfile::TempDir;
 
-use crate::{resolve_program, ModuleError, PreludeVariant, ResolvedProgram};
+use crate::{ModuleError, PreludeVariant, ResolvedProgram, resolve_program};
 
 fn ident(name: &str) -> Identifier {
     Identifier {

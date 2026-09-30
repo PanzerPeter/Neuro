@@ -5,8 +5,8 @@
 // enum for the failure to go anywhere, and (since the language has no From/Into) the
 // error type must already match, with no implicit conversion.
 
-use super::operators::RESULT_ENUM;
 use super::TypeChecker;
+use super::operators::RESULT_ENUM;
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::Expr;

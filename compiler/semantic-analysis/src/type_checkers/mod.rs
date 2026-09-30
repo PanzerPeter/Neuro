@@ -946,11 +946,7 @@ impl TypeChecker {
         // always sees style guidance alongside other diagnostics.
         self.run_lints(items);
 
-        if self.has_errors() {
-            Err(())
-        } else {
-            Ok(())
-        }
+        if self.has_errors() { Err(()) } else { Ok(()) }
     }
 
     /// Walk every function and method body emitting lint warnings.

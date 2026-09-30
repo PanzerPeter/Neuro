@@ -12,8 +12,8 @@ use crate::LoweringError;
 use super::leaf::is_arithmetic;
 use super::positions::{constant_stride, describe_stmt, integer_min, is_float_valued, stmt_span};
 use super::{
-    Arm, ArmBody, Branch, Carried, ForRange, Leaf, Linearizer, Loop, Node, Op, Slot,
-    RUN_TIME_STRIDE,
+    Arm, ArmBody, Branch, Carried, ForRange, Leaf, Linearizer, Loop, Node, Op, RUN_TIME_STRIDE,
+    Slot,
 };
 
 /// `loop { C; if !t { break }; B }` as the `while { C; t } { B }` it is: the condition, a

@@ -391,14 +391,12 @@ impl<'ctx> CodegenContext<'ctx> {
         // After nested control flow the builder may be positioned at a block that is NOT
         // then_bb (e.g. the merge block of an inner if).  Checking then_bb would miss that
         // case, so we check whichever block the builder currently occupies.
-        if let Some(current_bb) = self.builder.get_insert_block() {
-            if current_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(merge_bb)
-                    .map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
-                    })?;
-            }
+        if let Some(current_bb) = self.builder.get_insert_block()
+            && current_bb.get_terminator().is_none()
+        {
+            self.builder
+                .build_unconditional_branch(merge_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
         }
 
         // Generate else-if and else blocks.
@@ -422,14 +420,12 @@ impl<'ctx> CodegenContext<'ctx> {
             self.pop_drop_scope();
         }
         // Same: check current insert block, not the fixed else_bb, for the same reason.
-        if let Some(current_bb) = self.builder.get_insert_block() {
-            if current_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(merge_bb)
-                    .map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
-                    })?;
-            }
+        if let Some(current_bb) = self.builder.get_insert_block()
+            && current_bb.get_terminator().is_none()
+        {
+            self.builder
+                .build_unconditional_branch(merge_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
         }
 
         // Continue at merge block
@@ -548,10 +544,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 // slot before exiting; semantic analysis guarantees the slot exists.
                 if let Some(value_expr) = value {
                     let val = self.codegen_expr(value_expr)?;
-                    if let Some(slot) = break_slot {
-                        if !self.current_block_terminated() {
-                            self.builder.build_store(slot, val)?;
-                        }
+                    if let Some(slot) = break_slot
+                        && !self.current_block_terminated()
+                    {
+                        self.builder.build_store(slot, val)?;
                     }
                     // A broken-out place is moved out of the loop and must not be dropped.
                     self.mark_moved_for_drop(value_expr);
@@ -561,17 +557,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 // leaving the loop.
                 self.emit_drops_through(drop_depth)?;
 
-                if let Some(current_bb) = self.builder.get_insert_block() {
-                    if current_bb.get_terminator().is_none() {
-                        self.builder
-                            .build_unconditional_branch(break_bb)
-                            .map_err(|e| {
-                                CodegenError::LlvmError(format!(
-                                    "failed to build break branch: {}",
-                                    e
-                                ))
-                            })?;
-                    }
+                if let Some(current_bb) = self.builder.get_insert_block()
+                    && current_bb.get_terminator().is_none()
+                {
+                    self.builder
+                        .build_unconditional_branch(break_bb)
+                        .map_err(|e| {
+                            CodegenError::LlvmError(format!("failed to build break branch: {}", e))
+                        })?;
                 }
 
                 Ok(())
@@ -585,17 +578,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 // are destroyed before the back-edge.
                 self.emit_drops_through(drop_depth)?;
 
-                if let Some(current_bb) = self.builder.get_insert_block() {
-                    if current_bb.get_terminator().is_none() {
-                        self.builder
-                            .build_unconditional_branch(continue_bb)
-                            .map_err(|e| {
-                                CodegenError::LlvmError(format!(
-                                    "failed to build continue branch: {}",
-                                    e
-                                ))
-                            })?;
-                    }
+                if let Some(current_bb) = self.builder.get_insert_block()
+                    && current_bb.get_terminator().is_none()
+                {
+                    self.builder
+                        .build_unconditional_branch(continue_bb)
+                        .map_err(|e| {
+                            CodegenError::LlvmError(format!(
+                                "failed to build continue branch: {}",
+                                e
+                            ))
+                        })?;
                 }
 
                 Ok(())

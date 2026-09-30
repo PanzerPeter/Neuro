@@ -2486,3 +2486,24 @@ fn regression_an_enum_method_returning_an_owned_string_hands_it_to_the_caller() 
         function_body(&ir, "main")
     );
 }
+
+/// Whether a long array holds a `string` is a question about its element type. It was
+/// answered by listing every element first, so a `[i32; 4294967295]` parameter made the
+/// backend ask for 256 GiB and abort.
+#[test]
+fn regression_a_long_array_binding_is_planned_without_listing_its_elements() {
+    let source = r#"
+        func f(a: [i32; 4294967295]) -> i32 {
+            return 0
+        }
+        func main() -> i32 {
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    assert!(
+        ir.contains("[4294967295 x i32]"),
+        "the parameter keeps its full length:\n{}",
+        function_body(&ir, "f")
+    );
+}

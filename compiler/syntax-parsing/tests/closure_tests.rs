@@ -1,6 +1,6 @@
 // Closure literal and function-type parsing tests
 
-use syntax_parsing::{parse_expr, Expr, Type};
+use syntax_parsing::{Expr, Type, parse_expr};
 
 #[test]
 fn parses_single_expression_closure() {

@@ -4,7 +4,7 @@
 // right is `tools/grad_differential.py`'s job, against finite differences of compiled code.
 
 use super::{function_names, lower};
-use crate::{lower_program, LoweringError};
+use crate::{LoweringError, lower_program};
 use neuro_hir::{HirExprKind, HirItem, HirProgram, HirStmt, HirType};
 
 const WEIGHTED_LOSS: &str = r#"
@@ -1077,9 +1077,11 @@ fn an_order_two_backward_writes_the_hessian_after_the_gradient() {
 fn a_loop_is_differentiated_twice_under_order_two() {
     let program = lower(&LOOPED_LOSS.replace("@grad", "@grad(order: 2)"));
     let hvp = item_function(&program, "__loss__hvp__w");
-    assert!(all_stmts(&hvp.body)
-        .iter()
-        .any(|stmt| matches!(stmt, HirStmt::While { .. })));
+    assert!(
+        all_stmts(&hvp.body)
+            .iter()
+            .any(|stmt| matches!(stmt, HirStmt::While { .. }))
+    );
 }
 
 /// A `loop` whose first exit is `if !condition { break }` is the `while` it spells, in a

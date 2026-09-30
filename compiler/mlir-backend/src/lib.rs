@@ -30,10 +30,10 @@ mod smoke;
 mod tensor_arithmetic;
 
 #[cfg(feature = "mlir")]
-pub use bridge::{lower_for_link, translate_to_llvm_ir, LinkableBodies};
+pub use bridge::{LinkableBodies, lower_for_link, translate_to_llvm_ir};
 #[cfg(feature = "mlir")]
 pub use errors::MlirError;
 #[cfg(feature = "mlir")]
-pub use gpu::{lower_for_gpu, GpuTarget};
+pub use gpu::{GpuTarget, lower_for_gpu};
 #[cfg(feature = "mlir")]
 pub use lower::lower_program;

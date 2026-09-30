@@ -1,8 +1,8 @@
 //! Loops: `while`, `loop` and the counted `for` over a range, with its `.rev()` and
 //! `.step(n)` walks and the branch targets `break` / `continue` resolve to.
 
-use inkwell::values::BasicValueEnum;
 use inkwell::IntPredicate;
+use inkwell::values::BasicValueEnum;
 use neuro_hir::{HirExpr, HirStmt};
 
 use crate::codegen::context::{CodegenContext, LoopTargets};
@@ -101,10 +101,10 @@ impl<'ctx> CodegenContext<'ctx> {
             drop_scope_depth: body_scope_index,
         });
         for stmt in body {
-            if let Some(current_bb) = self.builder.get_insert_block() {
-                if current_bb.get_terminator().is_some() {
-                    break;
-                }
+            if let Some(current_bb) = self.builder.get_insert_block()
+                && current_bb.get_terminator().is_some()
+            {
+                break;
             }
             self.codegen_stmt(stmt)?;
         }
@@ -114,14 +114,12 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         self.pop_drop_scope();
 
-        if let Some(tail_bb) = self.builder.get_insert_block() {
-            if tail_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(cond_bb)
-                    .map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
-                    })?;
-            }
+        if let Some(tail_bb) = self.builder.get_insert_block()
+            && tail_bb.get_terminator().is_none()
+        {
+            self.builder
+                .build_unconditional_branch(cond_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
         }
 
         self.builder.position_at_end(exit_bb);
@@ -180,10 +178,10 @@ impl<'ctx> CodegenContext<'ctx> {
             drop_scope_depth: body_scope_index,
         });
         for stmt in body {
-            if let Some(current_bb) = self.builder.get_insert_block() {
-                if current_bb.get_terminator().is_some() {
-                    break;
-                }
+            if let Some(current_bb) = self.builder.get_insert_block()
+                && current_bb.get_terminator().is_some()
+            {
+                break;
             }
             self.codegen_stmt(stmt)?;
         }
@@ -193,14 +191,12 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         self.pop_drop_scope();
 
-        if let Some(tail_bb) = self.builder.get_insert_block() {
-            if tail_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(body_bb)
-                    .map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
-                    })?;
-            }
+        if let Some(tail_bb) = self.builder.get_insert_block()
+            && tail_bb.get_terminator().is_none()
+        {
+            self.builder
+                .build_unconditional_branch(body_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
         }
 
         self.builder.position_at_end(exit_bb);
@@ -435,10 +431,10 @@ impl<'ctx> CodegenContext<'ctx> {
             drop_scope_depth: body_scope_index,
         });
         for stmt in body {
-            if let Some(current_bb) = self.builder.get_insert_block() {
-                if current_bb.get_terminator().is_some() {
-                    break;
-                }
+            if let Some(current_bb) = self.builder.get_insert_block()
+                && current_bb.get_terminator().is_some()
+            {
+                break;
             }
             self.codegen_stmt(stmt)?;
         }
@@ -448,14 +444,12 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         self.pop_drop_scope();
 
-        if let Some(tail_bb) = self.builder.get_insert_block() {
-            if tail_bb.get_terminator().is_none() {
-                self.builder
-                    .build_unconditional_branch(step_bb)
-                    .map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to build branch: {}", e))
-                    })?;
-            }
+        if let Some(tail_bb) = self.builder.get_insert_block()
+            && tail_bb.get_terminator().is_none()
+        {
+            self.builder
+                .build_unconditional_branch(step_bb)
+                .map_err(|e| CodegenError::LlvmError(format!("failed to build branch: {}", e)))?;
         }
 
         self.builder.position_at_end(step_bb);

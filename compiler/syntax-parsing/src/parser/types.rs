@@ -30,12 +30,12 @@ impl Parser {
         // Bracketed sequence type: `[T; N]` is a fixed-size array, `[T]` an unsized
         // slice. They share a prefix, so the `;` (or its absence before `]`) selects.
         if self.check(&TokenKind::LeftBracket) {
-            let open = self.advance().ok_or(ParseError::UnexpectedEof {
+            let open = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'['".to_string(),
             })?;
             let element = self.parse_type()?;
             if self.check(&TokenKind::RightBracket) {
-                let close = self.advance().ok_or(ParseError::UnexpectedEof {
+                let close = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "']'".to_string(),
                 })?;
                 return Ok(Type::Slice {
@@ -44,7 +44,7 @@ impl Parser {
                 });
             }
             self.consume(TokenKind::Semicolon, "';' in array type `[T; N]`")?;
-            let size_token = self.advance().ok_or(ParseError::UnexpectedEof {
+            let size_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "array length".to_string(),
             })?;
             let size = match size_token.kind {
@@ -59,7 +59,7 @@ impl Parser {
                         expected: "non-negative integer array length or const parameter name"
                             .to_string(),
                         span: size_token.span,
-                    })
+                    });
                 }
             };
             let close = self.consume(TokenKind::RightBracket, "']' to close array type")?;
@@ -74,7 +74,7 @@ impl Parser {
         // closure/function type `(T1, ...) -> R`: disambiguated by a trailing `->`.
         // A tuple needs two or more elements; a function type accepts zero or more.
         if self.check(&TokenKind::LeftParen) {
-            let open = self.advance().ok_or(ParseError::UnexpectedEof {
+            let open = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'('".to_string(),
             })?;
             let mut elements = Vec::new();
@@ -118,12 +118,12 @@ impl Parser {
         // distributes over whatever type follows. Order after `&`: an optional lifetime,
         // then an optional `mut` keyword marking a mutable borrow.
         if self.check(&TokenKind::Amp) {
-            let amp = self.advance().ok_or(ParseError::UnexpectedEof {
+            let amp = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'&'".to_string(),
             })?;
             let lifetime =
                 if let Some(TokenKind::Lifetime(name)) = self.peek().map(|t| t.kind.clone()) {
-                    let lt_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                    let lt_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                         expected: "lifetime".to_string(),
                     })?;
                     Some(Identifier {
@@ -151,7 +151,7 @@ impl Parser {
         // trait name. In argument position `parse_function` later rewrites it into a
         // trait-bounded generic parameter; in return position it survives to semantic.
         if self.check(&TokenKind::Impl) {
-            let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+            let kw = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'impl'".to_string(),
             })?;
             let trait_name = self.parse_trait_ref_name("trait name after `impl`")?;
@@ -166,7 +166,7 @@ impl Parser {
         // Dynamic-dispatch trait object `dyn Trait`: the `dyn` keyword followed
         // by a trait name. Valid only behind a reference; semantic rejects a bare `dyn`.
         if self.check(&TokenKind::Dyn) {
-            let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+            let kw = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'dyn'".to_string(),
             })?;
             let trait_name = self.parse_trait_ref_name("trait name after `dyn`")?;
@@ -178,7 +178,7 @@ impl Parser {
         // module qualifier does, so no pass between here and the type checker (which is
         // the first place an implementing type is known) needs a node of its own for it.
         if self.check(&TokenKind::SelfUpper) {
-            let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+            let kw = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'Self'".to_string(),
             })?;
             if !self.check(&TokenKind::ColonColon) {
@@ -196,7 +196,7 @@ impl Parser {
             }));
         }
 
-        let token = self.advance().ok_or(ParseError::UnexpectedEof {
+        let token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "type".to_string(),
         })?;
 
@@ -341,12 +341,12 @@ impl Parser {
                 }
             } else if let Some(TokenKind::Integer(n)) = self.peek_kind() {
                 let value = *n;
-                let span = self
-                    .advance()
-                    .map(|t| t.span)
-                    .ok_or(ParseError::UnexpectedEof {
-                        expected: "const argument".to_string(),
-                    })?;
+                let span =
+                    self.advance()
+                        .map(|t| t.span)
+                        .ok_or_else(|| ParseError::UnexpectedEof {
+                            expected: "const argument".to_string(),
+                        })?;
                 // An integer token carries a magnitude, so a negative const argument
                 // is a `-` token followed by one and is rejected as an unexpected token
                 // before reaching here.
@@ -415,7 +415,7 @@ impl Parser {
         let span = self
             .advance()
             .map(|t| t.span)
-            .ok_or(ParseError::UnexpectedEof {
+            .ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "a tensor dimension name".to_string(),
             })?;
         self.advance(); // consume ':'
@@ -426,7 +426,7 @@ impl Parser {
     /// Parse one axis extent: a non-negative integer literal, a shape parameter's name,
     /// or `?` for an axis whose extent is not known until run time.
     fn parse_tensor_extent(&mut self) -> ParseResult<TensorExtent> {
-        let token = self.advance().ok_or(ParseError::UnexpectedEof {
+        let token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "a tensor dimension".to_string(),
         })?;
         match token.kind {
@@ -890,11 +890,13 @@ mod tests {
             panic!("expected a call, got {init:?}");
         };
         assert!(args.is_empty());
-        let [GenericArg::Type(Type::Tensor {
-            element_type,
-            shape,
-            ..
-        })] = &type_args[..]
+        let [
+            GenericArg::Type(Type::Tensor {
+                element_type,
+                shape,
+                ..
+            }),
+        ] = &type_args[..]
         else {
             panic!("expected one tensor type argument, got {type_args:?}");
         };

@@ -23,9 +23,9 @@
 // its kernels and the copy back queue in that order without a wait between them: the one
 // synchronization is after the copy back, where the host is about to read the result.
 
+use inkwell::AddressSpace;
 use inkwell::module::Linkage;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
-use inkwell::AddressSpace;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;

@@ -335,10 +335,12 @@ fn string_subtract_is_rejected() {
 
     let ty = checker.check_expr(&sub, None);
     assert_eq!(ty, Some(Type::Unknown));
-    assert!(checker
-        .into_errors()
-        .iter()
-        .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })));
+    assert!(
+        checker
+            .into_errors()
+            .iter()
+            .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. }))
+    );
 }
 
 /// Mixing a string with a non-string under `+` is rejected (no silent coercion).
@@ -358,8 +360,10 @@ fn string_plus_integer_is_rejected() {
 
     let ty = checker.check_expr(&mixed, None);
     assert_eq!(ty, Some(Type::Unknown));
-    assert!(checker
-        .into_errors()
-        .iter()
-        .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })));
+    assert!(
+        checker
+            .into_errors()
+            .iter()
+            .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. }))
+    );
 }

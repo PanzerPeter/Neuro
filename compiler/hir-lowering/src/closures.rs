@@ -44,7 +44,7 @@ impl Lowerer {
                 None => {
                     return Err(LoweringError::UnresolvedType {
                         name: format!("closure parameter '{}'", p.name.name),
-                    })
+                    });
                 }
             };
             hir_params.push(HirParam {

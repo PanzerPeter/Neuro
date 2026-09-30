@@ -1,7 +1,7 @@
 // Parser tests for the `@no_prelude` file marker: where it is accepted, and the
 // diagnostic for every position that is not the top of a file.
 
-use syntax_parsing::{parse, Item, ParseError};
+use syntax_parsing::{Item, ParseError, parse};
 
 #[test]
 fn the_marker_parses_at_the_top_of_a_file() {

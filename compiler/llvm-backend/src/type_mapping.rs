@@ -328,7 +328,7 @@ impl<'ctx> TypeMapper<'ctx> {
                 return Err(CodegenError::UnsupportedType(format!(
                     "`{}` has no DLPack dtype and cannot be a tensor element",
                     other.mangle()
-                )))
+                )));
             }
         };
         Ok(DlpackDataType { code, bits })
@@ -580,15 +580,21 @@ mod tests {
             .and_then(|field| field.try_into().ok())
             .expect("the fifth field is the DLTensor");
         assert_eq!(dl_tensor.count_fields(), 7);
-        assert!(dl_tensor
-            .get_field_type_at_index(0)
-            .is_some_and(|field| field.is_pointer_type()));
-        assert!(dl_tensor
-            .get_field_type_at_index(2)
-            .is_some_and(|field| field.into_int_type().get_bit_width() == 32));
-        assert!(dl_tensor
-            .get_field_type_at_index(6)
-            .is_some_and(|field| field.into_int_type().get_bit_width() == 64));
+        assert!(
+            dl_tensor
+                .get_field_type_at_index(0)
+                .is_some_and(|field| field.is_pointer_type())
+        );
+        assert!(
+            dl_tensor
+                .get_field_type_at_index(2)
+                .is_some_and(|field| field.into_int_type().get_bit_width() == 32)
+        );
+        assert!(
+            dl_tensor
+                .get_field_type_at_index(6)
+                .is_some_and(|field| field.into_int_type().get_bit_width() == 64)
+        );
     }
 
     /// The control block trails the exchange structure in one allocation, so the storage
@@ -610,13 +616,17 @@ mod tests {
             .expect("the second field is the control block");
         // The element buffer's byte length, then the gradient and Hessian slots.
         assert_eq!(control.count_fields(), 3);
-        assert!(control
-            .get_field_type_at_index(0)
-            .is_some_and(|field| field.into_int_type().get_bit_width() == 64));
+        assert!(
+            control
+                .get_field_type_at_index(0)
+                .is_some_and(|field| field.into_int_type().get_bit_width() == 64)
+        );
         for slot in [1, 2] {
-            assert!(control
-                .get_field_type_at_index(slot)
-                .is_some_and(|field| field.is_pointer_type()));
+            assert!(
+                control
+                    .get_field_type_at_index(slot)
+                    .is_some_and(|field| field.is_pointer_type())
+            );
         }
     }
 }

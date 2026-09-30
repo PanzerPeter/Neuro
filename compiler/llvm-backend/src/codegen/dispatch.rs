@@ -5,9 +5,9 @@
 // method table: a `&dyn Trait` is a `{ data ptr, vtable ptr }` fat pointer, and a call
 // through it loads a fixed slot from the vtable and jumps.
 
+use inkwell::AddressSpace;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::*;
-use inkwell::AddressSpace;
 use neuro_hir::{HirExpr, HirImpl, HirItem, HirSelfParam};
 
 use crate::codegen::context::CodegenContext;
@@ -221,7 +221,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Err(CodegenError::UnsupportedType(format!(
                     "only a struct or enum can be used as a `dyn {}` trait object, found {:?}",
                     trait_name, other
-                )))
+                )));
             }
         };
 

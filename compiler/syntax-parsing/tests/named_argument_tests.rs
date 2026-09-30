@@ -5,7 +5,7 @@
 // needs the callee and happens in `argument-binding`, so these tests only assert on the
 // shape the parser produces.
 
-use syntax_parsing::{parse, parse_expr, Expr, Item, ParamLabel, Parameter, Stmt};
+use syntax_parsing::{Expr, Item, ParamLabel, Parameter, Stmt, parse, parse_expr};
 
 /// The parameters of the first function declared in `source`.
 fn params_of(source: &str) -> Vec<Parameter> {

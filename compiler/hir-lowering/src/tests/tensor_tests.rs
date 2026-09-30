@@ -6,10 +6,10 @@ use shared_types::Literal;
 fn param_types(src: &str, name: &str) -> Vec<HirType> {
     let program = lower(src);
     for item in &program.items {
-        if let HirItem::Function(f) = item {
-            if f.name == name {
-                return f.params.iter().map(|p| p.ty.clone()).collect();
-            }
+        if let HirItem::Function(f) = item
+            && f.name == name
+        {
+            return f.params.iter().map(|p| p.ty.clone()).collect();
         }
     }
     panic!("no function named {name}");

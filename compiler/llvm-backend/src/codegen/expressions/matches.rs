@@ -8,9 +8,9 @@
 // slot. The frontend guarantees exhaustiveness, so the final fall-through is
 // `unreachable`.
 
+use inkwell::IntPredicate;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use inkwell::IntPredicate;
 use neuro_hir::{
     HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest,
 };
@@ -70,11 +70,11 @@ impl<'ctx> CodegenContext<'ctx> {
         // arm did not bind leaks rather than being released twice. An arm that binds
         // nothing takes nothing, so it hands the scrutinee its flags back.
         let mut disowned = Vec::new();
-        if let HirExprKind::Variable(name) = &scrutinee.kind {
-            if arms.iter().any(|arm| !arm.bindings.is_empty()) {
-                let name = name.clone();
-                disowned = self.mark_held_moved_for_drop(&name)?;
-            }
+        if let HirExprKind::Variable(name) = &scrutinee.kind
+            && arms.iter().any(|arm| !arm.bindings.is_empty())
+        {
+            let name = name.clone();
+            disowned = self.mark_held_moved_for_drop(&name)?;
         }
 
         let is_void = matches!(result_ty, Type::Void);
@@ -219,7 +219,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Materialize the arm's bindings, evaluate its guard (if any), then its body into
     /// the result slot, branching to `merge_bb` on success or `next_bb` when a guard
     /// fails. Bindings are removed from the name maps before returning.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn codegen_arm_body(
         &mut self,
         arm: &HirMatchArm,

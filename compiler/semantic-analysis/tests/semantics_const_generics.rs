@@ -1,6 +1,6 @@
 // Semantic tests: const generic parameters, `where` clauses, and turbofish.
 
-use semantic_analysis::{type_check, TypeError};
+use semantic_analysis::{TypeError, type_check};
 
 fn check(source: &str) -> Result<(), Vec<TypeError>> {
     let items = syntax_parsing::parse(source).expect("should parse");
@@ -38,9 +38,11 @@ func main() -> i32 {
     head(xs)
 }"#;
     let errors = check(source).expect_err("N = 3 violates N > 5");
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ConstPredicateViolated { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ConstPredicateViolated { .. }))
+    );
 }
 
 #[test]
@@ -72,9 +74,11 @@ func main() -> i32 {
     repeat::<i32>(xs)
 }"#;
     let errors = check(source).expect_err("const parameter given a type argument");
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::TurbofishKindMismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TurbofishKindMismatch { .. }))
+    );
 }
 
 #[test]
@@ -94,7 +98,9 @@ fn const_param_must_be_integer() {
 func f<const N: bool>() -> i32 { 0 }
 func main() -> i32 { 0 }"#;
     let errors = check(source).expect_err("a bool const parameter is invalid");
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ConstParamNotInteger { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ConstParamNotInteger { .. }))
+    );
 }

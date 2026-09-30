@@ -245,20 +245,22 @@ fn resolve_one(
     // being imported, but only if an enum by that name exists: a head that names neither
     // a module nor an enum used to be read as an enum regardless, which turned a typo, and
     // any path to an out-of-scope module, into a binding that quietly meant nothing.
-    if consumed == 0 && segments.len() == 1 && names_an_enum(graph, prelude, segments[0]) {
-        if let ImportSelection::List(names) = &import.selection {
-            for entry in names {
-                let bound = entry.alias.as_ref().unwrap_or(&entry.name);
-                scope.bind_variant(
-                    &bound.name,
-                    segments[0],
-                    &entry.name.name,
-                    &owner,
-                    import.exported,
-                )?;
-            }
-            return Ok(());
+    if consumed == 0
+        && segments.len() == 1
+        && names_an_enum(graph, prelude, segments[0])
+        && let ImportSelection::List(names) = &import.selection
+    {
+        for entry in names {
+            let bound = entry.alias.as_ref().unwrap_or(&entry.name);
+            scope.bind_variant(
+                &bound.name,
+                segments[0],
+                &entry.name.name,
+                &owner,
+                import.exported,
+            )?;
         }
+        return Ok(());
     }
 
     Err(unresolved_head(graph, &segments, import, owner))
@@ -343,7 +345,7 @@ fn bind_from_module(
                             module: graph.path_of(module).to_string(),
                             item: name.clone(),
                             from: owner,
-                        })
+                        });
                     }
                 }
             }

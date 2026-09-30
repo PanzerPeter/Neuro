@@ -1,6 +1,6 @@
 // `import` declaration and unqualified-variant pattern parsing.
 
-use syntax_parsing::{parse, Expr, ImportSelection, Item, Pattern, Stmt};
+use syntax_parsing::{Expr, ImportSelection, Item, Pattern, Stmt, parse};
 
 fn import(source: &str) -> syntax_parsing::ImportDef {
     let items = parse(source).expect("import should parse");

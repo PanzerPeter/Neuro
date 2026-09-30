@@ -46,7 +46,7 @@ impl Lowerer {
             (HirMathOp::Pow, _) => {
                 return Err(LoweringError::Malformed {
                     detail: "`.pow` reached lowering without exactly one exponent".to_string(),
-                })
+                });
             }
             _ => None,
         };

@@ -1,6 +1,6 @@
 // Integration tests: Control flow: if / while / break / continue
 
-use semantic_analysis::{type_check, TypeError};
+use semantic_analysis::{TypeError, type_check};
 
 #[test]
 fn type_check_if_statement() {
@@ -131,9 +131,11 @@ fn error_break_outside_loop() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::BreakOutsideLoop { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::BreakOutsideLoop { .. }))
+    );
 }
 
 #[test]
@@ -147,9 +149,11 @@ fn error_continue_outside_loop() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ContinueOutsideLoop { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ContinueOutsideLoop { .. }))
+    );
 }
 
 #[test]
@@ -164,9 +168,11 @@ fn error_if_condition_not_bool() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 #[test]
@@ -182,9 +188,11 @@ fn error_while_condition_not_bool() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 /// The expected type now reaches a `break` value, so the agreement check between

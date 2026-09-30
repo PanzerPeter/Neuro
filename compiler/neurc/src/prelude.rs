@@ -10,7 +10,7 @@
 //! than written out a second time in Rust, so `prelude.nr` stays the one place the
 //! prelude's contents are stated.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ast_types::PRELUDE_MODULE;
 use module_resolution::PreludeVariant;
 use syntax_parsing::Item;

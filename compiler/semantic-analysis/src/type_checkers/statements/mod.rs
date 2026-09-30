@@ -267,16 +267,15 @@ impl TypeChecker {
                 };
 
                 // Check against expected return type (skip if return type is unknown)
-                if let Some(expected) = self.current_function_return_type.clone() {
-                    if !matches!(return_ty, Type::Unknown)
-                        && !self.assignable(&return_ty, &expected)
-                    {
-                        self.record_error(TypeError::ReturnTypeMismatch {
-                            expected: expected.clone(),
-                            found: return_ty,
-                            span: *span,
-                        });
-                    }
+                if let Some(expected) = self.current_function_return_type.clone()
+                    && !matches!(return_ty, Type::Unknown)
+                    && !self.assignable(&return_ty, &expected)
+                {
+                    self.record_error(TypeError::ReturnTypeMismatch {
+                        expected,
+                        found: return_ty,
+                        span: *span,
+                    });
                 }
 
                 // Returning a value moves it out of the function.
@@ -301,14 +300,15 @@ impl TypeChecker {
                 span: _,
             } => {
                 // Check condition is boolean - no type inference needed (must be bool)
-                if let Some(cond_ty) = self.check_expr(condition, Some(&Type::Bool)) {
-                    if !matches!(cond_ty, Type::Unknown) && !cond_ty.is_bool() {
-                        self.record_error(TypeError::Mismatch {
-                            expected: Type::Bool,
-                            found: cond_ty,
-                            span: condition.span(),
-                        });
-                    }
+                if let Some(cond_ty) = self.check_expr(condition, Some(&Type::Bool))
+                    && !matches!(cond_ty, Type::Unknown)
+                    && !cond_ty.is_bool()
+                {
+                    self.record_error(TypeError::Mismatch {
+                        expected: Type::Bool,
+                        found: cond_ty,
+                        span: condition.span(),
+                    });
                 }
 
                 // A move inside one arm must not invalidate the binding in a sibling
@@ -329,14 +329,15 @@ impl TypeChecker {
                 self.symbols.restore_moves(&move_snapshot);
 
                 for (else_if_cond, else_if_stmts) in else_if_blocks {
-                    if let Some(cond_ty) = self.check_expr(else_if_cond, Some(&Type::Bool)) {
-                        if !matches!(cond_ty, Type::Unknown) && !cond_ty.is_bool() {
-                            self.record_error(TypeError::Mismatch {
-                                expected: Type::Bool,
-                                found: cond_ty,
-                                span: else_if_cond.span(),
-                            });
-                        }
+                    if let Some(cond_ty) = self.check_expr(else_if_cond, Some(&Type::Bool))
+                        && !matches!(cond_ty, Type::Unknown)
+                        && !cond_ty.is_bool()
+                    {
+                        self.record_error(TypeError::Mismatch {
+                            expected: Type::Bool,
+                            found: cond_ty,
+                            span: else_if_cond.span(),
+                        });
                     }
 
                     self.symbols.push_scope();
@@ -372,14 +373,15 @@ impl TypeChecker {
                 body,
                 span: _,
             } => {
-                if let Some(cond_ty) = self.check_expr(condition, Some(&Type::Bool)) {
-                    if !matches!(cond_ty, Type::Unknown) && !cond_ty.is_bool() {
-                        self.record_error(TypeError::Mismatch {
-                            expected: Type::Bool,
-                            found: cond_ty,
-                            span: condition.span(),
-                        });
-                    }
+                if let Some(cond_ty) = self.check_expr(condition, Some(&Type::Bool))
+                    && !matches!(cond_ty, Type::Unknown)
+                    && !cond_ty.is_bool()
+                {
+                    self.record_error(TypeError::Mismatch {
+                        expected: Type::Bool,
+                        found: cond_ty,
+                        span: condition.span(),
+                    });
                 }
 
                 // A `while` always yields unit, so it is not a value loop.
@@ -457,16 +459,15 @@ impl TypeChecker {
                 self.symbols.push_scope();
 
                 self.define_loop_index(index);
-                if let Some(element_ty) = element_ty {
-                    if let Err(duplicate_name) =
+                if let Some(element_ty) = element_ty
+                    && let Err(duplicate_name) =
                         self.symbols
                             .define(iterator.name.clone(), element_ty, false)
-                    {
-                        self.record_error(TypeError::VariableAlreadyDefined {
-                            name: duplicate_name,
-                            span: iterator.span,
-                        });
-                    }
+                {
+                    self.record_error(TypeError::VariableAlreadyDefined {
+                        name: duplicate_name,
+                        span: iterator.span,
+                    });
                 }
 
                 for stmt in body {
@@ -564,16 +565,15 @@ impl TypeChecker {
                 self.symbols.push_scope();
 
                 self.define_loop_index(index);
-                if let Some(element_ty) = element_ty {
-                    if let Err(duplicate_name) =
+                if let Some(element_ty) = element_ty
+                    && let Err(duplicate_name) =
                         self.symbols
                             .define(iterator.name.clone(), element_ty, false)
-                    {
-                        self.record_error(TypeError::VariableAlreadyDefined {
-                            name: duplicate_name,
-                            span: iterator.span,
-                        });
-                    }
+                {
+                    self.record_error(TypeError::VariableAlreadyDefined {
+                        name: duplicate_name,
+                        span: iterator.span,
+                    });
                 }
 
                 for stmt in body {
@@ -645,15 +645,15 @@ impl TypeChecker {
                     return None;
                 }
 
-                if let Some(expr_ty) = self.check_expr(value, Some(&declared_ty)) {
-                    if !expr_ty.is_compatible_with(&declared_ty) {
-                        self.record_error(TypeError::Mismatch {
-                            expected: declared_ty.clone(),
-                            found: expr_ty,
-                            span: *span,
-                        });
-                        return None;
-                    }
+                if let Some(expr_ty) = self.check_expr(value, Some(&declared_ty))
+                    && !expr_ty.is_compatible_with(&declared_ty)
+                {
+                    self.record_error(TypeError::Mismatch {
+                        expected: declared_ty.clone(),
+                        found: expr_ty,
+                        span: *span,
+                    });
+                    return None;
                 }
                 self.check_const_value(value, &declared_ty);
 

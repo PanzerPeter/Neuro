@@ -52,7 +52,7 @@ impl Lowerer {
                 _ => {
                     return Err(LoweringError::Malformed {
                         detail: "cannot infer element type of empty array literal".to_string(),
-                    })
+                    });
                 }
             };
             return Ok(HirExpr::new(

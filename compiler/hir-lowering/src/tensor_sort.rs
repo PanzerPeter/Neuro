@@ -14,7 +14,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirSortKind, HirType};
 use shared_types::{Literal, Span};
 
 use crate::tensor_shape::const_integer;
-use crate::{malformed, Lowerer, LoweringError};
+use crate::{Lowerer, LoweringError, malformed};
 
 pub(crate) const SORT_METHOD: &str = "sort";
 pub(crate) const ARGSORT_METHOD: &str = "argsort";

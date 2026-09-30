@@ -44,7 +44,7 @@ impl Lowerer {
             None => {
                 return Err(LoweringError::UnresolvedType {
                     name: base.to_string(),
-                })
+                });
             }
         };
         let mangled = crate::mangle_struct_instance(base, args);
@@ -91,12 +91,11 @@ impl Lowerer {
     ) -> std::collections::HashMap<String, HirType> {
         let mut result = std::collections::HashMap::new();
         for (ta, gp) in imp.type_args.iter().zip(base_generics) {
-            if let ast_types::Type::Named(id) = ta {
-                if imp.generics.iter().any(|g| g.name.name == id.name) {
-                    if let Some(concrete) = subst.get(&gp.name.name) {
-                        result.insert(id.name.clone(), concrete.clone());
-                    }
-                }
+            if let ast_types::Type::Named(id) = ta
+                && imp.generics.iter().any(|g| g.name.name == id.name)
+                && let Some(concrete) = subst.get(&gp.name.name)
+            {
+                result.insert(id.name.clone(), concrete.clone());
             }
         }
         result
@@ -183,7 +182,7 @@ impl Lowerer {
             None => {
                 return Err(LoweringError::UnresolvedType {
                     name: ms.base.clone(),
-                })
+                });
             }
         };
 
@@ -265,7 +264,7 @@ impl Lowerer {
             None => {
                 return Err(LoweringError::UnresolvedType {
                     name: base.to_string(),
-                })
+                });
             }
         };
         let mangled = crate::mangle_struct_instance(base, args);
@@ -313,7 +312,7 @@ impl Lowerer {
             None => {
                 return Err(LoweringError::UnresolvedType {
                     name: me.base.clone(),
-                })
+                });
             }
         };
         let saved_ty = std::mem::replace(&mut self.type_subst, me.subst.clone());
@@ -345,7 +344,7 @@ impl Lowerer {
             None => {
                 return Err(LoweringError::UnresolvedCall {
                     target: instance.fn_name.clone(),
-                })
+                });
             }
         };
 

@@ -36,14 +36,14 @@ impl TypeChecker {
         if elements.is_empty() {
             return match expected {
                 Some(Type::Array { element, size }) => {
-                    if let ArrayLen::Fixed(n) = size {
-                        if *n != 0 {
-                            self.record_error(TypeError::ArrayLengthMismatch {
-                                expected: *n,
-                                found: 0,
-                                span: *span,
-                            });
-                        }
+                    if let ArrayLen::Fixed(n) = size
+                        && *n != 0
+                    {
+                        self.record_error(TypeError::ArrayLengthMismatch {
+                            expected: *n,
+                            found: 0,
+                            span: *span,
+                        });
                     }
                     Some(Type::Array {
                         element: element.clone(),
@@ -95,14 +95,13 @@ impl TypeChecker {
             size: ArrayLen::Fixed(expected_size),
             ..
         }) = expected
+            && *expected_size != size
         {
-            if *expected_size != size {
-                self.record_error(TypeError::ArrayLengthMismatch {
-                    expected: *expected_size,
-                    found: size,
-                    span: *span,
-                });
-            }
+            self.record_error(TypeError::ArrayLengthMismatch {
+                expected: *expected_size,
+                found: size,
+                span: *span,
+            });
         }
 
         Some(Type::Array {

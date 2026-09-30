@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{HirMathOp, HirReduceOp, HirType};
 
-use super::emit::{element_type, tensor_parts, tensor_type, Emitter};
-use super::tape::{literal_offset, Entry, Leaf, Op};
+use super::emit::{Emitter, element_type, tensor_parts, tensor_type};
+use super::tape::{Entry, Leaf, Op, literal_offset};
 use crate::LoweringError;
 
 #[derive(Default)]

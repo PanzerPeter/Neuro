@@ -32,7 +32,7 @@ impl Lowerer {
             other => {
                 return Err(LoweringError::Malformed {
                     detail: format!("tensor index over non-tensor type '{other}'"),
-                })
+                });
             }
         };
         if indices.len() != shape.len() {

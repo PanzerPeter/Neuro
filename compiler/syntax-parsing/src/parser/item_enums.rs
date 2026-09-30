@@ -28,7 +28,7 @@ impl Parser {
         let (generics, lifetimes) = self.parse_generic_params()?;
         if let Some(lt) = lifetimes.first() {
             return Err(ParseError::EnumLifetimeParam {
-                name: name.name.clone(),
+                name: name.name,
                 span: lt.span,
             });
         }

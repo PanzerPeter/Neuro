@@ -6,7 +6,9 @@ use thiserror::Error;
 /// A call site whose arguments cannot be bound to the callee's parameters.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ArgumentError {
-    #[error("in the call to '{callee}': a positional argument cannot follow a named one; move it before `{label}:`")]
+    #[error(
+        "in the call to '{callee}': a positional argument cannot follow a named one; move it before `{label}:`"
+    )]
     PositionalAfterNamed {
         callee: String,
         label: String,
@@ -42,7 +44,9 @@ pub enum ArgumentError {
         span: Span,
     },
 
-    #[error("the '{label}' parameter of '{callee}' is declared `_ {label}:`, which means it is passed positionally and its name is not written at the call site")]
+    #[error(
+        "the '{label}' parameter of '{callee}' is declared `_ {label}:`, which means it is passed positionally and its name is not written at the call site"
+    )]
     SuppressedLabel {
         callee: String,
         label: String,
@@ -52,7 +56,9 @@ pub enum ArgumentError {
     #[error("named arguments are not available here: '{callee}' has no declared parameter names")]
     LabelsUnsupported { callee: String, span: Span },
 
-    #[error("named arguments cannot be used with '{callee}': more than one type declares a method of that name with different parameter names, so `{label}:` does not identify one parameter")]
+    #[error(
+        "named arguments cannot be used with '{callee}': more than one type declares a method of that name with different parameter names, so `{label}:` does not identify one parameter"
+    )]
     AmbiguousMethodLabels {
         callee: String,
         label: String,

@@ -1,7 +1,7 @@
 // Interpolated string literals: turning the lexer's text/hole chunks into an
 // `Expr::InterpString` whose holes carry fully parsed expressions.
 
-use lexical_analysis::{tokenize, InterpChunk, TokenKind};
+use lexical_analysis::{InterpChunk, TokenKind, tokenize};
 use shared_types::{FormatAlign, FormatKind, FormatSpec, Span};
 
 use crate::errors::{ParseError, ParseResult};
@@ -71,7 +71,7 @@ fn parse_hole(source: &str, span: Span) -> ParseResult<InterpPart> {
                 expected: "':' followed by a format specifier, or the end of the interpolation"
                     .to_string(),
                 span: token.span,
-            })
+            });
         }
     };
 
@@ -167,7 +167,7 @@ fn parse_format_spec(text: &str, span: Span) -> ParseResult<FormatSpec> {
             _ => {
                 return Err(invalid(
                     "expected one of `? e d x X b o` as the format kind",
-                ))
+                ));
             }
         };
         i += 1;

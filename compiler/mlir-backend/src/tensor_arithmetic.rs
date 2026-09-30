@@ -2,14 +2,14 @@ use crate::{errors::MlirError, lower::map_type};
 
 use ast_types::BinaryOp;
 use melior::{
+    Context,
     dialect::{arith, func},
     ir::{
-        attribute::{DenseI32ArrayAttribute, FloatAttribute, IntegerAttribute},
-        operation::OperationBuilder,
         Attribute, Block, BlockLike, Identifier, Location, Operation, Region, RegionLike, Type,
         Value,
+        attribute::{DenseI32ArrayAttribute, FloatAttribute, IntegerAttribute},
+        operation::OperationBuilder,
     },
-    Context,
 };
 use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirStmt, HirType};
 
@@ -750,8 +750,8 @@ mod tests {
     use crate::lower::lower_program;
 
     use neuro_hir::{
-        static_shape, AxisNames, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram,
-        HirStmt, HirType,
+        AxisNames, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram, HirStmt,
+        HirType, static_shape,
     };
     use shared_types::Span;
 

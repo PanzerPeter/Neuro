@@ -12,9 +12,9 @@ use ast_types::{
     SelfParam, TensorExtent, TraitBound, Type,
 };
 
+use super::Parser;
 use super::items::desugar_impl_trait_params;
 use super::statements::stmt_span;
-use super::Parser;
 
 /// The external label that suppresses a call-site name entirely (`_ value: f32`).
 const WILDCARD_LABEL: &str = "_";
@@ -120,7 +120,7 @@ impl Parser {
         loop {
             let param_start = self
                 .peek()
-                .ok_or(ParseError::UnexpectedEof {
+                .ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "parameter".to_string(),
                 })?
                 .span;
@@ -212,7 +212,7 @@ impl Parser {
             // A lifetime parameter `'a` is a leading-quote name lexed as a single
             // `Lifetime` token. Lifetimes are collected apart from type/const parameters.
             if let Some(TokenKind::Lifetime(lt_name)) = self.peek().map(|t| t.kind.clone()) {
-                let lt_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                let lt_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "lifetime".to_string(),
                 })?;
                 let lt = Identifier {

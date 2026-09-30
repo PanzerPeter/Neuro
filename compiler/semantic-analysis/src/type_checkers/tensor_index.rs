@@ -10,8 +10,8 @@
 // which is why a range bound must fold to a constant here while a position may be any
 // run-time integer.
 
-use super::expressions::const_predicates::eval_literal_int;
 use super::TypeChecker;
+use super::expressions::const_predicates::eval_literal_int;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::{Expr, TensorIndexArg};
@@ -143,16 +143,16 @@ impl TypeChecker {
             });
             return None;
         }
-        if let (Some(value), ArrayLen::Fixed(extent)) = (eval_literal_int(expr), extent) {
-            if value < 0 || value >= *extent as i128 {
-                self.record_error(TypeError::TensorIndexOutOfBounds {
-                    index: value,
-                    axis,
-                    extent: *extent,
-                    span: expr.span(),
-                });
-                return None;
-            }
+        if let (Some(value), ArrayLen::Fixed(extent)) = (eval_literal_int(expr), extent)
+            && (value < 0 || value >= *extent as i128)
+        {
+            self.record_error(TypeError::TensorIndexOutOfBounds {
+                index: value,
+                axis,
+                extent: *extent,
+                span: expr.span(),
+            });
+            return None;
         }
         Some(ResolvedAxis::Position)
     }

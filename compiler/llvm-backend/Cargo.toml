@@ -7,6 +7,9 @@ authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
 ast-types = { path = "../infrastructure/ast-types" }
@@ -21,9 +24,6 @@ syntax-parsing = { path = "../syntax-parsing" }
 # dependency (mirrors the existing syntax-parsing dev setup).
 hir-lowering = { path = "../hir-lowering" }
 criterion = { workspace = true }
-
-[lib]
-path = "src/lib.rs"
 
 [[bench]]
 name = "codegen_bench"

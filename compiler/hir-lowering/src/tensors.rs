@@ -109,7 +109,7 @@ impl Lowerer {
                 _ => {
                     return Err(LoweringError::Malformed {
                         detail: format!("`Tensor::{ctor}` has no tensor type to build"),
-                    })
+                    });
                 }
             },
         };
@@ -164,7 +164,7 @@ impl Lowerer {
             other => {
                 return Err(LoweringError::Malformed {
                     detail: format!("`Tensor` has no constructor named '{other}'"),
-                })
+                });
             }
         };
         Ok(HirExpr::new(kind, ty, span))

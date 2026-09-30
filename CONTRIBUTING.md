@@ -27,7 +27,7 @@ We welcome contributions, but note:
 
 ### Prerequisites
 
-- **Rust**: 1.85 or later (`rustup update stable`)
+- **Rust**: 1.98.1 or later (`rustup update stable`)
 - **LLVM 22**: development package (see below)
 - **Git**
 - **IDE**: VS Code with rust-analyzer recommended

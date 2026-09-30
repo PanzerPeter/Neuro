@@ -53,7 +53,7 @@ impl TypeChecker {
             hint = Some(then_ty.clone());
         }
 
-        let mut arm_types: Vec<Type> = vec![then_ty.clone()];
+        let mut arm_types: Vec<Type> = vec![then_ty];
 
         for (elif_cond, elif_block) in else_if_blocks {
             self.symbols.restore_moves(&move_snapshot);
@@ -102,7 +102,7 @@ impl TypeChecker {
         for arm_ty in &arm_types {
             if !arm_ty.is_compatible_with(&result_ty) {
                 self.record_error(TypeError::Mismatch {
-                    expected: result_ty.clone(),
+                    expected: result_ty,
                     found: arm_ty.clone(),
                     span: *span,
                 });

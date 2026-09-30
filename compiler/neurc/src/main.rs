@@ -63,7 +63,7 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
 
-        /// Optimization level (0-3)
+        /// Optimization level (0-3). 0 is a debug build: integer overflow panics. 1-3 are release builds: overflow wraps. Use 2 for speed
         #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
         optimization: u8,
 
@@ -78,7 +78,7 @@ enum Commands {
         #[arg(value_name = "FILE")]
         input: PathBuf,
 
-        /// Optimization level (0-3)
+        /// Optimization level (0-3). 0 is a debug build: integer overflow panics. 1-3 are release builds: overflow wraps. Use 2 for speed
         #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
         optimization: u8,
     },

@@ -1,6 +1,5 @@
 use super::super::TypeChecker;
-#[allow(unused_imports)]
-use super::{make_function, make_ident, make_type, semantic_errors};
+use super::{make_ident, semantic_errors};
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{Expr, Stmt};
@@ -53,9 +52,11 @@ fn test_for_range_rejects_non_integer_bound() {
     assert!(checker.has_errors());
 
     let errors = checker.into_errors();
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, TypeError::InvalidForRangeType { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::InvalidForRangeType { .. }))
+    );
 }
 
 #[test]
@@ -97,9 +98,11 @@ fn test_undefined_loop_label_is_rejected() {
     checker.check_stmt(&stmt);
     assert!(checker.has_errors());
     let errors = checker.into_errors();
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, TypeError::UndefinedLabel { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::UndefinedLabel { .. }))
+    );
 }
 
 #[test]
@@ -114,9 +117,11 @@ fn test_break_outside_loop_still_rejected() {
 
     checker.check_stmt(&stmt);
     let errors = checker.into_errors();
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, TypeError::BreakOutsideLoop { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::BreakOutsideLoop { .. }))
+    );
 }
 
 #[test]
@@ -166,9 +171,11 @@ fn test_break_value_type_disagreement_is_rejected() {
 
     let _ = checker.check_expr(&loop_expr, None);
     let errors = checker.into_errors();
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, TypeError::Mismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::Mismatch { .. }))
+    );
 }
 
 #[test]
@@ -189,9 +196,11 @@ fn test_break_value_in_while_loop_is_rejected() {
 
     checker.check_stmt(&stmt);
     let errors = checker.into_errors();
-    assert!(errors
-        .iter()
-        .any(|error| matches!(error, TypeError::BreakValueInUnitLoop { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, TypeError::BreakValueInUnitLoop { .. }))
+    );
 }
 
 /// The position binding is `u64` whatever the sequence holds, so it indexes the

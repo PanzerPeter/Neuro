@@ -17,7 +17,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::{Literal, Span};
 use std::collections::HashMap;
 
-use crate::{malformed, Lowerer, LoweringError};
+use crate::{Lowerer, LoweringError, malformed};
 
 pub(crate) const EINSUM_FUNC: &str = "einsum";
 

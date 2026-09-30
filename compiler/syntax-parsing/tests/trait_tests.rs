@@ -1,6 +1,6 @@
 // Trait declaration parsing and default-method injection.
 
-use syntax_parsing::{parse, Item};
+use syntax_parsing::{Item, parse};
 
 #[test]
 fn parses_required_and_default_trait_methods() {

@@ -1,7 +1,4 @@
-#[allow(unused_imports)]
-use super::{
-    binding_init, enum_names, function_body, function_names, impl_method_names, lower, struct_names,
-};
+use super::{binding_init, function_body, function_names, lower, struct_names};
 use neuro_hir::{HirExprKind, HirItem, HirStmt, HirType};
 
 #[test]
@@ -141,12 +138,16 @@ fn const_generic_function_monomorphizes_by_value() {
             _ => None,
         })
         .collect();
-    assert!(names
-        .iter()
-        .any(|n| n.contains("first") && n.contains("c2")));
-    assert!(names
-        .iter()
-        .any(|n| n.contains("first") && n.contains("c3")));
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("first") && n.contains("c2"))
+    );
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("first") && n.contains("c3"))
+    );
 }
 
 #[test]

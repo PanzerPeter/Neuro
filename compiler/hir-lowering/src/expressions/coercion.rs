@@ -5,7 +5,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::Literal;
 
 use crate::types::{float_suffix_type, int_suffix_type};
-use crate::{is_full_float, is_integer, is_numeric, peels_to_string, LoweringError};
+use crate::{LoweringError, is_full_float, is_integer, is_numeric, peels_to_string};
 use ast_types::BinaryOp;
 
 /// Wrap a reference in whichever unsizing coercion the expected type calls for:
@@ -140,14 +140,14 @@ pub(super) fn binary_result_type(
             return Err(LoweringError::UnsupportedOperand {
                 op: op.to_string(),
                 ty: left.to_string(),
-            })
+            });
         }
         // `??` desugars to a `match` before any operand type is combined, so it never
         // reaches the operand-symmetric result rule.
         BinaryOp::NullCoalesce => {
             return Err(LoweringError::Malformed {
                 detail: "`??` reached the binary result rule; it desugars to a match".to_string(),
-            })
+            });
         }
     })
 }

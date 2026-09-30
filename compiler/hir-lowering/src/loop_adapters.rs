@@ -28,7 +28,7 @@ use ast_types::{LoopAdapter, LoopAdapterKind, Stmt, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
 use shared_types::{Identifier, Literal, Span};
 
-use crate::iteration::{cursor_place, variable, LOOP_INDEX_TYPE};
+use crate::iteration::{LOOP_INDEX_TYPE, cursor_place, variable};
 use crate::{Lowerer, LoweringError};
 
 /// One adapter, resolved to the binding holding its function.
@@ -228,7 +228,7 @@ impl Lowerer {
     ///
     /// The chain's function bindings sit in a scope of their own, wrapped around the
     /// loop, so they are evaluated once and are invisible to everything after it.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn lower_adapted_for_range(
         &mut self,
         label: &Option<Identifier>,
@@ -268,7 +268,7 @@ impl Lowerer {
     }
 
     /// Lower `for x in xs` over a counted sequence wearing an adapter chain.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn lower_adapted_for_each(
         &mut self,
         label: &Option<Identifier>,

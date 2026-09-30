@@ -11,8 +11,8 @@ use shared_types::Span;
 use crate::errors::TypeError;
 use crate::types::Type;
 
-use super::expressions::const_predicates::eval_literal_int;
 use super::TypeChecker;
+use super::expressions::const_predicates::eval_literal_int;
 
 /// The prelude trait a container implements to produce an iterator.
 const INTO_ITERATOR_TRAIT: &str = "IntoIterator";

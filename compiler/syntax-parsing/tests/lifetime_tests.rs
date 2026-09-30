@@ -1,6 +1,6 @@
 // Explicit lifetime annotation parsing tests
 
-use syntax_parsing::{parse, Item, Type};
+use syntax_parsing::{Item, Type, parse};
 
 #[test]
 fn test_parse_function_lifetime_param() {

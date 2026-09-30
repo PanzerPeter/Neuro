@@ -65,10 +65,12 @@ fn assert_builtin_rejects_non_bool_argument() {
 
     let ty = checker.check_expr(&call, None);
     assert_eq!(ty, Some(Type::Unknown));
-    assert!(checker
-        .into_errors()
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        checker
+            .into_errors()
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 /// `unreachable()` is nullary; passing an argument is an arity error.
@@ -86,10 +88,12 @@ fn unreachable_builtin_rejects_arguments() {
 
     let ty = checker.check_expr(&call, None);
     assert_eq!(ty, Some(Type::Unknown));
-    assert!(checker
-        .into_errors()
-        .iter()
-        .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })));
+    assert!(
+        checker
+            .into_errors()
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. }))
+    );
 }
 
 /// A user-defined `func panic(n: i32) -> i32` shadows the builtin: the call is
@@ -180,10 +184,12 @@ fn println_builtin_rejects_non_string_argument() {
     };
 
     assert_eq!(checker.check_expr(&call, None), Some(Type::Void));
-    assert!(checker
-        .into_errors()
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        checker
+            .into_errors()
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 /// Exactly one argument: a second is an arity error, and the call still types as unit
@@ -204,10 +210,12 @@ fn println_builtin_rejects_extra_arguments() {
     };
 
     assert_eq!(checker.check_expr(&call, None), Some(Type::Void));
-    assert!(checker
-        .into_errors()
-        .iter()
-        .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })));
+    assert!(
+        checker
+            .into_errors()
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. }))
+    );
 }
 
 /// A user-defined `func println(n: i32) -> i32` shadows the builtin, exactly as one

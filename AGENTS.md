@@ -108,7 +108,7 @@ python tools/check_docs_hygiene.py
 
 ## Code Style Guidelines
 
-Rust, edition 2021, MSRV 1.85. Formatting is whatever `cargo fmt` produces:
+Rust, edition 2024, MSRV 1.98.1. Formatting is whatever `cargo fmt` produces:
 never hand-format around it.
 
 - **No `unwrap()` / `expect()` in production code paths.** Return
@@ -121,6 +121,9 @@ never hand-format around it.
   reason.
 - **Document every `unsafe` block** with a safety rationale comment. The
   backend is where these concentrate.
+- **Suppress a lint with `#[expect(...)]`, never `#[allow(...)]`.** An
+  expectation that stops firing warns, so a stale suppression cannot linger.
+  The workspace `allow_attributes` lint enforces it.
 - **Doc comments (`///`) on public APIs.** Describe the contract, not the
   implementation.
 - Match the surrounding code's naming and comment density. New code should be

@@ -6,8 +6,8 @@ use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 use ast_types::{ClosureParam, Expr, Stmt};
 
-use super::statements::stmt_span;
 use super::Parser;
+use super::statements::stmt_span;
 
 /// A parsed call argument list: the argument expressions, plus the call-site names of
 /// any named arguments, empty when the call named none.
@@ -113,7 +113,7 @@ impl Parser {
                                 found: other,
                                 expected: "closure parameter name".to_string(),
                                 span: name_tok.span,
-                            })
+                            });
                         }
                     };
                     let ty = if self.check(&TokenKind::Colon) {
@@ -148,7 +148,7 @@ impl Parser {
         // expression. The single-expression form binds the whole remaining
         // expression, so it stops naturally at a `,`, `)`, or newline.
         let body = if self.check(&TokenKind::LeftBrace) {
-            let brace = self.advance().ok_or(ParseError::UnexpectedEof {
+            let brace = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'{'".to_string(),
             })?;
             self.parse_block_expr(brace.span)?

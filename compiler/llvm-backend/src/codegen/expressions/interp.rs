@@ -239,7 +239,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Err(CodegenError::InternalError(format!(
                     "type {:?} reached interpolation codegen; semantic analysis rejects it",
                     other
-                )))
+                )));
             }
         };
 

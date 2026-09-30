@@ -1,7 +1,7 @@
 use ast_types::{ArraySize, GenericArg};
 
-use super::tensors::TENSOR_TYPE_NAME;
 use super::TypeChecker;
+use super::tensors::TENSOR_TYPE_NAME;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type};
 
@@ -189,13 +189,13 @@ impl TypeChecker {
                 lifetime,
                 ..
             } => {
-                if let Some(lt) = lifetime {
-                    if !self.lifetime_scope.contains(&lt.name) {
-                        self.record_error(TypeError::UndeclaredLifetime {
-                            name: lt.name.clone(),
-                            span: lt.span,
-                        });
-                    }
+                if let Some(lt) = lifetime
+                    && !self.lifetime_scope.contains(&lt.name)
+                {
+                    self.record_error(TypeError::UndeclaredLifetime {
+                        name: lt.name.clone(),
+                        span: lt.span,
+                    });
                 }
                 self.resolve_type_ctx(inner, true).map(|t| Type::Reference {
                     inner: Box::new(t),
@@ -257,10 +257,11 @@ impl TypeChecker {
                 // A compiler-known collection resolves to its own type, unless the
                 // program declares a generic type of that name: a local declaration
                 // shadows the standard library, as it does for the prelude enums.
-                if let Some(kind) = CollectionKind::from_name(&name.name) {
-                    if !self.is_generic_struct(&name.name) && !self.is_generic_enum(&name.name) {
-                        return self.resolve_collection(kind, resolved, *span);
-                    }
+                if let Some(kind) = CollectionKind::from_name(&name.name)
+                    && !self.is_generic_struct(&name.name)
+                    && !self.is_generic_enum(&name.name)
+                {
+                    return self.resolve_collection(kind, resolved, *span);
                 }
                 if !self.is_generic_struct(&name.name) && !self.is_generic_enum(&name.name) {
                     // `Tensor<f32>` is the shape-less spelling of a real type rather than
@@ -330,17 +331,16 @@ impl TypeChecker {
                     // Dimension names are the tensor type's own namespace, and
                     // `permute`-style operations resolve an identifier against it, so a
                     // repeated name would denote two axes at once.
-                    if let Some(name) = &dim.name {
-                        if axes
+                    if let Some(name) = &dim.name
+                        && axes
                             .iter()
                             .any(|axis| axis.name.as_deref() == Some(name.name.as_str()))
-                        {
-                            self.record_error(TypeError::DuplicateTensorAxisName {
-                                name: name.name.clone(),
-                                span: name.span,
-                            });
-                            return None;
-                        }
+                    {
+                        self.record_error(TypeError::DuplicateTensorAxisName {
+                            name: name.name.clone(),
+                            span: name.span,
+                        });
+                        return None;
                     }
                     axes.push(TensorAxis {
                         name: dim.name.as_ref().map(|n| n.name.clone()),
@@ -384,6 +384,16 @@ impl TypeChecker {
         span: shared_types::Span,
     ) -> Option<ArrayLen> {
         match size {
+            // LLVM array types count elements in 32 bits; a longer length would be
+            // silently truncated by the backend.
+            ArraySize::Literal(n) if *n > u64::from(u32::MAX) => {
+                self.record_error(TypeError::ArrayLengthTooLarge {
+                    length: *n,
+                    max: u32::MAX,
+                    span,
+                });
+                None
+            }
             ArraySize::Literal(n) => Some(ArrayLen::Fixed(*n as usize)),
             ArraySize::Const(ident) => {
                 if self.const_scope.contains_key(&ident.name) {

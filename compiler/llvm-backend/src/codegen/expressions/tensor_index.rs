@@ -12,8 +12,8 @@
 // be a double free. It also keeps the DLPack field contract — contiguous row-major
 // `strides`, `byte_offset` of zero — true of every tensor value.
 
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirTensorAxis};
 
 use super::row_major_strides;

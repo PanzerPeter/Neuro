@@ -1,6 +1,6 @@
 // Integration tests: Extended integer types and width/sign mismatches
 
-use semantic_analysis::{type_check, TypeError};
+use semantic_analysis::{TypeError, type_check};
 
 #[test]
 fn type_check_extended_integers_i8() {
@@ -96,9 +96,11 @@ fn error_signed_unsigned_mismatch() {
     let result = type_check(&items);
     assert!(result.is_err(), "i32 + u32 should fail type check");
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 #[test]
@@ -110,9 +112,11 @@ fn error_different_width_mismatch() {
     let result = type_check(&items);
     assert!(result.is_err(), "i8 + i16 should fail type check");
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 #[test]

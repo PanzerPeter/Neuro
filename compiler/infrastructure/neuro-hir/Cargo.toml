@@ -7,9 +7,9 @@ authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 shared-types = { path = "../shared-types" }
 ast-types = { path = "../ast-types" }
-
-[lib]
-path = "src/lib.rs"

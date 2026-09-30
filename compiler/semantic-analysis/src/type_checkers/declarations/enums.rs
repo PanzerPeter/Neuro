@@ -114,7 +114,7 @@ impl TypeChecker {
             Type::Tuple(elements) => {
                 return elements
                     .iter()
-                    .any(|element| self.holds_inline(element, target, seen))
+                    .any(|element| self.holds_inline(element, target, seen));
             }
             _ => return false,
         };

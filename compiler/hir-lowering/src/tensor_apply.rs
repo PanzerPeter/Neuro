@@ -11,7 +11,7 @@ use ast_types::Expr;
 use neuro_hir::{HirExpr, HirExprKind, HirTensorApply, HirType};
 use shared_types::Span;
 
-use crate::{malformed, Lowerer, LoweringError};
+use crate::{Lowerer, LoweringError, malformed};
 
 pub(crate) const MAP_METHOD: &str = "map";
 pub(crate) const ZIP_METHOD: &str = "zip";
@@ -76,7 +76,7 @@ impl Lowerer {
                 None => {
                     return Err(malformed(
                         "`.reduce` reached lowering with no seed".to_string(),
-                    ))
+                    ));
                 }
             },
             _ => HirType::Tensor {

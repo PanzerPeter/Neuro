@@ -5,7 +5,7 @@
 
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 
-use super::{SlotField, STATE_FULL};
+use super::{STATE_FULL, SlotField};
 use crate::codegen::collections::FIELD_LEN;
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};

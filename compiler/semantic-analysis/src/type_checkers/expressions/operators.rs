@@ -45,13 +45,12 @@ impl TypeChecker {
             return self.check_null_coalesce(left, right, span);
         }
 
-        if op.is_comparison() {
-            if let Expr::Binary { op: inner_op, .. } = left {
-                if inner_op.is_comparison() {
-                    self.record_error(TypeError::ComparisonChain { span: *span });
-                    return Some(Type::Unknown);
-                }
-            }
+        if op.is_comparison()
+            && let Expr::Binary { op: inner_op, .. } = left
+            && inner_op.is_comparison()
+        {
+            self.record_error(TypeError::ComparisonChain { span: *span });
+            return Some(Type::Unknown);
         }
 
         // Check both operands even if one fails, for better error reporting.
@@ -84,12 +83,14 @@ impl TypeChecker {
         // type before the tensor was known; it is the scalar broadcast all the same, so
         // it is re-typed as the element now. Only an unsuffixed literal qualifies,
         // because re-checking one has no effect beyond its type.
-        if left_expectation.is_none() && left_was_clean && is_bare_literal(left) {
-            if let Some(element) = Self::tensor_element_expectation(&right_ty) {
-                left_ty = self
-                    .check_expr(left, Some(&element))
-                    .unwrap_or(Type::Unknown);
-            }
+        if left_expectation.is_none()
+            && left_was_clean
+            && is_bare_literal(left)
+            && let Some(element) = Self::tensor_element_expectation(&right_ty)
+        {
+            left_ty = self
+                .check_expr(left, Some(&element))
+                .unwrap_or(Type::Unknown);
         }
 
         // If either operand is Unknown (error), propagate Unknown
@@ -110,23 +111,22 @@ impl TypeChecker {
         // a struct or enum that implements the operator's trait, the operator lowers to
         // that impl's method and takes its result type. Checked before the
         // built-in numeric/bitwise/comparison paths, which reject struct operands.
-        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = left_ty.referent() {
-            if let Some(dispatch) = self
+        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = left_ty.referent()
+            && let Some(dispatch) = self
                 .operator_binary_impls
                 .get(&(name.clone(), *op))
                 .cloned()
-            {
-                if !right_ty.referent().is_compatible_with(&dispatch.rhs) {
-                    self.record_error(TypeError::InvalidBinaryOperator {
-                        op: op.to_string(),
-                        left: left_ty.clone(),
-                        right: right_ty,
-                        span: *span,
-                    });
-                    return Some(Type::Unknown);
-                }
-                return Some(dispatch.result);
+        {
+            if !right_ty.referent().is_compatible_with(&dispatch.rhs) {
+                self.record_error(TypeError::InvalidBinaryOperator {
+                    op: op.to_string(),
+                    left: left_ty.clone(),
+                    right: right_ty,
+                    span: *span,
+                });
+                return Some(Type::Unknown);
             }
+            return Some(dispatch.result);
         }
 
         match op {
@@ -514,10 +514,10 @@ impl TypeChecker {
 
         // Operator-trait dispatch on a user type: `-a` via `Neg`, `~a` via
         // `Not`. The boolean `!a` (`UnaryOp::Not`) is never overloadable.
-        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = operand_ty.referent() {
-            if let Some(result) = self.operator_unary_impls.get(&(name.clone(), *op)).cloned() {
-                return Some(result);
-            }
+        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = operand_ty.referent()
+            && let Some(result) = self.operator_unary_impls.get(&(name.clone(), *op)).cloned()
+        {
+            return Some(result);
         }
 
         match op {

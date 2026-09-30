@@ -112,7 +112,7 @@ impl Lowerer {
             _ => {
                 return Err(LoweringError::UnresolvedCall {
                     target: format!("{}.{}", recv, method),
-                })
+                });
             }
         };
 

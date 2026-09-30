@@ -19,10 +19,10 @@
 // The compound assignment at the end of the file allocates nothing at all: it reuses the
 // buffer the target already owns, which is the guarantee the language makes about a
 // tensor's handle across an in-place update.
+use inkwell::IntPredicate;
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
 use super::row_major_strides;
@@ -36,8 +36,7 @@ use crate::types::Type;
 /// wrong about where its compute runs.
 const DEVICE_ENUM: &str = "Device";
 const DEVICE_HOST_VARIANT: &str = "CPU";
-const DEVICE_UNAVAILABLE: &str =
-    "tensor transfer to a non-host device requires the GPU backend, which this compiler \
+const DEVICE_UNAVAILABLE: &str = "tensor transfer to a non-host device requires the GPU backend, which this compiler \
      does not have yet";
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -202,7 +201,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "a tensor element is a scalar".to_string(),
-                ))
+                ));
             }
         };
         let values = (0..rows * cols).map(|i| if i / cols == i % cols { one } else { zero });
@@ -417,7 +416,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// the extents and both stride vectors are compile-time constants, so a result index
     /// decomposes into coordinates with constant divisions and recomposes into a source
     /// offset with constant multiplies. The IR is then the same size whatever the rank is.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn emit_permuted_copy(
         &mut self,
         buffer_ty: BasicTypeEnum<'ctx>,
@@ -566,7 +565,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 _ => {
                     return Err(CodegenError::InternalError(
                         "a tensor fill element is not a scalar constant".to_string(),
-                    ))
+                    ));
                 }
             }
         }

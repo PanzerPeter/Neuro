@@ -254,15 +254,13 @@ impl TypeChecker {
             // looked owned. `a + a` would otherwise pass the checker and hand codegen
             // two owners of one buffer, which frees it twice. The compound form applies
             // the same rule to `w += w`.
-            if !right_moved_on_entry {
-                if let Some((name, moved_at)) = self.place_moved_at(right) {
-                    self.record_error(TypeError::UseOfMovedValue {
-                        name,
-                        span: right.span(),
-                        moved_at,
-                    });
-                    return Type::Unknown;
-                }
+            if !right_moved_on_entry && let Some((name, moved_at)) = self.place_moved_at(right) {
+                self.record_error(TypeError::UseOfMovedValue {
+                    name,
+                    span: right.span(),
+                    moved_at,
+                });
+                return Type::Unknown;
             }
             self.record_move(right);
         }

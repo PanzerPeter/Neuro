@@ -7,6 +7,9 @@ authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 melior = { workspace = true, optional = true }
 mlir-sys = { workspace = true, optional = true }
@@ -23,6 +26,3 @@ shared-types = { path = "../infrastructure/shared-types", optional = true }
 # LLVM 22 without MLIR. See CONTEXT.md.
 default = []
 mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types", "dep:shared-types"]
-
-[lib]
-path = "src/lib.rs"

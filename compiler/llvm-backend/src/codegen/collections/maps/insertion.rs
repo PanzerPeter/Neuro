@@ -3,11 +3,11 @@
 // One of the map-codegen modules under `maps`; each adds methods to the same
 // `impl CodegenContext` block.
 
-use inkwell::values::FunctionValue;
 use inkwell::IntPredicate;
+use inkwell::values::FunctionValue;
 
-use super::probing::{helper_params, ProbeCursor};
-use super::{SlotField, STATE_EMPTY, STATE_FULL};
+use super::probing::{ProbeCursor, helper_params};
+use super::{STATE_EMPTY, STATE_FULL, SlotField};
 use crate::codegen::collections::{FIELD_CAP, FIELD_LEN, FIELD_USED};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};

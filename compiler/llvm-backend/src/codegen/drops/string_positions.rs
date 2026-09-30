@@ -255,15 +255,14 @@ impl<'ctx> CodegenContext<'ctx> {
             self.literal_string_moves = suspended;
         }
         let val = val?;
-        if self.literal_string_moves.is_some() && matches!(Type::from_hir(&value.ty), Type::String)
+        if self.literal_string_moves.is_some()
+            && matches!(Type::from_hir(&value.ty), Type::String)
+            && let Some(owns) = self.load_owned_string_flag(value)?
+            && let Some(moves) = &mut self.literal_string_moves
         {
-            if let Some(owns) = self.load_owned_string_flag(value)? {
-                if let Some(moves) = &mut self.literal_string_moves {
-                    let mut path = moves.path.clone();
-                    path.push(segment);
-                    moves.flags.push((path, owns));
-                }
-            }
+            let mut path = moves.path.clone();
+            path.push(segment);
+            moves.flags.push((path, owns));
         }
         self.mark_moved_for_drop(value);
         Ok(val)

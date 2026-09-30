@@ -1,6 +1,6 @@
 // Function parsing tests
 
-use syntax_parsing::{parse, Item};
+use syntax_parsing::{Item, parse};
 
 #[test]
 fn test_parse_empty_function() {

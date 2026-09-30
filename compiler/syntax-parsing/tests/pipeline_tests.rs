@@ -6,7 +6,7 @@
 // would otherwise have to know about the operator and does not.
 
 use shared_types::Literal;
-use syntax_parsing::{parse_expr, BinaryOp, Expr, Stmt};
+use syntax_parsing::{BinaryOp, Expr, Stmt, parse_expr};
 
 /// The callee and single argument of a desugared pipeline stage.
 fn call_parts(expr: &Expr) -> (&Expr, &Expr) {

@@ -39,7 +39,7 @@ pub use items::{
     HirTrait,
 };
 pub use statements::{HirPlace, HirStmt};
-pub use types::{extent_display, static_shape, AxisNames, HirCollectionKind, HirType};
+pub use types::{AxisNames, HirCollectionKind, HirType, extent_display, static_shape};
 
 #[cfg(test)]
 mod tests {
@@ -114,7 +114,7 @@ mod tests {
             HirExprKind::Binary {
                 op: BinaryOp::Add,
                 left: Box::new(lit.clone()),
-                right: Box::new(lit.clone()),
+                right: Box::new(lit),
             },
             HirType::I32,
             span(),

@@ -74,7 +74,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         return Err(CodegenError::InternalError(format!(
                             "array len receiver is not an array: {:?}",
                             other
-                        )))
+                        )));
                     }
                 };
                 Ok(self.context.i64_type().const_int(size as u64, false).into())
@@ -93,7 +93,7 @@ impl<'ctx> CodegenContext<'ctx> {
                                 return Err(CodegenError::InternalError(format!(
                                     "struct clone receiver is not a struct: {:?}",
                                     other
-                                )))
+                                )));
                             }
                         };
                         let struct_ty = self.get_struct_llvm_type(name)?;
@@ -152,7 +152,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "string.slice reached codegen without a range argument".into(),
-                ))
+                ));
             }
         };
 
@@ -440,7 +440,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "non-checked intrinsic routed to the checked path".into(),
-                ))
+                ));
             }
         };
 

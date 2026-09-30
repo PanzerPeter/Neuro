@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use ast_types::{ImportDef, Item, ModuleDef, ModuleId};
 
-use crate::walk::{walk_items, Site};
+use crate::walk::{Site, walk_items};
 use crate::{ModuleError, ParseModule};
 
 /// A module that was loaded, as reported back to the driver.
@@ -90,7 +90,7 @@ impl ModuleGraph {
         let mut graph = ModuleGraph {
             modules: Vec::new(),
             by_file: HashMap::new(),
-            root_dir: root_dir.clone(),
+            root_dir,
         };
         graph.load_file(file, None, String::new(), parse_module)?;
 

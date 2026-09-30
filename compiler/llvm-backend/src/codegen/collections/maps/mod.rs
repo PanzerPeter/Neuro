@@ -11,13 +11,13 @@
 // contract the type promises, with a shape small enough to be verifiable; a real
 // multi-way tree only changes the insert/erase constant, not the surface.
 
+use inkwell::IntPredicate;
 use inkwell::types::StructType;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
 use super::elements::SlotTransfer;
-use super::{collection_arg, FIELD_LEN};
+use super::{FIELD_LEN, collection_arg};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};

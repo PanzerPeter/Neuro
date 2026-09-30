@@ -84,7 +84,7 @@ body:
     attributes:
       label: OS, Rust, and LLVM
       description: Output of `rustc -vV` in one line plus your LLVM 22 install path.
-      placeholder: CachyOS, rustc 1.85.0, LLVM_SYS_221_PREFIX=/usr
+      placeholder: CachyOS, rustc 1.98.1, LLVM_SYS_221_PREFIX=/usr
     validations:
       required: true
 

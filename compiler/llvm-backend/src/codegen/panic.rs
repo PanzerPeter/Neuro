@@ -65,7 +65,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Err(CodegenError::InternalError(format!(
                     "unknown panic builtin '{}' reached codegen",
                     other
-                )))
+                )));
             }
         }
 

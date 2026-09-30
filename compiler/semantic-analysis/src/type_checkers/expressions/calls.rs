@@ -4,11 +4,11 @@
 // here adds methods to the same `impl TypeChecker` block.
 
 use super::builtins::TO_CHECKED_METHOD;
-use super::{declarations, eval_const_predicate, TypeChecker, CLONE_METHOD, COLLECTION_CTOR};
+use super::{CLONE_METHOD, COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
 use crate::errors::TypeError;
+use crate::type_checkers::BoundInfo;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
-use crate::type_checkers::BoundInfo;
 use crate::types::{CollectionKind, Type};
 use ast_types::{Expr, GenericArg};
 use shared_types::{Identifier, Span};
@@ -119,7 +119,7 @@ impl TypeChecker {
                 continue;
             };
             if !sig.uses_assoc {
-                return Some((sig.params.clone(), sig.ret.clone()));
+                return Some((sig.params.clone(), sig.ret));
             }
             let mut named = Vec::new();
             for ty in sig
@@ -741,13 +741,12 @@ impl TypeChecker {
                 }
                 // `Vec::new()` and friends: a compiler-known constructor, unless
                 // the program declares its own type of that name.
-                if let Some(kind) = CollectionKind::from_name(&type_name.name) {
-                    if member.name == COLLECTION_CTOR
-                        && !self.struct_defs.contains_key(&type_name.name)
-                        && !self.enum_defs.contains_key(&type_name.name)
-                    {
-                        return Some(self.check_collection_new(kind, args, expected, *path_span));
-                    }
+                if let Some(kind) = CollectionKind::from_name(&type_name.name)
+                    && member.name == COLLECTION_CTOR
+                    && !self.struct_defs.contains_key(&type_name.name)
+                    && !self.enum_defs.contains_key(&type_name.name)
+                {
+                    return Some(self.check_collection_new(kind, args, expected, *path_span));
                 }
                 // A member name is never both a variant and an associated function (the
                 // impl registration rejects the pair), so a registered function wins here.

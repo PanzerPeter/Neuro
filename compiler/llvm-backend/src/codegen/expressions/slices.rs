@@ -6,8 +6,8 @@
 // borrowed run and its element count. Every operation here re-derives the element
 // stride from the slice's semantic element type, because LLVM pointers are untyped.
 
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt};
 
 use crate::codegen::context::{CodegenContext, LoopTargets};
@@ -59,7 +59,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "sequence .slice reached codegen without a range argument".into(),
-                ))
+                ));
             }
         };
 
@@ -237,10 +237,10 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         self.pop_drop_scope();
 
-        if let Some(tail_bb) = self.builder.get_insert_block() {
-            if tail_bb.get_terminator().is_none() {
-                self.builder.build_unconditional_branch(step_bb)?;
-            }
+        if let Some(tail_bb) = self.builder.get_insert_block()
+            && tail_bb.get_terminator().is_none()
+        {
+            self.builder.build_unconditional_branch(step_bb)?;
         }
 
         self.builder.position_at_end(step_bb);

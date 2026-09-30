@@ -1,6 +1,6 @@
 // Parsing for the `val PATTERN = value else |binding| { ... }` statement.
 
-use syntax_parsing::{parse, EnumPatternPayload, Item, Pattern, Stmt};
+use syntax_parsing::{EnumPatternPayload, Item, Pattern, Stmt, parse};
 
 /// The statements of the first function body in `source`.
 fn first_fn_body(source: &str) -> Vec<Stmt> {

@@ -55,8 +55,12 @@ pub(crate) fn resolve_grad_slot_method(recv: &Type, method: &str) -> Option<Grad
 /// The panic an empty slot's read raises.
 fn empty_slot_message(slot: DerivativeSlot) -> &'static str {
     match slot {
-        DerivativeSlot::Gradient => "`.grad()` read an empty gradient slot: no `.backward()` has filled it since the tensor was built or last `.zero_grad()`",
-        DerivativeSlot::Hessian => "`.hessian()` read an empty Hessian slot: no `.backward()` of a `@grad(order: 2)` function has filled it since the tensor was built, last `.zero_grad()`, or last took a first-order gradient",
+        DerivativeSlot::Gradient => {
+            "`.grad()` read an empty gradient slot: no `.backward()` has filled it since the tensor was built or last `.zero_grad()`"
+        }
+        DerivativeSlot::Hessian => {
+            "`.hessian()` read an empty Hessian slot: no `.backward()` of a `@grad(order: 2)` function has filled it since the tensor was built, last `.zero_grad()`, or last took a first-order gradient"
+        }
     }
 }
 

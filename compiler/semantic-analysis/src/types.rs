@@ -821,17 +821,21 @@ mod tests {
         assert_eq!(ref_str.peel_string_ref(), Type::String);
         assert_eq!(Type::String.peel_string_ref(), Type::String);
         // After peeling, a slice and an owned string compare compatible either way.
-        assert!(ref_str
-            .peel_string_ref()
-            .is_compatible_with(&Type::String.peel_string_ref()));
+        assert!(
+            ref_str
+                .peel_string_ref()
+                .is_compatible_with(&Type::String.peel_string_ref())
+        );
 
         // Non-string references are left intact: reading them through `==` needs
         // the deref operator (`*`), so `&i32` stays incompatible.
         let ref_i32 = ref_to(Type::I32);
         assert_eq!(ref_i32.peel_string_ref(), ref_i32);
-        assert!(!ref_i32
-            .peel_string_ref()
-            .is_compatible_with(&Type::I32.peel_string_ref()));
+        assert!(
+            !ref_i32
+                .peel_string_ref()
+                .is_compatible_with(&Type::I32.peel_string_ref())
+        );
     }
 
     #[test]

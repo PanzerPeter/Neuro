@@ -1,6 +1,5 @@
 use super::super::TypeChecker;
-#[allow(unused_imports)]
-use super::{make_function, make_ident, make_type, semantic_errors};
+use super::{make_function, make_ident, make_type};
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{BinaryOp, Expr, Place, Stmt, UnaryOp};

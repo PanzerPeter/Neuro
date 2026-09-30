@@ -326,7 +326,7 @@ fn internalize(module: &Module<'_>, names: &[&str]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{build_module, BodyMemory, ExternalBodies, OptimizationLevelSetting};
+    use crate::{BodyMemory, ExternalBodies, OptimizationLevelSetting, build_module};
     use inkwell::context::Context;
     use inkwell::module::Linkage;
 

@@ -100,7 +100,7 @@ several features at once.
 
 | Requirement | Version | Notes |
 |---|---|---|
-| **Rust** | 1.85+ | Install via [rustup](https://rustup.rs/) |
+| **Rust** | 1.98.1+ | Install via [rustup](https://rustup.rs/) |
 | **LLVM 22** | 22.x with dev libraries | Per-platform commands below |
 | **C linker** | any | `gcc` / `clang` on Linux and macOS, MSVC on Windows |
 

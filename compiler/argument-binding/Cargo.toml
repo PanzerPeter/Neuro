@@ -7,6 +7,9 @@ authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 ast-types = { path = "../infrastructure/ast-types" }
 shared-types = { path = "../infrastructure/shared-types" }

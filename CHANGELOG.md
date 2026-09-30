@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-09-30
+
+### Changed
+
+- Building the compiler needs Rust 1.98.1 or later (was 1.85). The workspace moves to the
+  2024 edition and Cargo's version-3 resolver, which picks dependency versions that fit the
+  declared minimum Rust. Code is formatted with the 2024 style edition, and nested `if let`s
+  are collapsed into let chains.
+- The parser no longer allocates an error message for every expression it parses. Its
+  end-of-input errors were built eagerly inside `ok_or`, on the success path too.
+- `neurc compile --help` and `neurc run --help` say what the optimization levels mean: `-O0`
+  (the default) is a debug build where integer overflow panics; `-O1` to `-O3` wrap.
+- Lint suppressions are `#[expect(...)]`, enforced by a workspace `allow_attributes` lint, so
+  one that stops firing is reported. Seventeen test modules had been hiding unused imports
+  behind `#[allow(unused_imports)]`; the imports are gone.
+- Dependencies refreshed within their semver ranges. `tempfile` is a workspace dependency.
+
+### Fixed
+
+- An array length past `u32::MAX` is a type error. LLVM counts array elements in 32 bits, and
+  the backend truncated a longer one: `[i32; 4294967298]` compiled as `[2 x i32]`.
+- A long array type no longer aborts the compiler. Deciding whether an array binding holds a
+  `string` listed every element first, so a `[i32; 4294967295]` parameter asked for 256 GiB.
+  The element type answers for all of them now.
+
 ## [4.5.0] - 2026-09-30
 
 ### Added

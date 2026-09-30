@@ -7,6 +7,9 @@ authors.workspace = true
 license-file.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 shared-types = { path = "../infrastructure/shared-types" }
 logos = { workspace = true }
@@ -14,6 +17,3 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-
-[lib]
-path = "src/lib.rs"

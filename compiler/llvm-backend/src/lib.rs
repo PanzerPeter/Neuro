@@ -10,8 +10,8 @@ mod types;
 
 pub use errors::{CodegenError, CodegenResult};
 
-use inkwell::context::Context as LLVMContext;
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
+use inkwell::context::Context as LLVMContext;
 use neuro_hir::{HirItem, HirProgram, HirSelfParam, HirTarget};
 use std::collections::HashMap;
 use types::Type;
@@ -476,7 +476,7 @@ fn host_target_machine(
 )> {
     let target_triple = inkwell::targets::TargetMachine::get_default_triple();
     inkwell::targets::Target::initialize_native(&inkwell::targets::InitializationConfig::default())
-        .map_err(|e| CodegenError::InitializationFailed(e.to_string()))?;
+        .map_err(CodegenError::InitializationFailed)?;
 
     let target = inkwell::targets::Target::from_triple(&target_triple)
         .map_err(|e| CodegenError::InitializationFailed(format!("failed to get target: {}", e)))?;

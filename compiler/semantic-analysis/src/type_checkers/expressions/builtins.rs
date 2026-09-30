@@ -3,7 +3,7 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
-use super::{TypeChecker, CLONE_METHOD};
+use super::{CLONE_METHOD, TypeChecker};
 use crate::errors::TypeError;
 use crate::type_checkers::backward::{
     BACKWARD_METHOD, GRAD_METHOD, HESSIAN_METHOD, ZERO_GRAD_METHOD,
@@ -406,14 +406,14 @@ impl TypeChecker {
             });
             return;
         }
-        if let Some(arg_ty) = self.check_expr(&args[0], Some(&Type::U64)) {
-            if !arg_ty.is_compatible_with(&Type::U64) {
-                self.record_error(TypeError::Mismatch {
-                    expected: Type::U64,
-                    found: arg_ty,
-                    span: args[0].span(),
-                });
-            }
+        if let Some(arg_ty) = self.check_expr(&args[0], Some(&Type::U64))
+            && !arg_ty.is_compatible_with(&Type::U64)
+        {
+            self.record_error(TypeError::Mismatch {
+                expected: Type::U64,
+                found: arg_ty,
+                span: args[0].span(),
+            });
         }
     }
 
@@ -435,14 +435,14 @@ impl TypeChecker {
             return;
         }
 
-        if let Some(arg_ty) = self.check_expr(&args[0], Some(recv)) {
-            if !arg_ty.is_compatible_with(recv) {
-                self.record_error(TypeError::Mismatch {
-                    expected: recv.clone(),
-                    found: arg_ty,
-                    span: args[0].span(),
-                });
-            }
+        if let Some(arg_ty) = self.check_expr(&args[0], Some(recv))
+            && !arg_ty.is_compatible_with(recv)
+        {
+            self.record_error(TypeError::Mismatch {
+                expected: recv.clone(),
+                found: arg_ty,
+                span: args[0].span(),
+            });
         }
     }
 
@@ -472,13 +472,13 @@ impl TypeChecker {
         let Some(place) = Self::slice_borrow_root(object) else {
             return;
         };
-        if let Some((_, exclusive)) = self.symbols.borrow_counts(&place) {
-            if exclusive > 0 {
-                self.record_error(TypeError::CannotBorrowWhileMutablyBorrowed {
-                    name: place.clone(),
-                    span: call_span,
-                });
-            }
+        if let Some((_, exclusive)) = self.symbols.borrow_counts(&place)
+            && exclusive > 0
+        {
+            self.record_error(TypeError::CannotBorrowWhileMutablyBorrowed {
+                name: place.clone(),
+                span: call_span,
+            });
         }
         self.symbols.add_transient_borrow(&place, false);
     }
@@ -526,14 +526,15 @@ impl TypeChecker {
         };
 
         for bound in [start.as_ref(), end.as_ref()] {
-            if let Some(bound_ty) = self.check_expr(bound, Some(&Type::U64)) {
-                if !matches!(bound_ty, Type::Unknown) && !bound_ty.is_integer() {
-                    self.record_error(TypeError::Mismatch {
-                        expected: Type::U64,
-                        found: bound_ty,
-                        span: bound.span(),
-                    });
-                }
+            if let Some(bound_ty) = self.check_expr(bound, Some(&Type::U64))
+                && !matches!(bound_ty, Type::Unknown)
+                && !bound_ty.is_integer()
+            {
+                self.record_error(TypeError::Mismatch {
+                    expected: Type::U64,
+                    found: bound_ty,
+                    span: bound.span(),
+                });
             }
         }
 
@@ -574,16 +575,15 @@ impl TypeChecker {
             return Some(Type::Unknown);
         }
 
-        if let (Some(expected), Some(arg)) = (expected_param, args.first()) {
-            if let Some(arg_ty) = self.check_expr(arg, Some(&expected)) {
-                if !arg_ty.is_compatible_with(&expected) {
-                    self.record_error(TypeError::Mismatch {
-                        expected,
-                        found: arg_ty,
-                        span: arg.span(),
-                    });
-                }
-            }
+        if let (Some(expected), Some(arg)) = (expected_param, args.first())
+            && let Some(arg_ty) = self.check_expr(arg, Some(&expected))
+            && !arg_ty.is_compatible_with(&expected)
+        {
+            self.record_error(TypeError::Mismatch {
+                expected,
+                found: arg_ty,
+                span: arg.span(),
+            });
         }
 
         Some(Type::Unknown)
@@ -684,13 +684,13 @@ impl TypeChecker {
             return;
         }
         if Self::is_bare_binding(object) {
-            if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name) {
-                if shared > 0 || exclusive > 0 {
-                    self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
-                        name: name.clone(),
-                        span,
-                    });
-                }
+            if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name)
+                && (shared > 0 || exclusive > 0)
+            {
+                self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
+                    name: name.clone(),
+                    span,
+                });
             }
             self.symbols.add_transient_borrow(&name, true);
         }

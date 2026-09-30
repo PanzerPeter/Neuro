@@ -1,5 +1,5 @@
 use super::{binding_init, function_body, lower};
-use crate::{lower_program, LoweringError};
+use crate::{LoweringError, lower_program};
 
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirItem, HirMathOp, HirStmt, HirType};
 

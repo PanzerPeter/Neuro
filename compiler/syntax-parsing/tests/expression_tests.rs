@@ -1,7 +1,7 @@
 // Expression parsing tests
 
 use shared_types::{FloatSuffix, FormatAlign, FormatKind, Literal};
-use syntax_parsing::{parse_expr, BinaryOp, Expr, InterpPart, TensorIndexArg, UnaryOp};
+use syntax_parsing::{BinaryOp, Expr, InterpPart, TensorIndexArg, UnaryOp, parse_expr};
 
 #[test]
 fn test_parse_integer_literal() {
@@ -751,9 +751,11 @@ fn a_multi_axis_index_parses_as_a_tensor_index() {
         panic!("expected a tensor index, got {expr:?}");
     };
     assert_eq!(indices.len(), 2);
-    assert!(indices
-        .iter()
-        .all(|index| matches!(index, TensorIndexArg::Position(_))));
+    assert!(
+        indices
+            .iter()
+            .all(|index| matches!(index, TensorIndexArg::Position(_)))
+    );
 }
 
 #[test]

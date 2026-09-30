@@ -428,10 +428,10 @@ impl SymbolTable {
         let mut idx = 0;
         for scope in &self.scopes {
             for (name, info) in scope {
-                if let Some(before) = snapshot.get(idx) {
-                    if let Some(span) = info.moves.introduced_since(before) {
-                        introduced.push((name.clone(), span));
-                    }
+                if let Some(before) = snapshot.get(idx)
+                    && let Some(span) = info.moves.introduced_since(before)
+                {
+                    introduced.push((name.clone(), span));
                 }
                 idx += 1;
             }

@@ -13,7 +13,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirReduceOp, HirType};
 use shared_types::Span;
 
 use crate::tensor_shape::const_integer;
-use crate::{malformed, Lowerer, LoweringError};
+use crate::{Lowerer, LoweringError, malformed};
 
 pub(crate) const SUM_METHOD: &str = "sum";
 pub(crate) const MEAN_METHOD: &str = "mean";
@@ -63,9 +63,9 @@ impl Lowerer {
         };
 
         let axis = resolve_axis(&shape, &names, entry, method)?;
-        let mut result_shape = shape.clone();
+        let mut result_shape = shape;
         result_shape.remove(axis);
-        let mut result_names = names.0.clone();
+        let mut result_names = names.0;
         result_names.remove(axis);
         Ok(HirExpr::new(
             HirExprKind::TensorReduce {

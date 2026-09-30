@@ -15,7 +15,7 @@ mod sequences;
 mod struct_exprs;
 mod try_expr;
 
-use super::{declarations, TypeChecker, VariantForm};
+use super::{TypeChecker, VariantForm, declarations};
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::Expr;

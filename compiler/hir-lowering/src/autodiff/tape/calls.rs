@@ -7,12 +7,12 @@ use ast_types::BinaryOp;
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirTensorApply, HirType};
 use shared_types::{Literal, Span};
 
-use crate::autodiff::emit::{self, tensor_parts};
 use crate::LoweringError;
+use crate::autodiff::emit::{self, tensor_parts};
 
 use super::leaf::{clone_call, is_copied_field};
 use super::positions::coordinates;
-use super::{ArmBody, Leaf, Linearizer, Op, GPU_CALL, MAX_UNROLLED_ELEMENTS, RUN_TIME_TARGET};
+use super::{ArmBody, GPU_CALL, Leaf, Linearizer, MAX_UNROLLED_ELEMENTS, Op, RUN_TIME_TARGET};
 
 impl<'f> Linearizer<'f> {
     /// A call to a user function, or through a function value whose target is known here,

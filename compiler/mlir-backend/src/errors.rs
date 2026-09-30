@@ -39,12 +39,16 @@ pub enum MlirError {
 
     /// A GPU chip name that is not letters, digits and `_`. It is spliced into a
     /// textual pass pipeline, so anything else could rewrite the pipeline.
-    #[error("invalid GPU chip name `{0}`: expected letters, digits and `_`, such as `sm_80` or `gfx90a`")]
+    #[error(
+        "invalid GPU chip name `{0}`: expected letters, digits and `_`, such as `sm_80` or `gfx90a`"
+    )]
     InvalidGpuChip(String),
 
     /// `gpu-module-to-binary` produced no device object for a kernel module. An AMD
     /// code object is linked by ROCm's `ld.lld`, found under `$ROCM_PATH/llvm/bin`.
-    #[error("GPU kernels could not be serialized; an AMD target needs ROCm installed (ld.lld under $ROCM_PATH/llvm/bin, /opt/rocm by default)")]
+    #[error(
+        "GPU kernels could not be serialized; an AMD target needs ROCm installed (ld.lld under $ROCM_PATH/llvm/bin, /opt/rocm by default)"
+    )]
     GpuSerializationFailed,
 
     /// `@gpu` functions whose bodies this path cannot turn into kernels, each with its

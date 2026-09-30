@@ -20,9 +20,9 @@
 // Every operand is READ. A contraction allocates its own result, so an operand that a
 // binding owns is left alone and only a temporary built for the call is released here.
 
+use inkwell::IntPredicate;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
@@ -168,7 +168,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Sum the products of the operands' elements over every value of the contracted
     /// letters, for the one output slot `o` names.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn accumulate_contraction(
         &mut self,
         elem_llvm: BasicTypeEnum<'ctx>,

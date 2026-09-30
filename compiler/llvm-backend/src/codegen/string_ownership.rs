@@ -290,10 +290,10 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
             continue;
         }
         collect_returns(body, &mut exits);
-        if let Some(HirStmt::Expr(tail)) = body.last() {
-            if !tail_exits(tail, &mut exits) {
-                exits.clear();
-            }
+        if let Some(HirStmt::Expr(tail)) = body.last()
+            && !tail_exits(tail, &mut exits)
+        {
+            exits.clear();
         }
         out.push((name, exits));
     }

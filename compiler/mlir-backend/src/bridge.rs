@@ -4,7 +4,7 @@ use crate::{
     lower::{build_linkable_module, build_module},
 };
 
-use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
+use melior::{Context, ir::Module, pass::PassManager, utility::parse_pass_pipeline};
 use neuro_hir::{HirProgram, HirTarget};
 
 /// The route from the dialects this slice builds in down to the `llvm` dialect.
@@ -201,8 +201,8 @@ pub(crate) mod tests {
     use crate::smoke::build_smoke_module;
     use ast_types::BinaryOp;
     use neuro_hir::{
-        static_shape, AxisNames, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram,
-        HirStmt, HirType,
+        AxisNames, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram, HirStmt,
+        HirType, static_shape,
     };
     use shared_types::Span;
 

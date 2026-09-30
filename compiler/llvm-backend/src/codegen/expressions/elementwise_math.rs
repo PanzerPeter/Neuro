@@ -144,7 +144,7 @@ impl<'ctx> CodegenContext<'ctx> {
             HirMathOp::Sign => {
                 return Err(CodegenError::InternalError(
                     "`sign` has no intrinsic".to_string(),
-                ))
+                ));
             }
         };
         let intrinsic = Intrinsic::find(name)

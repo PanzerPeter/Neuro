@@ -21,7 +21,7 @@ impl Parser {
     /// shapes that can be read, so the classification happens once the expression is
     /// in hand rather than as lookahead over raw tokens.
     pub(crate) fn parse_assign_tail(&mut self, target: Expr) -> ParseResult<Stmt> {
-        let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
+        let op_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "assignment operator".to_string(),
         })?;
         let op = match op_token.kind {
@@ -36,7 +36,7 @@ impl Parser {
                     found,
                     expected: "assignment operator".to_string(),
                     span: op_token.span,
-                })
+                });
             }
         };
 

@@ -236,7 +236,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "method type information is not a function type".to_string(),
-                ))
+                ));
             }
         };
 
@@ -292,7 +292,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "method type information is not a function type".to_string(),
-                ))
+                ));
             }
         };
 
@@ -367,10 +367,10 @@ impl<'ctx> CodegenContext<'ctx> {
         // exit — and so is a consuming `self`, which the caller handed over. A borrowed
         // receiver is not: its value stays the caller's.
         self.push_drop_scope();
-        if matches!(method.self_param, Some(HirSelfParam::Owned)) {
-            if let Some(alloca) = self.variables.get(SELF_BINDING).copied() {
-                self.register_owned_binding(SELF_BINDING, alloca, &self_ty)?;
-            }
+        if matches!(method.self_param, Some(HirSelfParam::Owned))
+            && let Some(alloca) = self.variables.get(SELF_BINDING).copied()
+        {
+            self.register_owned_binding(SELF_BINDING, alloca, &self_ty)?;
         }
         for (i, param) in method.params.iter().enumerate() {
             if let (Some(param_ty), Some(alloca)) = (
@@ -402,7 +402,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "function type information is not a function type".to_string(),
-                ))
+                ));
             }
         };
 
@@ -442,7 +442,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "function type information is not a function type".to_string(),
-                ))
+                ));
             }
         };
 
@@ -545,7 +545,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     _ => {
                         return Err(CodegenError::InternalError(
                             "tail statement is not value-producing".to_string(),
-                        ))
+                        ));
                     }
                 };
                 // The tail expression itself may diverge (`func f() -> i32 { panic("x") }`),
@@ -572,21 +572,21 @@ impl<'ctx> CodegenContext<'ctx> {
             // In both cases we emit `unreachable`; dead blocks are eliminated by LLVM
             // later, while genuine missing returns produce undefined behaviour. The
             // correct long-term fix is return-path analysis in semantic analysis.
-            if let Some(current_bb) = self.builder.get_insert_block() {
-                if current_bb.get_terminator().is_none() {
-                    if matches!(return_type, Type::Void) {
-                        self.emit_drops_through(0)?;
-                        self.builder.build_return(None).map_err(|e| {
-                            CodegenError::LlvmError(format!("failed to build void return: {}", e))
-                        })?;
-                    } else {
-                        self.builder.build_unreachable().map_err(|e| {
-                            CodegenError::LlvmError(format!(
-                                "failed to build unreachable terminator: {}",
-                                e
-                            ))
-                        })?;
-                    }
+            if let Some(current_bb) = self.builder.get_insert_block()
+                && current_bb.get_terminator().is_none()
+            {
+                if matches!(return_type, Type::Void) {
+                    self.emit_drops_through(0)?;
+                    self.builder.build_return(None).map_err(|e| {
+                        CodegenError::LlvmError(format!("failed to build void return: {}", e))
+                    })?;
+                } else {
+                    self.builder.build_unreachable().map_err(|e| {
+                        CodegenError::LlvmError(format!(
+                            "failed to build unreachable terminator: {}",
+                            e
+                        ))
+                    })?;
                 }
             }
         }

@@ -888,7 +888,9 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   `.0` yields the inner type in the `TupleIndex` check. A newtype is an `impl` target like a
   struct (`impl_target_type`): its methods, associated functions (`Name::f`), operator traits and
   trait impls resolve through the same tables, keyed by the newtype's name.
-- **Arrays.** `resolve_type` resolves `[T; N]`; `check_expr` handles array literals (homogeneous,
+- **Arrays.** `resolve_type` resolves `[T; N]`, rejecting a literal `N` past `u32::MAX`
+  (`ArrayLengthTooLarge`: LLVM counts array elements in 32 bits, so the backend would truncate
+  it); `check_expr` handles array literals (homogeneous,
   length vs annotation) and indexing (`NotIndexable` / `IndexNotInteger`); `array.len()` is `u64`;
   `Stmt::ForEach` binds the element type, and a BY-VALUE head over a move-tracked element type
   records a move of the iterable: the loop takes the elements over, which is what codegen already

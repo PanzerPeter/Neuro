@@ -1,6 +1,6 @@
 // `export` visibility markers on items and on struct fields.
 
-use syntax_parsing::{parse, Item};
+use syntax_parsing::{Item, parse};
 
 fn items(source: &str) -> Vec<Item> {
     parse(source).expect("source should parse")

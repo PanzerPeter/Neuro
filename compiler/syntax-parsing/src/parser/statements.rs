@@ -155,7 +155,7 @@ impl Parser {
     pub(crate) fn parse_stmt(&mut self) -> ParseResult<Stmt> {
         self.skip_newlines();
 
-        let token = self.peek().ok_or(ParseError::UnexpectedEof {
+        let token = self.peek().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "statement".to_string(),
         })?;
 
@@ -259,7 +259,7 @@ impl Parser {
             // destructuring bind; anything else is an ordinary variable
             // declaration (`val name`, `val name: T`).
             if self.starts_destructure_pattern() {
-                let kw = self.advance().ok_or(ParseError::UnexpectedEof {
+                let kw = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "'val' or 'mut'".to_string(),
                 })?;
                 let start_span = kw.span;

@@ -76,11 +76,7 @@ impl TypeChecker {
         if self.check_integer_range(value, &ty) {
             ty
         } else {
-            self.record_error(TypeError::IntegerLiteralOutOfRange {
-                value,
-                ty: ty.clone(),
-                span,
-            });
+            self.record_error(TypeError::IntegerLiteralOutOfRange { value, ty, span });
             Type::Unknown
         }
     }

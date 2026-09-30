@@ -3,7 +3,7 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
-use super::{declarations, mentions_type_parameter, TypeChecker, VariantForm};
+use super::{TypeChecker, VariantForm, declarations, mentions_type_parameter};
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{Expr, FieldInit};
@@ -77,14 +77,14 @@ impl TypeChecker {
         match info.form {
             VariantForm::Unit => {}
             VariantForm::Tuple => self.record_error(TypeError::EnumVariantFormMismatch {
-                enum_name: enum_name.to_string(),
+                enum_name: enum_name.clone(),
                 variant: variant.to_string(),
                 expected: "tuple".to_string(),
                 hint: "construct it with arguments, e.g. `E::V(...)`".to_string(),
                 span,
             }),
             VariantForm::Struct => self.record_error(TypeError::EnumVariantFormMismatch {
-                enum_name: enum_name.to_string(),
+                enum_name: enum_name.clone(),
                 variant: variant.to_string(),
                 expected: "struct".to_string(),
                 hint: "construct it with braces, e.g. `E::V { field: ... }`".to_string(),
@@ -121,7 +121,7 @@ impl TypeChecker {
             Some(info) => info,
             None => {
                 self.record_error(TypeError::UnknownEnumVariant {
-                    enum_name: enum_name.to_string(),
+                    enum_name: enum_name.clone(),
                     variant: variant.to_string(),
                     span,
                 });
@@ -136,7 +136,7 @@ impl TypeChecker {
             VariantForm::Tuple => {}
             VariantForm::Unit => {
                 self.record_error(TypeError::EnumVariantFormMismatch {
-                    enum_name: enum_name.to_string(),
+                    enum_name: enum_name.clone(),
                     variant: variant.to_string(),
                     expected: "unit".to_string(),
                     hint: "construct it without arguments, e.g. `E::V`".to_string(),
@@ -149,7 +149,7 @@ impl TypeChecker {
             }
             VariantForm::Struct => {
                 self.record_error(TypeError::EnumVariantFormMismatch {
-                    enum_name: enum_name.to_string(),
+                    enum_name: enum_name.clone(),
                     variant: variant.to_string(),
                     expected: "struct".to_string(),
                     hint: "construct it with braces, e.g. `E::V { field: ... }`".to_string(),
@@ -168,7 +168,7 @@ impl TypeChecker {
 
         if args.len() != field_tys.len() {
             self.record_error(TypeError::EnumVariantArityMismatch {
-                enum_name: enum_name.to_string(),
+                enum_name: enum_name.clone(),
                 variant: variant.to_string(),
                 expected: field_tys.len(),
                 found: args.len(),
@@ -185,10 +185,8 @@ impl TypeChecker {
         for (arg, declared) in args.iter().zip(field_tys.iter()) {
             let ctx = (!mentions_type_parameter(declared)).then(|| declared.clone());
             let arg_ty = self.check_expr(arg, ctx.as_ref());
-            if inferring {
-                if let Some(ty) = &arg_ty {
-                    declarations::unify_generic(declared, ty, &mut subst);
-                }
+            if inferring && let Some(ty) = &arg_ty {
+                declarations::unify_generic(declared, ty, &mut subst);
             }
             // The payload is a new owner: a place written here is moved into it.
             self.record_move(arg);
@@ -330,15 +328,15 @@ impl TypeChecker {
         }
 
         for (field_name, _) in &info_fields {
-            if let Some(field_name) = field_name {
-                if !seen.contains_key(field_name) {
-                    self.record_error(TypeError::MissingEnumField {
-                        enum_name: enum_name.clone(),
-                        variant: variant.name.clone(),
-                        field: field_name.clone(),
-                        span,
-                    });
-                }
+            if let Some(field_name) = field_name
+                && !seen.contains_key(field_name)
+            {
+                self.record_error(TypeError::MissingEnumField {
+                    enum_name: enum_name.clone(),
+                    variant: variant.name.clone(),
+                    field: field_name.clone(),
+                    span,
+                });
             }
         }
 

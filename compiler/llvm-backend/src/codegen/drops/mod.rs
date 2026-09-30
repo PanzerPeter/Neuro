@@ -123,6 +123,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// when the store into it provably allocated, which needs the flag, so it is planned
     /// where a flag can be planned and nowhere else.
     fn holds_string_position(&self, ty: &Type) -> bool {
+        // Every element of an array has the same type, so one answers for all of them.
+        // Asking `held_positions` would build an entry per element first.
+        if let Type::Array { element, size } = ty {
+            return *size > 0
+                && (matches!(**element, Type::String) || self.holds_string_position(element));
+        }
         self.held_positions(ty).iter().any(|(_, position_ty)| {
             matches!(position_ty, Type::String) || self.holds_string_position(position_ty)
         })
@@ -299,16 +305,16 @@ impl<'ctx> CodegenContext<'ctx> {
                 let _ = path.pop();
                 continue;
             }
-            if let Some(target) = self.drop_target_of(&position_ty) {
-                if !matches!(target, DropTarget::Aggregate) {
-                    let flag_ptr = self.arm_drop_flag()?;
-                    out.push(HeldDrop {
-                        path: path.clone(),
-                        storage_ptr: position_ptr,
-                        flag_ptr,
-                        target,
-                    });
-                }
+            if let Some(target) = self.drop_target_of(&position_ty)
+                && !matches!(target, DropTarget::Aggregate)
+            {
+                let flag_ptr = self.arm_drop_flag()?;
+                out.push(HeldDrop {
+                    path: path.clone(),
+                    storage_ptr: position_ptr,
+                    flag_ptr,
+                    target,
+                });
             }
             self.plan_held_drops(position_ptr, &position_ty, path, out)?;
             let _ = path.pop();

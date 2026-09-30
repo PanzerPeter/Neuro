@@ -10,11 +10,11 @@
 // the buffer by the time the reader sees it. That transfers rather than copies, so the
 // buffer is neither duplicated nor released twice.
 
-use inkwell::values::{BasicValueEnum, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, PointerValue};
 use neuro_hir::HirExpr;
 
-use super::{collection_arg, FIELD_LEN};
+use super::{FIELD_LEN, collection_arg};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};

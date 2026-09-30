@@ -13,8 +13,8 @@
 // The receiver is READ. Nothing is moved and nothing is released here: a reduction
 // summarises a buffer its owner keeps.
 
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirReduceOp};
 
 use crate::codegen::context::CodegenContext;
@@ -182,7 +182,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Fold the run's remaining `mid - 1` elements into the accumulator. The first is
     /// already there, which is what gives `.max()` and `.min()` a starting value without
     /// a per-dtype sentinel.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn fold_run(
         &mut self,
         (elem_llvm, acc_llvm): (

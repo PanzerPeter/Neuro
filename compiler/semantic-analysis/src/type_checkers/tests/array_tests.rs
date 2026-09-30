@@ -1,5 +1,4 @@
-#[allow(unused_imports)]
-use super::{make_function, make_ident, make_type, semantic_errors};
+use super::semantic_errors;
 use crate::errors::TypeError;
 
 #[test]
@@ -43,6 +42,35 @@ func main() -> i32 {
             .iter()
             .any(|e| matches!(e, TypeError::ArrayLengthMismatch { .. })),
         "a literal whose length differs from the annotation must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn array_length_past_u32_is_rejected() {
+    // LLVM counts array elements in 32 bits, so a longer length used to reach the
+    // backend and be truncated: `[i32; 4294967298]` compiled as `[2 x i32]`.
+    let errors = semantic_errors(
+        r#"
+func f(a: [i32; 4294967296]) -> i32 {
+    return 0
+}
+func g(a: [i32; 4294967295]) -> i32 {
+    return 0
+}
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [TypeError::ArrayLengthTooLarge {
+                length: 4294967296,
+                ..
+            }]
+        ),
+        "only the length past u32::MAX must be rejected; got {errors:?}"
     );
 }
 

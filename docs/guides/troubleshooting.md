@@ -559,7 +559,7 @@ Include in bug reports:
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
 - Neuro: version from `neurc --version` (and commit hash)
 - LLVM: 22.x
-- Rust: 1.85+
+- Rust: 1.98.1+
 
 ## Issue
 [Description]

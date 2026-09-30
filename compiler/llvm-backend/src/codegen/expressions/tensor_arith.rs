@@ -11,9 +11,9 @@
 // tensor's handle across an in-place update.
 
 use ast_types::BinaryOp;
+use inkwell::IntPredicate;
 use inkwell::types::{BasicTypeEnum, FloatType};
 use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue};
-use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
 use super::row_major_strides;
@@ -739,7 +739,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 _ => {
                     return Err(CodegenError::InternalError(
                         "a compound assignment carries an arithmetic operator".to_string(),
-                    ))
+                    ));
                 }
             }?;
             return Ok(self.narrow_float(value, narrow)?.into());
@@ -760,7 +760,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "a compound assignment carries an arithmetic operator".to_string(),
-                ))
+                ));
             }
         };
         Ok(value.into())

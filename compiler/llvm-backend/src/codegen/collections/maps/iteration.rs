@@ -3,8 +3,8 @@
 // One of the map-codegen modules under `maps`; each adds methods to the same
 // `impl CodegenContext` block.
 
-use inkwell::values::FunctionValue;
 use inkwell::IntPredicate;
+use inkwell::values::FunctionValue;
 
 use super::STATE_FULL;
 use crate::codegen::collections::elements::SlotTransfer;

@@ -4,7 +4,7 @@
 // Inside a delimiter pair (`(...)` or `[...]`) that ambiguity is gone, so a struct
 // literal must be accepted there even though the enclosing header is guarded.
 
-use syntax_parsing::{parse, parse_expr, Expr};
+use syntax_parsing::{Expr, parse, parse_expr};
 
 /// Parse `src` as a whole program, expecting success.
 fn parse_ok(src: &str) {

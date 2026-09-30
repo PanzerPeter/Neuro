@@ -6,7 +6,7 @@
 // a flat `Expr::Compose` chain, an applied composition folded into nested calls, and
 // a rejection for any operand that is not a name.
 
-use syntax_parsing::{parse, parse_expr, BinaryOp, Expr};
+use syntax_parsing::{BinaryOp, Expr, parse, parse_expr};
 
 fn compose_names(expr: &Expr) -> Vec<String> {
     match expr {

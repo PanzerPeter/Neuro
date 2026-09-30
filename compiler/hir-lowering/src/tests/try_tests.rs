@@ -76,9 +76,11 @@ fn result_failure_arm_forwards_the_err_payload() {
     let HirExprKind::Block { stmts } = &arms[1].body.kind else {
         panic!("the failure arm should be a block");
     };
-    let [HirStmt::Return {
-        value: Some(value), ..
-    }] = stmts.as_slice()
+    let [
+        HirStmt::Return {
+            value: Some(value), ..
+        },
+    ] = stmts.as_slice()
     else {
         panic!("the failure arm should return a value");
     };
@@ -117,9 +119,11 @@ fn option_failure_arm_returns_none_without_binding() {
     let HirExprKind::Block { stmts } = &arms[1].body.kind else {
         panic!("the failure arm should be a block");
     };
-    let [HirStmt::Return {
-        value: Some(value), ..
-    }] = stmts.as_slice()
+    let [
+        HirStmt::Return {
+            value: Some(value), ..
+        },
+    ] = stmts.as_slice()
     else {
         panic!("the failure arm should return a value");
     };
@@ -155,9 +159,11 @@ fn propagated_value_targets_the_callers_return_instance() {
     let HirExprKind::Block { stmts } = &arms[1].body.kind else {
         panic!("the failure arm should be a block");
     };
-    let [HirStmt::Return {
-        value: Some(value), ..
-    }] = stmts.as_slice()
+    let [
+        HirStmt::Return {
+            value: Some(value), ..
+        },
+    ] = stmts.as_slice()
     else {
         panic!("the failure arm should return a value");
     };

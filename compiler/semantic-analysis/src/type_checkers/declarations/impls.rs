@@ -6,10 +6,10 @@
 
 use super::{DEBUG_TRAIT, DROP_METHOD, DROP_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
-use crate::type_checkers::collections::{HASHABLE_TRAIT, HASH_METHOD};
+use crate::type_checkers::TypeChecker;
+use crate::type_checkers::collections::{HASH_METHOD, HASHABLE_TRAIT};
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
 use crate::type_checkers::val_else::stmts_diverge;
-use crate::type_checkers::TypeChecker;
 use crate::types::Type;
 use ast_types::{ImplDef, SelfParam};
 use std::collections::HashMap;
@@ -238,15 +238,15 @@ impl TypeChecker {
                 .unwrap_or(Type::Void);
 
             let result = if spec.has_output {
-                if let Some(out) = &declared_output {
-                    if !out.is_compatible_with(&ret) {
-                        self.record_error(TypeError::AssociatedTypeMismatch {
-                            trait_name: trait_name.to_string(),
-                            expected: out.clone(),
-                            found: ret.clone(),
-                            span: method.name.span,
-                        });
-                    }
+                if let Some(out) = &declared_output
+                    && !out.is_compatible_with(&ret)
+                {
+                    self.record_error(TypeError::AssociatedTypeMismatch {
+                        trait_name: trait_name.to_string(),
+                        expected: out.clone(),
+                        found: ret.clone(),
+                        span: method.name.span,
+                    });
                 }
                 ret
             } else {

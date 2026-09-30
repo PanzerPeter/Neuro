@@ -7,9 +7,9 @@
 //! function pointer with the environment pointer. A call loads both halves and
 //! dispatches indirectly.
 
+use inkwell::AddressSpace;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
-use inkwell::AddressSpace;
 use neuro_hir::{HirCapture, HirClosure, HirExpr};
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -168,7 +168,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Err(CodegenError::InternalError(format!(
                     "indirect call target is not a function type: {:?}",
                     other
-                )))
+                )));
             }
         };
 

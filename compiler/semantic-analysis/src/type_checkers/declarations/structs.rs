@@ -5,8 +5,8 @@
 //! to the same `impl TypeChecker` block.
 
 use super::{
-    mangle_struct_instance, remap_method_type, substitute_generic, CLONE_TRAIT, COPY_TRAIT,
-    DEBUG_TRAIT, DERIVE_ATTRIBUTE, IMPLEMENTED_DERIVES, PARTIAL_EQ_TRAIT, PENDING_DERIVES,
+    CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, DERIVE_ATTRIBUTE, IMPLEMENTED_DERIVES, PARTIAL_EQ_TRAIT,
+    PENDING_DERIVES, mangle_struct_instance, remap_method_type, substitute_generic,
 };
 use crate::errors::TypeError;
 use crate::type_checkers::TypeChecker;
@@ -410,7 +410,7 @@ impl TypeChecker {
             }
 
             // Value predicates (`where N > 0`) hold against the concrete const values.
-            self.check_where_predicates(&template.where_predicates.clone(), &subst);
+            self.check_where_predicates(&template.where_predicates, &subst);
 
             let template_fields = self.struct_defs.get(base).cloned().unwrap_or_default();
             let concrete_fields: Vec<(String, Type)> = template_fields
@@ -462,10 +462,10 @@ impl TypeChecker {
         for imp in &impls {
             let mut impl_subst: HashMap<String, Type> = HashMap::new();
             for (ta, arg) in imp.type_args.iter().zip(args.iter()) {
-                if let ast_types::Type::Named(id) = ta {
-                    if imp.generics.iter().any(|g| g.name.name == id.name) {
-                        impl_subst.insert(id.name.clone(), arg.clone());
-                    }
+                if let ast_types::Type::Named(id) = ta
+                    && imp.generics.iter().any(|g| g.name.name == id.name)
+                {
+                    impl_subst.insert(id.name.clone(), arg.clone());
                 }
             }
             for method in &imp.methods {

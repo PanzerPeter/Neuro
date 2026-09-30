@@ -13,9 +13,9 @@
 // every borrowed view lands on a code point boundary) so the loop's own bound is the
 // string length rather than a validity check.
 
+use inkwell::IntPredicate;
 use inkwell::module::Linkage;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue};
-use inkwell::IntPredicate;
 use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;

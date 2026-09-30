@@ -85,7 +85,6 @@ impl CompileTest {
     /// This is `neurc check`, the front-end-only path. Use it for a test whose subject is
     /// what the type checker accepts or rejects: it skips LLVM entirely, so it neither
     /// needs a linker nor reports a backend error as if it were a type error.
-    #[allow(dead_code)]
     pub fn check(&self, filename: &str, source: &str) -> Result<(), String> {
         let source_path = self.write_source(filename, source);
         let output = Command::new(neurc_path())

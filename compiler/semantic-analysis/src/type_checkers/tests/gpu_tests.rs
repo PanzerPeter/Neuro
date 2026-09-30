@@ -50,7 +50,13 @@ fn gpu_is_refused_with_arguments_beside_grad_and_on_a_method() {
         ),
     ] {
         let errors = semantic_errors(src);
-        let [TypeError::GpuForm { problem: found, span }] = errors.as_slice() else {
+        let [
+            TypeError::GpuForm {
+                problem: found,
+                span,
+            },
+        ] = errors.as_slice()
+        else {
             panic!("expected one GpuForm error for {src:?}, got {errors:?}");
         };
         assert!(found.starts_with(problem), "{found}");

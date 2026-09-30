@@ -50,19 +50,19 @@ pub(crate) fn bind(
         return Ok(Bound::InPlace);
     }
 
-    if let Some(first_named) = named_from {
-        if let Some(stray) = labels[first_named..].iter().position(Option::is_none) {
-            let label = labels[first_named]
-                .as_ref()
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
-            let at = first_named + stray;
-            return Err(ArgumentError::PositionalAfterNamed {
-                callee: callee.to_string(),
-                label,
-                span: args.get(at).map(Expr::span).unwrap_or(span),
-            });
-        }
+    if let Some(first_named) = named_from
+        && let Some(stray) = labels[first_named..].iter().position(Option::is_none)
+    {
+        let label = labels[first_named]
+            .as_ref()
+            .map(|l| l.name.clone())
+            .unwrap_or_default();
+        let at = first_named + stray;
+        return Err(ArgumentError::PositionalAfterNamed {
+            callee: callee.to_string(),
+            label,
+            span: args.get(at).map(Expr::span).unwrap_or(span),
+        });
     }
 
     // A permutation needs one argument per parameter, unless the callee is one of the
@@ -139,7 +139,7 @@ pub(crate) fn bind(
                         callee: callee.to_string(),
                         label: sig.params[index].name.clone().unwrap_or_default(),
                         span,
-                    })
+                    });
                 }
             },
         }

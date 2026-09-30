@@ -12,8 +12,8 @@
 // Every operand is READ. Nothing is moved here: a traversal allocates its own result, so
 // the tensors it walked stay alive and usable.
 
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirTensorApply};
 
 use crate::codegen::context::CodegenContext;
@@ -49,7 +49,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "a tensor traversal carries the wrong operand for its kind".to_string(),
-                ))
+                ));
             }
         };
         let call_ret = match &callee.ty {
@@ -57,7 +57,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "a tensor traversal's callee is not a function".to_string(),
-                ))
+                ));
             }
         };
         let value = self.codegen_expr(callee)?;
@@ -145,7 +145,7 @@ impl<'ctx> CodegenContext<'ctx> {
             (None, None) => {
                 return Err(CodegenError::InternalError(
                     "a tensor traversal has nowhere to put its answer".to_string(),
-                ))
+                ));
             }
         }
         let next =

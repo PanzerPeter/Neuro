@@ -8,9 +8,9 @@ use shared_types::{Identifier, Span};
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 
+use super::Parser;
 use super::expr_index::IndexArguments;
 use super::expressions::finish_call;
-use super::Parser;
 
 /// The function names one operand of `>>` contributes to the chain.
 ///
@@ -50,7 +50,7 @@ pub(super) fn as_compose(callee: &Expr) -> Option<&[Identifier]> {
 impl Parser {
     /// Parse an infix expression (binary operators, function calls, field access, casts)
     pub(super) fn parse_infix(&mut self, left: Expr) -> ParseResult<Expr> {
-        let token = self.peek().ok_or(ParseError::UnexpectedEof {
+        let token = self.peek().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "operator or '('".to_string(),
         })?;
 
@@ -90,7 +90,7 @@ impl Parser {
             TokenKind::Dot => {
                 self.advance(); // consume '.'
                 if let Some(TokenKind::Integer(_)) = self.peek_kind() {
-                    let idx_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                    let idx_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                         expected: "tuple index".to_string(),
                     })?;
                     let TokenKind::Integer(n) = idx_token.kind else {
@@ -133,7 +133,7 @@ impl Parser {
             // right operand is parsed at `Range` precedence so a stray second `..` ends
             // the expression rather than chaining.
             TokenKind::DotDot | TokenKind::DotDotEqual => {
-                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                let op_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "'..' or '..='".to_string(),
                 })?;
                 let inclusive = matches!(op_token.kind, TokenKind::DotDotEqual);
@@ -173,7 +173,7 @@ impl Parser {
             // as a call, so `f(x)? + 1` propagates the call's failure and adds to its
             // payload, and `parse(s)?.field` reads a field of the unwrapped value.
             TokenKind::Question => {
-                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                let op_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "'?'".to_string(),
                 })?;
                 let span = left.span().merge(op_token.span);
@@ -224,7 +224,7 @@ impl Parser {
             }
 
             kind if self.is_binary_op(kind) => {
-                let op_token = self.advance().ok_or(ParseError::UnexpectedEof {
+                let op_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "operator".to_string(),
                 })?;
                 let op = self.token_to_binary_op(&op_token)?;

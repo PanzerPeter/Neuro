@@ -2,7 +2,7 @@
 
 use ast_types::{Expr, InterpPart};
 use shared_types::{
-    FormatAlign, FormatKind, FormatSpec, Span, MAX_FORMAT_PRECISION, MAX_FORMAT_WIDTH,
+    FormatAlign, FormatKind, FormatSpec, MAX_FORMAT_PRECISION, MAX_FORMAT_WIDTH, Span,
 };
 
 use super::TypeChecker;

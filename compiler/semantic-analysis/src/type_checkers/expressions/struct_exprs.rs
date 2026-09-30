@@ -3,7 +3,7 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
-use super::{declarations, mentions_type_parameter, TypeChecker};
+use super::{TypeChecker, declarations, mentions_type_parameter};
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{Expr, FieldInit};
@@ -33,14 +33,14 @@ impl TypeChecker {
             return Type::Newtype(name.to_string());
         }
 
-        if let Some(arg_ty) = self.check_expr(&args[0], Some(inner)) {
-            if !arg_ty.is_compatible_with(inner) {
-                self.record_error(TypeError::Mismatch {
-                    expected: inner.clone(),
-                    found: arg_ty,
-                    span: args[0].span(),
-                });
-            }
+        if let Some(arg_ty) = self.check_expr(&args[0], Some(inner))
+            && !arg_ty.is_compatible_with(inner)
+        {
+            self.record_error(TypeError::Mismatch {
+                expected: inner.clone(),
+                found: arg_ty,
+                span: args[0].span(),
+            });
         }
         self.record_move(&args[0]);
         Type::Newtype(name.to_string())
@@ -155,14 +155,14 @@ impl TypeChecker {
         // A `..base` source, when present, must be the same monomorphized instance.
         if let Some(base_expr) = base {
             self.reject_private_update(&name.name, &seen, span);
-            if let Some(base_ty) = self.check_expr(base_expr, Some(&inst)) {
-                if !base_ty.is_compatible_with(&inst) {
-                    self.record_error(TypeError::Mismatch {
-                        expected: inst.clone(),
-                        found: base_ty,
-                        span: base_expr.span(),
-                    });
-                }
+            if let Some(base_ty) = self.check_expr(base_expr, Some(&inst))
+                && !base_ty.is_compatible_with(&inst)
+            {
+                self.record_error(TypeError::Mismatch {
+                    expected: inst.clone(),
+                    found: base_ty,
+                    span: base_expr.span(),
+                });
             }
             self.record_update_base_move(&template_fields, &seen, base_expr);
         }
@@ -239,14 +239,14 @@ impl TypeChecker {
 
             if let Some(ref expected_ty) = expected_field_ty {
                 self.reject_private_field(&name.name, &fname.name, *fspan);
-                if let Some(actual_ty) = self.check_expr(value, Some(expected_ty)) {
-                    if !self.assignable(&actual_ty, expected_ty) {
-                        self.record_error(TypeError::Mismatch {
-                            expected: expected_ty.clone(),
-                            found: actual_ty,
-                            span: value.span(),
-                        });
-                    }
+                if let Some(actual_ty) = self.check_expr(value, Some(expected_ty))
+                    && !self.assignable(&actual_ty, expected_ty)
+                {
+                    self.record_error(TypeError::Mismatch {
+                        expected: expected_ty.clone(),
+                        found: actual_ty,
+                        span: value.span(),
+                    });
                 }
                 self.record_move(value);
             } else {
@@ -266,14 +266,14 @@ impl TypeChecker {
         if let Some(base_expr) = base {
             self.reject_private_update(&name.name, &seen, *span);
             let expected = Type::Struct(name.name.clone());
-            if let Some(base_ty) = self.check_expr(base_expr, Some(&expected)) {
-                if !base_ty.is_compatible_with(&expected) {
-                    self.record_error(TypeError::Mismatch {
-                        expected,
-                        found: base_ty,
-                        span: base_expr.span(),
-                    });
-                }
+            if let Some(base_ty) = self.check_expr(base_expr, Some(&expected))
+                && !base_ty.is_compatible_with(&expected)
+            {
+                self.record_error(TypeError::Mismatch {
+                    expected,
+                    found: base_ty,
+                    span: base_expr.span(),
+                });
             }
             self.record_update_base_move(&def, &seen, base_expr);
         } else {

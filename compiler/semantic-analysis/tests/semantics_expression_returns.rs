@@ -1,6 +1,6 @@
 // Integration tests: Expression-based (implicit) returns
 
-use semantic_analysis::{type_check, TypeError};
+use semantic_analysis::{TypeError, type_check};
 
 #[test]
 fn expression_based_return_simple_literal() {
@@ -108,9 +108,11 @@ fn expression_based_return_wrong_type() {
         "Wrong type for implicit return should fail"
     );
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. }))
+    );
 }
 
 #[test]

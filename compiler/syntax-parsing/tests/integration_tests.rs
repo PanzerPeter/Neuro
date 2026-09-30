@@ -332,7 +332,7 @@ fn test_complete_program_with_continue_statement() {
 // Full semantics (Option/Result unwrap) land in Phase 2; this test pins down the AST shape.
 #[test]
 fn test_null_coalesce_is_right_associative() {
-    use syntax_parsing::{parse_expr, BinaryOp, Expr};
+    use syntax_parsing::{BinaryOp, Expr, parse_expr};
 
     let expr = parse_expr("a ?? b ?? c").expect("parse should succeed");
 
@@ -363,7 +363,7 @@ fn test_null_coalesce_is_right_associative() {
 // `?` (error propagation): a postfix operator binding as tightly as a call.
 #[test]
 fn test_try_is_postfix_and_binds_tighter_than_arithmetic() {
-    use syntax_parsing::{parse_expr, BinaryOp, Expr};
+    use syntax_parsing::{BinaryOp, Expr, parse_expr};
 
     // `f(x)? + 1` propagates the call's failure and adds to the unwrapped payload.
     let expr = parse_expr("f(x)? + 1").expect("parse should succeed");
@@ -385,7 +385,7 @@ fn test_try_is_postfix_and_binds_tighter_than_arithmetic() {
 
 #[test]
 fn test_try_chains_with_field_access() {
-    use syntax_parsing::{parse_expr, Expr};
+    use syntax_parsing::{Expr, parse_expr};
 
     // `parse(s)?.field` reads a field of the UNWRAPPED value, so `?` applies first.
     let expr = parse_expr("parse(s)?.field").expect("parse should succeed");
@@ -398,7 +398,7 @@ fn test_try_chains_with_field_access() {
 
 #[test]
 fn test_null_coalesce_binds_looser_than_logical_or() {
-    use syntax_parsing::{parse_expr, BinaryOp, Expr};
+    use syntax_parsing::{BinaryOp, Expr, parse_expr};
 
     // `a ?? b || c` must parse as `a ?? (b || c)`: `||` (row 13) binds tighter than `??` (row 14).
     let expr = parse_expr("a ?? b || c").expect("parse should succeed");

@@ -3,7 +3,7 @@
 use ast_types::{Expr, Place, Stmt};
 use neuro_hir::{HirPlace, HirStmt, HirType};
 
-use crate::iteration::{char_indices_receiver, LoopPosition};
+use crate::iteration::{LoopPosition, char_indices_receiver};
 use crate::{LoopCtx, Lowerer, LoweringError};
 
 /// The type of an enumerated loop's position binding. `u64` matches `.len()` and
@@ -41,7 +41,7 @@ impl Lowerer {
                                 "binding '{}' has neither type nor initializer",
                                 name.name
                             ),
-                        })
+                        });
                     }
                 };
                 self.define(name.name.clone(), final_ty.clone());
@@ -260,7 +260,7 @@ impl Lowerer {
                         other => {
                             return Err(LoweringError::Malformed {
                                 detail: format!("for-each over non-iterable type '{}'", other),
-                            })
+                            });
                         }
                     },
                 };
@@ -401,10 +401,11 @@ impl Lowerer {
     /// Record a value-carrying `break`'s type against its target loop: the loop named
     /// by `label`, or the innermost loop. Only a value-capable `loop` accepts one.
     fn record_break_value(&mut self, label: Option<&str>, ty: HirType) {
-        if let Some(ctx) = self.break_target(label) {
-            if ctx.is_value && ctx.value_ty.is_none() {
-                ctx.value_ty = Some(ty);
-            }
+        if let Some(ctx) = self.break_target(label)
+            && ctx.is_value
+            && ctx.value_ty.is_none()
+        {
+            ctx.value_ty = Some(ty);
         }
     }
 

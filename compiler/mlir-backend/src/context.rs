@@ -1,9 +1,9 @@
 use std::sync::Once;
 
 use melior::{
+    Context,
     dialect::DialectRegistry,
     utility::{register_all_dialects, register_all_llvm_translations, register_all_passes},
-    Context,
 };
 
 /// The pass registry is process-global, and registering a pipeline twice is a

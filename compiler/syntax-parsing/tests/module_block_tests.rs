@@ -1,6 +1,6 @@
 // Inline `module Name { ... }` block parsing.
 
-use syntax_parsing::{parse, Item, ModuleDef};
+use syntax_parsing::{Item, ModuleDef, parse};
 
 fn block(source: &str) -> ModuleDef {
     let items = parse(source).expect("module block should parse");

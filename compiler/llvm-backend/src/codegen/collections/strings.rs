@@ -8,11 +8,11 @@
 // is why it does not reuse the `Vec` reserve helper: appending an n-byte string must
 // reach `len + n` capacity in a single step, not by doubling n times.
 
-use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use neuro_hir::HirExpr;
 
-use super::{initial_capacity, FIELD_CAP, FIELD_LEN};
+use super::{FIELD_CAP, FIELD_LEN, initial_capacity};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;

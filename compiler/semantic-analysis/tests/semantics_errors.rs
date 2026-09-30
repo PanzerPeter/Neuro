@@ -1,6 +1,6 @@
 // Integration tests: General type-checking error cases
 
-use semantic_analysis::{type_check, TypeError};
+use semantic_analysis::{TypeError, type_check};
 
 #[test]
 fn error_undefined_variable() {
@@ -28,9 +28,11 @@ fn error_array_destructure_length_mismatch() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ArrayPatternLengthMismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArrayPatternLengthMismatch { .. }))
+    );
 }
 
 #[test]
@@ -46,9 +48,11 @@ fn error_array_destructure_too_many_before_rest() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ArrayPatternLengthMismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArrayPatternLengthMismatch { .. }))
+    );
 }
 
 #[test]
@@ -61,9 +65,11 @@ fn error_type_mismatch() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 #[test]
@@ -75,9 +81,11 @@ fn error_wrong_operator_type() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. }))
+    );
 }
 
 #[test]
@@ -89,9 +97,11 @@ fn error_return_type_mismatch() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. }))
+    );
 }
 
 #[test]
@@ -109,9 +119,11 @@ fn error_argument_count_mismatch() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. }))
+    );
 }
 
 #[test]
@@ -129,9 +141,11 @@ fn error_argument_type_mismatch() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::Mismatch { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. }))
+    );
 }
 
 #[test]
@@ -143,9 +157,11 @@ fn error_undefined_function() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::UndefinedFunction { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UndefinedFunction { .. }))
+    );
 }
 
 #[test]
@@ -159,9 +175,11 @@ fn error_duplicate_variable() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::VariableAlreadyDefined { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::VariableAlreadyDefined { .. }))
+    );
 }
 
 #[test]
@@ -179,9 +197,11 @@ fn error_duplicate_function() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::FunctionAlreadyDefined { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::FunctionAlreadyDefined { .. }))
+    );
 }
 
 #[test]
@@ -193,9 +213,11 @@ fn error_unknown_type_name() {
     let result = type_check(&items);
     assert!(result.is_err());
     let errors = result.unwrap_err();
-    assert!(errors
-        .iter()
-        .any(|e| matches!(e, TypeError::UnknownTypeName { .. })));
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnknownTypeName { .. }))
+    );
 }
 
 #[test]

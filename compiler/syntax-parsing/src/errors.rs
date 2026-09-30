@@ -23,7 +23,9 @@ pub enum ParseError {
     #[error("duplicate parameter name '{name}' in function definition")]
     DuplicateParameter { name: String, span: Span },
 
-    #[error("two parameters share the call-site name '{label}'; a named argument must identify exactly one parameter")]
+    #[error(
+        "two parameters share the call-site name '{label}'; a named argument must identify exactly one parameter"
+    )]
     DuplicateParameterLabel { label: String, span: Span },
 
     #[error("duplicate type alias '{name}'")]
@@ -35,13 +37,17 @@ pub enum ParseError {
     #[error("type alias '{name}' is defined in terms of itself (cyclic alias)")]
     CyclicTypeAlias { name: String, span: Span },
 
-    #[error("enum '{name}' may not declare lifetime parameters; enum payloads are restricted to scalar types, so a borrowed payload has nothing to annotate")]
+    #[error(
+        "enum '{name}' may not declare lifetime parameters; enum payloads are restricted to scalar types, so a borrowed payload has nothing to annotate"
+    )]
     EnumLifetimeParam { name: String, span: Span },
 
     #[error("`export` cannot be applied to {what}")]
     ExportNotAllowed { what: String, span: Span },
 
-    #[error("`@no_prelude` must be the first thing in a file; it opts that file out of the implicit prelude, so it cannot follow a declaration or sit inside a `module` block")]
+    #[error(
+        "`@no_prelude` must be the first thing in a file; it opts that file out of the implicit prelude, so it cannot follow a declaration or sit inside a `module` block"
+    )]
     MisplacedNoPrelude { span: Span },
 
     #[error("an interpolation hole `{{}}` must contain an expression")]
@@ -57,13 +63,19 @@ pub enum ParseError {
     #[error("string interpolation is not allowed in a pattern; a pattern must be a constant")]
     InterpolationInPattern { span: Span },
 
-    #[error("a `for` head binding a pair `(index, value)` iterates a position-yielding head; add `.enumerate()` to the iterable, or iterate `.char_indices()` for byte offsets")]
+    #[error(
+        "a `for` head binding a pair `(index, value)` iterates a position-yielding head; add `.enumerate()` to the iterable, or iterate `.char_indices()` for byte offsets"
+    )]
     PairWithoutEnumerate { span: Span },
 
-    #[error("`.{head}()` yields a position and a value; bind both with a pair pattern `for (index, value) in ...`")]
+    #[error(
+        "`.{head}()` yields a position and a value; bind both with a pair pattern `for (index, value) in ...`"
+    )]
     PairHeadWithoutPair { head: String, span: Span },
 
-    #[error("`.char_indices()` is a complete `for` head: it already binds a position, so it takes no `.enumerate()` and no `.map` / `.filter` adapters")]
+    #[error(
+        "`.char_indices()` is a complete `for` head: it already binds a position, so it takes no `.enumerate()` and no `.map` / `.filter` adapters"
+    )]
     CharIndicesHeadDecorated { span: Span },
 
     #[error("`.{adapter}()` takes no arguments")]
@@ -75,27 +87,35 @@ pub enum ParseError {
     #[error("`.rev()` reverses a range, so its receiver must be one: write `(start..end).rev()`")]
     RevOnNonRange { span: Span },
 
-    #[error("`.step(n)` strides over a range, so its receiver must be one: write `(start..end).step(n)`, or `(start..end).rev().step(n)` to stride down")]
+    #[error(
+        "`.step(n)` strides over a range, so its receiver must be one: write `(start..end).step(n)`, or `(start..end).rev().step(n)` to stride down"
+    )]
     StepOnNonRange { span: Span },
 
     #[error("`.step()` takes exactly one argument: the positive stride, as in `(0..n).step(2)`")]
     StepArity { span: Span },
 
-    #[error("a `[...]` shape argument is only valid on a tensor type; `{name}` takes type or const arguments, as in `{name}<i32>`")]
+    #[error(
+        "a `[...]` shape argument is only valid on a tensor type; `{name}` takes type or const arguments, as in `{name}<i32>`"
+    )]
     ShapeArgumentOnNonTensor { name: String, span: Span },
 
-    #[error("`Tensor` takes exactly two arguments: an element type and a `[...]` shape, as in `Tensor<f32, [3, 3]>`")]
+    #[error(
+        "`Tensor` takes exactly two arguments: an element type and a `[...]` shape, as in `Tensor<f32, [3, 3]>`"
+    )]
     TensorTypeArity { span: Span },
 
-    #[error(
-        "the left of `{op}` must be a place: a variable, a field, an element, or `*reference`"
-    )]
+    #[error("the left of `{op}` must be a place: a variable, a field, an element, or `*reference`")]
     NotAPlace { op: String, span: Span },
 
-    #[error("the right of `|>` must be a function value: a function name, a bound method `receiver.method`, or a parenthesized closure `(|x: T| ...)`")]
+    #[error(
+        "the right of `|>` must be a function value: a function name, a bound method `receiver.method`, or a parenthesized closure `(|x: T| ...)`"
+    )]
     NotAPipelineTarget { span: Span },
 
-    #[error("the operands of `>>` must be function names: `f >> g` composes them into the function `|x| g(f(x))`")]
+    #[error(
+        "the operands of `>>` must be function names: `f >> g` composes them into the function `|x| g(f(x))`"
+    )]
     NotAComposeOperand { span: Span },
 
     #[error("lexical error: {0}")]

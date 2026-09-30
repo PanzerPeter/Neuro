@@ -756,7 +756,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_builtin_method, BuiltinMethod};
+    use super::{BuiltinMethod, resolve_builtin_method};
     use crate::types::{CollectionKind, Type};
 
     #[test]

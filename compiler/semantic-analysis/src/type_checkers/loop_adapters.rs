@@ -57,15 +57,16 @@ impl TypeChecker {
             }
         };
 
-        if let Some(element) = &element {
-            if !matches!(element, Type::Unknown) && !self.assignable(element, &param) {
-                self.record_error(TypeError::LoopAdapterInput {
-                    adapter: name.clone(),
-                    expected: element.clone(),
-                    found: param,
-                    span: adapter.span,
-                });
-            }
+        if let Some(element) = &element
+            && !matches!(element, Type::Unknown)
+            && !self.assignable(element, &param)
+        {
+            self.record_error(TypeError::LoopAdapterInput {
+                adapter: name.clone(),
+                expected: element.clone(),
+                found: param,
+                span: adapter.span,
+            });
         }
 
         match adapter.kind {

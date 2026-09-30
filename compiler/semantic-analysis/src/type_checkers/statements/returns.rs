@@ -52,20 +52,20 @@ impl TypeChecker {
         match expr {
             Expr::Paren(inner, _) => self.check_returned_reference(inner),
             Expr::Reference { operand, span, .. } => {
-                if let Some(name) = root_place_name(operand) {
-                    if self.is_local_to_function(&name) {
-                        self.record_error(TypeError::ReturnsReferenceToLocal { name, span: *span });
-                    }
+                if let Some(name) = root_place_name(operand)
+                    && self.is_local_to_function(&name)
+                {
+                    self.record_error(TypeError::ReturnsReferenceToLocal { name, span: *span });
                 }
             }
             Expr::Identifier(ident) => {
-                if let Some(place) = self.symbols.borrow_provenance(&ident.name) {
-                    if self.is_local_to_function(&place) {
-                        self.record_error(TypeError::ReturnsReferenceToLocal {
-                            name: place,
-                            span: ident.span,
-                        });
-                    }
+                if let Some(place) = self.symbols.borrow_provenance(&ident.name)
+                    && self.is_local_to_function(&place)
+                {
+                    self.record_error(TypeError::ReturnsReferenceToLocal {
+                        name: place,
+                        span: ident.span,
+                    });
                 }
             }
             Expr::If {
@@ -82,10 +82,10 @@ impl TypeChecker {
                         self.check_returned_reference(tail);
                     }
                 }
-                if let Some(block) = else_block {
-                    if let Some(tail) = tail_expr(block) {
-                        self.check_returned_reference(tail);
-                    }
+                if let Some(block) = else_block
+                    && let Some(tail) = tail_expr(block)
+                {
+                    self.check_returned_reference(tail);
                 }
             }
             Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } => {

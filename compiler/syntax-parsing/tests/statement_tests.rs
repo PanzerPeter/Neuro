@@ -1,6 +1,6 @@
 // Statement parsing tests
 
-use syntax_parsing::{parse, BinaryOp, Item, Place, Stmt};
+use syntax_parsing::{BinaryOp, Item, Place, Stmt, parse};
 
 /// Count the statements the first function body desugars to.
 fn first_fn_body_len(source: &str) -> usize {
@@ -698,7 +698,6 @@ fn test_bug_069_a_line_opening_with_minus_amp_or_pipe_is_a_new_statement() {
 fn test_bug_069_a_trailing_operator_or_an_open_delimiter_still_continues() {
     let trailing = "func f(a: i32, b: i32) {\n    val t = a -\n        b\n}\n";
     assert_eq!(first_fn_body_len(trailing), 1);
-    let parenthesized =
-        "func f(a: i32, b: i32) {\n    val t = (a\n        - b\n        * 2)\n    g(a,\n        b\n        - 1)\n}\n";
+    let parenthesized = "func f(a: i32, b: i32) {\n    val t = (a\n        - b\n        * 2)\n    g(a,\n        b\n        - 1)\n}\n";
     assert_eq!(first_fn_body_len(parenthesized), 2);
 }

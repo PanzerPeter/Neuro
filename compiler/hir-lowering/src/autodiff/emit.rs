@@ -8,8 +8,8 @@
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    static_shape, AxisNames, HirExpr, HirExprKind, HirMathOp, HirPlace, HirReduceOp, HirStmt,
-    HirTensorAxis, HirType,
+    AxisNames, HirExpr, HirExprKind, HirMathOp, HirPlace, HirReduceOp, HirStmt, HirTensorAxis,
+    HirType, static_shape,
 };
 use shared_types::{Literal, Span};
 

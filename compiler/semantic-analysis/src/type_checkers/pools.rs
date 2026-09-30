@@ -413,12 +413,11 @@ impl TypeChecker {
         // The receiver is not in `args`; it rides inside a field-access callee, and its
         // mutability lives in `mut_self_methods` rather than in the signature, where
         // `self` is recorded as the bare struct type.
-        if let (Some(key), Some(object)) = (self.callee_key(func), self.callee_operand(func)) {
-            if self.mut_self_methods.contains(&key) {
-                if let Some(root) = self.outliving_root(object) {
-                    return Some(root);
-                }
-            }
+        if let (Some(key), Some(object)) = (self.callee_key(func), self.callee_operand(func))
+            && self.mut_self_methods.contains(&key)
+            && let Some(root) = self.outliving_root(object)
+        {
+            return Some(root);
         }
 
         self.declared_params(func)?

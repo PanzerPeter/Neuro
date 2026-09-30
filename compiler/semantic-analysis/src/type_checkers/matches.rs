@@ -107,7 +107,7 @@ impl TypeChecker {
         for arm_ty in &arm_types {
             if !arm_ty.is_compatible_with(&result_ty) {
                 self.record_error(TypeError::MatchArmTypeMismatch {
-                    expected: result_ty.clone(),
+                    expected: result_ty,
                     found: arm_ty.clone(),
                     span,
                 });

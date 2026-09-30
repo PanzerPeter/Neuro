@@ -8,8 +8,8 @@
 use ast_types::{Expr, Pattern, Stmt};
 use shared_types::{Identifier, Span};
 
-use super::collections::OPTION_ENUM;
 use super::TypeChecker;
+use super::collections::OPTION_ENUM;
 use crate::errors::TypeError;
 use crate::types::Type;
 

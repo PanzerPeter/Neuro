@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 
 members = [
     # Infrastructure Components (Shared across slices)
@@ -24,9 +24,9 @@ members = [
 ]
 
 [workspace.package]
-version = "4.5.0"
-edition = "2021"
-rust-version = "1.85"
+version = "4.5.1"
+edition = "2024"
+rust-version = "1.98.1"
 authors = ["Neuro Contributors"]
 license-file = "LICENSE"
 publish = false
@@ -73,8 +73,17 @@ clap = { version = "4.5", features = ["derive"] }
 env_logger = { version = "0.11", default-features = false }
 log = "0.4"
 
+# Temporary directories (driver build scratch, test fixtures)
+tempfile = "3.8"
+
 # Testing
 criterion = "0.8"
+
+# Lints every member opts into with `[lints] workspace = true`. A suppression is
+# `#[expect(...)]`, never `#[allow(...)]`: an expectation that stops firing is itself
+# a warning, so a stale suppression cannot outlive the code it excused.
+[workspace.lints.clippy]
+allow_attributes = "warn"
 
 [profile.dev]
 split-debuginfo = "unpacked"

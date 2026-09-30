@@ -69,7 +69,7 @@ impl Lowerer {
     /// `head` is the already-lowered iterable. The loop's own scope holds the
     /// generated iterator binding as well as the element and position bindings, so a
     /// `break` / `continue` inside `body` resolves against the emitted `while`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn lower_protocol_for(
         &mut self,
         label: &Option<Identifier>,
@@ -230,7 +230,7 @@ impl Lowerer {
                 place: cursor_place(cursor),
                 value: HirExpr::new(
                     HirExprKind::FieldAccess {
-                        object: Box::new(variable(&iter_binding, iter_ty.clone(), span)),
+                        object: Box::new(variable(&iter_binding, iter_ty, span)),
                         field: CHARS_OFFSET_FIELD.to_string(),
                     },
                     LOOP_INDEX_TYPE,

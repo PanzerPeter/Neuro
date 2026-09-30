@@ -5,7 +5,7 @@ use shared_types::Span;
 
 use crate::errors::LexError;
 
-use super::{InterpChunk, StringValue, TokenKind, TRIPLE_QUOTE};
+use super::{InterpChunk, StringValue, TRIPLE_QUOTE, TokenKind};
 
 /// Decode a `"…"` string literal token, splitting interpolated literals into chunks.
 ///

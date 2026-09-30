@@ -287,12 +287,12 @@ impl<'ctx> CodegenContext<'ctx> {
             DropTarget::Aggregate => {
                 return Err(CodegenError::InternalError(
                     "a holder with no release of its own reached the destructor path".to_string(),
-                ))
+                ));
             }
             DropTarget::PoolRegistered => {
                 return Err(CodegenError::InternalError(
                     "a pool-registered value reached the per-scope drop path".to_string(),
-                ))
+                ));
             }
         }
         // Clear the flag so a re-reachable drop site cannot run the destructor twice.

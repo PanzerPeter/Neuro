@@ -23,7 +23,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "tuple literal type is not a tuple".to_string(),
-                ))
+                ));
             }
         };
 
@@ -70,7 +70,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Err(CodegenError::InternalError(format!(
                     "tuple index on non-tuple value: {:?}",
                     other
-                )))
+                )));
             }
         };
         self.builder

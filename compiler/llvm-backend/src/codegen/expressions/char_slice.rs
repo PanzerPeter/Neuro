@@ -20,11 +20,11 @@
 // a loop, and `.char_slice` needs two of them (one per endpoint), so inlining would put
 // four basic blocks into the caller for every use.
 
+use inkwell::IntPredicate;
 use inkwell::module::Linkage;
 use inkwell::values::{
     BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
-use inkwell::IntPredicate;
 use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::codegen::context::CodegenContext;
@@ -70,7 +70,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => {
                 return Err(CodegenError::InternalError(
                     "string.char_slice reached codegen without a range argument".into(),
-                ))
+                ));
             }
         };
 

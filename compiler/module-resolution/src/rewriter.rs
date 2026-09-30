@@ -9,10 +9,10 @@
 use ast_types::{EnumPatternPayload, Expr, Pattern};
 use shared_types::Identifier;
 
-use crate::imports::ImportScope;
-use crate::loader::{site_segments, ModuleGraph};
-use crate::walk::{walk_items, Site};
 use crate::ModuleError;
+use crate::imports::ImportScope;
+use crate::loader::{ModuleGraph, site_segments};
+use crate::walk::{Site, walk_items};
 
 pub(crate) fn strip_qualifiers(
     graph: &mut ModuleGraph,

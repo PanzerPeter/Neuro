@@ -8,8 +8,8 @@ use ast_types::{
     ModuleDef, NewtypeDef, TraitBound, TraitMethod, Type,
 };
 
-use super::type_aliases::{expand_type_aliases, TypeAliasDecl};
 use super::Parser;
+use super::type_aliases::{TypeAliasDecl, expand_type_aliases};
 
 /// Whether an item list runs to end of input or to the `}` of an inline `module` block.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -93,7 +93,7 @@ impl Parser {
             } else if !attributes.is_empty() {
                 // Attributes attach only to functions and structs today; rejecting here
                 // gives an actionable diagnostic instead of silently dropping them.
-                let token = self.peek().ok_or(ParseError::UnexpectedEof {
+                let token = self.peek().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: "function or struct definition after attribute".to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
@@ -121,21 +121,27 @@ impl Parser {
                 c.exported = export.is_some();
                 items.push(Item::Const(c));
             } else if self.check(&TokenKind::Type) {
-                reject_export(export, "a `type` alias (an alias is expanded at parse time, so no name of it survives to reach another module)")?;
+                reject_export(
+                    export,
+                    "a `type` alias (an alias is expanded at parse time, so no name of it survives to reach another module)",
+                )?;
                 alias_decls.push(self.parse_type_alias()?);
             } else if self.check(&TokenKind::Newtype) {
                 let mut nt = self.parse_newtype_def()?;
                 nt.exported = export.is_some();
                 items.push(Item::Newtype(nt));
             } else if self.check(&TokenKind::Module) {
-                reject_export(export, "an inline `module` block (its name is reached only from the file that declares it, so there is no outside to open it to)")?;
+                reject_export(
+                    export,
+                    "an inline `module` block (its name is reached only from the file that declares it, so there is no outside to open it to)",
+                )?;
                 let module = self.parse_module_block(alias_decls)?;
                 items.push(Item::Module(module));
             } else if self.check(&TokenKind::Import) {
                 let import = self.parse_import(export.is_some())?;
                 items.push(Item::Import(import));
             } else {
-                let token = self.peek().ok_or(ParseError::UnexpectedEof {
+                let token = self.peek().ok_or_else(|| ParseError::UnexpectedEof {
                     expected: ITEM_EXPECTED.to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {

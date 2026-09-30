@@ -276,8 +276,7 @@ impl Net {
 /// Each `wrt:` entry that selects nothing is reported at the entry.
 #[test]
 fn a_wrt_entry_that_selects_nothing_is_rejected_where_it_is_written() {
-    let net =
-        "struct Inner { export w: Tensor<f32, [2]>, hidden: Tensor<f32, [2]>, export n: f32 }\n\
+    let net = "struct Inner { export w: Tensor<f32, [2]>, hidden: Tensor<f32, [2]>, export n: f32 }\n\
                struct Net { export inner: Inner, export heads: [Tensor<f32, [2]>; 2] }\n";
     for entry in [
         "self.inner.hidden",

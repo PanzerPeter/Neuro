@@ -1,14 +1,14 @@
 use crate::{context::new_context, errors::MlirError, tensor_arithmetic};
 
 use melior::{
+    Context,
     dialect::{func, llvm},
     ir::{
+        BlockLike, Identifier, Location, Module, Operation, Region, Type, TypeLike,
         attribute::{StringAttribute, TypeAttribute},
         operation::OperationLike,
         r#type::{FunctionType, IntegerType, RankedTensorType},
-        BlockLike, Identifier, Location, Module, Operation, Region, Type, TypeLike,
     },
-    Context,
 };
 use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirType};
 

@@ -8,8 +8,8 @@ use shared_types::Identifier;
 use crate::errors::{ParseError, ParseResult};
 use ast_types::{ImplDef, TraitDef, TraitMethod};
 
-use super::statements::stmt_span;
 use super::Parser;
+use super::statements::stmt_span;
 
 /// What a trait's `type` item must look like, for the diagnostic that rejects a binding
 /// where a declaration belongs.

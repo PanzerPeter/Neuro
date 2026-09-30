@@ -34,7 +34,7 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::values::*;
 use neuro_hir::{HirExpr, HirExprKind};
 
-use crate::codegen::context::{resolve_builtin_method, BuiltinMethod, CodegenContext};
+use crate::codegen::context::{BuiltinMethod, CodegenContext, resolve_builtin_method};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -118,7 +118,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         return Err(CodegenError::InternalError(format!(
                             "field access on non-struct type: {}",
                             other
-                        )))
+                        )));
                     }
                 };
                 self.codegen_field_access(object, field, &struct_name)

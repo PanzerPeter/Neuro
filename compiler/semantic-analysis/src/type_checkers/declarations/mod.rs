@@ -183,15 +183,15 @@ impl TypeChecker {
                 .map(|info| info.assoc_types.clone());
             let mut assoc = Vec::new();
             for (name, ty) in &bound.assoc_bindings {
-                if let Some(declared) = &declared {
-                    if !declared.contains(&name.name) {
-                        self.record_error(TypeError::UnknownAssociatedType {
-                            trait_name: bound.trait_name.name.clone(),
-                            name: name.name.clone(),
-                            span: name.span,
-                        });
-                        continue;
-                    }
+                if let Some(declared) = &declared
+                    && !declared.contains(&name.name)
+                {
+                    self.record_error(TypeError::UnknownAssociatedType {
+                        trait_name: bound.trait_name.name.clone(),
+                        name: name.name.clone(),
+                        span: name.span,
+                    });
+                    continue;
                 }
                 if let Some(resolved_ty) = self.resolve_type(ty) {
                     assoc.push((name.name.clone(), resolved_ty));

@@ -88,12 +88,12 @@ impl Parser {
         loop {
             if let Some(TokenKind::Integer(n)) = self.peek_kind() {
                 let value = *n;
-                let span = self
-                    .advance()
-                    .map(|t| t.span)
-                    .ok_or(ParseError::UnexpectedEof {
-                        expected: "const argument".to_string(),
-                    })?;
+                let span =
+                    self.advance()
+                        .map(|t| t.span)
+                        .ok_or_else(|| ParseError::UnexpectedEof {
+                            expected: "const argument".to_string(),
+                        })?;
                 // An integer token carries a magnitude, so a negative const argument
                 // is a `-` token followed by one and is rejected as an unexpected token
                 // before reaching here.

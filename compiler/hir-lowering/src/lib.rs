@@ -76,14 +76,18 @@ pub enum LoweringError {
     /// take and no operator-trait impl covers. The checker rejects a concrete operand
     /// directly; a generic body types `a == b` as its type parameter and is checked once
     /// as a template, so an instantiation is the path that reaches here.
-    #[error("cannot apply binary operator {op} to operands of type '{ty}': '{ty}' has no built-in {op} and no operator-trait impl providing it")]
+    #[error(
+        "cannot apply binary operator {op} to operands of type '{ty}': '{ty}' has no built-in {op} and no operator-trait impl providing it"
+    )]
     UnsupportedOperand { op: String, ty: String },
 
     /// A `@grad` body uses a construct the derivative transform has no rule for. Unlike
     /// every other variant this is a user-facing limit of the transform, not a checker
     /// escape: the transform owns its rule set, so it is the one place that can say
     /// precisely what it cannot differentiate, and it says where.
-    #[error("cannot differentiate {construct}, reached from `@grad` function '{function}'; the language reference's automatic differentiation chapter lists what a `@grad` body, and every function it calls, may use")]
+    #[error(
+        "cannot differentiate {construct}, reached from `@grad` function '{function}'; the language reference's automatic differentiation chapter lists what a `@grad` body, and every function it calls, may use"
+    )]
     NotDifferentiable {
         function: String,
         construct: String,
@@ -501,10 +505,10 @@ fn unify_ast_hir(
             },
         ) => {
             // A const-parameter length binds that parameter to the argument's length.
-            if let ast_types::ArraySize::Const(id) = psize {
-                if cnames.contains(&id.name) {
-                    const_subst.entry(id.name.clone()).or_insert(*asize as u64);
-                }
+            if let ast_types::ArraySize::Const(id) = psize
+                && cnames.contains(&id.name)
+            {
+                const_subst.entry(id.name.clone()).or_insert(*asize as u64);
             }
             unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
         }

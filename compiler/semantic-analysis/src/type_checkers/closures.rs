@@ -120,14 +120,14 @@ impl TypeChecker {
             }
             match last {
                 Stmt::Expr(e) if !matches!(declared, Type::Void) => {
-                    if let Some(t) = self.check_expr(e, Some(declared)) {
-                        if !self.assignable(&t, declared) {
-                            self.record_error(TypeError::Mismatch {
-                                expected: declared.clone(),
-                                found: t,
-                                span: e.span(),
-                            });
-                        }
+                    if let Some(t) = self.check_expr(e, Some(declared))
+                        && !self.assignable(&t, declared)
+                    {
+                        self.record_error(TypeError::Mismatch {
+                            expected: declared.clone(),
+                            found: t,
+                            span: e.span(),
+                        });
                     }
                 }
                 other => {

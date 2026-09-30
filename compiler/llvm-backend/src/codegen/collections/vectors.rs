@@ -4,12 +4,12 @@
 // doubles the capacity through one shared byte-sized `realloc` helper. The element type
 // only enters through its stride, so every `Vec<T>` in a module reuses the same helper.
 
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirStmt};
 
 use super::elements::SlotTransfer;
-use super::{collection_arg, initial_capacity, FIELD_CAP, FIELD_LEN};
+use super::{FIELD_CAP, FIELD_LEN, collection_arg, initial_capacity};
 use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -260,10 +260,10 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         self.pop_drop_scope();
 
-        if let Some(tail_bb) = self.builder.get_insert_block() {
-            if tail_bb.get_terminator().is_none() {
-                self.builder.build_unconditional_branch(step_bb)?;
-            }
+        if let Some(tail_bb) = self.builder.get_insert_block()
+            && tail_bb.get_terminator().is_none()
+        {
+            self.builder.build_unconditional_branch(step_bb)?;
         }
 
         self.builder.position_at_end(step_bb);

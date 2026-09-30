@@ -1,12 +1,12 @@
 use crate::{
-    bridge::{llvm_descent, translate_llvm_dialect, LinkableBodies, BUFFERIZE},
+    bridge::{BUFFERIZE, LinkableBodies, llvm_descent, translate_llvm_dialect},
     context::new_context,
     errors::MlirError,
     lower::build_linkable_module,
     tensor_arithmetic::read_type,
 };
 
-use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
+use melior::{Context, ir::Module, pass::PassManager, utility::parse_pass_pipeline};
 use neuro_hir::{HirFunction, HirItem, HirProgram, HirType};
 use shared_types::Span;
 
@@ -216,7 +216,7 @@ mod tests {
     use crate::bridge::tests::{program_with_tensor_operator, tensor};
     use crate::lower_for_link;
     use ast_types::BinaryOp;
-    use neuro_hir::{static_shape, HirExpr, HirExprKind, HirStmt, HirTarget};
+    use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirTarget, static_shape};
 
     fn nvidia() -> GpuTarget {
         GpuTarget::Nvidia {

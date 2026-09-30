@@ -18,9 +18,9 @@ use std::collections::HashSet;
 use ast_types::{Expr, Stmt};
 use shared_types::Span;
 
+use super::TypeChecker;
 use super::grad::GradSelection;
 use super::statements::borrow_target_of;
-use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::symbol_table::GradLoss;
 use crate::types::{TensorAxis, Type};
@@ -267,7 +267,9 @@ impl TypeChecker {
         };
         let same_block = self.symbols.defining_depth(name) == self.symbols.depth().checked_sub(1);
         let problem = match &info.grad_loss {
-            None => format!("needs '{name}' to be a `val` bound directly to the result of a `@grad` function call"),
+            None => format!(
+                "needs '{name}' to be a `val` bound directly to the result of a `@grad` function call"
+            ),
             Some(GradLoss::Untracked(position)) => format!(
                 "cannot run for '{name}': argument {} of the `@grad` call that produced it is neither `&mut name` nor a `&mut` binding, so its borrow cannot be held until here",
                 position + 1

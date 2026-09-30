@@ -1,9 +1,9 @@
 //! Destroying the value a store displaces: a reassigned binding, a held position, an
 //! array element, and re-arming the flags of what replaced it.
 
+use inkwell::IntPredicate;
 use inkwell::types::ArrayType;
 use inkwell::values::PointerValue;
-use inkwell::IntPredicate;
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use crate::codegen::context::{CodegenContext, DropEntry, DropTarget};
