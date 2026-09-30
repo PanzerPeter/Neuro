@@ -7,6 +7,11 @@
 // instead of failing in the dynamic loader. Every launcher's module is loaded by a
 // global constructor, so that check happens at startup, before `main`.
 //
+// When every `@gpu` function in the program has a host fallback, the backend defines
+// `__neuro_gpu_fallback` as 1: a module load then leaves its module null instead of
+// aborting, and each call asks `__neuro_gpu_usable` which body to run. Nothing reaches a
+// null module, because the host body is chosen whenever the probe failed.
+//
 // Failures end in `__neuro_gpu_panic`, which the LLVM backend defines: it prints
 // `panic: <message>` and aborts like every other runtime panic, flushing buffered
 // standard output first. Only `mgpuMemAlloc` reports failure by returning null, which
@@ -38,6 +43,8 @@ typedef unsigned long long CUdeviceptr;
 
 extern void __neuro_gpu_panic(const char *message, int64_t length)
     __attribute__((noreturn));
+
+extern const uint8_t __neuro_gpu_fallback;
 
 static struct {
     CUresult (*init)(unsigned);
@@ -83,7 +90,10 @@ static const struct {
     {"cuMemcpyAsync", (void **)&cu.memcpy_async},
 };
 
+static int probed;
 static int ready;
+// Why the probe found no usable GPU: a literal or a driver-owned error name, both static.
+static const char *unusable_reason;
 
 static void __attribute__((noreturn)) fail(const char *format, const char *detail) {
     char message[256];
@@ -118,37 +128,64 @@ static void check(CUresult result, const char *call) {
     fail("GPU error: %s", context);
 }
 
-static void ensure_ready(void) {
-    if (ready) {
+// Open the driver and make device 0's primary context current, once. A failure is
+// recorded rather than reported: whether it is fatal is the caller's to decide.
+static void probe(void) {
+    if (probed) {
         return;
     }
+    probed = 1;
     void *driver = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
     if (driver == NULL) {
-        unusable("the CUDA driver (libcuda.so.1) could not be loaded");
+        unusable_reason = "the CUDA driver (libcuda.so.1) could not be loaded";
+        return;
     }
     for (size_t i = 0; i < sizeof entry_points / sizeof entry_points[0]; i++) {
         *entry_points[i].slot = dlsym(driver, entry_points[i].name);
         if (*entry_points[i].slot == NULL) {
-            unusable("the CUDA driver is too old");
+            unusable_reason = "the CUDA driver is too old";
+            return;
         }
     }
     CUresult result = cu.init(0);
     if (result != 0) {
-        unusable(error_name(result));
+        unusable_reason = error_name(result);
+        return;
     }
     int count = 0;
     if (cu.device_get_count(&count) != 0 || count == 0) {
-        unusable("the CUDA driver reports no device");
+        unusable_reason = "the CUDA driver reports no device";
+        return;
     }
     CUdevice device;
     CUcontext context;
-    check(cu.device_get(&device, 0), "cuDeviceGet");
-    check(cu.primary_ctx_retain(&context, device), "cuDevicePrimaryCtxRetain");
-    check(cu.ctx_set_current(context), "cuCtxSetCurrent");
+    if ((result = cu.device_get(&device, 0)) != 0 ||
+        (result = cu.primary_ctx_retain(&context, device)) != 0 ||
+        (result = cu.ctx_set_current(context)) != 0) {
+        unusable_reason = error_name(result);
+        return;
+    }
     ready = 1;
 }
 
+static void ensure_ready(void) {
+    probe();
+    if (!ready) {
+        unusable(unusable_reason);
+    }
+}
+
+// Which body a `@gpu(fallback: true)` function runs: its kernels, or its host copy.
+int32_t __neuro_gpu_usable(void) {
+    probe();
+    return ready;
+}
+
 static CUmodule load(const void *data) {
+    probe();
+    if (!ready && __neuro_gpu_fallback) {
+        return NULL;
+    }
     ensure_ready();
     CUmodule module;
     check(cu.module_load_data(&module, data), "cuModuleLoadData");

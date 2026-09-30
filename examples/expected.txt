@@ -19,10 +19,11 @@
 # program: it has no `main`, and is compiled as part of the root that reaches
 # into it rather than on its own.
 #
-# `gpu` after an exit code marks a program with `@gpu` functions. It is pinned
-# like any other where a GPU runs it; with no usable GPU it must abort at
+# `gpu` after an exit code marks a program with bare `@gpu` functions. It is
+# pinned like any other where a GPU runs it; with no usable GPU it must abort at
 # startup with the GPU runtime's diagnostic, and a compiler built without the
-# MLIR backend only type-checks it.
+# MLIR backend only type-checks it. A program whose `@gpu` functions all carry
+# `fallback: true` runs everywhere and takes no marker.
 
 # --- basics: functions, variables, arithmetic, recursion, stdout ------------
 basics/assignment.nr           15
@@ -164,6 +165,7 @@ showcase/enum_records.nr             46
 showcase/field_report.nr             63
 showcase/frozen_features.nr          23
 showcase/generic_toolkit.nr          87
+showcase/gpu_fallback.nr             3
 showcase/gpu_layer.nr                3  gpu
 showcase/gradient_loss.nr            45
 showcase/grid_update.nr              50

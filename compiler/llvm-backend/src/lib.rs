@@ -12,7 +12,7 @@ pub use errors::{CodegenError, CodegenResult};
 
 use inkwell::context::Context as LLVMContext;
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
-use neuro_hir::{HirItem, HirProgram, HirSelfParam};
+use neuro_hir::{HirItem, HirProgram, HirSelfParam, HirTarget};
 use std::collections::HashMap;
 use types::Type;
 
@@ -340,6 +340,12 @@ fn build_module<'ctx>(
     if device_bodies {
         codegen_ctx.set_body_memory(BodyMemory::Device);
         codegen_ctx.define_gpu_panic()?;
+        // A bare `@gpu` function has no host body, so one is enough to make a missing GPU
+        // fatal at startup.
+        let every_function_falls_back = !items
+            .iter()
+            .any(|item| matches!(item, HirItem::Function(f) if f.target == HirTarget::Gpu));
+        codegen_ctx.define_gpu_fallback_flag(every_function_falls_back);
     }
 
     // Emit module-level constants as LLVM global constants before any function.
@@ -378,6 +384,9 @@ fn build_module<'ctx>(
     for item in items {
         match item {
             HirItem::Function(func_def) => match external_symbol(&func_def.name) {
+                Some((symbol, BodyMemory::Device)) if func_def.target == HirTarget::GpuOrHost => {
+                    codegen_ctx.codegen_gpu_fallback(func_def, symbol, &func_types)?
+                }
                 Some((symbol, memory)) => {
                     codegen_ctx.codegen_external_body(func_def, symbol, memory)?
                 }

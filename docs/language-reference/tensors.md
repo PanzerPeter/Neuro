@@ -934,17 +934,41 @@ A program with a `@gpu` function checks for a usable NVIDIA GPU when it starts, 
 If there is none, it prints ``panic: `@gpu` needs an NVIDIA GPU, and none is usable:`` followed
 by the reason, and aborts.
 
-The attribute is bare and goes on a free function. It is refused on a method, next to `@grad`,
-and with arguments; `@gpu(fallback: true)`, which would add a CPU copy chosen at startup, is not
-supported yet. A `@grad` body cannot differentiate through a `@gpu` call unless the callee is
-also `@no_grad`, because the derivative would compute it on the host.
+The attribute goes on a free function. It is refused on a method, next to `@grad`, and with
+any argument other than `fallback:`. A `@grad` body cannot differentiate through a `@gpu` call,
+with or without a fallback, unless the callee is also `@no_grad`, because the derivative would
+compute it on the host.
 
 Compiling `@gpu` needs a `neurc` built with the MLIR backend (`--features mlir`, see
 [installation](../getting-started/installation.md#optional-mlir-backend)) on Linux; any other
-build refuses the function. Only NVIDIA GPUs run it today. The kernels ship as PTX that the
-CUDA driver compiles for the GPU it finds, so the machine that compiles needs no CUDA toolkit,
-and the one that runs needs only the NVIDIA driver.
+build refuses a bare `@gpu` function. Only NVIDIA GPUs run it today. The kernels ship as PTX
+that the CUDA driver compiles for the GPU it finds, so the machine that compiles needs no CUDA
+toolkit, and the one that runs needs only the NVIDIA driver.
 [examples/tensors/tensor_gpu.nr](../../examples/tensors/tensor_gpu.nr) runs the snippet above.
+
+### A CPU fallback: `@gpu(fallback: true)`
+
+`@gpu(fallback: true)` builds the body twice, as kernels and as ordinary host code. The program
+picks one when it starts: the kernels if it finds a usable NVIDIA GPU, the host copy if not.
+Every call in a run takes the same path, and both give the same result.
+
+```neuro
+@gpu(fallback: true)
+func hidden(x: &Tensor<f32, [4, 3]>, w: &Tensor<f32, [3, 5]>, b: &Tensor<f32, [5]>) -> Tensor<f32, [4, 5]> {
+    val product = x @ w
+    product + b
+}
+```
+
+The body still has to be one the GPU path can lower, because the host copy is only ever built
+beside a kernel. The value is the literal `true` or `false`, and
+`fallback: false` means bare `@gpu`. A program that also has a bare `@gpu` function still
+aborts at startup without a GPU, because that function has no host copy.
+
+A `neurc` built without the MLIR backend, or running on Windows, compiles a fallback function
+to its host copy only and warns that it always runs on the host.
+[examples/showcase/gpu_fallback.nr](../../examples/showcase/gpu_fallback.nr) uses two fallback
+layers and prints the same output with or without a GPU.
 
 ## What tensors cannot do yet
 

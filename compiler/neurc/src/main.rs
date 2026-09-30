@@ -583,10 +583,10 @@ fn compile_file(
     Ok(output_path)
 }
 
-/// The `@gpu` functions in `hir`.
+/// The `@gpu` functions in `hir`, `fallback: true` ones included.
 fn gpu_functions(hir: &neuro_hir::HirProgram) -> impl Iterator<Item = &neuro_hir::HirFunction> {
     hir.items.iter().filter_map(|item| match item {
-        neuro_hir::HirItem::Function(f) if f.target == neuro_hir::HirTarget::Gpu => Some(f),
+        neuro_hir::HirItem::Function(f) if f.target.has_gpu_body() => Some(f),
         _ => None,
     })
 }
@@ -615,8 +615,16 @@ fn tensor_bodies(
     }
     // The runtime opens the CUDA driver with `dlopen`, which Windows does not have.
     if cfg!(target_os = "windows") {
-        refuse_gpu_functions(hir, path, source, "is not supported on Windows yet");
-        anyhow::bail!("`@gpu` is not supported on Windows yet");
+        if without_gpu_bodies(
+            hir,
+            path,
+            source,
+            "is not supported on Windows yet",
+            "`@gpu` is not supported on Windows yet",
+        ) {
+            anyhow::bail!("`@gpu` is not supported on Windows yet");
+        }
+        return Ok(bodies);
     }
 
     let target = mlir_backend::GpuTarget::Nvidia {
@@ -640,40 +648,56 @@ fn tensor_bodies(
 }
 
 /// Without the `mlir` feature there is no MLIR toolchain, and every body is the LLVM
-/// backend's. A `@gpu` body cannot be one of them: running it on the host is what the
-/// attribute forbids.
+/// backend's. A bare `@gpu` body cannot be one of them: running it on the host is what the
+/// attribute forbids. A `fallback: true` one can, with a warning.
 #[cfg(not(feature = "mlir"))]
 fn tensor_bodies(
     hir: &neuro_hir::HirProgram,
     path: &Path,
     source: Option<&str>,
 ) -> Result<Vec<llvm_backend::ExternalBodies>> {
-    if gpu_functions(hir).next().is_none() {
-        return Ok(Vec::new());
-    }
-    refuse_gpu_functions(
+    if without_gpu_bodies(
         hir,
         path,
         source,
         "needs a GPU, and this neurc was built without the MLIR backend (`--features mlir`)",
-    );
-    anyhow::bail!("`@gpu` needs a neurc built with the MLIR backend")
+        "this neurc was built without the MLIR backend (`--features mlir`)",
+    ) {
+        anyhow::bail!("`@gpu` needs a neurc built with the MLIR backend");
+    }
+    Ok(Vec::new())
 }
 
-/// Report every `@gpu` function at its declaration, with `problem` after its name.
-fn refuse_gpu_functions(
+/// Report the `@gpu` functions of a build that cannot give them GPU bodies, each at its
+/// declaration. A bare one is an error, `problem` completing its sentence. A `fallback:
+/// true` one still builds with its host body, so it is a warning, saying `why` it will
+/// never reach a GPU. Returns whether any function was refused.
+fn without_gpu_bodies(
     hir: &neuro_hir::HirProgram,
     path: &Path,
     source: Option<&str>,
     problem: &str,
-) {
+    why: &str,
+) -> bool {
+    let mut refused = false;
     for function in gpu_functions(hir) {
-        let message = format!("`@gpu` function '{}' {problem}", function.name);
+        let name = &function.name;
+        let (label, message) = match function.target {
+            neuro_hir::HirTarget::GpuOrHost => (
+                "warning",
+                format!("`@gpu(fallback: true)` function '{name}' always runs on the host: {why}"),
+            ),
+            _ => {
+                refused = true;
+                ("error", format!("`@gpu` function '{name}' {problem}"))
+            }
+        };
         eprintln!(
             "{}\n",
-            render_diagnostic(path, source, &message, function.span)
+            render_labeled(label, path, source, &message, function.span)
         );
     }
+    refused
 }
 
 /// Record why one linker did not produce the executable, for the error the last one raises.

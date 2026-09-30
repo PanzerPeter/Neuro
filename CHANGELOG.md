@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-09-30
+
+### Added
+
+- `@gpu(fallback: true)` gives a `@gpu` function a CPU copy. The program checks for a usable
+  NVIDIA GPU once, at startup, and every call then runs the kernels if it found one and the host
+  copy if not, with the same result either way. The body must still be one the GPU path can
+  lower. `fallback:` takes the literal `true` or `false`. A program that also has a bare `@gpu`
+  function still aborts at startup without a GPU. A `neurc` built without the MLIR backend, or
+  on Windows, compiles a fallback function to its host copy only and warns that it always runs
+  on the host.
+
 ## [4.4.1] - 2026-09-29
 
 ### Changed

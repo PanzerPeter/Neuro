@@ -133,6 +133,16 @@ prefix, stdout drained first, `abort`); only `mgpuMemAlloc` answers null instead
 allocator's own diagnostic. It makes device 0's primary context current once and assumes one
 thread. The executable needs `dlopen`, which `neurc` links `-ldl` for.
 
+**`@gpu(fallback: true)`.** A `Device` body whose `HirFunction::target` is `GpuOrHost` goes
+through `codegen_gpu_fallback` instead: it emits `f.gpu` (the staging wrapper), `f.host` (this
+backend's own body, via `codegen_function`), both internal, and makes `f` call the one
+`__neuro_gpu_usable()` picks. The runtime's driver probe records why it failed instead of
+panicking, and `ensure_ready` turns that into the panic for callers that need a GPU. A module
+load panics on a failed probe unless `__neuro_gpu_fallback`, an `i8` constant
+`define_gpu_fallback_flag` emits, is 1, which it is exactly when the program has no bare `@gpu`
+function; the load then answers a null module that nothing reads, since every call takes its
+host body.
+
 ## Stack Slot Placement
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,
 allocates, and restores. **Every** local binding, result slot, induction variable, scratch temp,

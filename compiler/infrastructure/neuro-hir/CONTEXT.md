@@ -11,7 +11,8 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
   `HirFieldInit`, `HirBindingSource`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,
   `HirMatchTest`, `HirMathOp`, `HirReduceOp`, `HirSortKind`, `HirTensorApply`, `HirTensorAxis`,
   `HirType`, `HirCollectionKind`, `AxisNames`
-- Pure functions over those types: `static_shape` and `extent_display`
+- Pure functions over those types: `static_shape`, `extent_display` and
+  `HirTarget::has_gpu_body`
 
 ## Shared Kernel
 - shared-types: `Span`, `Literal`, `FormatSpec` embedded in HIR nodes
@@ -121,7 +122,9 @@ storage without a second resolver.
 
 Nothing frontend-only survives into the HIR: lint-suppression attributes such as `@allow` are
 consumed before lowering. Backend attributes (`@grad`, `@gpu`) belong here when the features that
-need them land, and not before.
+need them land, and not before. `@gpu` is `HirFunction::target`: `Gpu` for bare `@gpu`,
+`GpuOrHost` for `@gpu(fallback: true)`, whose backends must emit a kernel and a host copy and
+pick one at startup.
 
 ### Nodes that carry a deliberate design decision
 

@@ -46,9 +46,11 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    also goes through `mlir_backend::lower_for_gpu` for NVIDIA (`GPU_CHIP`, PTX the driver JITs
    for any newer GPU), and those bodies are a second `ExternalBodies` with `BodyMemory::Device`.
    A `@gpu` body that cannot become a kernel is rendered at its function
-   (`GpuBodiesNotLowered`) and stops the compile. Without the feature `tensor_bodies` answers no
-   bodies, and any `@gpu` function is an error at its declaration: there is no host fallback.
-   Windows refuses `@gpu` either way, since the GPU runtime needs `dlopen`.
+   (`GpuBodiesNotLowered`) and stops the compile, `fallback: true` or not. Without the feature
+   `tensor_bodies` answers no bodies, and every bare `@gpu` function is an error at its
+   declaration: it has no host body. A `@gpu(fallback: true)` function is a warning instead
+   (`without_gpu_bodies`) and builds with its host body only. Windows does the same either way,
+   since the GPU runtime needs `dlopen`.
 
 `run_file` adds nothing to that order. It calls `compile_file` with an output path inside a
 temporary directory, executes the result, and exits with the child's own status, so a Neuro

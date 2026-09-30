@@ -85,8 +85,8 @@ module per declaration kind beside it. `tests/` is split by subject.
   `@grad` (`NoGradForm` at the attribute otherwise, a method included). What a call to one
   may pass inside a `@grad` body is the transform's rule, like the rest of the body.
   `check_gpu_attributes` (`type_checkers/gpu.rs`) holds `@gpu` to its one form the same way:
-  bare, on a free function that is not also `@grad` (`GpuForm` at the attribute otherwise;
-  `fallback:` is refused as not supported yet). Whether the body can become a kernel is the GPU
+  on a free function that is not also `@grad`, with no argument or one `fallback:` whose value
+  is the literal `true` or `false` (`GpuForm` at the attribute otherwise). Whether the body can become a kernel is the GPU
   backend's rule, decided at compile time, so `check` accepts a body `compile` refuses.
   `.detach()` (`expressions/builtins.rs`) consumes an owned tensor like `.to` (`record_move`)
   and keeps its type; a borrowed receiver falls through to `MethodNotFound`.

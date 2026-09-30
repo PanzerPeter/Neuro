@@ -4,30 +4,40 @@
 use std::collections::HashSet;
 
 use ast_types::{
-    Attribute, ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef,
-    VariantPayload,
+    Attribute, ConstDef, EnumDef, Expr, FunctionDef, ImplDef, Item, MethodDef, SelfParam,
+    StructDef, VariantPayload,
 };
 use neuro_hir::{
     HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction, HirImpl, HirItem,
     HirMethod, HirParam, HirProgram, HirSelfParam, HirStmt, HirStruct, HirTarget, HirType,
 };
+use shared_types::Literal;
 
 use crate::{Lowerer, LoweringError};
 
 mod mono;
 mod register;
 
-/// The attribute pinning a function's body to a GPU. Its form (bare, on a free
-/// function) is the checker's rule; here it only has to be recognised.
+/// The attribute pinning a function's body to a GPU. Its form (on a free function, at
+/// most a literal `fallback:`) is the checker's rule; here it only has to be recognised.
 const GPU_ATTRIBUTE: &str = "gpu";
 
+const FALLBACK_LABEL: &str = "fallback";
+
 fn target_of(attributes: &[Attribute]) -> HirTarget {
-    match attributes
+    let Some(gpu) = attributes
         .iter()
-        .any(|attr| attr.name.name == GPU_ATTRIBUTE)
-    {
-        true => HirTarget::Gpu,
-        false => HirTarget::Host,
+        .find(|attr| attr.name.name == GPU_ATTRIBUTE)
+    else {
+        return HirTarget::Host;
+    };
+    let falls_back = gpu.named.iter().any(|arg| {
+        arg.label.name == FALLBACK_LABEL
+            && matches!(arg.value, Expr::Literal(Literal::Boolean(true), _))
+    });
+    match falls_back {
+        true => HirTarget::GpuOrHost,
+        false => HirTarget::Gpu,
     }
 }
 

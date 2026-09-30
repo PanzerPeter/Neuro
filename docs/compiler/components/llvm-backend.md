@@ -293,6 +293,13 @@ use rather than linking against it. The launchers load their kernels from a glob
 so a program checks for a usable GPU before `main`, and every runtime failure, a missing GPU
 included, is an ordinary `panic:` that drains buffered output and aborts.
 
+A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging wrapper above;
+`f.host`, the backend's own body; and `f` itself, which asks the runtime's
+`__neuro_gpu_usable` which of the two to call. The backend also defines the constant
+`__neuro_gpu_fallback`, 1 when no bare `@gpu` function exists. With it set, a module load
+that finds no usable GPU leaves the module unloaded instead of aborting, and every call takes
+its host body.
+
 ## Resources
 
 - [LLVM Language Reference](https://llvm.org/docs/LangRef.html)

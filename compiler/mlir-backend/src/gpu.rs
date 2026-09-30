@@ -7,7 +7,7 @@ use crate::{
 };
 
 use melior::{ir::Module, pass::PassManager, utility::parse_pass_pipeline, Context};
-use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirType};
 use shared_types::Span;
 
 /// The GPU a set of kernels is compiled for, and the chip that fixes its ISA.
@@ -65,8 +65,9 @@ const TILE_SIZES: &str = "16,16";
 /// the caller can hand out device memory: only kernels ever touch it.
 const DEVICE_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm{use-generic-functions=true}";
 
-/// Lower every `@gpu` function into GPU kernels for `target`, with host functions
-/// that launch them, or refuse the program if any of them cannot become one.
+/// Lower every `@gpu` function, a `fallback: true` one included, into GPU kernels for
+/// `target`, with host functions that launch them, or refuse the program if any of them
+/// cannot become one.
 ///
 /// A body qualifies exactly when [`lower_for_link`](crate::lower_for_link) would link
 /// it were it not `@gpu`, and has no rank-0 tensor in it: an operation with no
@@ -139,7 +140,7 @@ pub(crate) fn lower_with_format(
 }
 
 fn runs_on_gpu(function: &HirFunction) -> bool {
-    function.target == HirTarget::Gpu && launches_every_op(function)
+    function.target.has_gpu_body() && launches_every_op(function)
 }
 
 /// Every `@gpu` function missing from `lowered`, with where it is declared.
@@ -148,7 +149,7 @@ fn refused_bodies(program: &HirProgram, lowered: &[(String, String)]) -> Vec<(St
         .items
         .iter()
         .filter_map(|item| match item {
-            HirItem::Function(function) if function.target == HirTarget::Gpu => Some(function),
+            HirItem::Function(function) if function.target.has_gpu_body() => Some(function),
             _ => None,
         })
         .filter(|function| !lowered.iter().any(|(name, _)| *name == function.name))
@@ -215,7 +216,7 @@ mod tests {
     use crate::bridge::tests::{program_with_tensor_operator, tensor};
     use crate::lower_for_link;
     use ast_types::BinaryOp;
-    use neuro_hir::{static_shape, HirExpr, HirExprKind, HirStmt};
+    use neuro_hir::{static_shape, HirExpr, HirExprKind, HirStmt, HirTarget};
 
     fn nvidia() -> GpuTarget {
         GpuTarget::Nvidia {
@@ -483,11 +484,22 @@ mod tests {
         let mut host = gpu.clone();
         host.name = "g".to_string();
         host.target = HirTarget::Host;
+        // A fallback's host copy is the LLVM backend's own body, not the CPU path's.
+        let mut either = gpu.clone();
+        either.name = "h".to_string();
+        either.target = HirTarget::GpuOrHost;
         program.items.push(HirItem::Function(host));
+        program.items.push(HirItem::Function(either));
 
         let gpu = lower_for_gpu(&program, &nvidia()).expect("the GPU path should lower");
         let cpu = lower_for_link(&program).expect("the CPU path should lower");
-        assert_eq!(gpu.functions, [("f".into(), "__neuro_mlir_f".into())]);
+        assert_eq!(
+            gpu.functions,
+            [
+                ("f".into(), "__neuro_mlir_f".into()),
+                ("h".into(), "__neuro_mlir_h".into())
+            ]
+        );
         assert_eq!(cpu.functions, [("g".into(), "__neuro_mlir_g".into())]);
     }
 

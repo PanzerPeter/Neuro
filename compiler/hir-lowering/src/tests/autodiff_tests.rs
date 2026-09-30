@@ -1245,19 +1245,40 @@ func double(x: &Tensor<f32, [2]>) -> Tensor<f32, [2]> {
 }
 "#;
 
-/// Inlining a `@gpu` callee onto the tape would run its body on the host.
+/// Inlining a `@gpu` callee onto the tape would run its body on the host, which a
+/// fallback allows only where no GPU is usable.
 #[test]
 fn a_gpu_call_in_a_grad_body_is_refused_at_the_call() {
-    let src = format!(
-        "{GPU_CALLEE}
+    for callee in [
+        GPU_CALLEE.to_string(),
+        GPU_CALLEE.replace("@gpu", "@gpu(fallback: true)"),
+    ] {
+        let src = format!(
+            "{callee}
 @grad
 func loss(t: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {{
     val d = double(t)
     return Tensor::scalar(d.sum())
 }}
 "
-    );
-    refusal_at(&src, "double(t)");
+        );
+        refusal_at(&src, "double(t)");
+    }
+}
+
+#[test]
+fn a_literal_fallback_gives_the_function_a_host_target_too() {
+    for (attribute, target) in [
+        ("@gpu(fallback: true)", neuro_hir::HirTarget::GpuOrHost),
+        ("@gpu(fallback: false)", neuro_hir::HirTarget::Gpu),
+    ] {
+        let program = lower(&GPU_CALLEE.replace("@gpu", attribute));
+        assert_eq!(
+            item_function(&program, "double").target,
+            target,
+            "{attribute}"
+        );
+    }
 }
 
 #[test]

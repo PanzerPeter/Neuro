@@ -64,9 +64,9 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
 - `lower_for_link`, the driver's entry: only the bodies worth linking, as LLVM IR, with the
   function each symbol computes.
-- `lower_for_gpu`, the `@gpu` functions as GPU kernels with host functions that launch them,
-  reading and writing device memory only, or an error naming each `@gpu` function it cannot
-  lower. `neurc` calls it for a program with a `@gpu` function.
+- `lower_for_gpu`, the `@gpu` functions (`fallback: true` ones included) as GPU kernels with
+  host functions that launch them, reading and writing device memory only, or an error naming
+  each `@gpu` function it cannot lower. `neurc` calls it for a program with a `@gpu` function.
 - The HIR-independent `melior` wiring check (a verified `func.func @neuro_smoke` with an
   `arith.addi` body) is `pub(crate)` and compiled only under `test`.
 
@@ -267,7 +267,8 @@ product is two kernels, the zero fill and the contraction.
 Each symbol keeps `lower_for_link`'s signature, so the
 [LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The two paths split the
 program by `HirFunction::target`: `lower_for_link` takes only host functions and `lower_for_gpu`
-only `@gpu` ones. A `@gpu` body `lower_for_link` would not take, or one with a rank-0 tensor in it
+only `@gpu` ones, with or without a fallback. A fallback's host copy is the LLVM backend's own
+body, not this crate's CPU path. A `@gpu` body `lower_for_link` would not take, or one with a rank-0 tensor in it
 (a rank-0 operation has no parallel axis to launch over, so it would run on the host against
 device buffers), is `GpuBodiesNotLowered`, with the name and span of each: `@gpu` forbids running
 it anywhere but a GPU. The symbol's body calls MLIR's GPU runtime ABI (`mgpuModuleLoad` or

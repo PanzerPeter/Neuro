@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::BasicMetadataTypeEnum;
-use inkwell::values::{BasicMetadataValueEnum, PointerValue};
-use inkwell::AddressSpace;
+use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
+use inkwell::{AddressSpace, IntPredicate};
 use neuro_hir::HirFunction;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -11,14 +13,23 @@ use crate::types::Type;
 use crate::{BodyMemory, ExternalBodies};
 
 use super::context::CodegenContext;
-use super::device_memory::{DEVICE_ALLOC_FN, DEVICE_RELEASE_FN, GPU_PANIC_FN};
+use super::device_memory::{DEVICE_ALLOC_FN, DEVICE_RELEASE_FN, GPU_FALLBACK_GLOBAL, GPU_PANIC_FN};
 
 /// The CUDA implementation of the GPU runtime ABI a device body calls, linked in with
 /// the first set of device bodies. See `gpu_runtime.c`, its provenance.
 const GPU_RUNTIME_IR: &str = include_str!("gpu_runtime.ll");
 
+/// The runtime's answer to which body a `@gpu(fallback: true)` function runs: nonzero
+/// when it found a usable GPU.
+const GPU_USABLE_FN: &str = "__neuro_gpu_usable";
+
+/// A fallback function's two bodies are named after it with these. A `.` cannot appear in
+/// a Neuro identifier, so neither can collide with a function the program declares.
+const GPU_BODY_SUFFIX: &str = ".gpu";
+const HOST_BODY_SUFFIX: &str = ".host";
+
 /// What the runtime defines for the launchers and the staging, made internal once linked.
-const GPU_RUNTIME_ENTRY_POINTS: [&str; 12] = [
+const GPU_RUNTIME_ENTRY_POINTS: [&str; 13] = [
     "mgpuModuleLoad",
     "mgpuModuleLoadJIT",
     "mgpuModuleUnload",
@@ -30,6 +41,7 @@ const GPU_RUNTIME_ENTRY_POINTS: [&str; 12] = [
     "mgpuMemAlloc",
     "mgpuMemFree",
     "mgpuMemcpy",
+    GPU_USABLE_FN,
     GPU_PANIC_FN,
 ];
 
@@ -128,6 +140,89 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Define `func_def`, a `@gpu(fallback: true)` function whose kernels `symbol`
+    /// launches, as a choice between two bodies: the staged device one where the runtime
+    /// found a usable GPU, and this backend's own host body where it did not. The runtime
+    /// probes once, when the first module loads before `main`, so every call in a run takes
+    /// the same branch.
+    pub(crate) fn codegen_gpu_fallback(
+        &mut self,
+        func_def: &HirFunction,
+        symbol: &str,
+        func_types: &HashMap<String, Type>,
+    ) -> CodegenResult<()> {
+        let function = *self
+            .functions
+            .get(&func_def.name)
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.clone()))?;
+        let signature = func_types
+            .get(&func_def.name)
+            .cloned()
+            .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.clone()))?;
+
+        let gpu = self.declare_body_copy(func_def, function, GPU_BODY_SUFFIX);
+        self.codegen_external_body(&gpu, symbol, BodyMemory::Device)?;
+        let host = self.declare_body_copy(func_def, function, HOST_BODY_SUFFIX);
+        self.codegen_function(&host, &HashMap::from([(host.name.clone(), signature)]))?;
+
+        let entry = self.context.append_basic_block(function, "entry");
+        let on_gpu = self.context.append_basic_block(function, "on_gpu");
+        let on_host = self.context.append_basic_block(function, "on_host");
+        self.builder.position_at_end(entry);
+        self.current_function = Some(function);
+        let i32_type = self.context.i32_type();
+        let probe = self.extern_fn(GPU_USABLE_FN, i32_type.fn_type(&[], false));
+        let usable = self
+            .builder
+            .build_call(probe, &[], "gpu.usable")?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError(format!("{GPU_USABLE_FN} returned void")))?
+            .into_int_value();
+        let chosen = self.builder.build_int_compare(
+            IntPredicate::NE,
+            usable,
+            i32_type.const_zero(),
+            "gpu.chosen",
+        )?;
+        self.builder
+            .build_conditional_branch(chosen, on_gpu, on_host)?;
+
+        let args: Vec<BasicMetadataValueEnum<'ctx>> =
+            function.get_param_iter().map(Into::into).collect();
+        for (block, body) in [(on_gpu, &gpu.name), (on_host, &host.name)] {
+            self.builder.position_at_end(block);
+            let callee = *self
+                .functions
+                .get(body)
+                .ok_or_else(|| CodegenError::UndefinedFunction(body.clone()))?;
+            let result = self.builder.build_call(callee, &args, "")?;
+            match result.try_as_basic_value().basic() {
+                Some(value) => self.builder.build_return(Some(&value))?,
+                None => self.builder.build_return(None)?,
+            };
+        }
+        Ok(())
+    }
+
+    /// `func_def` renamed with `suffix`, declared internal with `function`'s signature.
+    fn declare_body_copy(
+        &mut self,
+        func_def: &HirFunction,
+        function: FunctionValue<'ctx>,
+        suffix: &str,
+    ) -> HirFunction {
+        let copy = HirFunction {
+            name: format!("{}{suffix}", func_def.name),
+            ..func_def.clone()
+        };
+        let declared =
+            self.module
+                .add_function(&copy.name, function.get_type(), Some(Linkage::Internal));
+        self.functions.insert(copy.name.clone(), declared);
+        copy
+    }
+
     /// Append the `memref` descriptor for a `tensor_ty` buffer at `data`: the buffer as
     /// both the allocated and the aligned pointer (the callee frees neither), a zero
     /// offset, then the extents and the row-major element strides.
@@ -197,6 +292,9 @@ pub(crate) fn link_gpu_runtime<'ctx>(
 ) -> CodegenResult<()> {
     link_ir(context, module, GPU_RUNTIME_IR, "the GPU runtime")?;
     internalize(module, &GPU_RUNTIME_ENTRY_POINTS);
+    if let Some(flag) = module.get_global(GPU_FALLBACK_GLOBAL) {
+        flag.set_linkage(Linkage::Internal);
+    }
     Ok(())
 }
 
@@ -504,6 +602,56 @@ mod tests {
         let panic = &ir[position(&ir, "@__neuro_gpu_panic(ptr", 0)..];
         let write = position(panic, "call i64 @write(", 0);
         position(panic, "call void @abort()", write);
+    }
+
+    /// `SOURCE` with an attribute on each function.
+    fn attributed(scale: &str, consume: &str) -> String {
+        SOURCE
+            .replace("func scale", &format!("{scale}\n        func scale"))
+            .replace("func consume", &format!("{consume}\n        func consume"))
+    }
+
+    /// The whole definition of `name`, whatever its linkage.
+    fn any_body<'a>(ir: &'a str, name: &str) -> &'a str {
+        let line = definition(ir, name).unwrap_or_else(|| panic!("no `{name}`:\n{ir}"));
+        let rest = &ir[position(ir, line, 0)..];
+        &rest[..rest.find("\n}").unwrap_or(rest.len())]
+    }
+
+    #[test]
+    fn a_fallback_function_chooses_its_device_or_host_body_per_run() {
+        let fallback = "@gpu(fallback: true)";
+        let ir = device_ir(&attributed(fallback, fallback));
+        let scale = body(&ir, "scale");
+        let probe = position(scale, "call i32 @__neuro_gpu_usable()", 0);
+        position(scale, "call ptr @scale.gpu(", probe);
+        position(scale, "call ptr @scale.host(", probe);
+
+        let device = any_body(&ir, "scale.gpu");
+        assert!(
+            device.starts_with("define internal") && device.contains("call void @ext_scale("),
+            "{device}"
+        );
+        let host = any_body(&ir, "scale.host");
+        assert!(
+            host.starts_with("define internal") && host.contains("fmul") && !host.contains("mgpu"),
+            "the host body is this backend's own:\n{host}"
+        );
+        assert!(
+            ir.contains("@__neuro_gpu_fallback = internal constant i8 1"),
+            "with every function falling back, a missing GPU is not fatal:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn one_bare_gpu_function_keeps_a_missing_gpu_fatal() {
+        let ir = device_ir(&attributed("@gpu", "@gpu(fallback: true)"));
+        assert!(
+            ir.contains("@__neuro_gpu_fallback = internal constant i8 0"),
+            "{ir}"
+        );
+        assert!(!body(&ir, "scale").contains("__neuro_gpu_usable"), "{ir}");
+        assert!(body(&ir, "consume").contains("__neuro_gpu_usable"), "{ir}");
     }
 
     #[test]

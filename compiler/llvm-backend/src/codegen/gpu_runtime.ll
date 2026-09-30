@@ -2,8 +2,10 @@
 ; MLIR's GPU runtime ABI (`mgpu*`) over the CUDA driver API, linked into every module
 ; that runs `@gpu` bodies. The CUDA driver is opened with dlopen, so a binary without a
 ; usable NVIDIA GPU starts, then panics from the first module load (a global
-; constructor) saying why. Failures call `__neuro_gpu_panic`, which the LLVM backend
-; defines as an ordinary runtime panic.
+; constructor) saying why, unless every `@gpu` function has a host fallback
+; (`__neuro_gpu_fallback`), in which case `__neuro_gpu_usable` sends each call to its
+; host body. Failures call `__neuro_gpu_panic`, which the LLVM backend defines as an
+; ordinary runtime panic.
 ;
 ; Generated from compiler/llvm-backend/src/codegen/gpu_runtime.c with clang -O2
 ; -emit-llvm (the exact command is in that file), then stripped of the target
@@ -21,73 +23,225 @@
 @.str.3 = private unnamed_addr constant [20 x i8] c"cuStreamSynchronize\00", align 1
 @.str.4 = private unnamed_addr constant [10 x i8] c"cuMemFree\00", align 1
 @.str.5 = private unnamed_addr constant [14 x i8] c"cuMemcpyAsync\00", align 1
-@.str.6 = private unnamed_addr constant [17 x i8] c"cuModuleLoadData\00", align 1
-@.str.7 = private unnamed_addr constant [18 x i8] c"%s failed with %s\00", align 1
-@.str.8 = private unnamed_addr constant [14 x i8] c"GPU error: %s\00", align 1
-@.str.9 = private unnamed_addr constant [22 x i8] c"an unknown CUDA error\00", align 1
-@.str.10 = private unnamed_addr constant [13 x i8] c"libcuda.so.1\00", align 1
-@.str.11 = private unnamed_addr constant [51 x i8] c"the CUDA driver (libcuda.so.1) could not be loaded\00", align 1
-@entry_points = internal unnamed_addr constant [16 x %struct.anon.0] [%struct.anon.0 { ptr @.str.18, ptr @cu }, %struct.anon.0 { ptr @.str.19, ptr getelementptr (i8, ptr @cu, i64 8) }, %struct.anon.0 { ptr @.str.20, ptr getelementptr (i8, ptr @cu, i64 16) }, %struct.anon.0 { ptr @.str.14, ptr getelementptr (i8, ptr @cu, i64 24) }, %struct.anon.0 { ptr @.str.15, ptr getelementptr (i8, ptr @cu, i64 32) }, %struct.anon.0 { ptr @.str.16, ptr getelementptr (i8, ptr @cu, i64 40) }, %struct.anon.0 { ptr @.str.6, ptr getelementptr (i8, ptr @cu, i64 48) }, %struct.anon.0 { ptr @.str.21, ptr getelementptr (i8, ptr @cu, i64 56) }, %struct.anon.0 { ptr @.str, ptr getelementptr (i8, ptr @cu, i64 64) }, %struct.anon.0 { ptr @.str.1, ptr getelementptr (i8, ptr @cu, i64 72) }, %struct.anon.0 { ptr @.str.2, ptr getelementptr (i8, ptr @cu, i64 80) }, %struct.anon.0 { ptr @.str.3, ptr getelementptr (i8, ptr @cu, i64 88) }, %struct.anon.0 { ptr @.str.22, ptr getelementptr (i8, ptr @cu, i64 96) }, %struct.anon.0 { ptr @.str.23, ptr getelementptr (i8, ptr @cu, i64 104) }, %struct.anon.0 { ptr @.str.24, ptr getelementptr (i8, ptr @cu, i64 112) }, %struct.anon.0 { ptr @.str.5, ptr getelementptr (i8, ptr @cu, i64 120) }], align 16
-@.str.12 = private unnamed_addr constant [27 x i8] c"the CUDA driver is too old\00", align 1
-@.str.13 = private unnamed_addr constant [34 x i8] c"the CUDA driver reports no device\00", align 1
-@.str.14 = private unnamed_addr constant [12 x i8] c"cuDeviceGet\00", align 1
-@.str.15 = private unnamed_addr constant [25 x i8] c"cuDevicePrimaryCtxRetain\00", align 1
-@.str.16 = private unnamed_addr constant [16 x i8] c"cuCtxSetCurrent\00", align 1
-@.str.17 = private unnamed_addr constant [51 x i8] c"`@gpu` needs an NVIDIA GPU, and none is usable: %s\00", align 1
-@.str.18 = private unnamed_addr constant [7 x i8] c"cuInit\00", align 1
-@.str.19 = private unnamed_addr constant [15 x i8] c"cuGetErrorName\00", align 1
-@.str.20 = private unnamed_addr constant [17 x i8] c"cuDeviceGetCount\00", align 1
-@.str.21 = private unnamed_addr constant [15 x i8] c"cuModuleUnload\00", align 1
-@.str.22 = private unnamed_addr constant [14 x i8] c"cuMemAlloc_v2\00", align 1
-@.str.23 = private unnamed_addr constant [18 x i8] c"cuMemAllocManaged\00", align 1
-@.str.24 = private unnamed_addr constant [13 x i8] c"cuMemFree_v2\00", align 1
+@probed = internal unnamed_addr global i1 false, align 4
+@.str.6 = private unnamed_addr constant [13 x i8] c"libcuda.so.1\00", align 1
+@.str.7 = private unnamed_addr constant [51 x i8] c"the CUDA driver (libcuda.so.1) could not be loaded\00", align 1
+@unusable_reason = internal unnamed_addr global ptr null, align 8
+@entry_points = internal unnamed_addr constant [16 x %struct.anon.0] [%struct.anon.0 { ptr @.str.10, ptr @cu }, %struct.anon.0 { ptr @.str.11, ptr getelementptr (i8, ptr @cu, i64 8) }, %struct.anon.0 { ptr @.str.12, ptr getelementptr (i8, ptr @cu, i64 16) }, %struct.anon.0 { ptr @.str.13, ptr getelementptr (i8, ptr @cu, i64 24) }, %struct.anon.0 { ptr @.str.14, ptr getelementptr (i8, ptr @cu, i64 32) }, %struct.anon.0 { ptr @.str.15, ptr getelementptr (i8, ptr @cu, i64 40) }, %struct.anon.0 { ptr @.str.16, ptr getelementptr (i8, ptr @cu, i64 48) }, %struct.anon.0 { ptr @.str.17, ptr getelementptr (i8, ptr @cu, i64 56) }, %struct.anon.0 { ptr @.str, ptr getelementptr (i8, ptr @cu, i64 64) }, %struct.anon.0 { ptr @.str.1, ptr getelementptr (i8, ptr @cu, i64 72) }, %struct.anon.0 { ptr @.str.2, ptr getelementptr (i8, ptr @cu, i64 80) }, %struct.anon.0 { ptr @.str.3, ptr getelementptr (i8, ptr @cu, i64 88) }, %struct.anon.0 { ptr @.str.18, ptr getelementptr (i8, ptr @cu, i64 96) }, %struct.anon.0 { ptr @.str.19, ptr getelementptr (i8, ptr @cu, i64 104) }, %struct.anon.0 { ptr @.str.20, ptr getelementptr (i8, ptr @cu, i64 112) }, %struct.anon.0 { ptr @.str.5, ptr getelementptr (i8, ptr @cu, i64 120) }], align 16
+@.str.8 = private unnamed_addr constant [27 x i8] c"the CUDA driver is too old\00", align 1
+@.str.9 = private unnamed_addr constant [34 x i8] c"the CUDA driver reports no device\00", align 1
+@.str.10 = private unnamed_addr constant [7 x i8] c"cuInit\00", align 1
+@.str.11 = private unnamed_addr constant [15 x i8] c"cuGetErrorName\00", align 1
+@.str.12 = private unnamed_addr constant [17 x i8] c"cuDeviceGetCount\00", align 1
+@.str.13 = private unnamed_addr constant [12 x i8] c"cuDeviceGet\00", align 1
+@.str.14 = private unnamed_addr constant [25 x i8] c"cuDevicePrimaryCtxRetain\00", align 1
+@.str.15 = private unnamed_addr constant [16 x i8] c"cuCtxSetCurrent\00", align 1
+@.str.16 = private unnamed_addr constant [17 x i8] c"cuModuleLoadData\00", align 1
+@.str.17 = private unnamed_addr constant [15 x i8] c"cuModuleUnload\00", align 1
+@.str.18 = private unnamed_addr constant [14 x i8] c"cuMemAlloc_v2\00", align 1
+@.str.19 = private unnamed_addr constant [18 x i8] c"cuMemAllocManaged\00", align 1
+@.str.20 = private unnamed_addr constant [13 x i8] c"cuMemFree_v2\00", align 1
+@.str.21 = private unnamed_addr constant [22 x i8] c"an unknown CUDA error\00", align 1
+@__neuro_gpu_fallback = external local_unnamed_addr constant i8, align 1
+@.str.22 = private unnamed_addr constant [18 x i8] c"%s failed with %s\00", align 1
+@.str.23 = private unnamed_addr constant [14 x i8] c"GPU error: %s\00", align 1
+@.str.24 = private unnamed_addr constant [51 x i8] c"`@gpu` needs an NVIDIA GPU, and none is usable: %s\00", align 1
 
+; Function Attrs: nounwind
+define dso_local range(i32 0, 2) i32 @__neuro_gpu_usable() local_unnamed_addr {
+  tail call fastcc void @probe()
+  %1 = load i1, ptr @ready, align 4
+  %2 = zext i1 %1 to i32
+  ret i32 %2
+}
+
+; Function Attrs: nounwind
+define internal fastcc void @probe() unnamed_addr {
+  %1 = alloca ptr, align 8
+  %2 = alloca ptr, align 8
+  %3 = alloca i32, align 4
+  %4 = alloca i32, align 4
+  %5 = alloca ptr, align 8
+  %6 = load i1, ptr @probed, align 4
+  br i1 %6, label %69, label %7
+
+7:                                                ; preds = %0
+  store i1 true, ptr @probed, align 4
+  %8 = tail call ptr @dlopen(ptr noundef nonnull @.str.6, i32 noundef 2)
+  %9 = icmp eq ptr %8, null
+  br i1 %9, label %10, label %14
+
+10:                                               ; preds = %7
+  store ptr @.str.7, ptr @unusable_reason, align 8
+  br label %69
+
+11:                                               ; preds = %14
+  %12 = add nuw nsw i64 %15, 1
+  %13 = icmp eq i64 %12, 16
+  br i1 %13, label %23, label %14
+
+14:                                               ; preds = %7, %11
+  %15 = phi i64 [ %12, %11 ], [ 0, %7 ]
+  %16 = getelementptr inbounds nuw %struct.anon.0, ptr @entry_points, i64 %15
+  %17 = load ptr, ptr %16, align 16
+  %18 = tail call ptr @dlsym(ptr noundef nonnull %8, ptr noundef %17)
+  %19 = getelementptr inbounds nuw i8, ptr %16, i64 8
+  %20 = load ptr, ptr %19, align 8
+  store ptr %18, ptr %20, align 8
+  %21 = icmp eq ptr %18, null
+  br i1 %21, label %22, label %11
+
+22:                                               ; preds = %14
+  store ptr @.str.8, ptr @unusable_reason, align 8
+  br label %69
+
+23:                                               ; preds = %11
+  %24 = load ptr, ptr @cu, align 8
+  %25 = tail call i32 %24(i32 noundef 0)
+  %26 = icmp eq i32 %25, 0
+  br i1 %26, label %35, label %27
+
+27:                                               ; preds = %23
+  call void @llvm.lifetime.start.p0(ptr nonnull %2)
+  store ptr null, ptr %2, align 8
+  %28 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 8), align 8
+  %29 = call i32 %28(i32 noundef range(i32 1, 0) %25, ptr noundef nonnull %2)
+  %30 = icmp ne i32 %29, 0
+  %31 = load ptr, ptr %2, align 8
+  %32 = icmp eq ptr %31, null
+  %33 = select i1 %30, i1 true, i1 %32
+  %34 = select i1 %33, ptr @.str.21, ptr %31
+  call void @llvm.lifetime.end.p0(ptr nonnull %2)
+  store ptr %34, ptr @unusable_reason, align 8
+  br label %69
+
+35:                                               ; preds = %23
+  call void @llvm.lifetime.start.p0(ptr nonnull %3)
+  store i32 0, ptr %3, align 4
+  %36 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 16), align 8
+  %37 = call i32 %36(ptr noundef nonnull %3)
+  %38 = icmp ne i32 %37, 0
+  %39 = load i32, ptr %3, align 4
+  %40 = icmp eq i32 %39, 0
+  %41 = select i1 %38, i1 true, i1 %40
+  br i1 %41, label %42, label %43
+
+42:                                               ; preds = %35
+  store ptr @.str.9, ptr @unusable_reason, align 8
+  br label %68
+
+43:                                               ; preds = %35
+  call void @llvm.lifetime.start.p0(ptr nonnull %4)
+  call void @llvm.lifetime.start.p0(ptr nonnull %5)
+  %44 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 24), align 8
+  %45 = call i32 %44(ptr noundef nonnull %4, i32 noundef 0)
+  %46 = icmp eq i32 %45, 0
+  br i1 %46, label %47, label %57
+
+47:                                               ; preds = %43
+  %48 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 32), align 8
+  %49 = load i32, ptr %4, align 4
+  %50 = call i32 %48(ptr noundef nonnull %5, i32 noundef %49)
+  %51 = icmp eq i32 %50, 0
+  br i1 %51, label %52, label %57
+
+52:                                               ; preds = %47
+  %53 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 40), align 8
+  %54 = load ptr, ptr %5, align 8
+  %55 = call i32 %53(ptr noundef %54)
+  %56 = icmp eq i32 %55, 0
+  br i1 %56, label %66, label %57
+
+57:                                               ; preds = %52, %47, %43
+  %58 = phi i32 [ %45, %43 ], [ %50, %47 ], [ %55, %52 ]
+  call void @llvm.lifetime.start.p0(ptr nonnull %1)
+  store ptr null, ptr %1, align 8
+  %59 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 8), align 8
+  %60 = call i32 %59(i32 noundef range(i32 1, 0) %58, ptr noundef nonnull %1)
+  %61 = icmp ne i32 %60, 0
+  %62 = load ptr, ptr %1, align 8
+  %63 = icmp eq ptr %62, null
+  %64 = select i1 %61, i1 true, i1 %63
+  %65 = select i1 %64, ptr @.str.21, ptr %62
+  call void @llvm.lifetime.end.p0(ptr nonnull %1)
+  store ptr %65, ptr @unusable_reason, align 8
+  br label %67
+
+66:                                               ; preds = %52
+  store i1 true, ptr @ready, align 4
+  br label %67
+
+67:                                               ; preds = %66, %57
+  call void @llvm.lifetime.end.p0(ptr nonnull %5)
+  call void @llvm.lifetime.end.p0(ptr nonnull %4)
+  br label %68
+
+68:                                               ; preds = %67, %42
+  call void @llvm.lifetime.end.p0(ptr nonnull %3)
+  br label %69
+
+69:                                               ; preds = %22, %10, %68, %27, %0
+  ret void
+}
+
+; Function Attrs: nounwind
 define dso_local ptr @mgpuModuleLoad(ptr noundef %0, i64 noundef %1) local_unnamed_addr {
-  %3 = alloca [128 x i8], align 16
-  %4 = alloca ptr, align 8
-  tail call fastcc void @ensure_ready()
-  call void @llvm.lifetime.start.p0(ptr nonnull %4)
-  %5 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 48), align 8
-  %6 = call i32 %5(ptr noundef nonnull %4, ptr noundef %0)
-  %7 = icmp eq i32 %6, 0
-  br i1 %7, label %11, label %8
-
-8:                                                ; preds = %2
-  call void @llvm.lifetime.start.p0(ptr nonnull %3)
-  %9 = call fastcc ptr @error_name(i32 noundef %6)
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.6, ptr noundef %9)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %3)
-  unreachable
-
-11:                                               ; preds = %2
-  %12 = load ptr, ptr %4, align 8
-  call void @llvm.lifetime.end.p0(ptr nonnull %4)
-  ret ptr %12
+  %3 = tail call fastcc ptr @load(ptr noundef %0)
+  ret ptr %3
 }
 
+; Function Attrs: nounwind
+define internal fastcc ptr @load(ptr noundef %0) unnamed_addr {
+  %2 = alloca [128 x i8], align 16
+  %3 = alloca ptr, align 8
+  tail call fastcc void @probe()
+  %4 = load i1, ptr @ready, align 4
+  %5 = load i8, ptr @__neuro_gpu_fallback, align 1
+  %6 = icmp eq i8 %5, 0
+  %7 = select i1 %4, i1 true, i1 %6
+  br i1 %7, label %8, label %21
+
+8:                                                ; preds = %1
+  tail call fastcc void @probe()
+  %9 = load i1, ptr @ready, align 4
+  br i1 %9, label %12, label %10
+
+10:                                               ; preds = %8
+  %11 = load ptr, ptr @unusable_reason, align 8
+  tail call fastcc void @unusable(ptr noundef %11)
+  unreachable
+
+12:                                               ; preds = %8
+  call void @llvm.lifetime.start.p0(ptr nonnull %3)
+  %13 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 48), align 8
+  %14 = call i32 %13(ptr noundef nonnull %3, ptr noundef %0)
+  %15 = icmp eq i32 %14, 0
+  br i1 %15, label %19, label %16
+
+16:                                               ; preds = %12
+  call void @llvm.lifetime.start.p0(ptr nonnull %2)
+  %17 = call fastcc ptr @error_name(i32 noundef %14)
+  %18 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.16, ptr noundef %17)
+  call fastcc void @fail(ptr noundef nonnull @.str.23, ptr noundef nonnull %2)
+  unreachable
+
+19:                                               ; preds = %12
+  %20 = load ptr, ptr %3, align 8
+  call void @llvm.lifetime.end.p0(ptr nonnull %3)
+  br label %21
+
+21:                                               ; preds = %1, %19
+  %22 = phi ptr [ %20, %19 ], [ null, %1 ]
+  ret ptr %22
+}
+
+; Function Attrs: nounwind
 define dso_local ptr @mgpuModuleLoadJIT(ptr noundef %0, i32 noundef %1) local_unnamed_addr {
-  %3 = alloca [128 x i8], align 16
-  %4 = alloca ptr, align 8
-  tail call fastcc void @ensure_ready()
-  call void @llvm.lifetime.start.p0(ptr nonnull %4)
-  %5 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 48), align 8
-  %6 = call i32 %5(ptr noundef nonnull %4, ptr noundef %0)
-  %7 = icmp eq i32 %6, 0
-  br i1 %7, label %11, label %8
-
-8:                                                ; preds = %2
-  call void @llvm.lifetime.start.p0(ptr nonnull %3)
-  %9 = call fastcc ptr @error_name(i32 noundef %6)
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.6, ptr noundef %9)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %3)
-  unreachable
-
-11:                                               ; preds = %2
-  %12 = load ptr, ptr %4, align 8
-  call void @llvm.lifetime.end.p0(ptr nonnull %4)
-  ret ptr %12
+  %3 = tail call fastcc ptr @load(ptr noundef %0)
+  ret ptr %3
 }
 
+; Function Attrs: nounwind
 define dso_local void @mgpuModuleUnload(ptr noundef %0) local_unnamed_addr {
   %2 = load i1, ptr @ready, align 4
   br i1 %2, label %3, label %6
@@ -101,6 +255,7 @@ define dso_local void @mgpuModuleUnload(ptr noundef %0) local_unnamed_addr {
   ret void
 }
 
+; Function Attrs: nounwind
 define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) local_unnamed_addr {
   %3 = alloca [128 x i8], align 16
   %4 = alloca ptr, align 8
@@ -113,8 +268,8 @@ define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) loca
 8:                                                ; preds = %2
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
   %9 = call fastcc ptr @error_name(i32 noundef %6)
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str, ptr noundef %9)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %3)
+  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str, ptr noundef %9)
+  call fastcc void @fail(ptr noundef nonnull @.str.23, ptr noundef nonnull %3)
   unreachable
 
 11:                                               ; preds = %2
@@ -123,10 +278,13 @@ define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) loca
   ret ptr %12
 }
 
+; Function Attrs: mustprogress nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
 declare void @llvm.lifetime.start.p0(ptr captures(none))
 
+; Function Attrs: mustprogress nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)
 declare void @llvm.lifetime.end.p0(ptr captures(none))
 
+; Function Attrs: nounwind
 define dso_local void @mgpuLaunchKernel(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i64 noundef %6, i32 noundef %7, ptr noundef %8, ptr noundef %9, ptr noundef %10, i64 noundef %11) local_unnamed_addr {
   %13 = alloca [128 x i8], align 16
   %14 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 72), align 8
@@ -143,162 +301,54 @@ define dso_local void @mgpuLaunchKernel(ptr noundef %0, i64 noundef %1, i64 noun
 23:                                               ; preds = %12
   call void @llvm.lifetime.start.p0(ptr nonnull %13)
   %24 = tail call fastcc ptr @error_name(i32 noundef %21)
-  %25 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %13, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.1, ptr noundef %24)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %13)
+  %25 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %13, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.1, ptr noundef %24)
+  call fastcc void @fail(ptr noundef nonnull @.str.23, ptr noundef nonnull %13)
   unreachable
 
 26:                                               ; preds = %12
   ret void
 }
 
+; Function Attrs: nounwind
 define dso_local ptr @mgpuStreamCreate() local_unnamed_addr {
   %1 = alloca [128 x i8], align 16
   %2 = load ptr, ptr @shared_stream, align 8
   %3 = icmp eq ptr %2, null
-  br i1 %3, label %4, label %13
+  br i1 %3, label %4, label %17
 
 4:                                                ; preds = %0
-  tail call fastcc void @ensure_ready()
-  %5 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 80), align 8
-  %6 = tail call i32 %5(ptr noundef nonnull @shared_stream, i32 noundef 1)
-  %7 = icmp eq i32 %6, 0
-  br i1 %7, label %8, label %10
+  tail call fastcc void @probe()
+  %5 = load i1, ptr @ready, align 4
+  br i1 %5, label %8, label %6
+
+6:                                                ; preds = %4
+  %7 = load ptr, ptr @unusable_reason, align 8
+  tail call fastcc void @unusable(ptr noundef %7)
+  unreachable
 
 8:                                                ; preds = %4
-  %9 = load ptr, ptr @shared_stream, align 8
-  br label %13
+  %9 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 80), align 8
+  %10 = tail call i32 %9(ptr noundef nonnull @shared_stream, i32 noundef 1)
+  %11 = icmp eq i32 %10, 0
+  br i1 %11, label %12, label %14
 
-10:                                               ; preds = %4
+12:                                               ; preds = %8
+  %13 = load ptr, ptr @shared_stream, align 8
+  br label %17
+
+14:                                               ; preds = %8
   call void @llvm.lifetime.start.p0(ptr nonnull %1)
-  %11 = tail call fastcc ptr @error_name(i32 noundef %6)
-  %12 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %1, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.2, ptr noundef %11)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %1)
+  %15 = tail call fastcc ptr @error_name(i32 noundef %10)
+  %16 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %1, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.2, ptr noundef %15)
+  call fastcc void @fail(ptr noundef nonnull @.str.23, ptr noundef nonnull %1)
   unreachable
 
-13:                                               ; preds = %8, %0
-  %14 = phi ptr [ %9, %8 ], [ %2, %0 ]
-  ret ptr %14
+17:                                               ; preds = %12, %0
+  %18 = phi ptr [ %13, %12 ], [ %2, %0 ]
+  ret ptr %18
 }
 
-define internal fastcc void @ensure_ready() unnamed_addr {
-  %1 = alloca [128 x i8], align 16
-  %2 = alloca [128 x i8], align 16
-  %3 = alloca [128 x i8], align 16
-  %4 = alloca i32, align 4
-  %5 = alloca i32, align 4
-  %6 = alloca ptr, align 8
-  %7 = load i1, ptr @ready, align 4
-  br i1 %7, label %62, label %8
-
-8:                                                ; preds = %0
-  %9 = tail call ptr @dlopen(ptr noundef nonnull @.str.10, i32 noundef 2)
-  %10 = icmp eq ptr %9, null
-  br i1 %10, label %11, label %19
-
-11:                                               ; preds = %8
-  tail call fastcc void @unusable(ptr noundef nonnull @.str.11)
-  unreachable
-
-12:                                               ; preds = %19
-  %13 = add nuw nsw i64 %20, 1
-  %14 = icmp eq i64 %13, 16
-  br i1 %14, label %15, label %19
-
-15:                                               ; preds = %12
-  %16 = load ptr, ptr @cu, align 8
-  %17 = tail call i32 %16(i32 noundef 0)
-  %18 = icmp eq i32 %17, 0
-  br i1 %18, label %30, label %28
-
-19:                                               ; preds = %8, %12
-  %20 = phi i64 [ %13, %12 ], [ 0, %8 ]
-  %21 = getelementptr inbounds nuw %struct.anon.0, ptr @entry_points, i64 %20
-  %22 = load ptr, ptr %21, align 16
-  %23 = tail call ptr @dlsym(ptr noundef nonnull %9, ptr noundef %22)
-  %24 = getelementptr inbounds nuw i8, ptr %21, i64 8
-  %25 = load ptr, ptr %24, align 8
-  store ptr %23, ptr %25, align 8
-  %26 = icmp eq ptr %23, null
-  br i1 %26, label %27, label %12
-
-27:                                               ; preds = %19
-  tail call fastcc void @unusable(ptr noundef nonnull @.str.12)
-  unreachable
-
-28:                                               ; preds = %15
-  %29 = tail call fastcc ptr @error_name(i32 noundef %17)
-  tail call fastcc void @unusable(ptr noundef %29)
-  unreachable
-
-30:                                               ; preds = %15
-  call void @llvm.lifetime.start.p0(ptr nonnull %4)
-  store i32 0, ptr %4, align 4
-  %31 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 16), align 8
-  %32 = call i32 %31(ptr noundef nonnull %4)
-  %33 = icmp ne i32 %32, 0
-  %34 = load i32, ptr %4, align 4
-  %35 = icmp eq i32 %34, 0
-  %36 = select i1 %33, i1 true, i1 %35
-  br i1 %36, label %37, label %38
-
-37:                                               ; preds = %30
-  call fastcc void @unusable(ptr noundef nonnull @.str.13)
-  unreachable
-
-38:                                               ; preds = %30
-  call void @llvm.lifetime.start.p0(ptr nonnull %5)
-  call void @llvm.lifetime.start.p0(ptr nonnull %6)
-  %39 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 24), align 8
-  %40 = call i32 %39(ptr noundef nonnull %5, i32 noundef 0)
-  %41 = icmp eq i32 %40, 0
-  br i1 %41, label %45, label %42
-
-42:                                               ; preds = %38
-  call void @llvm.lifetime.start.p0(ptr nonnull %3)
-  %43 = call fastcc ptr @error_name(i32 noundef %40)
-  %44 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.14, ptr noundef %43)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %3)
-  unreachable
-
-45:                                               ; preds = %38
-  %46 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 32), align 8
-  %47 = load i32, ptr %5, align 4
-  %48 = call i32 %46(ptr noundef nonnull %6, i32 noundef %47)
-  %49 = icmp eq i32 %48, 0
-  br i1 %49, label %53, label %50
-
-50:                                               ; preds = %45
-  call void @llvm.lifetime.start.p0(ptr nonnull %2)
-  %51 = call fastcc ptr @error_name(i32 noundef %48)
-  %52 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.15, ptr noundef %51)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %2)
-  unreachable
-
-53:                                               ; preds = %45
-  %54 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 40), align 8
-  %55 = load ptr, ptr %6, align 8
-  %56 = call i32 %54(ptr noundef %55)
-  %57 = icmp eq i32 %56, 0
-  br i1 %57, label %61, label %58
-
-58:                                               ; preds = %53
-  call void @llvm.lifetime.start.p0(ptr nonnull %1)
-  %59 = call fastcc ptr @error_name(i32 noundef %56)
-  %60 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %1, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.16, ptr noundef %59)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %1)
-  unreachable
-
-61:                                               ; preds = %53
-  store i1 true, ptr @ready, align 4
-  call void @llvm.lifetime.end.p0(ptr nonnull %6)
-  call void @llvm.lifetime.end.p0(ptr nonnull %5)
-  call void @llvm.lifetime.end.p0(ptr nonnull %4)
-  br label %62
-
-62:                                               ; preds = %0, %61
-  ret void
-}
-
+; Function Attrs: nounwind
 define dso_local void @mgpuStreamSynchronize(ptr noundef %0) local_unnamed_addr {
   %2 = alloca [128 x i8], align 16
   %3 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 88), align 8
@@ -309,54 +359,66 @@ define dso_local void @mgpuStreamSynchronize(ptr noundef %0) local_unnamed_addr 
 6:                                                ; preds = %1
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
   %7 = tail call fastcc ptr @error_name(i32 noundef %4)
-  %8 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.3, ptr noundef %7)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %2)
+  %8 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.3, ptr noundef %7)
+  call fastcc void @fail(ptr noundef nonnull @.str.23, ptr noundef nonnull %2)
   unreachable
 
 9:                                                ; preds = %1
   ret void
 }
 
+; Function Attrs: mustprogress nofree norecurse nosync nounwind willreturn memory(none)
 define dso_local void @mgpuStreamDestroy(ptr noundef readnone captures(none) %0) local_unnamed_addr {
   ret void
 }
 
+; Function Attrs: nounwind
 define dso_local ptr @mgpuMemAlloc(i64 noundef %0, ptr noundef readnone captures(none) %1, i8 noundef zeroext %2) local_unnamed_addr {
   %4 = alloca i64, align 8
-  tail call fastcc void @ensure_ready()
-  %5 = icmp eq i64 %0, 0
-  br i1 %5, label %20, label %6
+  tail call fastcc void @probe()
+  %5 = load i1, ptr @ready, align 4
+  br i1 %5, label %8, label %6
 
 6:                                                ; preds = %3
+  %7 = load ptr, ptr @unusable_reason, align 8
+  tail call fastcc void @unusable(ptr noundef %7)
+  unreachable
+
+8:                                                ; preds = %3
+  %9 = icmp eq i64 %0, 0
+  br i1 %9, label %24, label %10
+
+10:                                               ; preds = %8
   call void @llvm.lifetime.start.p0(ptr nonnull %4)
   store i64 0, ptr %4, align 8
-  %7 = icmp eq i8 %2, 0
-  br i1 %7, label %11, label %8
+  %11 = icmp eq i8 %2, 0
+  br i1 %11, label %15, label %12
 
-8:                                                ; preds = %6
-  %9 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 104), align 8
-  %10 = call i32 %9(ptr noundef nonnull %4, i64 noundef %0, i32 noundef 1)
-  br label %14
+12:                                               ; preds = %10
+  %13 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 104), align 8
+  %14 = call i32 %13(ptr noundef nonnull %4, i64 noundef %0, i32 noundef 1)
+  br label %18
 
-11:                                               ; preds = %6
-  %12 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 96), align 8
-  %13 = call i32 %12(ptr noundef nonnull %4, i64 noundef %0)
-  br label %14
+15:                                               ; preds = %10
+  %16 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 96), align 8
+  %17 = call i32 %16(ptr noundef nonnull %4, i64 noundef %0)
+  br label %18
 
-14:                                               ; preds = %11, %8
-  %15 = phi i32 [ %10, %8 ], [ %13, %11 ]
-  %16 = icmp eq i32 %15, 0
-  %17 = load i64, ptr %4, align 8
-  %18 = inttoptr i64 %17 to ptr
-  %19 = select i1 %16, ptr %18, ptr null
+18:                                               ; preds = %15, %12
+  %19 = phi i32 [ %14, %12 ], [ %17, %15 ]
+  %20 = icmp eq i32 %19, 0
+  %21 = load i64, ptr %4, align 8
+  %22 = inttoptr i64 %21 to ptr
+  %23 = select i1 %20, ptr %22, ptr null
   call void @llvm.lifetime.end.p0(ptr nonnull %4)
-  br label %20
+  br label %24
 
-20:                                               ; preds = %3, %14
-  %21 = phi ptr [ %19, %14 ], [ null, %3 ]
-  ret ptr %21
+24:                                               ; preds = %8, %18
+  %25 = phi ptr [ %23, %18 ], [ null, %8 ]
+  ret ptr %25
 }
 
+; Function Attrs: nounwind
 define dso_local void @mgpuMemFree(ptr noundef %0, ptr noundef readnone captures(none) %1) local_unnamed_addr {
   %3 = alloca [128 x i8], align 16
   %4 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 112), align 8
@@ -368,14 +430,15 @@ define dso_local void @mgpuMemFree(ptr noundef %0, ptr noundef readnone captures
 8:                                                ; preds = %2
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
   %9 = tail call fastcc ptr @error_name(i32 noundef %6)
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.4, ptr noundef %9)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %3)
+  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.4, ptr noundef %9)
+  call fastcc void @fail(ptr noundef nonnull @.str.23, ptr noundef nonnull %3)
   unreachable
 
 11:                                               ; preds = %2
   ret void
 }
 
+; Function Attrs: nounwind
 define dso_local void @mgpuMemcpy(ptr noundef %0, ptr noundef %1, i64 noundef %2, ptr noundef %3) local_unnamed_addr {
   %5 = alloca [128 x i8], align 16
   %6 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @cu, i64 120), align 8
@@ -388,16 +451,21 @@ define dso_local void @mgpuMemcpy(ptr noundef %0, ptr noundef %1, i64 noundef %2
 11:                                               ; preds = %4
   call void @llvm.lifetime.start.p0(ptr nonnull %5)
   %12 = tail call fastcc ptr @error_name(i32 noundef %9)
-  %13 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.7, ptr noundef nonnull @.str.5, ptr noundef %12)
-  call fastcc void @fail(ptr noundef nonnull @.str.8, ptr noundef nonnull %5)
+  %13 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.5, ptr noundef %12)
+  call fastcc void @fail(ptr noundef nonnull @.str.23, ptr noundef nonnull %5)
   unreachable
 
 14:                                               ; preds = %4
   ret void
 }
 
-declare noundef i32 @snprintf(ptr noalias noundef writeonly captures(none), i64 noundef, ptr noundef readonly captures(none), ...) local_unnamed_addr
+; Function Attrs: nounwind
+declare ptr @dlopen(ptr noundef, i32 noundef) local_unnamed_addr
 
+; Function Attrs: nounwind
+declare ptr @dlsym(ptr noundef, ptr noundef) local_unnamed_addr
+
+; Function Attrs: nounwind
 define internal fastcc ptr @error_name(i32 noundef range(i32 1, 0) %0) unnamed_addr {
   %2 = alloca ptr, align 8
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
@@ -408,11 +476,15 @@ define internal fastcc ptr @error_name(i32 noundef range(i32 1, 0) %0) unnamed_a
   %6 = load ptr, ptr %2, align 8
   %7 = icmp eq ptr %6, null
   %8 = select i1 %5, i1 true, i1 %7
-  %9 = select i1 %8, ptr @.str.9, ptr %6
+  %9 = select i1 %8, ptr @.str.21, ptr %6
   call void @llvm.lifetime.end.p0(ptr nonnull %2)
   ret ptr %9
 }
 
+; Function Attrs: nofree nounwind
+declare noundef i32 @snprintf(ptr noalias noundef writeonly captures(none), i64 noundef, ptr noundef readonly captures(none), ...) local_unnamed_addr
+
+; Function Attrs: noreturn nounwind
 define internal fastcc void @fail(ptr noundef readonly captures(none) %0, ptr noundef %1) unnamed_addr {
   %3 = alloca [256 x i8], align 16
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
@@ -424,17 +496,17 @@ define internal fastcc void @fail(ptr noundef readonly captures(none) %0, ptr no
   unreachable
 }
 
+; Function Attrs: noreturn
 declare void @__neuro_gpu_panic(ptr noundef, i64 noundef) local_unnamed_addr
 
-declare ptr @dlopen(ptr noundef, i32 noundef) local_unnamed_addr
-
+; Function Attrs: noreturn nounwind
 define internal fastcc void @unusable(ptr noundef %0) unnamed_addr {
-  tail call fastcc void @fail(ptr noundef nonnull @.str.17, ptr noundef %0)
+  tail call fastcc void @fail(ptr noundef nonnull @.str.24, ptr noundef %0)
   unreachable
 }
 
-declare ptr @dlsym(ptr noundef, ptr noundef) local_unnamed_addr
-
+; Function Attrs: nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)
 declare i32 @llvm.smax.i32(i32, i32)
 
+; Function Attrs: nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)
 declare i32 @llvm.umin.i32(i32, i32)

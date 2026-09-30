@@ -21,9 +21,10 @@ legs build the placeholder.
 - `lower_for_link(&HirProgram) -> Result<LinkableBodies, MlirError>`: the driver's entry. A module
   of only the bodies worth linking, each defined as `__neuro_mlir_<function>`, carried through the
   same pipeline and returned as LLVM IR with its `(function, symbol)` pairs. Empty IR and no pairs
-  when nothing qualifies. A `@gpu` function (`HirTarget::Gpu`) never qualifies here.
+  when nothing qualifies. A `@gpu` function (`HirTarget::Gpu` or `GpuOrHost`) never qualifies
+  here; a fallback function's host copy is the LLVM backend's own body.
 - `lower_for_gpu(&HirProgram, &GpuTarget) -> Result<LinkableBodies, MlirError>`: every `@gpu`
-  function, with the pairs and symbol signatures `lower_for_link` would give it, but each symbol
+  function, `fallback: true` ones included, with the pairs and symbol signatures `lower_for_link` would give it, but each symbol
   launches its `linalg` ops as GPU kernels for `GpuTarget::Nvidia { chip }` (`nvvm`, PTX) or
   `GpuTarget::Amd { chip }` (`rocdl`, a code object). A `@gpu` body that would not reach
   `lower_for_link`, or that has a rank-0 tensor, is `GpuBodiesNotLowered` with every such

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use ast_types::BinaryOp;
-use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirTarget, HirTensorApply, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirTensorApply, HirType};
 use shared_types::{Literal, Span};
 
 use crate::autodiff::emit::{self, tensor_parts};
@@ -126,7 +126,7 @@ impl<'f> Linearizer<'f> {
         if self
             .functions
             .function(target)
-            .is_some_and(|function| function.target == HirTarget::Gpu)
+            .is_some_and(|function| function.target.has_gpu_body())
         {
             return Err(self.refuse(GPU_CALL, span));
         }

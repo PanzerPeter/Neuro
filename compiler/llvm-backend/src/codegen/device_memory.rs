@@ -43,6 +43,11 @@ pub(crate) const DEVICE_RELEASE_FN: &str = "_mlir_memref_to_llvm_free";
 /// buffered standard output drained first.
 pub(crate) const GPU_PANIC_FN: &str = "__neuro_gpu_panic";
 
+/// An `i8` the GPU runtime reads before a module load: 1 when every `@gpu` function has a
+/// host fallback, so a missing GPU leaves the program to run its host bodies instead of
+/// aborting at startup.
+pub(crate) const GPU_FALLBACK_GLOBAL: &str = "__neuro_gpu_fallback";
+
 const DEVICE_BUMP_FN: &str = "__neuro_device_bump";
 const DEVICE_ARENA_BASE_GLOBAL: &str = "__neuro_device_arena_base";
 const DEVICE_ARENA_OFFSET_GLOBAL: &str = "__neuro_device_arena_offset";
@@ -112,6 +117,15 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.position_at_end(block);
         }
         Ok(())
+    }
+
+    /// Define [`GPU_FALLBACK_GLOBAL`], external until the runtime is linked like
+    /// [`GPU_PANIC_FN`].
+    pub(crate) fn define_gpu_fallback_flag(&self, every_function_falls_back: bool) {
+        let i8_type = self.context.i8_type();
+        let flag = self.module.add_global(i8_type, None, GPU_FALLBACK_GLOBAL);
+        flag.set_constant(true);
+        flag.set_initializer(&i8_type.const_int(u64::from(every_function_falls_back), false));
     }
 
     /// Read the device arena's mark, for

@@ -237,8 +237,9 @@ Rust 1.88 or newer.
 With the same environment, `neurc` can be built with a feature of the same name. That
 compiler hands straight-line `f32` / `f64` tensor arithmetic to the MLIR path and links the
 result into the program; every other body still comes from the LLVM backend, and programs
-behave identically either way. It is also the only compiler that accepts `@gpu`: a build without
-the feature refuses a `@gpu` function rather than run it on the CPU.
+behave identically either way. It is also the only compiler that builds `@gpu` kernels: a build without
+the feature refuses a bare `@gpu` function rather than run it on the CPU, and compiles a
+`@gpu(fallback: true)` one to its host copy only, with a warning.
 
 ```bash
 cargo build -p neurc --features mlir

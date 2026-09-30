@@ -67,8 +67,8 @@ func main() -> i32 {
 fn a_misplaced_gpu_is_refused_by_the_checker() {
     for (source, problem) in [
         (
-            "@gpu(fallback: true)\nfunc id(x: f32) -> f32 {\n    x\n}\nfunc main() -> i32 { return 0 }\n",
-            "`fallback:` is not supported yet",
+            "@gpu(device: 0)\nfunc id(x: f32) -> f32 {\n    x\n}\nfunc main() -> i32 { return 0 }\n",
+            "takes only `fallback: true` or `fallback: false`",
         ),
         (
             "struct S { x: f32 }\nimpl S {\n    @gpu\n    func get(&self) -> f32 {\n        self.x\n    }\n}\nfunc main() -> i32 { return 0 }\n",

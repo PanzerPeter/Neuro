@@ -55,6 +55,7 @@ mod functions;
 mod generic_structs;
 mod generics;
 mod gpu_attribute;
+mod gpu_fallback;
 mod gradient_control;
 mod gradient_slot;
 mod half_precision;

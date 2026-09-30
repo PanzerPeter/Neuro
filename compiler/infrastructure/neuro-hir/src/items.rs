@@ -116,6 +116,17 @@ pub enum HirTarget {
     /// A GPU kernel, and nowhere else: `@gpu`. A backend that cannot lower the body to
     /// one must refuse the program rather than run it on the host.
     Gpu,
+    /// A GPU kernel when the program finds a usable GPU at startup, the host otherwise:
+    /// `@gpu(fallback: true)`. The body must still lower to a kernel; the host copy is
+    /// what runs where no GPU does.
+    GpuOrHost,
+}
+
+impl HirTarget {
+    /// Whether the function has a GPU body, with or without a host fallback.
+    pub fn has_gpu_body(self) -> bool {
+        matches!(self, Self::Gpu | Self::GpuOrHost)
+    }
 }
 
 /// A function or method parameter with its resolved type.
