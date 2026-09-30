@@ -25,8 +25,13 @@
 // even when it has no `@gpu` function, and finds out whether a GPU is usable at its first
 // transfer rather than at startup.
 //
-// Single-threaded by design: device 0 is made current once, on the thread that loads the
-// first module, and Neuro programs run on that thread.
+// Every device has its own context, stream, device arena and copy of each kernel module.
+// One device is current at a time, and the calls that name no device (the launchers',
+// the arena's) act on it. Device 0 is current except while a `@gpu` call runs on another
+// device or a transfer touches one, and each of those switches back when it is done.
+//
+// Single-threaded by design: a context is current per thread, and Neuro programs run on
+// the thread that loads the first module.
 //
 // Regenerate both .ll files with tools/regen_gpu_runtime.sh.
 
@@ -34,11 +39,16 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+// Devices past this many are treated as absent. No machine this runtime targets has more,
+// and a fixed table keeps the per-device state free of allocation.
+#define MAX_DEVICES 64
 
 #ifdef NEURO_HIP
 
-// HIP, ROCm's runtime API. It keeps a primary context per device itself, so selecting
-// device 0 is all the setup there is, and its device pointers are plain pointers.
+// HIP, ROCm's runtime API. It keeps a primary context per device itself, so selecting a
+// device is all the setup there is, and its device pointers are plain pointers.
 typedef int gpu_result;
 typedef void *gpu_module;
 typedef void *gpu_function;
@@ -106,8 +116,8 @@ static const char *error_name(gpu_result result) {
     return name != NULL ? name : "an unknown HIP error";
 }
 
-static gpu_result open_device(void) {
-    return drv.set_device(0);
+static gpu_result select_device(int index) {
+    return drv.set_device(index);
 }
 
 static gpu_result allocate(void **pointer, size_t size, int managed) {
@@ -199,15 +209,18 @@ static const char *error_name(gpu_result result) {
     return name;
 }
 
-static gpu_result open_device(void) {
+// Each device's primary context, retained the first time the device is selected.
+static CUcontext contexts[MAX_DEVICES];
+
+static gpu_result select_device(int index) {
     CUdevice device;
-    CUcontext context;
     gpu_result result;
-    if ((result = drv.device_get(&device, 0)) != 0 ||
-        (result = drv.primary_ctx_retain(&context, device)) != 0) {
+    if (contexts[index] == NULL &&
+        ((result = drv.device_get(&device, index)) != 0 ||
+         (result = drv.primary_ctx_retain(&contexts[index], device)) != 0)) {
         return result;
     }
-    return drv.ctx_set_current(context);
+    return drv.ctx_set_current(contexts[index]);
 }
 
 static gpu_result allocate(void **pointer, size_t size, int managed) {
@@ -238,6 +251,18 @@ static int probed;
 static int ready;
 // Why the probe found no usable GPU: a literal or a driver-owned error name, both static.
 static const char *unusable_reason;
+
+// What one device holds: the stream every call on it shares, and its arena.
+struct device {
+    gpu_stream stream;
+    void *arena;
+    uint64_t arena_offset;
+};
+
+static struct device devices[MAX_DEVICES];
+static int device_count;
+// The device the calls that name none act on.
+static int current;
 
 #define MESSAGE_CAPACITY 256
 
@@ -304,12 +329,14 @@ static void probe(void) {
         unusable_reason = error_name(result);
         return;
     }
-    int count = 0;
-    if (drv.device_get_count(&count) != 0 || count == 0) {
+    if (drv.device_get_count(&device_count) != 0 || device_count <= 0) {
         unusable_reason = NO_DEVICE;
         return;
     }
-    if ((result = open_device()) != 0) {
+    if (device_count > MAX_DEVICES) {
+        device_count = MAX_DEVICES;
+    }
+    if ((result = select_device(0)) != 0) {
         unusable_reason = error_name(result);
         return;
     }
@@ -333,9 +360,47 @@ int32_t __neuro_gpu_usable(void) {
     return ready;
 }
 
+// Make `device` current and return the device that was, to switch back to. A negative
+// index is a `@gpu` call whose operands are all host memory, which runs on GPU 0.
+int32_t __neuro_device_switch(int32_t device) {
+    int32_t previous = current;
+    if (device < 0) {
+        device = 0;
+    }
+    if (device != current) {
+        ensure_ready();
+        check(select_device(device), NAME("cuCtxSetCurrent", "hipSetDevice"));
+        current = device;
+    }
+    return previous;
+}
+
+// The device a `@gpu` call runs on, folded over its tensor operands: the one its device
+// operands live on, or -1 while every operand seen is host memory. One kernel cannot read
+// two devices' memory.
+int32_t __neuro_device_join(int32_t chosen, int32_t operand) {
+    if (chosen < 0 || operand < 0 || operand == chosen) {
+        return chosen < 0 ? operand : chosen;
+    }
+    char message[MESSAGE_CAPACITY];
+    report(message,
+           snprintf(message, sizeof message,
+                    "a `@gpu` call's operands live on GPU %d and GPU %d: move them to one "
+                    "device with `.to(Device::GPU(n))` first",
+                    chosen, operand));
+}
+
 // Why a present GPU is still unusable: its driver refused a module, say PTX newer than
 // it reads, a chip too old to JIT it, or a code object built for another chip.
 static char load_failure[128];
+
+// What a launcher holds as its module: the image, and the copy each device's context
+// loaded from it. Device 0's is loaded at startup; another device's the first time a
+// launch on it asks for a function.
+struct module_set {
+    const void *data;
+    gpu_module loaded[MAX_DEVICES];
+};
 
 static gpu_module load(const void *data) {
     probe();
@@ -358,7 +423,13 @@ static gpu_module load(const void *data) {
         return NULL;
     }
     check(result, NAME("cuModuleLoadData", "hipModuleLoadData"));
-    return module;
+    struct module_set *set = calloc(1, sizeof *set);
+    if (set == NULL) {
+        fail("GPU error: %s", "no host memory left to record a kernel module");
+    }
+    set->data = data;
+    set->loaded[current] = module;
+    return set;
 }
 
 // An AMD kernel is a code object, which carries its own size.
@@ -377,14 +448,27 @@ gpu_module mgpuModuleLoadJIT(void *data, int32_t optimization_level) {
 // Runs from a global destructor, which may come after the driver has shut down at
 // exit; a failure there has nothing left to protect.
 void mgpuModuleUnload(gpu_module module) {
-    if (ready) {
-        drv.module_unload(module);
+    struct module_set *set = module;
+    if (set == NULL || !ready) {
+        return;
     }
+    for (int i = 0; i < device_count; i++) {
+        if (set->loaded[i] != NULL && select_device(i) == 0) {
+            drv.module_unload(set->loaded[i]);
+        }
+    }
+    (void)select_device(current);
+    free(set);
 }
 
 gpu_function mgpuModuleGetFunction(gpu_module module, const char *name) {
+    struct module_set *set = module;
+    if (set->loaded[current] == NULL) {
+        check(drv.module_load_data(&set->loaded[current], set->data),
+              NAME("cuModuleLoadData", "hipModuleLoadData"));
+    }
     gpu_function function;
-    check(drv.module_get_function(&function, module, name),
+    check(drv.module_get_function(&function, set->loaded[current], name),
           NAME("cuModuleGetFunction", "hipModuleGetFunction"));
     return function;
 }
@@ -399,20 +483,19 @@ void mgpuLaunchKernel(gpu_function function, intptr_t grid_x, intptr_t grid_y,
           NAME("cuLaunchKernel", "hipModuleLaunchKernel"));
 }
 
-// Every caller gets the same stream, created on first use and kept for the life of the
-// program. The launchers ask for a stream per kernel and the staging around them for one
-// per call; creating and destroying each costs more than a small kernel runs, and one
-// in-order stream is also what orders a call's copies before its kernels and its
-// kernels before the copy back. The driver releases it at exit.
-static gpu_stream shared_stream;
-
+// Every caller on a device gets that device's one stream, created on first use and kept
+// for the life of the program. The launchers ask for a stream per kernel and the staging
+// around them for one per call; creating and destroying each costs more than a small
+// kernel runs, and one in-order stream is also what orders a call's copies before its
+// kernels and its kernels before the copy back. The driver releases them at exit.
 gpu_stream mgpuStreamCreate(void) {
-    if (shared_stream == NULL) {
+    struct device *device = &devices[current];
+    if (device->stream == NULL) {
         ensure_ready();
-        check(drv.stream_create(&shared_stream, STREAM_NON_BLOCKING),
+        check(drv.stream_create(&device->stream, STREAM_NON_BLOCKING),
               NAME("cuStreamCreate", "hipStreamCreateWithFlags"));
     }
-    return shared_stream;
+    return device->stream;
 }
 
 void mgpuStreamSynchronize(gpu_stream stream) {
@@ -443,29 +526,84 @@ void mgpuMemcpy(void *dst, void *src, size_t size, gpu_stream stream) {
     check(copy(dst, src, size, stream), NAME("cuMemcpyAsync", "hipMemcpyAsync"));
 }
 
+// The device arena: the host arena's rules over a chunk of each device's memory. Bump
+// allocation, one release for everything past a mark, and a spill to the driver's own
+// allocator when the chunk is full. The chunk is reserved on a device's first request, so
+// a program that never stages a call never initializes the driver for it, and is kept
+// until exit.
+//
+// The staging around a `@gpu` call and the launchers' buffers between two kernels both
+// allocate here, the launchers because `finalize-memref-to-llvm{use-generic-functions}`
+// names these two functions as their allocator.
+
+// Resident from the moment it is reserved, unlike host address space, so it is sized for
+// staging a handful of large tensors rather than generously.
+#define ARENA_CAPACITY ((uint64_t)64 * 1024 * 1024)
+// What `cuMemAlloc` and `hipMalloc` guarantee, and what a coalesced load wants.
+#define ARENA_ALIGN ((uintptr_t)256)
+
+static const char ALLOCATION_FAILED[] =
+    "device memory allocation failed: no GPU is available, or it is out of memory";
+
+void *_mlir_memref_to_llvm_alloc(uint64_t size) {
+    struct device *device = &devices[current];
+    if (device->arena == NULL) {
+        // A failed reservation leaves the arena empty, and every request then spills.
+        device->arena = mgpuMemAlloc(ARENA_CAPACITY, NULL, 0);
+    }
+    uintptr_t base = (uintptr_t)device->arena;
+    // The absolute address is aligned, not the offset: the chunk's base carries only the
+    // driver's guarantee.
+    uintptr_t cursor = base + device->arena_offset;
+    uint64_t start = ((cursor + ARENA_ALIGN - 1) & ~(ARENA_ALIGN - 1)) - base;
+    void *buffer;
+    if (base != 0 && start <= ARENA_CAPACITY && size <= ARENA_CAPACITY - start) {
+        device->arena_offset = start + size;
+        buffer = (void *)(base + start);
+    } else {
+        buffer = mgpuMemAlloc(size, NULL, 0);
+    }
+    if (buffer == NULL) {
+        report(ALLOCATION_FAILED, sizeof ALLOCATION_FAILED - 1);
+    }
+    return buffer;
+}
+
+// Nothing for a buffer in the chunk, which a mark restore reclaims, nor for null, the
+// scratch a resident operand never took. A spilled buffer goes back to the driver.
+void _mlir_memref_to_llvm_free(void *pointer) {
+    uintptr_t base = (uintptr_t)devices[current].arena;
+    if (pointer == NULL || (base != 0 && (uintptr_t)pointer - base < ARENA_CAPACITY)) {
+        return;
+    }
+    mgpuMemFree(pointer, NULL);
+}
+
+// The current device's arena mark, and its release back to one. A `pool` block takes
+// one around its body, where device 0 is current.
+uint64_t __neuro_device_mark(void) {
+    return devices[current].arena_offset;
+}
+
+void __neuro_device_restore(uint64_t mark) {
+    devices[current].arena_offset = mark;
+}
+
 // A device tensor's buffer is an allocation of its own rather than a piece of the device
 // arena: it lives until the tensor is dropped, which no call's mark can see.
 
-// Only device 0 is ever made current, so a tensor can live on GPU 0 alone.
 void __neuro_device_check(int32_t device) {
     ensure_ready_for(TRANSFER);
-    if (device == 0) {
+    if (device >= 0 && device < device_count) {
         return;
     }
-    int count = 0;
-    drv.device_get_count(&count);
     char message[MESSAGE_CAPACITY];
-    if (device < 0 || device >= count) {
-        report(message, snprintf(message, sizeof message,
-                                 "`Device::GPU(%d)` names no GPU: this machine has %d",
-                                 device, count));
-    }
     report(message, snprintf(message, sizeof message,
-                             "`Device::GPU(%d)` is not supported yet: a tensor can "
-                             "live on GPU 0 only",
-                             device));
+                             "`Device::GPU(%d)` names no GPU: this machine has %d", device,
+                             device_count));
 }
 
+// On the current device.
 void *__neuro_device_alloc(uint64_t size) {
     ensure_ready_for(TRANSFER);
     void *pointer = NULL;
@@ -477,22 +615,49 @@ void *__neuro_device_alloc(uint64_t size) {
 // Waits for the copy: the caller releases the host buffer next.
 void *__neuro_device_upload(void *host, uint64_t size, int32_t device) {
     __neuro_device_check(device);
+    int32_t previous = __neuro_device_switch(device);
     void *buffer = __neuro_device_alloc(size);
     gpu_stream stream = mgpuStreamCreate();
     mgpuMemcpy(buffer, host, size, stream);
     mgpuStreamSynchronize(stream);
+    __neuro_device_switch(previous);
     return buffer;
 }
 
-// Queued behind every kernel still writing `device`, on the one stream they run on.
-void __neuro_device_download(void *host, void *device, uint64_t size) {
+// Queued behind every kernel still writing `buffer`, on the stream they run on.
+void __neuro_device_download(void *host, void *buffer, uint64_t size, int32_t device) {
+    int32_t previous = __neuro_device_switch(device);
     gpu_stream stream = mgpuStreamCreate();
-    mgpuMemcpy(host, device, size, stream);
+    mgpuMemcpy(host, buffer, size, stream);
     mgpuStreamSynchronize(stream);
+    __neuro_device_switch(previous);
 }
 
 // A kernel still queued may read the buffer, so the stream drains first.
-void __neuro_device_free(void *device) {
+void __neuro_device_free(void *buffer, int32_t device) {
+    int32_t previous = __neuro_device_switch(device);
     mgpuStreamSynchronize(mgpuStreamCreate());
-    check(release(device), NAME("cuMemFree", "hipFree"));
+    check(release(buffer), NAME("cuMemFree", "hipFree"));
+    __neuro_device_switch(previous);
+}
+
+// `buffer`, living on `from`, moved to `to`: itself when they are the same device, and
+// otherwise a copy on `to` with `buffer` released. Unified addressing lets one copy read
+// another device's memory; the driver routes it peer to peer or through the host.
+void *__neuro_device_move(void *buffer, uint64_t size, int32_t from, int32_t to) {
+    __neuro_device_check(to);
+    if (from == to) {
+        return buffer;
+    }
+    // Kernels on `from` may still be writing `buffer`.
+    int32_t previous = __neuro_device_switch(from);
+    mgpuStreamSynchronize(mgpuStreamCreate());
+    __neuro_device_switch(to);
+    void *moved = __neuro_device_alloc(size);
+    gpu_stream stream = mgpuStreamCreate();
+    mgpuMemcpy(moved, buffer, size, stream);
+    mgpuStreamSynchronize(stream);
+    __neuro_device_free(buffer, from);
+    __neuro_device_switch(previous);
+    return moved;
 }

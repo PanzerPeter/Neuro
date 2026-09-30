@@ -85,6 +85,7 @@ mod methods;
 mod mlir_routing;
 mod modules;
 mod move_semantics;
+mod multi_gpu;
 mod mutable_borrows;
 mod named_arguments;
 mod nested_block_comments;

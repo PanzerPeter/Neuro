@@ -10,9 +10,9 @@
 // arithmetic outside a `@gpu` function aborts with a diagnostic asking for
 // `.to(Device::CPU)` first.
 //
-// A tensor can live on GPU 0 only for now, and any other index is refused at run time.
-// Like every program with a bare `@gpu` function, this one stops at startup when there
-// is no usable NVIDIA GPU.
+// On a machine with several GPUs, `Device::GPU(1)` and up name the others, and a `@gpu`
+// call runs on the GPU its tensors are on. Like every program with a bare `@gpu`
+// function, this one stops at startup when there is no usable NVIDIA GPU.
 
 @gpu
 func step(state: &Tensor<f32, [8, 8]>, delta: &Tensor<f32, [8, 8]>, rate: f32) -> Tensor<f32, [8, 8]> {

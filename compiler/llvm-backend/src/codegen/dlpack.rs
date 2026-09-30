@@ -56,6 +56,14 @@ pub(crate) enum TensorHome<'ctx> {
     Gpu(IntValue<'ctx>),
 }
 
+/// How a deleter returns the element buffer: to the host allocator, or to the GPU
+/// runtime, which also needs the device the buffer is on.
+#[derive(Clone, Copy)]
+enum DataRelease<'ctx> {
+    Host(FunctionValue<'ctx>),
+    Device(FunctionValue<'ctx>),
+}
+
 /// Field indices into `DLManagedTensorVersioned`, mirroring the C header's order.
 const FIELD_VERSION: u32 = 0;
 const FIELD_MANAGER_CTX: u32 = 1;
@@ -107,6 +115,9 @@ const FIELD_SHAPE: u32 = 4;
 const FIELD_STRIDES: u32 = 5;
 const FIELD_BYTE_OFFSET: u32 = 6;
 
+/// The index half of the nested `DLDevice`, after its device type.
+const FIELD_DEVICE_ID: u32 = 1;
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Allocate a tensor's DLPack handle and its element buffer, fill every field of the
     /// structure, and return the handle, the pointer that *is* the tensor value.
@@ -129,18 +140,17 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// [`alloc_dlpack_tensor`](CodegenContext::alloc_dlpack_tensor) for a tensor whose
-    /// elements a GPU writes: the buffer is device memory, and the handle carries the
-    /// device deleter. Device 0, because it is the only one the runtime lets a tensor
-    /// live on.
+    /// elements a GPU writes: the buffer is device memory on the runtime's current device,
+    /// which must be GPU `index`, and the handle carries the device deleter.
     pub(crate) fn alloc_device_tensor(
         &mut self,
         tensor_ty: &Type,
         name: &str,
+        index: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let handle = self.alloc_dlpack_storage(name)?;
         let data = self.alloc_device_tensor_buffer(tensor_ty)?;
-        let first_gpu = self.context.i32_type().const_zero();
-        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Gpu(first_gpu))?;
+        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Gpu(index))?;
         Ok(handle)
     }
 
@@ -332,6 +342,23 @@ impl<'ctx> CodegenContext<'ctx> {
             &[FIELD_DL_TENSOR, FIELD_DEVICE],
             device.into_struct_value().into(),
         )
+    }
+
+    /// The `i32` index of the device `handle`'s buffer is on, 0 for host memory.
+    pub(crate) fn dlpack_device_index(
+        &self,
+        handle: PointerValue<'ctx>,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
+        let index = self.handle_field_ptr(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_DEVICE, FIELD_DEVICE_ID],
+        )?;
+        Ok(self
+            .builder
+            .build_load(self.context.i32_type(), index, "dlpack.device.index")?
+            .into_int_value())
     }
 
     /// An `i1` that is true when `handle`'s buffer is host memory.
@@ -663,7 +690,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // the structure to plain `free`: the two blocks come from different allocators on
         // Windows, where crossing them corrupts the heap.
         let release_data = self.aligned_release_fn()?;
-        self.define_dlpack_deleter(DLPACK_DELETER_FN, release_data)
+        self.define_dlpack_deleter(DLPACK_DELETER_FN, DataRelease::Host(release_data))
     }
 
     /// The deleter a device tensor carries: the host deleter, with the buffer returned to
@@ -673,13 +700,13 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok(existing);
         }
         let release_data = self.device_tensor_free_fn()?;
-        self.define_dlpack_deleter(DLPACK_DEVICE_DELETER_FN, release_data)
+        self.define_dlpack_deleter(DLPACK_DEVICE_DELETER_FN, DataRelease::Device(release_data))
     }
 
     fn define_dlpack_deleter(
         &mut self,
         name: &str,
-        release_data: FunctionValue<'ctx>,
+        release_data: DataRelease<'ctx>,
     ) -> CodegenResult<FunctionValue<'ctx>> {
         let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
         let fn_type = self.context.void_type().fn_type(&[ptr_type.into()], false);
@@ -700,7 +727,16 @@ impl<'ctx> CodegenContext<'ctx> {
         self.release_derivatives(handle)?;
         let data = self.load_dlpack_data(handle)?;
         let free_fn = self.release_fn()?;
-        self.builder.build_call(release_data, &[data.into()], "")?;
+        match release_data {
+            DataRelease::Host(release) => {
+                self.builder.build_call(release, &[data.into()], "")?;
+            }
+            DataRelease::Device(release) => {
+                let index = self.dlpack_device_index(handle)?;
+                self.builder
+                    .build_call(release, &[data.into(), index.into()], "")?;
+            }
+        }
         self.builder.build_call(free_fn, &[handle.into()], "")?;
         self.builder.build_return(None)?;
         if let Some(block) = saved_block {

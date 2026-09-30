@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.8.0] - 2026-09-30
+
+### Added
+
+- `Device::GPU(n)` names any GPU the machine has, not only GPU 0. `.to(Device::GPU(n))` moves a
+  tensor to GPU `n` from the host or from another GPU, and a `@gpu` call runs on the GPU its
+  device tensors live on, leaving its result there. A call with only host tensors runs on GPU 0.
+  Tensors on two different GPUs in one call abort with ``a `@gpu` call's operands live on GPU 0
+  and GPU 1``, and an index the machine lacks with ``names no GPU: this machine has <count>``.
+  The GPU runtime keeps a context, stream, device arena and copy of each kernel module per GPU.
+  None of it has run on a machine with two GPUs yet: the suite checks it against a two-device
+  fake driver.
+
+### Changed
+
+- The device arena that stages a `@gpu` call's buffers moved from generated LLVM IR into the GPU
+  runtime, which keeps one per GPU.
+
 ## [4.7.0] - 2026-09-30
 
 ### Added

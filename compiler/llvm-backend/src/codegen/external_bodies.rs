@@ -14,9 +14,9 @@ use crate::{BodyMemory, ExternalBodies};
 
 use super::context::CodegenContext;
 use super::device_memory::{
-    DEVICE_ALLOC_FN, DEVICE_CHECK_FN, DEVICE_DOWNLOAD_FN, DEVICE_RELEASE_FN,
-    DEVICE_TENSOR_ALLOC_FN, DEVICE_TENSOR_FREE_FN, DEVICE_UPLOAD_FN, GPU_FALLBACK_GLOBAL,
-    GPU_PANIC_FN,
+    DEVICE_ALLOC_FN, DEVICE_CHECK_FN, DEVICE_DOWNLOAD_FN, DEVICE_JOIN_FN, DEVICE_MARK_FN,
+    DEVICE_MOVE_FN, DEVICE_RELEASE_FN, DEVICE_RESTORE_FN, DEVICE_SWITCH_FN, DEVICE_TENSOR_ALLOC_FN,
+    DEVICE_TENSOR_FREE_FN, DEVICE_UPLOAD_FN, GPU_FALLBACK_GLOBAL, GPU_PANIC_FN,
 };
 
 /// The GPU runtime ABI a device body calls, over CUDA and over HIP, one of them linked in
@@ -35,7 +35,7 @@ const HOST_BODY_SUFFIX: &str = ".host";
 
 /// What the runtime defines for the launchers, the staging and device tensors, made
 /// internal once linked.
-const GPU_RUNTIME_ENTRY_POINTS: [&str; 18] = [
+const GPU_RUNTIME_ENTRY_POINTS: [&str; 25] = [
     "mgpuModuleLoad",
     "mgpuModuleLoadJIT",
     "mgpuModuleUnload",
@@ -47,9 +47,16 @@ const GPU_RUNTIME_ENTRY_POINTS: [&str; 18] = [
     "mgpuMemAlloc",
     "mgpuMemFree",
     "mgpuMemcpy",
+    DEVICE_ALLOC_FN,
+    DEVICE_RELEASE_FN,
+    DEVICE_MARK_FN,
+    DEVICE_RESTORE_FN,
+    DEVICE_SWITCH_FN,
+    DEVICE_JOIN_FN,
     DEVICE_TENSOR_ALLOC_FN,
     DEVICE_UPLOAD_FN,
     DEVICE_DOWNLOAD_FN,
+    DEVICE_MOVE_FN,
     DEVICE_TENSOR_FREE_FN,
     DEVICE_CHECK_FN,
     GPU_USABLE_FN,
@@ -69,10 +76,12 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// When `memory` is a device's, every buffer `symbol` sees is device memory. A host
     /// tensor operand is copied there and a device one passed as it is. With every operand
-    /// on the host, the result is written to a device buffer and copied back into the host
-    /// tensor returned, so such a caller still passes and receives host tensors; with any
-    /// operand on the device, the result is a device tensor. Every staged copy is released
-    /// before the function returns. A host body refuses a device tensor at run time.
+    /// on the host, the call runs on GPU 0 and the result is written to a device buffer and
+    /// copied back into the host tensor returned, so such a caller still passes and
+    /// receives host tensors; with any operand on a device, the call runs on that device
+    /// and the result is a device tensor there. Operands on two devices abort. Every staged
+    /// copy is released before the function returns. A host body refuses a device tensor
+    /// at run time.
     pub(crate) fn codegen_external_body(
         &mut self,
         func_def: &HirFunction,
@@ -91,11 +100,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_types: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
         let mut args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
         let mut consumed = Vec::new();
-        let mut staging = match memory {
-            BodyMemory::Host => None,
-            BodyMemory::Device => Some(self.open_device_staging()?),
-        };
 
+        // Every tensor handle is read before any is staged, because where the call runs,
+        // and so where its first staged copy goes, depends on all of them.
+        let mut operands = Vec::new();
         for (index, param) in func_def.params.iter().enumerate() {
             let value = function
                 .get_nth_param(index as u32)
@@ -104,18 +112,31 @@ impl<'ctx> CodegenContext<'ctx> {
             let handle = match &ty {
                 Type::Tensor { .. } => {
                     consumed.push(value.into_pointer_value());
-                    value.into_pointer_value()
+                    Some(value.into_pointer_value())
                 }
                 // A `&Tensor` is the address of a cell holding the handle.
-                Type::Reference { inner, .. } if matches!(**inner, Type::Tensor { .. }) => self
-                    .builder
-                    .build_load(ptr_type, value.into_pointer_value(), "external.borrow")?
-                    .into_pointer_value(),
-                _ => {
-                    arg_types.push(value.get_type().into());
-                    args.push(value.into());
-                    continue;
-                }
+                Type::Reference { inner, .. } if matches!(**inner, Type::Tensor { .. }) => Some(
+                    self.builder
+                        .build_load(ptr_type, value.into_pointer_value(), "external.borrow")?
+                        .into_pointer_value(),
+                ),
+                _ => None,
+            };
+            operands.push((value, ty, handle));
+        }
+        let mut staging = match memory {
+            BodyMemory::Host => None,
+            BodyMemory::Device => {
+                let handles: Vec<_> = operands.iter().filter_map(|(_, _, h)| *h).collect();
+                Some(self.open_device_staging(&handles)?)
+            }
+        };
+
+        for (value, ty, handle) in operands {
+            let Some(handle) = handle else {
+                arg_types.push(value.get_type().into());
+                args.push(value.into());
+                continue;
             };
             let data = match staging.as_mut() {
                 Some(staging) => self.stage_operand(staging, ty.referent(), handle)?,
@@ -295,9 +316,6 @@ pub(crate) fn link_external_bodies<'ctx>(
         })?;
         function.set_linkage(Linkage::Internal);
     }
-    // The device allocator stayed external only so the launchers' declarations of its
-    // names would resolve to it.
-    internalize(module, &[DEVICE_ALLOC_FN, DEVICE_RELEASE_FN]);
     Ok(())
 }
 
@@ -488,12 +506,25 @@ mod tests {
         let ir = device_ir(SOURCE);
         let scale = body(&ir, "scale");
 
-        let stream = position(scale, "call ptr @mgpuStreamCreate()", 0);
-        let placed = position(
+        // The call's device is settled before its first allocation: the stream and the
+        // arena are the current device's.
+        let joined = position(
             scale,
-            "br i1 %dlpack.on_host, label %device.stage, label %device.staged",
-            stream,
+            "%device.index = call i32 @__neuro_device_join(i32 -1, i32 %device.operand.index)",
+            0,
         );
+        let switched = position(
+            scale,
+            "%device.previous = call i32 @__neuro_device_switch(i32 %device.index)",
+            joined,
+        );
+        let marked = position(
+            scale,
+            "%device.mark = call i64 @__neuro_device_mark()",
+            switched,
+        );
+        let stream = position(scale, "call ptr @mgpuStreamCreate()", marked);
+        let placed = position(scale, "label %device.stage, label %device.staged", stream);
         let copy_in = position(
             scale,
             "call void @mgpuMemcpy(ptr %device.buffer, ptr %dlpack.data,",
@@ -516,10 +547,15 @@ mod tests {
             "the kernels queue behind the copies on one stream, so nothing waits before them:\n{scale}"
         );
         position(scale, "call void @_mlir_memref_to_llvm_free(", settled);
+        let restored = position(
+            scale,
+            "call void @__neuro_device_restore(i64 %device.mark)",
+            settled,
+        );
         position(
             scale,
-            "store i64 %device.mark, ptr @__neuro_device_arena_offset",
-            settled,
+            "call i32 @__neuro_device_switch(i32 %device.previous)",
+            restored,
         );
 
         assert_eq!(
@@ -546,8 +582,10 @@ mod tests {
         let on_device = &scale[resident..returned];
         assert!(
             on_device.contains("store ptr @__neuro_dlpack_device_deleter")
-                && on_device.contains("store { i32, i32 } { i32 2, i32 0 }"),
-            "a result left on the device is a kDLCUDA tensor released by the runtime:\n{on_device}"
+                && on_device
+                    .contains("insertvalue { i32, i32 } { i32 2, i32 0 }, i32 %device.index, 1"),
+            "a result left on the device is a kDLCUDA tensor on the call's device, \
+             released by the runtime:\n{on_device}"
         );
         position(
             scale,
@@ -580,16 +618,12 @@ mod tests {
             assert!(
                 ir.lines().any(|line| line.starts_with("define internal")
                     && line.contains(&format!("@{name}("))),
-                "expected `{name}` defined here and internalized after the link:\n{ir}"
+                "expected `{name}` defined by the runtime and internalized after the link:\n{ir}"
             );
         }
         assert!(
             ir.contains("device memory allocation failed"),
             "an allocation that fails must abort rather than hand a kernel null:\n{ir}"
-        );
-        assert!(
-            ir.contains("call ptr @mgpuMemAlloc(i64 67108864, ptr null, i8 0)"),
-            "expected the chunk reserved as plain device memory:\n{ir}"
         );
     }
 
@@ -606,16 +640,17 @@ mod tests {
         );
         let device = device_ir(&source);
         let main = &device[position(&device, "define i32 @main(", 0)..];
-        let released = position(main, "call void @__neuro_arena_release(", 0);
+        let marked = position(main, "%device.mark = call i64 @__neuro_device_mark()", 0);
+        let released = position(main, "call void @__neuro_arena_release(", marked);
         position(
             main,
-            "store i64 %device.mark, ptr @__neuro_device_arena_offset",
+            "call void @__neuro_device_restore(i64 %device.mark)",
             released,
         );
 
         let host = linked_ir(&source, BODIES, BodyMemory::Host);
         assert!(
-            !host.contains("__neuro_device_arena"),
+            !host.contains("__neuro_device_mark"),
             "a host-only program owes the device nothing:\n{host}"
         );
     }
@@ -710,7 +745,8 @@ mod tests {
 {ir}"
         );
         assert!(
-            body(&ir, "scale").contains("store { i32, i32 } { i32 10, i32 0 }"),
+            body(&ir, "scale")
+                .contains("insertvalue { i32, i32 } { i32 10, i32 0 }, i32 %device.index, 1"),
             "a result left on an AMD GPU is a kDLROCM tensor:
 {ir}"
         );

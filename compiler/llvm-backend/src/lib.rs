@@ -73,13 +73,12 @@ pub enum BodyMemory {
     Host,
     /// Device memory, for bodies that launch GPU kernels through MLIR's GPU runtime ABI
     /// (`mgpu*`). The wrapper copies each tensor operand to the device and the result
-    /// back, and this backend defines `_mlir_memref_to_llvm_alloc` /
-    /// `_mlir_memref_to_llvm_free` as its device allocator for the buffers a body
-    /// allocates itself. It links its own runtime for that ABI, over the [`GpuVendor`]'s
-    /// library, which it opens at run time: the program needs `dlopen` from the platform
-    /// C library, and a GPU only once it runs. A tensor already moved to the GPU with
-    /// `.to(Device::GPU(0))` is passed without a copy, and a call given one leaves its
-    /// result on the GPU too.
+    /// back, and the buffers a body allocates itself come from the runtime's device arena
+    /// (`_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`). This backend links
+    /// its own runtime for that ABI, over the [`GpuVendor`]'s library, which it opens at
+    /// run time: the program needs `dlopen` from the platform C library, and a GPU only
+    /// once it runs. A tensor already moved to a GPU with `.to(Device::GPU(n))` is passed
+    /// without a copy, and a call given one runs on that GPU and leaves its result there.
     Device,
 }
 

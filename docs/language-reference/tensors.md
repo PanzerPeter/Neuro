@@ -92,9 +92,9 @@ To keep the source, clone first: `t.clone().to(Device::GPU(0))`.
 A borrow cannot be consumed, so `.to` is not offered on `&Tensor<T, S>`: calling it there
 reports that the borrowed type has no such method.
 
-`.to(Device::GPU(0))` copies the elements into the memory of the first GPU and frees the
-host buffer. `.to(Device::CPU)` copies them back and frees the device buffer. Transferring a
-tensor to the device it is already on copies nothing. A [`@gpu`](#running-on-a-gpu-gpu)
+`.to(Device::GPU(n))` copies the elements into the memory of GPU `n`, counting from 0, and
+frees the buffer they were in, host or another GPU's. `.to(Device::CPU)` copies them back and
+frees the device buffer. Transferring a tensor to the device it is already on copies nothing. A [`@gpu`](#running-on-a-gpu-gpu)
 function reads a device tensor in place instead of copying it over, and returns its result on
 the GPU as well.
 
@@ -129,9 +129,8 @@ A transfer needs a usable GPU of the vendor the program was built for (NVIDIA un
 [`--gpu-arch`](../guides/cli-usage.md#choosing-a-gpu) names an AMD chip) when it runs. A program
 whose only GPU use is `.to` looks for one at its first transfer, not at startup, and if none is
 usable the transfer aborts with ``panic: `Device::GPU` needs an NVIDIA GPU, and none is usable:``
-(or `an AMD GPU`) followed by the reason. A tensor
-can live on GPU 0 only for now: `Device::GPU(n)` with any other `n` aborts with a diagnostic
-naming `n`. Transfers need no MLIR backend, so any `neurc` compiles them, but on Windows a
+(or `an AMD GPU`) followed by the reason. `Device::GPU(n)` for a GPU the machine does not have
+aborts with ``panic: `Device::GPU(n)` names no GPU: this machine has <count>``. Transfers need no MLIR backend, so any `neurc` compiles them, but on Windows a
 transfer to a GPU aborts.
 [examples/tensors/tensor_device.nr](../../examples/tensors/tensor_device.nr) runs the snippet
 above and checks it against the host.
@@ -954,8 +953,10 @@ in-place compound assignment. Build such a tensor at a static shape and pass it 
 `@gpu` pins a function's body to the GPU. Each operation in it becomes a kernel. A call copies
 its host tensor arguments to the device, runs the kernels and copies the result back, so a
 caller with host tensors still passes and receives ordinary ones. An argument already moved
-with [`.to(Device::GPU(0))`](#device-transfer) is read where it is, and a call given one leaves
-its result on the GPU too:
+with [`.to(Device::GPU(n))`](#device-transfer) is read where it is, and a call given one runs on
+that GPU and leaves its result there. A call with only host arguments runs on GPU 0. Arguments on
+two different GPUs cannot meet in one kernel: the call aborts with ``panic: a `@gpu` call's
+operands live on GPU 0 and GPU 1: move them to one device with `.to(Device::GPU(n))` first``.
 
 ```neuro
 @gpu

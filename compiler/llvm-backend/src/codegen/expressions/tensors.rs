@@ -514,8 +514,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Both the device and where the tensor lives now are run-time values, so the choice
     /// is made at run time: a tensor already where it is asked to go is left alone, and
-    /// one elsewhere has its elements copied into a buffer at the destination and its old
-    /// buffer released. Either way the result is the receiver's own handle, re-pointed at
+    /// one elsewhere, another GPU included, has its elements copied into a buffer at the
+    /// destination and its old buffer released. Either way the result is the receiver's own handle, re-pointed at
     /// the new buffer, so a transfer allocates no second tensor. The GPU runtime checks the
     /// index, and aborts with a diagnostic when no usable GPU answers to it.
     ///
@@ -585,7 +585,10 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(done)?;
 
         self.builder.position_at_end(resident);
-        self.device_check(index)?;
+        let device_data = self.load_dlpack_data(handle)?;
+        let from = self.dlpack_device_index(handle)?;
+        let moved = self.device_move(device_data, &tensor_ty, from, index)?;
+        self.set_dlpack_home(handle, moved, TensorHome::Gpu(index))?;
         self.builder.build_unconditional_branch(done)?;
 
         self.builder.position_at_end(to_cpu);
@@ -594,11 +597,12 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(download);
         let device_data = self.load_dlpack_data(handle)?;
+        let from = self.dlpack_device_index(handle)?;
         let host_data = self.alloc_host_buffer(&tensor_ty)?;
-        self.device_download(host_data, device_data, &tensor_ty)?;
+        self.device_download(host_data, device_data, from, &tensor_ty)?;
         let release_device = self.device_tensor_free_fn()?;
         self.builder
-            .build_call(release_device, &[device_data.into()], "")?;
+            .build_call(release_device, &[device_data.into(), from.into()], "")?;
         self.set_dlpack_home(handle, host_data, TensorHome::Host)?;
         self.builder.build_unconditional_branch(done)?;
 

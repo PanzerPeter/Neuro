@@ -68,17 +68,6 @@ const CELL_FIELDS: u64 = 4;
 /// trait itself is: a program that shadows it withdraws the opt-in with it.
 const POOL_HANDLE_STRUCT: &str = "PoolHandle";
 
-/// One linear arena: the global holding its chunk's base (null until reserved), the
-/// global holding the offset of its first free byte, and the chunk's size. The host
-/// arena and the device arena share every bump and ownership rule and differ only
-/// in these.
-#[derive(Clone, Copy)]
-pub(crate) struct Arena<'ctx> {
-    pub(crate) base: GlobalValue<'ctx>,
-    pub(crate) offset: GlobalValue<'ctx>,
-    pub(crate) capacity: u64,
-}
-
 impl<'ctx> CodegenContext<'ctx> {
     /// Record `name` as a binding of the innermost open `pool`, so a later store into it
     /// keeps the bump path. Inert outside a pool.
@@ -489,33 +478,27 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(function)
     }
 
-    fn host_arena(&self) -> Arena<'ctx> {
-        Arena {
-            base: self.arena_base_global(ARENA_BASE_GLOBAL),
-            offset: self.arena_offset_global(ARENA_OFFSET_GLOBAL),
-            capacity: ARENA_CAPACITY,
-        }
-    }
-
-    /// The internal `ptr` global `name`, null until a reservation stores a chunk in it.
-    pub(crate) fn arena_base_global(&self, name: &str) -> GlobalValue<'ctx> {
-        if let Some(existing) = self.module.get_global(name) {
+    /// The internal `ptr` global holding the chunk's base, null until a reservation stores
+    /// one in it.
+    fn arena_base_global(&self) -> GlobalValue<'ctx> {
+        if let Some(existing) = self.module.get_global(ARENA_BASE_GLOBAL) {
             return existing;
         }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let global = self.module.add_global(ptr_type, None, name);
+        let global = self.module.add_global(ptr_type, None, ARENA_BASE_GLOBAL);
         global.set_linkage(Linkage::Internal);
         global.set_initializer(&ptr_type.const_null());
         global
     }
 
-    /// The internal `i64` global `name`, starting at zero.
-    pub(crate) fn arena_offset_global(&self, name: &str) -> GlobalValue<'ctx> {
-        if let Some(existing) = self.module.get_global(name) {
+    /// The internal `i64` global holding the offset of the chunk's first free byte,
+    /// starting at zero.
+    fn arena_offset_global(&self) -> GlobalValue<'ctx> {
+        if let Some(existing) = self.module.get_global(ARENA_OFFSET_GLOBAL) {
             return existing;
         }
         let i64_type = self.context.i64_type();
-        let global = self.module.add_global(i64_type, None, name);
+        let global = self.module.add_global(i64_type, None, ARENA_OFFSET_GLOBAL);
         global.set_linkage(Linkage::Internal);
         global.set_initializer(&i64_type.const_zero());
         global
@@ -548,8 +531,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let reserve = self.context.append_basic_block(function, "reserve");
             let done = self.context.append_basic_block(function, "done");
             let ptr_type = self.context.ptr_type(AddressSpace::default());
-            let arena = self.host_arena();
-            let base = arena.base;
+            let base = self.arena_base_global();
 
             self.builder.position_at_end(entry);
             let current = self
@@ -578,9 +560,11 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_unconditional_branch(done)?;
 
             self.builder.position_at_end(done);
-            let mark =
-                self.builder
-                    .build_load(i64_type, arena.offset.as_pointer_value(), "arena.mark")?;
+            let mark = self.builder.build_load(
+                i64_type,
+                self.arena_offset_global().as_pointer_value(),
+                "arena.mark",
+            )?;
             self.builder.build_return(Some(&mark))?;
             Ok(())
         })?;
@@ -603,7 +587,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let mark = function
                 .get_first_param()
                 .ok_or_else(|| CodegenError::InternalError("arena release lost its mark".into()))?;
-            let offset = self.host_arena().offset;
+            let offset = self.arena_offset_global();
             self.builder.build_store(offset.as_pointer_value(), mark)?;
             self.builder.build_return(None)?;
             Ok(())
@@ -629,14 +613,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .into_int_value();
             let align = i64_type.const_int(ARENA_MIN_ALIGN, false);
             let fallback = self.get_or_declare_malloc();
-            self.build_bump_body(
-                self.host_arena(),
-                function,
-                size,
-                align,
-                fallback,
-                &[size.into()],
-            )
+            self.build_bump_body(function, size, align, fallback, &[size.into()])
         })?;
         Ok(function)
     }
@@ -674,7 +651,6 @@ impl<'ctx> CodegenContext<'ctx> {
             };
             let fallback = self.get_or_declare_aligned_alloc();
             self.build_bump_body(
-                self.host_arena(),
                 function,
                 size,
                 align,
@@ -685,16 +661,14 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(function)
     }
 
-    /// Fill an allocator's body: align `arena`'s bump pointer up to `align`, take
-    /// `size` bytes when they fit in the chunk, and otherwise hand the request to
-    /// `fallback`.
+    /// Fill an allocator's body: align the bump pointer up to `align`, take `size` bytes
+    /// when they fit in the chunk, and otherwise hand the request to `fallback`.
     ///
     /// The absolute address is what gets aligned, not the offset: the chunk's own base
     /// carries only its allocator's guarantee, which can be weaker than the alignment
     /// a tensor buffer asks for.
-    pub(crate) fn build_bump_body(
+    fn build_bump_body(
         &self,
-        arena: Arena<'ctx>,
         function: FunctionValue<'ctx>,
         size: IntValue<'ctx>,
         align: IntValue<'ctx>,
@@ -711,7 +685,11 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(entry);
         let base = self
             .builder
-            .build_load(ptr_type, arena.base.as_pointer_value(), "arena.base")?
+            .build_load(
+                ptr_type,
+                self.arena_base_global().as_pointer_value(),
+                "arena.base",
+            )?
             .into_pointer_value();
         let missing = self.builder.build_is_null(base, "arena.missing")?;
         self.builder.build_conditional_branch(missing, heap, bump)?;
@@ -720,7 +698,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let base_int = self
             .builder
             .build_ptr_to_int(base, i64_type, "arena.base.int")?;
-        let offset_global = arena.offset;
+        let offset_global = self.arena_offset_global();
         let offset = self
             .builder
             .build_load(i64_type, offset_global.as_pointer_value(), "arena.offset")?
@@ -743,7 +721,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let fits = self.builder.build_int_compare(
             IntPredicate::ULE,
             end,
-            i64_type.const_int(arena.capacity, false),
+            i64_type.const_int(ARENA_CAPACITY, false),
             "arena.fits",
         )?;
         self.builder.build_conditional_branch(fits, take, heap)?;
@@ -793,7 +771,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .get_first_param()
                 .ok_or_else(|| CodegenError::InternalError("release lost its pointer".into()))?
                 .into_pointer_value();
-            let owned = self.build_arena_owns(self.host_arena(), target)?;
+            let owned = self.build_arena_owns(target)?;
             self.builder.build_conditional_branch(owned, done, heap)?;
 
             self.builder.position_at_end(heap);
@@ -808,19 +786,19 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(function)
     }
 
-    /// Whether `target` points into `arena`'s chunk. Compares the whole reserved
+    /// Whether `target` points into the chunk. Compares the whole reserved
     /// range rather than the live prefix: a pointer above the mark is memory the
     /// arena has already reclaimed, and it must not reach the allocator either.
-    pub(crate) fn build_arena_owns(
-        &self,
-        arena: Arena<'ctx>,
-        target: PointerValue<'ctx>,
-    ) -> CodegenResult<IntValue<'ctx>> {
+    fn build_arena_owns(&self, target: PointerValue<'ctx>) -> CodegenResult<IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let base = self
             .builder
-            .build_load(ptr_type, arena.base.as_pointer_value(), "arena.base")?
+            .build_load(
+                ptr_type,
+                self.arena_base_global().as_pointer_value(),
+                "arena.base",
+            )?
             .into_pointer_value();
         let base_int = self
             .builder
@@ -830,7 +808,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_ptr_to_int(target, i64_type, "arena.target.int")?;
         let limit = self.builder.build_int_add(
             base_int,
-            i64_type.const_int(arena.capacity, false),
+            i64_type.const_int(ARENA_CAPACITY, false),
             "arena.limit",
         )?;
         let above = self.builder.build_int_compare(

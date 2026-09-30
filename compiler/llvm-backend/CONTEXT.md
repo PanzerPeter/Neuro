@@ -105,27 +105,29 @@ descriptor needs a compile-time extent per axis.
 `codegen_external_body` takes it per function. `Host` passes
 each tensor's own buffer, after `load_host_data` checks it is a host tensor. `Device` is for
 bodies that launch GPU kernels, and `codegen/device_memory.rs` gives the symbol device buffers
-only: the wrapper opens a staging region (the device arena's mark, and a stream from
-`mgpuStreamCreate`), and `stage_operand` branches on each operand's DLPack `device` field, copying
+only: the wrapper reads every tensor operand's handle first, folds their devices with
+`__neuro_device_join` (a host operand is -1; two different GPUs abort), and opens a staging region
+on that device: `__neuro_device_switch` makes it current (GPU 0 for an all-host call) and returns
+the one it replaces, then the device's arena mark and a stream from `mgpuStreamCreate`.
+`stage_operand` branches on each operand's DLPack `device` field, copying
 a host tensor into a scratch buffer with `mgpuMemcpy` and passing a device tensor's own buffer as
 it is. `stage_result` branches on whether any operand was resident: if one was, the result is a
-fresh device tensor (`alloc_device_tensor`) the kernels write directly; if none was, the kernels
+fresh device tensor on the call's device (`alloc_device_tensor`) the kernels write directly; if none was, the kernels
 write scratch and `close_device_staging` copies it into the host tensor returned, so an all-host
 call is unchanged. The close synchronizes once in both cases, because a spilled scratch buffer
 goes back through `cuMemFree`, then releases each staged buffer (null for a resident operand, which
-`_mlir_memref_to_llvm_free` skips) and restores the mark. No wait sits between the copies in and
-the call: the runtime hands every `mgpuStreamCreate` the same in-order stream, so the kernels queue
-behind the copies.
+`_mlir_memref_to_llvm_free` skips), restores the mark, and switches back to the device it
+replaced. No wait sits between the copies in and the call: the runtime hands every
+`mgpuStreamCreate` on a device the same in-order stream, so the kernels queue behind the copies.
 
-The device allocator is a second linear arena built from `arena.rs`'s `Arena` descriptor, the same
-bump (`build_bump_body`) and ownership test (`build_arena_owns`) over `__neuro_device_arena_base` /
-`__neuro_device_arena_offset`: a 64 MiB chunk of plain device memory from `mgpuMemAlloc`, reserved
-on the first allocation (not at a mark, so a program that never reaches a GPU body never touches
-the device), 256-byte alignment, and a spill to `mgpuMemAlloc` / `mgpuMemFree` for what does not
-fit. It is defined under the names a launcher's IR allocates its scratch buffers through,
-`_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, with external linkage so the launchers'
-declarations resolve to it at the link, which then internalizes both. An allocation that comes
-back null aborts with a diagnostic rather than hand a kernel a null buffer.
+The device allocator lives in the runtime, one linear arena per device over the current one
+(`_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, the names a launcher's IR allocates
+its scratch buffers through, plus `__neuro_device_mark` / `_restore`): a 64 MiB chunk of plain
+device memory reserved on that device's first allocation (not at a mark, so a program that never
+reaches a GPU body never touches the device), 256-byte alignment, and a spill to `mgpuMemAlloc` /
+`mgpuMemFree` for what does not fit. This backend only declares the four; the launchers' and the
+staging's declarations resolve to the runtime at its link. An allocation that comes back null
+aborts with a diagnostic rather than hand a kernel a null buffer.
 
 **The GPU runtime.** A module that defines `__neuro_gpu_panic` links `codegen/gpu_runtime.ll`
 for `GpuVendor::Nvidia` or `codegen/gpu_runtime_hip.ll` for `GpuVendor::Amd`
@@ -133,21 +135,30 @@ for `GpuVendor::Nvidia` or `codegen/gpu_runtime_hip.ll` for `GpuVendor::Amd`
 device-tensor operation defines it on first use through `require_gpu_runtime`, so a program with a
 `.to(...)` and no `@gpu` function carries the runtime too. The runtime defines MLIR's GPU runtime
 ABI (`mgpuModuleLoad[JIT]`, `mgpuModuleUnload`, `mgpuModuleGetFunction`, `mgpuLaunchKernel`,
-`mgpuStream*`, `mgpuMem*`) over the CUDA driver API or HIP, plus the device-tensor calls
-(`__neuro_device_upload` / `_download` / `_alloc` / `_free` / `_check`), and every entry point is
-internalized after the link. Both are generated from `gpu_runtime.c`, like `softfloat`'s
+`mgpuStream*`, `mgpuMem*`) over the CUDA driver API or HIP, plus the device arena, the current-device calls (`__neuro_device_switch` / `_join`) and the
+device-tensor calls (`__neuro_device_upload` / `_download` / `_move` / `_alloc` / `_free` /
+`_check`), and every entry point is internalized after the link. Both are generated from `gpu_runtime.c`, like `softfloat`'s
 builtins: one source whose vendor block (`-DNEURO_HIP`) holds every call that differs, so the
 logic is shared. The runtime opens `libcuda.so.1` or `libamdhip64.so` with `dlopen` on first use,
-creates one non-blocking stream the first time a stream is asked for and hands it to every caller
-(`mgpuStreamDestroy` leaves it alone; a stream per launch cost more than a small kernel runs),
+creates one non-blocking stream per device the first time one is asked for there and hands it to
+every caller on that device (`mgpuStreamDestroy` leaves it alone; a stream per launch cost more
+than a small kernel runs),
 so the binary does not need the driver to load and a missing GPU becomes a diagnostic rather than
 a dynamic-loader error. First use is the launchers' module-load constructor, so a program with a
 `@gpu` function checks for a GPU before `main`. The runtime reports every failure through
 `__neuro_gpu_panic(ptr, i64)`, which `define_gpu_panic` emits as an ordinary panic (`panic:`
 prefix, stdout drained first, `abort`); only `mgpuMemAlloc` answers null instead, for the device
-allocator's own diagnostic. It makes device 0 current once and assumes one
-thread, which is why `__neuro_device_check` refuses every index but 0. The executable needs
-`dlopen`, which `neurc` links `-ldl` for.
+allocator's own diagnostic.
+
+Each device has its own primary context (retained on first selection), stream, arena and copy of
+every kernel module. A launcher's module handle is a runtime record holding the image and one
+loaded module per device: device 0's is loaded by the startup constructor, another device's by
+`mgpuModuleGetFunction` on the first launch there. One device is current at a time, and the calls
+that name none (the launchers', the arena's) act on it; device 0 is current except inside a
+staged call or a transfer, and each switches back. The device-tensor calls take the device a
+buffer is on, read from the handle's DLPack `device` field. `__neuro_device_check` refuses an
+index at or past the device count. The runtime assumes one thread, since a context is current per
+thread. The executable needs `dlopen`, which `neurc` links `-ldl` for.
 
 **`@gpu(fallback: true)`.** A `Device` body whose `HirFunction::target` is `GpuOrHost` goes
 through `codegen_gpu_fallback` instead: it emits `f.gpu` (the staging wrapper), `f.host` (this
@@ -488,9 +499,10 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   argument is the prelude `Device` enum; its tag (`extractvalue` field 0) is compared against
   `enum_variant_tag("Device", "CPU")`, and `GPU`'s index is read out of its payload words. Both
   the target and the tensor's current device are run-time values, so the lowering branches: a
-  tensor already there is left alone (`__neuro_device_check` still vets a GPU index), a host
-  tensor bound for a GPU is uploaded and its host buffer released, and a device tensor bound for
-  the host is downloaded into a fresh host buffer and its device buffer freed. `set_dlpack_home`
+  host tensor bound for the host is left alone, a device tensor bound for a GPU goes through `__neuro_device_move`, which vets the index and
+  returns the same buffer when it is already there or copies it to the other GPU and frees the
+  old one, a host tensor bound for a GPU is uploaded and its host buffer released, and a device
+  tensor bound for the host is downloaded into a fresh host buffer and its device buffer freed. `set_dlpack_home`
   re-points the receiver's own handle (`data`, `device`, deleter), so the result is the receiver's
   handle and a transfer allocates no second tensor. On Windows, which has no GPU runtime, a
   transfer to a GPU is a `codegen_guard_or_panic` abort instead.
@@ -601,7 +613,7 @@ tensor's buffer is `[1 x T]` (the empty product), not a zero-length array. Becau
 just the handle, a tensor with a dynamic `?` axis maps, moves and releases like any other;
 `types::static_extents` guards the sites that do need a number (the buffer layout, its byte
 size, an index's strides) and reports `UnsupportedType` rather than sizing an allocation from a
-guess. A handle's buffer is host memory (`kDLCPU`) unless `.to(Device::GPU(0))` or a `@gpu` call
+guess. A handle's buffer is host memory (`kDLCPU`) unless `.to(Device::GPU(n))` or a `@gpu` call
 with a device operand made it device memory (`kDLCUDA`, or `kDLROCM` for an AMD build;
 `TensorHome::Gpu`), and every host read of
 an existing tensor goes through `load_host_data`, whose guard aborts with a located diagnostic
@@ -1457,15 +1469,15 @@ reverse registration order, unlinks each cell before calling its `bulk_release(&
 indirectly, honours the cell's flag so a moved-out value is passed over, and runs before
 `__neuro_arena_release` reclaims the memory the instances and the cells live in.
 
-In a program whose external bodies run on a device, `codegen_pool_expr` also reads the device
-arena's offset on entry and stores it back after the host arena's release. The sweep dispatches
-`bulk_release` per registered instance; the release per device is the mark restore of that
-device's arena, once the LIFO walk is done.
+In a program whose external bodies run on a device, `codegen_pool_expr` also takes the current
+device's arena mark on entry (`__neuro_device_mark`) and restores it after the host arena's
+release. The sweep dispatches `bulk_release` per registered instance. Between calls the current
+device is GPU 0; a call on another GPU restores that GPU's arena before it returns.
 
 **Known limits**: the chunk is reserved once and never released, an allocation that does not fit
 falls back to the heap (correct, not fast), and `Vec` / `String` buffers and map tables stay off
 the arena for the reasons above. Registration follows bindings, so a `PoolAware` temporary is never
-registered. There is one device arena, on the GPU runtime's default device.
+registered.
 
 ## Collections ABI
 `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header:

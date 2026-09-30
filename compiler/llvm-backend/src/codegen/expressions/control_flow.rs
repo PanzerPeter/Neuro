@@ -152,9 +152,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// A body that cannot fall through (a panic) leaves the block terminated and needs
     /// no restore: the process is on its way out, and the arena dies with it.
     ///
-    /// In a program that runs any body on a device, the device arena is marked and
-    /// restored alongside the host one, after the sweep: one batched release per device,
-    /// once the LIFO walk is done.
+    /// In a program that runs any body on a device, the current device's arena is marked
+    /// and restored alongside the host one, after the sweep, once the LIFO walk is done.
+    /// Between calls the current device is GPU 0; a call on another GPU restores that
+    /// GPU's arena itself before it returns.
     pub(crate) fn codegen_pool_expr(
         &mut self,
         stmts: &[HirStmt],

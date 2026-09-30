@@ -1,4 +1,4 @@
-// Device management: `.to(Device::GPU(0))` moves a tensor's buffer into GPU memory and
+// Device management: `.to(Device::GPU(n))` moves a tensor's buffer into GPU memory and
 // `.to(Device::CPU)` brings it back, and a `@gpu` call reads a tensor already there in
 // place.
 //
@@ -87,12 +87,11 @@ fn without_a_visible_gpu_the_transfer_aborts_with_the_reason() {
     assert_no_gpu_at_the_transfer(&run(&compile(&test, "hidden.nr", ROUND_TRIP), true));
 }
 
-/// Only device 0's context is ever current, so no other index can hold a tensor. The
-/// exact message depends on how many GPUs the machine has; any of the three is a refusal
-/// that names the problem.
+/// No machine has a GPU 7 or a GPU -1. Without a usable GPU the refusal is the missing
+/// GPU; with one, it names the index and the count. `multi_gpu.rs` pins the count.
 #[cfg(unix)]
 #[test]
-fn a_gpu_index_past_the_first_is_refused() {
+fn a_gpu_index_the_machine_lacks_is_refused() {
     for index in ["7", "-1"] {
         let source = format!(
             "func main() -> i32 {{\n    val g = Tensor::<f32, [4]>::ones().to(Device::GPU({index}))\n    return 0\n}}\n"
@@ -103,10 +102,7 @@ fn a_gpu_index_past_the_first_is_refused() {
         assert!(!output.status.success(), "GPU({index}) must not succeed");
         assert!(
             stderr.starts_with(NO_GPU)
-                || stderr.starts_with(&format!("panic: `Device::GPU({index})` names no GPU"))
-                || stderr.starts_with(&format!(
-                    "panic: `Device::GPU({index})` is not supported yet"
-                )),
+                || stderr.starts_with(&format!("panic: `Device::GPU({index})` names no GPU")),
             "{stderr}"
         );
     }
