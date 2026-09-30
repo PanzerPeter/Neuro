@@ -200,10 +200,10 @@ fn a_kernel_out_handle_is_only_indexed() {
     }
 }
 
-/// An index store into an output is legal only inside `unsafe`, however deep; a read of
-/// one element, a shadowing local and a partition's slice need none.
+/// Indexing an output, to read or to write, is legal only inside `unsafe`, however deep;
+/// a shadowing local and a partition's slice need none.
 #[test]
-fn a_raw_kernel_out_write_needs_unsafe() {
+fn a_raw_kernel_out_index_needs_unsafe() {
     let with = |line: &str| {
         KERNEL.replace(
             "    val block = block_id.z\n",
@@ -213,13 +213,15 @@ fn a_raw_kernel_out_write_needs_unsafe() {
     for line in [
         "    out[0, 0] = 1.0",
         "    out[0, 0] += 1.0",
-        "    if on { out[0, 0] = out[1, 1] }",
+        "    if on { out[0, 0] = 1.0 }",
         "    for i in 0..2 { unsafe { val x = 1.0 }\n out[i, 0] = 1.0 }",
+        "    val x = out[1, 1]",
+        "    val x = a[0, 0] + out[1, 1]",
     ] {
         let src = with(line);
         let (problem, at) = kernel_error(&src);
         assert!(
-            problem.contains("output 'out' is written by index only inside `unsafe { }`"),
+            problem.contains("output 'out' is indexed only inside `unsafe { }`"),
             "{line}: {problem}"
         );
         assert_eq!(
@@ -228,7 +230,7 @@ fn a_raw_kernel_out_write_needs_unsafe() {
         );
     }
     for line in [
-        "    val x = out[1, 1]",
+        "    val x = unsafe { out[1, 1] }",
         "    unsafe { if on { out[0, 0] = 1.0 } }",
         "    unsafe { unsafe { out[0, 0] = 1.0 } }",
         "    if on {\n        mut out: [f32; 2] = [0.0, 0.0]\n        out[0] = 1.0\n    }",

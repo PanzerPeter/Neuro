@@ -282,7 +282,7 @@ impl TypeChecker {
             Expr::Loop { label, body, .. } => self.check_loop_expr(label, body, expected),
 
             // `unsafe` checks like a bare block. Its one meaning so far: inside it, a
-            // kernel may write a `KernelOut` element by index.
+            // kernel may index a `KernelOut` element.
             Expr::Unsafe { stmts, .. } => {
                 self.unsafe_depth += 1;
                 let ty = self.check_bare_block_expr(stmts, expected);

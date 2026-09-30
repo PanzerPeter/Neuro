@@ -233,6 +233,9 @@ impl TypeChecker {
         }
         let ty = self.check_expr(object, None);
         self.indexed_kernel_out = None;
+        if let Expr::Identifier(name) = object {
+            self.check_kernel_out_index(name);
+        }
         ty
     }
 
@@ -343,21 +346,25 @@ impl TypeChecker {
         self.kernel_error(&problem, span);
     }
 
-    /// Refuse a store through a `KernelOut` handle's index outside `unsafe`: the compiler
-    /// cannot prove that no two threads write one element, so the block marks where the
+    /// Refuse a `KernelOut` element read or write outside `unsafe`: the compiler cannot
+    /// prove that no other thread writes the element, so the block marks where the
     /// programmer vouches for it.
-    pub(crate) fn check_kernel_out_write(&mut self, object: &Expr) {
-        let Expr::Identifier(out) = object else {
-            return;
-        };
+    fn check_kernel_out_index(&mut self, out: &Identifier) {
         if self.unsafe_depth > 0 || !self.names_kernel_out(&out.name) {
             return;
         }
-        let problem = format!(
-            "output '{0}' is written by index only inside `unsafe {{ }}`, which vouches that no two threads write one element; `{0}.partition(...)` needs no `unsafe`",
-            out.name
-        );
-        self.kernel_error(&problem, out.span);
+        let error = TypeError::KernelForm {
+            problem: format!(
+                "output '{0}' is indexed only inside `unsafe {{ }}`, which vouches that no other thread writes the element; `{0}.partition(...)` needs no `unsafe`",
+                out.name
+            ),
+            span: out.span,
+        };
+        // `out[i] += v` checks its place and then its desugared read `out[i] + v`: one
+        // index, one error.
+        if !self.errors.contains(&error) {
+            self.record_error(error);
+        }
     }
 
     /// The arguments of a call to `callee`, with each one a kernel borrows written as the

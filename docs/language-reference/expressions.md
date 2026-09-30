@@ -296,10 +296,10 @@ val x: i32 = unsafe {
 }
 ```
 
-`unsafe` has one meaning so far. Inside a `@kernel` body, writing an output
-element by index (`out[i] = v`, `out[i] += v`) is legal only in an `unsafe`
-block, which marks where the programmer vouches that no two threads write the
-same element. See [Writing a kernel](tensors.md#writing-a-kernel-kernel).
+`unsafe` has one meaning so far. Inside a `@kernel` body, indexing an output
+(`out[i] = v`, `out[i] += v`, `val x = out[i]`) is legal only in an `unsafe`
+block, which marks where the programmer vouches that no other thread writes
+that element. See [Writing a kernel](tensors.md#writing-a-kernel-kernel).
 Everywhere else an `unsafe` block behaves like `{ }`.
 
 ### Parenthesized Expressions

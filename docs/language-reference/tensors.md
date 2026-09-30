@@ -1069,11 +1069,12 @@ the kernel has run; a tensor already moved with [`.to(Device::GPU(n))`](#device-
 where it is, and an output is written in place.
 
 Inside the body a `KernelOut` handle is only ever indexed (`out[i, j] = v`, `out[i] += v`, or a
-read of one element) or partitioned (below). A write by index must sit in an `unsafe { }` block:
-the compiler cannot prove that no two threads write the same element, so `unsafe` marks each
-place where you vouch for it, and searching a kernel for `unsafe` finds every one. Reading an
-element needs no `unsafe`. `partition` is the safe alternative. The handle cannot be bound to a local, borrowed, passed to
-a function, captured by a closure or returned, and `KernelOut` is not a type anywhere but a
+read of one element) or partitioned (below). Indexing must sit in an `unsafe { }` block: the
+compiler cannot prove that no other thread writes the same element, so `unsafe` marks each place
+where you vouch for it, and searching a kernel for `unsafe` finds every one. A read needs it too,
+since it races with another thread's write to that element. `partition` is the safe alternative.
+The handle cannot be bound to a local, borrowed, passed to a function, captured by a closure or
+returned, and `KernelOut` is not a type anywhere but a
 kernel's parameter list. An input is read-only; writing one of its elements is an error.
 
 ### Writing through `partition`

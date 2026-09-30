@@ -106,9 +106,9 @@ module per declaration kind beside it. `tests/` is split by subject.
   like any other. It also records the `KernelOut` parameters (`enter_kernel_outs`); the
   identifier arm refuses any read of one (`check_kernel_out_read`) except as the object of an
   index, which `check_index_base` marks, and `validate_captures` refuses a closure capturing one.
-  A store through that index (`out[i] = v`, `out[i] += v`) is refused outside an `unsafe` block
-  (`check_kernel_out_write`, called from `resolve_place`; the `Unsafe` arm counts the enclosing
-  blocks in `unsafe_depth`). A read of one element needs none.
+  That index, read or written (`val x = out[i]`, `out[i] = v`, `out[i] += v`), is refused outside
+  an `unsafe` block (`check_kernel_out_index`, called from `check_index_base`; the `Unsafe` arm
+  counts the enclosing blocks in `unsafe_depth`).
   The other place a handle may be named is the receiver of `out.partition(...)`, which the
   method-call arm hands to `check_kernel_partition` before checking the receiver as a value: one
   closure literal of two parameters, checked by `check_closure` against the fixed signature

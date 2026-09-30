@@ -16,9 +16,9 @@
 // `KernelOut<Tensor>`, and numbers or `bool`s by value. It returns nothing; what it
 // computes is what it writes. The call borrows every tensor: pass an input as `a` (you
 // still own it afterwards) and an output as `&mut r`. Inside the body an output is only
-// ever indexed, and a write goes in an `unsafe { }` block: `unsafe { out[i] = v }`. The
-// compiler cannot prove that no two threads write one element, so `unsafe` marks where
-// you vouch for it. The handle cannot be stored, passed on or returned.
+// ever indexed, and the index, read or write, goes in an `unsafe { }` block:
+// `unsafe { out[i] = v }`. The compiler cannot prove that no other thread writes that
+// element, so `unsafe` marks where you vouch for it. The handle cannot be stored, passed on or returned.
 // The body may use locals, arithmetic, casts, `if`, `while`, `loop`, `for` over a range,
 // `break`, `continue` and `return`, and tensor elements. It cannot call functions yet.
 //

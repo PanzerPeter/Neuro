@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.12.1] - 2026-09-30
+
+### Changed
+
+- **Breaking:** in a `@kernel` body, reading a `KernelOut` element (`val x = out[j]`) now needs
+  `unsafe { }` too, the same as a write. The read races with any other thread writing `j` in the
+  same launch, and without the block that race was possible in safe code. To migrate,
+  wrap the read: `val x = unsafe { out[j] }`. `out.partition(...)` still needs no `unsafe`.
+
 ## [4.12.0] - 2026-09-30
 
 ### Changed

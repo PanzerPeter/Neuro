@@ -115,7 +115,11 @@ fn a_malformed_kernel_is_refused_by_the_checker() {
         ),
         (
             "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<i32, [4]>>) {\n    out[thread_id.x] += 1\n}\nfunc main() -> i32 { return 0 }\n",
-            "output 'out' is written by index only inside `unsafe { }`",
+            "output 'out' is indexed only inside `unsafe { }`",
+        ),
+        (
+            "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<i32, [4]>>) {\n    val x = out[(thread_id.x + 1) % 4]\n}\nfunc main() -> i32 { return 0 }\n",
+            "output 'out' is indexed only inside `unsafe { }`",
         ),
         (
             "@kernel(threads: [4])\nfunc k(a: Tensor<f32, [4]>, out: KernelOut<Tensor<f32, [4]>>) {}\nfunc main() -> i32 {\n    val a: Tensor<f32, [4]> = Tensor::ones()\n    mut r: Tensor<f32, [4]> = Tensor::zeros()\n    k(&a, &mut r)\n    return 0\n}\n",

@@ -166,7 +166,7 @@ pub(crate) struct TypeChecker {
     /// The identifier an index is about to check as its object: the one read of a
     /// `KernelOut` handle a kernel body may make.
     indexed_kernel_out: Option<shared_types::Span>,
-    /// How many `unsafe` blocks enclose the code being checked; a raw `KernelOut` write
+    /// How many `unsafe` blocks enclose the code being checked; indexing a `KernelOut`
     /// needs at least one.
     unsafe_depth: u32,
     /// For each `@kernel` function, which parameters are bare `Tensor` inputs, the ones
