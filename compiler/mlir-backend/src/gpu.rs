@@ -88,12 +88,85 @@ impl GpuTarget {
     }
 }
 
-/// Threads per block along the first two parallel axes. A launch where each block
-/// runs one thread leaves all but one lane of every warp idle.
+/// How a function's parallel loops become blocks of threads: the tile sizes, read by
+/// loop axis from the outermost, and the `gpu-map-parallel-loops` policy that lays the
+/// tiled axes onto x, y and z.
 ///
-/// ponytail: one fixed tile for every shape and chip; a 1-D body gets 16 threads a
-/// block. Pick per rank and chip once kernels run and can be measured.
-const TILE_SIZES: &str = "16,16";
+/// One list fits one rank only, so each function gets the one its widest tensor needs,
+/// and functions that need different ones lower as separate modules. A rank-N tiling
+/// handed a loop of lower rank (a reduction's result) still launches, with fewer threads
+/// a block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Tiling {
+    tiles: &'static str,
+    policy: &'static str,
+}
+
+/// The innermost axis on thread x, 32 wide, so a warp reads 128 contiguous bytes of a
+/// row-major buffer, with 256 threads a block.
+const VECTOR: Tiling = Tiling {
+    tiles: "256",
+    policy: "innermost-first",
+};
+const MATRIX: Tiling = Tiling {
+    tiles: "8,32",
+    policy: "innermost-first",
+};
+const VOLUME: Tiling = Tiling {
+    tiles: "1,8,32",
+    policy: "innermost-first",
+};
+/// The outermost axis on x, where the grid has no practical limit: what is left when an
+/// outer axis is too long for grid y or z, and for rank 4 and up, whose innermost axis
+/// no policy maps.
+const OUTERMOST: Tiling = Tiling {
+    tiles: "16,16",
+    policy: "outermost-first",
+};
+
+/// Blocks a launch may have along grid y or z, on NVIDIA and AMD alike.
+const MAX_GRID_YZ: usize = 65_535;
+
+/// The tiling for `function`'s loops, from the longest extent each axis has over its
+/// tensors, counted from the innermost: broadcasting aligns there, so no operation's
+/// loop reaches further.
+fn tiling(function: &HirFunction) -> Tiling {
+    let mut extents: Vec<usize> = Vec::new();
+    for shape in signature_shapes(function) {
+        for (axis, extent) in shape.iter().rev().enumerate() {
+            let extent = extent.unwrap_or(0);
+            match extents.get_mut(axis) {
+                Some(longest) => *longest = (*longest).max(extent),
+                None => extents.push(extent),
+            }
+        }
+    }
+    let fits = |axis: usize, tile: usize| extents[axis].div_ceil(tile) <= MAX_GRID_YZ;
+    match extents.len() {
+        0 | 1 => VECTOR,
+        2 if fits(1, 8) => MATRIX,
+        3 if fits(1, 8) && fits(2, 1) => VOLUME,
+        _ => OUTERMOST,
+    }
+}
+
+/// The shapes of `function`'s tensor parameters and results.
+fn signature_shapes(function: &HirFunction) -> Vec<&[Option<usize>]> {
+    let results = match &function.return_type {
+        HirType::Tuple(parts) => parts.iter().collect(),
+        result => vec![result],
+    };
+    function
+        .params
+        .iter()
+        .map(|param| read_type(&param.ty))
+        .chain(results)
+        .filter_map(|ty| match ty {
+            HirType::Tensor { shape, .. } => Some(shape.as_slice()),
+            _ => None,
+        })
+        .collect()
+}
 
 /// A buffer a launcher needs between two kernels is allocated through
 /// `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free` instead of libc, so
@@ -150,12 +223,14 @@ pub(crate) fn lower_with_format(
     // Asked once, and only of a program whose GPU code calls a math function.
     let probed = OnceCell::new();
     let math = || *probed.get_or_init(|| device_math(&context, target, format));
-    let (mut module, mut functions) = build_linkable_module(&context, program, &runs_on_gpu)?;
+    let (module, mut functions) = build_linkable_module(&context, program, &runs_on_gpu)?;
     let calling_math = math_functions(&module, &functions);
-    if !calling_math.is_empty() && !math() {
-        (module, functions) = build_linkable_module(&context, program, &|function| {
-            runs_on_gpu(function) && !calling_math.contains(&function.name)
-        })?;
+    let without_math = !calling_math.is_empty() && !math();
+    let admit = |function: &HirFunction| {
+        runs_on_gpu(function) && !(without_math && calling_math.contains(&function.name))
+    };
+    if without_math {
+        functions = build_linkable_module(&context, program, &admit)?.1;
     }
     let refused = refused_bodies(program, &functions);
     if !refused.is_empty() {
@@ -164,12 +239,27 @@ pub(crate) fn lower_with_format(
     let kernels =
         kernel_launchers(program, target, &math).map_err(MlirError::KernelBodiesNotLowered)?;
 
-    let mut lowered = Vec::with_capacity(2);
-    if !functions.is_empty() {
+    let mut tilings = Vec::new();
+    for function in program.items.iter().filter_map(|item| match item {
+        HirItem::Function(function) if functions.iter().any(|(name, _)| *name == function.name) => {
+            Some(function)
+        }
+        _ => None,
+    }) {
+        let tiling = tiling(function);
+        if !tilings.contains(&tiling) {
+            tilings.push(tiling);
+        }
+    }
+    let mut lowered = Vec::with_capacity(tilings.len() + 1);
+    for tiling in tilings {
+        let (mut module, _) = build_linkable_module(&context, program, &|function| {
+            admit(function) && self::tiling(function) == tiling
+        })?;
         lower_module(
             &context,
             &mut module,
-            &gpu_lowering_pipeline(target),
+            &gpu_lowering_pipeline(target, tiling),
             format,
         )?;
         lowered.push(module);
@@ -322,9 +412,9 @@ fn launches_every_op(function: &HirFunction) -> bool {
 }
 
 /// The CPU pipeline with its middle swapped: instead of sequential loops, each
-/// `linalg` op becomes `scf.parallel` loops, tiled so the outer loop maps to blocks
-/// and the inner one to threads, then a `gpu.launch` outlined into a kernel of its
-/// own `gpu.module`. The kernels convert to the vendor dialect inside their
+/// `linalg` op becomes `scf.parallel` loops, tiled by `tiling` so the outer loop maps
+/// to blocks and the inner one to threads, then a `gpu.launch` outlined into a kernel
+/// of its own `gpu.module`. The kernels convert to the vendor dialect inside their
 /// modules; `gpu-to-llvm` turns each launch into runtime calls on the host side.
 ///
 /// `gpu-async-region` chains a body's launches on one stream with a single wait at
@@ -336,16 +426,18 @@ fn launches_every_op(function: &HirFunction) -> bool {
 /// writes as `affine.apply`, which the CPU path never produces. Serializing the
 /// kernels is a separate run so a missing toolkit is told apart from a lowering
 /// bug.
-fn gpu_lowering_pipeline(target: &GpuTarget) -> String {
+fn gpu_lowering_pipeline(target: &GpuTarget, tiling: Tiling) -> String {
     format!(
         "builtin.module({BUFFERIZE},\
          func.func(convert-linalg-to-parallel-loops,\
-         scf-parallel-loop-tiling{{parallel-loop-tile-sizes={TILE_SIZES} no-min-max-bounds=true}},\
-         gpu-map-parallel-loops,convert-parallel-loops-to-gpu),\
+         scf-parallel-loop-tiling{{parallel-loop-tile-sizes={tiles} no-min-max-bounds=true}},\
+         gpu-map-parallel-loops{{mapping-policy={policy}}},convert-parallel-loops-to-gpu),\
          gpu-kernel-outlining,func.func(gpu-async-region),\
          {attach}{{chip={chip}}},\
          gpu.module({convert}),\
          lower-affine,{descent},gpu-to-llvm,reconcile-unrealized-casts)",
+        tiles = tiling.tiles,
+        policy = tiling.policy,
         attach = target.attach_target_pass(),
         chip = target.chip(),
         convert = target.kernel_conversion_pass(),
@@ -485,6 +577,58 @@ mod tests {
     }
 
     #[test]
+    fn each_rank_gets_the_tiling_that_fits_it() {
+        let of = |shape: &[usize]| {
+            let program = element_wise(shape);
+            let HirItem::Function(function) = &program.items[0] else {
+                unreachable!("the fixture is one function");
+            };
+            tiling(function)
+        };
+        assert_eq!(of(&[1 << 24]), VECTOR);
+        assert_eq!(of(&[64, 64]), MATRIX);
+        assert_eq!(of(&[8, 64, 64]), VOLUME);
+        assert_eq!(of(&[2, 3, 4, 5]), OUTERMOST);
+        // Rows past what grid y holds in blocks of 8 go to grid x instead.
+        assert_eq!(of(&[2_000_000, 4]), OUTERMOST);
+        assert_eq!(of(&[70_000, 4, 4]), OUTERMOST);
+    }
+
+    #[test]
+    fn a_warp_walks_the_innermost_axis_and_a_wide_tensor_launches() {
+        // With the outermost axis on x, 2,000,000 columns in blocks of 16 asked grid y
+        // for 125,000 blocks, past its limit, and the launch failed.
+        let ir = lower_for_gpu(&element_wise(&[4, 2_000_000]), &nvidia())
+            .expect("a wide body should lower")
+            .llvm_ir;
+
+        // Grid (62500, 1, 1), blocks of (32, 8, 1).
+        assert!(
+            ir.contains("i64 62500, i64 1, i64 1, i64 32, i64 8, i64 1"),
+            "{ir}"
+        );
+    }
+
+    #[test]
+    fn functions_of_different_ranks_lower_together() {
+        let mut program = element_wise(&[2, 3]);
+        let HirItem::Function(mut vector) = element_wise(&[5]).items.remove(0) else {
+            unreachable!("the fixture is one function");
+        };
+        vector.name = "g".to_string();
+        program.items.push(HirItem::Function(vector));
+
+        let bodies = lower_for_gpu(&program, &nvidia()).expect("both bodies should lower");
+        assert_eq!(bodies.functions.len(), 2, "{:?}", bodies.functions);
+        assert!(
+            bodies.llvm_ir.contains("define void @__neuro_mlir_f(")
+                && bodies.llvm_ir.contains("define void @__neuro_mlir_g("),
+            "{}",
+            bodies.llvm_ir
+        );
+    }
+
+    #[test]
     fn a_matrix_product_becomes_a_fill_and_a_contraction_kernel() {
         let ir = lower_for_gpu(&matmul(), &nvidia())
             .expect("a matrix product should lower to kernels")
@@ -579,16 +723,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_buffer_between_two_kernels_comes_from_the_callers_allocator() {
-        // `(a + b) * b`: the sum lives only between the two launches.
-        let ty = tensor(static_shape(&[37, 45]));
-        let mut program = element_wise(&[37, 45]);
+    /// `program`'s one function with its result multiplied by `b`, of type `ty`.
+    fn times_b(mut program: HirProgram, ty: HirType) -> HirProgram {
         let HirItem::Function(function) = &mut program.items[0] else {
             unreachable!("the fixture is one function");
         };
         let Some(HirStmt::Return {
-            value: Some(sum), ..
+            value: Some(result),
+            ..
         }) = function.body.pop()
         else {
             unreachable!("the fixture returns its operation");
@@ -596,7 +738,7 @@ mod tests {
         let product = HirExpr::new(
             HirExprKind::Binary {
                 op: BinaryOp::Multiply,
-                left: Box::new(sum),
+                left: Box::new(result),
                 right: Box::new(HirExpr::new(
                     HirExprKind::Variable("b".to_string()),
                     ty.clone(),
@@ -607,12 +749,42 @@ mod tests {
             Span::new(0, 0),
         );
         function.body.push(HirStmt::Expr(product));
+        program
+    }
+
+    #[test]
+    fn element_wise_operations_fuse_into_one_kernel() {
+        // `(a + b) * b`: the sum is computed where it is used and never stored.
+        let ty = tensor(static_shape(&[37, 45]));
+        let ir = lower_for_gpu(&times_b(element_wise(&[37, 45]), ty), &nvidia())
+            .expect("a two-operation body should lower")
+            .llvm_ir;
+
+        assert_eq!(ir.matches("call void @mgpuLaunchKernel").count(), 1, "{ir}");
+        assert!(!ir.contains("@_mlir_memref_to_llvm_alloc("), "{ir}");
+    }
+
+    #[test]
+    fn a_buffer_between_two_kernels_comes_from_the_callers_allocator() {
+        // `(a @ b) * b`: a contraction does not fuse into its consumer, so the product
+        // lives only between the launches.
+        let ty = tensor(static_shape(&[37, 37]));
+        let program = times_b(
+            on_gpu(program_with_tensor_operator(
+                BinaryOp::MatMul,
+                ty.clone(),
+                ty.clone(),
+                ty.clone(),
+            )),
+            ty,
+        );
 
         let ir = lower_for_gpu(&program, &nvidia())
             .expect("a two-operation body should lower")
             .llvm_ir;
 
-        assert_eq!(ir.matches("call void @mgpuLaunchKernel").count(), 2, "{ir}");
+        // The fill, the contraction and the product.
+        assert_eq!(ir.matches("call void @mgpuLaunchKernel").count(), 3, "{ir}");
         assert!(
             ir.contains("call ptr @_mlir_memref_to_llvm_alloc(")
                 && ir.contains("call void @_mlir_memref_to_llvm_free("),
@@ -623,7 +795,7 @@ mod tests {
             "a host allocation would hand a kernel host memory:\n{ir}"
         );
 
-        // Both launches queue on one stream and the host waits once, after the second:
+        // Every launch queues on one stream and the host waits once, after the last:
         // a wait per launch stalls the host between kernels that need nothing from it.
         assert_eq!(ir.matches("call ptr @mgpuStreamCreate(").count(), 1, "{ir}");
         assert_eq!(

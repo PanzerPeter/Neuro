@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.16.1] - 2026-10-01
+
+### Changed
+
+- Element-wise operations on tensors fuse before they reach a loop nest: `(a + b) * c` in a
+  body the MLIR backend lowers is one loop on the CPU and one kernel on the GPU, and the sum
+  is never stored. The fused body runs the same operations in the same order, so results are
+  bit-for-bit the same. On an RTX 5070 a fused `a * b + a` over `[4096, 4096]` device tensors
+  runs about 7x faster per call.
+- `@gpu` kernels lay their threads along the innermost axis, so a warp reads contiguous
+  memory, and each function's tiling now fits its rank (256 threads a block for a vector,
+  `8 x 32` for a matrix, `1 x 8 x 32` for rank 3), using the `innermost-first` mapping policy
+  newer MLIR offers. A `[1024, 1024]` matrix product runs about 4x faster, a rank-3
+  element-wise body about 14x.
+- The benchmark harness runs a NumPy version of a benchmark beside the plain Python one when
+  `programs/<name>_numpy.py` exists, and matmul, mandelbrot and vector_sum have one. New
+  `gpu_matmul` and `gpu_relax` benchmarks time `@gpu` code against NumPy and are skipped on
+  a machine without a GPU or a neurc built without the MLIR backend.
+
+### Fixed
+
+- A `@gpu` body over a tensor with more than about a million elements along its second axis,
+  such as `Tensor<f32, [4, 2000000]>`, aborted with `cuLaunchKernel failed with
+  CUDA_ERROR_INVALID_VALUE`: its blocks along that axis went to grid y, which holds 65,535.
+  That axis now goes to grid x, and a tensor whose outer axis is too long for grid y keeps
+  the old layout, which puts it on x.
+
 ## [4.16.0] - 2026-10-01
 
 ### Changed

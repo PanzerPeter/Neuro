@@ -67,7 +67,11 @@ their HIR from source. Never a production dependency.
 **The MLIR → LLVM crossing.** `translate_to_llvm_ir` runs `llvm_lowering_pipeline()`, named in
 text (its two halves, the `BUFFERIZE` constant and `llvm_descent`, are shared with the GPU pipeline, which passes the descent its own `finalize-memref-to-llvm` spelling) and parsed by `melior::utility::parse_pass_pipeline`: melior's typed `one-shot-bufferize`
 constructor takes no options, and `buffer-deallocation-pipeline` is a pipeline with no
-constructor at all. Its first four entries are what carry a `linalg` body: `one-shot-bufferize` (with
+constructor at all. It opens with `linalg-fuse-elementwise-ops`, which folds an operation whose one
+use is the next into it, so `(a + b) * c` is one loop nest (one kernel on a GPU) with no buffer for
+the sum; the fused body runs the same operations in the same order, and neither backend contracts a
+multiply and an add without fast-math flags, so the bits do not change. The next four entries are
+what carry a `linalg` body: `one-shot-bufferize` (with
 `bufferize-function-boundaries=true`, or a `func.func` keeps `tensor` in its signature and never
 converts, and `function-boundary-type-conversion=identity-layout-map`, so a parameter is a plain
 row-major `memref` and a copy into one lowers to `llvm.memcpy` rather than to a runtime-library
@@ -109,16 +113,26 @@ LLVM with MLIR in one prefix. `mlir-sys` uses Rust
 2024 let-chains in its build script, so the `mlir` feature needs Rust 1.88 or newer.
 
 **The GPU pipeline.** `lower_for_gpu` builds the `lower_for_link` module and swaps the middle of
-the CPU pipeline: `convert-linalg-to-parallel-loops`, `scf-parallel-loop-tiling` (16 × 16 over the
-first two axes, guarded rather than clamped, so the outer loop maps to blocks and the inner to
-threads), `gpu-map-parallel-loops`, `convert-parallel-loops-to-gpu`, `gpu-kernel-outlining`,
+the CPU pipeline: `convert-linalg-to-parallel-loops`, `scf-parallel-loop-tiling` (guarded rather
+than clamped, so the outer loop maps to blocks and the inner to threads), `gpu-map-parallel-loops`,
+`convert-parallel-loops-to-gpu`, `gpu-kernel-outlining`,
 `gpu-async-region` (a body's launches chain on one stream with a single wait at its end, instead
 of a stream created, waited on and destroyed per launch), then
 `nvvm-attach-target` / `rocdl-attach-target` with the chip and `convert-gpu-to-nvvm` /
 `convert-gpu-to-rocdl` inside each `gpu.module`. `lower-affine` is added for the index arithmetic
 the GPU mapping writes; `gpu-to-llvm` turns each launch into calls to MLIR's GPU runtime ABI
 (`mgpuModuleLoad[JIT]`, `mgpuLaunchKernel`, `mgpuStream*`), which the IR declares and nothing in
-this crate defines. `gpu-module-to-binary` runs as a second pass manager so a missing toolkit is
+this crate defines.
+
+**Tiling, per function.** Tile sizes are read by loop axis from the outermost, so one list fits one
+rank; `tiling` picks a function's from its widest tensor and functions that differ lower as
+separate modules. Ranks 1 to 3 take `mapping-policy=innermost-first` (absent from LLVM 20), which puts
+the innermost axis on thread x, 32 wide, so a warp reads 128 contiguous bytes: `256`, `8,32` and
+`1,8,32`, 256 threads a block. The default policy put the outermost axis on x, so a warp strode
+across rows, and a wide tensor asked grid y for more than its 65,535 blocks. An outer axis too long
+for grid y or z in those tiles, and any rank past 3 (whose innermost axis no policy maps), keep
+the old `16,16` outermost-first tiling, where the long axis sits on grid x. A loop of lower rank
+than its function's tiling (a reduction's result) still launches, with fewer threads a block. `gpu-module-to-binary` runs as a second pass manager so a missing toolkit is
 `GpuSerializationFailed` and a lowering bug stays `PassPipelineFailed`. NVIDIA embeds PTX (`isa`),
 which the CUDA driver JITs for its GPU, so a compile needs no CUDA toolkit. AMD embeds a code
 object (`bin`): HIP cannot load assembly, and linking one runs `$ROCM_PATH/llvm/bin/ld.lld`. The

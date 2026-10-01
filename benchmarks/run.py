@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Cross-language benchmark harness: Neuro vs C++ vs Python.
 
-Each benchmark is a triple of programs (`programs/<name>.nr`, `<name>.cpp`,
-`<name>.py`) that compute the same result and print it identically. The harness
+Each benchmark is a set of programs (`programs/<name>.nr`, and any of `<name>.cpp`,
+`<name>.py` and `<name>_numpy.py`) that compute the same result and print it
+identically. The plain Python row measures the language; the NumPy row measures
+what a Python programmer would actually write where the work vectorizes. The harness
 builds the compiled ones, checks all three agree on stdout, then times each and
 reports wall time relative to the fastest.
 
@@ -17,7 +19,8 @@ Usage:
 
 Requires `neurc` (built with `cargo build --release`), a C++ compiler, and
 python3. A language whose toolchain is missing is skipped with a note rather
-than failing the run.
+than failing the run, as is a `gpu_*` benchmark when neurc was built without
+`--features mlir` or the machine has no usable GPU.
 """
 
 import argparse
@@ -78,14 +81,21 @@ def build_cpp(name: str, flag: str) -> tuple[str, Path] | None:
     return (f"c++ {flag}", out)
 
 
-def measure(cmd: list[str], reps: int) -> tuple[float, str]:
-    """Fastest wall time over `reps` runs, plus the stdout every run produced."""
+def has_numpy() -> bool:
+    return run([sys.executable, "-c", "import numpy"]).returncode == 0
+
+
+def measure(cmd: list[str], reps: int) -> tuple[float, str] | None:
+    """Fastest wall time over `reps` runs, plus the stdout every run produced, or
+    None for a GPU program on a machine with no usable GPU."""
     best = float("inf")
     output = ""
     for _ in range(reps):
         start = time.perf_counter()
         result = subprocess.run(cmd, capture_output=True, text=True)
         best = min(best, time.perf_counter() - start)
+        if result.returncode != 0 and "GPU, and none is usable" in result.stdout + result.stderr:
+            return None
         if result.returncode != 0:
             raise SystemExit(f"{cmd[0]} exited {result.returncode}: {result.stderr}")
         output = result.stdout
@@ -108,6 +118,12 @@ def bench(name: str, reps: int, levels: list[int]) -> None:
     script = PROGRAMS / f"{name}.py"
     if script.exists():
         entries.append(("python3", [sys.executable, str(script)]))
+    script = PROGRAMS / f"{name}_numpy.py"
+    if script.exists():
+        if has_numpy():
+            entries.append(("numpy", [sys.executable, str(script)]))
+        else:
+            print("  (numpy not installed, skipping its row)")
 
     if not entries:
         print("  (no runnable implementation)")
@@ -116,9 +132,12 @@ def bench(name: str, reps: int, levels: list[int]) -> None:
     results: list[tuple[str, float]] = []
     outputs: dict[str, str] = {}
     for label, cmd in entries:
-        elapsed, output = measure(cmd, reps)
-        results.append((label, elapsed))
-        outputs[label] = output
+        measured = measure(cmd, reps)
+        if measured is None:
+            print(f"  ({label}: no usable GPU, skipping its row)")
+            continue
+        results.append((label, measured[0]))
+        outputs[label] = measured[1]
 
     # Every implementation must agree, or the numbers below compare different work.
     distinct = set(outputs.values())
@@ -128,6 +147,8 @@ def bench(name: str, reps: int, levels: list[int]) -> None:
             print(f"      {label}: {output.strip()[:60]!r}")
         raise SystemExit(1)
 
+    if not results:
+        return
     fastest = min(elapsed for _, elapsed in results)
     for label, elapsed in results:
         print(f"  {label:<12}{elapsed * 1000:9.1f} ms   {elapsed / fastest:5.2f}x")

@@ -1,4 +1,4 @@
-# Cargo configuration for the NEURO compiler.
+# Cargo configuration for the Neuro compiler.
 
 [target.x86_64-pc-windows-msvc]
 # LLVM's official Windows development build (the clang+llvm-*-x86_64-pc-windows-msvc

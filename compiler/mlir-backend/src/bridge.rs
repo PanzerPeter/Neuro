@@ -51,7 +51,14 @@ fn llvm_lowering_pipeline() -> String {
 }
 
 /// Tensor values into buffers, with the boundary the LLVM backend calls across.
+///
+/// `linalg-fuse-elementwise-ops` first folds each operation whose one use is the next
+/// into it, so `(a + b) * c` is one loop nest (one kernel on a GPU) and its sum never
+/// becomes a buffer. The fused body runs the same operations in the same order, and
+/// neither backend contracts a multiply and an add without fast-math flags, so the
+/// bits are the unfused ones.
 pub(crate) const BUFFERIZE: &str = "\
+    linalg-fuse-elementwise-ops,\
     one-shot-bufferize{bufferize-function-boundaries=true function-boundary-type-conversion=identity-layout-map},\
     buffer-results-to-out-params{hoist-static-allocs=true modify-public-functions=true},\
     buffer-deallocation-pipeline";
