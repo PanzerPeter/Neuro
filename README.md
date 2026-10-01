@@ -196,24 +196,38 @@ Every row is implemented, tested and usable today. Depth lives in the
 is `-O 0`, checked arithmetic with no optimization, so pass `-O 3` before drawing any conclusion
 about speed.
 
-Best of nine runs on one machine, lower is better. Reproduce with `python benchmarks/run.py`,
-which builds all three implementations of each program and refuses to report timings if they
-disagree on output.
+Best of nine runs on one machine, lower is better. Reproduce with
+`python benchmarks/run.py --reps 9 --levels 3`, which builds every implementation of each program
+and refuses to report timings if they disagree on output. The Python column is the language
+itself; the NumPy column is what a Python programmer would write where the work vectorizes.
 
-| Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 |
-|---|---|---|---|---|
-| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 5786 ms |
-| `vector_sum` | `Vec` push, indexed sweep | 24 ms | 25 ms | 9987 ms |
-| `call_overhead` | recursion, call and inline cost | 44 ms | 50 ms | 1363 ms |
-| `print_lines` | integer holes to standard output | 13 ms | 20 ms | 108 ms |
-| `format_floats` | `f64` holes at a fixed precision | 112 ms | 108 ms | 210 ms |
-| `int_divide` | guarded `/` and `%`, opaque divisor | 95 ms | 88 ms | 1312 ms |
-| `matmul` | `@` on `[256, 256]` `f32` tensors | 21 ms | 22 ms | 2935 ms |
+| Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 | NumPy |
+|---|---|---|---|---|---|
+| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 6678 ms | 1240 ms |
+| `vector_sum` | `Vec` push, indexed sweep | 25 ms | 25 ms | 11511 ms | 135 ms |
+| `call_overhead` | recursion, call and inline cost | 47 ms | 51 ms | 1387 ms | |
+| `print_lines` | integer holes to standard output | 13 ms | 20 ms | 113 ms | |
+| `format_floats` | `f64` holes at a fixed precision | 111 ms | 106 ms | 216 ms | |
+| `int_divide` | guarded `/` and `%`, opaque divisor | 96 ms | 88 ms | 1503 ms | |
+| `matmul` | `@` on `[256, 256]` `f32` tensors | 21 ms | 21 ms | 2896 ms | 82 ms |
 
-Absolute times belong to the machine, and the Python column to whichever `python3` is on your
-PATH. Two rows are worth a word: `print_lines` beats C because an integer hole renders through a
-digit loop instead of `snprintf`, and `int_divide` is the one place the compiler spends rather
-than saves, since `/` and `%` guard the operand pairs the hardware leaves undefined.
+Absolute times belong to the machine, and the Python columns to whichever interpreter runs the
+harness (NumPy here is the PyPI wheel, which bundles OpenBLAS). Two rows are worth a word:
+`print_lines` beats C because an integer hole renders through a digit loop instead of
+`snprintf`, and `int_divide` is the one place the compiler spends rather than saves, since `/`
+and `%` guard the operand pairs the hardware leaves undefined.
+
+The GPU benchmarks run their Neuro side as `@gpu` kernels on an RTX 5070, from a `neurc` built
+with `--features mlir`, against NumPy on the CPU:
+
+| Benchmark | What it stresses | Neuro `@gpu` | NumPy |
+|---|---|---|---|
+| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 273 ms | 618 ms |
+| `gpu_matmul` | five `[2048, 2048]` `f32` products | 359 ms | 213 ms |
+
+About 250 ms of each Neuro time is the CUDA driver starting up. The matrix product is a plain
+loop per output element, with no shared-memory tiling and no tensor cores yet, so a multithreaded
+BLAS on the CPU still beats it.
 
 ---
 

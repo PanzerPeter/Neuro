@@ -45,3 +45,13 @@ The `x` column is time relative to the fastest implementation of that benchmark.
 `neuro -O0` is expected to be slow: it selects trapping arithmetic and runs no
 optimization pipeline. `neuro -O3` against `c++ -O2` is the comparison that
 matters.
+
+The NumPy rows are only as fast as the BLAS library NumPy links. A distribution
+package may link the reference BLAS, which is about a hundred times slower at a
+large matrix product than an optimized one. The PyPI wheel bundles OpenBLAS, so
+run the harness from a virtual environment to compare against NumPy at its best:
+
+```bash
+python -m venv ~/.venvs/bench && ~/.venvs/bench/bin/pip install numpy
+~/.venvs/bench/bin/python benchmarks/run.py
+```

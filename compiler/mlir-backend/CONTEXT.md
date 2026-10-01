@@ -173,9 +173,9 @@ because `buffer-deallocation-pipeline` refuses unstructured loops and `gpu.launc
 (`translate_llvm_dialects`).
 
 **GPU memory.** The descent runs `finalize-memref-to-llvm{use-generic-functions=true}`, so a buffer
-bufferization allocates between two kernels (the sum in `(a + b) * c`) calls
-`_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free` instead of `malloc` / `free`, and the
-LLVM backend defines those as its device allocator. Only the kernels read or write these buffers.
+bufferization allocates between two kernels (the product in `(a @ b) * c`, since a contraction
+does not fuse into its consumer) calls `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`
+instead of `malloc` / `free`, and the LLVM backend defines those as its device allocator. Only the kernels read or write these buffers.
 The exception would be an operation with no parallel axis, which has no loop to map
 and so runs on the host against device buffers; only a rank-0 operation has none, and a rank-0
 operation needs rank-0 operands, which come from the parameters. `launches_every_op` therefore

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.16.2] - 2026-10-01
+
+### Changed
+
+- The README's performance section adds a NumPy column beside plain Python and a table for the
+  `gpu_relax` and `gpu_matmul` benchmarks, and the benchmark guide explains why NumPy should run
+  from its PyPI wheel, which bundles OpenBLAS.
+- The MLIR backend's compiler guide covers element-wise fusion and per-rank GPU tiling.
+- The 4.16.1 entry below gives the speedups measured on an idle GPU; the first figures came from
+  a noisy run and overstated them.
+
 ## [4.16.1] - 2026-10-01
 
 ### Changed
@@ -16,13 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Element-wise operations on tensors fuse before they reach a loop nest: `(a + b) * c` in a
   body the MLIR backend lowers is one loop on the CPU and one kernel on the GPU, and the sum
   is never stored. The fused body runs the same operations in the same order, so results are
-  bit-for-bit the same. On an RTX 5070 a fused `a * b + a` over `[4096, 4096]` device tensors
-  runs about 7x faster per call.
+  bit-for-bit the same.
 - `@gpu` kernels lay their threads along the innermost axis, so a warp reads contiguous
   memory, and each function's tiling now fits its rank (256 threads a block for a vector,
   `8 x 32` for a matrix, `1 x 8 x 32` for rank 3), using the `innermost-first` mapping policy
-  newer MLIR offers. A `[1024, 1024]` matrix product runs about 4x faster, a rank-3
-  element-wise body about 14x.
+  newer MLIR offers. Together with the fusion, on an RTX 5070 with device tensors, `a * b + a`
+  runs about 3.4x faster per call over `[4096, 4096]`, 4.5x over `[16777216]` and 7.7x over
+  `[64, 512, 512]`, and a `[1024, 1024]` matrix product about 4x.
 - The benchmark harness runs a NumPy version of a benchmark beside the plain Python one when
   `programs/<name>_numpy.py` exists, and matmul, mandelbrot and vector_sum have one. New
   `gpu_matmul` and `gpu_relax` benchmarks time `@gpu` code against NumPy and are skipped on

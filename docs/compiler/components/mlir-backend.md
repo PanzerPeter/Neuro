@@ -194,33 +194,37 @@ into loops. See [MLIR to LLVM IR](#mlir-to-llvm-ir).
 
 `translate_to_llvm_ir` runs a real MLIR pass pipeline rather than emitting LLVM by hand:
 
-1. `one-shot-bufferize{bufferize-function-boundaries=true function-boundary-type-conversion=identity-layout-map}`
+1. `linalg-fuse-elementwise-ops` folds each operation whose one use is the next into it, so
+   `(a + b) * c` becomes one loop nest and the sum is never stored. The fused body runs the same
+   operations in the same order, and no multiply and add are contracted without fast-math flags,
+   so the results are bit-for-bit the unfused ones.
+2. `one-shot-bufferize{bufferize-function-boundaries=true function-boundary-type-conversion=identity-layout-map}`
    rewrites tensor values into `memref` buffers. The function-boundary flag is required, not a
    tuning knob: without it a `func.func` keeps `tensor` in its signature, which `func-to-llvm`
    cannot convert. The identity layout makes a parameter a plain row-major `memref`, which is
    what a DLPack buffer is.
-2. `buffer-results-to-out-params{hoist-static-allocs=true modify-public-functions=true}` turns a
+3. `buffer-results-to-out-params{hoist-static-allocs=true modify-public-functions=true}` turns a
    returned buffer into a trailing parameter the caller allocates, and with a static shape the
    body writes straight into it.
-3. `buffer-deallocation-pipeline` gives each buffer still allocated inside an owner and a release.
-4. `func.func(convert-linalg-to-loops)` turns the structured op into `scf` loops over element
+4. `buffer-deallocation-pipeline` gives each buffer still allocated inside an owner and a release.
+5. `func.func(convert-linalg-to-loops)` turns the structured op into `scf` loops over element
    loads and stores. It is nested under `func.func` because that is the operation it is anchored
    on, and it must run *after* bufferization: against tensor operands it silently leaves the op
    alone.
-5. `convert-scf-to-cf` and `finalize-memref-to-llvm` lower what those loops are made of, then
+6. `convert-scf-to-cf` and `finalize-memref-to-llvm` lower what those loops are made of, then
    `func-to-llvm`, `arith-to-llvm`, `cf-to-llvm` and `index-to-llvm` take the rest into the
    `llvm` dialect.
-6. `reconcile-unrealized-casts` clears the `unrealized_conversion_cast` ops each conversion leaves
+7. `reconcile-unrealized-casts` clears the `unrealized_conversion_cast` ops each conversion leaves
    at its boundary with the dialects the others own. The translation rejects any that survive, so
    this pass runs last by necessity, not by convention.
-7. `mlirTranslateModuleToLLVMIR` builds the LLVM module. melior does not wrap it, so the
+8. `mlirTranslateModuleToLLVMIR` builds the LLVM module. melior does not wrap it, so the
    call goes through `mlir-sys` directly, pinned to the exact version melior itself depends on so
    both reach one crate instance.
-8. The resulting `LLVMModuleRef` is wrapped by `inkwell::module::Module` (sole owner, disposed on
+9. The resulting `LLVMModuleRef` is wrapped by `inkwell::module::Module` (sole owner, disposed on
    drop) and put through LLVM's verifier.
 
 The pipeline is named in text and parsed with `melior::utility::parse_pass_pipeline`, because
-two of the three entries that carry a `linalg` body have no usable typed constructor: melior's
+two of the entries that carry a `linalg` body have no usable typed constructor: melior's
 `one-shot-bufferize` takes no options, so it cannot set `bufferize-function-boundaries`, and
 `buffer-deallocation-pipeline` is a pipeline rather than a pass. Textually named passes must be in the process-global pass registry, so the
 MLIR context builder calls `register_all_passes` once.
@@ -262,8 +266,13 @@ toolkit. `GpuTarget::Amd { chip }` (a `gfxNNN`) goes through `rocdl` and embeds 
 for exactly that chip. Building the code object runs ROCm's `ld.lld`, so an AMD target needs ROCm
 installed and fails with `GpuSerializationFailed` without it.
 
-The parallel loops are tiled 16 × 16 over their first two axes, with a bounds guard rather than
-a clamped extent, so blocks cover the grid and each block runs a tile of threads. A matrix
+The parallel loops are tiled with a bounds guard rather than a clamped extent, so blocks cover
+the grid and each block runs a tile of threads. The tiles fit each function's rank: for ranks 1
+to 3 the innermost axis goes on thread x, 32 wide, so a warp reads contiguous memory, with 256
+threads a block (`256`, `8 × 32`, `1 × 8 × 32`). Rank 4 and up, and a tensor whose outer axis is
+too long for grid y or z, which hold 65,535 blocks, keep a 16 × 16 tile over the first two axes
+with the outermost axis on grid x. Functions that need different tilings lower as separate
+modules. A matrix
 product is two kernels, the zero fill and the contraction. A reduction (`.sum()`, `.mean()`,
 `.max()`, `.min()`), which only a GPU body lowers here, is a seed and a fold, plus a division for
 a mean: one thread per result element folds its run in order, which is the LLVM backend's order,
@@ -292,7 +301,8 @@ it anywhere but a GPU. The symbol's body calls MLIR's GPU runtime ABI (`mgpuModu
 LLVM backend's runtime defines.
 
 Every buffer a symbol is handed has to be device memory; the LLVM backend's wrapper stages them.
-A buffer the body needs between two kernels, such as the sum in `(a + b) * c`, is allocated
+A buffer the body needs between two kernels, such as the product in `(a @ b) * c` (a
+contraction does not fuse into the operation after it), is allocated
 through `_mlir_memref_to_llvm_alloc` and freed through `_mlir_memref_to_llvm_free` rather than
 `malloc` / `free` (`finalize-memref-to-llvm{use-generic-functions=true}`). The LLVM backend
 defines both as its device allocator.
