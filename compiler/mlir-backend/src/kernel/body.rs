@@ -6,21 +6,33 @@
 //! A value an `if` or `&&` produces goes through a slot too, which keeps every SSA value
 //! used only in the block that defines it or one it dominates.
 
+mod traversal;
+
 use std::fmt::Write as _;
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    HirExpr, HirExprKind, HirFunction, HirGridIndex, HirPlace, HirStmt, HirTensorAxis, HirType,
+    HirExpr, HirExprKind, HirFunction, HirGridIndex, HirMathOp, HirPlace, HirStmt, HirTensorAxis,
+    HirType,
 };
 use shared_types::{Literal, Span};
 
 use super::GuardStyle;
+
+pub(super) use traversal::{Launch, outlined_launch};
 
 /// The grid axes as `gpu` dialect dimensions, in field order.
 const GRID_DIMENSIONS: [&str; 3] = ["x", "y", "z"];
 
 const INDEX_OUT_OF_BOUNDS: &str = "index out of bounds in a `@kernel` body";
 const DIVIDE_BY_ZERO: &str = "integer division by zero in a `@kernel` body";
+
+/// Why a traversal's function with integer arithmetic stays on the host: the GPU has none
+/// of the overflow and zero-divisor guards the host runs it with.
+const STRICT_INTEGERS: &str = "integer arithmetic, which has no device form";
+
+/// Why a math function has no device form in this compile.
+const NO_DEVICE_MATH: &str = "a math function, which needs the GPU vendor's device math library (libdevice from the CUDA toolkit, or ROCm's) when compiling";
 
 /// The construct a body stopped at, and what it is, completing "cannot lower ...".
 #[derive(Debug)]
@@ -132,6 +144,16 @@ pub(crate) struct BodyEmitter<'f> {
     /// Whether the block being emitted already ends in a terminator. Code after one is
     /// unreachable and is not emitted.
     terminated: bool,
+    /// Whether the vendor's device math library is there to call. Without it a math
+    /// function has no device form.
+    math: bool,
+    /// Whether integer arithmetic is refused. A `@kernel` wraps on overflow and stops on a
+    /// zero divisor in its own way; a traversal's function must compute what the host's
+    /// does, guards included, so it has none.
+    strict: bool,
+    /// Where a `return` with a value stores it: the slot of the function being called, and
+    /// its type. A `@kernel` returns nothing.
+    returns: Option<(String, &'static str)>,
 }
 
 impl<'f> BodyEmitter<'f> {
@@ -140,6 +162,7 @@ impl<'f> BodyEmitter<'f> {
         guard: GuardStyle,
         threads: [u32; 3],
         grid: Vec<usize>,
+        math: bool,
     ) -> Self {
         let params = function
             .params
@@ -165,6 +188,9 @@ impl<'f> BodyEmitter<'f> {
             scopes: vec![params],
             loops: Vec::new(),
             terminated: false,
+            math,
+            strict: false,
+            returns: None,
         }
     }
 
@@ -337,6 +363,17 @@ impl<'f> BodyEmitter<'f> {
                 Ok(())
             }
             HirStmt::Return { value: None, .. } => {
+                self.branch(exit);
+                Ok(())
+            }
+            HirStmt::Return {
+                value: Some(value), ..
+            } if self.returns.is_some() => {
+                let value = self.expr(value, exit)?;
+                if let Some((slot, ty)) = &self.returns {
+                    let store = format!("memref.store {value}, {slot}[] : memref<{ty}>");
+                    self.line(&store);
+                }
                 self.branch(exit);
                 Ok(())
             }
@@ -644,6 +681,11 @@ impl<'f> BodyEmitter<'f> {
             HirExprKind::Binary { op, left, right } => self.binary(*op, left, right, expr, exit),
             HirExprKind::Unary { op, operand } => self.unary(*op, operand, expr, exit),
             HirExprKind::Cast { value } => self.cast(value, &expr.ty, exit),
+            HirExprKind::Math {
+                op,
+                operand,
+                exponent,
+            } => self.math(*op, operand, exponent.as_deref(), expr, exit),
             HirExprKind::TensorIndex { object, axes } if scalar_type(&expr.ty).is_some() => {
                 let (memref, ty, extents) = self.tensor(object)?;
                 let indices = self.indices(axes, &extents, expr.span, exit)?;
@@ -859,6 +901,11 @@ impl<'f> BodyEmitter<'f> {
     /// `flat`, an `i64` row-major position already known to be in range, as one `index`
     /// per axis of `extents`. An empty axis gets the unwrapped quotient, as `.flat` does.
     fn delinearize(&mut self, flat: &str, extents: &[usize]) -> String {
+        self.delinearize_each(flat, extents).join(", ")
+    }
+
+    /// [`Self::delinearize`], one `index` value per axis.
+    fn delinearize_each(&mut self, flat: &str, extents: &[usize]) -> Vec<String> {
         let mut indices = Vec::with_capacity(extents.len());
         for (axis, &extent) in extents.iter().enumerate() {
             let stride: usize = extents[axis + 1..].iter().map(|&e| e.max(1)).product();
@@ -873,7 +920,7 @@ impl<'f> BodyEmitter<'f> {
             }
             indices.push(self.assign(&format!("arith.index_cast {value} : i64 to index")));
         }
-        indices.join(", ")
+        indices
     }
 
     /// The one call a body makes: `slice.len()` on a partition slice, its run length.
@@ -943,6 +990,9 @@ impl<'f> BodyEmitter<'f> {
         }
         if int_width(operand_ty).is_none() {
             return Err(Refused::new(expr.span, "this operator on a `bool`"));
+        }
+        if self.strict && !matches!(op, BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor) {
+            return Err(Refused::new(expr.span, STRICT_INTEGERS));
         }
         // Integer arithmetic wraps, as it does in a release build; the kernel has no
         // debug tier to panic in.
@@ -1034,6 +1084,9 @@ impl<'f> BodyEmitter<'f> {
         let value = self.expr(operand, exit)?;
         let text = match (op, &operand.ty) {
             (UnaryOp::Negate, ty) if is_float(ty) => format!("arith.negf {value} : {mlir}"),
+            (UnaryOp::Negate, ty) if int_width(ty).is_some() && self.strict => {
+                return Err(Refused::new(expr.span, STRICT_INTEGERS));
+            }
             (UnaryOp::Negate, ty) if int_width(ty).is_some() => {
                 let zero = self.assign(&format!("arith.constant 0 : {mlir}"));
                 format!("arith.subi {zero}, {value} : {mlir}")
@@ -1049,6 +1102,54 @@ impl<'f> BodyEmitter<'f> {
             _ => return Err(Refused::new(expr.span, "this unary operator")),
         };
         Ok(self.assign(&text))
+    }
+
+    /// A math function on one float: the `math` dialect op of its name, which the GPU
+    /// conversion turns into a call into the vendor's device math library, or `sign`'s two
+    /// compares, as the LLVM backend writes it.
+    fn math(
+        &mut self,
+        op: HirMathOp,
+        operand: &HirExpr,
+        exponent: Option<&HirExpr>,
+        expr: &HirExpr,
+        exit: &str,
+    ) -> Lowered<String> {
+        let Some(mlir) = scalar_type(&expr.ty).filter(|_| is_float(&expr.ty)) else {
+            return Err(Refused::new(expr.span, "a math function on a non-float"));
+        };
+        if !self.math && op != HirMathOp::Sign {
+            return Err(Refused::new(expr.span, NO_DEVICE_MATH));
+        }
+        let value = self.expr(operand, exit)?;
+        let name = match op {
+            HirMathOp::Exp => "exp",
+            HirMathOp::Log => "log",
+            HirMathOp::Sqrt => "sqrt",
+            HirMathOp::Tanh => "tanh",
+            HirMathOp::Abs => "absf",
+            HirMathOp::Pow => {
+                let Some(exponent) = exponent else {
+                    return Err(Refused::new(expr.span, "a `.pow` without an exponent"));
+                };
+                let power = self.expr(exponent, exit)?;
+                return Ok(self.assign(&format!("math.powf {value}, {power} : {mlir}")));
+            }
+            HirMathOp::Sign => {
+                let zero = self.assign(&format!("arith.constant 0.0 : {mlir}"));
+                let one = self.assign(&format!("arith.constant 1.0 : {mlir}"));
+                let minus_one = self.assign(&format!("arith.constant -1.0 : {mlir}"));
+                let above = self.assign(&format!("arith.cmpf ogt, {value}, {zero} : {mlir}"));
+                let below = self.assign(&format!("arith.cmpf olt, {value}, {zero} : {mlir}"));
+                let negative = self.assign(&format!(
+                    "arith.select {below}, {minus_one}, {value} : {mlir}"
+                ));
+                return Ok(
+                    self.assign(&format!("arith.select {above}, {one}, {negative} : {mlir}"))
+                );
+            }
+        };
+        Ok(self.assign(&format!("math.{name} {value} : {mlir}")))
     }
 
     fn cast(&mut self, value: &HirExpr, target: &HirType, exit: &str) -> Lowered<String> {
@@ -1180,7 +1281,6 @@ fn statement_kind(statement: &HirStmt) -> &'static str {
 fn expression_kind(kind: &HirExprKind) -> &'static str {
     match kind {
         HirExprKind::Closure { .. } => "a closure",
-        HirExprKind::Math { .. } => "a math function",
         HirExprKind::Match { .. } => "a `match`",
         HirExprKind::TensorIndex { .. } | HirExprKind::Index { .. } => "a tensor slice",
         HirExprKind::Loop { .. } => "a `loop` with a value",

@@ -32,11 +32,16 @@ legs build the placeholder.
   is handed must be device memory, and it allocates a buffer between two kernels through
   `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which the caller defines. It also
   admits every `FollowsOperands` function (a tensor operation lowering outlined out of host code)
-  the same way, but leniently: one it cannot lower keeps its host body alone and is no error. It
+  the same way, but leniently: one it cannot lower keeps its host body alone and is no error. One
+  whose body is a compound assignment or a `.map` / `.zip` / `.reduce` becomes a per-thread
+  launcher instead (`kernel/body/traversal.rs`), as leniently. It
   lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
   returns nothing and launches the body once per thread; a body construct the kernel lowering
   lacks is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
-  function. `neurc` calls it only for a program with a `@gpu` or `@kernel` function.
+  function. A body calling a math function needs the vendor's device math library; without it
+  (probed once, see Notes) a `FollowsOperands` one keeps its host body, a `@gpu` one is
+  `GpuBodiesNotLowered` and a `@kernel` one a `KernelRefusal` at the call. `neurc` calls it for a
+  program with a `@gpu`, `@kernel` or `FollowsOperands` function.
 The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
 from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
 because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
@@ -192,7 +197,46 @@ is one MLIR result per tensor, each its own out-param after bufferization, and `
 admits it, as it admits an `i32` result tensor: an index a sort writes, never arithmetic, since
 every parameter is a float.
 
-**Tensor arithmetic (and, on the GPU, reductions and sorts) is the only body lowered here.** `tensor_arithmetic::build_body` turns a
+**Device-only bodies beyond reductions and sorts.** `build_expression` takes the function's
+`HirTarget`; a body for a GPU target (`device(target)`) also lowers elementwise math
+(`tensor_math.rs`: one `linalg.generic` whose body is the `math` dialect op of the function's
+name, `.pow`'s exponent a scalar every point reads, `sign` two compares), slices and permuting
+shape casts (`tensor_layout.rs`: a permute is an input map; a slice is a generic with no inputs
+whose body reads the source with `tensor.extract` at `start + d * step`, from `end - 1` down when
+reversed, and a position axis at one index) and `einsum` (`tensor_einsum.rs`: output letters
+`parallel`, contracted letters `reduction` in letter order, a `+0.0` fill, operands multiplied left
+to right and added to the accumulator, the LLVM backend's order exactly; a full contraction
+arrives boxed in `[1]` and gets one leading parallel dimension of extent 1). A slice position is a
+literal inside its axis, or, only for a `FollowsOperands` target, an integer parameter the call
+site has checked; `linkable_signature` admits integer scalar parameters for that target alone.
+Anything else leaves the body to the LLVM backend, since a GPU body cannot stop the program.
+
+**Per-thread launchers for outlined bodies.** A `FollowsOperands` function whose body is a compound
+assignment (through `*__operand1`) or a traversal is written as MLIR text like a `@kernel`
+(`kernel/body/traversal.rs`, a child of `body.rs` so it shares `BodyEmitter`): a compound
+assignment and a `.map` / `.zip` run one thread per element (256 a block, the position row-major
+delinearized), each reading its element(s), and either updating the `&mut` target in place (the
+value read with the host's trailing-axis broadcast) or calling the closure and storing to the
+result out-param; a `.reduce` runs one thread folding the closure over the buffer in row-major
+order into a `[1]` out-param. The closure is the lifted `HirClosure` the body's `Closure`
+expression names, its parameters bound to the loaded elements and its captures to the launcher
+parameters of the same name. The emitter runs in strict mode there: integer arithmetic is refused
+(the GPU has none of the host's overflow and zero-divisor guards) and `return` with a value stores
+into the call's result slot. A body it refuses leaves the function to the host. `BodyEmitter`
+also lowers scalar math functions (`math.*`, `sign` as selects) for `@kernel` bodies.
+
+**The device math probe.** A `math` op inside a `gpu.module` becomes a call into libdevice (NVIDIA)
+or ocml (AMD), which `gpu-module-to-binary` links only when it finds the CUDA toolkit
+(`CUDA_ROOT` / `CUDA_HOME` / `CUDA_PATH`, or MLIR's build-time default) or ROCm; with no toolkit the
+PTX keeps `.extern .func __nv_*`, which the driver refuses at load along with every other kernel.
+`lower_with_format` therefore checks each built definition's text for `math.` (`math_functions`)
+and, only then, serializes `MATH_PROBE` (one `math.exp`) with diagnostics swallowed: the library is
+there when that succeeds with no `.extern` and no `__ocml_` left. Without it the linkable module is
+rebuilt without the functions that call math (so `build_linkable_module`'s `admit` is a
+`&dyn Fn`), and `kernel_launchers` re-emits a `@kernel` body with math refused. The answer is
+cached for the compile in a `OnceCell`.
+
+**Tensor arithmetic (and, on the GPU, the operations above) is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` or tail expression over
 element-wise `+ - * /` on tensors into a `func.func` definition. An operand may be borrowed: a
 `&Tensor` parameter is a tensor block argument (`read_type`, which also gives the defined

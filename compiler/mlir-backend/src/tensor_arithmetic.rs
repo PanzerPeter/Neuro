@@ -1,5 +1,11 @@
 use crate::{
-    errors::MlirError, lower::map_type, tensor_reduce::build_reduce, tensor_sort::build_sort,
+    errors::MlirError,
+    lower::map_type,
+    tensor_einsum::build_einsum,
+    tensor_layout::{build_permute, build_slice},
+    tensor_math::build_math,
+    tensor_reduce::build_reduce,
+    tensor_sort::build_sort,
 };
 
 use ast_types::BinaryOp;
@@ -76,10 +82,9 @@ pub(crate) fn build_body<'c>(
     }
 
     let block = Block::new(&slots);
-    // A reduction or a sort is lowered for a GPU body only. On the host it stays the LLVM
-    // backend's, like every other tensor operation beyond the arithmetic this path was
-    // built for.
-    let reductions = function.target != HirTarget::Host;
+    // Every tensor operation beyond the arithmetic this path was built for is lowered for a
+    // GPU body only. On the host it stays the LLVM backend's.
+    let target = function.target;
 
     let built = {
         let mut scope: Vec<(String, Value<'c, '_>)> = Vec::with_capacity(function.params.len());
@@ -92,7 +97,7 @@ pub(crate) fn build_body<'c>(
             &block,
             &function.body,
             &mut scope,
-            reductions,
+            target,
         )?
     };
 
@@ -137,7 +142,7 @@ fn build_statements<'c, 'a>(
     block: &'a Block<'c>,
     statements: &[HirStmt],
     scope: &mut Vec<(String, Value<'c, 'a>)>,
-    reductions: bool,
+    target: HirTarget,
 ) -> Result<bool, MlirError> {
     let Some((last, leading)) = statements.split_last() else {
         return Ok(false);
@@ -152,8 +157,7 @@ fn build_statements<'c, 'a>(
         else {
             return Ok(false);
         };
-        let Some(value) = build_expression(context, location, block, init, scope, reductions)?
-        else {
+        let Some(value) = build_expression(context, location, block, init, scope, target)? else {
             return Ok(false);
         };
         scope.push((name.clone(), value));
@@ -173,8 +177,8 @@ fn build_statements<'c, 'a>(
         HirExprKind::TensorSort {
             kind: HirSortKind::TopK(_),
             ..
-        } if reductions => build_sort(context, location, block, value, scope)?,
-        _ => build_expression(context, location, block, value, scope, reductions)?
+        } if device(target) => build_sort(context, location, block, value, scope, target)?,
+        _ => build_expression(context, location, block, value, scope, target)?
             .map(|result| vec![result]),
     };
     let Some(results) = results else {
@@ -193,16 +197,22 @@ fn build_statements<'c, 'a>(
     Ok(true)
 }
 
-/// Lower one expression, yielding the SSA value it produces. `reductions` admits
-/// `.sum()` / `.mean()` / `.max()` / `.min()` and `.sort()` / `.argsort()`, which only a
-/// GPU body lowers here.
+/// Whether a body for `target` runs on a GPU, which is what admits the reductions, the sorts
+/// and every other operation beyond element-wise arithmetic and `@`.
+pub(crate) fn device(target: HirTarget) -> bool {
+    target != HirTarget::Host
+}
+
+/// Lower one expression, yielding the SSA value it produces. A body for a GPU `target`
+/// also lowers the reductions, the sorts, elementwise math, slices, permutations and
+/// `einsum`.
 pub(crate) fn build_expression<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    reductions: bool,
+    target: HirTarget,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     match &expression.kind {
         // Searched from the back so a shadowing binding wins over the one it hides.
@@ -216,34 +226,91 @@ pub(crate) fn build_expression<'c, 'a>(
         HirExprKind::Reference {
             operand,
             mutable: false,
-        } => build_expression(context, location, block, operand, scope, reductions),
-        HirExprKind::TensorReduce { .. } if reductions => {
-            build_reduce(context, location, block, expression, &expression.ty, scope)
-        }
+        } => build_expression(context, location, block, operand, scope, target),
+        _ if !device(target) => match &expression.kind {
+            HirExprKind::Binary {
+                op: BinaryOp::MatMul,
+                ..
+            } => build_matmul(context, location, block, expression, scope, target),
+            HirExprKind::Binary { .. } => {
+                build_elementwise(context, location, block, expression, scope, target)
+            }
+            _ => Ok(None),
+        },
+        HirExprKind::TensorReduce { .. } => build_reduce(
+            context,
+            location,
+            block,
+            expression,
+            &expression.ty,
+            scope,
+            target,
+        ),
         HirExprKind::TensorSort {
             kind: HirSortKind::Values | HirSortKind::Indices,
             ..
-        } if reductions => Ok(build_sort(context, location, block, expression, scope)?
-            .and_then(|results| results.into_iter().next())),
-        // A whole-tensor reduction reaches a GPU body boxed in a one-element tensor, since
-        // a body hands back buffers only.
-        HirExprKind::TensorLiteral { elements } if reductions => match elements.as_slice() {
+        } => Ok(
+            build_sort(context, location, block, expression, scope, target)?
+                .and_then(|results| results.into_iter().next()),
+        ),
+        // A whole-tensor reduction or a full contraction reaches a GPU body boxed in a
+        // one-element tensor, since a body hands back buffers only.
+        HirExprKind::TensorLiteral { elements } => match elements.as_slice() {
             [
                 reduce @ HirExpr {
                     kind: HirExprKind::TensorReduce { axis: None, .. },
                     ..
                 },
-            ] => build_reduce(context, location, block, reduce, &expression.ty, scope),
+            ] => build_reduce(
+                context,
+                location,
+                block,
+                reduce,
+                &expression.ty,
+                scope,
+                target,
+            ),
+            [
+                einsum @ HirExpr {
+                    kind: HirExprKind::TensorEinsum { .. },
+                    ..
+                },
+            ] => build_einsum(
+                context,
+                location,
+                block,
+                einsum,
+                &expression.ty,
+                scope,
+                target,
+            ),
             _ => Ok(None),
         },
+        HirExprKind::TensorEinsum { .. } => build_einsum(
+            context,
+            location,
+            block,
+            expression,
+            &expression.ty,
+            scope,
+            target,
+        ),
+        HirExprKind::Math { .. } => build_math(context, location, block, expression, scope, target),
+        HirExprKind::TensorIndex { .. } => {
+            build_slice(context, location, block, expression, scope, target)
+        }
+        HirExprKind::TensorShapeCast {
+            permutation: Some(_),
+            ..
+        } => build_permute(context, location, block, expression, scope, target),
         // `@` contracts an axis instead of walking the result element for element, so it
         // is a different index space rather than a different body.
         HirExprKind::Binary {
             op: BinaryOp::MatMul,
             ..
-        } => build_matmul(context, location, block, expression, scope, reductions),
+        } => build_matmul(context, location, block, expression, scope, target),
         HirExprKind::Binary { .. } => {
-            build_elementwise(context, location, block, expression, scope, reductions)
+            build_elementwise(context, location, block, expression, scope, target)
         }
         _ => Ok(None),
     }
@@ -256,7 +323,7 @@ fn build_elementwise<'c, 'a>(
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    reductions: bool,
+    target: HirTarget,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::Binary { op, left, right } = &expression.kind else {
         return Ok(None);
@@ -274,10 +341,10 @@ fn build_elementwise<'c, 'a>(
     else {
         return Ok(None);
     };
-    let Some(lhs) = build_expression(context, location, block, left, scope, reductions)? else {
+    let Some(lhs) = build_expression(context, location, block, left, scope, target)? else {
         return Ok(None);
     };
-    let Some(rhs) = build_expression(context, location, block, right, scope, reductions)? else {
+    let Some(rhs) = build_expression(context, location, block, right, scope, target)? else {
         return Ok(None);
     };
     let Some(sizes) = dynamic_sizes(context, location, block, result_shape, &[lhs, rhs], &axes)?
@@ -328,7 +395,7 @@ fn build_matmul<'c, 'a>(
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    reductions: bool,
+    target: HirTarget,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::Binary { left, right, .. } = &expression.kind else {
         return Ok(None);
@@ -351,10 +418,10 @@ fn build_matmul<'c, 'a>(
     if !contraction_is_static(left, right, result_shape) {
         return Ok(None);
     }
-    let Some(lhs) = build_expression(context, location, block, left, scope, reductions)? else {
+    let Some(lhs) = build_expression(context, location, block, left, scope, target)? else {
         return Ok(None);
     };
-    let Some(rhs) = build_expression(context, location, block, right, scope, reductions)? else {
+    let Some(rhs) = build_expression(context, location, block, right, scope, target)? else {
         return Ok(None);
     };
 

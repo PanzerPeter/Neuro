@@ -10,10 +10,11 @@
 // the CPU instead, and the same rule holds while compiling: a body the GPU path cannot
 // lower is a compile error at the function, not a host fallback.
 //
-// WHAT A `@gpu` BODY MAY CONTAIN: straight-line element-wise `+ - * /` and `@` over
-// `f32` / `f64` tensors of static shape and rank 1 or more, with scalar or tensor
-// parameters (owned or `&`) and a tensor result. Compiling one needs a `neurc` built
-// with the MLIR backend (`--features mlir`).
+// WHAT A `@gpu` BODY MAY CONTAIN: straight-line tensor code over `f32` / `f64` tensors of
+// static shape and rank 1 or more (element-wise `+ - * /`, `@`, reductions, sorts, the
+// elementwise math methods, slices at literal positions, `.t()` and `einsum`), with scalar
+// or tensor parameters (owned or `&`) and a tensor result. Compiling one needs a `neurc`
+// built with the MLIR backend (`--features mlir`).
 
 // A blend of two images of the same size, one kernel per operator.
 @gpu

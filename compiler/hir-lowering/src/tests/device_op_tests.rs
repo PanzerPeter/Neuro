@@ -184,3 +184,163 @@ func main() -> i32 {
     );
     assert_eq!(outlined(&program).len(), 4);
 }
+
+const MORE: &str = r#"
+enum Device {
+    CPU,
+    GPU(i32)
+}
+
+struct Layer {
+    w: Tensor<f32, [2, 3]>
+}
+
+func twice(x: f32) -> f32 { x * 2.0f32 }
+
+func main() -> i32 {
+    val a: Tensor<f32, [2, 3]> = Tensor::ones()
+    val g = a.clone().to(Device::GPU(0))
+    val k = 1u64
+    val smooth = (&g + &a).exp() * 2.0f32
+    val row = g[k, 0..2]
+    val flipped = g.clone().t()
+    val gram = einsum("ij,kj->ik", &g, &g)
+    val trace = einsum("ij,ij->", &g, &g)
+    val scale = 3.0f32
+    val mapped = g.map(|x: f32| -> f32 { x * scale })
+    val named = g.map(twice)
+    val folded = g.reduce(0.0f32, |acc: f32, x: f32| -> f32 { acc + x })
+    mut w = a.clone()
+    w -= &g
+    mut layer = Layer { w: a.clone() }
+    layer.w -= &g
+    return 0
+}
+"#;
+
+#[test]
+fn elementwise_math_joins_the_operator_tree_and_borrows_its_leaf() {
+    let program = lower(MORE);
+    let smooth = callee(&program, "smooth");
+    let types: Vec<String> = smooth.params.iter().map(|p| p.ty.to_string()).collect();
+    assert_eq!(
+        types,
+        ["&Tensor<f32, [2, 3]>", "&Tensor<f32, [2, 3]>", "f32"],
+        "one function for `+`, `.exp()` and `*`"
+    );
+}
+
+#[test]
+fn a_slice_position_is_checked_where_the_call_evaluates_it() {
+    let program = lower(MORE);
+    let row = callee(&program, "row");
+    let types: Vec<String> = row.params.iter().map(|p| p.ty.to_string()).collect();
+    assert_eq!(types, ["&Tensor<f32, [2, 3]>", "u64"]);
+    let init = binding_init(function_body(&program, "main"), "row");
+    let HirExprKind::Call { args, .. } = &init.kind else {
+        panic!("the slice is a call: {:?}", init.kind);
+    };
+    let HirExprKind::Block { stmts } = &args[1].kind else {
+        panic!("the position is guarded: {:?}", args[1].kind);
+    };
+    assert!(matches!(
+        stmts.as_slice(),
+        [
+            HirStmt::VarDecl { .. },
+            HirStmt::If { .. },
+            HirStmt::Expr(_)
+        ]
+    ));
+}
+
+#[test]
+fn a_permute_takes_its_receiver_and_einsum_lends_its_operands() {
+    let program = lower(MORE);
+    let flipped = callee(&program, "flipped");
+    assert_eq!(flipped.params[0].ty.to_string(), "Tensor<f32, [2, 3]>");
+    let gram = callee(&program, "gram");
+    assert_eq!(gram.params[0].ty.to_string(), "&Tensor<f32, [2, 3]>");
+    assert_eq!(gram.return_type.to_string(), "Tensor<f32, [2, 2]>");
+    let trace = callee(&program, "trace");
+    assert_eq!(
+        trace.return_type.to_string(),
+        "Tensor<f32, [1]>",
+        "a full contraction is boxed like a whole reduction"
+    );
+}
+
+#[test]
+fn a_traversal_keeps_its_closure_and_takes_its_captures() {
+    let program = lower(MORE);
+    let mapped = callee(&program, "mapped");
+    let names: Vec<&str> = mapped.params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["__operand0", "scale"]);
+    let [HirStmt::Expr(body)] = mapped.body.as_slice() else {
+        panic!("one tail expression");
+    };
+    let HirExprKind::TensorApply { callee, .. } = &body.kind else {
+        panic!("the traversal itself: {:?}", body.kind);
+    };
+    assert!(matches!(callee.kind, HirExprKind::Closure { .. }));
+    assert_eq!(callee_name(&program, "folded"), "outlined");
+    // A function passed by name is a closure forwarding to it, so it is outlined too.
+    assert_eq!(callee_name(&program, "named"), "outlined");
+}
+
+#[test]
+fn a_traversal_over_a_function_local_stays_inline() {
+    // Through a local the closure is a value only the run time knows.
+    let program = lower(&MORE.replace(
+        "val named = g.map(twice)",
+        "val f = |x: f32| -> f32 { x }\n    val named = g.map(f)",
+    ));
+    assert_eq!(callee_name(&program, "named"), "inline");
+}
+
+#[test]
+fn a_compound_assignment_writes_through_a_mutable_borrow() {
+    let program = lower(MORE);
+    let main = function_body(&program, "main");
+    let calls: Vec<&HirFunction> = main
+        .iter()
+        .filter_map(|stmt| match stmt {
+            HirStmt::Expr(expr) => match &expr.kind {
+                HirExprKind::Call { callee, .. } => match &callee.kind {
+                    HirExprKind::Variable(name) => {
+                        outlined(&program).into_iter().find(|f| &f.name == name)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    let [update] = calls.as_slice() else {
+        panic!("only `w -= &g` is outlined, not the field: {calls:?}");
+    };
+    let types: Vec<String> = update.params.iter().map(|p| p.ty.to_string()).collect();
+    assert_eq!(types, ["&Tensor<f32, [2, 3]>", "&mut Tensor<f32, [2, 3]>"]);
+    assert_eq!(update.return_type, HirType::Void);
+    assert!(main.iter().any(|stmt| matches!(
+        stmt,
+        HirStmt::TensorCompoundAssign {
+            place: neuro_hir::HirPlace::Field { .. },
+            ..
+        }
+    )));
+}
+
+/// "outlined" when `binding` is initialized by a call to an outlined function, whether its
+/// value is read back from a boxed result or not.
+fn callee_name(program: &HirProgram, binding: &str) -> &'static str {
+    let init = binding_init(function_body(program, "main"), binding);
+    let call = match &init.kind {
+        HirExprKind::TensorIndex { object, .. } => object,
+        _ => init,
+    };
+    match &call.kind {
+        HirExprKind::Call { .. } => "outlined",
+        _ => "inline",
+    }
+}

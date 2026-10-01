@@ -16,7 +16,7 @@ use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
 
 use crate::{errors::KernelRefusal, gpu::GpuTarget, lower::LINKED_SYMBOL_PREFIX};
 
-use body::{BodyEmitter, Refused, memref_type, scalar_type};
+use body::{BodyEmitter, Launch, Refused, memref_type, outlined_launch, scalar_type};
 
 /// How a body stops a thread that broke a runtime rule (an index past an extent, a zero
 /// divisor). NVIDIA lowers `cf.assert` to its device assertion, which prints the message
@@ -48,12 +48,22 @@ pub(crate) struct KernelLaunchers {
 /// exploded `memref` descriptors and the scalars as themselves, in declaration order, and
 /// returns nothing: what a kernel computes is what it writes through its `&mut` tensors.
 ///
+/// A function outlined to follow its operands joins them when its body is a compound
+/// assignment or a `.map` / `.zip` / `.reduce` the per-thread lowering covers, its result
+/// (if any) an out-param after its parameters, as `linalg`'s are. One it does not cover is
+/// left to the host, which is no error.
+///
+/// `math` answers whether the GPU vendor's device math library is there to call; it is
+/// asked only of a body that calls a math function.
+///
 /// # Errors
 ///
-/// A body construct the lowering does not cover, one [`KernelRefusal`] per function.
+/// A body construct the lowering does not cover, one [`KernelRefusal`] per `@kernel`
+/// function.
 pub(crate) fn kernel_launchers(
     program: &HirProgram,
     target: &GpuTarget,
+    math: &dyn Fn() -> bool,
 ) -> Result<KernelLaunchers, Vec<KernelRefusal>> {
     let guard = GuardStyle::for_target(target);
     let mut text = String::from("module {\n");
@@ -63,11 +73,18 @@ pub(crate) fn kernel_launchers(
         let HirItem::Function(function) = item else {
             continue;
         };
+        let symbol = format!("{LINKED_SYMBOL_PREFIX}{}", function.name);
+        if function.target == HirTarget::FollowsOperands {
+            if let Some(launcher) = follows_operands(program, function, &symbol, guard, math) {
+                text.push_str(&launcher);
+                functions.push((function.name.clone(), symbol));
+            }
+            continue;
+        }
         let HirTarget::Kernel { threads } = function.target else {
             continue;
         };
-        let symbol = format!("{LINKED_SYMBOL_PREFIX}{}", function.name);
-        match launcher(function, &symbol, threads, guard) {
+        match launcher(function, &symbol, threads, guard, math) {
             Ok(launcher) => {
                 text.push_str(&launcher);
                 functions.push((function.name.clone(), symbol));
@@ -92,32 +109,92 @@ fn launcher(
     symbol: &str,
     threads: [u32; 3],
     guard: GuardStyle,
+    math: &dyn Fn() -> bool,
 ) -> Result<String, Refused> {
-    let mut params = Vec::with_capacity(function.params.len());
-    for (index, param) in function.params.iter().enumerate() {
-        let ty = match &param.ty {
-            HirType::Reference { inner, .. } => memref_type(inner),
-            other => scalar_type(other).map(str::to_string),
-        }
-        .ok_or_else(|| Refused::new(param.span, "a parameter of this type"))?;
-        params.push(format!("%arg{index}: {ty}"));
-    }
+    let params = parameters(function)?;
     let Some(extents) = grid_extents(function) else {
         return Err(Refused::new(
             function.span,
             "a kernel without a `&mut` tensor of static shape",
         ));
     };
-
-    let mut text = format!("  func.func @\"{symbol}\"({}) {{\n", params.join(", "));
     let blocks = grid_blocks(&extents, threads);
     // A grid tensor with no elements has no threads to run, and a launch of zero blocks
     // is an error on every GPU.
     if blocks.contains(&0) {
-        text.push_str("    return\n  }\n");
-        return Ok(text);
+        return Ok(launch_text(symbol, &params, blocks, threads, ""));
     }
-    let region = BodyEmitter::new(function, guard, threads, extents).emit()?;
+    let mut region = BodyEmitter::new(function, guard, threads, extents.clone(), true).emit()?;
+    if uses_math(&region) && !math() {
+        region = BodyEmitter::new(function, guard, threads, extents, false).emit()?;
+    }
+    Ok(launch_text(symbol, &params, blocks, threads, &region))
+}
+
+/// The launcher of an outlined `function`, or `None` where the per-thread lowering does not
+/// cover its body, which then runs on the host alone.
+fn follows_operands(
+    program: &HirProgram,
+    function: &HirFunction,
+    symbol: &str,
+    guard: GuardStyle,
+    math: &dyn Fn() -> bool,
+) -> Option<String> {
+    let mut params = parameters(function).ok()?;
+    let Launch {
+        blocks,
+        threads,
+        region,
+        result,
+    } = outlined_launch(program, function, guard, true).ok()??;
+    if uses_math(&region) && !math() {
+        return None;
+    }
+    if let Some(result) = result {
+        params.push(format!("%arg{}: {result}", params.len()));
+    }
+    if blocks.contains(&0) {
+        return Some(launch_text(symbol, &params, blocks, threads, ""));
+    }
+    Some(launch_text(symbol, &params, blocks, threads, &region))
+}
+
+/// Whether a region calls a math function, which only the vendor's device math library
+/// can run.
+fn uses_math(region: &str) -> bool {
+    region.contains("math.")
+}
+
+/// Each parameter as the launcher declares it: a tensor, owned or borrowed, as its `memref`,
+/// and a scalar as itself.
+fn parameters(function: &HirFunction) -> Result<Vec<String>, Refused> {
+    let mut params = Vec::with_capacity(function.params.len());
+    for (index, param) in function.params.iter().enumerate() {
+        let ty = match &param.ty {
+            HirType::Reference { inner, .. } => memref_type(inner),
+            tensor @ HirType::Tensor { .. } => memref_type(tensor),
+            other => scalar_type(other).map(str::to_string),
+        }
+        .ok_or_else(|| Refused::new(param.span, "a parameter of this type"))?;
+        params.push(format!("%arg{index}: {ty}"));
+    }
+    Ok(params)
+}
+
+/// A `func.func` named `symbol` that runs `region` over a grid of `blocks` of `threads`,
+/// or returns at once when the grid has no blocks.
+fn launch_text(
+    symbol: &str,
+    params: &[String],
+    blocks: [u64; 3],
+    threads: [u32; 3],
+    region: &str,
+) -> String {
+    let mut text = format!("  func.func @\"{symbol}\"({}) {{\n", params.join(", "));
+    if blocks.contains(&0) {
+        text.push_str("    return\n  }\n");
+        return text;
+    }
     for (axis, (count, per_block)) in blocks.iter().zip(threads).enumerate() {
         text.push_str(&format!(
             "    %grid{axis} = arith.constant {count} : index\n    %block{axis} = arith.constant {per_block} : index\n"
@@ -127,9 +204,9 @@ fn launcher(
         "    gpu.launch blocks(%bx, %by, %bz) in (%gx = %grid0, %gy = %grid1, %gz = %grid2) \
          threads(%tx, %ty, %tz) in (%sx = %block0, %sy = %block1, %sz = %block2) {\n",
     );
-    text.push_str(&region);
+    text.push_str(region);
     text.push_str("    }\n    return\n  }\n");
-    Ok(text)
+    text
 }
 
 /// The extents of the first `&mut` tensor parameter, the tensor the grid covers.
@@ -207,7 +284,7 @@ func main() -> i32 {
     #[test]
     fn a_kernel_launches_over_its_grid_behind_a_descriptor_signature() {
         let KernelLaunchers { text, functions } =
-            kernel_launchers(&program(KERNEL), &nvidia()).expect("the body lowers");
+            kernel_launchers(&program(KERNEL), &nvidia(), &|| true).expect("the body lowers");
         assert_eq!(
             functions,
             vec![("add_relu".to_string(), "__neuro_mlir_add_relu".to_string())]
@@ -245,7 +322,7 @@ func main() -> i32 {
         let target = GpuTarget::Amd {
             chip: "gfx90a".to_string(),
         };
-        let text = kernel_launchers(&program(KERNEL), &target)
+        let text = kernel_launchers(&program(KERNEL), &target, &|| true)
             .expect("the body lowers")
             .text;
         assert!(
@@ -308,7 +385,7 @@ func main() -> i32 {
 
     #[test]
     fn a_partition_runs_in_each_thread_that_owns_a_grid_element() {
-        let text = kernel_launchers(&program(PARTITION), &nvidia())
+        let text = kernel_launchers(&program(PARTITION), &nvidia(), &|| true)
             .expect("the body lowers")
             .text;
         // Threads 6 and 7 of the two blocks of 4 own no element of the grid tensor.
@@ -359,7 +436,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-        let text = kernel_launchers(&program(source), &nvidia())
+        let text = kernel_launchers(&program(source), &nvidia(), &|| true)
             .expect("the body lowers")
             .text;
         assert!(!text.contains("gpu.launch"), "{text}");

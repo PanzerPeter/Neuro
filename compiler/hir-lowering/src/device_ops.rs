@@ -12,16 +12,27 @@
 // The pass runs only in a program that moves a tensor to a device, since that is the one
 // way a device tensor comes to exist; any other program is lowered exactly as before.
 
-use ast_types::BinaryOp;
+use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    AxisNames, HirExpr, HirExprKind, HirFunction, HirInterpPart, HirItem, HirParam, HirPlace,
-    HirStmt, HirTarget, HirTensorAxis, HirType,
+    AxisNames, HirCapture, HirExpr, HirExprKind, HirFunction, HirInterpPart, HirItem, HirParam,
+    HirPlace, HirStmt, HirTarget, HirTensorApply, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
 /// The outlined functions are named with this and a counter. The checker forbids the `__`
 /// prefix in user names, as it does for lifted closures (`__closure_N`).
 const OUTLINED_PREFIX: &str = "__device_op_";
+
+/// An outlined function's parameters are named with this and their position. The `__`
+/// prefix keeps them apart from a closure capture, which is passed under its own name.
+const OPERAND_PREFIX: &str = "__operand";
+
+/// The local a slice position is bound to while the call site checks it.
+const POSITION_LOCAL: &str = "__position";
+
+/// What an out-of-range slice position reports: the host's own words for it, so a device
+/// slice and a host one fail alike.
+const INDEX_OUT_OF_BOUNDS: &str = "tensor index out of bounds";
 
 /// Outline every device-capable tensor operation in the program's host code into a
 /// `FollowsOperands` function, appended to `items`.
@@ -57,26 +68,48 @@ fn device_tensor(ty: &HirType) -> bool {
     matches!(
         ty.referent(),
         HirType::Tensor { element, shape, .. }
-            if matches!(**element, HirType::F32 | HirType::F64)
+            if float(element)
                 && !shape.is_empty()
                 && shape.iter().all(Option::is_some)
     )
 }
 
-/// A node of an outlinable operator tree: element-wise arithmetic or a matrix product
-/// producing a device-capable tensor.
+fn float(ty: &HirType) -> bool {
+    matches!(ty, HirType::F32 | HirType::F64)
+}
+
+/// A node of an outlinable operator tree: an operation producing a device-capable tensor
+/// out of tensors the same function can compute or read. Element-wise arithmetic, `@` and a
+/// permuting shape cast take their operands as written; elementwise math, a slice and an
+/// `einsum` only read theirs, so each must be another node or a tensor that can be lent.
 fn operator_node(expr: &HirExpr) -> bool {
-    matches!(
-        &expr.kind,
-        HirExprKind::Binary {
-            op: BinaryOp::Add
+    if !device_tensor(&expr.ty) {
+        return false;
+    }
+    match &expr.kind {
+        HirExprKind::Binary { op, .. } => matches!(
+            op,
+            BinaryOp::Add
                 | BinaryOp::Subtract
                 | BinaryOp::Multiply
                 | BinaryOp::Divide
-                | BinaryOp::MatMul,
+                | BinaryOp::MatMul
+        ),
+        HirExprKind::TensorShapeCast {
+            permutation: Some(_),
             ..
-        }
-    ) && device_tensor(&expr.ty)
+        } => true,
+        HirExprKind::Math { operand, .. } => readable(operand),
+        HirExprKind::TensorIndex { object, .. } => readable(object),
+        HirExprKind::TensorEinsum { operands, .. } => operands.iter().all(readable),
+        _ => false,
+    }
+}
+
+/// Whether a node that only reads `operand` can take it: as a node of the same tree, or
+/// as a device-capable tensor it is lent.
+fn readable(operand: &HirExpr) -> bool {
+    operator_node(operand) || (device_tensor(&operand.ty) && reducible(operand))
 }
 
 /// Whether a reduction or a sort may be outlined over `receiver`: a borrow (lent on as it
@@ -101,6 +134,27 @@ fn is_place(expr: &HirExpr) -> bool {
     )
 }
 
+/// Whether every capture of a closure is a scalar a device body can be handed, so a
+/// traversal calling it may run on a GPU.
+fn scalar_captures(captures: &[HirCapture]) -> bool {
+    captures.iter().all(|capture| {
+        matches!(
+            capture.ty,
+            HirType::F32
+                | HirType::F64
+                | HirType::I8
+                | HirType::I16
+                | HirType::I32
+                | HirType::I64
+                | HirType::U8
+                | HirType::U16
+                | HirType::U32
+                | HirType::U64
+                | HirType::Bool
+        )
+    })
+}
+
 impl Outliner {
     /// Replace `expr` with a call to an outlined function when it is a device-capable
     /// operation, and report whether it did. Its operands are rewritten first, so an
@@ -109,78 +163,168 @@ impl Outliner {
         if operator_node(expr) {
             let mut operands = Vec::new();
             let body = self.take_tree(placeholder(expr), &mut operands);
-            *expr = self.call(body, operands, expr.span);
+            *expr = self.call(body, operands, &[], expr.span);
             return true;
         }
-        // A sort's result is a fresh tensor (or `.topk`'s pair of them) of the receiver's
-        // rank, so the receiver alone decides whether it can run on a device.
-        if let HirExprKind::TensorSort { receiver, .. } = &mut expr.kind {
-            if !device_tensor(&receiver.ty) || !reducible(receiver) {
-                return false;
+        match &mut expr.kind {
+            // A sort's result is a fresh tensor (or `.topk`'s pair of them) of the receiver's
+            // rank, so the receiver alone decides whether it can run on a device.
+            HirExprKind::TensorSort { receiver, .. } => {
+                if !device_tensor(&receiver.ty) || !reducible(receiver) {
+                    return false;
+                }
+                self.rewrite(receiver);
+                let span = expr.span;
+                let mut sort = placeholder(expr);
+                let HirExprKind::TensorSort { receiver, .. } = &mut sort.kind else {
+                    return false;
+                };
+                let operand = lend_out(receiver, 0, span);
+                *expr = self.call(sort, vec![operand], &[], span);
+                true
             }
-            self.rewrite(receiver);
-            let span = expr.span;
-            let mut sort = placeholder(expr);
-            let HirExprKind::TensorSort { receiver, .. } = &mut sort.kind else {
-                return false;
+            HirExprKind::TensorReduce { receiver, axis, .. } => {
+                if !device_tensor(&receiver.ty)
+                    || !reducible(receiver)
+                    || (axis.is_some() && !device_tensor(&expr.ty))
+                {
+                    return false;
+                }
+                self.rewrite(receiver);
+                let whole = axis.is_none();
+                let span = expr.span;
+                let mut reduce = placeholder(expr);
+                let HirExprKind::TensorReduce { receiver, .. } = &mut reduce.kind else {
+                    return false;
+                };
+                let operand = lend_out(receiver, 0, span);
+                *expr = match whole {
+                    true => self.boxed_call(reduce, vec![operand], &[], span),
+                    false => self.call(reduce, vec![operand], &[], span),
+                };
+                true
+            }
+            // A full contraction (`"ii->"`) yields a scalar; one with output letters is a
+            // tensor, and so a node of an operator tree, taken above.
+            HirExprKind::TensorEinsum { operands, .. } => {
+                if device_tensor(&expr.ty) || !float(&expr.ty) || !operands.iter().all(readable) {
+                    return false;
+                }
+                let span = expr.span;
+                let mut einsum = placeholder(expr);
+                let mut taken = Vec::new();
+                if let HirExprKind::TensorEinsum { operands, .. } = &mut einsum.kind {
+                    for operand in operands.iter_mut() {
+                        *operand =
+                            self.take_read(std::mem::replace(operand, unit(span)), &mut taken);
+                    }
+                }
+                *expr = self.boxed_call(einsum, taken, &[], span);
+                true
+            }
+            HirExprKind::TensorApply { .. } => self.outline_apply(expr),
+            _ => false,
+        }
+    }
+
+    /// Outline `.map(f)`, `.zip(other, f)` or `.reduce(init, f)` over a device-capable
+    /// receiver whose function is a closure literal (a function passed by name is lowered to
+    /// one forwarding to it). The closure stays in the body, so a GPU body knows what it
+    /// calls; its captures become parameters under their own names, which is where the
+    /// closure literal loads them from. A function passed through a local is a value only the
+    /// run time knows, so that traversal stays inline.
+    fn outline_apply(&mut self, expr: &mut HirExpr) -> bool {
+        let HirExprKind::TensorApply {
+            kind,
+            receiver,
+            operand,
+            callee,
+        } = &mut expr.kind
+        else {
+            return false;
+        };
+        let HirExprKind::Closure { captures, .. } = &callee.kind else {
+            return false;
+        };
+        let admitted = device_tensor(&receiver.ty)
+            && reducible(receiver)
+            && scalar_captures(captures)
+            && match (*kind, operand.as_deref()) {
+                (HirTensorApply::Map, None) => device_tensor(&expr.ty),
+                (HirTensorApply::Zip, Some(other)) => {
+                    device_tensor(&expr.ty) && device_tensor(&other.ty) && reducible(other)
+                }
+                (HirTensorApply::Reduce, Some(_)) => float(&expr.ty),
+                _ => false,
             };
-            let operand = lend(std::mem::replace(receiver.as_mut(), unit(span)));
-            **receiver = parameter(0, &operand);
-            *expr = self.call(sort, vec![operand], span);
-            return true;
-        }
-        let HirExprKind::TensorReduce { receiver, axis, .. } = &mut expr.kind else {
-            return false;
-        };
-        if !device_tensor(&receiver.ty)
-            || !reducible(receiver)
-            || (axis.is_some() && !device_tensor(&expr.ty))
-        {
+        if !admitted {
             return false;
         }
+        let captures = captures.clone();
+        let reduce = *kind == HirTensorApply::Reduce;
         self.rewrite(receiver);
-        let whole = axis.is_none();
+        if let Some(operand) = operand {
+            self.rewrite(operand);
+        }
         let span = expr.span;
-        let mut reduce = placeholder(expr);
-        let HirExprKind::TensorReduce { receiver, .. } = &mut reduce.kind else {
+        let mut apply = placeholder(expr);
+        let HirExprKind::TensorApply {
+            receiver, operand, ..
+        } = &mut apply.kind
+        else {
             return false;
         };
-        let operand = lend(std::mem::replace(receiver.as_mut(), unit(span)));
-        **receiver = parameter(0, &operand);
-        if !whole {
-            *expr = self.call(reduce, vec![operand], span);
-            return true;
+        let mut operands = vec![lend_out(receiver, 0, span)];
+        if let Some(operand) = operand {
+            // A `.zip`'s second tensor is read like the receiver; a `.reduce`'s seed is a
+            // scalar, passed as it is.
+            let taken = std::mem::replace(operand.as_mut(), unit(span));
+            let taken = if reduce { taken } else { lend(taken) };
+            **operand = parameter(1, &taken);
+            operands.push(taken);
         }
-        // A whole-tensor reduction yields a scalar, which a GPU body cannot return: its
-        // result is a buffer the caller allocates. So the body leaves it in a one-element
-        // tensor, and the call site reads that element back.
-        let element = reduce.ty.clone();
-        let boxed = HirExpr::new(
-            HirExprKind::TensorLiteral {
-                elements: vec![reduce],
-            },
-            HirType::Tensor {
-                element: Box::new(element.clone()),
-                shape: vec![Some(1)],
-                names: AxisNames::default(),
-            },
-            span,
-        );
-        let call = self.call(boxed, vec![operand], span);
-        let first = HirExpr::new(
-            HirExprKind::Literal(Literal::Integer(0, None)),
-            HirType::U64,
-            span,
-        );
-        *expr = HirExpr::new(
-            HirExprKind::TensorIndex {
-                object: Box::new(call),
-                axes: vec![HirTensorAxis::Position(first)],
-            },
-            element,
-            span,
-        );
+        *expr = match reduce {
+            true => self.boxed_call(apply, operands, &captures, span),
+            false => self.call(apply, operands, &captures, span),
+        };
         true
+    }
+
+    /// `place OP= value` on a device-capable tensor as a call to a function that updates
+    /// its target through a `&mut` parameter, so the buffer the place addresses is the one
+    /// written, wherever it lives. `None` for a place a backend cannot borrow mutably (a
+    /// field, an element) or a value no GPU body takes.
+    fn outline_compound(
+        &mut self,
+        place: &HirPlace,
+        op: BinaryOp,
+        value: &mut HirExpr,
+        ty: &HirType,
+        span: Span,
+    ) -> Option<HirExpr> {
+        let admitted = device_tensor(ty)
+            && matches!(
+                op,
+                BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+            )
+            && (device_tensor(&value.ty) || value.ty == *element(ty)?);
+        if !admitted {
+            return None;
+        }
+        let target = mutable_borrow(place, ty, span)?;
+        // The value is evaluated before the target is touched, as the statement orders it.
+        let value = std::mem::replace(value, unit(span));
+        let body = HirStmt::TensorCompoundAssign {
+            place: HirPlace::Deref {
+                pointer: Box::new(parameter(1, &target)),
+                ty: ty.clone(),
+            },
+            op,
+            value: parameter(0, &value),
+            ty: ty.clone(),
+            span,
+        };
+        Some(self.define(vec![body], HirType::Void, vec![value, target], &[], span))
     }
 
     /// The operator tree rooted at `expr` with each operand replaced by the parameter it
@@ -192,18 +336,125 @@ impl Outliner {
             operands.push(expr);
             return variable;
         }
-        if let HirExprKind::Binary { left, right, .. } = &mut expr.kind {
-            **left = self.take_tree(std::mem::replace(left, unit(expr.span)), operands);
-            **right = self.take_tree(std::mem::replace(right, unit(expr.span)), operands);
+        let span = expr.span;
+        match &mut expr.kind {
+            HirExprKind::Binary { left, right, .. } => {
+                **left = self.take_tree(std::mem::replace(left, unit(span)), operands);
+                **right = self.take_tree(std::mem::replace(right, unit(span)), operands);
+            }
+            HirExprKind::TensorShapeCast { receiver, .. } => {
+                **receiver = self.take_tree(std::mem::replace(receiver, unit(span)), operands);
+            }
+            HirExprKind::Math {
+                operand, exponent, ..
+            } => {
+                **operand = self.take_read(std::mem::replace(operand, unit(span)), operands);
+                if let Some(exponent) = exponent {
+                    **exponent = self.take_tree(std::mem::replace(exponent, unit(span)), operands);
+                }
+            }
+            HirExprKind::TensorIndex { object, axes } => {
+                let extents = match object.ty.referent() {
+                    HirType::Tensor { shape, .. } => shape.clone(),
+                    _ => Vec::new(),
+                };
+                **object = self.take_read(std::mem::replace(object, unit(span)), operands);
+                for (axis, extent) in axes.iter_mut().zip(extents) {
+                    if let HirTensorAxis::Position(position) = axis {
+                        self.rewrite(position);
+                        let checked =
+                            checked_position(std::mem::replace(position, unit(span)), extent, span);
+                        *position = parameter(operands.len(), &checked);
+                        operands.push(checked);
+                    }
+                }
+            }
+            HirExprKind::TensorEinsum {
+                operands: inputs, ..
+            } => {
+                for input in inputs.iter_mut() {
+                    *input = self.take_read(std::mem::replace(input, unit(span)), operands);
+                }
+            }
+            _ => {}
         }
         expr
     }
 
-    /// Define a `FollowsOperands` function computing `body` over `operands`, and return
-    /// the call to it.
-    fn call(&mut self, body: HirExpr, operands: Vec<HirExpr>, span: Span) -> HirExpr {
+    /// An operand a node only reads: another node of the tree, or a leaf lent to the call.
+    fn take_read(&mut self, expr: HirExpr, operands: &mut Vec<HirExpr>) -> HirExpr {
+        if operator_node(&expr) {
+            return self.take_tree(expr, operands);
+        }
+        let mut expr = expr;
+        self.rewrite(&mut expr);
+        let operand = lend(expr);
+        let variable = parameter(operands.len(), &operand);
+        operands.push(operand);
+        variable
+    }
+
+    /// Define a `FollowsOperands` function computing `body` over `operands` and `captures`,
+    /// and return the call to it.
+    fn call(
+        &mut self,
+        body: HirExpr,
+        operands: Vec<HirExpr>,
+        captures: &[HirCapture],
+        span: Span,
+    ) -> HirExpr {
+        let ret = body.ty.clone();
+        self.define(vec![HirStmt::Expr(body)], ret, operands, captures, span)
+    }
+
+    /// [`Self::call`] for a body yielding a scalar, which a GPU body cannot return: its
+    /// result is a buffer the caller allocates. So the body leaves it in a one-element
+    /// tensor, and the call site reads that element back.
+    fn boxed_call(
+        &mut self,
+        body: HirExpr,
+        operands: Vec<HirExpr>,
+        captures: &[HirCapture],
+        span: Span,
+    ) -> HirExpr {
+        let element = body.ty.clone();
+        let boxed = HirExpr::new(
+            HirExprKind::TensorLiteral {
+                elements: vec![body],
+            },
+            HirType::Tensor {
+                element: Box::new(element.clone()),
+                shape: vec![Some(1)],
+                names: AxisNames::default(),
+            },
+            span,
+        );
+        let call = self.call(boxed, operands, captures, span);
+        let first = HirExpr::new(
+            HirExprKind::Literal(Literal::Integer(0, None)),
+            HirType::U64,
+            span,
+        );
+        HirExpr::new(
+            HirExprKind::TensorIndex {
+                object: Box::new(call),
+                axes: vec![HirTensorAxis::Position(first)],
+            },
+            element,
+            span,
+        )
+    }
+
+    fn define(
+        &mut self,
+        body: Vec<HirStmt>,
+        ret: HirType,
+        operands: Vec<HirExpr>,
+        captures: &[HirCapture],
+        span: Span,
+    ) -> HirExpr {
         let name = format!("{OUTLINED_PREFIX}{}", self.functions.len());
-        let params: Vec<HirParam> = operands
+        let mut params: Vec<HirParam> = operands
             .iter()
             .enumerate()
             .map(|(index, operand)| HirParam {
@@ -212,7 +463,19 @@ impl Outliner {
                 span: operand.span,
             })
             .collect();
-        let ret = body.ty.clone();
+        let mut args = operands;
+        for capture in captures {
+            params.push(HirParam {
+                name: capture.name.clone(),
+                ty: capture.ty.clone(),
+                span,
+            });
+            args.push(HirExpr::new(
+                HirExprKind::Variable(capture.name.clone()),
+                capture.ty.clone(),
+                span,
+            ));
+        }
         let callee = HirExpr::new(
             HirExprKind::Variable(name.clone()),
             HirType::Function {
@@ -225,14 +488,14 @@ impl Outliner {
             name,
             params,
             return_type: ret.clone(),
-            body: vec![HirStmt::Expr(body)],
+            body,
             target: HirTarget::FollowsOperands,
             span,
         });
         HirExpr::new(
             HirExprKind::Call {
                 callee: Box::new(callee),
-                args: operands,
+                args,
             },
             ret,
             span,
@@ -248,10 +511,22 @@ impl Outliner {
     fn rewrite_stmt(&mut self, stmt: &mut HirStmt) {
         match stmt {
             HirStmt::VarDecl { init, .. } => self.rewrite_optional(init.as_mut()),
-            HirStmt::Assign { place, value, .. }
-            | HirStmt::TensorCompoundAssign { place, value, .. } => {
+            HirStmt::Assign { place, value, .. } => {
                 self.rewrite(value);
                 self.rewrite_place(place);
+            }
+            HirStmt::TensorCompoundAssign {
+                place,
+                op,
+                value,
+                ty,
+                span,
+            } => {
+                self.rewrite(value);
+                self.rewrite_place(place);
+                if let Some(call) = self.outline_compound(place, *op, value, ty, *span) {
+                    *stmt = HirStmt::Expr(call);
+                }
             }
             HirStmt::Return { value, .. } | HirStmt::Break { value, .. } => {
                 self.rewrite_optional(value.as_mut())
@@ -479,7 +754,14 @@ impl Outliner {
 }
 
 fn parameter_name(index: usize) -> String {
-    format!("operand{index}")
+    format!("{OPERAND_PREFIX}{index}")
+}
+
+fn element(ty: &HirType) -> Option<&HirType> {
+    match ty.referent() {
+        HirType::Tensor { element, .. } => Some(element),
+        _ => None,
+    }
 }
 
 /// The argument a reduction or a sort passes for its receiver. Both read the receiver and
@@ -500,6 +782,139 @@ fn lend(operand: HirExpr) -> HirExpr {
         ),
         _ => operand,
     }
+}
+
+/// Lend the receiver in `slot` out of the operation, leaving the parameter numbered
+/// `index` in its place, and return the argument passed for it.
+fn lend_out(slot: &mut HirExpr, index: usize, span: Span) -> HirExpr {
+    let operand = lend(std::mem::replace(slot, unit(span)));
+    *slot = parameter(index, &operand);
+    operand
+}
+
+/// The `&mut` argument a compound assignment's outlined function writes its target
+/// through: the binding itself when it already is a `&mut` tensor, or a fresh mutable
+/// borrow of an owned one. A field or an element cannot be borrowed by a backend.
+fn mutable_borrow(place: &HirPlace, ty: &HirType, span: Span) -> Option<HirExpr> {
+    let reference = HirType::Reference {
+        inner: Box::new(ty.clone()),
+        mutable: true,
+    };
+    let (name, binding_ty) = match place {
+        HirPlace::Var { name, ty } => (name, ty),
+        HirPlace::Deref { pointer, .. } => match &pointer.kind {
+            HirExprKind::Variable(name) => (name, &pointer.ty),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let binding = HirExpr::new(
+        HirExprKind::Variable(name.clone()),
+        binding_ty.clone(),
+        span,
+    );
+    match binding_ty {
+        HirType::Reference { mutable: true, .. } => Some(binding),
+        HirType::Tensor { .. } => Some(HirExpr::new(
+            HirExprKind::Reference {
+                operand: Box::new(binding),
+                mutable: true,
+            },
+            reference,
+            span,
+        )),
+        _ => None,
+    }
+}
+
+/// `position` checked against `extent` where the call evaluates it, the host's guard
+/// with the host's message: `{ val p = position; if !((p as u64) < extent) { panic } p }`.
+/// A GPU body cannot stop the program, so a position reaches one only once it is known to
+/// be in range. A signed position widens with its sign, so a negative one fails the same
+/// unsigned test, as on the host.
+fn checked_position(position: HirExpr, extent: Option<usize>, span: Span) -> HirExpr {
+    let ty = position.ty.clone();
+    let local = HirExpr::new(
+        HirExprKind::Variable(POSITION_LOCAL.to_string()),
+        ty.clone(),
+        position.span,
+    );
+    let widened = match ty {
+        HirType::U64 => local.clone(),
+        _ => HirExpr::new(
+            HirExprKind::Cast {
+                value: Box::new(local.clone()),
+            },
+            HirType::U64,
+            position.span,
+        ),
+    };
+    let bound = HirExpr::new(
+        HirExprKind::Literal(Literal::Integer(extent.unwrap_or(0) as i128, None)),
+        HirType::U64,
+        span,
+    );
+    let inside = HirExpr::new(
+        HirExprKind::Binary {
+            op: BinaryOp::Less,
+            left: Box::new(widened),
+            right: Box::new(bound),
+        },
+        HirType::Bool,
+        span,
+    );
+    let outside = HirExpr::new(
+        HirExprKind::Unary {
+            op: UnaryOp::Not,
+            operand: Box::new(inside),
+        },
+        HirType::Bool,
+        span,
+    );
+    let message = HirExpr::new(
+        HirExprKind::Literal(Literal::String(INDEX_OUT_OF_BOUNDS.to_string())),
+        HirType::String,
+        span,
+    );
+    let panic = HirExpr::new(
+        HirExprKind::Call {
+            callee: Box::new(HirExpr::new(
+                HirExprKind::Variable("panic".to_string()),
+                HirType::Function {
+                    params: vec![HirType::String],
+                    ret: Box::new(HirType::Void),
+                },
+                span,
+            )),
+            args: vec![message],
+        },
+        HirType::Void,
+        span,
+    );
+    let block_span = position.span;
+    HirExpr::new(
+        HirExprKind::Block {
+            stmts: vec![
+                HirStmt::VarDecl {
+                    name: POSITION_LOCAL.to_string(),
+                    ty: ty.clone(),
+                    init: Some(position),
+                    mutable: false,
+                    span: block_span,
+                },
+                HirStmt::If {
+                    condition: outside,
+                    then_block: vec![HirStmt::Expr(panic)],
+                    else_if_blocks: Vec::new(),
+                    else_block: None,
+                    span,
+                },
+                HirStmt::Expr(local),
+            ],
+        },
+        ty,
+        block_span,
+    )
 }
 
 /// The parameter an outlined body reads in place of `operand`, at the operand's own span.

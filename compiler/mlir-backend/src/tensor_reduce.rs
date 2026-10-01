@@ -35,7 +35,7 @@ use melior::{
         operation::OperationBuilder,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirReduceOp, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirReduceOp, HirTarget, HirType};
 
 /// How many region arguments a fold body takes: the source element, then the accumulator.
 const FOLD_BODY_ARGUMENTS: usize = 2;
@@ -52,22 +52,23 @@ pub(crate) fn build_reduce<'c, 'a>(
     reduce: &HirExpr,
     result: &HirType,
     scope: &[(String, Value<'c, 'a>)],
+    target: HirTarget,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::TensorReduce { receiver, op, axis } = &reduce.kind else {
         return Ok(None);
     };
-    let (Some((element, source)), Some((_, target))) =
+    let (Some((element, source)), Some((_, extents))) =
         (tensor_parts(&receiver.ty), tensor_parts(result))
     else {
         return Ok(None);
     };
-    let Some(layout) = ReduceLayout::new(source, target, *axis) else {
+    let Some(layout) = ReduceLayout::new(source, extents, *axis) else {
         return Ok(None);
     };
     if !matches!(element, HirType::F32 | HirType::F64) {
         return Ok(None);
     }
-    let Some(source) = build_expression(context, location, block, receiver, scope, true)? else {
+    let Some(source) = build_expression(context, location, block, receiver, scope, target)? else {
         return Ok(None);
     };
 

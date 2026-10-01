@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.15.0] - 2026-10-01
+
+### Added
+
+- The remaining float tensor operations on a tensor that lives on a GPU now run on that GPU
+  instead of aborting, and their results stay there: compound assignment (`w -= &g`, `w *= 2.0`),
+  slicing (stepped, reversed and at a run-time position), `.t()` and `.permute(...)`, `einsum`,
+  the elementwise math methods, and `.map`, `.zip` and `.reduce` over a closure literal, its
+  captures included. A compound assignment writes its target's own buffer where the target lives,
+  so a host tensor updated with a device operand stays a host tensor. A slice position past its
+  axis fails with the host's message before anything is copied. Results match the host bit for
+  bit, except `.exp()`, `.log()`, `.tanh()` and `.pow(p)`, which use the GPU vendor's math library
+  and may differ in the last bits. A `@gpu` function may now also use the elementwise math
+  methods, slices at literal positions, `.t()` / `.permute(...)` and `einsum`, and a `@kernel` body
+  may call the math methods. Needs a `neurc` built with the MLIR backend.
+- Elementwise math on a GPU needs the vendor's device math library when compiling (libdevice
+  from the CUDA toolkit, or ROCm's). Without it, an outlined math operation runs on the host only
+  and a `@gpu` or `@kernel` body calling one is a compile error.
+
 ## [4.14.0] - 2026-10-01
 
 ### Added

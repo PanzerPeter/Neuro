@@ -111,11 +111,14 @@ construct's span, and `neurc` renders it like a type error. See
 ### Device operations
 
 In a program that moves a tensor to a device with `.to(...)`, the last step of lowering outlines
-each tensor operation a GPU can compute (a tree of `+ - * / @`, or a reduction, over float
-tensors of static shape) into a function of its own whose target is
-`HirTarget::FollowsOperands`. The backends then choose per call where it runs, from where its
-operands live. The operands are passed exactly as written, so ownership is unchanged. The source
-lives in [`src/device_ops.rs`](../../../compiler/hir-lowering/src/device_ops.rs).
+each tensor operation a GPU can compute over float tensors of static shape into a function of
+its own whose target is `HirTarget::FollowsOperands`: a tree of operators, `@`, elementwise math,
+slices, permutations and `einsum`, or a reduction, a sort, a traversal over a closure literal,
+or a compound assignment. The backends then choose per call where it runs, from where its
+operands live. The operands are passed as written, so ownership is unchanged; one an operation
+only reads is lent, a compound assignment's target is passed as `&mut`, and a slice position is
+checked against its axis at the call with the host's own guard. The source lives in
+[`src/device_ops.rs`](../../../compiler/hir-lowering/src/device_ops.rs).
 
 ## Testing
 

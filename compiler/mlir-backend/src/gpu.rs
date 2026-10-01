@@ -7,9 +7,11 @@ use crate::{
     tensor_arithmetic::read_type,
 };
 
+use std::cell::OnceCell;
+
 use melior::{
     Context,
-    ir::{Module, operation::OperationLike},
+    ir::{BlockLike, Module, attribute::StringAttribute, operation::OperationLike},
     pass::PassManager,
     utility::parse_pass_pipeline,
 };
@@ -144,12 +146,22 @@ pub(crate) fn lower_with_format(
     }
 
     let context = new_context();
-    let (mut module, mut functions) = build_linkable_module(&context, program, runs_on_gpu)?;
+    // Asked once, and only of a program whose GPU code calls a math function.
+    let probed = OnceCell::new();
+    let math = || *probed.get_or_init(|| device_math(&context, target, format));
+    let (mut module, mut functions) = build_linkable_module(&context, program, &runs_on_gpu)?;
+    let calling_math = math_functions(&module, &functions);
+    if !calling_math.is_empty() && !math() {
+        (module, functions) = build_linkable_module(&context, program, &|function| {
+            runs_on_gpu(function) && !calling_math.contains(&function.name)
+        })?;
+    }
     let refused = refused_bodies(program, &functions);
     if !refused.is_empty() {
         return Err(MlirError::GpuBodiesNotLowered(refused));
     }
-    let kernels = kernel_launchers(program, target).map_err(MlirError::KernelBodiesNotLowered)?;
+    let kernels =
+        kernel_launchers(program, target, &math).map_err(MlirError::KernelBodiesNotLowered)?;
 
     let mut lowered = Vec::with_capacity(2);
     if !functions.is_empty() {
@@ -190,6 +202,69 @@ pub(crate) fn lower_with_format(
         llvm_ir: translate_llvm_dialects(&lowered)?,
         functions,
     })
+}
+
+/// A GPU module calling one math function, which the vendor's conversion turns into a call
+/// into its device math library: libdevice, found through the CUDA toolkit, on NVIDIA, and
+/// ROCm's device libraries on AMD.
+const MATH_PROBE: &str = r#"module attributes {gpu.container_module} {
+  gpu.module @probe {
+    gpu.func @probe(%a: memref<1xf32>) kernel {
+      %c0 = arith.constant 0 : index
+      %x = memref.load %a[%c0] : memref<1xf32>
+      %y = math.exp %x : f32
+      memref.store %y, %a[%c0] : memref<1xf32>
+      gpu.return
+    }
+  }
+}"#;
+
+/// Whether this compile can link the device math library a math function calls on
+/// `target`. Without the CUDA toolkit, `gpu-module-to-binary` leaves libdevice's functions
+/// as `.extern` declarations in the PTX, which the driver then cannot load, along with every
+/// other kernel of the program; a missing ROCm library fails the AMD link, or leaves the
+/// `__ocml_` call in assembly.
+pub(crate) fn device_math(context: &Context, target: &GpuTarget, format: &str) -> bool {
+    let Some(mut module) = Module::parse(context, MATH_PROBE) else {
+        return false;
+    };
+    let pipeline = format!(
+        "builtin.module({attach}{{chip={chip}}},gpu.module({convert}),reconcile-unrealized-casts)",
+        attach = target.attach_target_pass(),
+        chip = target.chip(),
+        convert = target.kernel_conversion_pass(),
+    );
+    // A missing library is an answer here, not an error to print: handled, so MLIR's
+    // default handler never sees it.
+    let quiet = context.attach_diagnostic_handler(|_| true);
+    let lowered = lower_module(context, &mut module, &pipeline, format);
+    context.detach_diagnostic_handler(quiet);
+    if lowered.is_err() {
+        return false;
+    }
+    let object = module.as_operation().to_string();
+    !object.contains(".extern") && !object.contains("__ocml_")
+}
+
+/// The functions of `functions` whose definition in `module` calls a math function.
+fn math_functions(module: &Module<'_>, functions: &[(String, String)]) -> Vec<String> {
+    let mut calling = Vec::new();
+    let mut next = module.body().first_operation();
+    while let Some(operation) = next {
+        let symbol = operation
+            .attribute("sym_name")
+            .ok()
+            .and_then(|name| StringAttribute::try_from(name).ok())
+            .map(|name| name.value().to_string());
+        if let Some(symbol) = symbol
+            && operation.to_string().contains("math.")
+            && let Some((function, _)) = functions.iter().find(|(_, linked)| *linked == symbol)
+        {
+            calling.push(function.clone());
+        }
+        next = operation.next_in_block();
+    }
+    calling
 }
 
 /// Run `pipeline` over `module`, then embed its kernels as `format` device objects.

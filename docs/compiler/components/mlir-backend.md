@@ -267,7 +267,17 @@ a clamped extent, so blocks cover the grid and each block runs a tile of threads
 product is two kernels, the zero fill and the contraction. A reduction (`.sum()`, `.mean()`,
 `.max()`, `.min()`), which only a GPU body lowers here, is a seed and a fold, plus a division for
 a mean: one thread per result element folds its run in order, which is the LLVM backend's order,
-so the device and host answers match exactly.
+so the device and host answers match exactly. A GPU body also lowers elementwise math (the `math`
+dialect op of each function's name), slices (a gather reading the source at each result
+position), permutations (an input map) and `einsum` (the matrix product's contracting shape, in
+the LLVM backend's summation order). A slice position is a literal, or a parameter the call site
+has already checked: a GPU body cannot stop the program.
+
+A math function becomes a call into the GPU vendor's device math library (libdevice on NVIDIA,
+ocml on AMD), which the kernels can link only when the CUDA toolkit or ROCm is found while
+compiling. `lower_for_gpu` probes for it once, only for a program whose GPU code calls one, and
+without it leaves such a body to the host (an outlined operation) or refuses it (`@gpu`,
+`@kernel`).
 
 Each symbol keeps `lower_for_link`'s signature, so the
 [LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The two paths split the
@@ -306,6 +316,13 @@ caller's from the start, and the deallocation pass that follows bufferization re
 branches in a loop. The two modules are translated to LLVM IR separately and linked into one.
 A construct the body lowering does not cover (a function call, a slice, a `match`) is
 `KernelBodiesNotLowered`, with the construct's span and what it is.
+
+The same per-thread lowering runs the outlined operations `linalg` cannot express: a compound
+assignment, one thread per element writing the target's own buffer, and `.map` / `.zip`, one
+thread per element calling the closure inline, with `.reduce` folding in a single thread in the
+host's order. There it refuses integer arithmetic, which the GPU would run without the host's
+guards, and a body it refuses keeps its host copy rather than being an error. See
+[`kernel/body/traversal.rs`](../../../compiler/mlir-backend/src/kernel/body/traversal.rs).
 
 ## Coexistence with inkwell
 

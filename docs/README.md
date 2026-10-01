@@ -77,7 +77,7 @@ current entry points when this directory disagrees.
 | CPU codegen | inkwell (LLVM 22) | In use |
 | MLIR construction | melior (LLVM/MLIR 22) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR and linked into compiled programs, behind the off-by-default `mlir` feature |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
-| GPU | MLIR `gpu` to `nvvm` (PTX) or `rocdl` (code object) | `@gpu` functions run as NVIDIA kernels on an `mlir` build, or AMD ones with `--gpu-arch gfxNNN`, with an opt-in CPU fallback chosen at startup; `@kernel` functions launch their own per-thread body over a grid; `.to(Device::GPU(n))` keeps tensors on any of the machine's GPUs between calls, and a call runs on the GPU its tensors are on |
+| GPU | MLIR `gpu` to `nvvm` (PTX) or `rocdl` (code object) | `@gpu` functions run as NVIDIA kernels on an `mlir` build, or AMD ones with `--gpu-arch gfxNNN`, with an opt-in CPU fallback chosen at startup; `@kernel` functions launch their own per-thread body over a grid; `.to(Device::GPU(n))` keeps tensors on any of the machine's GPUs between calls, and a call or a float tensor operation runs on the GPU its tensors are on |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.
 

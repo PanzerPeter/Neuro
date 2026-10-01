@@ -122,7 +122,7 @@ pub struct LinkableBodies {
 /// As [`translate_to_llvm_ir`].
 pub fn lower_for_link(program: &HirProgram) -> Result<LinkableBodies, MlirError> {
     let context = new_context();
-    let (mut module, functions) = build_linkable_module(&context, program, |function| {
+    let (mut module, functions) = build_linkable_module(&context, program, &|function| {
         function.target == HirTarget::Host
     })?;
     if functions.is_empty() {

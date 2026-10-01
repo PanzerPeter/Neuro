@@ -6,10 +6,11 @@
 // tensors therefore keeps its data on the GPU the whole way, and only `.to(Device::CPU)`
 // brings the answer back.
 //
-// Outside `@gpu`, a tensor operation runs on the device its tensors live on too: `+ - * /`
-// and `@` on float tensors, `.sum()` / `.mean()` / `.max()` / `.min()`, `.sort()` /
-// `.argsort()` / `.topk()`, reading or writing one element, and `.clone()`. An operation with no device form (`.map`, a slice, integer
-// arithmetic) aborts with a diagnostic asking for `.to(Device::CPU)` first.
+// Outside `@gpu`, a float tensor operation runs on the device its tensors live on too:
+// operators and `@`, compound assignment, reductions, sorts, slices, `.t()`, `einsum`, the
+// elementwise math methods, and `.map` / `.zip` / `.reduce` over a closure, as well as reading
+// or writing one element and `.clone()`. An operation with no device form (integer
+// arithmetic, say) aborts with a diagnostic asking for `.to(Device::CPU)` first.
 //
 // On a machine with several GPUs, `Device::GPU(1)` and up name the others, and a `@gpu`
 // call runs on the GPU its tensors are on. Like every program with a bare `@gpu`
@@ -43,6 +44,12 @@ func main() -> i32 {
 
     val (top, row) = halved.topk(k: 1, axis: 0)
     println("top of column 3: {top[0, 3]} in row {row[0, 3]}")
+
+    // A slice, a closure called once per element, and an in-place update, all on the GPU.
+    val corner = halved[0..2, 6..8]
+    mut shifted = corner.map(|v: f32| -> f32 { v - 1.0f32 })
+    shifted *= 2.0f32
+    println("a corner, shifted and doubled on the device: {shifted[1, 1]}")
 
     val result = state.to(Device::CPU)
 

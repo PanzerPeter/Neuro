@@ -1,6 +1,7 @@
 // Tensor operations on a device tensor outside `@gpu` run on its device: element reads and
-// writes and `.clone()` on every build, the operators, reductions and sorts where the MLIR
-// backend can build their kernels.
+// writes and `.clone()` on every build, and where the MLIR backend can build their kernels the
+// operators, compound assignment, reductions, sorts, slices, permutations, `einsum`,
+// elementwise math and `.map` / `.zip` / `.reduce`.
 //
 // Only a machine with an NVIDIA GPU runs a transfer to the end. CI has none, so each test
 // that needs one also accepts the transfer's own diagnostic, as `device_management.rs` does.
@@ -137,9 +138,12 @@ fn a_result_stays_on_the_device() {
         ("val s = g.sort()", 13),
         ("val (s, t) = g.topk(k: 2)", 13),
     ] {
+        // A closure reached through a local is a value only the run time knows, so its
+        // traversal has no device form.
         let source = format!(
-            "func main() -> i32 {{\n    val h = Tensor::<f32, [2, 3]>::ones()\n    val g = h.clone().to(Device::GPU(0))\n    {operation}\n    val r = s.map(|v: f32| v * 2.0f32)\n    return 0\n}}\n"
-        );
+            "func main() -> i32 {{\n    val h = Tensor::<f32, [2, 3]>::ones()\n    val g = h.clone().to(Device::GPU(0))\n    {operation}\n    val r = s.map(f)\n    return 0\n}}\n"
+        )
+        .replace("func main() -> i32 {\n", "func main() -> i32 {\n    val f = |v: f32| v * 2.0f32\n");
         let test = CompileTest::new();
         let output = run(&test, "resident.nr", &source, false);
         if without_gpu(&output) {
@@ -147,7 +151,7 @@ fn a_result_stays_on_the_device() {
         }
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.starts_with(ON_DEVICE) && stderr.contains(&format!("resident.nr:5:{column}")),
+            stderr.starts_with(ON_DEVICE) && stderr.contains(&format!("resident.nr:6:{column}")),
             "`{operation}`: {stderr}"
         );
     }
@@ -312,4 +316,318 @@ func main() -> i32 {
         stderr.starts_with(ON_DEVICE) && stderr.contains("integer_sort.nr:4:13"),
         "{stderr}"
     );
+}
+
+/// Slices (stepped, reversed, at a run-time position), a permutation and `einsum` (a
+/// contraction, a diagonal, a full contraction) on a device tensor give the host's answer bit
+/// for bit. A mismatch count of zero.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn layouts_and_contractions_on_the_device_match_the_host() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    mut m: Tensor<f32, [37, 19]> = Tensor::zeros()
+    mut i = 0
+    while i < 37 {
+        mut j = 0
+        while j < 19 {
+            m[i, j] = ((i * 19 + j) % 23) as f32 * 0.37f32 - 3.5f32
+            j += 1
+        }
+        i += 1
+    }
+    val g = m.clone().to(Device::GPU(0))
+    val k = 5u64
+    val stepped = g[(3..30).step(4), (0..19).rev()].to(Device::CPU)
+    val row = g[k, 2..17].to(Device::CPU)
+    val flipped = g.clone().t().to(Device::CPU)
+    val gram = einsum("ij,kj->ik", &g, &g).to(Device::CPU)
+    val diagonal = einsum("ii->i", g[0..19, ..]).to(Device::CPU)
+    val total = einsum("ij,ij->", &g, &g)
+
+    val host_gram = einsum("ij,kj->ik", &m, &m)
+    val host_stepped = m[(3..30).step(4), (0..19).rev()]
+    mut wrong = 0
+    i = 0
+    while i < 37 {
+        mut j = 0
+        while j < 19 {
+            if flipped[j, i] != m[i, j] { wrong += 1 }
+            j += 1
+        }
+        j = 0
+        while j < 37 {
+            if gram[i, j] != host_gram[i, j] { wrong += 1 }
+            j += 1
+        }
+        i += 1
+    }
+    i = 0
+    while i < 7 {
+        mut j = 0
+        while j < 19 {
+            if stepped[i, j] != host_stepped[i, j] { wrong += 1 }
+            j += 1
+        }
+        i += 1
+    }
+    i = 0
+    while i < 15 {
+        if row[i] != m[5, 2 + i] { wrong += 1 }
+        i += 1
+    }
+    i = 0
+    while i < 19 {
+        if diagonal[i] != m[i, i] { wrong += 1 }
+        i += 1
+    }
+    if total != einsum("ij,ij->", &m, &m) { wrong += 1 }
+    println("{total} {stepped[6, 0]} {row[0]} {gram[36, 36]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "layouts.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_ran(
+        &output,
+        0,
+        "4426.68115234375 -2.759999990463257 -1.649999976158142 131.4180908203125\n",
+    );
+}
+
+/// `sqrt` and `abs` on a device tensor are exact, as on the host. The transcendental functions
+/// are the GPU vendor's device math library, which may differ from the host's C library in the
+/// last bits, so they are held to a relative error. A compiler that found no device math
+/// library leaves the math to the host, and the device tensor refuses it at the first call.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn elementwise_math_on_the_device_follows_the_device_library() {
+    const SOURCE: &str = r#"
+func near(a: f32, b: f32) -> bool {
+    val d = (a - b).abs()
+    d == 0.0f32 || d <= b.abs() * 0.000001f32
+}
+
+func main() -> i32 {
+    mut m: Tensor<f32, [37, 19]> = Tensor::zeros()
+    mut i = 0
+    while i < 37 {
+        mut j = 0
+        while j < 19 {
+            m[i, j] = ((i * 19 + j) % 23) as f32 * 0.37f32 - 3.5f32
+            j += 1
+        }
+        i += 1
+    }
+    val g = m.clone().to(Device::GPU(0))
+    val root = (&g * &g).sqrt().to(Device::CPU)
+    val size = g.abs().to(Device::CPU)
+    val grown = g.exp().to(Device::CPU)
+    val logs = (g.abs() + 1.0f32).log().to(Device::CPU)
+    val squashed = g.tanh().to(Device::CPU)
+    val power = g.abs().pow(1.5f32).to(Device::CPU)
+    mut wrong = 0
+    i = 0
+    while i < 37 {
+        mut j = 0
+        while j < 19 {
+            val x = m[i, j]
+            if root[i, j] != (x * x).sqrt() || size[i, j] != x.abs() { wrong += 1 }
+            if !near(grown[i, j], x.exp()) || !near(logs[i, j], (x.abs() + 1.0f32).log()) { wrong += 1 }
+            if !near(squashed[i, j], x.tanh()) || !near(power[i, j], x.abs().pow(1.5f32)) { wrong += 1 }
+            j += 1
+        }
+        i += 1
+    }
+    println("{root[2, 3]} {size[0, 0]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "math.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.starts_with(ON_DEVICE) && stderr.contains("math.nr:19:16") {
+        return;
+    }
+    assert_ran(&output, 0, "3.159999847412109 3.5\n");
+}
+
+/// `.map` and `.zip` with capturing closures (one with an early `return` and a loop),
+/// `.reduce` in the host's order, and compound assignment into a device target, a host target
+/// beside a device value, and a `&mut` parameter, all give the host's answer bit for bit.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn traversals_and_compound_assignment_on_the_device_match_the_host() {
+    const SOURCE: &str = r#"
+func step(w: &mut Tensor<f32, [37, 19]>, g: &Tensor<f32, [19]>) {
+    *w -= g
+}
+
+func main() -> i32 {
+    mut m: Tensor<f32, [37, 19]> = Tensor::zeros()
+    mut i = 0
+    while i < 37 {
+        mut j = 0
+        while j < 19 {
+            m[i, j] = ((i * 19 + j) % 23) as f32 * 0.37f32 - 3.5f32
+            j += 1
+        }
+        i += 1
+    }
+    val b = Tensor::<f32, [19]>::ones() * 0.3f32
+    val g = m.clone().to(Device::GPU(0))
+    val gb = b.clone().to(Device::GPU(0))
+    val scale = 1.7f32
+    val limit = 2u32
+    val mapped = g.map(|x: f32| -> f32 {
+        mut y = x * scale
+        if y > 1.0f32 { return y - 1.0f32 }
+        for k in 0u32..limit { y = y * 0.5f32 }
+        y
+    }).to(Device::CPU)
+    val zipped = g.zip(&g, |a: f32, c: f32| -> f32 { a * c - scale }).to(Device::CPU)
+    val folded = g.reduce(0.0f32, |acc: f32, x: f32| -> f32 { acc * 0.5f32 + x })
+
+    mut w = m.clone().to(Device::GPU(0))
+    w -= &gb
+    w *= 2.0f32
+    w += &g
+    step(&mut w, &gb)
+    w /= &g
+    mut expected = m.clone()
+    expected -= &b
+    expected *= 2.0f32
+    expected += &m
+    expected -= &b
+    expected /= &m
+    mut beside = m.clone()
+    beside += &g
+    val updated = w.to(Device::CPU)
+
+    mut wrong = 0
+    i = 0
+    while i < 37 {
+        mut j = 0
+        while j < 19 {
+            val x = m[i, j]
+            mut y = x * scale
+            if y > 1.0f32 { y = y - 1.0f32 } else { y = y * 0.5f32 * 0.5f32 }
+            if mapped[i, j] != y { wrong += 1 }
+            if zipped[i, j] != x * x - scale { wrong += 1 }
+            if updated[i, j] != expected[i, j] { wrong += 1 }
+            if beside[i, j] != x + x { wrong += 1 }
+            j += 1
+        }
+        i += 1
+    }
+    if folded != m.reduce(0.0f32, |acc: f32, x: f32| -> f32 { acc * 0.5f32 + x }) { wrong += 1 }
+    println("{folded} {mapped[3, 4]} {updated[36, 18]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "traversals.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_ran(
+        &output,
+        0,
+        "1.142077803611755 2.485000371932983 2.042553424835205\n",
+    );
+}
+
+/// A slice position is checked where the call evaluates it, with the host's guard, so a
+/// position past its axis on a device tensor panics exactly as on a host one, on every build.
+#[cfg(unix)]
+#[test]
+fn a_device_slice_past_its_axis_panics_as_on_the_host() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    val m: Tensor<f32, [4, 3]> = Tensor::ones()
+    val g = m.clone().to(Device::GPU(0))
+    val k = -1
+    val row = g[k, ..]
+    return 0
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "past.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("panic: tensor index out of bounds at ")
+            && stderr.contains("past.nr:6:15"),
+        "{stderr}"
+    );
+}
+
+/// What has no device form refuses a device tensor at the operation: a traversal whose
+/// function does integer arithmetic (the GPU has none of its guards) or is reached through a
+/// local, and a compound assignment to a field, which a backend cannot borrow mutably.
+#[cfg(unix)]
+#[test]
+fn what_has_no_device_form_refuses_a_device_tensor() {
+    for (operation, column) in [
+        (
+            "val r = g.map(|x: f32| -> f32 { (x as i32 + 1) as f32 })",
+            13,
+        ),
+        ("val r = g.map(f)", 13),
+        ("layer.w -= &g", 16),
+    ] {
+        let source = format!(
+            "struct Layer {{\n    w: Tensor<f32, [2, 3]>\n}}\n\nfunc main() -> i32 {{\n    val f = |v: f32| v\n    val g = Tensor::<f32, [2, 3]>::ones().to(Device::GPU(0))\n    mut layer = Layer {{ w: Tensor::<f32, [2, 3]>::ones().to(Device::GPU(0)) }}\n    {operation}\n    return 0\n}}\n"
+        );
+        let test = CompileTest::new();
+        let output = run(&test, "refused.nr", &source, false);
+        if without_gpu(&output) {
+            continue;
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.starts_with(ON_DEVICE) && stderr.contains(&format!("refused.nr:9:{column}")),
+            "`{operation}`: {stderr}"
+        );
+    }
+}
+
+/// A program that transfers but slices, permutes, contracts, maps, folds and updates host
+/// tensors only computes them on the host, GPU or not, as it did before any of them had a
+/// device form.
+#[cfg(unix)]
+#[test]
+fn host_layouts_traversals_and_updates_stay_on_the_host() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    val a: Tensor<f32, [2, 3]> = [[3.0, 1.0, 2.0], [0.5, 0.5, -1.0]]
+    val b = a.to(Device::CPU)
+    val k = 1u64
+    val scale = 2.0f32
+    mut w = b.clone()
+    w -= b.clone().t().t()
+    w += b.exp().log()
+    val total = einsum("ij,ij->", &b, &b)
+    val doubled = b.map(|x: f32| -> f32 { x * scale })
+    val sum = b.reduce(0.0f32, |s: f32, x: f32| -> f32 { s + x })
+    println("{b[k, 1..3][1]} {b.clone().t()[2, 1]} {total} {doubled[0, 0]} {sum} {w[0, 2]}")
+    return 0
+}
+"#;
+    let test = CompileTest::new();
+    for hide_devices in [false, true] {
+        assert_ran(
+            &run(&test, "host_layouts.nr", SOURCE, hide_devices),
+            0,
+            "-1.0 -1.0 15.5 6.0 6.0 2.0\n",
+        );
+    }
 }

@@ -429,15 +429,30 @@ an identifier that is no local but names a function becomes a closure forwarding
 lowered a tensor `.to(...)` (`transfers`), the one way a device tensor comes to exist. It
 outlines each tensor operation a GPU body can compute (a float tensor of static shape, rank 1 or
 more) out of host code (`Host` functions, methods, closures) into a `HirTarget::FollowsOperands`
-function named `__device_op_N`: a maximal tree of `+ - * / @` becomes one function over its
-leaves, and a reduction or a `.sort()` / `.argsort()` / `.topk()` one over its receiver.
-Parameters are the operands exactly as written (`&a` stays a borrow, `a` a move), except that a
-named receiver of a reduction or a sort, which the operation only reads, is passed as `&receiver`.
-A `.topk` function returns its values/indices tuple as is. A whole-tensor reduction yields a scalar, which a
-GPU body cannot return, so its function returns a `[1]` tensor (`TensorLiteral` of the reduction)
-and the call site reads element 0. Operands keep their spans inside the body, so a host body
-refusing a device tensor still reports the operation's position. Integer tensors and rank-0
-operations stay inline: the MLIR path could not lower them anyway.
+function named `__device_op_N`, its parameters named `__operandN`. A maximal tree becomes one
+function over its leaves: `+ - * / @` and a permuting shape cast take their operands as written,
+elementwise math, a slice and an `einsum` with output letters only read theirs, so each takes
+another node of the tree or a leaf lent as `&leaf`. A reduction, a `.sort()` / `.argsort()` /
+`.topk()`, a full `einsum` and a `.map` / `.zip` / `.reduce` are each one function over their
+receiver (and `.zip`'s second tensor or `.reduce`'s seed). Parameters are the operands exactly as
+written (`&a` stays a borrow, `a` a move), except that a named tensor an operation only reads is
+passed as `&receiver`. A `.topk` function returns its values/indices tuple as is. A whole-tensor
+reduction, a full contraction and a `.reduce` yield a scalar, which a GPU body cannot return, so
+their function returns a `[1]` tensor (`TensorLiteral` of the operation) and the call site reads
+element 0.
+
+A slice's positions become parameters checked where the call evaluates them:
+`{ val __position = p; if !((p as u64) < extent) { panic("tensor index out of bounds") } __position }`,
+the host's own guard and message, so a GPU body never reads an unchecked position. A traversal is
+outlined only over a closure literal (a function passed by name is one by then, forwarding to it);
+the literal stays in the body, and its captures are extra parameters named after them, since that
+is where the literal loads them from. A compound assignment `place OP= v` on a `Var` place, or a
+`*r` whose `r` is a `&mut` binding, becomes a `Void` call taking `(v, &mut target)` whose body is
+the `TensorCompoundAssign` through `*__operand1`, so the update writes the target's own buffer
+wherever it lives. Operands keep their spans inside the body, so a host body refusing a device
+tensor still reports the operation's position. Integer tensors, rank-0 operations, and an
+operation over a field or other non-binding place (it can be neither lent nor moved out) stay
+inline: the MLIR path could not lower them anyway.
 
 ### Dynamic dispatch
 A `traits` table (name → methods in declaration order, with their visible parameter and return

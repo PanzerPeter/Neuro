@@ -120,12 +120,15 @@ func main() -> i32 {
 ```
 
 Outside `@gpu`, an operation on a device tensor runs on that tensor's GPU as well, and its
-result stays there. This covers `+ - * /` and `@` on `f32` / `f64` tensors, `.sum()`,
-`.mean()`, `.max()` and `.min()`, `.sort()`, `.argsort()` and `.topk()`, reading or writing one
-element, and `.clone()`. A host
+result stays there. On `f32` / `f64` tensors this covers `+ - * /` and `@`, compound assignment
+(`w -= g`), `.sum()`, `.mean()`, `.max()` and `.min()`, `.sort()`, `.argsort()` and `.topk()`,
+slicing, `.t()` and `.permute(...)`, `einsum`, the elementwise math methods, and `.map`, `.zip`
+and `.reduce` with a closure, as well as reading or writing one element and `.clone()`. A host
 operand next to a device operand is copied over for the operation. If every operand is a host
 tensor, the operation runs on the host as usual. The results are the same values the host
-computes.
+computes, with one exception: `.exp()`, `.log()`, `.tanh()` and `.pow(p)` come from the GPU
+vendor's math library and may differ from the host's in the last bits (`.sqrt()` and `.abs()` are
+exact everywhere).
 
 ```neuro
 val g = Tensor::<f32, [8, 8]>::ones().to(Device::GPU(0))
@@ -134,15 +137,21 @@ val total = halved.sum()          // reduced on GPU 0; the scalar comes back
 val first = halved[0, 0]          // copies that one element back
 ```
 
+A compound assignment updates its target where the target lives, in its own buffer: `w -= &g`
+with `w` on the host and `g` on a GPU copies `w` over for the update and back again. A slice
+position is checked against its axis before anything runs, with the host's message.
+
 Reading or writing a single element copies only that element between the host and the GPU, and
 waits for the copy to finish. A loop over the elements of a device tensor therefore pays one copy
-per element, so move the tensor back with `.to(Device::CPU)` before reading many of them. The
-operators, reductions and sorts need a `neurc` built with the MLIR backend. Without it, element access
-and `.clone()` still run on the device.
+per element, so move the tensor back with `.to(Device::CPU)` before reading many of them. Every
+operation above except element access and `.clone()` needs a `neurc` built with the MLIR backend.
+Without it, element access and `.clone()` still run on the device.
 
-Other operations have no device form yet: any operation on an integer tensor (sorting one
-included), compound assignment, slicing, the elementwise math methods, `einsum`,
-`.map` / `.zip` / `.reduce` and a permuting shape cast. Given a device tensor, each one aborts at the operation with
+Some operations have no device form: any operation on an integer tensor (sorting one included),
+`.map` / `.zip` / `.reduce` whose function does integer arithmetic, calls a function (a function
+passed by name does) or is passed through a local, an operation on a tensor reached through a
+struct field (`layer.w.sum()`, `layer.w -= g`), and elementwise math when the compiler found no
+device math library. Given a device tensor, each one aborts at the operation with
 ``panic: this tensor lives on a GPU, where host code cannot read it: move it back with
 `.to(Device::CPU)` first``, plus its location. Moving a device tensor, passing it, returning it,
 storing it in a struct and dropping it all work as they do for a host tensor.
@@ -998,9 +1007,12 @@ func blend(a: &Tensor<f32, [4, 6]>, b: &Tensor<f32, [4, 6]>, t: f32) -> Tensor<f
 
 Bare `@gpu` requires a GPU, and the compiler never runs the body anywhere else. A body the
 GPU path cannot lower is a compile error at the function. That path takes straight-line
-element-wise `+ - * /`, `@`, and `.sum()` / `.mean()` / `.max()` / `.min()` along an axis over
-`f32` / `f64` tensors of static shape and rank 1 or more, with scalar or tensor parameters
-(owned or `&`) and a tensor result. A generic function qualifies per instance.
+tensor code over `f32` / `f64` tensors of static shape and rank 1 or more: element-wise
+`+ - * /`, `@`, `.sum()` / `.mean()` / `.max()` / `.min()`, `.sort()` / `.argsort()` /
+`.topk()`, the elementwise math methods, slices at literal positions, `.t()` / `.permute(...)`
+and `einsum`, with scalar or tensor parameters (owned or `&`) and a tensor result. A generic
+function qualifies per instance. Elementwise math also needs the GPU vendor's device math library
+when compiling (libdevice from the CUDA toolkit, or ROCm's).
 
 A program with a `@gpu` function checks for a usable GPU when it starts, before `main`.
 If there is none, it prints ``panic: `@gpu` needs an NVIDIA GPU, and none is usable:`` (or

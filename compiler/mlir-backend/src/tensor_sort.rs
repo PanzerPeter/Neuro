@@ -38,7 +38,7 @@ use melior::{
         r#type::{IntegerType, RankedTensorType},
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirSortKind, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirSortKind, HirTarget, HirType};
 
 /// The width of the integer attribute `linalg.index` names its dimension with.
 const DIMENSION_BITS: u32 = 64;
@@ -60,6 +60,7 @@ pub(crate) fn build_sort<'c, 'a>(
     block: &'a Block<'c>,
     sort: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
+    target: HirTarget,
 ) -> Result<Option<Vec<Value<'c, 'a>>>, MlirError> {
     let HirExprKind::TensorSort {
         receiver,
@@ -88,7 +89,7 @@ pub(crate) fn build_sort<'c, 'a>(
         },
         (HirSortKind::TopK(_), _) => return Ok(None),
     };
-    let Some(source) = build_expression(context, location, block, receiver, scope, true)? else {
+    let Some(source) = build_expression(context, location, block, receiver, scope, target)? else {
         return Ok(None);
     };
 

@@ -109,16 +109,22 @@ fn a_gpu_index_the_machine_lacks_is_refused() {
 }
 
 /// Host code cannot dereference device memory, so a tensor operation with no device form
-/// checks where its operand lives and names the way out, at the operation. Without the MLIR
-/// backend the operators and reductions have none either. `device_operations.rs` covers the
-/// operations that do run on the device.
+/// checks where its operand lives and names the way out, at the operation. A traversal whose
+/// function does integer arithmetic has none on any build; without the MLIR backend the
+/// operators, reductions, slices and traversals have none either. `device_operations.rs`
+/// covers the operations that do run on the device.
 #[cfg(unix)]
 #[test]
 fn host_code_refuses_a_device_tensor_at_the_operation() {
     // Each operation's tensor operand starts in column 13, after `    val r = `.
-    let mut operations = vec!["val r = g.map(|v: f32| v * 2.0f32)", "val r = g[0..2]"];
+    let mut operations = vec!["val r = g.map(|v: f32| -> f32 { (v as i32 * 2) as f32 })"];
     if !cfg!(feature = "mlir") {
-        operations.extend(["val r = g.sum()", "val r = &g + &g"]);
+        operations.extend([
+            "val r = g.map(|v: f32| v * 2.0f32)",
+            "val r = g[0..2]",
+            "val r = g.sum()",
+            "val r = &g + &g",
+        ]);
     }
     for operation in operations {
         let source = format!(

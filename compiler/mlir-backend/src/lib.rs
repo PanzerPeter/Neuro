@@ -31,6 +31,12 @@ mod smoke;
 #[cfg(feature = "mlir")]
 mod tensor_arithmetic;
 #[cfg(feature = "mlir")]
+mod tensor_einsum;
+#[cfg(feature = "mlir")]
+mod tensor_layout;
+#[cfg(feature = "mlir")]
+mod tensor_math;
+#[cfg(feature = "mlir")]
 mod tensor_reduce;
 #[cfg(feature = "mlir")]
 mod tensor_sort;

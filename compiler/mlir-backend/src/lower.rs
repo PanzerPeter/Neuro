@@ -10,7 +10,7 @@ use melior::{
         r#type::{FunctionType, IntegerType, RankedTensorType},
     },
 };
-use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirType};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirTarget, HirType};
 
 /// Prepended to a linked body's symbol, so it never collides with the Neuro-ABI
 /// function of the same name the LLVM backend defines around it.
@@ -138,7 +138,7 @@ pub(crate) fn build_module<'c>(
 pub(crate) fn build_linkable_module<'c>(
     context: &'c Context,
     program: &HirProgram,
-    admit: fn(&HirFunction) -> bool,
+    admit: &dyn Fn(&HirFunction) -> bool,
 ) -> Result<(Module<'c>, Vec<(String, String)>), MlirError> {
     let location = Location::unknown(context);
     let module = Module::new(location);
@@ -175,7 +175,8 @@ pub(crate) fn build_linkable_module<'c>(
 
 /// Whether this path computes a function exactly as the LLVM backend would, so the
 /// two are interchangeable: a static tensor result ([`linkable_result`]), and parameters
-/// that are `f32` / `f64` scalars or static tensors of them, owned or behind `&`.
+/// that are `f32` / `f64` scalars or static tensors of them, owned or behind `&`, plus
+/// the checked slice positions of an outlined function.
 ///
 /// Floats only, because the LLVM backend guards integer elements (an overflowing
 /// element panics on the debug tier, a zero divisor in every build) and `arith`
@@ -183,10 +184,26 @@ pub(crate) fn build_linkable_module<'c>(
 /// arithmetic, so a dynamic signature never has a body worth linking.
 fn linkable_signature(function: &HirFunction) -> bool {
     linkable_result(&function.return_type)
-        && function
-            .params
-            .iter()
-            .all(|param| linkable_type(tensor_arithmetic::read_type(&param.ty)))
+        && function.params.iter().all(|param| {
+            linkable_type(tensor_arithmetic::read_type(&param.ty))
+                || (function.target == HirTarget::FollowsOperands && position_type(&param.ty))
+        })
+}
+
+/// The integer a slice position is. A function outlined to follow its operands takes one
+/// as a parameter, its call site having checked it; no arithmetic is done on it.
+fn position_type(ty: &HirType) -> bool {
+    matches!(
+        ty,
+        HirType::I8
+            | HirType::I16
+            | HirType::I32
+            | HirType::I64
+            | HirType::U8
+            | HirType::U16
+            | HirType::U32
+            | HirType::U64
+    )
 }
 
 fn linkable_type(ty: &HirType) -> bool {
