@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::BasicMetadataTypeEnum;
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
 use neuro_hir::HirFunction;
@@ -70,7 +70,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// `symbol` takes MLIR's calling convention: each tensor as an exploded row-major
     /// `memref` descriptor, each scalar as itself, and the result as one more descriptor
-    /// after them, naming a buffer this side allocates. The function keeps Neuro's own
+    /// after them (one per tensor of a tuple result), naming a buffer this side allocates. The function keeps Neuro's own
     /// ABI around it, so no caller can tell which backend computed the body.
     ///
     /// Ownership is the ordinary function's: a by-value tensor parameter was moved in,
@@ -156,23 +156,30 @@ impl<'ctx> CodegenContext<'ctx> {
             self.push_memref_descriptor(tensor_ty, data, &mut arg_types, &mut args)?;
         }
 
-        // A `@kernel` returns nothing: it computes into its `&mut` tensors.
+        // A `@kernel` returns nothing: it computes into its `&mut` tensors. A tuple
+        // (`.topk`'s values and indices) is one out-param per tensor, in order.
         let result_ty = Type::from_hir(&func_def.return_type);
-        let result = match (&result_ty, staging.as_mut()) {
-            (Type::Void, _) => None,
-            (_, Some(staging)) => {
-                let staged = self.stage_result(staging, &result_ty)?;
-                let (handle, written) = (staged.handle, staged.written);
-                written_back.push((result_ty.clone(), staged));
-                Some((handle, written))
-            }
-            (_, None) => {
-                let result = self.alloc_dlpack_tensor(&result_ty, "external.result")?;
-                Some((result, self.load_dlpack_data(result)?))
-            }
+        let parts = match &result_ty {
+            Type::Void => Vec::new(),
+            Type::Tuple(parts) => parts.clone(),
+            single => vec![single.clone()],
         };
-        if let Some((_, written)) = result {
-            self.push_memref_descriptor(&result_ty, written, &mut arg_types, &mut args)?;
+        let mut results = Vec::with_capacity(parts.len());
+        for part in &parts {
+            let (handle, written) = match staging.as_mut() {
+                Some(staging) => {
+                    let staged = self.stage_result(staging, part)?;
+                    let (handle, written) = (staged.handle, staged.written);
+                    written_back.push((part.clone(), staged));
+                    (handle, written)
+                }
+                None => {
+                    let result = self.alloc_dlpack_tensor(part, "external.result")?;
+                    (result, self.load_dlpack_data(result)?)
+                }
+            };
+            self.push_memref_descriptor(part, written, &mut arg_types, &mut args)?;
+            results.push(handle);
         }
 
         let callee = self.module.get_function(symbol).unwrap_or_else(|| {
@@ -190,9 +197,29 @@ impl<'ctx> CodegenContext<'ctx> {
         for handle in consumed {
             self.build_dlpack_release(handle)?;
         }
-        match result {
-            Some((handle, _)) => self.builder.build_return(Some(&handle))?,
-            None => self.builder.build_return(None)?,
+        match (&result_ty, results.as_slice()) {
+            (Type::Void, _) => self.builder.build_return(None)?,
+            (Type::Tuple(_), handles) => {
+                let BasicTypeEnum::StructType(tuple) = self.get_any_llvm_type(&result_ty)? else {
+                    return Err(CodegenError::InternalError(
+                        "a tuple result does not lower to a struct".to_string(),
+                    ));
+                };
+                let mut packed = tuple.get_undef();
+                for (index, handle) in handles.iter().enumerate() {
+                    packed = self
+                        .builder
+                        .build_insert_value(packed, *handle, index as u32, "external.pair")?
+                        .into_struct_value();
+                }
+                self.builder.build_return(Some(&packed))?
+            }
+            (_, [handle]) => self.builder.build_return(Some(handle))?,
+            _ => {
+                return Err(CodegenError::InternalError(
+                    "a tensor result staged no buffer".to_string(),
+                ));
+            }
         };
         Ok(())
     }

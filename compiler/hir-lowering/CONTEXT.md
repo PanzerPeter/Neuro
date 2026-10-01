@@ -430,9 +430,10 @@ lowered a tensor `.to(...)` (`transfers`), the one way a device tensor comes to 
 outlines each tensor operation a GPU body can compute (a float tensor of static shape, rank 1 or
 more) out of host code (`Host` functions, methods, closures) into a `HirTarget::FollowsOperands`
 function named `__device_op_N`: a maximal tree of `+ - * / @` becomes one function over its
-leaves, and a reduction one over its receiver. Parameters are the operands exactly as written
-(`&a` stays a borrow, `a` a move), except that a named receiver of a reduction, which the
-reduction only reads, is passed as `&receiver`. A whole-tensor reduction yields a scalar, which a
+leaves, and a reduction or a `.sort()` / `.argsort()` / `.topk()` one over its receiver.
+Parameters are the operands exactly as written (`&a` stays a borrow, `a` a move), except that a
+named receiver of a reduction or a sort, which the operation only reads, is passed as `&receiver`.
+A `.topk` function returns its values/indices tuple as is. A whole-tensor reduction yields a scalar, which a
 GPU body cannot return, so its function returns a `[1]` tensor (`TensorLiteral` of the reduction)
 and the call site reads element 0. Operands keep their spans inside the body, so a host body
 refusing a device tensor still reports the operation's position. Integer tensors and rank-0

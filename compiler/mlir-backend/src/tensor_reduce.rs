@@ -24,11 +24,12 @@ use crate::{
         Generic, OperandAxes, build_expression, empty_tensor, fill_block, generic_op,
         indexing_maps, iterator_types, tensor_parts,
     },
+    tensor_sort::precedes,
 };
 
 use melior::{
     Context,
-    dialect::arith::{self, CmpfPredicate},
+    dialect::arith,
     ir::{
         Block, BlockLike, Location, Region, RegionLike, Type, Value, attribute::FloatAttribute,
         operation::OperationBuilder,
@@ -202,7 +203,7 @@ impl ReduceLayout {
 }
 
 /// Append one `linalg.generic` with `body` as its single block, yielding its result.
-fn apply<'c, 'a>(
+pub(crate) fn apply<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
@@ -231,29 +232,16 @@ fn fold_block<'c>(
     let block = Block::new(&[(element, location); FOLD_BODY_ARGUMENTS]);
     let value: Value = block.argument(0)?.into();
     let carried: Value = block.argument(1)?.into();
-    let predicate = match op {
+    let descending = match op {
         HirReduceOp::Sum | HirReduceOp::Mean => {
             let sum = append(&block, arith::addf(carried, value, location))?;
             yield_value(&block, location, sum)?;
             return Ok(block);
         }
-        HirReduceOp::Max => CmpfPredicate::Ogt,
-        HirReduceOp::Min => CmpfPredicate::Olt,
+        HirReduceOp::Max => true,
+        HirReduceOp::Min => false,
     };
-    let ordered = append(
-        &block,
-        arith::cmpf(context, predicate, value, carried, location),
-    )?;
-    let carried_nan = append(
-        &block,
-        arith::cmpf(context, CmpfPredicate::Uno, carried, carried, location),
-    )?;
-    let real = append(
-        &block,
-        arith::cmpf(context, CmpfPredicate::Ord, value, value, location),
-    )?;
-    let before = append(&block, arith::ori(ordered, carried_nan, location))?;
-    let wins = append(&block, arith::andi(real, before, location))?;
+    let wins = precedes(context, location, &block, value, carried, descending)?;
     let kept = append(&block, arith::select(wins, value, carried, location))?;
     yield_value(&block, location, kept)?;
     Ok(block)
@@ -274,14 +262,14 @@ fn mean_block<'c>(location: Location<'c>, element: Type<'c>) -> Result<Block<'c>
     Ok(block)
 }
 
-fn append<'c, 'a>(
+pub(crate) fn append<'c, 'a>(
     block: &'a Block<'c>,
     operation: melior::ir::Operation<'c>,
 ) -> Result<Value<'c, 'a>, MlirError> {
     Ok(block.append_operation(operation).result(0)?.into())
 }
 
-fn yield_value<'c>(
+pub(crate) fn yield_value<'c>(
     block: &Block<'c>,
     location: Location<'c>,
     value: Value<'c, '_>,

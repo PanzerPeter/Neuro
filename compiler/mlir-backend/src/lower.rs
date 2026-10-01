@@ -174,16 +174,15 @@ pub(crate) fn build_linkable_module<'c>(
 }
 
 /// Whether this path computes a function exactly as the LLVM backend would, so the
-/// two are interchangeable: a static tensor result, and parameters that are `f32` /
-/// `f64` scalars or static tensors of them, owned or behind `&`.
+/// two are interchangeable: a static tensor result ([`linkable_result`]), and parameters
+/// that are `f32` / `f64` scalars or static tensors of them, owned or behind `&`.
 ///
 /// Floats only, because the LLVM backend guards integer elements (an overflowing
 /// element panics on the debug tier, a zero divisor in every build) and `arith`
 /// has neither guard. Static extents only, because the frontend gives a `?` axis no
 /// arithmetic, so a dynamic signature never has a body worth linking.
 fn linkable_signature(function: &HirFunction) -> bool {
-    matches!(function.return_type, HirType::Tensor { .. })
-        && linkable_type(&function.return_type)
+    linkable_result(&function.return_type)
         && function
             .params
             .iter()
@@ -195,6 +194,20 @@ fn linkable_type(ty: &HirType) -> bool {
         HirType::F32 | HirType::F64 => true,
         HirType::Tensor { element, shape, .. } => {
             matches!(**element, HirType::F32 | HirType::F64) && shape.iter().all(Option::is_some)
+        }
+        _ => false,
+    }
+}
+
+/// A static tensor of floats, or of the `i32` indices a sort writes, or a tuple of them
+/// (`.topk`'s values and indices). An `i32` result carries no arithmetic: every parameter
+/// is a float, and the element-wise path only yields its operands' element type.
+fn linkable_result(ty: &HirType) -> bool {
+    match ty {
+        HirType::Tuple(parts) => !parts.is_empty() && parts.iter().all(linkable_result),
+        HirType::Tensor { element, shape, .. } => {
+            matches!(**element, HirType::F32 | HirType::F64 | HirType::I32)
+                && shape.iter().all(Option::is_some)
         }
         _ => false,
     }
@@ -245,7 +258,7 @@ fn declare_function<'c>(
     param_types: &[HirType],
     return_type: &HirType,
 ) -> Result<Operation<'c>, MlirError> {
-    let fn_type = signature(context, param_types, return_type)?;
+    let fn_type = signature(context, param_types, std::slice::from_ref(return_type))?;
 
     // An empty region makes this an external declaration; private visibility keeps
     // it unexported, matching its declaration-only role in the scaffold module.
@@ -277,7 +290,12 @@ fn define_function<'c>(
     return_type: &HirType,
     body: Region<'c>,
 ) -> Result<Operation<'c>, MlirError> {
-    let fn_type = signature(context, param_types, return_type)?;
+    // A tuple is one result per tensor, so bufferization gives each its own out-param.
+    let results = match return_type {
+        HirType::Tuple(parts) => parts.as_slice(),
+        single => std::slice::from_ref(single),
+    };
+    let fn_type = signature(context, param_types, results)?;
 
     Ok(func::func(
         context,
@@ -294,17 +312,18 @@ fn define_function<'c>(
 fn signature<'c>(
     context: &'c Context,
     param_types: &[HirType],
-    return_type: &HirType,
+    return_types: &[HirType],
 ) -> Result<FunctionType<'c>, MlirError> {
     let inputs = param_types
         .iter()
         .map(|ty| map_type(context, ty))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let results = match return_type {
-        HirType::Void => Vec::new(),
-        other => vec![map_type(context, other)?],
-    };
+    let results = return_types
+        .iter()
+        .filter(|ty| **ty != HirType::Void)
+        .map(|ty| map_type(context, ty))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(FunctionType::new(context, &inputs, &results))
 }

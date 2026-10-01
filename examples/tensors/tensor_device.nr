@@ -7,8 +7,8 @@
 // brings the answer back.
 //
 // Outside `@gpu`, a tensor operation runs on the device its tensors live on too: `+ - * /`
-// and `@` on float tensors, `.sum()` / `.mean()` / `.max()` / `.min()`, reading or writing
-// one element, and `.clone()`. An operation with no device form (`.map`, a slice, integer
+// and `@` on float tensors, `.sum()` / `.mean()` / `.max()` / `.min()`, `.sort()` /
+// `.argsort()` / `.topk()`, reading or writing one element, and `.clone()`. An operation with no device form (`.map`, a slice, integer
 // arithmetic) aborts with a diagnostic asking for `.to(Device::CPU)` first.
 //
 // On a machine with several GPUs, `Device::GPU(1)` and up name the others, and a `@gpu`
@@ -40,6 +40,9 @@ func main() -> i32 {
     mut copy = halved.clone()
     copy[0, 0] = 0.0f32
     println("on the device: sum {halved.sum()}, row max {halved.max(axis: 1)[7]}, first {copy[0, 0]} and {halved[0, 0]}")
+
+    val (top, row) = halved.topk(k: 1, axis: 0)
+    println("top of column 3: {top[0, 3]} in row {row[0, 3]}")
 
     val result = state.to(Device::CPU)
 

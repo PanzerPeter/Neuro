@@ -32,6 +32,8 @@ mod smoke;
 mod tensor_arithmetic;
 #[cfg(feature = "mlir")]
 mod tensor_reduce;
+#[cfg(feature = "mlir")]
+mod tensor_sort;
 
 #[cfg(feature = "mlir")]
 pub use bridge::{LinkableBodies, lower_for_link, translate_to_llvm_ir};

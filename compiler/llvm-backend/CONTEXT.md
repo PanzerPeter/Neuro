@@ -90,7 +90,9 @@ differs. `codegen_external_body` (`codegen/external_bodies.rs`) emits it as a ca
 in MLIR's calling convention: each tensor as an exploded row-major `memref` descriptor (its `data`
 pointer as both the allocated and the aligned pointer, offset 0, then its extents and element
 strides as constants), each scalar as itself, and a result descriptor over a tensor this backend
-allocates through `alloc_dlpack_tensor`, so the value handed back is an ordinary handle. A
+allocates through `alloc_dlpack_tensor`, so the value handed back is an ordinary handle. A tuple
+of tensors (`.topk`'s values and indices) is one result descriptor per tensor, in order, and the
+handles are packed into the tuple returned. A
 `&Tensor` parameter is loaded through to its handle and only read; a by-value one was moved in
 and is released through `build_dlpack_release` after the call, the same release the ordinary body
 would have reached at scope exit.
@@ -98,7 +100,8 @@ would have reached at scope exit.
 `link_external_bodies` parses the text into the module's own context (the IR crosses as text, so
 the other backend never shares an `LLVMContext` with this one), links it, and makes each symbol
 `internal` so the optimizer may inline it into its one caller. The caller promises every named
-function has scalar, tensor or `&Tensor` parameters and a statically shaped tensor result; the
+function has scalar, tensor or `&Tensor` parameters and a statically shaped tensor result (or
+a tuple of them); the
 descriptor needs a compile-time extent per axis.
 
 `ExternalBodies::memory` (`BodyMemory`) says where a symbol's buffers must live, and

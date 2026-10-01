@@ -1,4 +1,6 @@
-use crate::{errors::MlirError, lower::map_type, tensor_reduce::build_reduce};
+use crate::{
+    errors::MlirError, lower::map_type, tensor_reduce::build_reduce, tensor_sort::build_sort,
+};
 
 use ast_types::BinaryOp;
 use melior::{
@@ -11,7 +13,7 @@ use melior::{
         operation::OperationBuilder,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirStmt, HirTarget, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirSortKind, HirStmt, HirTarget, HirType};
 
 /// How many region arguments `linalg.generic` passes an element-wise binary body:
 /// one per operand, the destination's included.
@@ -59,9 +61,12 @@ pub(crate) fn build_body<'c>(
     location: Location<'c>,
     function: &HirFunction,
 ) -> Result<Option<Region<'c>>, MlirError> {
-    // Cheap filter first: a function that does not hand a tensor back cannot be
-    // one of these, and every scalar function in the program hits it.
-    if !matches!(function.return_type, HirType::Tensor { .. }) {
+    // Cheap filter first: a function that does not hand a tensor back (or `.topk`'s
+    // pair of them) cannot be one of these, and every scalar function hits it.
+    if !matches!(
+        function.return_type,
+        HirType::Tensor { .. } | HirType::Tuple(_)
+    ) {
         return Ok(None);
     }
 
@@ -71,8 +76,9 @@ pub(crate) fn build_body<'c>(
     }
 
     let block = Block::new(&slots);
-    // A reduction is lowered for a GPU body only. On the host it stays the LLVM backend's,
-    // like every other tensor operation beyond the arithmetic this path was built for.
+    // A reduction or a sort is lowered for a GPU body only. On the host it stays the LLVM
+    // backend's, like every other tensor operation beyond the arithmetic this path was
+    // built for.
     let reductions = function.target != HirTarget::Host;
 
     let built = {
@@ -162,24 +168,34 @@ fn build_statements<'c, 'a>(
     else {
         return Ok(false);
     };
-    let Some(result) = build_expression(context, location, block, value, scope, reductions)? else {
+    // `.topk` hands back two tensors, its values and its indices, as two results.
+    let results = match &value.kind {
+        HirExprKind::TensorSort {
+            kind: HirSortKind::TopK(_),
+            ..
+        } if reductions => build_sort(context, location, block, value, scope)?,
+        _ => build_expression(context, location, block, value, scope, reductions)?
+            .map(|result| vec![result]),
+    };
+    let Some(results) = results else {
         return Ok(false);
     };
     // Handing an argument back unchanged is no arithmetic. Through this path it
     // would also cost a copy into a fresh buffer, where the LLVM backend returns
     // the handle it was given.
     for index in 0..block.argument_count() {
-        if Value::from(block.argument(index)?) == result {
+        if results.contains(&Value::from(block.argument(index)?)) {
             return Ok(false);
         }
     }
-    block.append_operation(func::r#return(&[result], location));
+    block.append_operation(func::r#return(&results, location));
 
     Ok(true)
 }
 
 /// Lower one expression, yielding the SSA value it produces. `reductions` admits
-/// `.sum()` / `.mean()` / `.max()` / `.min()`, which only a GPU body lowers here.
+/// `.sum()` / `.mean()` / `.max()` / `.min()` and `.sort()` / `.argsort()`, which only a
+/// GPU body lowers here.
 pub(crate) fn build_expression<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
@@ -204,6 +220,11 @@ pub(crate) fn build_expression<'c, 'a>(
         HirExprKind::TensorReduce { .. } if reductions => {
             build_reduce(context, location, block, expression, &expression.ty, scope)
         }
+        HirExprKind::TensorSort {
+            kind: HirSortKind::Values | HirSortKind::Indices,
+            ..
+        } if reductions => Ok(build_sort(context, location, block, expression, scope)?
+            .and_then(|results| results.into_iter().next())),
         // A whole-tensor reduction reaches a GPU body boxed in a one-element tensor, since
         // a body hands back buffers only.
         HirExprKind::TensorLiteral { elements } if reductions => match elements.as_slice() {

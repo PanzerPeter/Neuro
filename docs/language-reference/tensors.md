@@ -121,7 +121,8 @@ func main() -> i32 {
 
 Outside `@gpu`, an operation on a device tensor runs on that tensor's GPU as well, and its
 result stays there. This covers `+ - * /` and `@` on `f32` / `f64` tensors, `.sum()`,
-`.mean()`, `.max()` and `.min()`, reading or writing one element, and `.clone()`. A host
+`.mean()`, `.max()` and `.min()`, `.sort()`, `.argsort()` and `.topk()`, reading or writing one
+element, and `.clone()`. A host
 operand next to a device operand is copied over for the operation. If every operand is a host
 tensor, the operation runs on the host as usual. The results are the same values the host
 computes.
@@ -136,12 +137,12 @@ val first = halved[0, 0]          // copies that one element back
 Reading or writing a single element copies only that element between the host and the GPU, and
 waits for the copy to finish. A loop over the elements of a device tensor therefore pays one copy
 per element, so move the tensor back with `.to(Device::CPU)` before reading many of them. The
-operators and reductions need a `neurc` built with the MLIR backend. Without it, element access
+operators, reductions and sorts need a `neurc` built with the MLIR backend. Without it, element access
 and `.clone()` still run on the device.
 
-Other operations have no device form yet: integer tensor arithmetic, compound assignment,
-slicing, the elementwise math methods, `einsum`, `.map` / `.zip` / `.reduce`, sorting and a
-permuting shape cast. Given a device tensor, each one aborts at the operation with
+Other operations have no device form yet: any operation on an integer tensor (sorting one
+included), compound assignment, slicing, the elementwise math methods, `einsum`,
+`.map` / `.zip` / `.reduce` and a permuting shape cast. Given a device tensor, each one aborts at the operation with
 ``panic: this tensor lives on a GPU, where host code cannot read it: move it back with
 `.to(Device::CPU)` first``, plus its location. Moving a device tensor, passing it, returning it,
 storing it in a struct and dropping it all work as they do for a host tensor.
@@ -771,7 +772,8 @@ best candidates at the front where top-k expects them. A program that wants the 
 order returns nothing on `NaN`" semantics maps through an ordered-float wrapper first.
 
 Equal elements keep the order they were written in, which is what makes an `argsort` of a
-tensor with ties reproducible.
+tensor with ties reproducible. On a GPU (a `@gpu` body, or a float tensor that lives on a
+device) the result is the same, ties and `NaN` included.
 
 Like a reduction, a selection **reads** its receiver: it allocates its own result and
 leaves the ordered buffer where it was, so it is offered on `&Tensor<T, S>` too.

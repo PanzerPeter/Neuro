@@ -177,7 +177,22 @@ a third generic. A whole-tensor reduction arrives boxed in a one-element `Tensor
 body returns buffers only) and becomes a reduction into `tensor<1xT>` with one parallel axis of
 extent 1.
 
-**Tensor arithmetic (and, on the GPU, reductions) is the only body lowered here.** `tensor_arithmetic::build_body` turns a
+**Sorts, for GPU bodies only.** `tensor_sort::build_sort` lowers `.sort()` / `.argsort()` /
+`.topk()` when the target is not `Host`, as a rank sort in two `linalg.generic`s. The count's index
+space is the source's axes (`parallel`, one GPU thread per element) and then the compared
+element's run position (`reduction`): each element counts the ones that precede it under the LLVM
+backend's comparator (`precedes`, which the `.max()` / `.min()` fold also uses) plus the equal
+ones at earlier positions, which is where a stable sort puts it. The gather's index space is the
+output's axes and then the run: each output position takes the element whose count is its
+position, its value or (as `index_cast` to `i32`) its run position. Both destinations are seeded
+with 0 first. `.topk` sorts descending and has `k` output positions per run, so it gathers those
+two outputs and nothing more. Each answer is the host's exactly, permutation included; the work
+is O(extent²) per run. A `.topk` body returns two tensors, so a defined function's tuple of tensors
+is one MLIR result per tensor, each its own out-param after bufferization, and `linkable_result`
+admits it, as it admits an `i32` result tensor: an index a sort writes, never arithmetic, since
+every parameter is a float.
+
+**Tensor arithmetic (and, on the GPU, reductions and sorts) is the only body lowered here.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` or tail expression over
 element-wise `+ - * /` on tensors into a `func.func` definition. An operand may be borrowed: a
 `&Tensor` parameter is a tensor block argument (`read_type`, which also gives the defined
@@ -235,7 +250,7 @@ That keeps every allocation a Neuro tensor owns on the LLVM backend's side.
 
 **What `lower_for_link` links.** `build_linkable_module` takes a free function only when
 `linkable_signature` holds (an `f32` / `f64` scalar or static tensor of one for every parameter,
-owned or behind `&`, and a static tensor result) and `build_body` lowers it. Floats only, because
+owned or behind `&`, and a static tensor result or tuple of them, see `linkable_result`) and `build_body` lowers it. Floats only, because
 the LLVM backend guards integer elements (an overflow panics on the debug tier, a zero divisor in
 every build) and `arith` has neither guard, so the two would not be interchangeable. Static only,
 because the frontend gives a `?` axis no arithmetic. The module declares nothing: a declaration

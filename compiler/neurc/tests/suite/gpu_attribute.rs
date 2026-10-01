@@ -229,6 +229,49 @@ func main() -> i32 {
     assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
 }
 
+/// A `@gpu` body can sort, and return `.topk`'s values and indices as a pair. Equal
+/// elements keep their order, as on the host.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn a_gpu_body_sorts_and_returns_topk_as_a_pair() {
+    const SOURCE: &str = r#"
+@gpu
+func ranked(x: &Tensor<f32, [2, 4]>) -> (Tensor<f32, [2, 2]>, Tensor<i32, [2, 2]>) {
+    x.topk(k: 2)
+}
+
+@gpu
+func ordered(x: &Tensor<f32, [2, 4]>) -> Tensor<i32, [2, 4]> {
+    x.argsort(descending: true)
+}
+
+func main() -> i32 {
+    val a: Tensor<f32, [2, 4]> = [[1.0, 4.0, 2.0, 4.0], [0.5, -1.0, 3.0, 0.5]]
+    val (v, i) = ranked(&a)
+    val o = ordered(&a)
+    println("{v[0, 0]} {v[0, 1]} {i[0, 0]} {i[0, 1]} {v[1, 1]} {i[1, 1]} {o[1, 0]} {o[1, 3]}")
+    return i[0, 1]
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("sort.nr", SOURCE))
+        .expect("a sort lowers to kernels");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        assert_aborted_at_startup(&output);
+        return;
+    }
+    assert_eq!(output.status.code(), Some(3), "stderr: {stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "4.0 4.0 1 3 0.5 0 2 1\n"
+    );
+}
+
 #[cfg(all(feature = "mlir", unix))]
 #[test]
 fn without_a_visible_gpu_the_program_aborts_before_main() {

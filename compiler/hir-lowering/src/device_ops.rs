@@ -1,5 +1,5 @@
 // Outlining the tensor operations a GPU can run into functions that run where their
-// operands live (§6.2: operations execute on the tensor's device).
+// operands live: an operation executes on the device its tensors are on.
 //
 // Nothing in a tensor's type says where it lives, so the choice is made per call at run
 // time, and a backend can only make it at a call: it needs a body to hand the GPU and a
@@ -79,10 +79,10 @@ fn operator_node(expr: &HirExpr) -> bool {
     ) && device_tensor(&expr.ty)
 }
 
-/// Whether a reduction may be outlined over `receiver`: a borrow (lent on as it is), a
-/// named tensor (lent with `&`), or a temporary (moved in, since nothing else owns it).
-/// A tensor inside another place, a field say, can be neither lent, since a backend borrows
-/// only a binding, nor moved out of its owner, so its reduction stays inline.
+/// Whether a reduction or a sort may be outlined over `receiver`: a borrow (lent on as it
+/// is), a named tensor (lent with `&`), or a temporary (moved in, since nothing else owns
+/// it). A tensor inside another place, a field say, can be neither lent, since a backend
+/// borrows only a binding, nor moved out of its owner, so its operation stays inline.
 fn reducible(receiver: &HirExpr) -> bool {
     matches!(receiver.ty, HirType::Reference { .. })
         || matches!(receiver.kind, HirExprKind::Variable(_))
@@ -112,6 +112,23 @@ impl Outliner {
             *expr = self.call(body, operands, expr.span);
             return true;
         }
+        // A sort's result is a fresh tensor (or `.topk`'s pair of them) of the receiver's
+        // rank, so the receiver alone decides whether it can run on a device.
+        if let HirExprKind::TensorSort { receiver, .. } = &mut expr.kind {
+            if !device_tensor(&receiver.ty) || !reducible(receiver) {
+                return false;
+            }
+            self.rewrite(receiver);
+            let span = expr.span;
+            let mut sort = placeholder(expr);
+            let HirExprKind::TensorSort { receiver, .. } = &mut sort.kind else {
+                return false;
+            };
+            let operand = lend(std::mem::replace(receiver.as_mut(), unit(span)));
+            **receiver = parameter(0, &operand);
+            *expr = self.call(sort, vec![operand], span);
+            return true;
+        }
         let HirExprKind::TensorReduce { receiver, axis, .. } = &mut expr.kind else {
             return false;
         };
@@ -128,23 +145,7 @@ impl Outliner {
         let HirExprKind::TensorReduce { receiver, .. } = &mut reduce.kind else {
             return false;
         };
-        let operand = std::mem::replace(receiver.as_mut(), unit(span));
-        // A reduction reads its receiver and leaves it alive, so a named tensor is lent to
-        // the call rather than moved into it. A temporary has no owner to outlive it.
-        let operand = match &operand.ty {
-            HirType::Tensor { .. } if is_place(&operand) => HirExpr::new(
-                HirExprKind::Reference {
-                    operand: Box::new(operand.clone()),
-                    mutable: false,
-                },
-                HirType::Reference {
-                    inner: Box::new(operand.ty),
-                    mutable: false,
-                },
-                operand.span,
-            ),
-            _ => operand,
-        };
+        let operand = lend(std::mem::replace(receiver.as_mut(), unit(span)));
         **receiver = parameter(0, &operand);
         if !whole {
             *expr = self.call(reduce, vec![operand], span);
@@ -479,6 +480,26 @@ impl Outliner {
 
 fn parameter_name(index: usize) -> String {
     format!("operand{index}")
+}
+
+/// The argument a reduction or a sort passes for its receiver. Both read the receiver and
+/// leave it alive, so a named tensor is lent to the call rather than moved into it. A
+/// temporary has no owner to outlive it, and a borrow is lent on as it is.
+fn lend(operand: HirExpr) -> HirExpr {
+    match &operand.ty {
+        HirType::Tensor { .. } if is_place(&operand) => HirExpr::new(
+            HirExprKind::Reference {
+                operand: Box::new(operand.clone()),
+                mutable: false,
+            },
+            HirType::Reference {
+                inner: Box::new(operand.ty),
+                mutable: false,
+            },
+            operand.span,
+        ),
+        _ => operand,
+    }
 }
 
 /// The parameter an outlined body reads in place of `operand`, at the operand's own span.

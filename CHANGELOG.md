@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.14.0] - 2026-10-01
+
+### Added
+
+- `.sort()`, `.argsort()` and `.topk()` on a float tensor that lives on a GPU now run on that GPU
+  instead of aborting, and their results stay there. The order is the host's exactly, indices
+  included: equal elements keep their positions and a `NaN` sorts last in either direction. A
+  `@gpu` function may sort too, and may return `.topk`'s `(values, indices)` pair. A sort runs
+  as a parallel rank sort, with each element counting the elements ordered before it, so the work
+  is quadratic in the sorted axis's length. Sorting an integer tensor on a device still aborts at
+  the operation, like other integer tensor operations. Needs a `neurc` built with the MLIR
+  backend.
+
+### Fixed
+
+- A source comment in the HIR lowering cited an internal spec section number; it now describes
+  the rule in plain terms, and the documentation hygiene check passes again.
+
 ## [4.13.0] - 2026-09-30
 
 ### Added

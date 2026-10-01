@@ -139,3 +139,48 @@ func main() -> i32 {
     assert!(matches!(total.kind, HirExprKind::TensorReduce { .. }));
     assert!(outlined(&program).is_empty());
 }
+
+#[test]
+fn a_sort_is_outlined_over_its_receiver() {
+    // Arguments are positional here: `k` first, then the axis.
+    let program = lower(
+        r#"
+enum Device {
+    CPU,
+    GPU(i32)
+}
+
+func main() -> i32 {
+    val a: Tensor<f32, [2, 3]> = Tensor::ones()
+    val g = a.clone().to(Device::GPU(0))
+    val sorted = g.sort()
+    val order = (&g + &a).argsort(0)
+    val (top, at) = g.topk(2)
+    val ints: Tensor<i32, [4]> = Tensor::ones()
+    val kept = ints.sort()
+    return 0
+}
+"#,
+    );
+    let sorted = callee(&program, "sorted");
+    assert_eq!(sorted.params[0].ty.to_string(), "&Tensor<f32, [2, 3]>");
+    assert_eq!(sorted.return_type.to_string(), "Tensor<f32, [2, 3]>");
+    // The receiver is a temporary, itself an outlined sum, so it is moved in.
+    let order = callee(&program, "order");
+    assert_eq!(order.params[0].ty.to_string(), "Tensor<f32, [2, 3]>");
+    assert_eq!(order.return_type.to_string(), "Tensor<i32, [2, 3]>");
+    let topk = outlined(&program)
+        .into_iter()
+        .find(|f| matches!(f.return_type, HirType::Tuple(_)))
+        .expect("`.topk` is outlined with its pair");
+    assert_eq!(
+        topk.return_type.to_string(),
+        "(Tensor<f32, [2, 2]>, Tensor<i32, [2, 2]>)"
+    );
+    let kept = binding_init(function_body(&program, "main"), "kept");
+    assert!(
+        matches!(kept.kind, HirExprKind::TensorSort { .. }),
+        "an integer sort has no device form"
+    );
+    assert_eq!(outlined(&program).len(), 4);
+}

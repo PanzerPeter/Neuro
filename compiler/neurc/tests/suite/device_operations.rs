@@ -1,6 +1,6 @@
 // Tensor operations on a device tensor outside `@gpu` run on its device: element reads and
-// writes and `.clone()` on every build, the operators and reductions where the MLIR backend
-// can build their kernels.
+// writes and `.clone()` on every build, the operators, reductions and sorts where the MLIR
+// backend can build their kernels.
 //
 // Only a machine with an NVIDIA GPU runs a transfer to the end. CI has none, so each test
 // that needs one also accepts the transfer's own diagnostic, as `device_management.rs` does.
@@ -131,7 +131,12 @@ func main() -> i32 {
 #[cfg(all(feature = "mlir", unix))]
 #[test]
 fn a_result_stays_on_the_device() {
-    for (operation, column) in [("val s = &g + &h", 13), ("val s = g.sum(axis: 0)", 13)] {
+    for (operation, column) in [
+        ("val s = &g + &h", 13),
+        ("val s = g.sum(axis: 0)", 13),
+        ("val s = g.sort()", 13),
+        ("val (s, t) = g.topk(k: 2)", 13),
+    ] {
         let source = format!(
             "func main() -> i32 {{\n    val h = Tensor::<f32, [2, 3]>::ones()\n    val g = h.clone().to(Device::GPU(0))\n    {operation}\n    val r = s.map(|v: f32| v * 2.0f32)\n    return 0\n}}\n"
         );
@@ -192,6 +197,119 @@ func main() -> i32 {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.starts_with(ON_DEVICE) && stderr.contains("integer.nr:4:13"),
+        "{stderr}"
+    );
+}
+
+/// `.sort()`, `.argsort()` and `.topk()` on a device tensor give the host's order exactly:
+/// ties keep their positions, a NaN sorts last either way, and an inner axis or an `f64`
+/// tensor changes nothing. A mismatch count of zero.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn sorts_on_the_device_match_the_host() {
+    const SOURCE: &str = r#"
+func same(a: f32, b: f32) -> bool {
+    a.is_nan() == b.is_nan() && (a.is_nan() || a == b)
+}
+
+func main() -> i32 {
+    mut m: Tensor<f32, [9, 7]> = Tensor::zeros()
+    mut i = 0
+    while i < 9 {
+        mut j = 0
+        while j < 7 {
+            m[i, j] = ((i * 7 + j * 3) % 4) as f32 - 1.5
+            if (i + j) % 5 == 0 { m[i, j] = 0.0f32 / 0.0f32 }
+            j += 1
+        }
+        i += 1
+    }
+    val d: Tensor<f64, [3, 4, 2]> = Tensor::ones()
+    val g = m.clone().to(Device::GPU(0))
+
+    val sorted = g.sort().to(Device::CPU)
+    val down = g.sort(axis: 0, descending: true).to(Device::CPU)
+    val order = (&g + &g).argsort(axis: 0).to(Device::CPU)
+    val (gtop, gat) = g.topk(k: 3)
+    val top = gtop.to(Device::CPU)
+    val at = gat.to(Device::CPU)
+    val (_, gdat) = d.clone().to(Device::GPU(0)).topk(k: 2, axis: 1)
+    val dat = gdat.to(Device::CPU)
+
+    val (htop, hat) = m.topk(k: 3)
+    val (_, hdat) = d.topk(k: 2, axis: 1)
+    mut wrong = 0
+    i = 0
+    while i < 9 {
+        mut j = 0
+        while j < 7 {
+            if !same(sorted[i, j], m.sort()[i, j]) { wrong += 1 }
+            if !same(down[i, j], m.sort(axis: 0, descending: true)[i, j]) { wrong += 1 }
+            if order[i, j] != (&m + &m).argsort(axis: 0)[i, j] { wrong += 1 }
+            if j < 3 && (!same(top[i, j], htop[i, j]) || at[i, j] != hat[i, j]) { wrong += 1 }
+            j += 1
+        }
+        i += 1
+    }
+    i = 0
+    while i < 3 {
+        if dat[i, 0, 1] != hdat[i, 0, 1] || dat[i, 1, 0] != hdat[i, 1, 0] { wrong += 1 }
+        i += 1
+    }
+    println("{sorted[0, 0]} {sorted[0, 6]} {order[0, 0]} {top[1, 0]} {at[1, 0]} {dat[2, 1, 1]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "sorts.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_ran(&output, 0, "-1.5 nan 4 1.5 0 1\n");
+}
+
+/// A program that sorts only host tensors sorts them on the host, GPU or not.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn a_host_sort_stays_on_the_host_without_a_gpu() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    val a: Tensor<f32, [2, 3]> = [[3.0, 1.0, 2.0], [0.5, 0.5, -1.0]]
+    val b = a.to(Device::CPU)
+    val (top, at) = b.topk(k: 1)
+    println("{b.sort()[0, 0]} {b.argsort()[1, 0]} {top[0, 0]} {at[1, 0]}")
+    return at[0, 0]
+}
+"#;
+    let test = CompileTest::new();
+    for hide_devices in [false, true] {
+        assert_ran(
+            &run(&test, "host_sort.nr", SOURCE, hide_devices),
+            0,
+            "1.0 2 3.0 0\n",
+        );
+    }
+}
+
+/// An integer tensor has no device form, a sort included, so it refuses a device receiver.
+#[cfg(unix)]
+#[test]
+fn an_integer_sort_refuses_a_device_operand() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    val k = Tensor::<i32, [4]>::ones().to(Device::GPU(0))
+    val r = k.sort()
+    return 0
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "integer_sort.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with(ON_DEVICE) && stderr.contains("integer_sort.nr:4:13"),
         "{stderr}"
     );
 }

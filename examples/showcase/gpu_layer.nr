@@ -3,17 +3,19 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   `@gpu` · `.to(Device::GPU(0))` / `.to(Device::CPU)` · `@` and broadcast `+` in one
-//   kernel body · operators, reductions and element reads on a device tensor outside
-//   `@gpu` · `pool` arena blocks · a closure through `.map` · a `.sum()` reduction
-//   · a `Vec` of `Copy` structs.
+//   kernel body · operators, reductions, `.topk` and element reads on a device tensor
+//   outside `@gpu` · `pool` arena blocks · a closure through `.map` · a `.sum()`
+//   reduction · a `Vec` of `Copy` structs.
 //
 // The weights and bias move to the GPU once, before the first batch, and stay there: each
 // call reads them in place and stages only the batch. Because a weight lives on the GPU,
 // so does each call's result. Its elements are compared with the same layer computed
 // inline on the host, one element read at a time, and the two must agree exactly. The
-// per-row peak is computed with ordinary operators and reductions, which run on the GPU
-// because their operands live there. Only then does `.to(Device::CPU)` bring the result
-// back for the ReLU, a closure through `.map`, which has no device form. Every batch is
+// per-row peak is computed with ordinary operators and reductions, and the leading unit of
+// the first row with `.topk`, all of which run on the GPU because their operands live there.
+// The two units tie in the last batch, and a tie goes to the earlier unit. Only then does
+// `.to(Device::CPU)` bring the result back for the ReLU, a closure through `.map`, which has
+// no device form. Every batch is
 // processed inside a `pool`, whose exit also releases the device memory the call staged.
 // Without a usable NVIDIA GPU the program stops before `main` with a `panic:` line, since
 // bare `@gpu` never falls back to the CPU.
@@ -29,6 +31,7 @@ struct BatchReport {
     batch: i32,
     total: f32,
     row_peak: f32,
+    leader: i32,
     agrees: bool
 }
 
@@ -53,9 +56,11 @@ func main() -> i32 {
             val on_host = &x @ &w + &bias
             val agrees = on_gpu[0, 0] == on_host[0, 0] && on_gpu[3, 1] == on_host[3, 1]
             val row_peak = (&on_gpu - &bias_gpu).sum(axis: 1).max()
+            val (_, unit) = on_gpu.topk(k: 1)
+            val leader = unit[0, 0]
             val activated = on_gpu.to(Device::CPU).map(relu)
             val total = activated.sum()
-            reports.push(BatchReport { batch: batch, total: total, row_peak: row_peak, agrees: agrees })
+            reports.push(BatchReport { batch: batch, total: total, row_peak: row_peak, leader: leader, agrees: agrees })
         }
         batch += 1
     }
@@ -63,7 +68,7 @@ func main() -> i32 {
     mut agreeing = 0
     for i in 0..reports.len() as i32 {
         val report = reports[i]
-        println("batch {report.batch}: activated total {report.total}, row peak {report.row_peak}, host agrees: {report.agrees}")
+        println("batch {report.batch}: activated total {report.total}, row peak {report.row_peak}, leading unit {report.leader}, host agrees: {report.agrees}")
         if report.agrees { agreeing += 1 }
     }
     return agreeing
