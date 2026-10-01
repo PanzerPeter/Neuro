@@ -29,7 +29,7 @@ pub enum GpuTarget {
     Amd { chip: String },
 }
 
-/// The chips LLVM 22 has a processor model for (`llc -march=nvptx64 -mcpu=help`, and
+/// The chips LLVM 23 has a processor model for (`llc -march=nvptx64 -mcpu=help`, and
 /// `-march=amdgcn`, less the `gfxN-generic` families). LLVM only warns about any other name,
 /// then crashes selecting AMD instructions without one, so a chip must be on its list.
 const NVIDIA_CHIPS: &[&str] = &[
@@ -45,7 +45,8 @@ const AMD_CHIPS: &[&str] = &[
     "gfx908", "gfx909", "gfx90a", "gfx90c", "gfx942", "gfx950", "gfx1010", "gfx1011", "gfx1012",
     "gfx1013", "gfx1030", "gfx1031", "gfx1032", "gfx1033", "gfx1034", "gfx1035", "gfx1036",
     "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153",
-    "gfx1200", "gfx1201", "gfx1250", "gfx1251",
+    "gfx1154", "gfx1170", "gfx1171", "gfx1172", "gfx1200", "gfx1201", "gfx1250", "gfx1251",
+    "gfx1310",
 ];
 
 impl GpuTarget {
@@ -529,7 +530,7 @@ mod tests {
             .llvm_ir;
 
         assert_is_a_launcher(&ir);
-        assert!(ir.contains("amdgcn-amd-amdhsa--gfx90a"), "{ir}");
+        assert!(ir.contains("amdgcn-amd-amdhsa-unknown-gfx90a"), "{ir}");
         assert!(
             ir.contains("v_add_f32"),
             "expected the kernel's fadd:\n{ir}"

@@ -84,7 +84,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "argument-binding"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "ast-types"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "shared-types",
 ]
@@ -106,22 +106,21 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bindgen"
-version = "0.72.1"
+version = "0.73.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
+checksum = "787ef8ef523575546b106a58213d6e6b06198a05c2f757258c68a74273670cfa"
 dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools",
  "log",
  "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
  "rustc-hash",
- "shlex 1.3.0",
- "syn 2.0.119",
+ "shlex",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -158,7 +157,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f360145194ee8e21db5ee7f3fcd4fe52210864c75c985dae33218202c8bbe040"
 dependencies = [
  "find-msvc-tools",
- "shlex 2.0.1",
+ "shlex",
 ]
 
 [[package]]
@@ -478,7 +477,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hir-lowering"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "neuro-hir",
@@ -490,8 +489,7 @@ dependencies = [
 [[package]]
 name = "inkwell"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30932a1258d02e3c7344618abcdbb5dca03e0f8d2ad34496067d1f371cfceda6"
+source = "git+https://github.com/TheDan64/inkwell?rev=e27198562729488a493e8110b4d925875eb917cb#e27198562729488a493e8110b4d925875eb917cb"
 dependencies = [
  "bitflags",
  "inkwell_internals",
@@ -503,8 +501,7 @@ dependencies = [
 [[package]]
 name = "inkwell_internals"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04a85f1cf8de4f1df2ebd93b6afe957fa2acd0081c97dabfa41651eeeb44756e"
+source = "git+https://github.com/TheDan64/inkwell?rev=e27198562729488a493e8110b4d925875eb917cb#e27198562729488a493e8110b4d925875eb917cb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -557,7 +554,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lexical-analysis"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "logos",
  "serde_json",
@@ -589,7 +586,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "llvm-backend"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "criterion",
@@ -603,9 +600,9 @@ dependencies = [
 
 [[package]]
 name = "llvm-sys"
-version = "221.1.0"
+version = "231.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e52e36cd9eef0d5c4ba35c751c252f207642293009bb774185f84f678c7683c"
+checksum = "c0475bc87fdfb41f07d459d26d01534dbf24f51260dc8a38b661988e5e6b3432"
 dependencies = [
  "anyhow",
  "cc",
@@ -655,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "melior"
-version = "0.27.8"
+version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03e93b92e9921fc1d4265a5caa50b1fdcd68c4b41e35119f26062bfc912d186f"
+checksum = "818ec97287ecdbcf4875f7a9d1ebcbc637f72f361d682b7eeb62871ad66ea6a7"
 dependencies = [
  "melior-macro",
  "mlir-sys",
@@ -665,9 +662,9 @@ dependencies = [
 
 [[package]]
 name = "melior-macro"
-version = "0.20.8"
+version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8b3fa1b8258f577a08fc3ceb35e1f96bec377435f6a3762314a43e07ebddec9"
+checksum = "c6329f3c86e84b9a813cd68ffc48e935fd87c3c8e0b25d20a5e029f02869bb8a"
 dependencies = [
  "comrak",
  "convert_case",
@@ -693,7 +690,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mlir-backend"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "hir-lowering",
@@ -708,16 +705,16 @@ dependencies = [
 
 [[package]]
 name = "mlir-sys"
-version = "220.0.2"
+version = "230.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55f8c5781dc23ebe7456f9e9aaecab9eee9e542f7e9051b95b0a31b1d5d4b61f"
+checksum = "af55946104703fa7658138f96ec4a258a070783e6067c0614b4ae543b0f85232"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "module-resolution"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -727,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "neurc"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "anyhow",
  "argument-binding",
@@ -748,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "neuro-hir"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -882,12 +879,12 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.37"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
 dependencies = [
  "proc-macro2",
- "syn 2.0.119",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -1005,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "semantic-analysis"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -1064,13 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "shared-types"
-version = "4.15.0"
-
-[[package]]
-name = "shlex"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+version = "4.16.0"
 
 [[package]]
 name = "shlex"
@@ -1126,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "syntax-parsing"
-version = "4.15.0"
+version = "4.16.0"
 dependencies = [
  "ast-types",
  "lexical-analysis",
@@ -1136,9 +1127,9 @@ dependencies = [
 
 [[package]]
 name = "tblgen"
-version = "0.9.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15a6768dc51535aeaecbe812e2a792a77cbef10b1c4529e29bea5864a738dc6a"
+checksum = "6559c84cdfb38bbcbd74eca4dc8a064141887f049c4f6516ccc3130954730bee"
 dependencies = [
  "bindgen",
  "cc",

@@ -592,6 +592,9 @@ compiler bug, not a diagnostic.
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it
   too, or a closure in the body captures it.
+- **Range bounds**: the start is lowered first and the end against its type, except that an
+  unsuffixed integer literal start beside a non-literal end is lowered against the end's type
+  (`0..v.len()` runs over `u64`), the order `semantic-analysis` checks them in.
 - **Reversed and stepped ranges**: `ForRange`'s `reversed` flag and `step` ride through to the
   adapted lowering as well as the plain one, the stride lowered against the range's element type.
   Nothing about the bounds, the element type, or the body changes with them; the walk is a

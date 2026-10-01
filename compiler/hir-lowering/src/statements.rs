@@ -175,8 +175,15 @@ impl Lowerer {
                 body,
                 span,
             } => {
-                let start = self.lower_expr(start, None)?;
-                let end = self.lower_expr(end, Some(&start.ty))?;
+                // Mirrors the checker: an unsuffixed literal start takes the end's type.
+                let (start, end) = if unsuffixed_integer(start) && !unsuffixed_integer(end) {
+                    let end = self.lower_expr(end, None)?;
+                    (self.lower_expr(start, Some(&end.ty))?, end)
+                } else {
+                    let start = self.lower_expr(start, None)?;
+                    let end = self.lower_expr(end, Some(&start.ty))?;
+                    (start, end)
+                };
                 let step = step
                     .as_ref()
                     .map(|step| self.lower_expr(step, Some(&start.ty)).map(Box::new))
@@ -550,4 +557,12 @@ impl Lowerer {
             _ => None,
         }
     }
+}
+
+/// An integer literal with no suffix, whose type comes from its context.
+fn unsuffixed_integer(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Literal(shared_types::Literal::Integer(_, None), _)
+    )
 }

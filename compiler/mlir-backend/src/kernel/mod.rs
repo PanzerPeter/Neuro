@@ -332,7 +332,7 @@ func main() -> i32 {
         let ir = lower_with_format(&program(KERNEL), &target, "isa")
             .expect("the kernel lowers for AMD")
             .llvm_ir;
-        assert!(ir.contains("amdgcn-amd-amdhsa--gfx90a"), "{ir}");
+        assert!(ir.contains("amdgcn-amd-amdhsa-unknown-gfx90a"), "{ir}");
     }
 
     #[test]

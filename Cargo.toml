@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "4.15.0"
+version = "4.16.0"
 edition = "2024"
 rust-version = "1.98.1"
 authors = ["Neuro Contributors"]
@@ -40,30 +40,31 @@ anyhow = "1.0"
 logos = "0.16"
 
 # LLVM Backend
-# Requires LLVM 22 with dev libraries (the backend emits LLVM IR via inkwell).
-# LLVM_SYS_221_PREFIX points at that install: /usr on Arch/CachyOS, whose stock
-# `llvm` is 22. Feature flag llvm22-1 (inkwell's minor-version suffix scheme).
+# Requires LLVM 23 with dev libraries (the backend emits LLVM IR via inkwell).
+# LLVM_SYS_231_PREFIX points at that install: /usr on Arch/CachyOS, whose stock
+# `llvm` is 23. Feature flag llvm23-1 (inkwell's minor-version suffix scheme).
+# LLVM 23 support is on inkwell's master but in no crates.io release yet, so the
+# dependency is pinned to that commit; move back to a version once 0.11 ships.
 # default-features = false disables inkwell's `target-all` default, which would
 # otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
 # That fails to link against LLVM's official Windows build, which ships only a
 # subset of backends. We only ever initialize the native (x86) target.
-inkwell = { version = "0.10.0", default-features = false, features = ["llvm22-1", "target-x86"] }
+inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "e27198562729488a493e8110b4d925875eb917cb", default-features = false, features = ["llvm23-1", "target-x86"] }
 
 # MLIR Backend (Phase 1.8+)
 # Rust MLIR bindings for the tensor lowering path, behind mlir-backend's `mlir`
-# feature. melior 0.27.x is the last line on MLIR 22 (via mlir-sys 220); 0.28
-# moved to MLIR 23. mlir-sys finds MLIR through `$MLIR_SYS_220_PREFIX/bin/
-# llvm-config`, so MLIR must be installed into the same prefix as the LLVM that
-# LLVM_SYS_221_PREFIX names: `bridge.rs` hands an `LLVMContextRef` from MLIR's
-# libLLVM to inkwell, so both must load one libLLVM 22. TABLEGEN_220_PREFIX
-# names the same prefix for mlir-tblgen.
-melior = "0.27.8"
+# feature. melior 0.28.x is the MLIR 23 line (via mlir-sys 230). mlir-sys finds
+# MLIR through `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR must be installed
+# into the same prefix as the LLVM that LLVM_SYS_231_PREFIX names: `bridge.rs`
+# hands an `LLVMContextRef` from MLIR's libLLVM to inkwell, so both must load one
+# libLLVM 23. TABLEGEN_230_PREFIX names the same prefix for mlir-tblgen.
+melior = "0.28.2"
 
 # melior does not wrap `mlirTranslateModuleToLLVMIR`, so the MLIR -> LLVM IR
 # crossing calls it through the raw bindings. Pinned to the version melior
 # itself depends on, so both reach the SAME `mlir-sys` instance and its
 # `MlirOperation` / `LLVMContextRef` types unify.
-mlir-sys = "220.0.2"
+mlir-sys = "230.0.2"
 
 # Serialization
 serde_json = "1.0"

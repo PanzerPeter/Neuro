@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.16.0] - 2026-10-01
+
+### Changed
+
+- The compiler builds against LLVM 23 (inkwell's `llvm23-1` feature). Export
+  `LLVM_SYS_231_PREFIX` instead of `LLVM_SYS_221_PREFIX`: `/usr` with Arch's stock `llvm`,
+  `/usr/lib/llvm-23` from apt.llvm.org, `$(brew --prefix llvm)` on macOS. No inkwell release on
+  crates.io supports LLVM 23 yet, so the dependency is pinned to a commit of inkwell's
+  repository until one does. See the [installation guide](docs/getting-started/installation.md).
+- The optional MLIR backend moves to melior 0.28.2 and mlir-sys 230.0.2 (MLIR 23). Its variables
+  are now `MLIR_SYS_230_PREFIX` and `TABLEGEN_230_PREFIX`, still naming the same prefix as
+  `LLVM_SYS_231_PREFIX`.
+- Windows builds use LLVM's official `clang+llvm-23.1.2-x86_64-pc-windows-msvc` archive.
+- `--gpu-arch` accepts the AMD chips LLVM 23 adds: `gfx1154`, `gfx1170`, `gfx1171`, `gfx1172`
+  and `gfx1310`.
+- An AMD code object now names its target `amdgcn-amd-amdhsa-unknown-gfxNNN`, the spelling
+  LLVM 23 gives a target ID, where LLVM 22 wrote `amdgcn-amd-amdhsa--gfxNNN`.
+
+### Fixed
+
+- `for i in 0..v.len()` and `for k in 0..=n` with `n: i64` were refused with a type mismatch:
+  the literal start was typed `i32` before the end was read. An unsuffixed literal start now
+  takes the end's type, so the specification's `for i in 0..slice.len()` in a `partition`
+  closure compiles as written. Closes BUG-091.
+
 ## [4.15.0] - 2026-10-01
 
 ### Added

@@ -36,7 +36,7 @@ tempfile = { workspace = true }
 
 [features]
 # Route the tensor bodies MLIR computes exactly as the LLVM backend would through
-# mlir-backend. Needs an MLIR 22 toolchain at build time, like mlir-backend's own
+# mlir-backend. Needs an MLIR 23 toolchain at build time, like mlir-backend's own
 # feature; without it every body stays on the LLVM backend. See CONTEXT.md.
 default = []
 mlir = ["dep:mlir-backend", "mlir-backend/mlir"]

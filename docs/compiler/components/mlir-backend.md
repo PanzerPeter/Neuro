@@ -2,7 +2,7 @@
 
 **Status**: experimental, off by default behind the `mlir` cargo feature
 **Crate**: `compiler/mlir-backend`
-**Library**: melior 0.27.8 (Rust MLIR bindings, LLVM/MLIR 22)
+**Library**: melior 0.28.2 (Rust MLIR bindings, LLVM/MLIR 23)
 
 ## Overview
 
@@ -35,11 +35,11 @@ The path is opt-in behind the off-by-default `mlir` feature
 
 The gate is permanent, not a staging step. LLVM's official Windows development build, the one
 `llvm-sys` builds against there, carries no MLIR at all, so requiring MLIR would stop `neurc.exe`
-being buildable. Homebrew's `llvm@22` and apt.llvm.org's packages do carry it; on Arch no
+being buildable. Homebrew's `llvm` and apt.llvm.org's packages do carry it; on Arch no
 package fits (`aur/mlir` ships no `libMLIR-C.so`), so MLIR comes from a source build.
 
 - **Disabled (default)**: the crate compiles to an empty placeholder and pulls in no MLIR toolchain
-  (nor `neuro-hir`), so `cargo build/test --workspace` works on a stock LLVM 22 install with no MLIR
+  (nor `neuro-hir`), so `cargo build/test --workspace` works on a stock LLVM 23 install with no MLIR
   on every CI OS.
 - **Enabled**: pulls in `melior` + `mlir-sys` + `inkwell` + `neuro-hir` + `ast-types` and exposes the
   entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a dedicated
@@ -47,7 +47,7 @@ package fits (`aur/mlir` ships no `libMLIR-C.so`), so MLIR comes from a source b
   legs build the placeholder.
 
 See [Installation → Optional: MLIR Backend](../../getting-started/installation.md#optional-mlir-backend)
-for the MLIR 22 toolchain setup.
+for the MLIR 23 toolchain setup.
 
 ### Entry points (feature `mlir`)
 
@@ -327,11 +327,11 @@ guards, and a body it refuses keeps its host copy rather than being an error. Se
 ## Coexistence with inkwell
 
 `mlir-sys` carries no `llvm-sys` dependency and no Cargo `links` key that clashes with inkwell's.
-It finds MLIR by running `$MLIR_SYS_220_PREFIX/bin/llvm-config`, so MLIR must be installed into
-the same prefix as the LLVM `LLVM_SYS_221_PREFIX` names, and `TABLEGEN_220_PREFIX` names it too.
-Both bindings then load one `libLLVM` 22, which the handoff above relies on.
+It finds MLIR by running `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR must be installed into
+the same prefix as the LLVM `LLVM_SYS_231_PREFIX` names, and `TABLEGEN_230_PREFIX` names it too.
+Both bindings then load one `libLLVM` 23, which the handoff above relies on.
 
-`melior 0.27.x` is the last line on MLIR 22 (via `mlir-sys 220`); `melior 0.28` moved to MLIR 23.
+`melior 0.28.x` is the MLIR 23 line (via `mlir-sys 230`).
 
 ## Source
 

@@ -385,6 +385,11 @@ loop.
   so `xs[i]` needs no cast) in the same scope as the element binding, which is what makes
   `for (i, i) in ...` a `VariableAlreadyDefined` rather than a shadow.
 
+- **Range bounds.** The start bound leads: it is checked with no expected type and the end is
+  checked against it. The exception is an unsuffixed integer literal start beside an end that is
+  not one (`0..v.len()`, `0..=n`): the end is checked first and the literal takes its type, so
+  the loop runs over `u64` or `i64` without a suffix. `hir-lowering` orders the two the same way.
+
 - **Reversed heads.** `Stmt::ForRange` and `TensorIndexArg::Range` carry a `reversed` flag
   for `.rev()`, and the checker reads neither. A reversal changes the order values arrive in,
   not the bounds, the element type, or a slice's surviving extent, so there is no rule here to

@@ -177,3 +177,38 @@ func main() -> i32 {
         .expect_err("300 does not fit u8");
     assert!(error.contains("out of range for type u8"), "got: {error}");
 }
+
+#[test]
+fn test_bug_091_a_literal_range_start_takes_the_end_s_type() {
+    let source = r#"
+func sum_vec(v: &Vec<i32>) -> i32 {
+    mut s = 0
+    for i in 0..v.len() {
+        s = s + v[i]
+    }
+    s
+}
+
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(10)
+    v.push(20)
+    v.push(5)
+    val wide: i64 = 4
+    mut steps = 0
+    for k in 0..=wide {
+        steps = steps + 1
+    }
+    val n = 3
+    mut m = 0
+    for j in 0..n {
+        m = m + j
+    }
+    sum_vec(&v) + steps + m
+}
+"#;
+    let code = CompileTest::new()
+        .compile_and_run("literal_range_start.nr", source)
+        .expect("`0..v.len()` and `0..=wide` type the literal start by the end");
+    assert_eq!(code, 43);
+}

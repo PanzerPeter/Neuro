@@ -147,7 +147,7 @@ mod kernels {
                 && !ir.contains("call ptr @mgpuModuleLoadJIT("),
             "a code object is loaded as-is, never JIT compiled:\n{ir}"
         );
-        assert!(ir.contains("\\7FELF") && ir.contains("amdgcn-amd-amdhsa--gfx90a"));
+        assert!(ir.contains("\\7FELF") && ir.contains("amdgcn-amd-amdhsa-unknown-gfx90a"));
         assert!(ir.contains("libamdhip64.so") && !ir.contains("libcuda"));
     }
 

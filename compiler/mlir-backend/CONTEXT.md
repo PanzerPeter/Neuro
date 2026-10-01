@@ -7,7 +7,7 @@ Lower the typed HIR to MLIR for the tensor path, on the CPU and as NVIDIA or AMD
 The whole crate is opt-in behind the off-by-default `mlir` feature
 (`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir"]`). Disabled, it compiles to an empty
 placeholder pulling in no MLIR toolchain (nor `neuro-hir`), so a default
-`cargo build/test --workspace` works on stock LLVM 22 on every CI OS. Enabled, it exposes the
+`cargo build/test --workspace` works on stock LLVM 23 on every CI OS. Enabled, it exposes the
 entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a
 `cargo test -p mlir-backend --features mlir` step exercise the gated code; the Windows/macOS
 legs build the placeholder.
@@ -98,14 +98,14 @@ rather than miscompiling later. Each binding declares its own opaque `LLVMContex
 `register_all_llvm_translations` runs in `new_context()` for every path, not only the translating
 one: the translation interfaces have to be on the context that *built* the module.
 
-**Toolchain pinning.** `melior 0.27.x` is the last line on MLIR 22 (via `mlir-sys 220`);
-`melior 0.28` moved to MLIR 23. `mlir-sys` carries no `llvm-sys` dependency and no Cargo
+**Toolchain pinning.** `melior 0.28.x` is the MLIR 23 line (via `mlir-sys 230`). `mlir-sys` carries no `llvm-sys` dependency and no Cargo
 `links` key clashing with inkwell's. It finds MLIR by running
-`$MLIR_SYS_220_PREFIX/bin/llvm-config`, so MLIR has to be installed into the same prefix as the
-LLVM that `LLVM_SYS_221_PREFIX` names; `TABLEGEN_220_PREFIX` names that prefix too. One prefix
-means both bindings load one `libLLVM` 22, which the crossing above depends on. On Arch the
-stock `llvm` package is 22 and `aur/mlir` installs MLIR 22 beside it in `/usr`; on Ubuntu,
-apt.llvm.org's `libmlir-22-dev` does the same under `/usr/lib/llvm-22`. `mlir-sys` uses Rust
+`$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR has to be installed into the same prefix as the
+LLVM that `LLVM_SYS_231_PREFIX` names; `TABLEGEN_230_PREFIX` names that prefix too. One prefix
+means both bindings load one `libLLVM` 23, which the crossing above depends on. On Ubuntu,
+apt.llvm.org's `libmlir-23-dev` installs MLIR beside LLVM under `/usr/lib/llvm-23`. Arch has
+no package that fits (`aur/mlir` builds no `libMLIR-C`), so there it is a static source build of
+LLVM with MLIR in one prefix. `mlir-sys` uses Rust
 2024 let-chains in its build script, so the `mlir` feature needs Rust 1.88 or newer.
 
 **The GPU pipeline.** `lower_for_gpu` builds the `lower_for_link` module and swaps the middle of
@@ -122,7 +122,7 @@ this crate defines. `gpu-module-to-binary` runs as a second pass manager so a mi
 `GpuSerializationFailed` and a lowering bug stays `PassPipelineFailed`. NVIDIA embeds PTX (`isa`),
 which the CUDA driver JITs for its GPU, so a compile needs no CUDA toolkit. AMD embeds a code
 object (`bin`): HIP cannot load assembly, and linking one runs `$ROCM_PATH/llvm/bin/ld.lld`. The
-chip must be one LLVM 22 has a processor model for (`NVIDIA_CHIPS` / `AMD_CHIPS`), or it is
+chip must be one LLVM 23 has a processor model for (`NVIDIA_CHIPS` / `AMD_CHIPS`), or it is
 `InvalidGpuChip`: LLVM only warns about an unknown one and then crashes selecting AMD
 instructions, and the list also keeps anything but a plain name out of the pipeline text the
 chip is spliced into. The host symbol keeps `lower_for_link`'s exploded-descriptor signature, so one

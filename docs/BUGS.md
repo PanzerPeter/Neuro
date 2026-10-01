@@ -5,40 +5,50 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-091: `for i in 0..xs.len()` is refused: the literal start is typed before the end
+## BUG-092: a struct returned from a function never releases the `string` buffers it holds
 
 - **Status**: open, confirmed
-- **Area**: `semantic-analysis`; the `Stmt::ForRange` arm in `type_checkers/statements/mod.rs`,
-  and its mirror in `hir-lowering`
-- **Severity**: minor. Nothing miscompiles, but the natural loop over a length does not compile
+- **Area**: `llvm-backend`; `plan_held_drops` in `codegen/drops/mod.rs`, the same mechanism as
+  BUG-085 in the return direction
+- **Severity**: major. An unbounded leak, one buffer per call, for a struct built by a helper
 
 **Minimal repro**
 
 ```neuro
-func total(xs: &[f32]) -> f32 {
-    mut sum = 0.0f32
-    for i in 0..xs.len() {
-        sum += xs[i]
-    }
-    sum
-}
+struct T { text: string, n: i32 }
 
-func main() -> i32 { return 0 }
+func mk(i: i32) -> T { T { text: "w {i}", n: i } }
+
+func main() -> i32 {
+    mut c: u64 = 0
+    for i in 0..4 {
+        val t = mk(i)
+        c = c + t.text.len()
+    }
+    c as i32
+}
 ```
 
-Observed: `type mismatch: expected i32, found u64` at `xs.len()`. The same happens for a
-`partition` slice in a `@kernel` body, `for i in 0..slice.len()`, which is how the specification
-writes that loop.
+Expected: exit 12, with each `text` buffer released when `t` leaves scope. Observed: exit 12,
+and AddressSanitizer's leak check reports all four buffers. Building the struct in place
+(`val t = T { text: "w {i}", n: i }`) releases every buffer, so the two spellings disagree.
+Moving the field on (`v.push(t.text)`, `val s = t.text`) leaks the same way, which is what
+`examples/showcase/word_scanner.nr` does with `Token::of`.
 
-**Root cause**: the start bound is checked with no expected type, so the unsuffixed `0` takes the
-default `i32`, and the end is then checked against it. The inference runs only from start to end.
+**Root cause**: confirmed in the code. The callee clears its own drop flags when the struct
+leaves as its return value. The caller's binding gets its positions from `plan_held_drops`,
+which starts every `string` position disarmed, because a type cannot prove a `string` owns its
+buffer, and only a store in the caller's frame arms one. A binding initialized from a call
+result has no such store, so nothing releases the field.
 
-**Workaround**: suffix the literal, `for i in 0u64..xs.len()`, or cast the end,
-`0..xs.len() as i32`.
+**Workaround**: build the struct where it is used, or return the `string` itself and build the
+struct in the caller.
 
-**Fix sketch**: when the start is an unsuffixed integer literal and the end is not, check the end
-first and type the start by it; lowering must derive the loop variable's type the same way.
-Regression tests: `0..xs.len()` over a slice and a `Vec`, and `0..n` with `n: i32` unchanged.
+**Fix sketch**: the flags have to cross the return, as BUG-085 needs them to cross the call:
+return the `string` positions' flags beside the struct, or have the callee's summary prove that
+every return path fills a position with a fresh buffer and arm it in the caller. Regression
+tests: the repro in a loop under a leak check, a field filled from a literal (must not be
+freed), and a field moved out of the returned struct.
 
 ## BUG-088: an attribute the compiler does not know is accepted and ignored
 

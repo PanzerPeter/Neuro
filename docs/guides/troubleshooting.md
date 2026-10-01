@@ -9,33 +9,33 @@ Common problems and solutions when working with Neuro.
 **Symptoms**:
 ```text
 error: No suitable version of LLVM was found system-wide or pointed
-       to by LLVM_SYS_221_PREFIX.
+       to by LLVM_SYS_231_PREFIX.
 ```
 
-**Cause**: LLVM_SYS_221_PREFIX not set or points to wrong location. Neuro requires LLVM 22.
+**Cause**: LLVM_SYS_231_PREFIX not set or points to wrong location. Neuro requires LLVM 23.
 
 **Solution**:
 
 **Windows**:
 ```powershell
-# Set environment variable (adjust path to your LLVM 22 install)
-[System.Environment]::SetEnvironmentVariable('LLVM_SYS_221_PREFIX', 'C:\LLVM', 'Machine')
+# Set environment variable (adjust path to your LLVM 23 install)
+[System.Environment]::SetEnvironmentVariable('LLVM_SYS_231_PREFIX', 'C:\LLVM', 'Machine')
 
 # Restart terminal and verify
-$env:LLVM_SYS_221_PREFIX
+$env:LLVM_SYS_231_PREFIX
 ```
 
 **Unix**:
 ```bash
 # Add to ~/.bashrc or ~/.zshrc (path varies by distro)
-export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22   # Ubuntu/Debian
-# export LLVM_SYS_221_PREFIX=/usr             # Arch/CachyOS
+export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23   # Ubuntu/Debian
+# export LLVM_SYS_231_PREFIX=/usr             # Arch/CachyOS
 
 # Reload shell config
 source ~/.bashrc
 
 # Verify
-echo $LLVM_SYS_221_PREFIX
+echo $LLVM_SYS_231_PREFIX
 ```
 
 ### "LLVMConfig.cmake not found"
@@ -50,7 +50,7 @@ Could not find LLVMConfig.cmake
 **Solution**:
 
 Download and extract the full development package:
-- Windows: the LLVM 22 `clang+llvm-22.*-x86_64-pc-windows-msvc.tar.xz` archive
+- Windows: the LLVM 23 `clang+llvm-23.*-x86_64-pc-windows-msvc.tar.xz` archive
 - URL: https://github.com/llvm/llvm-project/releases
 
 **Do not** use the `.exe` installer: it lacks the development files.
@@ -70,7 +70,7 @@ is linked, but the linker still stops when a named library is missing.
 ```powershell
 vcpkg install "libxml2[core]:x64-windows-static"
 Get-ChildItem "<vcpkg-root>\installed\x64-windows-static\lib\*xml2*.lib" |
-  Select-Object -First 1 | Copy-Item -Destination "$env:LLVM_SYS_221_PREFIX\lib\xml2s.lib"
+  Select-Object -First 1 | Copy-Item -Destination "$env:LLVM_SYS_231_PREFIX\lib\xml2s.lib"
 ```
 
 ### Build fails with linker errors (Unix)
@@ -102,7 +102,7 @@ xcode-select --install
 
 ### `cargo build --features mlir` fails
 
-The `mlir-backend` slice's `mlir` feature is opt-in and needs MLIR 22 on top of LLVM 22.
+The `mlir-backend` slice's `mlir` feature is opt-in and needs MLIR 23 on top of LLVM 23.
 Default builds compile a placeholder and need none of this.
 
 **Symptoms**:
@@ -114,26 +114,26 @@ fatal error: 'mlir-c/IR.h' file not found
 unable to find library -lMLIR-C
 ```
 
-**Cause**: `mlir-sys` finds MLIR by running `$MLIR_SYS_220_PREFIX/bin/llvm-config` and
+**Cause**: `mlir-sys` finds MLIR by running `$MLIR_SYS_230_PREFIX/bin/llvm-config` and
 reading its `lib/` and `include/`. MLIR has to live in the same prefix as that
 `llvm-config`, and a prefix with no static LLVM libraries makes `mlir-sys` link the shared
 `MLIR-C` library, which distro packages (Arch's `aur/mlir` included) do not build.
 
 **Solution**: use a prefix that holds LLVM and MLIR together: apt.llvm.org's
-`/usr/lib/llvm-22` with `libmlir-22-dev` installed, or a source build of LLVM 22 with
+`/usr/lib/llvm-23` with `libmlir-23-dev` installed, or a source build of LLVM 23 with
 `-DLLVM_ENABLE_PROJECTS=mlir`. Point all three variables at it. See
 [Installation → Optional: MLIR Backend](../getting-started/installation.md#optional-mlir-backend).
 
 ```bash
-export LLVM_SYS_221_PREFIX=<prefix>   # inkwell
-export MLIR_SYS_220_PREFIX=<prefix>   # melior
-export TABLEGEN_220_PREFIX=<prefix>   # melior's TableGen macros
+export LLVM_SYS_231_PREFIX=<prefix>   # inkwell
+export MLIR_SYS_230_PREFIX=<prefix>   # melior
+export TABLEGEN_230_PREFIX=<prefix>   # melior's TableGen macros
 cargo test -p mlir-backend --features mlir
 ```
 
 If bindgen reports opaque 1-byte structs (`attempt to compute 0_usize - 8_usize`), the
 libclang it loaded is a different major version from the MLIR headers. Point
-`LIBCLANG_PATH` at a libclang 22.
+`LIBCLANG_PATH` at a libclang 23.
 
 ## Compilation Errors
 
@@ -558,7 +558,7 @@ Include in bug reports:
 ## Environment
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
 - Neuro: version from `neurc --version` (and commit hash)
-- LLVM: 22.x
+- LLVM: 23.x
 - Rust: 1.98.1+
 
 ## Issue

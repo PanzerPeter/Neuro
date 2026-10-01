@@ -48,8 +48,9 @@ transforms.
 - ast-types: the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)
 - shared-types: type system primitives, `FormatSpec` for interpolation
 
-inkwell 0.10.0 (feature `llvm22-1`) is a third-party crate, not Shared Kernel. Requires LLVM 22;
-set `LLVM_SYS_221_PREFIX` (e.g. `/usr` on Arch) before building. `semantic-analysis` is not a
+inkwell 0.10.0 (feature `llvm23-1`) is a third-party crate, not Shared Kernel. No crates.io release
+supports LLVM 23 yet, so the root `Cargo.toml` pins it to a commit of inkwell's master. Requires LLVM 23;
+set `LLVM_SYS_231_PREFIX` (e.g. `/usr` on Arch) before building. `semantic-analysis` is not a
 production dependency: neurc orders type-check then HIR lowering before codegen.
 `syntax-parsing` and `hir-lowering` appear only in `[dev-dependencies]` (tests and benches lower
 source to HIR before compiling).
@@ -1579,7 +1580,7 @@ against clang's native `_Float16` / `__bf16`. Regenerate via that command if LLV
 changes.
 
 ## Future: MLIR Integration
-When tensor ops land, `melior` (Rust MLIR bindings, same LLVM 22 / MLIR 22 install) joins inkwell.
+When tensor ops land, `melior` (Rust MLIR bindings, same LLVM 23 / MLIR 23 install) joins inkwell.
 Lowering: AST → HIR → MLIR dialects (linalg/tensor/func/arith) → Enzyme MLIR AD pass → GPU dialects
 (nvgpu/rocdl) or the `llvm` dialect → inkwell for final LLVM IR. inkwell stays the terminal
 emission layer in all paths.

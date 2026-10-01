@@ -1,15 +1,15 @@
 # LLVM Backend
 
 **Crate**: `compiler/llvm-backend`
-**Library**: inkwell 0.10.0 (LLVM 22 bindings)
-**Build requirement**: `LLVM_SYS_221_PREFIX` pointing at an LLVM 22 install
+**Library**: inkwell 0.10.0 (LLVM 23 bindings)
+**Build requirement**: `LLVM_SYS_231_PREFIX` pointing at an LLVM 23 install
 
 ## Overview
 
 The LLVM backend generates native object code from the typed High-Level IR (`neuro-hir`), not
 the AST. [HIR lowering](hir-lowering.md) has already attached a resolved type to every
 expression, so the backend reads types inline instead of re-deriving them. It uses
-[inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 22) to produce
+[inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 23) to produce
 optimized machine code for the host platform.
 
 **Entry points:**
@@ -237,14 +237,14 @@ program with variable declarations and calls, and `OptimizationLevelSetting::fro
 
 Run with:
 ```bash
-LLVM_SYS_221_PREFIX=/usr cargo test -p llvm-backend
+LLVM_SYS_231_PREFIX=/usr cargo test -p llvm-backend
 ```
 
 ## Design Decisions
 
 ### Why inkwell?
 
-inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alternative, calling `llvm-sys` (raw unsafe bindings) directly, would require manual lifetime management and is significantly more error-prone. inkwell compiles against the exact LLVM version specified by the feature flag (`llvm22-1`), preventing version mismatch at link time.
+inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alternative, calling `llvm-sys` (raw unsafe bindings) directly, would require manual lifetime management and is significantly more error-prone. inkwell compiles against the exact LLVM version specified by the feature flag (`llvm23-1`), preventing version mismatch at link time.
 
 ### Stack Allocation for All Locals
 

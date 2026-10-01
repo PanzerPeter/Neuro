@@ -91,7 +91,7 @@ Compiling for AMD needs ROCm, because the code object is linked with ROCm's `ld.
 (`$ROCM_PATH/llvm/bin/ld.lld`, `/opt/rocm` by default); without it the compile fails and says
 so. Running needs the HIP runtime and a GPU of that architecture. A program that only moves
 tensors with `.to(Device::GPU(0))` links the same runtime, so the flag matters for it too.
-`neurc` refuses a chip name with neither prefix, or one LLVM 22 has no processor for.
+`neurc` refuses a chip name with neither prefix, or one LLVM 23 has no processor for.
 
 #### Emitting an object file
 
@@ -210,19 +210,19 @@ RUST_LOG=info neurc compile program.nr    # Standard output
 RUST_LOG=debug neurc compile program.nr   # Detailed diagnostics
 ```
 
-### LLVM_SYS_221_PREFIX
+### LLVM_SYS_231_PREFIX
 
-Path to the LLVM 22 installation (required to build the compiler):
+Path to the LLVM 23 installation (required to build the compiler):
 
 ```bash
 # Arch / CachyOS
-export LLVM_SYS_221_PREFIX=/usr
+export LLVM_SYS_231_PREFIX=/usr
 
 # Ubuntu / Debian
-export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22
+export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23
 
 # macOS (Homebrew)
-export LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)
+export LLVM_SYS_231_PREFIX=$(brew --prefix llvm)
 ```
 
 See the [Installation Guide](../getting-started/installation.md) for full setup.
@@ -377,7 +377,7 @@ itself is noticeably slower. For the speed of the programs it produces, see the
 
 **Requirements**:
 - MSVC Build Tools 2022
-- LLVM 22 (the `clang+llvm-*-x86_64-pc-windows-msvc` development archive)
+- LLVM 23 (the `clang+llvm-*-x86_64-pc-windows-msvc` development archive)
 - a static libxml2 copied in as `xml2s.lib` (see
   [troubleshooting](troubleshooting.md#cannot-open-input-file-xml2slib-windows))
 
@@ -395,7 +395,7 @@ neurc compile examples/basics/hello.nr
 
 **Requirements**:
 - GCC or Clang (`build-essential` on Debian, `base-devel` on Arch)
-- LLVM 22
+- LLVM 23
 
 **Executable extension**: none
 
@@ -403,7 +403,7 @@ neurc compile examples/basics/hello.nr
 
 **Requirements**:
 - Xcode Command Line Tools
-- LLVM 22 (via Homebrew, `llvm@22`)
+- LLVM 23 (via Homebrew, `llvm`)
 
 **Apple Silicon**: supported
 
@@ -442,9 +442,9 @@ echo "Build complete!"
   run: |
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
-    sudo ./llvm.sh 22
-    sudo apt-get install -y llvm-22-dev libpolly-22-dev libzstd-dev zlib1g-dev
-    echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+    sudo ./llvm.sh 23
+    sudo apt-get install -y llvm-23-dev libpolly-23-dev libzstd-dev zlib1g-dev
+    echo "LLVM_SYS_231_PREFIX=/usr/lib/llvm-23" >> "$GITHUB_ENV"
 
 - name: Build Neuro compiler
   run: cargo build --release -p neurc

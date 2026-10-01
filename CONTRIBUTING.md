@@ -28,7 +28,7 @@ We welcome contributions, but note:
 ### Prerequisites
 
 - **Rust**: 1.98.1 or later (`rustup update stable`)
-- **LLVM 22**: development package (see below)
+- **LLVM 23**: development package (see below)
 - **Git**
 - **IDE**: VS Code with rust-analyzer recommended
 
@@ -37,24 +37,24 @@ We welcome contributions, but note:
 ```bash
 # Arch Linux / CachyOS
 sudo pacman -S llvm
-export LLVM_SYS_221_PREFIX=/usr
+export LLVM_SYS_231_PREFIX=/usr
 # Add to ~/.bashrc / ~/.zshrc to make permanent
 
 # Ubuntu / Debian
-wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 22
-sudo apt-get install -y llvm-22-dev libpolly-22-dev
-export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22
+wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 23
+sudo apt-get install -y llvm-23-dev libpolly-23-dev
+export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23
 
 # macOS
-brew install llvm@22
-export LLVM_SYS_221_PREFIX=$(brew --prefix llvm@22)
+brew install llvm
+export LLVM_SYS_231_PREFIX=$(brew --prefix llvm)
 ```
 
 > **Optional: the MLIR backend.** The `mlir-backend` slice is gated
 > behind the off-by-default `mlir` cargo feature, so a normal build needs only
-> LLVM 22. To work on it you need MLIR 22 installed into the same prefix as
-> LLVM 22 (`LLVM_SYS_221_PREFIX` / `MLIR_SYS_220_PREFIX` /
-> `TABLEGEN_220_PREFIX`); see [Optional: MLIR Backend](docs/getting-started/installation.md#optional-mlir-backend).
+> LLVM 23. To work on it you need MLIR 23 installed into the same prefix as
+> LLVM 23 (`LLVM_SYS_231_PREFIX` / `MLIR_SYS_230_PREFIX` /
+> `TABLEGEN_230_PREFIX`); see [Optional: MLIR Backend](docs/getting-started/installation.md#optional-mlir-backend).
 
 ```bash
 # Clone and verify the build
@@ -159,7 +159,7 @@ compiler/
 ├── argument-binding/        # Named arguments rewritten to positional calls
 ├── semantic-analysis/       # Type checker slice
 ├── hir-lowering/            # AST → typed HIR lowering slice, including autodiff
-├── llvm-backend/            # LLVM 22 / inkwell 0.10 codegen slice
+├── llvm-backend/            # LLVM 23 / inkwell 0.10 codegen slice
 ├── mlir-backend/            # MLIR / melior slice (off-by-default `mlir` feature)
 │
 └── neurc/                   # Compiler driver, the only crate depending on all slices

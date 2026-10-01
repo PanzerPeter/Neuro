@@ -403,7 +403,21 @@ impl TypeChecker {
                 body,
                 span: _,
             } => {
-                let start_ty = self.check_expr(start, None).unwrap_or(Type::Unknown);
+                // An unsuffixed literal start (`0..v.len()`) takes the end's type, so the
+                // end is checked first; otherwise the start leads, as before.
+                let (start_ty, end_ty) = if unsuffixed_integer(start) && !unsuffixed_integer(end) {
+                    let end_ty = self.check_expr(end, None).unwrap_or(Type::Unknown);
+                    let start_ty = self
+                        .check_expr(start, Some(&end_ty))
+                        .unwrap_or(Type::Unknown);
+                    (start_ty, end_ty)
+                } else {
+                    let start_ty = self.check_expr(start, None).unwrap_or(Type::Unknown);
+                    let end_ty = self
+                        .check_expr(end, Some(&start_ty))
+                        .unwrap_or(Type::Unknown);
+                    (start_ty, end_ty)
+                };
                 if !matches!(start_ty, Type::Unknown) && !start_ty.is_integer() {
                     self.record_error(TypeError::InvalidForRangeType {
                         found: start_ty.clone(),
@@ -411,9 +425,6 @@ impl TypeChecker {
                     });
                 }
 
-                let end_ty = self
-                    .check_expr(end, Some(&start_ty))
-                    .unwrap_or(Type::Unknown);
                 if !matches!(end_ty, Type::Unknown) && !end_ty.is_integer() {
                     self.record_error(TypeError::InvalidForRangeType {
                         found: end_ty.clone(),
@@ -670,4 +681,12 @@ impl TypeChecker {
             }
         }
     }
+}
+
+/// An integer literal with no suffix, whose type comes from its context.
+fn unsuffixed_integer(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Literal(shared_types::Literal::Integer(_, None), _)
+    )
 }

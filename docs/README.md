@@ -9,7 +9,7 @@ once, in the page that owns it.
 
 ## What is Neuro?
 
-A compiled language for high-performance AI workloads. It generates native code through an LLVM 22
+A compiled language for high-performance AI workloads. It generates native code through an LLVM 23
 backend, and it checks tensor shapes and differentiates tensor code while compiling. GPU
 acceleration through MLIR GPU dialects has begun: a `@gpu` function runs as NVIDIA or AMD kernels, a
 `@kernel` function is one you write per thread, and `.to(Device::GPU(n))` keeps a tensor on a GPU
@@ -74,8 +74,8 @@ current entry points when this directory disagrees.
 
 | Component | Library | Status |
 |---|---|---|
-| CPU codegen | inkwell (LLVM 22) | In use |
-| MLIR construction | melior (LLVM/MLIR 22) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR and linked into compiled programs, behind the off-by-default `mlir` feature |
+| CPU codegen | inkwell (LLVM 23) | In use |
+| MLIR construction | melior (LLVM/MLIR 23) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR and linked into compiled programs, behind the off-by-default `mlir` feature |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
 | GPU | MLIR `gpu` to `nvvm` (PTX) or `rocdl` (code object) | `@gpu` functions run as NVIDIA kernels on an `mlir` build, or AMD ones with `--gpu-arch gfxNNN`, with an opt-in CPU fallback chosen at startup; `@kernel` functions launch their own per-thread body over a grid; `.to(Device::GPU(n))` keeps tensors on any of the machine's GPUs between calls, and a call or a float tensor operation runs on the GPU its tensors are on |
 

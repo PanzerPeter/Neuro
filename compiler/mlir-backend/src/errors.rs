@@ -41,7 +41,7 @@ pub enum MlirError {
     /// and crash selecting AMD instructions; it is also spliced into a textual pass
     /// pipeline, so only a name on the list may reach it.
     #[error(
-        "unknown GPU chip `{0}`: expected a processor LLVM 22 knows, such as `sm_80` or `gfx90a`"
+        "unknown GPU chip `{0}`: expected a processor LLVM 23 knows, such as `sm_80` or `gfx90a`"
     )]
     InvalidGpuChip(String),
 
