@@ -276,7 +276,10 @@ modules. A matrix
 product is two kernels, the zero fill and the contraction. A reduction (`.sum()`, `.mean()`,
 `.max()`, `.min()`), which only a GPU body lowers here, is a seed and a fold, plus a division for
 a mean: one thread per result element folds its run in order, which is the LLVM backend's order,
-so the device and host answers match exactly. A GPU body also lowers elementwise math (the `math`
+so the device and host answers match exactly. A run longer than the language's 4096 reduction
+lanes first folds into a partials tensor, one thread per lane (and per result element), each
+looping over its lane's run positions, and the seed and fold then reduce the lanes: the lane
+order every backend shares, which puts a whole-tensor `.sum()` on thousands of threads. A GPU body also lowers elementwise math (the `math`
 dialect op of each function's name), slices (a gather reading the source at each result
 position), permutations (an input map) and `einsum` (the matrix product's contracting shape, in
 the LLVM backend's summation order). A slice position is a literal, or a parameter the call site

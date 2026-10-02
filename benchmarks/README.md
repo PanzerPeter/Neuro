@@ -24,7 +24,7 @@ The `gpu_*` benchmarks run their Neuro side as `@gpu` kernels, which needs a
 
 ```bash
 cargo build --release -p neurc --features mlir   # see the installation guide for MLIR
-python benchmarks/run.py gpu_matmul gpu_relax
+python benchmarks/run.py gpu_matmul gpu_reduce gpu_relax
 ```
 
 Without either, the Neuro rows are skipped with a note. They have no C++ row: a

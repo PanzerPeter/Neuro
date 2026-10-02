@@ -188,7 +188,14 @@ rule `build_linkable_module` takes (the CPU path admits every `Host` function, t
 backend's, with every other 2B tensor operation. The index space is the result's axes
 (`parallel`, so one GPU thread per result element) followed by the reduced ones (`reduction`, a
 sequential loop inside the thread), which folds each run in the source's order, as the LLVM
-backend does, so the two give the same bits. The destination is seeded first: `-0.0` for a sum
+backend does, so the two give the same bits. A run longer than `neuro_hir::REDUCE_LANES` folds in
+the language's lane order instead: `build_lanes` writes a partials tensor of the result's axes
+and a lane axis with one all-parallel `linalg.generic`, whose body runs an `scf.for` over the
+lane's run positions (`lane + k * REDUCE_LANES`, read with `tensor.extract`, the lane's own first
+element seeding it and a position past the run's end keeping the accumulator), and the seed and
+fold below then reduce the lane axis. The lane axis is innermost, so a whole-tensor reduction's
+warp reads contiguous memory. The generic has no input, so `linalg-fuse-elementwise-ops` cannot
+fold it into the lane fold and put it back on one thread. The destination is seeded first: `-0.0` for a sum
 (the additive identity, signed zeros included), the run's first element for `.max()` / `.min()`,
 whose fold keeps the element when it is a number that sorts before the accumulator or the
 accumulator is NaN (the LLVM backend's sorting comparator). A mean divides by the run length in

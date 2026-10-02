@@ -222,11 +222,14 @@ with `--features mlir`, against NumPy on the CPU:
 
 | Benchmark | What it stresses | Neuro `@gpu` | NumPy |
 |---|---|---|---|
-| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 273 ms | 618 ms |
-| `gpu_matmul` | five `[2048, 2048]` `f32` products | 359 ms | 213 ms |
+| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 261 ms | 653 ms |
+| `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 732 ms | 1224 ms |
+| `gpu_matmul` | five `[2048, 2048]` `f32` products | 346 ms | 230 ms |
 
-About 250 ms of each Neuro time is the CUDA driver starting up. The matrix product is a plain
-loop per output element, with no shared-memory tiling and no tensor cores yet, so a multithreaded
+About 230 ms of each Neuro time is fixed, most of it the CUDA driver starting up; the 200 relax
+steps themselves take about 16 ms. A long reduction folds in 4096 lanes, one GPU thread each, in
+the order the host folds in too, so the two agree bit for bit. The matrix product is a plain loop
+per output element, with no shared-memory tiling and no tensor cores yet, so a multithreaded
 BLAS on the CPU still beats it.
 
 ---

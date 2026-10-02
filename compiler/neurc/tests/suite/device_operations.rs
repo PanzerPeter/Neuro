@@ -127,6 +127,68 @@ func main() -> i32 {
     assert_ran(&output, 0, "2395.5 29.0 13.125\n");
 }
 
+/// A run longer than the 4096 reduction lanes folds in lanes on the device, one GPU thread
+/// per lane, in the order the host's lanes take: whole-tensor and axis reductions over long
+/// runs (along the last axis and across rows) match the host bit for bit. The values are
+/// picked so a left-to-right fold would give a different answer.
+#[cfg(all(feature = "mlir", unix))]
+#[test]
+fn long_runs_reduce_in_lanes_on_the_device_as_on_the_host() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    mut m = Tensor::<f32, [3, 9001]>::zeros()
+    mut i = 0
+    while i < 3 {
+        mut j = 0
+        while j < 9001 {
+            m[i, j] = (((i * 9001 + j) * 7919) % 10007) as f32 * 0.001f32 + 0.1f32
+            j += 1
+        }
+        i += 1
+    }
+    m[0, 0] = 16777216.0f32
+    val c = m.clone().t()
+    mut k = m.clone()
+    k[1, 4100] = 0.0f32 / 0.0f32
+    k[2, 0] = 0.0f32 / 0.0f32
+    val g = m.clone().to(Device::GPU(0))
+    val gc = c.clone().to(Device::GPU(0))
+    val gk = k.clone().to(Device::GPU(0))
+
+    val rows = g.sum(axis: 1).to(Device::CPU)
+    val means = g.mean(axis: 1).to(Device::CPU)
+    val columns = gc.sum(axis: 0).to(Device::CPU)
+    val peaks = gk.max(axis: 1).to(Device::CPU)
+    val lows = gk.min(axis: 1).to(Device::CPU)
+    val total = g.sum()
+    val average = g.mean()
+    val peak = gk.max()
+
+    mut wrong = 0
+    i = 0
+    while i < 3 {
+        if rows[i] != m.sum(axis: 1)[i] { wrong += 1 }
+        if means[i] != m.mean(axis: 1)[i] { wrong += 1 }
+        if columns[i] != c.sum(axis: 0)[i] { wrong += 1 }
+        if peaks[i] != k.max(axis: 1)[i] { wrong += 1 }
+        if lows[i] != k.min(axis: 1)[i] { wrong += 1 }
+        i += 1
+    }
+    if total != m.sum() { wrong += 1 }
+    if average != m.mean() { wrong += 1 }
+    if peak != k.max() { wrong += 1 }
+    println("{total} {rows[0]} {columns[2]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "lanes.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_ran(&output, 0, "16915028.0 16823168.0 45939.59375\n");
+}
+
 /// A result stays on the GPU its operands live on, so host code that has no device form
 /// refuses it. A host operand beside a device one is copied over rather than refused.
 #[cfg(all(feature = "mlir", unix))]

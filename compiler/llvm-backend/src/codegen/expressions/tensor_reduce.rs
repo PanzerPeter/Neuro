@@ -10,12 +10,20 @@
 // constant, so the IR is the same size whatever the receiver's rank is, exactly as the
 // slice and permute copies are built.
 //
+// A float run longer than `REDUCE_LANES` folds in the language's lane order instead of left
+// to right: lane `l` takes run positions `l, l + REDUCE_LANES, ...`, then the lanes fold in
+// order. That is the order the GPU lowering folds in, so the two give the same bits, and
+// the lanes are independent, so the per-lane loop vectorizes without reassociating a single
+// addition. A shorter run's lane order is exactly the left-to-right one.
+//
 // The receiver is READ. Nothing is moved and nothing is released here: a reduction
 // summarises a buffer its owner keeps.
 
 use inkwell::IntPredicate;
+use inkwell::intrinsics::Intrinsic;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use neuro_hir::{HirExpr, HirReduceOp};
+use neuro_hir::{HirExpr, HirReduceOp, REDUCE_LANES};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -78,6 +86,12 @@ impl<'ctx> CodegenContext<'ctx> {
         let function = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("a tensor reduction outside a function".to_string())
         })?;
+        // The lanes live only while this reduction runs: a function with many reductions
+        // must not hold one lane array per reduction in its frame.
+        let lanes = match acc_llvm.is_float_type() && layout.mid > REDUCE_LANES {
+            true => Some(self.scoped_lanes(acc_llvm)?),
+            false => None,
+        };
         let i64_type = self.context.i64_type();
         let run = self.entry_alloca(i64_type, "tensor.reduce.run")?;
         self.builder.build_store(run, i64_type.const_zero())?;
@@ -107,19 +121,32 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body);
         let base = self.run_base(r, &layout)?;
-        let first = self.load_element(elem_llvm, source, base, "tensor.reduce.first")?;
-        let first = self.widen_element(first)?;
-        self.builder.build_store(accumulator, first)?;
-        self.fold_run(
-            (elem_llvm, acc_llvm),
-            source,
-            base,
-            accumulator,
-            &layout,
-            op,
-            &acc_element,
-            offset,
-        )?;
+        match lanes {
+            Some((_, lanes)) => self.fold_lanes(
+                (elem_llvm, acc_llvm),
+                source,
+                base,
+                (lanes, accumulator),
+                &layout,
+                op,
+                &acc_element,
+            )?,
+            None => {
+                let first = self.load_element(elem_llvm, source, base, "tensor.reduce.first")?;
+                let first = self.widen_element(first)?;
+                self.builder.build_store(accumulator, first)?;
+                self.fold_run(
+                    (elem_llvm, acc_llvm),
+                    source,
+                    base,
+                    accumulator,
+                    &layout,
+                    op,
+                    &acc_element,
+                    offset,
+                )?;
+            }
+        }
 
         let mut value = self
             .builder
@@ -147,6 +174,10 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(head)?;
 
         self.builder.position_at_end(done);
+        if let Some((saved, _)) = lanes {
+            let restore = self.stack_intrinsic("llvm.stackrestore")?;
+            self.builder.build_call(restore, &[saved.into()], "")?;
+        }
         // Every read of the receiver is behind us, so a receiver that owns its buffer and
         // has no binding to release it can be freed here instead of leaking.
         self.release_receiver_temporary(receiver, receiver_handle)?;
@@ -252,6 +283,192 @@ impl<'ctx> CodegenContext<'ctx> {
         // edge leaves whichever block is current now.
         self.builder.build_unconditional_branch(head)?;
 
+        self.builder.position_at_end(done);
+        Ok(())
+    }
+
+    /// A `REDUCE_LANES`-element accumulator array, allocated here rather than in the entry
+    /// block, with the stack pointer it must be released back to.
+    fn scoped_lanes(
+        &self,
+        acc_llvm: BasicTypeEnum<'ctx>,
+    ) -> CodegenResult<(PointerValue<'ctx>, PointerValue<'ctx>)> {
+        let save = self.stack_intrinsic("llvm.stacksave")?;
+        let saved = self
+            .builder
+            .build_call(save, &[], "tensor.reduce.stack")?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError("`llvm.stacksave` returned void".into()))?
+            .into_pointer_value();
+        let lanes = self.builder.build_alloca(
+            acc_llvm.array_type(REDUCE_LANES as u32),
+            "tensor.reduce.lanes",
+        )?;
+        Ok((saved, lanes))
+    }
+
+    fn stack_intrinsic(&self, name: &str) -> CodegenResult<inkwell::values::FunctionValue<'ctx>> {
+        Intrinsic::find(name)
+            .and_then(|intrinsic| {
+                intrinsic.get_declaration(
+                    &self.module,
+                    &[self
+                        .context
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .into()],
+                )
+            })
+            .ok_or_else(|| CodegenError::InternalError(format!("no `{name}` intrinsic")))
+    }
+
+    /// Fold a float run longer than `REDUCE_LANES` in lane order, leaving the result in
+    /// `accumulator`. Each lane starts at its first element, so `.max()` / `.min()` need no
+    /// sentinel here either, and a sum's lane starts exactly where a `-0.0` seed would.
+    #[expect(clippy::too_many_arguments)]
+    fn fold_lanes(
+        &mut self,
+        (elem_llvm, acc_llvm): (BasicTypeEnum<'ctx>, BasicTypeEnum<'ctx>),
+        source: PointerValue<'ctx>,
+        base: IntValue<'ctx>,
+        (lanes, accumulator): (PointerValue<'ctx>, PointerValue<'ctx>),
+        layout: &ReduceLayout,
+        op: HirReduceOp,
+        element: &Type,
+    ) -> CodegenResult<()> {
+        let width = REDUCE_LANES as u64;
+        let rows = (layout.mid / REDUCE_LANES) as u64;
+        let tail = (layout.mid % REDUCE_LANES) as u64;
+        let read = |this: &mut Self, position: IntValue<'ctx>| {
+            let i64_type = this.context.i64_type();
+            let stepped = this.builder.build_int_mul(
+                position,
+                i64_type.const_int(layout.inner as u64, false),
+                "tensor.reduce.lstep",
+            )?;
+            let index = this
+                .builder
+                .build_int_add(base, stepped, "tensor.reduce.lindex")?;
+            let value = this.load_element(elem_llvm, source, index, "tensor.reduce.lelem")?;
+            this.widen_element(value)
+        };
+        // Folds run position `row * REDUCE_LANES + l` into lane `l`.
+        let fold_row = |this: &mut Self, row: IntValue<'ctx>, l: IntValue<'ctx>| {
+            let i64_type = this.context.i64_type();
+            let start = this.builder.build_int_mul(
+                row,
+                i64_type.const_int(width, false),
+                "tensor.reduce.row",
+            )?;
+            let position = this.builder.build_int_add(start, l, "tensor.reduce.lpos")?;
+            let value = read(this, position)?;
+            let slot = this.lane_slot(acc_llvm, lanes, l)?;
+            let carried = this
+                .builder
+                .build_load(acc_llvm, slot, "tensor.reduce.lane")?;
+            let folded = this.fold_element(op, carried, value, element, 0)?;
+            this.builder.build_store(slot, folded)?;
+            Ok(())
+        };
+
+        self.counted_loop("tensor.reduce.seed", 0, width, |this, l| {
+            let value = read(this, l)?;
+            let slot = this.lane_slot(acc_llvm, lanes, l)?;
+            this.builder.build_store(slot, value)?;
+            Ok(())
+        })?;
+        self.counted_loop("tensor.reduce.rows", 1, rows, |this, row| {
+            this.counted_loop("tensor.reduce.lanes", 0, width, |this, l| {
+                fold_row(this, row, l)
+            })
+        })?;
+        let last = self.context.i64_type().const_int(rows, false);
+        self.counted_loop("tensor.reduce.tail", 0, tail, |this, l| {
+            fold_row(this, last, l)
+        })?;
+
+        let first = self.lane_slot(acc_llvm, lanes, self.context.i64_type().const_zero())?;
+        let first = self
+            .builder
+            .build_load(acc_llvm, first, "tensor.reduce.lfirst")?;
+        self.builder.build_store(accumulator, first)?;
+        self.counted_loop("tensor.reduce.merge", 1, width, |this, l| {
+            let slot = this.lane_slot(acc_llvm, lanes, l)?;
+            let lane = this
+                .builder
+                .build_load(acc_llvm, slot, "tensor.reduce.lval")?;
+            let carried = this
+                .builder
+                .build_load(acc_llvm, accumulator, "tensor.reduce.lacc")?;
+            let folded = this.fold_element(op, carried, lane, element, 0)?;
+            this.builder.build_store(accumulator, folded)?;
+            Ok(())
+        })
+    }
+
+    fn lane_slot(
+        &self,
+        acc_llvm: BasicTypeEnum<'ctx>,
+        lanes: PointerValue<'ctx>,
+        l: IntValue<'ctx>,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        // SAFETY: every lane index is below `REDUCE_LANES`, the array's length, since each
+        // loop that produces one is bounded by it.
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(acc_llvm, lanes, &[l], "tensor.reduce.lslot")
+                .map_err(CodegenError::from)
+        }
+    }
+
+    /// `for i in from..to { body(i) }` with constant bounds, emitting nothing when the range
+    /// is empty. The body may leave the builder in a block of its own.
+    fn counted_loop(
+        &mut self,
+        name: &str,
+        from: u64,
+        to: u64,
+        mut body: impl FnMut(&mut Self, IntValue<'ctx>) -> CodegenResult<()>,
+    ) -> CodegenResult<()> {
+        if from >= to {
+            return Ok(());
+        }
+        let function = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("a tensor reduction outside a function".to_string())
+        })?;
+        let i64_type = self.context.i64_type();
+        let counter = self.entry_alloca(i64_type, name)?;
+        self.builder
+            .build_store(counter, i64_type.const_int(from, false))?;
+        let head = self
+            .context
+            .append_basic_block(function, &format!("{name}.head"));
+        let step = self
+            .context
+            .append_basic_block(function, &format!("{name}.body"));
+        let done = self
+            .context
+            .append_basic_block(function, &format!("{name}.done"));
+        self.builder.build_unconditional_branch(head)?;
+        self.builder.position_at_end(head);
+        let i = self
+            .builder
+            .build_load(i64_type, counter, name)?
+            .into_int_value();
+        let more = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64_type.const_int(to, false),
+            &format!("{name}.more"),
+        )?;
+        self.builder.build_conditional_branch(more, step, done)?;
+        self.builder.position_at_end(step);
+        body(self, i)?;
+        let next =
+            self.builder
+                .build_int_add(i, i64_type.const_int(1, false), &format!("{name}.next"))?;
+        self.builder.build_store(counter, next)?;
+        self.builder.build_unconditional_branch(head)?;
         self.builder.position_at_end(done);
         Ok(())
     }

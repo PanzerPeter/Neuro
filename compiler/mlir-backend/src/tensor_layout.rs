@@ -240,7 +240,7 @@ fn walk<'c, 'a>(
     append(body, arith::addi(first, scaled, location))
 }
 
-fn linalg_index<'c>(
+pub(crate) fn linalg_index<'c>(
     context: &'c Context,
     location: Location<'c>,
     dimension: usize,

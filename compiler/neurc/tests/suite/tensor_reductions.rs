@@ -172,6 +172,32 @@ func main() -> i32 {
     assert_eq!(run_program("tensor_reduce_nan.nr", source), 103);
 }
 
+/// A float run longer than 4096 folds in lanes: lane `l` takes run positions `l`, `l + 4096`,
+/// ..., then the lanes add in order. Left to right, every `1.0` after `2^24` would round
+/// away; in lanes, each lane's small total survives, so the answer shows which order ran. A
+/// run of exactly 4096 still folds left to right.
+#[test]
+fn a_float_run_longer_than_the_lanes_folds_in_lane_order() {
+    let source = r#"
+func main() -> i32 {
+    mut long = Tensor::<f32, [2, 5000]>::ones()
+    long[0, 0] = 16777216.0f32
+    long[1, 0] = 16777216.0f32
+    mut short = Tensor::<f32, [4096]>::ones()
+    short[0] = 16777216.0f32
+    if short.sum() != 16777216.0f32 { return 1 }
+    if long.sum() != 33561656.0f32 { return 2 }
+    val means = long.mean(axis: 1)
+    if means[1] != 3355.8046875f32 { return 3 }
+    val rows = long.sum(axis: 1)
+    if rows[0] != rows[1] { return 4 }
+    // 2^24 + 1808, where left to right would leave 2^24.
+    return ((rows[0] - 16777216.0f32) / 8.0f32) as i32
+}
+"#;
+    assert_eq!(run_program("tensor_reduce_lanes.nr", source), 226);
+}
+
 #[test]
 fn a_non_numeric_element_is_rejected() {
     let source = r#"

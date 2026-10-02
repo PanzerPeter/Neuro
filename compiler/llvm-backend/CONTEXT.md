@@ -733,7 +733,14 @@ never a nest of `rank` of them, for the reason the permuted copy gives. The accu
 starts at the run's FIRST element rather than at an identity, which is what gives `.max()` and
 `.min()` a starting value without a per-dtype sentinel (the checker has already refused an
 empty run). A sum reuses `codegen_int_arith`, so an overflowing reduction panics exactly where
-an overflowing `+` would; `.mean()` divides the float accumulator by the run length. Nothing
+an overflowing `+` would; `.mean()` divides the float accumulator by the run length. A float
+run longer than `neuro_hir::REDUCE_LANES` folds in the language's lane order instead
+(`fold_lanes`): an array of that many accumulators, each seeded with its lane's first element,
+a row loop whose inner lane loop has no dependence between lanes (so it vectorizes with no
+fast-math flag), the ragged tail, then the lanes folded in order into the accumulator. The array
+is allocated where the reduction starts, between `llvm.stacksave` and `llvm.stackrestore`, so
+only one is ever live however many reductions a function holds. This is the order the GPU
+lowering folds in. Nothing
 is moved here, and a receiver a binding owns is left to that binding's own drop. What IS
 released, once the fold has read everything, is a receiver that no binding owns:
 `release_receiver_temporary` frees the buffer of a receiver built for the call (an operator

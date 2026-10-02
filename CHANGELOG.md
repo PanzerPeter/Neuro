@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.17.0] - 2026-10-02
+
+### Changed
+
+- A float reduction over a run longer than 4096 elements adds in a fixed lane order the language
+  now defines: lane `l` folds positions `l, l + 4096, ...`, then the 4096 lanes fold in order.
+  The host and the GPU both follow it, so they still agree bit for bit, and each runs the lanes
+  side by side. A `.sum()` over a 16.7M-element `f32` tensor on a GPU went from about 1 s
+  (one GPU thread) to about 1.5 ms a call, and on the host from 6.7 ms to 2.5 ms, since the
+  independent lanes vectorize. `.mean()`, `.max()` and `.min()` take the same path. A run of up
+  to 4096 elements folds left to right as before, so its result is unchanged; a longer float
+  sum can differ from earlier releases in its last bits, and is usually closer to the exact
+  total, since a long `f32` sum no longer stalls once new elements fall below its precision.
+  Integer reductions and `.reduce` keep their left-to-right order.
+- The benchmark harness gains `gpu_reduce`, whole and row sums on a device tensor against NumPy,
+  and the README's GPU table includes it.
+
+### Fixed
+
+- The Windows CI legs build again on LLVM 23. Its Windows release links zlib and zstd, and
+  `llvm-config` names zstd by a path on the machine that built the release, which `llvm-sys`
+  passed to `rustc` as a library rename; CI rewrites that entry to the bare name and supplies
+  static zlib and zstd.
+
 ## [4.16.2] - 2026-10-01
 
 ### Changed

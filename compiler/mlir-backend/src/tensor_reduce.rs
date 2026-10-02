@@ -7,9 +7,14 @@
 // in, and the two give the same bits. A whole-tensor reduction writes a one-element tensor
 // (its one parallel axis has extent 1), since a GPU body returns buffers only.
 //
-// ponytail: one thread per result element, so a whole-tensor reduction runs in one GPU
-// thread. A tree reduction would use the whole GPU, once a ruling lets a device sum differ
-// from the host's in its last bits.
+// A run longer than `REDUCE_LANES` folds in the language's lane order first: one more
+// all-parallel `linalg.generic` over the result's axes and a lane axis, one GPU thread per
+// lane, each running an `scf.for` over its run positions `lane, lane + REDUCE_LANES, ...`
+// into a partials tensor. Adjacent lanes read adjacent elements, so a warp's loads coalesce.
+// The fold above then reduces the lane axis, exactly as the LLVM backend's lane order does,
+// so even a whole-tensor sum keeps the host's bits while running on thousands of threads.
+// The lane generic reads the source with `tensor.extract` at a position it computes, so it
+// has no input for the elementwise fusion to fold into the next generic.
 //
 // The destination is seeded before the fold, because a reduction reads it at every point:
 // with `-0.0` for a sum (the one float that adds as nothing, signed zeros included), and
@@ -24,18 +29,21 @@ use crate::{
         Generic, OperandAxes, build_expression, empty_tensor, fill_block, generic_op,
         indexing_maps, iterator_types, tensor_parts,
     },
+    tensor_layout::linalg_index,
     tensor_sort::precedes,
 };
 
 use melior::{
     Context,
-    dialect::arith,
+    dialect::arith::{self, CmpiPredicate},
     ir::{
-        Block, BlockLike, Location, Region, RegionLike, Type, Value, attribute::FloatAttribute,
+        Block, BlockLike, Location, Region, RegionLike, Type, Value,
+        attribute::{FloatAttribute, IntegerAttribute},
         operation::OperationBuilder,
+        r#type::RankedTensorType,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirReduceOp, HirTarget, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirReduceOp, HirTarget, HirType, REDUCE_LANES};
 
 /// How many region arguments a fold body takes: the source element, then the accumulator.
 const FOLD_BODY_ARGUMENTS: usize = 2;
@@ -74,6 +82,18 @@ pub(crate) fn build_reduce<'c, 'a>(
 
     let tensor_type = map_type(context, result)?;
     let element_type = map_type(context, element)?;
+    let length = layout.length;
+    let (source, layout) = match layout.lanes {
+        Some(ref run) if length > REDUCE_LANES => {
+            let partials = build_lanes(context, location, block, source, run, *op, element_type)?;
+            let Some(lanes) = ReduceLayout::new(&run.partials(), extents, Some(run.result_rank))
+            else {
+                return Ok(None);
+            };
+            (partials, lanes)
+        }
+        _ => (source, layout),
+    };
     let parallel = layout.result_rank;
     let result_axes: OperandAxes = Some((0..parallel).map(Some).collect());
     let empty = block
@@ -127,7 +147,7 @@ pub(crate) fn build_reduce<'c, 'a>(
         return Ok(Some(folded));
     }
 
-    let length = FloatAttribute::new(context, element_type, layout.length as f64).into();
+    let length = FloatAttribute::new(context, element_type, length as f64).into();
     let length = block
         .append_operation(arith::constant(context, length, location))
         .result(0)?
@@ -159,6 +179,32 @@ struct ReduceLayout {
     first: Vec<Option<usize>>,
     /// How many elements one run folds, which a mean divides by.
     length: usize,
+    /// Where a run's elements sit, for folding a long run in lanes.
+    lanes: Option<Run>,
+}
+
+/// The source shape and reduced axis, which place each run position in the source.
+struct Run {
+    extents: Vec<usize>,
+    /// The reduced axis; `None` for a whole-tensor reduction, whose run is the source in
+    /// row-major order.
+    axis: Option<usize>,
+    result_rank: usize,
+}
+
+impl Run {
+    /// The partials tensor's extents: the result's, then one per lane.
+    fn partials(&self) -> Vec<Option<usize>> {
+        let mut extents: Vec<Option<usize>> = match self.axis {
+            None => vec![Some(1)],
+            Some(axis) => (0..self.extents.len())
+                .filter(|&i| i != axis)
+                .map(|i| Some(self.extents[i]))
+                .collect(),
+        };
+        extents.push(Some(REDUCE_LANES));
+        extents
+    }
 }
 
 impl ReduceLayout {
@@ -181,6 +227,11 @@ impl ReduceLayout {
                 walk: (1..=rank).map(Some).collect(),
                 first: vec![None; rank],
                 length: extents.iter().product(),
+                lanes: Some(Run {
+                    extents: extents.clone(),
+                    axis: None,
+                    result_rank: 1,
+                }),
             });
         };
         let kept: Vec<Option<usize>> = (0..rank)
@@ -199,8 +250,186 @@ impl ReduceLayout {
                 .collect(),
             first: (0..rank).map(result_axis).collect(),
             length: extents[axis],
+            lanes: Some(Run {
+                extents: extents.clone(),
+                axis: Some(axis),
+                result_rank: rank - 1,
+            }),
         })
     }
+}
+
+/// Fold a long run's lanes into a partials tensor of the result's axes and a lane axis.
+/// Lane `l` starts at run position `l` (inside the run, which is longer than the lanes) and
+/// folds `l + k * REDUCE_LANES` for `k` from 1 while that is inside the run, the order the
+/// LLVM backend's lanes take.
+fn build_lanes<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    source: Value<'c, 'a>,
+    run: &Run,
+    op: HirReduceOp,
+    element_type: Type<'c>,
+) -> Result<Value<'c, 'a>, MlirError> {
+    let index = Type::index(context);
+    let length = run.extents.iter().product::<usize>();
+    let length = match run.axis {
+        Some(axis) => run.extents[axis],
+        None => length,
+    };
+    // Every extent is static: `ReduceLayout::new` admits only a static source.
+    let dimensions: Vec<u64> = run
+        .partials()
+        .iter()
+        .map(|extent| extent.map_or(0, |extent| extent as u64))
+        .collect();
+    let partials_type = RankedTensorType::new(&dimensions, element_type, None).into();
+    let rank = dimensions.len();
+    let empty = append(block, empty_tensor(location, partials_type, &[])?)?;
+
+    let body = Block::new(&[(element_type, location)]);
+    // The result position, one `linalg.index` per surviving source axis.
+    let kept: Vec<Value> = (0..run.result_rank)
+        .map(|dimension| append(&body, linalg_index(context, location, dimension)?))
+        .collect::<Result<_, _>>()?;
+    let lane = append(&body, linalg_index(context, location, run.result_rank)?)?;
+    let seed = read_run(
+        context,
+        location,
+        &body,
+        source,
+        run,
+        &kept,
+        lane,
+        element_type,
+    )?;
+    let first = index_constant(context, location, &body, 1)?;
+    let rows = index_constant(context, location, &body, length.div_ceil(REDUCE_LANES))?;
+
+    let step = Block::new(&[(index, location), (element_type, location)]);
+    let row: Value = step.argument(0)?.into();
+    let carried: Value = step.argument(1)?.into();
+    let width = index_constant(context, location, &step, REDUCE_LANES)?;
+    let scaled = append(&step, arith::muli(row, width, location))?;
+    let position = append(&step, arith::addi(scaled, lane, location))?;
+    let end = index_constant(context, location, &step, length)?;
+    let inside = append(
+        &step,
+        arith::cmpi(context, CmpiPredicate::Ult, position, end, location),
+    )?;
+    // Past the run's end the lane reads its own first element and keeps its accumulator.
+    let at = append(&step, arith::select(inside, position, lane, location))?;
+    let value = read_run(
+        context,
+        location,
+        &step,
+        source,
+        run,
+        &kept,
+        at,
+        element_type,
+    )?;
+    let folded = fold_step(context, location, &step, op, value, carried)?;
+    let kept_value = append(&step, arith::select(inside, folded, carried, location))?;
+    step.append_operation(
+        OperationBuilder::new("scf.yield", location)
+            .add_operands(&[kept_value])
+            .build()?,
+    );
+    let region = Region::new();
+    region.append_block(step);
+    let lane_value = append(
+        &body,
+        OperationBuilder::new("scf.for", location)
+            .add_operands(&[first, rows, first, seed])
+            .add_results(&[element_type])
+            .add_regions([region])
+            .build()?,
+    )?;
+    yield_value(&body, location, lane_value)?;
+
+    let own = Some((0..rank).map(Some).collect());
+    apply(
+        context,
+        location,
+        block,
+        Generic {
+            inputs: &[],
+            destination: empty,
+            indexing_maps: indexing_maps(context, rank, &[&own])?,
+            iterators: iterator_types(context, rank, 0)?,
+        },
+        partials_type,
+        body,
+    )
+}
+
+/// The source element at run position `position` of the run whose result position is
+/// `kept`: along the reduced axis for an axis reduction, and row-major through every axis
+/// for a whole-tensor one.
+#[expect(clippy::too_many_arguments)]
+fn read_run<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    at: &'a Block<'c>,
+    source: Value<'c, '_>,
+    run: &Run,
+    kept: &[Value<'c, '_>],
+    position: Value<'c, '_>,
+    element_type: Type<'c>,
+) -> Result<Value<'c, 'a>, MlirError> {
+    let constant = |value| index_constant(context, location, at, value);
+    let mut operands: Vec<Value> = vec![source];
+    match run.axis {
+        // `kept` holds one index per surviving axis, in order, so axis `i` past the reduced
+        // one is `kept[i - 1]`.
+        Some(axis) => operands.extend((0..run.extents.len()).map(|i| match i.cmp(&axis) {
+            std::cmp::Ordering::Less => kept[i],
+            std::cmp::Ordering::Equal => position,
+            std::cmp::Ordering::Greater => kept[i - 1],
+        })),
+        None => {
+            let mut stride: usize = run.extents.iter().product();
+            for (i, extent) in run.extents.iter().enumerate() {
+                stride /= extent;
+                let mut coordinate = position;
+                if stride > 1 {
+                    let divisor = constant(stride)?;
+                    coordinate = append(at, arith::divui(coordinate, divisor, location))?;
+                }
+                if i > 0 {
+                    let modulus = constant(*extent)?;
+                    coordinate = append(at, arith::remui(coordinate, modulus, location))?;
+                }
+                operands.push(coordinate);
+            }
+        }
+    }
+    append(
+        at,
+        OperationBuilder::new("tensor.extract", location)
+            .add_operands(&operands)
+            .add_results(&[element_type])
+            .build()?,
+    )
+}
+
+fn index_constant<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    at: &'a Block<'c>,
+    value: usize,
+) -> Result<Value<'c, 'a>, MlirError> {
+    let index = Type::index(context);
+    append(
+        at,
+        arith::constant(
+            context,
+            IntegerAttribute::new(index, value as i64).into(),
+            location,
+        ),
+    )
 }
 
 /// Append one `linalg.generic` with `body` as its single block, yielding its result.
@@ -233,19 +462,29 @@ fn fold_block<'c>(
     let block = Block::new(&[(element, location); FOLD_BODY_ARGUMENTS]);
     let value: Value = block.argument(0)?.into();
     let carried: Value = block.argument(1)?.into();
+    let folded = fold_step(context, location, &block, op, value, carried)?;
+    yield_value(&block, location, folded)?;
+    Ok(block)
+}
+
+/// `value` folded into `carried`, appended to `block`.
+fn fold_step<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    op: HirReduceOp,
+    value: Value<'c, '_>,
+    carried: Value<'c, '_>,
+) -> Result<Value<'c, 'a>, MlirError> {
     let descending = match op {
         HirReduceOp::Sum | HirReduceOp::Mean => {
-            let sum = append(&block, arith::addf(carried, value, location))?;
-            yield_value(&block, location, sum)?;
-            return Ok(block);
+            return append(block, arith::addf(carried, value, location));
         }
         HirReduceOp::Max => true,
         HirReduceOp::Min => false,
     };
-    let wins = precedes(context, location, &block, value, carried, descending)?;
-    let kept = append(&block, arith::select(wins, value, carried, location))?;
-    yield_value(&block, location, kept)?;
-    Ok(block)
+    let wins = precedes(context, location, block, value, carried, descending)?;
+    append(block, arith::select(wins, value, carried, location))
 }
 
 /// A mean's last step over `(length, total)`: the total divided by the run length.
@@ -331,6 +570,32 @@ mod tests {
                 ir.matches("call void @mgpuLaunchKernel").count(),
                 launches,
                 "`{body}`: a seed, a fold, and a mean's division:\n{ir}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_longer_than_the_lanes_folds_its_lanes_first() {
+        // One more kernel than a short run: the lane partials, then the seed and the fold
+        // over the lane axis (and a mean's division).
+        for (shape, body, launches) in [
+            ("[5000]", "    val r = g.sum()", 3),
+            ("[3, 9000]", "    val r = g.mean(1)", 4),
+            ("[9000, 3]", "    val r = g.max(0)", 3),
+            ("[4096, 2]", "    val r = g.sum(0)", 2),
+        ] {
+            let source = format!(
+                "enum Device {{\n    CPU,\n    GPU(i32)\n}}\n\nfunc main() -> i32 {{\n    val m: Tensor<f32, {shape}> = Tensor::ones()\n    val g = m.clone().to(Device::GPU(0))\n{body}\n    return 0\n}}\n"
+            );
+            let ast = syntax_parsing::parse(&source).expect("the program parses");
+            let program = hir_lowering::lower_program(&ast).expect("the program lowers to HIR");
+            let ir = lower_for_gpu(&program, &nvidia())
+                .expect("a reduction lowers")
+                .llvm_ir;
+            assert_eq!(
+                ir.matches("call void @mgpuLaunchKernel").count(),
+                launches,
+                "`{body}` over {shape}:\n{ir}"
             );
         }
     }

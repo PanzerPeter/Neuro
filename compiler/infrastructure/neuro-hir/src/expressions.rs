@@ -474,6 +474,17 @@ pub enum HirGridIndex {
     Block,
 }
 
+/// How many lanes a float reduction folds a long run in: the language's summation order.
+///
+/// A run of at most this many elements folds left to right. A longer one folds lane `l`
+/// over the run positions `l, l + REDUCE_LANES, l + 2 * REDUCE_LANES, ...` in order, and
+/// then the lanes in order. Every backend folds in exactly this order, so a float
+/// reduction gives the same bits on the host and on a GPU, and a backend may run the lanes
+/// in parallel (SIMD, threads, GPU threads) without changing the answer. Integer runs fold
+/// left to right at any length: their sum is exact, and the order only decides where a
+/// checked build traps.
+pub const REDUCE_LANES: usize = 4096;
+
 /// Which reduction a [`HirExprKind::TensorReduce`] performs.
 ///
 /// The four are one node rather than four because they differ only in the element

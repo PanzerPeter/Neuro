@@ -31,7 +31,7 @@ pub mod types;
 pub use expressions::{
     HirBindingSource, HirExpr, HirExprKind, HirFieldInit, HirGridIndex, HirInterpPart, HirMatchArm,
     HirMatchBinding, HirMatchTest, HirMathOp, HirReduceOp, HirSortKind, HirTensorApply,
-    HirTensorAxis,
+    HirTensorAxis, REDUCE_LANES,
 };
 pub use items::{
     HirCapture, HirClosure, HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction,

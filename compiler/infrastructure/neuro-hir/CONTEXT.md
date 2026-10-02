@@ -13,6 +13,8 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
   `HirType`, `HirCollectionKind`, `AxisNames`
 - Pure functions over those types: `static_shape`, `extent_display`,
   `HirTarget::has_gpu_body` and `HirTarget::requires_gpu`
+- Constant: `REDUCE_LANES`, the lane width that fixes a long float reduction's order for
+  every backend, so the host and a GPU fold a sum identically
 
 ## Shared Kernel
 - shared-types: `Span`, `Literal`, `FormatSpec` embedded in HIR nodes

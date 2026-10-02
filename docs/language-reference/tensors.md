@@ -726,6 +726,18 @@ val total: i32 = folded.item()                 // 22
 This is how a loss leaves a `@grad` function's rank-0 result as a number, for printing
 or for keeping past the `pool` block the tensor is released with.
 
+**The order a float reduction adds in is part of the language.** Float addition is not
+associative, so the order decides the last bits of a sum. A run of up to 4096 elements folds
+left to right. A longer run folds in 4096 lanes: lane `l` folds the elements at run positions
+`l`, `l + 4096`, `l + 8192`, ..., and then the lanes fold in order, lane 0 first. `.mean()`
+divides that sum by the run length, and `.max()` / `.min()` take the same path, though their
+answer does not depend on it. Every backend follows this order, so a reduction gives the same
+bits on the host and on a GPU, and the lanes can run side by side (in SIMD registers, or as
+thousands of GPU threads) without changing the answer. It is also more accurate than one
+running total: a long `f32` sum no longer stalls once each new element is below half its
+precision. Integer reductions fold left to right at any length; their total is exact whatever
+the order, which only decides where a checked build would report an overflow.
+
 Three rules are compile-time errors. The element type must be an integer or a float: a
 `bool` tensor has nothing to fold. A half-precision reduction accumulates in `f32`, so a long
 `bf16` sum does not stall. `.mean()` narrows that to floats, because an

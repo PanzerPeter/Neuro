@@ -166,6 +166,14 @@ runs:
     #     library, so no object from it is ever linked, but link.exe still fails
     #     with LNK1181 when a named library is missing. A static libxml2 from the
     #     runner's vcpkg is copied into the LLVM lib directory under that name.
+    #   - From 23 it also links zlib (`zs.lib`) and zstd, and names zstd by its
+    #     absolute path on the machine that built the release
+    #     (`S:/llvm/.../zstd_static.lib`). llvm-sys hands that to rustc as
+    #     `-l static=S:/...`, which rustc reads as renaming a library `S`, and the
+    #     build stops there. The path is rewritten inside llvm-config.exe to the
+    #     bare file name, padded with spaces so no offset in the binary moves
+    #     (llvm-sys splits the list on spaces and skips the empty entries), and
+    #     static zlib and zstd from vcpkg are copied in under those two names.
     #
     # The archive carries a subset of backends (X86, AArch64, ARM, BPF, NVPTX,
     # RISCV, WebAssembly), which is why inkwell uses `target-x86` and not
@@ -177,7 +185,7 @@ runs:
       id: llvm-cache
       with:
         path: C:\LLVM
-        key: llvm-23.1.2-x86_64-pc-windows-msvc-xml2s
+        key: llvm-23.1.2-x86_64-pc-windows-msvc-xml2s-zs-zstd
 
     - name: Install LLVM 23 (Windows)
       if: runner.os == 'Windows' && steps.llvm-cache.outputs.cache-hit != 'true'
@@ -226,21 +234,41 @@ runs:
         Get-ChildItem "$prefix\lib\cmake" | Where-Object Name -ne 'llvm' | Remove-Item -Recurse -Force
         Get-ChildItem $prefix | Where-Object Name -notin 'bin', 'include', 'lib' | Remove-Item -Recurse -Force
 
-        # [core] drops the iconv and zlib defaults: they would only add more
+        # [core] drops libxml2's iconv and zlib features: they would only add more
         # libraries that llvm-config does not name.
-        & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install "libxml2[core]:x64-windows-static"
-        if ($LASTEXITCODE -ne 0) { throw "vcpkg install libxml2 failed (exit $LASTEXITCODE)" }
-        # The archive's file name follows libxml2's own CMake naming, which is not
-        # stable across releases (`libxml2s.lib` up to 2.14, a different name in
-        # 2.15), so it is found by pattern. Any static libxml2 satisfies the link.
-        $xml2dir = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static\lib"
-        $xml2 = Get-ChildItem $xml2dir -Filter '*xml2*.lib' | Sort-Object Name -Descending | Select-Object -First 1
-        if (-not $xml2) {
-          Get-ChildItem $xml2dir | Format-Table Name, Length | Out-String | Write-Host
-          throw "vcpkg produced no static libxml2 archive in $xml2dir"
+        & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install "libxml2[core]:x64-windows-static" "zlib:x64-windows-static" "zstd:x64-windows-static"
+        if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed (exit $LASTEXITCODE)" }
+        # An archive's file name follows its project's own CMake naming, which is not
+        # stable across releases (`libxml2s.lib` up to libxml2 2.14, a different name
+        # in 2.15), so each is found by pattern and copied in under the name
+        # llvm-config gives it. Any static build of the library satisfies the link.
+        $vcpkgLib = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static\lib"
+        foreach ($wanted in @(
+            @{ Pattern = '*xml2*.lib'; Name = 'xml2s.lib' },
+            @{ Pattern = 'zlib*.lib'; Name = 'zs.lib' },
+            @{ Pattern = 'zstd*.lib'; Name = 'zstd_static.lib' })) {
+          $found = Get-ChildItem $vcpkgLib -Filter $wanted.Pattern | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $found) {
+            Get-ChildItem $vcpkgLib | Format-Table Name, Length | Out-String | Write-Host
+            throw "vcpkg produced no $($wanted.Pattern) archive in $vcpkgLib"
+          }
+          Write-Host "Using $($found.FullName) as $($wanted.Name)"
+          Copy-Item $found.FullName (Join-Path "$prefix\lib" $wanted.Name)
         }
-        Write-Host "Using $($xml2.FullName) as xml2s.lib"
-        Copy-Item $xml2.FullName "$prefix\lib\xml2s.lib"
+
+        # Latin-1 maps every byte to one character and back, so the rewrite touches
+        # only the matched bytes.
+        $llvmConfigExe = "$prefix\bin\llvm-config.exe"
+        $latin1 = [Text.Encoding]::GetEncoding(28591)
+        $text = $latin1.GetString([IO.File]::ReadAllBytes($llvmConfigExe))
+        # One entry of the space-separated list: a drive, path characters only, and
+        # a `.lib` file name, with a space or the string's end on either side.
+        $absolute = '(?<=[ \x00])[A-Za-z]:[/\\][A-Za-z0-9_.+/\\-]*[/\\]([A-Za-z0-9_.+-]+\.lib)(?=[ \x00])'
+        if (-not [regex]::IsMatch($text, $absolute)) {
+          throw "llvm-config.exe names no library by absolute path any more; drop this rewrite"
+        }
+        $text = [regex]::Replace($text, $absolute, { param($m) $m.Groups[1].Value.PadRight($m.Length) })
+        [IO.File]::WriteAllBytes($llvmConfigExe, $latin1.GetBytes($text))
 
     - name: Configure LLVM env (Windows)
       if: runner.os == 'Windows'
@@ -260,6 +288,20 @@ runs:
           throw "Unexpected LLVM version '$detected'; expected 23.x"
         }
         Write-Host "LLVM prefix: $prefix"
+
+        # Every system library must be a bare name llvm-sys can turn into a rustc
+        # `-l`, and present in the prefix or the SDK. A path here is the
+        # llvm-config.exe rewrite above not having happened (a stale cache).
+        $system = (& $llvmConfig --system-libs --link-static) -split '\s+' | Where-Object { $_ }
+        Write-Host "llvm-config system libraries: $system"
+        foreach ($lib in $system) {
+          if ($lib -match '[:/\\]') { throw "llvm-config names '$lib' by path, which llvm-sys cannot link" }
+        }
+        foreach ($lib in 'xml2s.lib', 'zs.lib', 'zstd_static.lib') {
+          if (($system -contains $lib) -and -not (Test-Path "$prefix\lib\$lib")) {
+            throw "llvm-config names $lib, which is missing from $prefix\lib"
+          }
+        }
 
         # llvm-sys on Windows/MSVC links statically: do NOT set
         # LLVM_LINK_LLVM_DYLIB.
