@@ -1,4 +1,4 @@
-// Neuro Programming Language - String `.char_slice(range)` (Phase 2A)
+// Neuro Programming Language - String `.char_slice(range)`
 //
 // `.char_slice(range)` is the codepoint-indexed companion to `.slice(range)`. Both
 // return a borrowed `&string` view (zero copy, since strings are immutable) but

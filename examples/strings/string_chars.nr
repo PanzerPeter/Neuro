@@ -1,4 +1,4 @@
-// Neuro Programming Language - Codepoint iterators `.chars()` / `.char_indices()` (Phase 2A)
+// Neuro Programming Language - Codepoint iterators `.chars()` / `.char_indices()`
 //
 // `.chars()` hands out an iterator over Unicode scalar values. Each step is O(1): the
 // cursor reads the code point standing at its byte offset and advances by that code

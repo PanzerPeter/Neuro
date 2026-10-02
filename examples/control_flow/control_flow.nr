@@ -1,9 +1,6 @@
 // Neuro Example: Control flow
 // Demonstrates: if/else, while loops, break/continue, boolean logic, comparisons
 //
-// Note: Phase 1 has limitations with deeply nested control flow
-// This example uses simple patterns that work within these limitations
-//
 // Each helper's answer is printed, so which loop form produced which number is
 // readable without tracing the arithmetic.
 

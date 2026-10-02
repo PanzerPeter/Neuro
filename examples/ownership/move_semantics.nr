@@ -1,6 +1,6 @@
-// Neuro Programming Language - Move semantics by default (Phase 1.7)
+// Neuro Programming Language - Move semantics by default
 //
-// Non-Copy owned values (today: `string`) are MOVED when bound, assigned,
+// Non-Copy owned values (here a `string`) are MOVED when bound, assigned,
 // returned, or passed by value. After a move the source binding is invalid;
 // reading it is a compile error. `.clone()` is the explicit opt-out.
 //

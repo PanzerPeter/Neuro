@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.17.1] - 2026-10-02
+
+### Changed
+
+- The README's Quick Roadmap follows the replanned phases: Phase 4 is complete, Phase 5
+  completes the language and makes MLIR the only tensor backend, Phase 6 is the neural network
+  library, and parallelism, interop, developer experience and distribution follow as Phases 7
+  to 10.
+- The README's demo GIF is re-recorded against the current compiler and now trains
+  `examples/showcase/gradient_loss.nr` with `@grad` instead of running a scalar perceptron.
+- DESIGN.md describes ownership, generics and error values as shipped rather than planned,
+  names the upstream `nvvm` and `rocdl` dialects as the GPU route without Triton, and points at
+  the memory model for what still leaks.
+- The docs index drops the `.nrl` and `.nrm` file types; model weights are planned as
+  `.safetensors`. The editor guide no longer names the phase number of the Language Server.
+- Example comments no longer cite old phase numbers or describe limits that are gone: `unsafe`
+  gates `KernelOut` indexing, nested control flow has no special limits, and structs pass to
+  functions.
+
 ## [4.17.0] - 2026-10-02
 
 ### Changed

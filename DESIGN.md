@@ -13,7 +13,7 @@ Neuro's central premise is that bugs caught at compile time are cheaper than bug
 This motivates:
 - Static typing with full type inference, so you get type safety without the ceremony.
 - Mandatory explicit mutability (`val` / `mut`), which puts mutation at the declaration site instead of burying it in an assignment.
-- Tensor shape types planned as compile-time parameters, so shape mismatches are rejected before a single weight is allocated.
+- Tensor shapes as compile-time parameters of the type, so shape mismatches are rejected before a single weight is allocated.
 
 ### 2. Explicitness where ambiguity costs
 
@@ -23,17 +23,17 @@ Inference is permitted where it is unambiguous and adds no semantic risk: local 
 
 ### 3. Ownership without a GC
 
-Neuro will eventually adopt an ownership and borrow-checker model similar to Rust's. Garbage collection is not on the roadmap. This is a deliberate trade-off:
+Neuro uses an ownership and borrow-checker model similar to Rust's. Garbage collection is not on the roadmap. This is a deliberate trade-off:
 
 - AI workloads are memory-intensive and latency-sensitive. GC pauses interact badly with tight training loops and large tensor allocations.
 - A GC would make it harder to reason about memory layout, which matters for MLIR lowering and GPU memory management.
 - Ownership makes memory behavior auditable at the type level. That matters for a language meant to give you confidence in what your model is doing.
 
-The ownership system is being layered on progressively as the type system matures: move-by-default, borrows (`&T` / `&mut T`), deterministic `Drop` (scope-exit destructors), the owning collections, and the growable `String` builder have all landed. Each frees its buffer at scope exit. The remaining alpha gap is the *anonymous* heap `string` that `+`, interpolation, and `String::to_string` produce: no tracked binding owns it, so nothing frees it (see README).
+Move-by-default, borrows (`&T` / `&mut T`), deterministic `Drop` (scope-exit destructors), the owning collections and the growable `String` builder are all in place, and each frees its buffer at scope exit. What still leaks in the alpha is a heap `string` in a storing position whose owner the compiler cannot prove; the [memory model](docs/language-reference/memory-model.md#what-still-leaks) lists those positions.
 
 ### 4. Zero-cost abstractions
 
-Structs, methods, and (eventually) generics should produce the same code as hand-written equivalents. Neuro does not pay for abstraction at runtime. There is no virtual dispatch by default, no boxing, no reference counting unless explicitly opted into.
+Structs, methods and generics produce the same code as hand-written equivalents. Neuro does not pay for abstraction at runtime. There is no virtual dispatch by default, no boxing, no reference counting unless explicitly opted into.
 
 ### 5. Native code, always
 
@@ -41,7 +41,7 @@ Neuro compiles directly to native binaries via LLVM. There is no interpreter, no
 
 ### 6. Errors as values
 
-Neuro will use `Result<T, E>` and `Option<T>` for error handling, not exceptions. Exceptions make control flow non-local and difficult to reason about in a system without a GC. `?` propagation and pattern matching provide ergonomic error handling without hidden jumps.
+Neuro uses `Result<T, E>` and `Option<T>` for error handling, not exceptions. Exceptions make control flow non-local and difficult to reason about in a system without a GC. `?` propagation and pattern matching provide ergonomic error handling without hidden jumps.
 
 ---
 
@@ -57,7 +57,7 @@ Neuro does not have an interpreter and does not plan to have one. It is not suit
 
 ### Not Python-compatible
 
-Neuro does not aim to run Python code or embed a Python interpreter. Python FFI over DLPack (Phase 7) will allow tensor data to be exchanged with Python-based ML frameworks at runtime, but Neuro code and Python code are distinct programs.
+Neuro does not aim to run Python code or embed a Python interpreter. Planned Python extension modules will let Python call compiled Neuro code and exchange tensors with ML frameworks over DLPack, but Neuro code and Python code stay distinct programs.
 
 ### Not a research language for type theory
 
@@ -94,7 +94,7 @@ Neuro addresses these at the language level: types are static, tensor shapes are
 
 LLVM is the industry standard for optimizing native code generation. The inkwell bindings give Neuro a mature, well-tested code generation foundation without reinventing register allocation, instruction selection, or platform ABI handling.
 
-MLIR (Multi-Level Intermediate Representation) is the route tensor operations take toward GPU targets. MLIR's type system natively represents tensor shapes as type parameters. The `linalg`, `tensor`, and `arith` dialects provide a high-level representation that MLIR can lower to both CPU vector code and GPU kernels using the `nvgpu`, `rocdl`, and Triton dialects. This means Neuro's compiler can target CPU, NVIDIA GPU, and AMD GPU without maintaining separate backends.
+MLIR (Multi-Level Intermediate Representation) is the route tensor operations take toward GPU targets. MLIR's type system natively represents tensor shapes as type parameters. The `linalg`, `tensor`, and `arith` dialects provide a high-level representation that MLIR can lower to both CPU vector code and GPU kernels through the upstream `nvvm` and `rocdl` dialects. Neuro's compiler targets CPU, NVIDIA GPU and AMD GPU this way without maintaining separate backends.
 
 ### Why compile-time AD over the typed HIR?
 

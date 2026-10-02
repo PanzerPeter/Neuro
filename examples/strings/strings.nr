@@ -1,5 +1,4 @@
 // Neuro Programming Language - String Type Test
-// Phase 1: Basic string implementation
 //
 // Every string this file builds is printed, so the escapes and the Unicode
 // escape are visible as rendered text. `main` returns 0: the output is the

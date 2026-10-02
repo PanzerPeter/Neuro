@@ -2,7 +2,7 @@
 
 Syntax highlighting for `.nr` files ships in the repository under
 [`neuro-language-support/`](../../neuro-language-support/). There is no Language Server yet;
-that is Phase 8 in the [Quick Roadmap](../../README.md#quick-roadmap).
+it is planned on the [Quick Roadmap](../../README.md#quick-roadmap).
 
 ## VS Code
 

@@ -86,9 +86,9 @@ Exact dependency versions live in the workspace `Cargo.toml` files, not here.
 | Extension | Purpose |
 |---|---|
 | `.nr` | Neuro source files |
-| `.nrl` | Compiled library modules (planned) |
-| `.nrm` | Serialized model data (planned) |
 | `.nrp` | Package definitions (planned) |
+
+Model weights are planned to use the standard `.safetensors` format rather than a Neuro-specific one.
 
 ## Project Resources
 

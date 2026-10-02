@@ -1,4 +1,4 @@
-// Demonstrates the `prefer-loop-over-while-true` lint introduced in Phase 1.5.
+// Demonstrates the `prefer-loop-over-while-true` lint.
 //
 // The `@allow(prefer_loop_over_while_true)` attribute on this function
 // silences the lint that would otherwise fire on `while true { ... }`.

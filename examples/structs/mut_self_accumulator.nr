@@ -1,6 +1,6 @@
 // Mutable methods: `&mut self` advances struct state in place.
 //
-// Demonstrates the ownership-gated receiver that landed in Phase 1.7:
+// Demonstrates the ownership-gated receiver:
 //   `&mut self` methods write to `self.field` and the change is observed by a
 //   later `&self` query. The accumulator is driven entirely through method
 //   calls on a `mut` binding: no direct field assignment in `main`.

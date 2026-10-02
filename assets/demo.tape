@@ -32,25 +32,24 @@ Sleep 500ms
 Show
 
 # --- 1. type-check: parse, resolve, type, lower to HIR --------------------
-Type "neurc check examples/showcase/perceptron.nr"
+Type "neurc check examples/showcase/gradient_loss.nr"
 Sleep 400ms
 Enter
 Sleep 1800ms
 
-# --- 2. compile to a native binary through LLVM ---------------------------
-Type "neurc compile -O2 examples/showcase/perceptron.nr -o perceptron"
+# --- 2. compile to a native binary through LLVM, @grad derivative included -
+Type "neurc compile -O3 examples/showcase/gradient_loss.nr -o gradient_loss"
 Sleep 400ms
 Enter
 Sleep 2200ms
 
-# --- 3. run it: forward pass per input, then the summed output ------------
-#     the perceptron truncates that sum into the process exit code
-Type "./perceptron"
+# --- 3. run it: gradient descent on a least-squares fit -------------------
+Type "./gradient_loss"
 Sleep 400ms
 Enter
 Sleep 2600ms
 
 # --- cleanup (not recorded) ----------------------------------------------
 Hide
-Type "rm -f perceptron" Enter
+Type "rm -f gradient_loss" Enter
 Show

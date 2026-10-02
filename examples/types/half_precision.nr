@@ -4,7 +4,7 @@
 // with a deliberately narrow contract: binding, copy, `==`/`!=`, and `as`-cast
 // to/from any numeric type. They have NO scalar arithmetic: half-precision ALUs
 // are not portable, so the language directs you to compute in `f32` and cast back.
-// Their payoff is bulk tensor compute (Phase 3), where the restriction lifts.
+// Their payoff is bulk tensor compute, where tensor arithmetic accepts them.
 //
 // Half-precision literals always carry their suffix: `1.5f16`, `0.02bf16`.
 

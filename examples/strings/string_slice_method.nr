@@ -1,4 +1,4 @@
-// Neuro Programming Language - String `.slice(range)` (Phase 1.7)
+// Neuro Programming Language - String `.slice(range)`
 //
 // `.slice(range)` returns a borrowed `&string` view into the receiver's UTF-8
 // data: zero copy, since strings are immutable. The range may be exclusive
