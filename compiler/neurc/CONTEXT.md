@@ -38,23 +38,24 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
 4. `hir_lowering::lower_program`: the typed HIR. `check` reports the lowered item count;
    `compile` hands the HIR to `llvm_backend::compile`, which lowers native object code from it
    (the backend does not consume the AST).
-5. Built with the `mlir` feature, `compile` first hands the HIR to `mlir_backend::lower_for_link`
+5. `compile` first hands the HIR to `mlir_backend::lower_for_link`
    (`tensor_bodies`) and passes the bodies it returns to the LLVM backend as `ExternalBodies`,
    which links them in place of its own. The two slices' types are mapped here, field for field,
    since neither may name the other's. A failure there stops the compile: it is a compiler bug,
    and handing the body back to the LLVM backend would hide it. A program with a `@gpu` function,
    or with a tensor operation lowering outlined to follow its operands (`FollowsOperands`), also
    goes through `mlir_backend::lower_for_gpu` for the `--gpu-arch` chip, and those bodies
-   are a second `ExternalBodies` with `BodyMemory::Device`. `check` always lowers for the
-   default: which bodies qualify does not depend on the vendor.
+   are a second `ExternalBodies` with `BodyMemory::Device`. `check` lowers for the default on
+   Linux: which bodies qualify does not depend on the vendor.
    A `@gpu` body that cannot become a kernel is rendered at its function
    (`GpuBodiesNotLowered`) and stops the compile, `fallback: true` or not. A `@kernel` function
    goes through the same call; a body construct it cannot lower is rendered at the construct
-   (`KernelBodiesNotLowered`, one `KernelRefusal` per function). Without the feature
-   `tensor_bodies` answers no bodies, and every bare `@gpu` or `@kernel` function is an error at
+   (`KernelBodiesNotLowered`, one `KernelRefusal` per function). Off Linux `tensor_bodies`
+   answers the host bodies only, and every bare `@gpu` or `@kernel` function is an error at
    its declaration: it has no host body. A `@gpu(fallback: true)` function is a warning instead
-   (`without_gpu_bodies`) and builds with its host body only. Windows does the same either way,
-   since the GPU runtime needs `dlopen`.
+   (`without_gpu_bodies`) and builds with its host body only. The GPU runtime needs `dlopen`,
+   which Windows lacks, and neither vendor ships a macOS driver; `check` there stays a type
+   check.
 
 `run_file` adds nothing to that order. It calls `compile_file` with an output path inside a
 temporary directory, executes the result, and exits with the child's own status, so a Neuro
@@ -108,15 +109,8 @@ whatever the consumer assumes, and `-O` still selects the pass pipeline, so `-O0
 unoptimized module a rewriting consumer wants and `-O2` is what the object path would have
 handed to the backend.
 
-`--emit` names the artifact, not the pipeline that produced it: with the `mlir` feature an
-object file or an `llvm-ir` module carries the linked MLIR bodies exactly as an executable does.
-
-### The `mlir` feature
-`mlir-backend` is an optional dependency, enabled by `neurc`'s own `mlir` feature (which turns on
-`mlir-backend/mlir`). Cargo decides dependencies before any build script runs, so the feature is
-the build-time switch: nothing probes for an MLIR toolchain, and a build that asks for the feature
-without one fails in `mlir-sys`'s build script. Off by default, like `mlir-backend`'s own gate,
-because LLVM's Windows development build ships no MLIR.
+`--emit` names the artifact, not the pipeline that produced it: an object file or an `llvm-ir`
+module carries the linked MLIR bodies exactly as an executable does.
 
 ### The prelude
 `prelude::load()` parses `prelude.nr` once into a `Prelude` value that answers two questions:

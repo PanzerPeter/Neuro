@@ -551,8 +551,7 @@ mod tests {
     #[test]
     fn maps_aggregate_types_to_opaque_pointers() {
         // Every aggregate is a pointer in the scaffold. Collections are listed explicitly
-        // because a new `HirType` variant must be routed here rather than silently
-        // breaking this crate's build behind the off-by-default `mlir` feature.
+        // because a new `HirType` variant must be routed here, not fall to a wildcard.
         let program = HirProgram {
             items: vec![HirItem::Function(HirFunction {
                 name: "aggregates".to_string(),

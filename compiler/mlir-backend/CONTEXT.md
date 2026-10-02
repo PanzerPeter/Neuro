@@ -1,18 +1,15 @@
 # mlir-backend
 
 ## Purpose
-Lower the typed HIR to MLIR for the tensor path, on the CPU and as NVIDIA or AMD GPU kernels. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end. The bodies it computes exactly as the LLVM backend would are also handed to the driver as linkable LLVM IR, which `neurc` built with its own `mlir` feature links into every compile.
+Lower the typed HIR to MLIR for the tensor path, on the CPU and as NVIDIA or AMD GPU kernels. It consumes `neuro_hir::HirProgram` and emits a verifier-clean module: a `func.func` declaration per function, except where a body is element-wise tensor arithmetic or a matrix product, which becomes a definition built from the `linalg` and `tensor` dialects. The same module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, so a `linalg` body arrives as a real loop nest and the HIR → MLIR → llvm dialect → inkwell pipeline is proven end to end. The bodies it computes exactly as the LLVM backend would are also handed to the driver as linkable LLVM IR, which `neurc` links into every compile.
 
-## Feature Gate
-The whole crate is opt-in behind the off-by-default `mlir` feature
-(`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir"]`). Disabled, it compiles to an empty
-placeholder pulling in no MLIR toolchain (nor `neuro-hir`), so a default
-`cargo build/test --workspace` works on stock LLVM 23 on every CI OS. Enabled, it exposes the
-entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a
-`cargo test -p mlir-backend --features mlir` step exercise the gated code; the Windows/macOS
-legs build the placeholder.
+## Toolchain
+Every build compiles the crate, so every build needs MLIR 23 in the LLVM 23 prefix (see
+Notes, toolchain pinning). CI provisions it on all three OSes: apt.llvm.org on Linux,
+Homebrew's `llvm` on macOS, and on Windows a static source build the `setup-llvm` action
+caches.
 
-## Entry Points (feature `mlir`)
+## Entry Points
 - `lower_program(&HirProgram) -> Result<String, MlirError>`: walks the typed HIR and returns
   the textual form of a verified module of `func.func` declarations.
 - `translate_to_llvm_ir(&HirProgram) -> Result<String, MlirError>`: the same module carried on
@@ -51,11 +48,9 @@ tests still carry that module across to LLVM IR, because it is the one module wi
 rather than only declarations.
 
 ## Shared Kernel
-- `neuro-hir`: the typed HIR contract `lower_program` consumes, gated under `mlir`.
-- `ast-types`: `BinaryOp`, which the HIR's `Binary` expression carries rather than redeclaring,
-  gated under `mlir`.
-- `shared-types`: `Span`, which `GpuBodiesNotLowered` carries per refused function, gated under
-  `mlir`.
+- `neuro-hir`: the typed HIR contract `lower_program` consumes.
+- `ast-types`: `BinaryOp`, which the HIR's `Binary` expression carries rather than redeclaring.
+- `shared-types`: `Span`, which `GpuBodiesNotLowered` carries per refused function.
 
 The crate adds no business logic of its own beyond the lowering; it otherwise uses only
 third-party `melior` + `mlir-sys` + `inkwell` + `thiserror`.
@@ -107,10 +102,11 @@ one: the translation interfaces have to be on the context that *built* the modul
 `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR has to be installed into the same prefix as the
 LLVM that `LLVM_SYS_231_PREFIX` names; `TABLEGEN_230_PREFIX` names that prefix too. One prefix
 means both bindings load one `libLLVM` 23, which the crossing above depends on. On Ubuntu,
-apt.llvm.org's `libmlir-23-dev` installs MLIR beside LLVM under `/usr/lib/llvm-23`. Arch has
-no package that fits (`aur/mlir` builds no `libMLIR-C`), so there it is a static source build of
-LLVM with MLIR in one prefix. `mlir-sys` uses Rust
-2024 let-chains in its build script, so the `mlir` feature needs Rust 1.88 or newer.
+apt.llvm.org's `libmlir-23-dev` installs MLIR beside LLVM under `/usr/lib/llvm-23`. Homebrew's
+`llvm` builds MLIR in. Arch has no package that fits (`aur/mlir` builds no `libMLIR-C`) and no
+Windows release carries MLIR, so on both it is a static source build of LLVM with MLIR in one
+prefix. `mlir-sys` uses Rust 2024 let-chains in its build script, which the workspace MSRV
+covers.
 
 **The GPU pipeline.** `lower_for_gpu` builds the `lower_for_link` module and swaps the middle of
 the CPU pipeline: `convert-linalg-to-parallel-loops`, `scf-parallel-loop-tiling` (guarded rather
@@ -346,6 +342,4 @@ element must map to an MLIR integer or float; an aggregate element is `Unsupport
 tensor is untouched and stays the representation every 2B operation uses.
 
 `map_type` matches `HirType` exhaustively with **no wildcard**, so a new HIR variant is a
-compile error here rather than a silent mis-map. Because the crate builds only under the
-off-by-default feature, that error surfaces on the `--all-features` CI job, not on a default
-`cargo build`, which is the one thing to remember when adding a `HirType` variant.
+compile error here rather than a silent mis-map, on every build.

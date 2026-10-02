@@ -217,8 +217,8 @@ harness (NumPy here is the PyPI wheel, which bundles OpenBLAS). Two rows are wor
 `snprintf`, and `int_divide` is the one place the compiler spends rather than saves, since `/`
 and `%` guard the operand pairs the hardware leaves undefined.
 
-The GPU benchmarks run their Neuro side as `@gpu` kernels on an RTX 5070, from a `neurc` built
-with `--features mlir`, against NumPy on the CPU:
+The GPU benchmarks run their Neuro side as `@gpu` kernels on an RTX 5070, compiled on Linux,
+against NumPy on the CPU:
 
 | Benchmark | What it stresses | Neuro `@gpu` | NumPy |
 |---|---|---|---|
@@ -271,15 +271,14 @@ compiler/
 ├── semantic-analysis/       # Type checker, scope and borrow analysis
 ├── hir-lowering/            # Type-checked AST -> typed HIR
 ├── llvm-backend/            # HIR -> object code (inkwell 0.10 / LLVM 23)
-├── mlir-backend/            # HIR -> MLIR linalg (off-by-default `mlir` feature)
+├── mlir-backend/            # HIR -> MLIR linalg and GPU kernels
 └── neurc/                   # CLI compiler driver
 ```
 
 Today a `.nr` file travels: **tokens → AST → merged program → type-checked AST → typed HIR →
 LLVM object code → system linker**. Automatic differentiation runs inside HIR lowering. The
-`mlir-backend` slice lowers the same typed HIR to MLIR `linalg`, and a `neurc` built with its
-`mlir` feature links the tensor bodies it computes into the program, and lowers `@gpu` and
-`@kernel` bodies on through the MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
+`mlir-backend` slice lowers the same typed HIR to MLIR `linalg`; `neurc` links the tensor
+bodies it computes into the program, and on Linux lowers `@gpu` and `@kernel` bodies on through the MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---

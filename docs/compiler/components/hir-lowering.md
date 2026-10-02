@@ -12,7 +12,7 @@ not expose them, so the lowerer **re-derives** each expression's type while walk
 
 `neurc` runs lowering immediately after `semantic_analysis::type_check` in both `check` and
 `compile`. The output feeds the [LLVM backend](llvm-backend.md) (and the
-[MLIR backend](mlir-backend.md) under the `mlir` feature).
+[MLIR backend](mlir-backend.md)).
 
 ## Architecture
 

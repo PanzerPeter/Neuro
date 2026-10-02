@@ -1,7 +1,7 @@
 // `@gpu`: a function whose body must run as a GPU kernel, and nowhere else.
 //
-// Only a neurc built with `--features mlir` can compile one, and only a machine with an
-// NVIDIA GPU can run the result. CI's MLIR job has no GPU, so the run tests accept either
+// Only a Linux neurc can compile one, and only a machine with an NVIDIA GPU can run the
+// result. CI's Linux legs have no GPU, so the run tests accept either
 // outcome a GPU-less machine can produce, but each asserts it fully: the right answer on a
 // GPU, or the startup diagnostic without one. The diagnostic itself is pinned by hiding
 // every device with `CUDA_VISIBLE_DEVICES`, which works whether or not a GPU is present.
@@ -9,7 +9,7 @@
 use crate::compile_harness::CompileTest;
 
 /// Two kernels' worth of work, each checked against the same arithmetic done on the host.
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 const KERNELS: &str = r#"
 @gpu
 func blend(a: &Tensor<f32, [37, 45]>, b: &Tensor<f32, [37, 45]>) -> Tensor<f32, [37, 45]> {
@@ -90,24 +90,24 @@ fn a_grad_body_cannot_differentiate_through_a_gpu_call() {
     assert!(error.contains("a call to a `@gpu` function"), "{error}");
 }
 
-#[cfg(not(feature = "mlir"))]
+#[cfg(not(target_os = "linux"))]
 #[test]
-fn without_mlir_a_gpu_function_is_a_compile_error() {
+fn off_linux_a_gpu_function_is_a_compile_error() {
     let test = CompileTest::new();
     let source = test.write_source(
-        "no_mlir.nr",
+        "off_linux.nr",
         "@gpu\nfunc add(a: &Tensor<f32, [2]>, b: &Tensor<f32, [2]>) -> Tensor<f32, [2]> {\n    a + b\n}\nfunc main() -> i32 { return 0 }\n",
     );
     let error = test.compile(&source).expect_err("no host fallback exists");
     assert!(
         error.contains("`@gpu` function 'add' needs a GPU")
-            && error.contains("built without the MLIR backend")
-            && error.contains("no_mlir.nr:2:1"),
+            && error.contains("only Linux builds reach")
+            && error.contains("off_linux.nr:2:1"),
         "{error}"
     );
 }
 
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_body_that_cannot_become_a_kernel_is_a_compile_error() {
     let test = CompileTest::new();
@@ -132,7 +132,7 @@ fn a_body_that_cannot_become_a_kernel_is_a_compile_error() {
     }
 }
 
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 #[test]
 fn gpu_bodies_launch_kernels_and_host_bodies_stay_on_the_host() {
     let test = CompileTest::new();
@@ -162,7 +162,7 @@ fn gpu_bodies_launch_kernels_and_host_bodies_stay_on_the_host() {
     assert!(ir.contains("mgpuLaunchKernel"), "{ir}");
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_gpu_program_runs_on_the_gpu_or_aborts_at_startup() {
     let test = CompileTest::new();
@@ -183,7 +183,7 @@ fn a_gpu_program_runs_on_the_gpu_or_aborts_at_startup() {
 
 /// A `@gpu` body reduces along an axis with one thread per result element, folding in the
 /// host's order, so the answer matches the host's exactly.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_gpu_body_reduces_along_an_axis_as_the_host_does() {
     const SOURCE: &str = r#"
@@ -231,7 +231,7 @@ func main() -> i32 {
 
 /// A `@gpu` body can sort, and return `.topk`'s values and indices as a pair. Equal
 /// elements keep their order, as on the host.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_gpu_body_sorts_and_returns_topk_as_a_pair() {
     const SOURCE: &str = r#"
@@ -272,7 +272,7 @@ func main() -> i32 {
     );
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn without_a_visible_gpu_the_program_aborts_before_main() {
     let test = CompileTest::new();
@@ -287,7 +287,7 @@ fn without_a_visible_gpu_the_program_aborts_before_main() {
 }
 
 /// The module loads in a global constructor, so the check runs before `main` prints.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 fn assert_aborted_at_startup(output: &std::process::Output) {
     use std::os::unix::process::ExitStatusExt;
     let stderr = String::from_utf8_lossy(&output.stderr);

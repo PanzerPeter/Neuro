@@ -20,10 +20,10 @@ A missing toolchain is skipped with a note, so the harness still runs where only
 some of them are installed.
 
 The `gpu_*` benchmarks run their Neuro side as `@gpu` kernels, which needs a
-`neurc` built with the MLIR backend and an NVIDIA GPU:
+Linux `neurc` and an NVIDIA GPU:
 
 ```bash
-cargo build --release -p neurc --features mlir   # see the installation guide for MLIR
+cargo build --release -p neurc
 python benchmarks/run.py gpu_matmul gpu_reduce gpu_relax
 ```
 

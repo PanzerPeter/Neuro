@@ -62,7 +62,7 @@ func main() -> i32 {
 
 /// Every operator and reduction a device tensor takes gives the host's answer bit for bit,
 /// odd extents included: a mismatch count of zero.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn operators_and_reductions_on_the_device_match_the_host() {
     const SOURCE: &str = r#"
@@ -131,7 +131,7 @@ func main() -> i32 {
 /// per lane, in the order the host's lanes take: whole-tensor and axis reductions over long
 /// runs (along the last axis and across rows) match the host bit for bit. The values are
 /// picked so a left-to-right fold would give a different answer.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn long_runs_reduce_in_lanes_on_the_device_as_on_the_host() {
     const SOURCE: &str = r#"
@@ -191,7 +191,7 @@ func main() -> i32 {
 
 /// A result stays on the GPU its operands live on, so host code that has no device form
 /// refuses it. A host operand beside a device one is copied over rather than refused.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_result_stays_on_the_device() {
     for (operation, column) in [
@@ -221,7 +221,7 @@ fn a_result_stays_on_the_device() {
 
 /// A program that transfers but computes on host tensors runs as it did, GPU or not: the
 /// kernels it carries are loaded at startup without making a missing GPU fatal.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn host_operands_stay_on_the_host_without_a_gpu() {
     const SOURCE: &str = r#"
@@ -270,7 +270,7 @@ func main() -> i32 {
 /// `.sort()`, `.argsort()` and `.topk()` on a device tensor give the host's order exactly:
 /// ties keep their positions, a NaN sorts last either way, and an inner axis or an `f64`
 /// tensor changes nothing. A mismatch count of zero.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn sorts_on_the_device_match_the_host() {
     const SOURCE: &str = r#"
@@ -335,7 +335,7 @@ func main() -> i32 {
 }
 
 /// A program that sorts only host tensors sorts them on the host, GPU or not.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_host_sort_stays_on_the_host_without_a_gpu() {
     const SOURCE: &str = r#"
@@ -383,7 +383,7 @@ func main() -> i32 {
 /// Slices (stepped, reversed, at a run-time position), a permutation and `einsum` (a
 /// contraction, a diagonal, a full contraction) on a device tensor give the host's answer bit
 /// for bit. A mismatch count of zero.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn layouts_and_contractions_on_the_device_match_the_host() {
     const SOURCE: &str = r#"
@@ -464,7 +464,7 @@ func main() -> i32 {
 /// are the GPU vendor's device math library, which may differ from the host's C library in the
 /// last bits, so they are held to a relative error. A compiler that found no device math
 /// library leaves the math to the host, and the device tensor refuses it at the first call.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn elementwise_math_on_the_device_follows_the_device_library() {
     const SOURCE: &str = r#"
@@ -523,7 +523,7 @@ func main() -> i32 {
 /// `.map` and `.zip` with capturing closures (one with an early `return` and a loop),
 /// `.reduce` in the host's order, and compound assignment into a device target, a host target
 /// beside a device value, and a `&mut` parameter, all give the host's answer bit for bit.
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn traversals_and_compound_assignment_on_the_device_match_the_host() {
     const SOURCE: &str = r#"

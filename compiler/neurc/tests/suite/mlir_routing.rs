@@ -1,8 +1,7 @@
-// Tensor bodies routed through mlir-backend when neurc is built with `--features mlir`.
+// Tensor bodies routed through mlir-backend.
 //
-// The programs run on both builds and must give the same answers, which is the point:
-// a routed body is interchangeable with the LLVM backend's own. Only the IR assertions
-// differ by feature, and they are what prove which backend computed each body.
+// A routed body must give the same answers the LLVM backend's own would, which the run
+// tests check; the IR assertions prove which backend computed each body.
 
 use crate::compile_harness::CompileTest;
 use std::path::Path;
@@ -92,7 +91,6 @@ fn integer_bodies_compute_the_same_answers() {
     assert_eq!(result, Ok(6));
 }
 
-#[cfg(feature = "mlir")]
 #[test]
 fn float_bodies_are_computed_by_mlir() {
     let ir = emit_llvm_ir(&CompileTest::new(), "routable.nr", ROUTABLE);
@@ -108,22 +106,11 @@ fn float_bodies_are_computed_by_mlir() {
     }
 }
 
-#[cfg(feature = "mlir")]
 #[test]
 fn integer_bodies_keep_their_guards_on_the_llvm_backend() {
     let ir = emit_llvm_ir(&CompileTest::new(), "integer.nr", INTEGER);
     assert!(
         !ir.contains("__neuro_mlir_"),
         "an integer body must not lose its overflow guard to MLIR:\n{ir}"
-    );
-}
-
-#[cfg(not(feature = "mlir"))]
-#[test]
-fn without_mlir_every_body_is_the_llvm_backends() {
-    let ir = emit_llvm_ir(&CompileTest::new(), "routable.nr", ROUTABLE);
-    assert!(
-        !ir.contains("__neuro_mlir_"),
-        "a build without the mlir feature has no MLIR path:\n{ir}"
     );
 }

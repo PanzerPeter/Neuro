@@ -1035,9 +1035,8 @@ any argument other than `fallback:`. A `@grad` body cannot differentiate through
 with or without a fallback, unless the callee is also `@no_grad`, because the derivative would
 compute it on the host.
 
-Compiling `@gpu` needs a `neurc` built with the MLIR backend (`--features mlir`, see
-[installation](../getting-started/installation.md#optional-mlir-backend)) on Linux; any other
-build refuses a bare `@gpu` function. By default the kernels are for NVIDIA and ship as PTX
+Compiling `@gpu` needs a Linux `neurc`; on any other platform `neurc` refuses a bare `@gpu`
+function. By default the kernels are for NVIDIA and ship as PTX
 that the CUDA driver compiles for the GPU it finds, so the machine that compiles needs no CUDA
 toolkit, and the one that runs needs only the NVIDIA driver. `--gpu-arch gfxNNN` builds for that
 AMD chip instead, which needs ROCm to compile and HIP to run; see
@@ -1063,8 +1062,8 @@ beside a kernel. The value is the literal `true` or `false`, and
 `fallback: false` means bare `@gpu`. A program that also has a bare `@gpu` function still
 aborts at startup without a GPU, because that function has no host copy.
 
-A `neurc` built without the MLIR backend, or running on Windows, compiles a fallback function
-to its host copy only and warns that it always runs on the host.
+Off Linux, `neurc` compiles a fallback function to its host copy only and warns that it
+always runs on the host.
 [examples/showcase/gpu_fallback.nr](../../examples/showcase/gpu_fallback.nr) uses two fallback
 layers and prints the same output with or without a GPU.
 

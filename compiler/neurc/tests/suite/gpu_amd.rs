@@ -85,7 +85,7 @@ fn a_transfer_built_for_amd_goes_through_hip() {
     assert!(run.stdout.is_empty(), "the transfer must not complete");
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 mod kernels {
     use super::*;
     use std::path::{Path, PathBuf};

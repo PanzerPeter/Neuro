@@ -84,10 +84,10 @@ const NO_GPU_PANIC: &str = "panic: `@gpu` needs an NVIDIA GPU, and none is usabl
 enum Expectation {
     /// A standalone program: compile it and assert this exit code.
     Exit(i32),
-    /// A program with `@gpu` functions, which only a neurc built with the `mlir`
-    /// feature compiles and only a machine with an NVIDIA GPU runs. On such a machine it
-    /// is held to its exit code and output like any other; with no GPU it must abort at
-    /// startup with the runtime's diagnostic; and without `mlir` it must type-check.
+    /// A program with `@gpu` functions, which only a Linux neurc compiles and only a
+    /// machine with an NVIDIA GPU runs. On such a machine it is held to its exit code and
+    /// output like any other; with no GPU it must abort at startup with the runtime's
+    /// diagnostic; and off Linux it must type-check.
     Gpu(i32),
     /// A non-root module of a multi-file program. It has no `main` of its own and is
     /// compiled only as part of the root that reaches into it, so the harness records
@@ -239,11 +239,11 @@ enum GpuOutcome {
     RanOnGpu,
 }
 
-/// Without `mlir` a `gpu` example cannot compile, so it must at least type-check. With it,
-/// it is compiled and run once: a machine with no GPU must produce the runtime's startup
+/// Off Linux a `gpu` example cannot compile, so it must at least type-check. On Linux it is
+/// compiled and run once: a machine with no GPU must produce the runtime's startup
 /// abort, and a machine with one goes on to the ordinary pin checks, which run it again.
 fn gpu_example_outcome(examples_dir: &Path, rel: &str) -> GpuOutcome {
-    if !cfg!(feature = "mlir") {
+    if !cfg!(target_os = "linux") {
         let output = Command::new(neurc_path())
             .arg("check")
             .arg(examples_dir.join(rel))

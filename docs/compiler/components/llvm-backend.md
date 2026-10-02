@@ -265,7 +265,7 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 
 ## MLIR bodies
 
-A `neurc` built with its `mlir` feature hands this backend the tensor bodies the
+`neurc` hands this backend the tensor bodies the
 [MLIR backend](mlir-backend.md) computed, as LLVM IR text plus the function each symbol stands
 for. Each named function is still declared and defined here, with its ordinary tensor ABI, but
 its body is a call: the backend loads each tensor's buffer out of its DLPack handle and passes it

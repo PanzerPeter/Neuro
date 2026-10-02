@@ -64,7 +64,7 @@ Design goals:
 - [Semantic Analysis](compiler/components/semantic-analysis.md): type checking
 - [HIR Lowering](compiler/components/hir-lowering.md): AST to typed High-Level IR (`neuro-hir`)
 - [LLVM Backend](compiler/components/llvm-backend.md): native code generation from HIR
-- [MLIR Backend](compiler/components/mlir-backend.md): experimental HIR to MLIR linalg path, off by default
+- [MLIR Backend](compiler/components/mlir-backend.md): experimental HIR to MLIR linalg and GPU path
 
 The typed High-Level IR (`neuro-hir`) is the backend-agnostic contract: every backend lowers from
 it. Each slice also keeps a `CONTEXT.md` beside its source, which is the authority on that slice's
@@ -75,9 +75,9 @@ current entry points when this directory disagrees.
 | Component | Library | Status |
 |---|---|---|
 | CPU codegen | inkwell (LLVM 23) | In use |
-| MLIR construction | melior (LLVM/MLIR 23) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR and linked into compiled programs, behind the off-by-default `mlir` feature |
+| MLIR construction | melior (LLVM/MLIR 23) | Tensor arithmetic to linalg, broadcasting included, bufferized through to LLVM IR and linked into every compiled program |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
-| GPU | MLIR `gpu` to `nvvm` (PTX) or `rocdl` (code object) | `@gpu` functions run as NVIDIA kernels on an `mlir` build, or AMD ones with `--gpu-arch gfxNNN`, with an opt-in CPU fallback chosen at startup; `@kernel` functions launch their own per-thread body over a grid; `.to(Device::GPU(n))` keeps tensors on any of the machine's GPUs between calls, and a call or a float tensor operation runs on the GPU its tensors are on |
+| GPU | MLIR `gpu` to `nvvm` (PTX) or `rocdl` (code object) | `@gpu` functions compiled on Linux run as NVIDIA kernels, or AMD ones with `--gpu-arch gfxNNN`, with an opt-in CPU fallback chosen at startup; `@kernel` functions launch their own per-thread body over a grid; `.to(Device::GPU(n))` keeps tensors on any of the machine's GPUs between calls, and a call or a float tensor operation runs on the GPU its tensors are on |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.
 

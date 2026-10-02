@@ -9,43 +9,55 @@ the three platforms CI builds, tests, and ships release binaries for.
 |---|---|---|
 | Rust | 1.98.1+ | Install via rustup |
 | LLVM | 23 | Development package required (headers + `llvm-config` + link libraries) |
+| MLIR | 23 | Installed into the same prefix as LLVM; see [MLIR](#mlir) |
 | C linker | any | `clang`, `gcc`, or the MSVC linker from Visual Studio Build Tools |
 
 **Optional:**
-- MLIR 23 for the experimental MLIR backend; see [MLIR Backend](#optional-mlir-backend) below. Not needed for a normal build.
-- An NVIDIA GPU and its driver, to run a program with `@gpu` functions (Linux only). Compiling one needs the MLIR backend, not a CUDA toolkit.
+- An NVIDIA GPU and its driver, to run a program with `@gpu` functions (Linux only). Compiling one needs no CUDA toolkit.
 - For an AMD GPU instead: ROCm to compile with `--gpu-arch gfxNNN`, and the HIP runtime to run the result. See [Choosing a GPU](../guides/cli-usage.md#choosing-a-gpu).
 
 ---
 
 ## Arch Linux / CachyOS
 
-```bash
-# 1. Install LLVM 23 (Arch's stock `llvm` package)
-sudo pacman -S llvm
+Arch ships no MLIR package that fits. `aur/mlir` installs next to the stock `llvm` but
+provides no `libMLIR-C.so`, and with no static LLVM libraries in `/usr`, `mlir-sys` links
+the shared `MLIR` and `MLIR-C` libraries. Build LLVM 23 with MLIR from source into its own
+prefix instead. The system libclang is 23 already, so `LIBCLANG_PATH` is not needed.
 
-# 2. Install Rust
+```bash
+# 1. Install the build tools
+sudo pacman -S base-devel cmake ninja clang lld
+
+# 2. Build LLVM + MLIR 23 from the llvm-project-23.1.2.src tarball
+cmake -S llvm-project-23.1.2.src/llvm -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DLLVM_ENABLE_PROJECTS=mlir -DLLVM_TARGETS_TO_BUILD="X86;NVPTX;AMDGPU" \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld \
+  -DLLVM_INCLUDE_TESTS=OFF -DMLIR_INCLUDE_TESTS=OFF \
+  -DCMAKE_INSTALL_PREFIX=/opt/llvm-mlir-23
+cmake --build build && sudo cmake --install build
+
+# 3. Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 rustup component add clippy rustfmt rust-analyzer
 
-# 3. Set LLVM prefix (add to ~/.bashrc or ~/.zshrc for permanence)
-export LLVM_SYS_231_PREFIX=/usr
+# 4. Point all three prefixes at it (add to ~/.bashrc or ~/.zshrc for permanence)
+export LLVM_SYS_231_PREFIX=/opt/llvm-mlir-23
+export MLIR_SYS_230_PREFIX=/opt/llvm-mlir-23
+export TABLEGEN_230_PREFIX=/opt/llvm-mlir-23
 
-# 4. Clone and build
+# 5. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
 cargo build --release
 
-# 5. Run tests
+# 6. Run tests
 cargo test --workspace
 
-# 6. Install the compiler (optional)
+# 7. Install the compiler (optional)
 cargo install --path compiler/neurc
 ```
-
-Once Arch's `llvm` moves past 23, install the versioned `llvm23` package instead and
-point `LLVM_SYS_231_PREFIX` at `/usr/lib/llvm23`.
 
 ---
 
@@ -57,17 +69,19 @@ wget https://apt.llvm.org/llvm.sh
 chmod +x llvm.sh
 sudo ./llvm.sh 23
 
-# 2. Install the LLVM development libraries and build dependencies
-sudo apt-get install -y llvm-23-dev libpolly-23-dev libzstd-dev zlib1g-dev build-essential git
+# 2. Install the LLVM and MLIR development libraries and build dependencies
+sudo apt-get install -y llvm-23-dev libpolly-23-dev libmlir-23-dev mlir-23-tools \
+  libclang-23-dev libclang-common-23-dev libzstd-dev zlib1g-dev build-essential git
 
 # 3. Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 
-# 4. Set LLVM prefix
+# 4. Set the prefixes (the same lines in ~/.bashrc make them permanent)
 export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23
-echo 'export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23' >> ~/.bashrc
-source ~/.bashrc
+export MLIR_SYS_230_PREFIX=/usr/lib/llvm-23
+export TABLEGEN_230_PREFIX=/usr/lib/llvm-23
+export LIBCLANG_PATH=/usr/lib/llvm-23/lib
 
 # 5. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
@@ -83,13 +97,13 @@ cargo test --workspace
 ## macOS (Homebrew)
 
 ```bash
-# 1. Install LLVM 23
+# 1. Install LLVM 23 (Homebrew builds MLIR into the same formula)
 brew install llvm
 
-# 2. Set LLVM prefix
+# 2. Set the prefixes (the same lines in ~/.zshrc make them permanent)
 export LLVM_SYS_231_PREFIX=$(brew --prefix llvm)
-echo "export LLVM_SYS_231_PREFIX=$(brew --prefix llvm)" >> ~/.zshrc
-source ~/.zshrc
+export MLIR_SYS_230_PREFIX=$(brew --prefix llvm)
+export TABLEGEN_230_PREFIX=$(brew --prefix llvm)
 
 # 3. Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -113,36 +127,41 @@ cargo test --workspace
 
 ## Windows (MSVC)
 
-Windows needs a **full LLVM 23 development build**. LLVM's release page has one:
-`clang+llvm-23.1.2-x86_64-pc-windows-msvc.tar.xz` carries `llvm-config.exe`, the
-headers and the static libraries `llvm-sys` builds against. The `LLVM-*-win64.exe`
-installer does not: it ships only Clang and `LLVM-C.dll`.
+No Windows LLVM release carries MLIR, so Windows builds LLVM and MLIR 23 from source into
+one prefix, as CI does. Expect the build to take hours on a four-core machine.
 
 ```powershell
-# 1. Install the MSVC toolchain (C++ build tools + Windows SDK)
+# 1. Install the MSVC toolchain (C++ build tools + Windows SDK), CMake, Ninja, and
+#    LLVM 23 itself for its libclang.dll, which bindgen loads (another major version
+#    lays the MLIR-C structs out wrong)
 winget install --id Microsoft.VisualStudio.2022.BuildTools
+winget install --id Kitware.CMake
+winget install --id Ninja-build.Ninja
+winget install --id LLVM.LLVM --version 23.1.2
 
 # 2. Install Rust (MSVC toolchain)
 winget install --id Rustlang.Rustup
 
-# 3. Download and unpack LLVM 23 into a space-free prefix
-$version = "23.1.2"
-$asset   = "clang+llvm-$version-x86_64-pc-windows-msvc"
-curl.exe -fsSL -o "$env:TEMP\$asset.tar.xz" `
-  "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/$asset.tar.xz"
-tar.exe -xf "$env:TEMP\$asset.tar.xz" -C $env:TEMP
-Move-Item "$env:TEMP\$asset" C:\LLVM
+# 3. From an "x64 Native Tools" prompt, in the llvm-project-23.1.2.src tree, build a
+#    static LLVM + MLIR prefix against the static CRT (see below)
+cmake -S llvm -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl `
+  -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+  -DLLVM_ENABLE_PROJECTS=mlir "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU" `
+  -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF `
+  -DLLVM_ENABLE_DIA_SDK=OFF -DLLVM_INCLUDE_TESTS=OFF -DMLIR_INCLUDE_TESTS=OFF `
+  -DCMAKE_INSTALL_PREFIX=C:\LLVM
+cmake --build build --target install
 
-# 4. Provide the libxml2 library that LLVM's llvm-config names (see below)
-vcpkg install "libxml2[core]:x64-windows-static"
-Get-ChildItem "<vcpkg-root>\installed\x64-windows-static\lib\*xml2*.lib" |
-  Select-Object -First 1 | Copy-Item -Destination C:\LLVM\lib\xml2s.lib
+# 4. Set the prefixes (setx persists them for future sessions)
+foreach ($name in 'LLVM_SYS_231_PREFIX', 'MLIR_SYS_230_PREFIX', 'TABLEGEN_230_PREFIX') {
+  setx $name "C:\LLVM"
+  Set-Item "env:$name" "C:\LLVM"
+}
+setx LIBCLANG_PATH "$env:ProgramFiles\LLVM\bin"
+$env:LIBCLANG_PATH = "$env:ProgramFiles\LLVM\bin"
 
-# 5. Set the LLVM prefix (persists for future sessions)
-setx LLVM_SYS_231_PREFIX "C:\LLVM"
-$env:LLVM_SYS_231_PREFIX = "C:\LLVM"
-
-# 6. Let rustc find the Windows SDK's system libraries (see below)
+# 5. Let rustc find the Windows SDK's system libraries (see below)
 $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib'
 $sdk  = Get-ChildItem $kits -Directory |
   Where-Object { Test-Path (Join-Path $_.FullName 'um\x64\psapi.lib') } |
@@ -151,101 +170,50 @@ $um   = Join-Path $sdk.FullName 'um\x64'
 "[target.x86_64-pc-windows-msvc]`nrustflags = ['-L', 'native=$um']" |
   Out-File "$env:USERPROFILE\.cargo\config.toml" -Append -Encoding utf8
 
-# 7. Clone and build
+# 6. Clone and build
 git clone https://github.com/PanzerPeter/Neuro.git
 cd Neuro
 cargo build --release
 
-# 8. Run tests
+# 7. Run tests
 cargo test --workspace
 ```
 
-**Static CRT.** LLVM's Windows build is compiled against the static CRT (`/MT`), and
-Rust defaults to the dynamic one (`/MD`) on `x86_64-pc-windows-msvc`. The repository's
-`.cargo/config.toml` builds Rust with `+crt-static` on that target so the two match. A
-`RUSTFLAGS` environment variable replaces that setting rather than adding to it, so if
-you set one, include `-C target-feature=+crt-static` in it.
+**Static CRT.** Step 3 builds LLVM against the static CRT (`/MT`), and Rust defaults to
+the dynamic one (`/MD`) on `x86_64-pc-windows-msvc`. The repository's `.cargo/config.toml`
+builds Rust with `+crt-static` on that target so the two match. A `RUSTFLAGS` environment
+variable replaces that setting rather than adding to it, so if you set one, include
+`-C target-feature=+crt-static` in it.
+
+**Optional libraries off.** zlib, zstd, libxml2 and the DIA SDK are switched off because
+`llvm-config --system-libs` would name them, some by absolute path, and `llvm-sys` passes
+every name it lists to rustc as a library to link.
 
 **Windows SDK libraries.** With the static CRT on, `llvm-sys` links the system libraries
 `llvm-config` names (`psapi`, `shell32`, `ole32`, `uuid`, `advapi32`, `ws2_32`, `ntdll`) as
 static libraries, and rustc looks for each `.lib` only on its own `-L` search paths, not on
-the linker's `LIB`. Without step 6 the build stops with
-``could not find native static library `psapi` ``. Step 6 adds the SDK's `um\x64` directory
+the linker's `LIB`. Without step 5 the build stops with
+``could not find native static library `psapi` ``. Step 5 adds the SDK's `um\x64` directory
 through your user-level Cargo config, which Cargo combines with the repository's
 `+crt-static` setting instead of replacing it.
 
-**libxml2.** `llvm-config.exe --system-libs` lists `xml2s.lib`, because one LLVM
-component (the Windows manifest merger) uses libxml2. Neuro never calls into it, so no
-libxml2 code ends up in `neurc.exe`, but the linker still refuses to start when a named
-library is missing. Any static libxml2 copied in under that name satisfies it. The archive
-vcpkg builds changes its file name between libxml2 releases (`libxml2s.lib` up to 2.14), which
-is why the command above matches `*xml2*.lib` instead of naming it.
-
-**Backend subset.** The archive carries X86, AArch64, ARM, BPF, NVPTX, RISCV and
-WebAssembly, which is why the workspace pins inkwell to `target-x86` rather than
-`target-all`. Neuro only ever initializes the native target, so nothing is lost.
-
 ---
 
-## Optional: MLIR Backend
+## MLIR
 
-The MLIR lowering path for tensors and GPU kernels lives in the
-`mlir-backend` slice, built on the `melior` Rust MLIR bindings. It is **off by
-default** behind the `mlir` cargo feature, so nothing here is required for a
-normal Neuro build: the default `cargo build/test --workspace` compiles a
-placeholder and needs only LLVM 23.
+The tensor and GPU lowering in the `mlir-backend` slice is built on the `melior` Rust MLIR
+bindings, and every build compiles it. MLIR 23 must sit **in the same prefix as the LLVM 23
+that `LLVM_SYS_231_PREFIX` names**: `mlir-sys` finds MLIR by running
+`$MLIR_SYS_230_PREFIX/bin/llvm-config`, so a separate MLIR prefix is invisible to it, and one
+prefix is also what makes inkwell and melior share a single LLVM. `mlir-sys` runs `bindgen`
+over the MLIR-C headers at build time, which needs a libclang; the platform sections above
+say where each one comes from.
 
-To build the MLIR path you need MLIR 23 installed **into the same prefix as the LLVM 23
-that `LLVM_SYS_231_PREFIX` names**. `mlir-sys` finds MLIR by running
-`$MLIR_SYS_230_PREFIX/bin/llvm-config`, so a separate MLIR prefix is invisible to it, and
-one prefix is also what makes inkwell and melior share a single LLVM. `mlir-sys` runs
-`bindgen` over the MLIR-C headers at build time, which needs a libclang of the same major
-version (23).
-
-```bash
-# Ubuntu/Debian (apt.llvm.org ships MLIR and libclang 23 beside LLVM 23):
-sudo apt-get install -y libmlir-23-dev mlir-23-tools libclang-23-dev libclang-common-23-dev
-export MLIR_SYS_230_PREFIX=/usr/lib/llvm-23
-export TABLEGEN_230_PREFIX=/usr/lib/llvm-23
-export LIBCLANG_PATH=/usr/lib/llvm-23/lib
-cargo test -p mlir-backend --features mlir
-```
-
-Arch/CachyOS ships no MLIR package that fits. `aur/mlir` installs next to the stock `llvm`
-but provides no `libMLIR-C.so`, and with no static LLVM libraries in `/usr`, `mlir-sys`
-links the shared `MLIR` and `MLIR-C` libraries. Build LLVM 23 with MLIR from source into
-its own prefix instead, and point all three variables at it (the system libclang is 23
-already, so `LIBCLANG_PATH` is not needed):
-
-```bash
-# In an llvm-project 23.1.2 source tree:
-cmake -S llvm -B build -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS=mlir \
-  -DLLVM_TARGETS_TO_BUILD="X86;NVPTX;AMDGPU" -DLLVM_INSTALL_UTILS=ON \
-  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DLLVM_USE_LINKER=lld \
-  -DCMAKE_INSTALL_PREFIX=/opt/llvm-mlir-23
-cmake --build build -j"$(nproc)" && sudo cmake --install build
-
-# Then, from the Neuro checkout:
-export LLVM_SYS_231_PREFIX=/opt/llvm-mlir-23
-export MLIR_SYS_230_PREFIX=/opt/llvm-mlir-23
-export TABLEGEN_230_PREFIX=/opt/llvm-mlir-23
-cargo test -p mlir-backend --features mlir
-```
-
-`mlir-sys` uses Rust 2024 let-chains in its build script, so the `mlir` feature needs
-Rust 1.88 or newer.
-
-With the same environment, `neurc` can be built with a feature of the same name. That
-compiler hands straight-line `f32` / `f64` tensor arithmetic to the MLIR path and links the
-result into the program; every other body still comes from the LLVM backend, and programs
-behave identically either way. It is also the only compiler that builds `@gpu` kernels: a build without
-the feature refuses a bare `@gpu` function rather than run it on the CPU, and compiles a
-`@gpu(fallback: true)` one to its host copy only, with a warning.
-
-```bash
-cargo build -p neurc --features mlir
-cargo test -p neurc --features mlir   # the whole end-to-end suite on that path
-```
+`neurc` hands straight-line `f32` / `f64` tensor arithmetic to the MLIR path and links the
+result into the program; every other body comes from the LLVM backend. It also builds
+`@gpu` kernels, on Linux only: elsewhere `neurc` refuses a bare `@gpu` function rather than
+run it on the CPU, and compiles a `@gpu(fallback: true)` one to its host copy only, with a
+warning.
 
 ## Verifying the Installation
 
@@ -290,8 +258,8 @@ ls $LLVM_SYS_231_PREFIX/lib/cmake/llvm/LLVMConfig.cmake
 
 Make sure the export is in your shell rc file and that you have sourced it in the current session.
 
-On Windows the same error means the prefix has no `llvm-config.exe`: you
-installed the `.exe` installer rather than the `clang+llvm-*-windows-msvc` archive:
+On Windows the same error means the prefix has no `llvm-config.exe`, which the
+`LLVM-*-win64.exe` installer does not ship; point the prefixes at your source build:
 
 ```powershell
 Test-Path "$env:LLVM_SYS_231_PREFIX\bin\llvm-config.exe"   # must be True
@@ -365,8 +333,8 @@ cargo uninstall neurc
 rm -rf /path/to/Neuro
 
 # Remove LLVM (optional)
-# Arch:   sudo pacman -R llvm
-# Ubuntu: sudo apt-get remove llvm-23
+# Arch:   sudo rm -rf /opt/llvm-mlir-23
+# Ubuntu: sudo apt-get remove llvm-23 libmlir-23-dev
 # macOS:  brew uninstall llvm
 ```
 

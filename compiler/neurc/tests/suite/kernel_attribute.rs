@@ -1,14 +1,14 @@
 // `@kernel(threads: [...])`: a function whose body runs once per thread of a launch grid.
 //
-// As with `@gpu`, only a neurc built with `--features mlir` compiles one and only a machine
-// with an NVIDIA GPU runs the result, so each run test accepts either outcome a machine can
+// As with `@gpu`, only a Linux neurc compiles one and only a machine with an NVIDIA GPU
+// runs the result, so each run test accepts either outcome a machine can
 // produce and asserts it fully: the right answer on a GPU, or the startup abort without one.
 
 use crate::compile_harness::CompileTest;
 
 /// An element-wise kernel over a grid that does not divide by its blocks, checked against
 /// the same arithmetic on the host, then again with the output already on the device.
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 const ADD_RELU: &str = r#"
 @kernel(threads: [16, 16])
 func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut<Tensor<f32, [37, 45]>>) {
@@ -164,12 +164,12 @@ fn grid_positions_exist_only_inside_a_kernel_body() {
     );
 }
 
-#[cfg(not(feature = "mlir"))]
+#[cfg(not(target_os = "linux"))]
 #[test]
-fn without_mlir_a_kernel_is_a_compile_error() {
+fn off_linux_a_kernel_is_a_compile_error() {
     let test = CompileTest::new();
     let source = test.write_source(
-        "no_mlir.nr",
+        "off_linux.nr",
         "@kernel(threads: [4])\nfunc k(out: KernelOut<Tensor<f32, [4]>>) {\n    unsafe { out[thread_id.x] = 1.0 }\n}\nfunc main() -> i32 { return 0 }\n",
     );
     let error = test
@@ -177,13 +177,13 @@ fn without_mlir_a_kernel_is_a_compile_error() {
         .expect_err("a kernel has no host body");
     assert!(
         error.contains("`@kernel` function 'k' needs a GPU")
-            && error.contains("built without the MLIR backend")
-            && error.contains("no_mlir.nr:2:1"),
+            && error.contains("only Linux builds reach")
+            && error.contains("off_linux.nr:2:1"),
         "{error}"
     );
 }
 
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_body_the_gpu_path_cannot_lower_is_refused_at_the_construct() {
     let test = CompileTest::new();
@@ -204,7 +204,7 @@ fn a_body_the_gpu_path_cannot_lower_is_refused_at_the_construct() {
     }
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_kernel_runs_on_the_gpu_or_the_program_aborts_at_startup() {
     let test = CompileTest::new();
@@ -231,7 +231,7 @@ fn a_kernel_runs_on_the_gpu_or_the_program_aborts_at_startup() {
     }
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn an_index_past_an_extent_stops_the_kernel_and_the_program() {
     use std::os::unix::process::ExitStatusExt;

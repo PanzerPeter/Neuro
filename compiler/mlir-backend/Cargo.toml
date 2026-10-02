@@ -11,21 +11,13 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-melior = { workspace = true, optional = true }
-mlir-sys = { workspace = true, optional = true }
-inkwell = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
-neuro-hir = { path = "../infrastructure/neuro-hir", optional = true }
-ast-types = { path = "../infrastructure/ast-types", optional = true }
-shared-types = { path = "../infrastructure/shared-types", optional = true }
-
-[features]
-# The MLIR path is opt-in: enabling `mlir` pulls in melior (and an MLIR 23
-# toolchain at build time) plus the neuro-hir contract it lowers from. Default
-# builds compile a trivial placeholder so the workspace builds and tests on stock
-# LLVM 23 without MLIR. See CONTEXT.md.
-default = []
-mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types", "dep:shared-types"]
+melior = { workspace = true }
+mlir-sys = { workspace = true }
+inkwell = { workspace = true }
+thiserror = { workspace = true }
+neuro-hir = { path = "../infrastructure/neuro-hir" }
+ast-types = { path = "../infrastructure/ast-types" }
+shared-types = { path = "../infrastructure/shared-types" }
 
 [dev-dependencies]
 # `@kernel` tests build HIR from source through the frontend slices. Test-only, never a

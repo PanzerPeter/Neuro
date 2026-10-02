@@ -21,8 +21,6 @@ const DEFAULT_GPU_CHIP: &str = "sm_60";
 #[derive(Clone)]
 struct GpuArch {
     vendor: llvm_backend::GpuVendor,
-    // Without MLIR no kernel is compiled, and only the vendor's runtime matters.
-    #[cfg_attr(not(feature = "mlir"), expect(dead_code))]
     chip: String,
 }
 
@@ -448,10 +446,10 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             })?;
             // Whether a `@gpu` body can become a kernel is decided by the backend that
             // lowers it, so a `check` that stopped at HIR would pass a body `compile`
-            // refuses. Without MLIR nothing can compile one, and `check` stays the
-            // type check it is. Which bodies qualify does not depend on the vendor, and
+            // refuses. Off Linux nothing can compile one, and `check` stays the type
+            // check it is. Which bodies qualify does not depend on the vendor, and
             // NVIDIA's needs no toolkit to serialize, so `check` lowers for it.
-            if cfg!(feature = "mlir") && gpu_functions(&hir).next().is_some() {
+            if cfg!(target_os = "linux") && gpu_functions(&hir).next().is_some() {
                 let source = single_module_source(path, module_count);
                 tensor_bodies(&hir, path, source.as_deref(), &GpuArch::default())?;
             }
@@ -654,7 +652,6 @@ fn gpu_functions(hir: &neuro_hir::HirProgram) -> impl Iterator<Item = &neuro_hir
 /// host body is a compiler bug, so it stops the build rather than quietly handing the
 /// body back to the LLVM backend, which would hide it. A `@gpu` body that cannot become
 /// a kernel is the user's error, reported at its function.
-#[cfg(feature = "mlir")]
 fn tensor_bodies(
     hir: &neuro_hir::HirProgram,
     path: &Path,
@@ -677,16 +674,19 @@ fn tensor_bodies(
     if gpu_functions(hir).next().is_none() && !follows_operands {
         return Ok(bodies);
     }
-    // The runtime opens the vendor library with `dlopen`, which Windows does not have.
-    if cfg!(target_os = "windows") {
+    // The runtime opens the vendor library with `dlopen`, which Windows does not have,
+    // and neither vendor ships a driver for macOS. A bare `@gpu` body cannot fall back to
+    // the host, which is what the attribute forbids; a `fallback: true` one can, with a
+    // warning.
+    if cfg!(not(target_os = "linux")) {
         if without_gpu_bodies(
             hir,
             path,
             source,
-            "is not supported on Windows yet",
-            "`@gpu` is not supported on Windows yet",
+            "needs a GPU, which only Linux builds reach",
+            "only Linux builds reach a GPU",
         ) {
-            anyhow::bail!("`@gpu` and `@kernel` are not supported on Windows yet");
+            anyhow::bail!("`@gpu` and `@kernel` compile on Linux only");
         }
         return Ok(bodies);
     }
@@ -726,28 +726,6 @@ fn tensor_bodies(
         memory: llvm_backend::BodyMemory::Device,
     });
     Ok(bodies)
-}
-
-/// Without the `mlir` feature there is no MLIR toolchain, and every body is the LLVM
-/// backend's. A bare `@gpu` body cannot be one of them: running it on the host is what the
-/// attribute forbids. A `fallback: true` one can, with a warning.
-#[cfg(not(feature = "mlir"))]
-fn tensor_bodies(
-    hir: &neuro_hir::HirProgram,
-    path: &Path,
-    source: Option<&str>,
-    _gpu: &GpuArch,
-) -> Result<Vec<llvm_backend::ExternalBodies>> {
-    if without_gpu_bodies(
-        hir,
-        path,
-        source,
-        "needs a GPU, and this neurc was built without the MLIR backend (`--features mlir`)",
-        "this neurc was built without the MLIR backend (`--features mlir`)",
-    ) {
-        anyhow::bail!("`@gpu` and `@kernel` need a neurc built with the MLIR backend");
-    }
-    Ok(Vec::new())
 }
 
 /// Report the `@gpu` functions of a build that cannot give them GPU bodies, each at its

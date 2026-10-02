@@ -31,7 +31,7 @@ Workspace layout (`compiler/`):
 | `semantic-analysis` | Type checking, scope resolution |
 | `hir-lowering` | AST → typed HIR |
 | `llvm-backend` | Codegen via inkwell 0.10.0 (LLVM 23) |
-| `mlir-backend` | MLIR/melior codegen, behind the off-by-default `mlir` feature |
+| `mlir-backend` | MLIR/melior codegen for tensor bodies and GPU kernels |
 | `neurc` | CLI driver; the only crate allowed to depend on every slice |
 
 **Architecture: Vertical Slice Architecture (VSA).** Crates are organized by
@@ -56,14 +56,18 @@ Never restate it elsewhere. It goes stale.
 
 ## Build and Test Commands
 
-LLVM 23 must be installed and `LLVM_SYS_231_PREFIX` exported before anything
-builds:
+LLVM 23 and MLIR 23, in one prefix, must be installed and three variables
+exported before anything builds:
 
 ```bash
-export LLVM_SYS_231_PREFIX=/usr                       # Arch / CachyOS
-export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23           # Ubuntu / Debian
-export LLVM_SYS_231_PREFIX=$(brew --prefix llvm)      # macOS
+prefix=/opt/llvm-mlir-23                  # Arch / CachyOS (source build)
+prefix=/usr/lib/llvm-23                   # Ubuntu / Debian (apt.llvm.org)
+prefix=$(brew --prefix llvm)              # macOS
+export LLVM_SYS_231_PREFIX=$prefix MLIR_SYS_230_PREFIX=$prefix TABLEGEN_230_PREFIX=$prefix
 ```
+
+[Installation](docs/getting-started/installation.md) has each platform's
+recipe, Windows' source build included.
 
 ```bash
 cargo build --workspace                # build everything
@@ -88,12 +92,6 @@ cargo run -p neurc -- check   examples/basics/hello.nr   # type-check only
 cargo run -p neurc -- compile examples/basics/hello.nr   # compile to a binary
 cargo run -p neurc -- compile examples/basics/hello.nr -O2 -o hello
 ```
-
-The MLIR backend is optional and off by default. It needs MLIR 23 installed
-into the same prefix as LLVM 23, with `LLVM_SYS_231_PREFIX`,
-`MLIR_SYS_230_PREFIX` and `TABLEGEN_230_PREFIX` all pointing at it; see
-[installation](docs/getting-started/installation.md#optional-mlir-backend).
-Then: `cargo test -p mlir-backend --features mlir`.
 
 **Quality gates.** Every change must leave these green before it is called
 done. Run them; do not assume:

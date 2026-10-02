@@ -96,9 +96,9 @@ fn fallback_takes_only_a_bool_literal() {
     );
 }
 
-#[cfg(not(feature = "mlir"))]
+#[cfg(not(target_os = "linux"))]
 #[test]
-fn without_mlir_the_host_body_is_built_with_a_warning() {
+fn off_linux_the_host_body_is_built_with_a_warning() {
     let test = CompileTest::new();
     let source = test.write_source("host_only.nr", FALLBACK);
     let output = Command::new(env!("CARGO_BIN_EXE_neurc"))
@@ -120,14 +120,14 @@ fn without_mlir_the_host_body_is_built_with_a_warning() {
 
     // A bare `@gpu` beside them is still refused: it has no host body to build.
     let mixed = test.write_source("mixed.nr", &with_a_bare_gpu_function());
-    let error = test.compile(&mixed).expect_err("bare `@gpu` needs MLIR");
+    let error = test.compile(&mixed).expect_err("bare `@gpu` needs a GPU");
     assert!(
         error.contains("`@gpu` function 'project' needs a GPU"),
         "{error}"
     );
 }
 
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_fallback_body_must_still_become_a_kernel() {
     let test = CompileTest::new();
@@ -148,7 +148,7 @@ fn a_fallback_body_must_still_become_a_kernel() {
     }
 }
 
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_fallback_function_gets_a_device_and_a_host_body() {
     let test = CompileTest::new();
@@ -168,7 +168,7 @@ fn a_fallback_function_gets_a_device_and_a_host_body() {
     assert!(ir.contains("mgpuLaunchKernel"), "{ir}");
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn one_bare_gpu_function_still_aborts_before_main_without_a_gpu() {
     use std::os::unix::process::ExitStatusExt;

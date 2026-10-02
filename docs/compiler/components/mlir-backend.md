@@ -1,6 +1,6 @@
 # MLIR Backend (Experimental)
 
-**Status**: experimental, off by default behind the `mlir` cargo feature
+**Status**: experimental, built into every compiler
 **Crate**: `compiler/mlir-backend`
 **Library**: melior 0.28.2 (Rust MLIR bindings, LLVM/MLIR 23)
 
@@ -12,8 +12,8 @@ MLIR module: one `func.func` *declaration* per function and `impl` method, excep
 element-wise tensor arithmetic or a matrix product, which becomes a definition built from the
 `linalg` and `tensor` dialects. That module can be carried on through bufferization and the
 `llvm` dialect into a verified inkwell LLVM module, where a `linalg` body arrives as a real loop nest, proving the
-HIR → MLIR → llvm dialect → inkwell pipeline end-to-end. A `neurc` built with its own `mlir`
-feature links the bodies this path computes into every program it compiles; see
+HIR → MLIR → llvm dialect → inkwell pipeline end-to-end. `neurc` links the bodies this path
+computes into every program it compiles; see
 [Linking into a compile](#linking-into-a-compile).
 
 Scalar arithmetic is deliberately **not** lowered here and never will be: it belongs to the
@@ -22,34 +22,20 @@ copies.
 
 ## Architecture
 
-- **Dependencies** (all behind the `mlir` feature): `neuro-hir` (the HIR it lowers), `ast-types`, `shared-types`,
+- **Dependencies**: `neuro-hir` (the HIR it lowers), `ast-types`, `shared-types`,
   `melior`, `mlir-sys`, `inkwell`, `thiserror`. It depends on no feature slice.
-- **Public API** (feature `mlir`): `lower_program`, `translate_to_llvm_ir`, `lower_for_link`,
+- **Public API**: `lower_program`, `translate_to_llvm_ir`, `lower_for_link`,
   `lower_for_gpu`, `GpuTarget`, `LinkableBodies`, `MlirError`.
-- **Reached from `neurc`** through `lower_for_link`, when `neurc` is built with its `mlir` feature.
+- **Reached from `neurc`** through `lower_for_link` and `lower_for_gpu`.
 
-### Feature gate
+### Toolchain
 
-The path is opt-in behind the off-by-default `mlir` feature
-(`mlir = ["dep:melior", "dep:mlir-sys", "dep:inkwell", "dep:thiserror", "dep:neuro-hir", "dep:ast-types"]`):
+Every build compiles this crate, so every build needs MLIR 23 in the same prefix as LLVM 23.
+apt.llvm.org's packages and Homebrew's `llvm` carry it. On Arch no package fits (`aur/mlir`
+ships no `libMLIR-C.so`), and no Windows LLVM release carries MLIR at all, so on both it comes
+from a source build. See [Installation → MLIR](../../getting-started/installation.md#mlir).
 
-The gate is permanent, not a staging step. LLVM's official Windows development build, the one
-`llvm-sys` builds against there, carries no MLIR at all, so requiring MLIR would stop `neurc.exe`
-being buildable. Homebrew's `llvm` and apt.llvm.org's packages do carry it; on Arch no
-package fits (`aur/mlir` ships no `libMLIR-C.so`), so MLIR comes from a source build.
-
-- **Disabled (default)**: the crate compiles to an empty placeholder and pulls in no MLIR toolchain
-  (nor `neuro-hir`), so `cargo build/test --workspace` works on a stock LLVM 23 install with no MLIR
-  on every CI OS.
-- **Enabled**: pulls in `melior` + `mlir-sys` + `inkwell` + `neuro-hir` + `ast-types` and exposes the
-  entry points below. CI provisions MLIR only on Linux, where the `--all-features` lint job and a dedicated
-  `cargo test -p mlir-backend --features mlir` smoke step exercise the gated code; the Windows/macOS
-  legs build the placeholder.
-
-See [Installation → Optional: MLIR Backend](../../getting-started/installation.md#optional-mlir-backend)
-for the MLIR 23 toolchain setup.
-
-### Entry points (feature `mlir`)
+### Entry points
 
 ```rust
 pub fn lower_program(program: &HirProgram) -> Result<String, MlirError>;

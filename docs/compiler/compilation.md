@@ -63,11 +63,10 @@ Native Executable (`.exe` on Windows, no extension on Unix)
 ```
 
 The typed HIR (`neuro-hir`) is the stable, backend-agnostic contract between the frontend (parser +
-type checker) and the backends. `llvm-backend` consumes it today; the experimental `mlir-backend`
-consumes the same HIR behind the off-by-default `mlir` feature. A `neurc` built with its own
-`mlir` feature asks it for the straight-line `f32` / `f64` tensor bodies it computes exactly as the
+type checker) and the backends. `llvm-backend` consumes it, and so does the experimental `mlir-backend`.
+`neurc` asks the latter for the straight-line `f32` / `f64` tensor bodies it computes exactly as the
 LLVM backend would, and the LLVM backend links those in, wrapped in the program's own tensor ABI,
-instead of generating them. The same build lowers each `@gpu` function's body, and each
+instead of generating them. On Linux it also lowers each `@gpu` function's body, and each
 `@kernel` function's per-thread body, through the MLIR GPU dialects to an NVIDIA or AMD kernel,
 and the LLVM backend links that kernel in with its launcher and the GPU runtime. See the [HIR Lowering](components/hir-lowering.md),
 [LLVM Backend](components/llvm-backend.md) and [MLIR Backend](components/mlir-backend.md) component
@@ -178,8 +177,7 @@ End-to-end coverage lives in `compiler/neurc/tests/`. The per-feature suites und
 `tests/suite/` (`arrays.rs`, `drop_destructors.rs`, `hir_lowering.rs`, …) compile and run real
 programs, asserting exit codes and output. `tests/examples.rs` builds and runs every program in
 `examples/` against its pinned exit code and stdout, and `tests/architecture_tests.rs` enforces
-the slice dependency rules. `cargo test --workspace` runs all of it; the `mlir`-feature tests
-are additional and feature-gated.
+the slice dependency rules. `cargo test --workspace` runs all of it.
 
 ## Known Limitations
 

@@ -100,10 +100,9 @@ sudo pacman -S base-devel
 xcode-select --install
 ```
 
-### `cargo build --features mlir` fails
+### `mlir-sys` fails to build
 
-The `mlir-backend` slice's `mlir` feature is opt-in and needs MLIR 23 on top of LLVM 23.
-Default builds compile a placeholder and need none of this.
+Every build compiles the `mlir-backend` slice, which needs MLIR 23 on top of LLVM 23.
 
 **Symptoms**:
 ```text
@@ -120,15 +119,15 @@ reading its `lib/` and `include/`. MLIR has to live in the same prefix as that
 `MLIR-C` library, which distro packages (Arch's `aur/mlir` included) do not build.
 
 **Solution**: use a prefix that holds LLVM and MLIR together: apt.llvm.org's
-`/usr/lib/llvm-23` with `libmlir-23-dev` installed, or a source build of LLVM 23 with
-`-DLLVM_ENABLE_PROJECTS=mlir`. Point all three variables at it. See
-[Installation → Optional: MLIR Backend](../getting-started/installation.md#optional-mlir-backend).
+`/usr/lib/llvm-23` with `libmlir-23-dev` installed, Homebrew's `llvm`, or a source build of
+LLVM 23 with `-DLLVM_ENABLE_PROJECTS=mlir`. Point all three variables at it. See
+[Installation → MLIR](../getting-started/installation.md#mlir).
 
 ```bash
 export LLVM_SYS_231_PREFIX=<prefix>   # inkwell
 export MLIR_SYS_230_PREFIX=<prefix>   # melior
 export TABLEGEN_230_PREFIX=<prefix>   # melior's TableGen macros
-cargo test -p mlir-backend --features mlir
+cargo test -p mlir-backend
 ```
 
 If bindgen reports opaque 1-byte structs (`attempt to compute 0_usize - 8_usize`), the

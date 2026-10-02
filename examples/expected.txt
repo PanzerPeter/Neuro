@@ -21,8 +21,8 @@
 #
 # `gpu` after an exit code marks a program with bare `@gpu` or `@kernel` functions. It is
 # pinned like any other where a GPU runs it; with no usable GPU it must abort at
-# startup with the GPU runtime's diagnostic, and a compiler built without the
-# MLIR backend only type-checks it. A program whose `@gpu` functions all carry
+# startup with the GPU runtime's diagnostic, and off Linux the compiler only
+# type-checks it. A program whose `@gpu` functions all carry
 # `fallback: true` runs everywhere and takes no marker.
 
 # --- basics: functions, variables, arithmetic, recursion, stdout ------------

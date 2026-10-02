@@ -1,10 +1,9 @@
 # Cargo configuration for the Neuro compiler.
 
 [target.x86_64-pc-windows-msvc]
-# LLVM's official Windows development build (the clang+llvm-*-x86_64-pc-windows-msvc
-# archive) is compiled against the static CRT (/MT). Rust defaults to the dynamic CRT
-# (/MD) on this target, and linking the two together fails with duplicate CRT symbols,
-# so Rust is built with the static CRT too. This affects only the compiler's own
+# The Windows LLVM + MLIR prefix is built from source against the static CRT (/MT). Rust
+# defaults to the dynamic CRT (/MD) on this target, and linking the two together fails
+# with duplicate CRT symbols, so Rust is built with the static CRT too. This affects only the compiler's own
 # binaries; programs neurc builds are linked separately. See
 # docs/getting-started/installation.md.
 rustflags = ["-C", "target-feature=+crt-static"]

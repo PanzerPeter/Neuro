@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-10-02
+
+### Changed
+
+- The MLIR backend is part of every build. The `mlir` Cargo feature on `neurc` and
+  `mlir-backend` is gone, so every `neurc` computes straight-line `f32` / `f64` tensor bodies
+  through MLIR, and building the compiler now needs MLIR 23 in the same prefix as LLVM 23, with
+  `LLVM_SYS_231_PREFIX`, `MLIR_SYS_230_PREFIX` and `TABLEGEN_230_PREFIX` all pointing at it. See
+  the [installation guide](docs/getting-started/installation.md) for each platform.
+- `@gpu` and `@kernel` compile on Linux only. On Windows and macOS a bare one is an error at its
+  declaration and a `@gpu(fallback: true)` one builds its host copy with a warning, as the
+  language reference already said. macOS builds had no MLIR before, so they never reached
+  that check.
+- CI builds against MLIR on every leg. The Windows legs link a static LLVM + MLIR 23 prefix built
+  from source and cached, since no Windows LLVM release carries MLIR.
+
 ## [5.0.0] - 2026-10-02
 
 Phase 4, GPU acceleration, is complete. Tensor code runs on NVIDIA and AMD GPUs through

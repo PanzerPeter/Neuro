@@ -85,7 +85,7 @@ load-bearing:
 
 ## External Bodies
 `ExternalBodies` is LLVM IR text plus `(function, symbol)` pairs: a free function whose body some
-other backend computed. `external` is a list of them, one per memory kind, each linked in turn (today `mlir-backend`, through `neurc`'s `mlir` feature). The function is
+other backend computed. `external` is a list of them, one per memory kind, each linked in turn (today `mlir-backend`, through `neurc`). The function is
 declared like any other, so every call site and every function value is unchanged; only its body
 differs. `codegen_external_body` (`codegen/external_bodies.rs`) emits it as a call to the symbol
 in MLIR's calling convention: each tensor as an exploded row-major `memref` descriptor (its `data`

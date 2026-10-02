@@ -19,8 +19,8 @@ Usage:
 
 Requires `neurc` (built with `cargo build --release`), a C++ compiler, and
 python3. A language whose toolchain is missing is skipped with a note rather
-than failing the run, as is a `gpu_*` benchmark when neurc was built without
-`--features mlir` or the machine has no usable GPU.
+than failing the run, as is a `gpu_*` benchmark when neurc cannot compile `@gpu`
+(off Linux) or the machine has no usable GPU.
 """
 
 import argparse

@@ -1,12 +1,11 @@
-name: "Setup LLVM 23"
-description: "Installs LLVM 23 and sets LLVM_SYS_231_PREFIX for llvm-sys-231.x"
+name: "Setup LLVM 23 + MLIR 23"
+description: "Installs LLVM 23 with MLIR 23 and sets the llvm-sys, mlir-sys and tblgen prefixes"
 inputs:
-  mlir:
+  build:
     description: >-
-      Also install the MLIR 23 dev libraries + a matching libclang 23 (Linux
-      only) and export MLIR_SYS_230_PREFIX / TABLEGEN_230_PREFIX / LIBCLANG_PATH.
-      Required only by jobs that enable the mlir-backend `mlir` feature (e.g. the
-      `--all-features` lint job). Default builds do not need it.
+      Windows only: build the LLVM + MLIR prefix from source when the cache has
+      none, instead of failing. Only CI's toolchain job sets it, so a cold cache
+      costs one build rather than one per job, each racing its own timeout.
     required: false
     default: "false"
 
@@ -62,68 +61,35 @@ runs:
           | sudo tee /etc/apt/sources.list.d/llvm.list
 
         apt_retry apt-get update -q
+        # mlir-sys runs bindgen over the MLIR-C headers and needs a libclang whose
+        # major version matches them, which the same channel ships. lld links the AMD
+        # code objects the neurc suite builds for `--gpu-arch gfx*`.
         apt_retry apt-get install -y \
           llvm-23 \
           llvm-23-dev \
           llvm-23-tools \
           libpolly-23-dev \
+          libmlir-23-dev \
+          mlir-23-tools \
+          libclang-23-dev \
+          libclang-common-23-dev \
+          lld-23 \
           libzstd-dev \
           zlib1g-dev
 
         # Sanity-check: ensure llvm-config resolves the correct version
         /usr/lib/llvm-23/bin/llvm-config --version | grep -E "^23\." \
           || { echo "ERROR: unexpected LLVM version"; exit 1; }
-
-        {
-          echo "LLVM_SYS_231_PREFIX=/usr/lib/llvm-23"
-          echo "LLVM_LINK_LLVM_DYLIB=1"
-          echo "PATH=/usr/lib/llvm-23/bin:$PATH"
-        } >> "$GITHUB_ENV"
-
-    # ── MLIR 23 + libclang 23 (Linux, opt-in) ──────────────────────────────────
-    # mlir-sys runs bindgen over the MLIR-C headers at build time and needs a
-    # libclang whose major version matches the headers (libclang 23 here). The
-    # apt.llvm.org llvm-23 channel ships both, so the version matches with no
-    # workaround. Only jobs enabling the mlir-backend `mlir` feature request this.
-    - name: Install MLIR 23 + libclang 23 (Linux)
-      if: runner.os == 'Linux' && inputs.mlir == 'true'
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        # Same bounded-retry shape as the step above; each composite step runs in
-        # its own shell, so the helper is redefined rather than shared.
-        apt_retry() {
-          local attempt
-          for attempt in 1 2 3; do
-            if sudo timeout -k 30 600 "$@"; then
-              return 0
-            fi
-            echo "::warning::'$*' failed (attempt ${attempt}/3), retrying in 15s"
-            # A killed apt can leave half-unpacked packages behind; clear that
-            # before the next attempt so the retry is not doomed from the start.
-            sudo dpkg --configure -a || true
-            sleep 15
-          done
-          echo "::error::'$*' failed after 3 attempts"
-          return 1
-        }
-
-        # lld links the AMD code objects the neurc suite builds for `--gpu-arch gfx*`.
-        apt_retry apt-get install -y \
-          libmlir-23-dev \
-          mlir-23-tools \
-          libclang-23-dev \
-          libclang-common-23-dev \
-          lld-23
-
         test -f /usr/lib/llvm-23/include/mlir-c/IR.h \
           || { echo "ERROR: MLIR-C headers missing"; exit 1; }
 
         {
+          echo "LLVM_SYS_231_PREFIX=/usr/lib/llvm-23"
           echo "MLIR_SYS_230_PREFIX=/usr/lib/llvm-23"
           echo "TABLEGEN_230_PREFIX=/usr/lib/llvm-23"
           echo "LIBCLANG_PATH=/usr/lib/llvm-23/lib"
+          echo "LLVM_LINK_LLVM_DYLIB=1"
+          echo "PATH=/usr/lib/llvm-23/bin:$PATH"
         } >> "$GITHUB_ENV"
 
     # ── macOS ──────────────────────────────────────────────────────────────────
@@ -136,141 +102,166 @@ runs:
         # Unlink any existing LLVM to avoid keg-only conflicts
         brew unlink llvm 2>/dev/null || true
         # Homebrew has no llvm@23 while 23 is current: the unversioned formula is
-        # 23, and the version check below fails the job when it moves to 24.
+        # 23, and the version check below fails the job when it moves to 24. The
+        # formula builds MLIR in, static libraries included, so one prefix serves
+        # llvm-sys, mlir-sys and tblgen.
         brew install llvm
 
         LLVM_PREFIX="$(brew --prefix llvm)"
 
         "$LLVM_PREFIX/bin/llvm-config" --version | grep -E "^23\." \
           || { echo "ERROR: unexpected LLVM version"; exit 1; }
+        test -f "$LLVM_PREFIX/include/mlir-c/IR.h" \
+          || { echo "ERROR: MLIR-C headers missing from $LLVM_PREFIX"; exit 1; }
 
         {
           echo "LLVM_SYS_231_PREFIX=$LLVM_PREFIX"
+          echo "MLIR_SYS_230_PREFIX=$LLVM_PREFIX"
+          echo "TABLEGEN_230_PREFIX=$LLVM_PREFIX"
           echo "PATH=$LLVM_PREFIX/bin:$PATH"
           # macOS links statically by default: do NOT set LLVM_LINK_LLVM_DYLIB
         } >> "$GITHUB_ENV"
 
     # ── Windows ──────────────────────────────────────────────────────────────────
-    # LLVM's own release ships a full MSVC development build as
-    # clang+llvm-<ver>-x86_64-pc-windows-msvc.tar.xz: llvm-config.exe, headers and
-    # every static .lib llvm-sys needs. (The NSIS .exe installer does not; it holds
-    # only Clang and LLVM-C.dll.) The archive is pinned by SHA-256, the digest
-    # GitHub records for the release asset.
+    # No Windows LLVM release carries MLIR, so CI builds LLVM and MLIR from the
+    # 23.1.2 source tarball into one static prefix, the recipe the installation
+    # guide gives for a local build, and caches it. One prefix matters: melior
+    # hands inkwell an LLVM context, so both must link the same LLVM.
     #
-    # Two properties of that build shape the steps below:
-    #   - It is compiled against the static CRT (/MT). `.cargo/config.toml`
-    #     builds Rust with +crt-static on this target to match; a /MD Rust build
-    #     would pull both CRTs into one link.
-    #   - Its llvm-config lists `xml2s.lib` among the system libraries, because
-    #     LLVMWindowsManifest uses libxml2. Nothing inkwell calls reaches that
-    #     library, so no object from it is ever linked, but link.exe still fails
-    #     with LNK1181 when a named library is missing. A static libxml2 from the
-    #     runner's vcpkg is copied into the LLVM lib directory under that name.
-    #   - From 23 it also links zlib (`zs.lib`) and zstd, and names zstd by its
-    #     absolute path on the machine that built the release
-    #     (`S:/llvm/.../zstd_static.lib`). llvm-sys hands that to rustc as
-    #     `-l static=S:/...`, which rustc reads as renaming a library `S`, and the
-    #     build stops there. The path is rewritten inside llvm-config.exe to the
-    #     bare file name, padded with spaces so no offset in the binary moves
-    #     (llvm-sys splits the list on spaces and skips the empty entries), and
-    #     static zlib and zstd from vcpkg are copied in under those two names.
+    # The build choices that matter downstream:
+    #   - The static CRT (/MT). `.cargo/config.toml` builds Rust with +crt-static
+    #     on this target to match; a /MD Rust build would pull both CRTs into one
+    #     link.
+    #   - zlib, zstd, libxml2 and the DIA SDK off. llvm-config would otherwise
+    #     list them among the system libraries, some by absolute path, which
+    #     llvm-sys turns into rustc `-l` flags it cannot satisfy.
+    #   - X86, NVPTX and AMDGPU only: the host, and the two GPU targets
+    #     mlir-backend's unit tests lower to whatever the host OS.
+    #   - No tools. Nothing downstream runs one except llvm-config, which the
+    #     build adds by hand, and leaving out the rest saves hours on a 4-core
+    #     runner. No clang either: bindgen's libclang 23 is copied in from
+    #     LLVM's release archive.
     #
-    # The archive carries a subset of backends (X86, AArch64, ARM, BPF, NVPTX,
-    # RISCV, WebAssembly), which is why inkwell uses `target-x86` and not
-    # `target-all`. The pruned prefix is cached per version.
+    # The cache key names the version and a recipe revision: bump the revision
+    # when a flag here changes, or every job keeps restoring the old prefix.
 
-    - name: Cache LLVM 23 (Windows)
+    - name: Restore LLVM + MLIR 23 (Windows)
       if: runner.os == 'Windows'
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       id: llvm-cache
       with:
         path: C:\LLVM
-        key: llvm-23.1.2-x86_64-pc-windows-msvc-xml2s-zs-zstd
+        key: llvm-mlir-23.1.2-x86_64-pc-windows-msvc-static-r1
 
-    - name: Install LLVM 23 (Windows)
-      if: runner.os == 'Windows' && steps.llvm-cache.outputs.cache-hit != 'true'
+    - name: Require a cached LLVM + MLIR 23 (Windows)
+      if: runner.os == 'Windows' && steps.llvm-cache.outputs.cache-hit != 'true' && inputs.build != 'true'
+      shell: bash
+      run: |
+        echo "::error::No cached LLVM + MLIR prefix; CI's windows_toolchain job builds it, and this job should have run after it"
+        exit 1
+
+    - name: Build LLVM + MLIR 23 (Windows)
+      if: runner.os == 'Windows' && steps.llvm-cache.outputs.cache-hit != 'true' && inputs.build == 'true'
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
 
         $version = "23.1.2"
-        $sha256  = "8fb91cdc44fcbbdcf6b3ffd0a1f9859abd14a3c3aae4423c2b6d4a4f90bf0095"
-        $asset   = "clang+llvm-$version-x86_64-pc-windows-msvc"
-        $url     = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/$asset.tar.xz"
-        $archive = "$env:TEMP\$asset.tar.xz"
-        $extract = "$env:TEMP\llvm-extract"
+        $sha256  = "c98bbef08a2b4c2613cd50e9aa9ae7b69b1fe6c16b2c40373bc0ab6116fdf78a"
+        $src     = "llvm-project-$version.src"
+        $url     = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/$src.tar.xz"
+        $work    = Join-Path $env:RUNNER_TEMP 'llvm'
+        $archive = Join-Path $work "$src.tar.xz"
+        $build   = Join-Path $work 'build'
         $prefix  = "C:\LLVM"
 
+        New-Item -ItemType Directory -Force -Path $work | Out-Null
         Write-Host "Downloading $url ..."
-        # Retry curl to absorb transient GitHub release CDN errors.
         curl.exe -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o $archive $url
         if ($LASTEXITCODE -ne 0) { throw "curl failed (exit $LASTEXITCODE)" }
-
         $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
         if ($actual -ne $sha256) { throw "SHA-256 mismatch: expected $sha256, got $actual" }
 
-        Write-Host "Extracting $archive ..."
-        if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
-        New-Item -ItemType Directory -Force -Path $extract | Out-Null
-        # Windows' bundled bsdtar reads .tar.xz directly.
-        tar.exe -xf $archive -C $extract
+        # Only the trees an LLVM + MLIR build reads. The tarball's only symlinks sit in
+        # llvm/utils/mlgo-utils, which Windows tar cannot create and nothing here uses.
+        tar.exe -xf $archive -C $work --exclude '*/mlgo-utils/*' `
+          "$src/llvm" "$src/mlir" "$src/cmake" "$src/third-party"
         if ($LASTEXITCODE -ne 0) { throw "tar extract failed (exit $LASTEXITCODE)" }
 
-        $inner = Join-Path $extract $asset
-        if (-not (Test-Path $inner)) { throw "Could not locate extracted LLVM root in $extract" }
-
-        if (Test-Path $prefix) { Remove-Item -Recurse -Force $prefix }
-        Move-Item -Path $inner -Destination $prefix
-
-        Remove-Item $archive -ErrorAction SilentlyContinue
-        Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
-
-        # Keep only what llvm-sys reads: llvm-config, the LLVM headers and the
-        # LLVM*.lib archives. Dropping clang, lld and lldb keeps the cache small
-        # and leaves no second clang on PATH to change which one neurc links with.
-        Get-ChildItem "$prefix\bin" | Where-Object Name -ne 'llvm-config.exe' | Remove-Item -Recurse -Force
-        Get-ChildItem "$prefix\include" | Where-Object Name -notin 'llvm', 'llvm-c' | Remove-Item -Recurse -Force
-        Get-ChildItem "$prefix\lib" | Where-Object { $_.Name -notlike 'LLVM*.lib' -and $_.Name -ne 'cmake' } | Remove-Item -Recurse -Force
-        Get-ChildItem "$prefix\lib\cmake" | Where-Object Name -ne 'llvm' | Remove-Item -Recurse -Force
-        Get-ChildItem $prefix | Where-Object Name -notin 'bin', 'include', 'lib' | Remove-Item -Recurse -Force
-
-        # [core] drops libxml2's iconv and zlib features: they would only add more
-        # libraries that llvm-config does not name.
-        & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install "libxml2[core]:x64-windows-static" "zlib:x64-windows-static" "zstd:x64-windows-static"
-        if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed (exit $LASTEXITCODE)" }
-        # An archive's file name follows its project's own CMake naming, which is not
-        # stable across releases (`libxml2s.lib` up to libxml2 2.14, a different name
-        # in 2.15; `zlib.lib` up to zlib 1.3.1, `zs.lib` from 1.3.2), so each is found
-        # by pattern and copied in under the name llvm-config gives it. Any static
-        # build of the library satisfies the link.
-        $vcpkgLib = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static\lib"
-        foreach ($wanted in @(
-            @{ Patterns = @('*xml2*.lib'); Name = 'xml2s.lib' },
-            @{ Patterns = @('zlib*.lib', 'zs.lib'); Name = 'zs.lib' },
-            @{ Patterns = @('zstd*.lib'); Name = 'zstd_static.lib' })) {
-          $found = $wanted.Patterns | ForEach-Object { Get-ChildItem $vcpkgLib -Filter $_ } |
-            Sort-Object Name -Descending | Select-Object -First 1
-          if (-not $found) {
-            Get-ChildItem $vcpkgLib | Format-Table Name, Length | Out-String | Write-Host
-            throw "vcpkg produced no $($wanted.Patterns -join ' or ') archive in $vcpkgLib"
-          }
-          Write-Host "Using $($found.FullName) as $($wanted.Name)"
-          Copy-Item $found.FullName (Join-Path "$prefix\lib" $wanted.Name)
+        # cl.exe and Ninja come from the Visual Studio developer environment.
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if (-not $vs) { throw "No Visual Studio with the x64 C++ tools" }
+        cmd.exe /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
+          if ($_ -match '^([^=]+)=(.*)$') { Set-Item "env:$($Matches[1])" $Matches[2] }
+        }
+        if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+          choco install ninja -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco install ninja failed (exit $LASTEXITCODE)" }
         }
 
-        # Latin-1 maps every byte to one character and back, so the rewrite touches
-        # only the matched bytes.
-        $llvmConfigExe = "$prefix\bin\llvm-config.exe"
-        $latin1 = [Text.Encoding]::GetEncoding(28591)
-        $text = $latin1.GetString([IO.File]::ReadAllBytes($llvmConfigExe))
-        # One entry of the space-separated list: a drive, path characters only, and
-        # a `.lib` file name, with a space or the string's end on either side.
-        $absolute = '(?<=[ \x00])[A-Za-z]:[/\\][A-Za-z0-9_.+/\\-]*[/\\]([A-Za-z0-9_.+-]+\.lib)(?=[ \x00])'
-        if (-not [regex]::IsMatch($text, $absolute)) {
-          throw "llvm-config.exe names no library by absolute path any more; drop this rewrite"
-        }
-        $text = [regex]::Replace($text, $absolute, { param($m) $m.Groups[1].Value.PadRight($m.Length) })
-        [IO.File]::WriteAllBytes($llvmConfigExe, $latin1.GetBytes($text))
+        # Four compile jobs and two links keep the large MLIR translation units inside
+        # the runner's memory.
+        cmake -S "$work\$src\llvm" -B $build -G Ninja `
+          -DCMAKE_BUILD_TYPE=Release `
+          "-DCMAKE_INSTALL_PREFIX=$prefix" `
+          -DCMAKE_C_COMPILER=cl `
+          -DCMAKE_CXX_COMPILER=cl `
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+          -DLLVM_ENABLE_PROJECTS=mlir `
+          "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU" `
+          -DLLVM_ENABLE_ASSERTIONS=OFF `
+          -DLLVM_ENABLE_ZLIB=OFF `
+          -DLLVM_ENABLE_ZSTD=OFF `
+          -DLLVM_ENABLE_LIBXML2=OFF `
+          -DLLVM_ENABLE_DIA_SDK=OFF `
+          -DLLVM_BUILD_TOOLS=OFF `
+          -DLLVM_BUILD_UTILS=OFF `
+          -DLLVM_INCLUDE_TESTS=OFF `
+          -DMLIR_INCLUDE_TESTS=OFF `
+          -DLLVM_INCLUDE_BENCHMARKS=OFF `
+          -DLLVM_INCLUDE_EXAMPLES=OFF `
+          -DLLVM_INCLUDE_DOCS=OFF `
+          -DLLVM_PARALLEL_COMPILE_JOBS=4 `
+          -DLLVM_PARALLEL_LINK_JOBS=2
+        if ($LASTEXITCODE -ne 0) { throw "cmake configure failed (exit $LASTEXITCODE)" }
+
+        cmake --build $build --target install
+        if ($LASTEXITCODE -ne 0) { throw "LLVM + MLIR build failed (exit $LASTEXITCODE)" }
+
+        # With LLVM_BUILD_TOOLS off, llvm-config is neither built nor installed by
+        # default. Run from the prefix it reads its paths relative to itself.
+        cmake --build $build --target llvm-config
+        if ($LASTEXITCODE -ne 0) { throw "llvm-config build failed (exit $LASTEXITCODE)" }
+        New-Item -ItemType Directory -Force -Path "$prefix\bin" | Out-Null
+        Copy-Item (Join-Path $build 'bin\llvm-config.exe') "$prefix\bin\llvm-config.exe"
+
+        # mlir-sys runs bindgen over the MLIR-C headers, and a libclang of another major
+        # version lays their structs out wrong. The prefix builds no clang, so libclang 23
+        # and its builtin headers come from LLVM's release archive, pinned by the SHA-256
+        # GitHub records for it. libclang finds the headers relative to itself.
+        $asset    = "clang+llvm-$version-x86_64-pc-windows-msvc"
+        $release  = Join-Path $work "$asset.tar.xz"
+        $clangSha = "8fb91cdc44fcbbdcf6b3ffd0a1f9859abd14a3c3aae4423c2b6d4a4f90bf0095"
+        curl.exe -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o $release `
+          "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/$asset.tar.xz"
+        if ($LASTEXITCODE -ne 0) { throw "curl failed (exit $LASTEXITCODE)" }
+        $actual = (Get-FileHash -Algorithm SHA256 $release).Hash.ToLower()
+        if ($actual -ne $clangSha) { throw "SHA-256 mismatch: expected $clangSha, got $actual" }
+        tar.exe -xf $release -C $work "$asset/bin/libclang.dll" "$asset/lib/clang/23/include"
+        if ($LASTEXITCODE -ne 0) { throw "tar extract failed (exit $LASTEXITCODE)" }
+        Copy-Item (Join-Path $work "$asset\bin\libclang.dll") "$prefix\bin\libclang.dll"
+        New-Item -ItemType Directory -Force -Path "$prefix\lib\clang\23" | Out-Null
+        Copy-Item -Recurse (Join-Path $work "$asset\lib\clang\23\include") "$prefix\lib\clang\23\include"
+
+        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+
+    - name: Save LLVM + MLIR 23 (Windows)
+      if: runner.os == 'Windows' && steps.llvm-cache.outputs.cache-hit != 'true' && inputs.build == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: C:\LLVM
+        key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
 
     - name: Configure LLVM env (Windows)
       if: runner.os == 'Windows'
@@ -292,22 +283,26 @@ runs:
         Write-Host "LLVM prefix: $prefix"
 
         # Every system library must be a bare name llvm-sys can turn into a rustc
-        # `-l`, and present in the prefix or the SDK. A path here is the
-        # llvm-config.exe rewrite above not having happened (a stale cache).
+        # `-l`, present in the SDK. A path here is a dependency the build above
+        # should have turned off.
         $system = (& $llvmConfig --system-libs --link-static) -split '\s+' | Where-Object { $_ }
         Write-Host "llvm-config system libraries: $system"
         foreach ($lib in $system) {
           if ($lib -match '[:/\\]') { throw "llvm-config names '$lib' by path, which llvm-sys cannot link" }
         }
-        foreach ($lib in 'xml2s.lib', 'zs.lib', 'zstd_static.lib') {
-          if (($system -contains $lib) -and -not (Test-Path "$prefix\lib\$lib")) {
-            throw "llvm-config names $lib, which is missing from $prefix\lib"
-          }
-        }
+        if (-not (Test-Path "$prefix\include\mlir-c\IR.h")) { throw "MLIR-C headers missing from $prefix" }
+
+        # bindgen loads the libclang 23 the build step put beside llvm-config, not the
+        # runner's own LLVM, whose major version is whatever the image ships.
+        $libclang = "$prefix\bin\libclang.dll"
+        if (-not (Test-Path $libclang)) { throw "No libclang.dll at $libclang for bindgen" }
 
         # llvm-sys on Windows/MSVC links statically: do NOT set
         # LLVM_LINK_LLVM_DYLIB.
         "LLVM_SYS_231_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
+        "MLIR_SYS_230_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
+        "TABLEGEN_230_PREFIX=$prefix" | Out-File $env:GITHUB_ENV  -Append -Encoding utf8
+        "LIBCLANG_PATH=$(Split-Path $libclang)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
         "$prefix\bin"                  | Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
         # Under +crt-static, llvm-sys emits the system libraries llvm-config names

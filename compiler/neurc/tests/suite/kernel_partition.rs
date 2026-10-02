@@ -1,16 +1,16 @@
 // `out.partition(|base, slice| { ... })`: the write form whose disjointness the compiler
 // proves, and `.flat(i)`, the row-major read it is written with.
 //
-// The run tests follow `kernel_attribute.rs`: only a neurc built with `--features mlir`
-// compiles a kernel, and a machine without an NVIDIA GPU aborts it at startup, which each
-// test accepts and asserts in full.
+// The run tests follow `kernel_attribute.rs`: only a Linux neurc compiles a kernel, and a
+// machine without an NVIDIA GPU aborts it at startup, which each test accepts and asserts
+// in full.
 
 use crate::compile_harness::CompileTest;
 
 /// A chunk-1 partition over a grid that overhangs its tensor, a chunk-3 partition of a
 /// second output, and a `return` that leaves only the closure: every element checked
 /// against the host.
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 const SPLIT: &str = r#"
 @kernel(threads: [16, 16])
 func split(a: Tensor<f32, [37, 45]>, out: KernelOut<Tensor<f32, [37, 45]>>, wide: KernelOut<Tensor<i64, [37, 45, 3]>>) {
@@ -131,7 +131,7 @@ fn flat_reads_a_tensor_by_its_row_major_position() {
     );
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_partition_writes_each_threads_run_on_the_gpu() {
     let test = CompileTest::new();
@@ -158,7 +158,7 @@ fn a_partition_writes_each_threads_run_on_the_gpu() {
     }
 }
 
-#[cfg(all(feature = "mlir", unix))]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_slice_index_past_the_run_stops_the_kernel_and_the_program() {
     use std::os::unix::process::ExitStatusExt;

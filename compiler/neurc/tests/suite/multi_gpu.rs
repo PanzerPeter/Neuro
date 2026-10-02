@@ -106,7 +106,7 @@ fn a_gpu_index_the_machine_lacks_is_refused_with_the_count() {
     }
 }
 
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 const BLEND: &str = r#"
 @gpu
 func blend(a: &Tensor<f32, [37, 45]>, b: &Tensor<f32, [37, 45]>) -> Tensor<f32, [37, 45]> {
@@ -118,7 +118,7 @@ func blend(a: &Tensor<f32, [37, 45]>, b: &Tensor<f32, [37, 45]>) -> Tensor<f32, 
 /// A call runs where its device operands live: GPU 1 loads its own copy of the kernels on
 /// the first launch there, and its stream, arena and result are GPU 1's. An all-host call
 /// still runs on GPU 0.
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_gpu_call_runs_on_the_gpu_its_operands_live_on() {
     let program = format!(
@@ -163,7 +163,7 @@ func main() -> i32 {{
     assert!(on_zero > 0 && on_one == 53 * on_zero, "{stderr}");
 }
 
-#[cfg(feature = "mlir")]
+#[cfg(target_os = "linux")]
 #[test]
 fn operands_on_two_gpus_are_refused_at_the_call() {
     use std::os::unix::process::ExitStatusExt;

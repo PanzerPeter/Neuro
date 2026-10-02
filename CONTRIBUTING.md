@@ -28,33 +28,36 @@ We welcome contributions, but note:
 ### Prerequisites
 
 - **Rust**: 1.98.1 or later (`rustup update stable`)
-- **LLVM 23**: development package (see below)
+- **LLVM 23 with MLIR 23**: development packages in one prefix (see below)
 - **Git**
 - **IDE**: VS Code with rust-analyzer recommended
 
 ### Setting Up the Development Environment
 
 ```bash
-# Arch Linux / CachyOS
-sudo pacman -S llvm
-export LLVM_SYS_231_PREFIX=/usr
-# Add to ~/.bashrc / ~/.zshrc to make permanent
+# Arch Linux / CachyOS: build LLVM + MLIR 23 into /opt/llvm-mlir-23 first
+prefix=/opt/llvm-mlir-23
 
 # Ubuntu / Debian
 wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 23
-sudo apt-get install -y llvm-23-dev libpolly-23-dev
-export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23
+sudo apt-get install -y llvm-23-dev libpolly-23-dev libmlir-23-dev mlir-23-tools \
+  libclang-23-dev libclang-common-23-dev
+prefix=/usr/lib/llvm-23
+export LIBCLANG_PATH=/usr/lib/llvm-23/lib
 
-# macOS
+# macOS (Homebrew's llvm includes MLIR)
 brew install llvm
-export LLVM_SYS_231_PREFIX=$(brew --prefix llvm)
+prefix=$(brew --prefix llvm)
+
+export LLVM_SYS_231_PREFIX=$prefix MLIR_SYS_230_PREFIX=$prefix TABLEGEN_230_PREFIX=$prefix
+# Add to ~/.bashrc / ~/.zshrc to make permanent
 ```
 
-> **Optional: the MLIR backend.** The `mlir-backend` slice is gated
-> behind the off-by-default `mlir` cargo feature, so a normal build needs only
-> LLVM 23. To work on it you need MLIR 23 installed into the same prefix as
-> LLVM 23 (`LLVM_SYS_231_PREFIX` / `MLIR_SYS_230_PREFIX` /
-> `TABLEGEN_230_PREFIX`); see [Optional: MLIR Backend](docs/getting-started/installation.md#optional-mlir-backend).
+> **MLIR.** Every build compiles the `mlir-backend` slice, so MLIR 23 must be
+> installed into the same prefix as LLVM 23, with `LLVM_SYS_231_PREFIX`,
+> `MLIR_SYS_230_PREFIX` and `TABLEGEN_230_PREFIX` all pointing at it. Arch and
+> Windows build it from source; see [MLIR](docs/getting-started/installation.md#mlir)
+> and the per-platform sections there.
 
 ```bash
 # Clone and verify the build
@@ -160,7 +163,7 @@ compiler/
 ├── semantic-analysis/       # Type checker slice
 ├── hir-lowering/            # AST → typed HIR lowering slice, including autodiff
 ├── llvm-backend/            # LLVM 23 / inkwell 0.10 codegen slice
-├── mlir-backend/            # MLIR / melior slice (off-by-default `mlir` feature)
+├── mlir-backend/            # MLIR / melior slice: tensor bodies and GPU kernels
 │
 └── neurc/                   # Compiler driver, the only crate depending on all slices
 ```
