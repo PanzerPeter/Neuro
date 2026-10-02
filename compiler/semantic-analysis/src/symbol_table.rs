@@ -12,6 +12,10 @@ use crate::types::Type;
 #[derive(Debug, Clone, PartialEq)]
 struct BorrowProvenance {
     place: String,
+    /// Index of the scope that defined `place` when the borrow was taken. The release
+    /// goes to that binding, not to whatever the name resolves to later: once an inner
+    /// shadow dies, its name resolves to the outer binding, whose borrow must survive.
+    scope: usize,
     exclusive: bool,
 }
 
@@ -141,23 +145,35 @@ impl SymbolInfo {
     }
 }
 
+/// The key a binding is held under between [`SymbolTable::define_pending`] and
+/// [`SymbolTable::commit_pending`]. `__` is rejected in every declared name, so no source
+/// name can reach it.
+pub(crate) fn pending_key(name: &str) -> String {
+    format!("__pending_{name}")
+}
+
 /// Symbol table with lexical scoping support
 #[derive(Debug)]
 pub(crate) struct SymbolTable {
     /// Stack of scopes (innermost scope is last)
     scopes: Vec<HashMap<String, SymbolInfo>>,
+    /// Parallel to `scopes`: whether the scope was opened by a shadowing declaration
+    /// rather than by a `{ }`. Such a scope closes with the block that holds it.
+    implicit: Vec<bool>,
 }
 
 impl SymbolTable {
     pub(crate) fn new() -> Self {
         Self {
             scopes: vec![HashMap::new()],
+            implicit: vec![false],
         }
     }
 
     /// Enter a new scope (e.g., function body, block)
     pub(crate) fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.implicit.push(false);
     }
 
     /// Exit the current scope, releasing every borrow held by a binding that
@@ -166,17 +182,56 @@ impl SymbolTable {
     /// persistent borrow count is decremented. Borrows targeting a
     /// place that lived in the same dying scope need no release: the place is
     /// gone too, so a target absent from the surviving scopes is simply skipped.
+    ///
+    /// The scopes shadowing declarations opened inside the block close with it, newest
+    /// first, so a shadowed binding lives to the end of its block.
     pub(crate) fn pop_scope(&mut self) {
-        if self.scopes.len() <= 1 {
-            return;
+        while self.scopes.len() > 1 {
+            let Some(dying) = self.scopes.pop() else {
+                return;
+            };
+            let implicit = self.implicit.pop().unwrap_or(false);
+            for info in dying.values() {
+                for prov in &info.borrows {
+                    self.release_persistent(prov);
+                }
+            }
+            if !implicit {
+                return;
+            }
         }
-        let Some(dying) = self.scopes.pop() else {
+    }
+
+    /// Define a `val` / `mut` binding, which may reuse a name the current block already
+    /// binds. The new binding goes in a scope of its own, so the shadowed one keeps
+    /// its moves and borrows, and both stay alive until the block ends.
+    ///
+    /// The binding is entered under [`pending_key`] and named by [`commit_pending`]. In
+    /// between, its initializer's moves and borrows are recorded, and a name the
+    /// initializer reads must still resolve to the binding it shadows: `val x = x` moves
+    /// the outer `x`, and `val x = &x` borrows it.
+    pub(crate) fn define_pending(&mut self, name: &str, ty: Type, mutable: bool) {
+        let occupied = self.scopes.len() > 1
+            && self
+                .scopes
+                .last()
+                .is_some_and(|scope| scope.contains_key(name));
+        if occupied {
+            self.scopes.push(HashMap::new());
+            self.implicit.push(true);
+        }
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(pending_key(name), SymbolInfo::new(ty, mutable));
+        }
+    }
+
+    /// Give the binding [`define_pending`] entered its own name.
+    pub(crate) fn commit_pending(&mut self, name: &str) {
+        let Some(scope) = self.scopes.last_mut() else {
             return;
         };
-        for info in dying.values() {
-            for prov in &info.borrows {
-                self.release_persistent(prov);
-            }
+        if let Some(info) = scope.remove(&pending_key(name)) {
+            scope.insert(name.to_string(), info);
         }
     }
 
@@ -280,9 +335,13 @@ impl SymbolTable {
                 info.shared_persistent = info.shared_persistent.saturating_add(1);
             }
         }
+        let Some(scope) = self.defining_depth(place) else {
+            return;
+        };
         if let Some(info) = self.lookup_mut(holder) {
             info.borrows.push(BorrowProvenance {
                 place: place.to_string(),
+                scope,
                 exclusive,
             });
         }
@@ -295,9 +354,13 @@ impl SymbolTable {
         if let Some(info) = self.lookup_mut(place) {
             info.exclusive_persistent = info.exclusive_persistent.saturating_add(1);
         }
+        let Some(scope) = self.defining_depth(place) else {
+            return;
+        };
         if let Some(info) = self.lookup_mut(holder) {
             info.borrows.push(BorrowProvenance {
                 place: place.to_string(),
+                scope,
                 exclusive: true,
             });
         }
@@ -339,7 +402,12 @@ impl SymbolTable {
     }
 
     fn release_persistent(&mut self, prov: &BorrowProvenance) {
-        if let Some(info) = self.lookup_mut(&prov.place) {
+        // A scope index past the end is the scope being popped: the place died with it.
+        let target = self
+            .scopes
+            .get_mut(prov.scope)
+            .and_then(|scope| scope.get_mut(&prov.place));
+        if let Some(info) = target {
             if prov.exclusive {
                 info.exclusive_persistent = info.exclusive_persistent.saturating_sub(1);
             } else {

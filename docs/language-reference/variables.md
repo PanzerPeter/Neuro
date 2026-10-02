@@ -393,9 +393,19 @@ func shadowing() -> i32 {
 ```
 
 The inner binding may have a different type. A later `val` or `mut` in the *same* block may
-also reuse a name, but the checker currently rejects that with
-`variable 'x' already defined in this scope` ([BUG-026](../BUGS.md#bug-026-a-later-binding-may-not-reuse-a-name-in-the-same-block)).
-Until it is fixed, give the second binding a different name or open a nested block.
+reuse a name too, and change its type:
+
+```neuro
+func reparse() -> i32 {
+    val n = "42"
+    val n = n.len() as i32   // the initializer still reads the first `n`
+    return n                 // 2
+}
+```
+
+A shadowed binding is not dropped when it is shadowed. It stays owned, and alive under any
+borrow taken of it, until its block ends. Its initializer runs before the new name exists, so
+`val x = x` moves the outer `x` into the new one.
 
 Reassignment is the other way to change a value. It keeps the same binding, so the new
 value must have the binding's type.

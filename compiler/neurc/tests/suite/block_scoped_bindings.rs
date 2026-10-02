@@ -178,3 +178,70 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 1);
 }
+
+/// BUG-026: a later `val` in the same block may reuse a name and change its type. Both
+/// values stay owned to the end of the block, so each `Vec` buffer is released once.
+#[test]
+fn regression_bug_026_same_block_shadowing() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val s = "a" + "b"
+    val n = s.len()
+    val s = n as i32 * 3
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    mut v: Vec<i32> = Vec::new()
+    v.push(2)
+    val k = 1
+    val f = |x: i32| -> i32 { x + k }
+    val k = 100
+    mut acc = 0
+    for i in 0..3 {
+        val t = i
+        val t = t * 2
+        acc += t
+    }
+    s + v[0] + f(1) + k + acc
+}
+"#;
+    // 6 + 2 + 2 + 100 + 6
+    assert_eq!(
+        test.compile_and_run("same_block_shadow.nr", source),
+        Ok(116)
+    );
+}
+
+/// BUG-094: `val x = x` in an inner block recorded the move against the new inner `x`,
+/// so the outer one stayed usable and both released the same buffer.
+#[test]
+fn regression_bug_094_shadowing_initializer_moves_the_outer_binding() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut x: Vec<i32> = Vec::new()
+    x.push(5)
+    {
+        val x = x
+    }
+    x.len() as i32
+}
+"#;
+    let err = test
+        .check("shadow_moves_outer.nr", source)
+        .expect_err("the outer `x` was moved into the inner one");
+    assert!(err.contains("use of moved value 'x'"), "got: {err}");
+
+    let ok = r#"
+func main() -> i32 {
+    mut x: Vec<i32> = Vec::new()
+    x.push(5)
+    {
+        mut x = x
+        x.push(6)
+        x.len() as i32
+    }
+}
+"#;
+    assert_eq!(test.compile_and_run("shadow_moves_outer_ok.nr", ok), Ok(2));
+}

@@ -224,6 +224,21 @@ impl TypeChecker {
     }
 }
 
+/// The names a closure reads from its enclosing scope, each once: its captures, plus any
+/// module-level name the body reads, which the caller tells apart by looking it up.
+pub(crate) fn closure_reads(params: &[ClosureParam], body: &Expr) -> HashSet<String> {
+    let mut fv = FreeVars::default();
+    collect_expr(body, &mut fv);
+    for p in params {
+        fv.bound.insert(p.name.name.clone());
+    }
+    fv.reads
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| !fv.bound.contains(name))
+        .collect()
+}
+
 /// The free-variable footprint of a closure body: names bound inside the body,
 /// identifier reads, and assignment targets. `bound` is a flat over-approximation
 /// (every locally-introduced name across all nested blocks); a read of a name in

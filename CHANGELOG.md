@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-10-02
+
+Phase 4, GPU acceleration, is complete. Tensor code runs on NVIDIA and AMD GPUs through
+upstream MLIR dialects: `@gpu` functions with an optional host fallback, `Device::GPU(n)`
+transfers and every tensor operation on a device tensor outside `@gpu`, `@kernel` functions with
+`KernelOut` and `partition`, sorting kernels, and a fixed reduction lane order that keeps host and
+GPU results bit for bit equal. Phase 5, which completes the language and makes MLIR the only
+tensor backend, is next.
+
+### Fixed
+
+- A `val` or `mut` may reuse a name its block already binds, and may change its type, as the
+  language reference specifies. Both values stay owned until the block ends. It was refused as
+  `variable already defined in this scope` (BUG-026).
+- `val x = x` in an inner block moves the outer `x`. The move was recorded against the new inner
+  binding, so the outer one stayed usable and both released the same buffer: a double free.
+- A borrow held by a binding in an inner block no longer releases an outer binding of the same
+  name when the block ends. The outer binding could then be reassigned while a slice of it was
+  still live, and the slice read freed memory.
+- A borrow handed out through a block, `if` or `match` tail, through a destructured part, or
+  through a call result bound in the block, is held by the binding that receives it, the same as
+  the borrow written directly. Before, the borrowee could be reassigned under it.
+- A closure literal can be called where it is written, `(|x: i32| -> i32 { x + 1 })(3)`, and so
+  can any other expression of function type. It was refused as a "non-function type" while the
+  message printed a function type (BUG-050).
+- An attribute the compiler does not know is an error at its span instead of being ignored, so a
+  misspelled `@no_grad` no longer leaves a call differentiated. An attribute the reference
+  specifies but nothing implements yet (`@inline`, `@test`, `@cfg`, ...) reports as not
+  implemented (BUG-088).
+- A traversal result stored past a `pool` is accepted when its function is a closure literal
+  whose captures hold no arena memory. `out = a.map(|x: i32| -> i32 { x * 10 })` was refused
+  while `out = &a + &a` was accepted (BUG-049, narrowed).
+- The Windows CI legs install LLVM again: vcpkg's zlib 1.3.2 names its static archive `zs.lib`
+  instead of `zlib.lib`, which the setup step did not look for.
+
 ## [4.17.1] - 2026-10-02
 
 ### Changed

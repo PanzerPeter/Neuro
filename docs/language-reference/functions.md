@@ -1090,6 +1090,10 @@ A function's own name is a value of its function type too, so `apply(5, double)`
 `func double(x: i32) -> i32` directly, and `val f = double` binds it. A generic function
 has no single type until its type arguments are named, so its bare name is refused.
 
+Any expression of function type can be called, not only a name: a closure literal called where
+it is written, `(|x: i32| -> i32 { x + 1 })(3)`, or a function chosen by an `if`,
+`(if fast { quick } else { exact })(v)`.
+
 Each closure compiles to a `{ function pointer, environment pointer }` value with
 no heap allocation; a call dispatches indirectly through it.
 

@@ -1070,3 +1070,51 @@ func main() -> i32 {
         "diagnostic should name the callee and the root binding, got: {err}"
     );
 }
+
+/// BUG-049: a traversal result stored past a `pool` was refused when its function was a
+/// closure literal, though `&a + &a` in the same place was accepted. A closure's
+/// environment is a stack slot, so it carries arena memory only through a capture.
+#[test]
+fn regression_bug_049_closure_argument_store_past_pool() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    mut out: Tensor<i32, [2, 2]> = [[0, 0], [0, 0]]
+    val k = 5
+    for i in 0..3 {
+        pool scratch {
+            out = a.map(|x: i32| -> i32 { x * 10 + k })
+        }
+    }
+    out[1, 1]
+}
+"#;
+    assert_eq!(
+        test.compile_and_run("pool_closure_store.nr", source),
+        Ok(45)
+    );
+}
+
+/// The closure is admitted only through its captures: one that reads a borrow of a
+/// block-local tensor is still refused.
+#[test]
+fn closure_capturing_a_pool_local_borrow_is_still_refused() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    mut out: Tensor<i32, [2, 2]> = [[0, 0], [0, 0]]
+    pool scratch {
+        val local: Tensor<i32, [2, 2]> = [[1, 1], [1, 1]]
+        val r = &local
+        out = a.map(|x: i32| -> i32 { x + r[0, 0] })
+    }
+    out[1, 1]
+}
+"#;
+    let err = test
+        .check("pool_closure_capture.nr", source)
+        .expect_err("a capture of a block-local borrow must keep the store refused");
+    assert!(err.contains("outlives the pool"), "got: {err}");
+}

@@ -259,3 +259,70 @@ fn generic_instance_validates_its_concrete_fields() {
         "got {errors:?}"
     );
 }
+
+/// BUG-088: a misspelled attribute used to be dropped, so `@no_grda` left a call
+/// differentiated. The attribute set is fixed, so an unknown name is an error at its span.
+#[test]
+fn regression_bug_088_unknown_attribute_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+        @no_grda
+        func scale() -> f32 { 2.0f32 }
+        struct P { x: i32 }
+        impl P {
+            @bogus
+            func get(&self) -> i32 { self.x }
+        }
+        func main() -> i32 { scale() as i32 }
+        "#,
+    );
+    for name in ["no_grda", "bogus"] {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::UnknownAttribute { name: n, .. } if n == name)),
+            "`@{name}` must be rejected, got {errors:?}"
+        );
+    }
+}
+
+/// A specified attribute nothing implements yet would be the same silent no-op, so it
+/// reports as unimplemented rather than as a misspelling.
+#[test]
+fn pending_attribute_reports_as_unimplemented() {
+    let errors = semantic_errors(
+        r#"
+        @inline
+        func sq(x: i32) -> i32 { x * x }
+        func main() -> i32 { sq(2) }
+        "#,
+    );
+    assert!(
+        errors.iter().any(
+            |e| matches!(e, TypeError::UnimplementedAttribute { name, .. } if name == "inline")
+        ),
+        "a pending attribute must report as unimplemented, got {errors:?}"
+    );
+}
+
+#[test]
+fn every_implemented_attribute_is_accepted() {
+    let errors = semantic_errors(
+        r#"
+        @derive(Copy, Clone)
+        struct P { x: i32 }
+        @allow(prefer_loop_over_while_true)
+        func spin() -> i32 { 1 }
+        @no_grad
+        func k(x: f32) -> f32 { x }
+        func main() -> i32 { spin() }
+        "#,
+    );
+    assert!(
+        !errors.iter().any(|e| matches!(
+            e,
+            TypeError::UnknownAttribute { .. } | TypeError::UnimplementedAttribute { .. }
+        )),
+        "a known attribute must be accepted, got {errors:?}"
+    );
+}

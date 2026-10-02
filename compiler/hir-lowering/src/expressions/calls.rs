@@ -91,13 +91,33 @@ impl Lowerer {
             Expr::Path {
                 type_name, member, ..
             } => self.lower_assoc_call(&type_name.name, &member.name, args, span),
-            other => Err(LoweringError::Malformed {
-                detail: format!(
-                    "call of non-callable expression {:?}",
-                    std::mem::discriminant(other)
-                ),
-            }),
+            other => self.lower_value_call(other, args, span),
         }
+    }
+
+    /// Lower a call whose callee is any other expression of function type, a closure
+    /// literal called in place for one. The checker refused every other callee.
+    fn lower_value_call(
+        &mut self,
+        func: &Expr,
+        args: &[Expr],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let callee = self.lower_expr(func, None)?;
+        let HirType::Function { params, ret } = callee.ty.clone() else {
+            return Err(LoweringError::Malformed {
+                detail: format!("call of non-callable type {:?}", callee.ty),
+            });
+        };
+        let args = self.lower_args(args, &params)?;
+        Ok(HirExpr::new(
+            HirExprKind::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            *ret,
+            span,
+        ))
     }
 
     /// Lower a newtype construction `Name(value)` to a transparent

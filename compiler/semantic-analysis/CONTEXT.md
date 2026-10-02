@@ -34,7 +34,9 @@ module per declaration kind beside it. `tests/` is split by subject.
   name (function, param, struct, field, enum, variant, trait, method, const, newtype) containing
   `__` with `ReservedNameSeparator`. `__` is the receiver/method separator in the flat function
   table and the backend splits method symbols on it, so a user name carrying its own `__` could
-  forge another item's symbol.
+  forge another item's symbol. `check_attribute_names` runs beside it: an attribute outside the
+  fixed set the language reference defines is `UnknownAttribute`, and one the reference names but no pass
+  acts on yet is `UnimplementedAttribute`, so neither is a silent no-op.
 - **1. structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
   `clone_structs` / `debug_structs` / `partial_eq_structs`, and every derive argument validated
   (`UnknownDerive`, `UnimplementedDerive`, `DuplicateDerive`). **1b. `validate_copy_derive`** and
@@ -568,6 +570,16 @@ At a `&place` site a `&mut` is rejected while any borrow is live
 (`attach_borrow`), released when that binding leaves scope; reassigning a `mut` reference releases
 its old borrow first. Transient borrows are dropped at the end of every statement
 (`clear_transient_borrows`), so a borrow never outlives the statement that took it.
+
+A borrow's provenance records the scope index of the binding it targets, and its release goes
+to that binding, never to whatever the name resolves to later: once an inner shadow dies, its
+name means the outer binding again. A `val` / `mut` may reuse a name its block already binds
+(`define_pending` opens an implicit scope that `pop_scope` closes with the block), and the new
+binding is held under `__pending_<name>` until its initializer's moves and borrows are recorded,
+so `val x = x` moves and `val x = &x` borrows the binding it shadows. A block, `if` or `match`
+initializer whose type carries a reference has its value-yielding tails walked
+(`tail_borrow_targets`, through block bindings, destructured parts and call arguments), and the
+new binding holds each borrow found, as it would for the same borrow written directly.
 
 A `&mut` binding passed bare to a call is a reborrow, not a borrow expression, so the counts
 never see it. `check_reborrow_exclusivity` (in `expressions/calls.rs`, run by every call path)

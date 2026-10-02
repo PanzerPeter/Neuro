@@ -68,21 +68,9 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_store(alloca, final_val).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to store initial value: {}", e))
             })?;
-            // `bind_name` records the binding's nominal type for later place statements
-            // (field / index assignment) that must recover a struct or array name, and
-            // hands back whatever the name meant before. That goes into the enclosing
-            // scope's frame so leaving the block puts the outer binding back.
             let pool_registered = self.pool_registered_type(&target_sem);
             let moves_a_registration =
                 init.is_some_and(|expr| self.moves_a_pool_registration(expr));
-            let shadowed = self.bind_name(name, alloca, alloca_ty, target_sem.clone());
-            if let Some(scope) = self.name_scopes.last_mut() {
-                scope.push(shadowed);
-            }
-            // A binding the block declares dies with the arena, so a later store into it
-            // may keep the bump path. Everything else a store can reach outlives the
-            // block.
-            self.note_pool_local(name);
 
             // Read before the move below disarms it: whether the binding a `string` is
             // moved out of owned the buffer is a runtime fact, and it moves with the value.
@@ -105,6 +93,20 @@ impl<'ctx> CodegenContext<'ctx> {
             if let Some(expr) = init {
                 self.mark_moved_for_drop(expr);
             }
+            // Bound only now: until here the initializer's names still mean the bindings
+            // it reads, so `val x = x` disowns the `x` it shadows rather than itself.
+            // `bind_name` records the binding's nominal type for later place statements
+            // (field / index assignment) that must recover a struct or array name, and
+            // hands back whatever the name meant before. That goes into the enclosing
+            // scope's frame so leaving the block puts the outer binding back.
+            let shadowed = self.bind_name(name, alloca, alloca_ty, target_sem.clone());
+            if let Some(scope) = self.name_scopes.last_mut() {
+                scope.push(shadowed);
+            }
+            // A binding the block declares dies with the arena, so a later store into it
+            // may keep the bump path. Everything else a store can reach outlives the
+            // block.
+            self.note_pool_local(name);
             // A `PoolAware` binding inside a `pool` is released by the arena's sweep at
             // the block's brace instead of by its own scope, so it takes one path or the
             // other and never both.

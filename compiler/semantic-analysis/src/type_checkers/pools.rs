@@ -137,12 +137,12 @@ impl TypeChecker {
             // A binding of pointerless type has nothing to carry; otherwise it must
             // predate every open arena mark, since a store into such a binding from
             // inside a pool is exactly what this rule rejects.
-            Expr::Identifier(id) => match self.symbols.lookup(&id.name) {
-                Some(symbol) => self.pool_safe(&symbol.ty) || self.declared_before_pools(&id.name),
-                // Not a binding: a unit variant such as `None`, or a function item.
-                // Neither holds an allocation.
-                None => true,
-            },
+            Expr::Identifier(id) => self.binding_carries_no_arena(&id.name),
+            // A closure's environment is a stack slot of the enclosing frame, never the
+            // arena, so the value carries arena memory only through a capture.
+            Expr::Closure { params, body, .. } => super::closures::closure_reads(params, body)
+                .iter()
+                .all(|name| self.binding_carries_no_arena(name)),
             // A path in value position names a unit variant, a constant or a function
             // item, none of which the block allocated.
             Expr::Path { .. } => true,
@@ -232,6 +232,15 @@ impl TypeChecker {
                     })
             }
             _ => false,
+        }
+    }
+
+    fn binding_carries_no_arena(&self, name: &str) -> bool {
+        match self.symbols.lookup(name) {
+            Some(symbol) => self.pool_safe(&symbol.ty) || self.declared_before_pools(name),
+            // Not a binding: a unit variant such as `None`, or a function item. Neither
+            // holds an allocation.
+            None => true,
         }
     }
 

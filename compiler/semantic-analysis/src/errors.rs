@@ -152,6 +152,16 @@ pub enum TypeError {
     )]
     UnimplementedDerive { name: String, span: Span },
 
+    #[error("`@{name}` is not an attribute: the attributes are {known}")]
+    UnknownAttribute {
+        name: String,
+        known: String,
+        span: Span,
+    },
+
+    #[error("`@{name}` is specified but not implemented yet, so it would have no effect")]
+    UnimplementedAttribute { name: String, span: Span },
+
     #[error("`@derive({name})` is listed twice on struct '{struct_name}'")]
     DuplicateDerive {
         struct_name: String,
@@ -1527,6 +1537,8 @@ impl TypeError {
             | Self::CopyDeriveNonCopyField { span, .. }
             | Self::UnknownDerive { span, .. }
             | Self::UnimplementedDerive { span, .. }
+            | Self::UnknownAttribute { span, .. }
+            | Self::UnimplementedAttribute { span, .. }
             | Self::DuplicateDerive { span, .. }
             | Self::DeriveConflictsWithImpl { span, .. }
             | Self::DeriveFieldUnsupported { span, .. }

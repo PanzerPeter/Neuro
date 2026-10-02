@@ -240,17 +240,19 @@ runs:
         if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed (exit $LASTEXITCODE)" }
         # An archive's file name follows its project's own CMake naming, which is not
         # stable across releases (`libxml2s.lib` up to libxml2 2.14, a different name
-        # in 2.15), so each is found by pattern and copied in under the name
-        # llvm-config gives it. Any static build of the library satisfies the link.
+        # in 2.15; `zlib.lib` up to zlib 1.3.1, `zs.lib` from 1.3.2), so each is found
+        # by pattern and copied in under the name llvm-config gives it. Any static
+        # build of the library satisfies the link.
         $vcpkgLib = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static\lib"
         foreach ($wanted in @(
-            @{ Pattern = '*xml2*.lib'; Name = 'xml2s.lib' },
-            @{ Pattern = 'zlib*.lib'; Name = 'zs.lib' },
-            @{ Pattern = 'zstd*.lib'; Name = 'zstd_static.lib' })) {
-          $found = Get-ChildItem $vcpkgLib -Filter $wanted.Pattern | Sort-Object Name -Descending | Select-Object -First 1
+            @{ Patterns = @('*xml2*.lib'); Name = 'xml2s.lib' },
+            @{ Patterns = @('zlib*.lib', 'zs.lib'); Name = 'zs.lib' },
+            @{ Patterns = @('zstd*.lib'); Name = 'zstd_static.lib' })) {
+          $found = $wanted.Patterns | ForEach-Object { Get-ChildItem $vcpkgLib -Filter $_ } |
+            Sort-Object Name -Descending | Select-Object -First 1
           if (-not $found) {
             Get-ChildItem $vcpkgLib | Format-Table Name, Length | Out-String | Write-Host
-            throw "vcpkg produced no $($wanted.Pattern) archive in $vcpkgLib"
+            throw "vcpkg produced no $($wanted.Patterns -join ' or ') archive in $vcpkgLib"
           }
           Write-Host "Using $($found.FullName) as $($wanted.Name)"
           Copy-Item $found.FullName (Join-Path "$prefix\lib" $wanted.Name)

@@ -1,6 +1,7 @@
 use ast_types::{Expr, Stmt};
 
 use crate::errors::TypeError;
+use crate::symbol_table::pending_key;
 use crate::types::Type;
 
 use super::backward::gradient_view_root;
@@ -40,6 +41,107 @@ pub(crate) fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
         Expr::Identifier(ident) => Some((ident.name.clone(), *mutable)),
         _ => None,
     }
+}
+
+/// The borrows a block, `if` or `match` initializer may yield, found through each tail
+/// that produces its value. A tail naming a binding the block declared is followed to that
+/// binding's initializer. Without this the borrow ended with the block that took it, while
+/// the value carrying it lived on in the binding, and its borrowee could be freed under it.
+fn tail_borrow_targets<'a>(
+    expr: &'a Expr,
+    blocks: &mut Vec<&'a [Stmt]>,
+    followed: &mut Vec<&'a str>,
+    out: &mut Vec<(String, bool)>,
+) {
+    let mut expr = expr;
+    while let Expr::Paren(inner, _) = expr {
+        expr = inner;
+    }
+    if let Some(target) = borrow_target_of(expr) {
+        out.push(target);
+        return;
+    }
+    match expr {
+        Expr::Block { stmts, .. } => block_tail_borrow_targets(stmts, blocks, followed, out),
+        Expr::If {
+            then_block,
+            else_if_blocks,
+            else_block,
+            ..
+        } => {
+            let branches = std::iter::once(then_block)
+                .chain(else_if_blocks.iter().map(|(_, block)| block))
+                .chain(else_block.iter());
+            for block in branches {
+                block_tail_borrow_targets(block, blocks, followed, out);
+            }
+        }
+        Expr::Match { arms, .. } => {
+            for arm in arms {
+                tail_borrow_targets(&arm.body, blocks, followed, out);
+            }
+        }
+        // A part of a value carries that value's borrows: a destructuring `val (a, b) = e`
+        // reaches its parts through a generated binding and `.0` / `.1`.
+        Expr::TupleIndex { object, .. } | Expr::FieldAccess { object, .. } => {
+            tail_borrow_targets(object, blocks, followed, out);
+        }
+        Expr::TupleLiteral { elements, .. } => {
+            for element in elements {
+                tail_borrow_targets(element, blocks, followed, out);
+            }
+        }
+        // A returned reference borrows one of the call's borrowed inputs (lifetime
+        // elision), so each is a candidate, as `hold_returned_borrows` takes them.
+        Expr::Call { func, args, .. } => {
+            out.extend(args.iter().filter_map(borrow_target_of));
+            if let Expr::FieldAccess { object, .. } = func.as_ref()
+                && let Some(root) = TypeChecker::place_root_name(object)
+            {
+                out.push((root, false));
+            }
+        }
+        Expr::Identifier(id) if !followed.contains(&id.name.as_str()) => {
+            let init = blocks.iter().rev().find_map(|stmts| {
+                stmts.iter().rev().find_map(|stmt| match stmt {
+                    Stmt::VarDecl {
+                        name,
+                        init: Some(init),
+                        ..
+                    } if name.name == id.name => Some(init),
+                    _ => None,
+                })
+            });
+            if let Some(init) = init {
+                followed.push(&id.name);
+                tail_borrow_targets(init, blocks, followed, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether a value of `ty` holds a reference anywhere a tail could hand one out.
+fn carries_borrow(ty: &Type) -> bool {
+    match ty {
+        Type::Reference { .. } => true,
+        Type::Tuple(elements) => elements.iter().any(carries_borrow),
+        Type::Array { element, .. } => carries_borrow(element),
+        _ => false,
+    }
+}
+
+fn block_tail_borrow_targets<'a>(
+    stmts: &'a [Stmt],
+    blocks: &mut Vec<&'a [Stmt]>,
+    followed: &mut Vec<&'a str>,
+    out: &mut Vec<(String, bool)>,
+) {
+    blocks.push(stmts);
+    if let Some(Stmt::Expr(tail)) = stmts.last() {
+        tail_borrow_targets(tail, blocks, followed, out);
+    }
+    blocks.pop();
 }
 
 /// The binding a `.slice(range)` / `.char_slice(range)` call borrows from, when the
@@ -185,14 +287,8 @@ impl TypeChecker {
                 // second, misleading "undefined variable" report chasing an error
                 // already given.
                 if init_errored && matches!(final_ty, Type::Unknown) {
-                    if let Err(duplicate_name) =
-                        self.symbols.define(name.name.clone(), final_ty, *mutable)
-                    {
-                        self.record_error(TypeError::VariableAlreadyDefined {
-                            name: duplicate_name,
-                            span: name.span,
-                        });
-                    }
+                    self.symbols.define_pending(&name.name, final_ty, *mutable);
+                    self.symbols.commit_pending(&name.name);
                     return Some(());
                 }
 
@@ -212,15 +308,8 @@ impl TypeChecker {
                 let view_root = init
                     .as_ref()
                     .and_then(|init_expr| gradient_view_root(init_expr, &final_ty));
-                if let Err(duplicate_name) =
-                    self.symbols.define(name.name.clone(), final_ty, *mutable)
-                {
-                    self.record_error(TypeError::VariableAlreadyDefined {
-                        name: duplicate_name,
-                        span: name.span,
-                    });
-                    return None;
-                }
+                let holder = pending_key(&name.name);
+                self.symbols.define_pending(&name.name, final_ty, *mutable);
 
                 // Binding the initializer moves it out of its source.
                 if let Some(init_expr) = init {
@@ -230,20 +319,43 @@ impl TypeChecker {
                     // binding hold a persistent borrow of that place, live until
                     // the binding leaves scope.
                     if let Some((place, exclusive)) = borrow_target_of(init_expr) {
-                        self.symbols.attach_borrow(&name.name, &place, exclusive);
+                        self.symbols.attach_borrow(&holder, &place, exclusive);
+                    } else {
+                        let mut targets = Vec::new();
+                        let yields_a_borrow = self
+                            .symbols
+                            .lookup(&holder)
+                            .is_some_and(|symbol| carries_borrow(&symbol.ty));
+                        if yields_a_borrow
+                            && matches!(
+                                init_expr,
+                                Expr::Block { .. } | Expr::If { .. } | Expr::Match { .. }
+                            )
+                        {
+                            tail_borrow_targets(
+                                init_expr,
+                                &mut Vec::new(),
+                                &mut Vec::new(),
+                                &mut targets,
+                            );
+                        }
+                        for (place, exclusive) in targets {
+                            self.symbols.attach_borrow(&holder, &place, exclusive);
+                        }
                     }
                     if let Some(place) = view_root {
-                        self.symbols.attach_borrow(&name.name, &place, false);
+                        self.symbols.attach_borrow(&holder, &place, false);
                     }
-                    if let Some(ty) = self.symbols.lookup(&name.name).map(|s| s.ty.clone()) {
-                        self.hold_returned_borrows(&name.name, init_expr, &ty);
+                    if let Some(ty) = self.symbols.lookup(&holder).map(|s| s.ty.clone()) {
+                        self.hold_returned_borrows(&holder, init_expr, &ty);
                     }
                     // A `mut` loss could be reassigned, and the `.backward()` would then
                     // run the derivative of a call its value no longer came from.
                     if !*mutable {
-                        self.hold_grad_call_borrows(&name.name, init_expr);
+                        self.hold_grad_call_borrows(&holder, &name.name, init_expr);
                     }
                 }
+                self.symbols.commit_pending(&name.name);
 
                 Some(())
             }

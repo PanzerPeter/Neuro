@@ -50,43 +50,6 @@ every return path fills a position with a fresh buffer and arm it in the caller.
 tests: the repro in a loop under a leak check, a field filled from a literal (must not be
 freed), and a field moved out of the returned struct.
 
-## BUG-088: an attribute the compiler does not know is accepted and ignored
-
-- **Status**: open, specification gap
-- **Area**: `semantic-analysis`; attributes are read by name where each one matters
-  (`grad`, `no_grad`, `gpu`, `kernel`, `derive`, `allow`) and never checked as a set
-- **Severity**: minor. Nothing miscompiles, but a misspelled attribute silently does nothing
-
-**Minimal repro**
-
-```neuro
-@no_grda
-func scale() -> f32 { 2.0f32 }
-
-func main() -> i32 {
-    scale() as i32
-}
-```
-
-Observed: compiles and exits 2. The misspelled `@no_grda` is dropped, so inside a `@grad` body
-the call would be differentiated rather than held constant. `@gpu` and `@kernel` are no longer
-part of this: each one's form is checked, and a body that cannot run on a GPU is a compile
-error.
-
-**Open question for the specification**: the custom attributes section says the `@name(args)`
-syntax is extensible, and says nothing about a name no one defined. Either an unknown attribute
-is an error (the usual choice, and the one that keeps a typo from changing a program's meaning),
-or it is ignored.
-
-**Root cause**: confirmed in the code. Each consumer looks for its own attribute name on the
-item and skips everything else; no pass checks an item's attributes against the known set.
-
-**Workaround**: none needed for correct spellings. Check attribute names by hand.
-
-**Fix sketch**: once the rule is settled, one pass over every item's attributes against the
-recognized names, reporting the unknown one at its span. Regression tests: a misspelled
-`@no_grad`, and every recognized attribute still accepted.
-
 ## BUG-085: a struct passed by value never releases the `string` buffers it holds
 
 - **Status**: open, confirmed
@@ -230,41 +193,10 @@ releases what they held before the call. Regression tests: the repro in a loop u
 check, a literal in the place (must not be freed), and a tensor field inside and outside a
 `pool`.
 
-## BUG-050: calling a closure literal in place reports a function type as "non-function"
-
-- **Status**: open, specification gap plus a wrong diagnostic
-- **Area**: `semantic-analysis`; call checking in `type_checkers/expressions/calls.rs`
-- **Severity**: minor. Nothing miscompiles; the program is refused with a message that
-  contradicts itself
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val e = (|x: i32| -> i32 { x + 1 })(3)
-    e
-}
-```
-
-Observed: `error: cannot call non-function type fn(i32) -> i32`, followed by a cascade error
-on every later use of `e`. The type the message prints IS a function type. Binding the closure
-first (`val f = |x: i32| -> i32 { x + 1 }` then `f(3)`) compiles and returns 4.
-
-**Open question for the specification**: the closures section says nothing about calling a
-closure expression directly. Either it is legal, in which case this is a missing call path, or
-it is not, in which case the diagnostic should say that a closure has to be bound before it is
-called. Whichever is chosen, "non-function type" is wrong for a function type.
-
-**Root cause**: not yet confirmed in the code. The call checker appears to accept a callee
-that is a name or a path and to fall through to the non-function error for any other callee
-expression, whatever its type.
-
-**Workaround**: bind the closure to a `val` and call the binding.
-
 ## BUG-049: a `pool` refuses to store some values it could prove are heap memory
 
-- **Status**: open, undecided (reproduces; whether the refusal is a defect or an accepted
-  limit of the provenance walk is not settled)
+- **Status**: open, confirmed. Narrowed: a closure literal argument is admitted through its
+  captures
 - **Area**: `semantic-analysis`; `carries_no_arena` in `type_checkers/pools.rs`
 - **Severity**: minor. Sound (the refusal never lets arena memory escape) but it rejects
   programs whose values never touch the arena
@@ -275,34 +207,32 @@ expression, whatever its type.
 func main() -> i32 {
     val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
     mut out: Tensor<i32, [2, 2]> = [[0, 0], [0, 0]]
-    mut s: string = "none"
-    val c = true
     pool scratch {
-        out = a.map(|x: i32| -> i32 { x * 10 })   // refused
+        val local: Tensor<i32, [2, 2]> = [[5, 6], [7, 8]]
+        out = local.clone()   // refused
     }
-    0
+    out[1, 1]
 }
 ```
 
-The store above is refused with "... outlives the pool". Written another way, the same
-value is accepted: `out = &a + &a` and `out = einsum("ij->ij", a)` compile. A store into a
-binding that outlives the block is emitted with the arena switched off, so none of these
-values can hold arena memory unless an operand already did.
+Expected: exit 8. The language reference routes an allocation whose owner outlives the block
+to the heap, and a store into a binding that outlives the block is emitted with the arena
+switched off, so the clone is heap memory whatever its receiver holds. Observed: refused with
+"... outlives the pool". An `if` / `match` arm or a block that declares a binding of its own
+is refused the same way.
 
 **Root cause**: confirmed in the code. `carries_no_arena` enumerates the expression shapes it
-can prove, and falls back to "may carry arena memory" for everything else. A closure literal
-argument, a method call such as `local.clone()` on a block-local receiver, and an `if` /
-`match` arm or a block that declares a binding of its own are not enumerated, so each is
-refused. Struct, tuple and array literals, and `if` / `match` whose arms are single
-expressions, are proven.
+can prove and falls back to "may carry arena memory" for everything else. A method call on a
+block-local receiver is walked through the receiver, which is arena memory, although a builtin
+`.clone()` copies it out. An arm with bindings is walked before the value is checked, so its
+names do not resolve.
 
 **Workaround**: bind the value inside the block and copy out a scalar, or build it before the
 block.
 
-**Fix sketch**: admit a closure literal argument whose captures are all admitted. An arm that
-declares bindings needs the walk to run after the value is checked, so that its names are
-resolvable. Decide first whether the provenance walk is meant to grow these shapes or whether
-the refusal is the intended boundary.
+**Fix sketch**: admit a builtin `.clone()` under a routed emission whatever its receiver, since
+the copy is the routed allocation. An arm that declares bindings needs the walk to run after the
+value is checked, so that its names resolve.
 
 ## BUG-038: a `string` passed by value to a closure, or returned by one, is released by nobody
 
@@ -539,52 +469,6 @@ whether the existing instantiation walk carries enough context to do that is the
 that decides the shape of the rest. Regression tests want both spellings of the parameter
 name, the turbofish form, the array form, and two distinct instantiations of the outer
 function so a wrong extent could not pass unnoticed.
-
-## BUG-026: a later binding may not reuse a name in the same block
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (scope resolution)
-- **Severity**: minor. The compiler rejects; it never miscompiles, and renaming works
-
-The language reference says a later `val` or `mut` in the same block may reuse an earlier
-binding's name, shadowing it for the rest of the scope, and that shadowing may change the
-type. The checker rejects the second declaration instead.
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val s = "text"
-    val s = 7
-    return s
-}
-```
-
-Expected: compiles, `s` is `i32` and the program returns 7. Observed:
-
-```text
-variable 's' already defined in this scope
-```
-
-Shadowing across *nested* blocks is unaffected: an inner block may reuse an outer name, and
-does the right thing. Only a second declaration at the same nesting level is refused.
-
-**Root cause**: not yet confirmed in the code. The scope resolver treats a re-declaration in
-one scope as a redefinition error rather than as a new binding that displaces the old name.
-
-**Workaround**: give the second binding a different name.
-
-**Fix sketch**: let a declaration in an occupied scope slot replace the entry rather than
-report. Two things have to come with it, and they are the reason this is not a one-line
-change. The reference requires the shadowed value to be dropped at the *normal end of scope*
-rather than early, so the displaced binding stays registered for destruction and both are
-released when the block ends. And the borrow and move checkers key on the name, so a moved
-binding that is then shadowed must not report a use-after-move against the new one. The borrow
-half is the harder one: a borrow records the place it borrows by name, so a `val r = &x` taken
-before a second `val x` would be released against the new `x` when `r` dies, which can clear a
-live borrow of the new binding and let it be moved while that borrow still reads it. A
-regression test needs all three: the type change above, a shadowed `Vec` (both buffers
-freed, exactly once), and a shadow of a moved binding.
 
 ## Taking one of these on
 

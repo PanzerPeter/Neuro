@@ -211,6 +211,11 @@ mention of that name reached the inner slot, reading a stale value or writing th
 buffer. Neither the type checker (which scopes correctly, and rejects the name after the
 block) nor the LLVM verifier could see it: at equal types the IR is well formed.
 
+`codegen_var_decl` calls `bind_name` only after the initializer's source has been read and
+disowned (`mark_moved_for_drop` and the string-flag loads). A declaration may shadow a name in
+its own block, and `val x = x` must disown the `x` it shadows; bound first, the name would
+resolve to the new slot, nothing would be disowned, and both slots would release one buffer.
+
 Match-arm and `val`-else pattern bindings use the same `bind_name` / `restore_bindings` pair
 directly rather than through a frame, because their scope is an arm rather than a block, and
 `val`-else deliberately leaves its ok-branch bindings registered for the enclosing block.

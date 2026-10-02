@@ -176,3 +176,80 @@ func main() -> i32 {
         "expected the borrowee diagnostic, got: {stderr}"
     );
 }
+
+/// BUG-093: when an inner block's shadow died, the borrow it held was released against
+/// the outer binding of the same name, which then could be reassigned under a live view.
+#[test]
+fn regression_bug_093_dying_shadow_keeps_the_outer_borrow() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(7)
+    v.push(8)
+    val s = v.slice(0..2)
+    {
+        val v = 3
+        val r = &v
+    }
+    v = Vec::new()
+    s[1]
+}
+"#;
+    let err = test
+        .check("shadow_release.nr", source)
+        .expect_err("`v` is still borrowed by `s`");
+    assert!(
+        err.contains("cannot assign to 'v' while it is borrowed"),
+        "got: {err}"
+    );
+}
+
+/// BUG-095: a borrow handed out through a block, `if` or `match` tail ended with the block,
+/// so the binding holding it did not freeze its borrowee. Written directly, the same
+/// program was refused. The tail may reach the borrow through a block binding, a
+/// destructured part, or a call returning one of its borrowed arguments.
+#[test]
+fn regression_bug_095_borrow_through_a_tail_is_held() {
+    let test = CompileTest::new();
+    for (name, init) in [
+        (
+            "tail_block.nr",
+            "{\n        val q = v.slice(0..2)\n        q\n    }",
+        ),
+        (
+            "tail_if.nr",
+            "if c { v.slice(0..2) } else { v.slice(0..1) }",
+        ),
+        ("tail_ref.nr", "{\n        val v = &v\n        v\n    }"),
+        (
+            "tail_destructure.nr",
+            "{\n        val (a, b) = (v.slice(0..1), 1)\n        a\n    }",
+        ),
+        (
+            "tail_call.nr",
+            "{\n        val q = pick(&v)\n        q\n    }",
+        ),
+    ] {
+        let source = format!(
+            r#"
+func pick(s: &Vec<i32>) -> &Vec<i32> {{ s }}
+func main() -> i32 {{
+    mut v: Vec<i32> = Vec::new()
+    v.push(7)
+    val c = true
+    val r = {init}
+    v = Vec::new()
+    r.len() as i32
+}}
+"#
+        );
+        let err = test
+            .check(name, &source)
+            .expect_err("`v` is still borrowed by `r`");
+        assert!(
+            err.contains("cannot assign to 'v' while it is borrowed"),
+            "{name}: {err}"
+        );
+    }
+}

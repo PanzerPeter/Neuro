@@ -477,6 +477,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_call(&mangled, args)
             }
 
+            // Any other callee of function type is a value, a closure literal called in
+            // place for one, and goes through its fat pointer like a closure binding.
+            _ if matches!(callee.ty, neuro_hir::HirType::Function { .. }) => {
+                self.codegen_indirect_call(callee, args)
+            }
+
             _ => Err(CodegenError::UnsupportedType(
                 "unsupported call expression".to_string(),
             )),

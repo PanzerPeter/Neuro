@@ -170,8 +170,11 @@ impl TypeChecker {
     /// argument has to be a place the borrow can be held on: `&mut name`, or a `&mut`
     /// binding passed on. Anything else leaves the loss unable to run a `.backward()`,
     /// which reports it there.
-    pub(crate) fn hold_grad_call_borrows(&mut self, holder: &str, init: &Expr) {
-        if !self.backward_losses.contains(holder) {
+    ///
+    /// `name` is the binding's source name, which `backward_losses` is keyed by; `holder`
+    /// is the key the binding is held under while its initializer is recorded.
+    pub(crate) fn hold_grad_call_borrows(&mut self, holder: &str, name: &str, init: &Expr) {
+        if !self.backward_losses.contains(name) {
             return;
         }
         let Expr::Call { func, args, .. } = peel_parens(init) else {

@@ -232,3 +232,19 @@ func main() -> i32 {
     );
     assert!(error.contains("borrows mutably"), "{error}");
 }
+
+/// BUG-088: a misspelled attribute compiled and did nothing, so `@no_grda` left a call
+/// differentiated. The attribute set is fixed and an unknown name is an error.
+#[test]
+fn regression_bug_088_unknown_attribute_is_a_compile_error() {
+    let test = CompileTest::new();
+    let source = r#"
+@no_grda
+func scale() -> f32 { 2.0f32 }
+func main() -> i32 { scale() as i32 }
+"#;
+    let err = test
+        .check("unknown_attribute.nr", source)
+        .expect_err("an unknown attribute must be refused");
+    assert!(err.contains("`@no_grda` is not an attribute"), "got: {err}");
+}

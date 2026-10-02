@@ -14,7 +14,7 @@ pub(crate) mod traits;
 use super::{BoundInfo, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
-use ast_types::Item;
+use ast_types::{Attribute, Item};
 use shared_types::Identifier;
 use std::collections::HashMap;
 
@@ -48,6 +48,28 @@ const IMPLEMENTED_DERIVES: &[&str] = &[COPY_TRAIT, CLONE_TRAIT, DEBUG_TRAIT, PAR
 
 /// Derive arguments the spec names as derivable but that no pass generates yet.
 const PENDING_DERIVES: &[&str] = &[HASHABLE_DERIVE];
+/// The attributes some pass acts on. The set is fixed by the language, so any other name is an error:
+/// ignoring it would let a misspelled `@no_grad` leave a call differentiated.
+const IMPLEMENTED_ATTRIBUTES: &[&str] = &[
+    DERIVE_ATTRIBUTE,
+    "grad",
+    "no_grad",
+    "gpu",
+    "kernel",
+    "allow",
+];
+
+/// Attributes the spec names that no pass acts on yet. Accepting one would be the silent
+/// no-op the fixed set exists to prevent.
+const PENDING_ATTRIBUTES: &[&str] = &[
+    "derivative",
+    "model",
+    "export",
+    "inline",
+    "test",
+    "cfg",
+    "deprecated",
+];
 /// The compiler-known `Drop` lang-item trait name.
 const DROP_TRAIT: &str = "Drop";
 /// The destructor method name required inside an `impl Drop` block.
@@ -107,6 +129,44 @@ impl TypeChecker {
                 Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => {}
             }
         }
+    }
+
+    /// Reject every attribute outside the fixed set on a function, struct or method.
+    pub(crate) fn check_attribute_names(&mut self, items: &[Item]) {
+        for item in items {
+            let attributes: Vec<&Attribute> = match item {
+                Item::Function(def) => def.attributes.iter().collect(),
+                Item::Struct(def) => def.attributes.iter().collect(),
+                Item::Impl(def) => def.methods.iter().flat_map(|m| &m.attributes).collect(),
+                _ => continue,
+            };
+            for attr in attributes {
+                self.check_attribute_name(attr);
+            }
+        }
+    }
+
+    fn check_attribute_name(&mut self, attr: &Attribute) {
+        let name = attr.name.name.as_str();
+        if IMPLEMENTED_ATTRIBUTES.contains(&name) {
+            return;
+        }
+        if PENDING_ATTRIBUTES.contains(&name) {
+            self.record_error(TypeError::UnimplementedAttribute {
+                name: name.to_string(),
+                span: attr.span,
+            });
+            return;
+        }
+        self.record_error(TypeError::UnknownAttribute {
+            name: name.to_string(),
+            known: IMPLEMENTED_ATTRIBUTES
+                .iter()
+                .map(|a| format!("@{a}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            span: attr.span,
+        });
     }
 
     /// Record a [`TypeError::ReservedNameSeparator`] if `ident` contains `__`.

@@ -164,22 +164,17 @@ fn error_undefined_function() {
     );
 }
 
+/// BUG-026: a later binding in the same block may reuse a name, and may change its type.
+/// It was refused as a redefinition.
 #[test]
-fn error_duplicate_variable() {
+fn regression_bug_026_same_block_shadowing_is_accepted() {
     let source = r#"func test() -> i32 {
-        val x: i32 = 1
+        val x = "text"
         val x: i32 = 2
         return x
     }"#;
     let items = syntax_parsing::parse(source).unwrap();
-    let result = type_check(&items);
-    assert!(result.is_err());
-    let errors = result.unwrap_err();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::VariableAlreadyDefined { .. }))
-    );
+    assert!(type_check(&items).is_ok());
 }
 
 /// A name bound twice by one closure's parameter list is a redefinition, as it is

@@ -802,6 +802,12 @@ impl TypeChecker {
 
             _ => {
                 let expr_ty = self.check_expr(func, None).unwrap_or(Type::Unknown);
+                // Any expression of function type is callable, a closure literal called in
+                // place included: the value is the same one a binding would hold.
+                if let Type::Function { params, ret } = expr_ty {
+                    self.check_call_args(args, &params, *span);
+                    return Some(*ret);
+                }
                 self.record_error(TypeError::NotCallable {
                     ty: expr_ty,
                     span: *span,

@@ -185,3 +185,23 @@ func main() -> i32 {
         "expected a redefinition diagnostic, got: {err}"
     );
 }
+
+/// BUG-050: a closure literal called in place was refused as a "non-function type"
+/// while printing a function type. Any expression of function type is callable.
+#[test]
+fn regression_bug_050_closure_literal_called_in_place() {
+    let test = CompileTest::new();
+    let source = r#"
+func add1(x: i32) -> i32 { x + 1 }
+func dbl(x: i32) -> i32 { x * 2 }
+func main() -> i32 {
+    val k = 10
+    val a = (|x: i32| -> i32 { x + k })(3)
+    val c = true
+    val b = (if c { add1 } else { dbl })(5)
+    val e = (|x: i32| -> i32 { (|y: i32| -> i32 { y * 3 })(x) })(2)
+    a + b + e
+}
+"#;
+    assert_eq!(test.compile_and_run("closure_in_place.nr", source), Ok(25));
+}
