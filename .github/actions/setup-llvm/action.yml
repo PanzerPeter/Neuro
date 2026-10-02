@@ -182,10 +182,13 @@ runs:
         $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
         if ($actual -ne $sha256) { throw "SHA-256 mismatch: expected $sha256, got $actual" }
 
-        # Only the trees an LLVM + MLIR build reads. The tarball's only symlinks sit in
-        # llvm/utils/mlgo-utils, which Windows tar cannot create and nothing here uses.
+        # Only the trees an LLVM + MLIR build reads. libc is one of them: LLVM's
+        # configure fails without the libc shared headers even when the libc project
+        # is off. The tarball's only symlinks in these trees sit in llvm/utils/mlgo-utils,
+        # which Windows tar cannot create; LLVM_INCLUDE_UTILS=OFF below keeps CMake from
+        # looking for that directory.
         tar.exe -xf $archive -C $work --exclude '*/mlgo-utils/*' `
-          "$src/llvm" "$src/mlir" "$src/cmake" "$src/third-party"
+          "$src/llvm" "$src/mlir" "$src/cmake" "$src/third-party" "$src/libc"
         if ($LASTEXITCODE -ne 0) { throw "tar extract failed (exit $LASTEXITCODE)" }
 
         # cl.exe and Ninja come from the Visual Studio developer environment.
@@ -217,6 +220,7 @@ runs:
           -DLLVM_ENABLE_DIA_SDK=OFF `
           -DLLVM_BUILD_TOOLS=OFF `
           -DLLVM_BUILD_UTILS=OFF `
+          -DLLVM_INCLUDE_UTILS=OFF `
           -DLLVM_INCLUDE_TESTS=OFF `
           -DMLIR_INCLUDE_TESTS=OFF `
           -DLLVM_INCLUDE_BENCHMARKS=OFF `

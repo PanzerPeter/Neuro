@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.2] - 2026-10-02
+
+### Fixed
+
+- `ci`: the Windows LLVM + MLIR source build failed at CMake configure. LLVM 23 needs the
+  `libc` tree's shared headers even with the libc project off, and the CI extract left it
+  out; it is extracted now. Configure also stopped on `llvm/utils/mlgo-utils`, which the
+  extract skips for its symlinks, so the build passes `LLVM_INCLUDE_UTILS=OFF` (no util was
+  built or installed before either).
+
 ## [5.1.1] - 2026-10-02
 
 ### Changed
