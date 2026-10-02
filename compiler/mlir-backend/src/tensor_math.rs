@@ -10,6 +10,7 @@
 
 use crate::{
     errors::MlirError,
+    guards::Lowering,
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, empty_tensor, indexing_maps, iterator_types,
@@ -26,7 +27,7 @@ use melior::{
         operation::OperationBuilder,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirMathOp, HirTarget, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirMathOp, HirType};
 
 /// Lower `math`, a `Math` over a float tensor, into a fresh tensor of the operand's shape.
 /// A scalar operand is the LLVM backend's.
@@ -36,7 +37,7 @@ pub(crate) fn build_math<'c, 'a>(
     block: &'a Block<'c>,
     math: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::Math {
         op,
@@ -55,12 +56,12 @@ pub(crate) fn build_math<'c, 'a>(
     {
         return Ok(None);
     }
-    let Some(source) = build_expression(context, location, block, operand, scope, target)? else {
+    let Some(source) = build_expression(context, location, block, operand, scope, lowering)? else {
         return Ok(None);
     };
     let mut inputs = vec![source];
     if let Some(exponent) = exponent {
-        let Some(power) = build_expression(context, location, block, exponent, scope, target)?
+        let Some(power) = build_expression(context, location, block, exponent, scope, lowering)?
         else {
             return Ok(None);
         };
@@ -193,10 +194,11 @@ mod tests {
     /// The device bodies before they are lowered for any GPU.
     fn device_module(program: &HirProgram) -> String {
         let context = new_context();
-        let (module, _) = build_linkable_module(&context, program, &|function| {
-            function.target == HirTarget::FollowsOperands
-        })
-        .expect("the bodies build");
+        let (module, _) =
+            build_linkable_module(&context, program, crate::Overflow::Checked, &|function| {
+                function.target == HirTarget::FollowsOperands
+            })
+            .expect("the bodies build");
         module.as_operation().to_string()
     }
 
@@ -230,8 +232,12 @@ mod tests {
             chip: "sm_80".to_string(),
         };
         let available = device_math(&new_context(), &target, "isa");
-        let bodies = lower_for_gpu(&program("    val r = g.exp()"), &target)
-            .expect("no library is no error for an outlined body");
+        let bodies = lower_for_gpu(
+            &program("    val r = g.exp()"),
+            &target,
+            crate::Overflow::Checked,
+        )
+        .expect("no library is no error for an outlined body");
         assert_eq!(bodies.functions.is_empty(), !available);
     }
 }

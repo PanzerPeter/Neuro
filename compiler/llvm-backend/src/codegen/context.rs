@@ -418,6 +418,8 @@ pub(crate) struct CodegenContext<'ctx> {
     /// `Device` when any linked body runs on a device, which has each `pool` block
     /// release the device arena at its exit too.
     pub(crate) body_memory: crate::BodyMemory,
+    /// Each checked external body's checks, by symbol. See [`crate::ExternalBodies::guards`].
+    pub(crate) external_guards: HashMap<String, Vec<crate::BodyGuard>>,
 
     /// Whose runtime a device body or tensor links, and what DLPack calls its memory.
     pub(crate) gpu_vendor: crate::GpuVendor,
@@ -469,6 +471,7 @@ impl<'ctx> CodegenContext<'ctx> {
             pool_marks: Vec::new(),
             pool_locals: Vec::new(),
             body_memory: crate::BodyMemory::Host,
+            external_guards: HashMap::new(),
             gpu_vendor: crate::GpuVendor::Nvidia,
         }
     }

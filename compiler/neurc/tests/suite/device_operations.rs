@@ -243,28 +243,113 @@ func main() -> i32 {
     }
 }
 
-/// An integer tensor has no device form (the kernels carry no overflow or zero-divisor
-/// guard), so its operator refuses a device operand at the operation.
-#[cfg(unix)]
+/// Integer tensors take the device forms float ones do, checks included: operators, `@`,
+/// reductions, a sort, `einsum`, a traversal whose closure does integer arithmetic and a
+/// compound assignment give the host's answers at both tiers. A mismatch count of zero.
+#[cfg(target_os = "linux")]
 #[test]
-fn an_integer_operator_refuses_a_device_operand() {
+fn integer_operations_on_the_device_match_the_host() {
     const SOURCE: &str = r#"
+func mismatch(a: &Tensor<i32, [9, 7]>, b: &Tensor<i32, [9, 7]>) -> i32 {
+    mut bad = 0
+    mut i = 0
+    while i < 9 {
+        mut j = 0
+        while j < 7 {
+            if a[i, j] != b[i, j] { bad += 1 }
+            j += 1
+        }
+        i += 1
+    }
+    bad
+}
+
 func main() -> i32 {
-    val k = Tensor::<i32, [4]>::ones().to(Device::GPU(0))
-    val r = &k + &k
+    mut m: Tensor<i32, [9, 7]> = Tensor::zeros()
+    mut i = 0
+    while i < 9 {
+        mut j = 0
+        while j < 7 {
+            m[i, j] = ((i * 7 + j) % 11) - 5
+            j += 1
+        }
+        i += 1
+    }
+    val ones: Tensor<i32, [7]> = Tensor::ones()
+    val d = ones * 3
+    val g = m.clone().to(Device::GPU(0))
+    val gd = d.clone().to(Device::GPU(0))
+    val host = (&m + &d) * &m - &m / &d
+    val dev = ((&g + &gd) * &g - &g / &gd).to(Device::CPU)
+    val w: Tensor<i32, [7, 2]> = Tensor::ones()
+    val gw = w.clone().to(Device::GPU(0))
+    val product = (&m @ &w).sum() - (&g @ &gw).to(Device::CPU).sum()
+    val sorted = m.sort(axis: 1)
+    val dsorted = g.sort(axis: 1).to(Device::CPU)
+    val mapped = m.map(|x: i32| -> i32 { x * 3 - 1 })
+    val dmapped = g.map(|x: i32| -> i32 { x * 3 - 1 }).to(Device::CPU)
+    val e = einsum("ij,ij->i", &m, &m)
+    val de = einsum("ij,ij->i", &g, &g).to(Device::CPU)
+    mut hc = m.clone()
+    hc *= 2
+    mut dc = g.clone()
+    dc *= 2
+    val back = dc.to(Device::CPU)
+    println("{mismatch(&host, &dev)} {product} {m.sum() - g.sum()} {m.max()} {g.min()}")
+    println("{mismatch(&sorted, &dsorted)} {mismatch(&mapped, &dmapped)} {e[4] - de[4]} {mismatch(&hc, &back)}")
     return 0
 }
 "#;
     let test = CompileTest::new();
-    let output = run(&test, "integer.nr", SOURCE, false);
+    let output = run(&test, "integers.nr", SOURCE, false);
     if without_gpu(&output) {
         return;
     }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.starts_with(ON_DEVICE) && stderr.contains("integer.nr:4:13"),
-        "{stderr}"
-    );
+    assert_ran(&output, 0, "0 0 0 5 -5\n0 0 0 0\n");
+}
+
+/// A check an integer operation fails on the device aborts at the operation with the host's
+/// own diagnostic, as the same operation on host tensors does: an overflow on the debug tier,
+/// a zero divisor, a remainder by zero in a traversal's closure.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_failed_integer_check_on_the_device_is_the_hosts_panic() {
+    for (operation, message, at) in [
+        (
+            "val r = (&g + &one).to(Device::CPU)",
+            "integer overflow",
+            "&g",
+        ),
+        (
+            "val r = (&g / &zeros).to(Device::CPU)",
+            "division by zero",
+            "&g",
+        ),
+        (
+            "val r = g.map(|x: i32| -> i32 { x % z }).to(Device::CPU)",
+            "remainder by zero",
+            "x %",
+        ),
+    ] {
+        let source = format!(
+            "func main() -> i32 {{\n    val h: Tensor<i32, [3]> = [1, 2147483647, 3]\n    val one: Tensor<i32, [3]> = Tensor::ones()\n    val zeros: Tensor<i32, [3]> = Tensor::zeros()\n    val z = 0\n    val g = h.to(Device::GPU(0))\n    println(\"before\")\n    {operation}\n    return 0\n}}\n"
+        );
+        let test = CompileTest::new();
+        let output = run(&test, "checked.nr", &source, false);
+        if without_gpu(&output) {
+            return;
+        }
+        let column = 5 + operation.find(at).expect("the operation's position");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.starts_with(&format!("panic: {message} at "))
+                && stderr.ends_with(&format!("/checked.nr:8:{column}\n"))
+                && stderr.lines().count() == 1,
+            "`{operation}`: {stderr}"
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "before\n");
+        assert!(!output.status.success());
+    }
 }
 
 /// `.sort()`, `.argsort()` and `.topk()` on a device tensor give the host's order exactly:
@@ -355,29 +440,6 @@ func main() -> i32 {
             "1.0 2 3.0 0\n",
         );
     }
-}
-
-/// An integer tensor has no device form, a sort included, so it refuses a device receiver.
-#[cfg(unix)]
-#[test]
-fn an_integer_sort_refuses_a_device_operand() {
-    const SOURCE: &str = r#"
-func main() -> i32 {
-    val k = Tensor::<i32, [4]>::ones().to(Device::GPU(0))
-    val r = k.sort()
-    return 0
-}
-"#;
-    let test = CompileTest::new();
-    let output = run(&test, "integer_sort.nr", SOURCE, false);
-    if without_gpu(&output) {
-        return;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.starts_with(ON_DEVICE) && stderr.contains("integer_sort.nr:4:13"),
-        "{stderr}"
-    );
 }
 
 /// Slices (stepped, reversed, at a run-time position), a permutation and `einsum` (a
@@ -633,14 +695,14 @@ func main() -> i32 {
 }
 
 /// What has no device form refuses a device tensor at the operation: a traversal whose
-/// function does integer arithmetic (the GPU has none of its guards) or is reached through a
-/// local, and a compound assignment to a field, which a backend cannot borrow mutably.
+/// function shifts an integer (no device form) or is reached through a local, and a compound
+/// assignment to a field, which a backend cannot borrow mutably.
 #[cfg(unix)]
 #[test]
 fn what_has_no_device_form_refuses_a_device_tensor() {
     for (operation, column) in [
         (
-            "val r = g.map(|x: f32| -> f32 { (x as i32 + 1) as f32 })",
+            "val r = g.map(|x: f32| -> f32 { ((x as i32) << 1) as f32 })",
             13,
         ),
         ("val r = g.map(f)", 13),

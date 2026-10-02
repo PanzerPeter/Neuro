@@ -111,7 +111,7 @@ fn off_linux_a_gpu_function_is_a_compile_error() {
 #[test]
 fn a_body_that_cannot_become_a_kernel_is_a_compile_error() {
     let test = CompileTest::new();
-    let text = "@gpu\nfunc add(a: Tensor<i32, [4]>, b: Tensor<i32, [4]>) -> Tensor<i32, [4]> {\n    a + b\n}\n@gpu\nfunc total(a: &Tensor<f32, [4]>) -> f32 {\n    a.sum()\n}\nfunc main() -> i32 { return 0 }\n";
+    let text = "@gpu\nfunc add(a: Tensor<i32, [4]>, b: Tensor<i32, [4]>) -> Tensor<i32, [4]> {\n    a % b\n}\n@gpu\nfunc total(a: &Tensor<f32, [4]>) -> f32 {\n    a.sum()\n}\nfunc main() -> i32 { return 0 }\n";
     let source = test.write_source("not_a_kernel.nr", text);
     let compiled = test
         .compile(&source)

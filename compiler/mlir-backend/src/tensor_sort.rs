@@ -20,6 +20,7 @@
 
 use crate::{
     errors::MlirError,
+    guards::{Element, Lowering},
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, empty_tensor, fill_block, indexing_maps,
@@ -38,7 +39,7 @@ use melior::{
         r#type::{IntegerType, RankedTensorType},
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirSortKind, HirTarget, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirSortKind, HirType};
 
 /// The width of the integer attribute `linalg.index` names its dimension with.
 const DIMENSION_BITS: u32 = 64;
@@ -60,7 +61,7 @@ pub(crate) fn build_sort<'c, 'a>(
     block: &'a Block<'c>,
     sort: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Vec<Value<'c, 'a>>>, MlirError> {
     let HirExprKind::TensorSort {
         receiver,
@@ -77,7 +78,10 @@ pub(crate) fn build_sort<'c, 'a>(
     let Some(extents) = shape.iter().copied().collect::<Option<Vec<usize>>>() else {
         return Ok(None);
     };
-    if !matches!(element, HirType::F32 | HirType::F64) || *axis >= extents.len() {
+    let Some(compared) = Element::of(element) else {
+        return Ok(None);
+    };
+    if *axis >= extents.len() {
         return Ok(None);
     }
     let outputs: Vec<(Picked, &HirType)> = match (kind, &sort.ty) {
@@ -89,7 +93,8 @@ pub(crate) fn build_sort<'c, 'a>(
         },
         (HirSortKind::TopK(_), _) => return Ok(None),
     };
-    let Some(source) = build_expression(context, location, block, receiver, scope, target)? else {
+    let Some(source) = build_expression(context, location, block, receiver, scope, lowering)?
+    else {
         return Ok(None);
     };
 
@@ -101,7 +106,7 @@ pub(crate) fn build_sort<'c, 'a>(
         source,
         &extents,
         *axis,
-        element_type,
+        (element_type, compared),
         *descending,
     )?;
     let mut results = Vec::with_capacity(outputs.len());
@@ -133,7 +138,7 @@ fn count<'c, 'a>(
     source: Value<'c, 'a>,
     extents: &[usize],
     axis: usize,
-    element: Type<'c>,
+    element: (Type<'c>, Element),
     descending: bool,
 ) -> Result<Value<'c, 'a>, MlirError> {
     let rank = extents.len();
@@ -184,9 +189,9 @@ fn gather<'c, 'a>(
     let rank = shape.len();
     let tensor_type = map_type(context, result)?;
     let element_type = map_type(context, element)?;
-    let zero: Attribute = match picked {
-        Picked::Element => FloatAttribute::new(context, element_type, 0.0).into(),
-        Picked::Position => IntegerAttribute::new(element_type, 0).into(),
+    let zero: Attribute = match Element::of(element) {
+        Some(Element::Float) => FloatAttribute::new(context, element_type, 0.0).into(),
+        _ => IntegerAttribute::new(element_type, 0).into(),
     };
     let seeded = seed(
         context,
@@ -267,7 +272,7 @@ fn along_run(rank: usize, axis: usize) -> OperandAxes {
 fn count_block<'c>(
     context: &'c Context,
     location: Location<'c>,
-    element: Type<'c>,
+    (element, kind): (Type<'c>, Element),
     axis: usize,
     run: usize,
     descending: bool,
@@ -283,8 +288,8 @@ fn count_block<'c>(
         &block,
         arith::cmpi(context, CmpiPredicate::Ult, compared, position, location),
     )?;
-    let mine_first = precedes(context, location, &block, mine, theirs, descending)?;
-    let theirs_first = precedes(context, location, &block, theirs, mine, descending)?;
+    let mine_first = precedes(context, location, &block, (mine, theirs), kind, descending)?;
+    let theirs_first = precedes(context, location, &block, (theirs, mine), kind, descending)?;
     let one = append(
         &block,
         arith::constant(context, IntegerAttribute::new(index, 1).into(), location),
@@ -354,15 +359,26 @@ fn linalg_index<'c>(
 
 /// Whether `a` strictly precedes `b` under the LLVM backend's sorting comparator: in
 /// order by `<` (by `>` when `descending`), with a NaN sorting last in either direction,
-/// so it precedes nothing and everything else precedes it.
+/// so it precedes nothing and everything else precedes it. An integer compares by its
+/// signedness and has no NaN.
 pub(crate) fn precedes<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
-    a: Value<'c, 'a>,
-    b: Value<'c, 'a>,
+    (a, b): (Value<'c, 'a>, Value<'c, 'a>),
+    kind: Element,
     descending: bool,
 ) -> Result<Value<'c, 'a>, MlirError> {
+    let integer = match (kind, descending) {
+        (Element::Float, _) => None,
+        (Element::Signed(_), true) => Some(CmpiPredicate::Sgt),
+        (Element::Signed(_), false) => Some(CmpiPredicate::Slt),
+        (Element::Unsigned(_), true) => Some(CmpiPredicate::Ugt),
+        (Element::Unsigned(_), false) => Some(CmpiPredicate::Ult),
+    };
+    if let Some(predicate) = integer {
+        return append(block, arith::cmpi(context, predicate, a, b, location));
+    }
     let predicate = if descending {
         CmpfPredicate::Ogt
     } else {
@@ -410,7 +426,8 @@ mod tests {
             ("    val s = g.argsort(0)", 4),
             ("    val (v, i) = g.topk(3)", 6),
         ] {
-            let bodies = lower_for_gpu(&program(body), &nvidia()).expect("a selection lowers");
+            let bodies = lower_for_gpu(&program(body), &nvidia(), crate::Overflow::Checked)
+                .expect("a selection lowers");
             assert_eq!(bodies.functions.len(), 1, "`{body}`");
             let ir = &bodies.llvm_ir;
             assert_eq!(
@@ -423,8 +440,12 @@ mod tests {
 
     #[test]
     fn topk_writes_its_two_results_through_two_out_params() {
-        let bodies =
-            lower_for_gpu(&program("    val (v, i) = g.topk(3)"), &nvidia()).expect("lowers");
+        let bodies = lower_for_gpu(
+            &program("    val (v, i) = g.topk(3)"),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("lowers");
         let (_, symbol) = &bodies.functions[0];
         let ir = &bodies.llvm_ir;
         let start = ir
@@ -445,7 +466,8 @@ mod tests {
                 f.target = HirTarget::Host;
             }
         }
-        let bodies = lower_for_link(&program).expect("the CPU path lowers");
+        let bodies =
+            lower_for_link(&program, crate::Overflow::Checked).expect("the CPU path lowers");
         assert!(bodies.functions.is_empty(), "{:?}", bodies.functions);
     }
 }

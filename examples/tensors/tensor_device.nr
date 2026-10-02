@@ -6,11 +6,12 @@
 // tensors therefore keeps its data on the GPU the whole way, and only `.to(Device::CPU)`
 // brings the answer back.
 //
-// Outside `@gpu`, a float tensor operation runs on the device its tensors live on too:
-// operators and `@`, compound assignment, reductions, sorts, slices, `.t()`, `einsum`, the
-// elementwise math methods, and `.map` / `.zip` / `.reduce` over a closure, as well as reading
-// or writing one element and `.clone()`. An operation with no device form (integer
-// arithmetic, say) aborts with a diagnostic asking for `.to(Device::CPU)` first.
+// Outside `@gpu`, a float or integer tensor operation runs on the device its tensors live on
+// too: operators and `@`, compound assignment, reductions, sorts, slices, `.t()`, `einsum`,
+// the elementwise math methods, and `.map` / `.zip` / `.reduce` over a closure, as well as
+// reading or writing one element and `.clone()`. Integer operations keep the host's checks
+// there. An operation with no device form (`%` on tensors, say) aborts with a diagnostic
+// asking for `.to(Device::CPU)` first.
 //
 // On a machine with several GPUs, `Device::GPU(1)` and up name the others, and a `@gpu`
 // call runs on the GPU its tensors are on. Like every program with a bare `@gpu`
@@ -50,6 +51,14 @@ func main() -> i32 {
     mut shifted = corner.map(|v: f32| -> f32 { v - 1.0f32 })
     shifted *= 2.0f32
     println("a corner, shifted and doubled on the device: {shifted[1, 1]}")
+
+    // Integer tensors run on the GPU too, with the checks the host makes: an element that
+    // overflowed here in a debug build, or a zero divisor in any build, would stop the
+    // program at the operation with the host's own `panic:` line.
+    val counts: Tensor<i32, [4]> = [7, 12, 3, 9]
+    val on_device = counts.to(Device::GPU(0))
+    val doubled = (&on_device * 2 - &on_device / 3).sort(descending: true)
+    println("integer counts on the device: largest {doubled[0]}, total {doubled.sum()}")
 
     val result = state.to(Device::CPU)
 

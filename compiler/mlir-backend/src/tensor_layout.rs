@@ -11,6 +11,7 @@
 
 use crate::{
     errors::MlirError,
+    guards::Lowering,
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, empty_tensor, fill_block, indexing_maps,
@@ -52,7 +53,7 @@ pub(crate) fn build_slice<'c, 'a>(
     block: &'a Block<'c>,
     slice: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::TensorIndex { object, axes } = &slice.kind else {
         return Ok(None);
@@ -67,7 +68,7 @@ pub(crate) fn build_slice<'c, 'a>(
     {
         return Ok(None);
     }
-    let Some(source) = build_expression(context, location, block, object, scope, target)? else {
+    let Some(source) = build_expression(context, location, block, object, scope, lowering)? else {
         return Ok(None);
     };
 
@@ -105,7 +106,7 @@ pub(crate) fn build_slice<'c, 'a>(
             }
             HirTensorAxis::Position(position) => {
                 let Some(at) =
-                    position_index(context, location, block, position, *extent, scope, target)?
+                    position_index(context, location, block, position, *extent, scope, lowering)?
                 else {
                     return Ok(None);
                 };
@@ -172,7 +173,7 @@ fn position_index<'c, 'a>(
     position: &HirExpr,
     extent: usize,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let index = Type::index(context);
     match &position.kind {
@@ -188,8 +189,9 @@ fn position_index<'c, 'a>(
                 ),
             )?))
         }
-        HirExprKind::Variable(_) if target == HirTarget::FollowsOperands => {
-            let Some(value) = build_expression(context, location, block, position, scope, target)?
+        HirExprKind::Variable(_) if lowering.target == HirTarget::FollowsOperands => {
+            let Some(value) =
+                build_expression(context, location, block, position, scope, lowering)?
             else {
                 return Ok(None);
             };
@@ -263,7 +265,7 @@ pub(crate) fn build_permute<'c, 'a>(
     block: &'a Block<'c>,
     cast: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::TensorShapeCast {
         receiver,
@@ -294,7 +296,8 @@ pub(crate) fn build_permute<'c, 'a>(
     if walked.contains(&None) {
         return Ok(None);
     }
-    let Some(source) = build_expression(context, location, block, receiver, scope, target)? else {
+    let Some(source) = build_expression(context, location, block, receiver, scope, lowering)?
+    else {
         return Ok(None);
     };
 
@@ -342,7 +345,8 @@ mod tests {
     }
 
     fn launches(program: &HirProgram) -> usize {
-        let bodies = lower_for_gpu(program, &nvidia()).expect("the body lowers");
+        let bodies =
+            lower_for_gpu(program, &nvidia(), crate::Overflow::Checked).expect("the body lowers");
         assert_eq!(bodies.functions.len(), 1, "one outlined body");
         bodies
             .llvm_ir
@@ -361,7 +365,8 @@ mod tests {
     #[test]
     fn a_checked_position_is_a_parameter_of_the_gather() {
         let program = program("    val k = 5u64\n    val s = g[k, 2..17]");
-        let bodies = lower_for_gpu(&program, &nvidia()).expect("the body lowers");
+        let bodies =
+            lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked).expect("the body lowers");
         assert_eq!(bodies.functions.len(), 1);
         // The position crosses as itself, after the receiver's rank-2 descriptor.
         assert!(
@@ -383,9 +388,17 @@ mod tests {
                 "@gpu\nfunc row(a: &Tensor<f32, [4, 3]>) -> Tensor<f32, [3]> {{\n{body}\n}}\n\nfunc main() -> i32 {{\n    val a = Tensor::<f32, [4, 3]>::ones()\n    val r = row(&a)\n    return 0\n}}\n"
             )
         };
-        lower_for_gpu(&parse(&source("    a[2, ..]")), &nvidia())
-            .expect("a literal position lowers");
-        let refused = lower_for_gpu(&parse(&source("    val i = 2u64\n    a[i, ..]")), &nvidia());
+        lower_for_gpu(
+            &parse(&source("    a[2, ..]")),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("a literal position lowers");
+        let refused = lower_for_gpu(
+            &parse(&source("    val i = 2u64\n    a[i, ..]")),
+            &nvidia(),
+            crate::Overflow::Checked,
+        );
         assert!(
             matches!(refused, Err(MlirError::GpuBodiesNotLowered(_))),
             "nothing checks a `@gpu` body's position: {refused:?}"

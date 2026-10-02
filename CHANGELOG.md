@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-10-02
+
+### Added
+
+- Integer tensor arithmetic goes through MLIR like float arithmetic: a straight-line function
+  over `i8` to `u64` tensors (`+ - * /`, `@`) is computed by the MLIR path and linked in, with
+  the checks the LLVM backend makes. An overflowing element still panics in a `-O0` build and a
+  zero divisor in every build, with the same `panic:` line and location as before.
+- Integer tensors run on the GPU. Outside `@gpu`, an operation on an integer device tensor
+  (operators, `@`, `.sum()` / `.max()` / `.min()`, sorts, slices, `.t()`, `einsum`, compound
+  assignment, and `.map` / `.zip` / `.reduce` with a closure doing integer arithmetic) now runs
+  on its GPU instead of aborting, and a `@gpu` function may take integer tensors. A check that
+  fails on the GPU aborts at the operation with the diagnostic the host prints for the same
+  data.
+
+### Changed
+
+- A `@kernel` body's integer arithmetic follows the build's tier: in a `-O0` build an overflow,
+  or `MIN / -1`, stops the kernel and the program, as an index past an extent does. From `-O1`
+  up it wraps, as before.
+
 ## [5.1.2] - 2026-10-02
 
 ### Fixed

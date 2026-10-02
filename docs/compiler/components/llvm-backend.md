@@ -275,6 +275,12 @@ parsed into the module's own context and linked in after every body, and each li
 made internal so the optimizer can inline it. inkwell stays the terminal code-emission layer on
 every path.
 
+A body with integer arithmetic carries checks it cannot raise itself, so it takes an `i64`
+status word as one more descriptor before the result's. The wrapper fills it with all ones, and
+after the call reads the number of the check that failed, if any, from its low 12 bits and raises
+the panic its own arithmetic would: `integer overflow`, `division by zero` or `remainder by
+zero`, at the operator. For a device body the word is staged and copied back like a result.
+
 Bodies marked `BodyMemory::Device` launch GPU kernels, which read and write device memory only,
 so the wrapper stages them. It copies each tensor operand into a device buffer, hands the kernels
 a device buffer for the result, copies the result back into the host tensor it returns, and

@@ -25,6 +25,10 @@ use super::device_memory::{
 const CUDA_RUNTIME_IR: &str = include_str!("gpu_runtime.ll");
 const HIP_RUNTIME_IR: &str = include_str!("gpu_runtime_hip.ll");
 
+/// The bits of a checked body's status word that number the check it failed. The bits
+/// above them order failures for the body; see [`crate::ExternalBodies::guards`].
+const STATUS_CHECK_MASK: u64 = 0xFFF;
+
 /// The runtime's answer to which body a `@gpu(fallback: true)` function runs: nonzero
 /// when it found a usable GPU.
 const GPU_USABLE_FN: &str = "__neuro_gpu_usable";
@@ -156,6 +160,35 @@ impl<'ctx> CodegenContext<'ctx> {
             self.push_memref_descriptor(tensor_ty, data, &mut arg_types, &mut args)?;
         }
 
+        // A checked body reports a failed check through a status word, which it takes
+        // between its parameters and its results.
+        let guards = self
+            .external_guards
+            .get(symbol)
+            .cloned()
+            .unwrap_or_default();
+        let status = match guards.is_empty() {
+            true => None,
+            false => {
+                let status_ty = status_type();
+                let i64_type = self.context.i64_type();
+                // All ones, above every key, which a failed check lowers.
+                let slot = self.builder.build_alloca(i64_type, "external.status")?;
+                self.builder.build_store(slot, i64_type.const_all_ones())?;
+                let data = match staging.as_mut() {
+                    Some(staging) => {
+                        let staged = self.stage_status(staging, slot, &status_ty)?;
+                        let written = staged.written;
+                        written_back.push((status_ty.clone(), staged));
+                        written
+                    }
+                    None => slot,
+                };
+                self.push_memref_descriptor(&status_ty, data, &mut arg_types, &mut args)?;
+                Some(slot)
+            }
+        };
+
         // A `@kernel` returns nothing: it computes into its `&mut` tensors. A tuple
         // (`.topk`'s values and indices) is one out-param per tensor, in order.
         let result_ty = Type::from_hir(&func_def.return_type);
@@ -193,6 +226,28 @@ impl<'ctx> CodegenContext<'ctx> {
 
         if let Some(staging) = staging {
             self.close_device_staging(staging, &written_back)?;
+        }
+        if let Some(slot) = status {
+            let i64_type = self.context.i64_type();
+            let key = self
+                .builder
+                .build_load(i64_type, slot, "external.status")?
+                .into_int_value();
+            let failed = self.builder.build_and(
+                key,
+                i64_type.const_int(STATUS_CHECK_MASK, false),
+                "external.failed",
+            )?;
+            for (index, guard) in guards.iter().enumerate() {
+                let number = i64_type.const_int(index as u64 + 1, false);
+                let ok = self.builder.build_int_compare(
+                    IntPredicate::NE,
+                    failed,
+                    number,
+                    "external.passed",
+                )?;
+                self.codegen_body_guard(ok, guard.kind, guard.offset)?;
+            }
         }
         for handle in consumed {
             self.build_dlpack_release(handle)?;
@@ -395,6 +450,15 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 }
 
+/// The status word a checked body reports through, as the one-element tensor its descriptor
+/// describes.
+fn status_type() -> Type {
+    Type::Tensor {
+        element: Box::new(Type::I64),
+        shape: vec![Some(1)],
+    }
+}
+
 /// Parse the bodies' IR and link it into `module`, then make each symbol internal:
 /// they exist only to be called by the functions
 /// [`CodegenContext::codegen_external_body`] wraps around them, so the optimizer may
@@ -509,6 +573,7 @@ mod tests {
                 ("consume".to_string(), "ext_consume".to_string()),
             ],
             memory,
+            guards: Vec::new(),
         }
     }
 
@@ -715,6 +780,7 @@ mod tests {
             llvm_ir: LAUNCHER.to_string(),
             functions: vec![("fill".to_string(), "ext_fill".to_string())],
             memory: BodyMemory::Device,
+            guards: Vec::new(),
         }];
         let ir = build_module(
             &context,
@@ -829,11 +895,13 @@ mod tests {
                     llvm_ir: DEVICE_SCALE.to_string(),
                     functions: vec![("scale".to_string(), "ext_scale".to_string())],
                     memory: BodyMemory::Device,
+                    guards: Vec::new(),
                 },
                 ExternalBodies {
                     llvm_ir: HOST_CONSUME.to_string(),
                     functions: vec![("consume".to_string(), "ext_consume".to_string())],
                     memory: BodyMemory::Host,
+                    guards: Vec::new(),
                 },
             ],
             GpuVendor::Nvidia,
@@ -949,6 +1017,71 @@ mod tests {
         );
         assert!(!body(&ir, "scale").contains("__neuro_gpu_usable"), "{ir}");
         assert!(body(&ir, "consume").contains("__neuro_gpu_usable"), "{ir}");
+    }
+
+    #[test]
+    fn a_checked_body_takes_a_status_word_and_its_caller_panics_for_it() {
+        // `consume`'s body takes the status word, one more rank-1 descriptor, between its
+        // operand and its result.
+        const CHECKED: &str = r#"
+            define void @ext_consume(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9, ptr %10, ptr %11, i64 %12, i64 %13, i64 %14) {
+              ret void
+            }
+        "#;
+        let guards = vec![(
+            "ext_consume".to_string(),
+            vec![
+                crate::BodyGuard {
+                    kind: crate::BodyGuardKind::DivisionByZero,
+                    offset: 0,
+                },
+                crate::BodyGuard {
+                    kind: crate::BodyGuardKind::Overflow,
+                    offset: 0,
+                },
+            ],
+        )];
+        for memory in [BodyMemory::Host, BodyMemory::Device] {
+            let external = ExternalBodies {
+                llvm_ir: CHECKED.to_string(),
+                functions: vec![("consume".to_string(), "ext_consume".to_string())],
+                memory,
+                guards: guards.clone(),
+            };
+            let ast = syntax_parsing::parse(SOURCE).expect("parsing failed");
+            let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
+            let context = Context::create();
+            let ir = build_module(
+                &context,
+                &hir,
+                OptimizationLevelSetting::O0,
+                SOURCE,
+                "checked.nr",
+                &[external],
+                GpuVendor::Nvidia,
+            )
+            .expect("a checked body links")
+            .module
+            .print_to_string()
+            .to_string();
+            let consume = body(&ir, "consume");
+            let filled = position(consume, "store i64 -1, ptr %external.status", 0);
+            let called = position(consume, "call void @ext_consume(", filled);
+            let read = position(consume, "load i64, ptr %external.status", called);
+            position(consume, "and i64 %external.status", read);
+            assert!(
+                ir.contains("panic: division by zero at checked.nr")
+                    && ir.contains("panic: integer overflow at checked.nr"),
+                "each check panics with the backend's own words:\n{ir}"
+            );
+            if memory == BodyMemory::Device {
+                let staged = position(consume, "call void @mgpuMemcpy(", filled);
+                assert!(
+                    staged < called,
+                    "the word reaches the device first:\n{consume}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -98,6 +98,15 @@ handles are packed into the tuple returned. A
 and is released through `build_dlpack_release` after the call, the same release the ordinary body
 would have reached at scope exit.
 
+A symbol named in `ExternalBodies::guards` computes integer arithmetic with checks it cannot
+raise itself. It takes one more descriptor between its parameters and its results, over an `i64`
+status word the wrapper fills with all ones (an `alloca`, or for a device body a word staged with
+`stage_status` and copied back with the results). A failed check lowers the word to a key whose low
+12 bits number the check in the symbol's `BodyGuard` list, counted from 1. After the call the
+wrapper masks those bits and, check by check, raises the panic its own arithmetic would
+(`codegen_body_guard`: `integer overflow`, `division by zero` or `remainder by zero`, at the
+check's offset), so a body computed elsewhere fails exactly as one computed here.
+
 `link_external_bodies` parses the text into the module's own context (the IR crosses as text, so
 the other backend never shares an `LLVMContext` with this one), links it, and makes each symbol
 `internal` so the optimizer may inline it into its one caller. The caller promises every named

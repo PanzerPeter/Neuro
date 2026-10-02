@@ -54,7 +54,7 @@ pub enum MlirError {
 
     /// `@gpu` functions whose bodies this path cannot turn into kernels, each with its
     /// declaration's span. Running one on the host instead is what `@gpu` forbids.
-    #[error("no GPU kernel for `@gpu` {}: the GPU path lowers straight-line tensor code over `f32` / `f64` tensors of static shape and rank 1 or more (operators, `@`, reductions, sorts, elementwise math, slices at literal positions, permutations, `einsum`), with a tensor result; elementwise math also needs the GPU vendor's device math library (libdevice from the CUDA toolkit, or ROCm's)", names(.0))]
+    #[error("no GPU kernel for `@gpu` {}: the GPU path lowers straight-line tensor code over `f32` / `f64` or integer tensors of static shape and rank 1 or more (operators, `@`, reductions, sorts, elementwise math, slices at literal positions, permutations, `einsum`), with a tensor result; elementwise math also needs the GPU vendor's device math library (libdevice from the CUDA toolkit, or ROCm's)", names(.0))]
     GpuBodiesNotLowered(Vec<(String, Span)>),
 
     /// `@kernel` functions whose bodies this path cannot lower, each with the construct

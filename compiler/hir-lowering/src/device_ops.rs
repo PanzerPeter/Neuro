@@ -61,21 +61,34 @@ struct Outliner {
     functions: Vec<HirFunction>,
 }
 
-/// Whether a GPU body can compute over a tensor of type `ty`: a floating-point element, as
-/// the MLIR path requires (it has none of the integer guards), and a static shape of rank 1
-/// or more, since an operation over rank 0 has no parallel axis to launch across.
+/// Whether a GPU body can compute over a tensor of type `ty`: a numeric element (an integer
+/// one keeps the host's checks there, reported back through the call), and a static shape of
+/// rank 1 or more, since an operation over rank 0 has no parallel axis to launch across.
 fn device_tensor(ty: &HirType) -> bool {
     matches!(
         ty.referent(),
         HirType::Tensor { element, shape, .. }
-            if float(element)
+            if numeric(element)
                 && !shape.is_empty()
                 && shape.iter().all(Option::is_some)
     )
 }
 
-fn float(ty: &HirType) -> bool {
-    matches!(ty, HirType::F32 | HirType::F64)
+/// An element a GPU body computes with: `f16` / `bf16` carry no arithmetic in the HIR.
+fn numeric(ty: &HirType) -> bool {
+    matches!(
+        ty,
+        HirType::F32
+            | HirType::F64
+            | HirType::I8
+            | HirType::I16
+            | HirType::I32
+            | HirType::I64
+            | HirType::U8
+            | HirType::U16
+            | HirType::U32
+            | HirType::U64
+    )
 }
 
 /// A node of an outlinable operator tree: an operation producing a device-capable tensor
@@ -137,22 +150,9 @@ fn is_place(expr: &HirExpr) -> bool {
 /// Whether every capture of a closure is a scalar a device body can be handed, so a
 /// traversal calling it may run on a GPU.
 fn scalar_captures(captures: &[HirCapture]) -> bool {
-    captures.iter().all(|capture| {
-        matches!(
-            capture.ty,
-            HirType::F32
-                | HirType::F64
-                | HirType::I8
-                | HirType::I16
-                | HirType::I32
-                | HirType::I64
-                | HirType::U8
-                | HirType::U16
-                | HirType::U32
-                | HirType::U64
-                | HirType::Bool
-        )
-    })
+    captures
+        .iter()
+        .all(|capture| numeric(&capture.ty) || capture.ty == HirType::Bool)
 }
 
 impl Outliner {
@@ -207,7 +207,7 @@ impl Outliner {
             // A full contraction (`"ii->"`) yields a scalar; one with output letters is a
             // tensor, and so a node of an operator tree, taken above.
             HirExprKind::TensorEinsum { operands, .. } => {
-                if device_tensor(&expr.ty) || !float(&expr.ty) || !operands.iter().all(readable) {
+                if device_tensor(&expr.ty) || !numeric(&expr.ty) || !operands.iter().all(readable) {
                     return false;
                 }
                 let span = expr.span;
@@ -254,7 +254,7 @@ impl Outliner {
                 (HirTensorApply::Zip, Some(other)) => {
                     device_tensor(&expr.ty) && device_tensor(&other.ty) && reducible(other)
                 }
-                (HirTensorApply::Reduce, Some(_)) => float(&expr.ty),
+                (HirTensorApply::Reduce, Some(_)) => numeric(&expr.ty),
                 _ => false,
             };
         if !admitted {

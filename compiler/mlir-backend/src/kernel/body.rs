@@ -18,6 +18,7 @@ use neuro_hir::{
 use shared_types::{Literal, Span};
 
 use super::GuardStyle;
+use crate::guards::{Guard, GuardKind, Overflow, SITE_BITS, STATUS_BITS};
 
 pub(super) use traversal::{Launch, outlined_launch};
 
@@ -26,10 +27,11 @@ const GRID_DIMENSIONS: [&str; 3] = ["x", "y", "z"];
 
 const INDEX_OUT_OF_BOUNDS: &str = "index out of bounds in a `@kernel` body";
 const DIVIDE_BY_ZERO: &str = "integer division by zero in a `@kernel` body";
+const REMAINDER_BY_ZERO: &str = "integer remainder by zero in a `@kernel` body";
+const OVERFLOW: &str = "integer overflow in a `@kernel` body";
 
-/// Why a traversal's function with integer arithmetic stays on the host: the GPU has none
-/// of the overflow and zero-divisor guards the host runs it with.
-const STRICT_INTEGERS: &str = "integer arithmetic, which has no device form";
+/// The launcher parameter a checked body stores a failed check's number into.
+pub(super) const STATUS: &str = "%status";
 
 /// Why a math function has no device form in this compile.
 const NO_DEVICE_MATH: &str = "a math function, which needs the GPU vendor's device math library (libdevice from the CUDA toolkit, or ROCm's) when compiling";
@@ -118,6 +120,15 @@ struct SliceView {
     chunk: usize,
 }
 
+/// How a thread that failed an integer check stops. A `@kernel` stops the kernel, as an
+/// index past an extent does ([`GuardStyle`]). An outlined body lowers [`STATUS`] to the
+/// check's key and leaves the launch, so its caller panics as the host would.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Failure {
+    Stop,
+    Report,
+}
+
 /// Where `break` and `continue` go for one enclosing loop.
 struct LoopTargets {
     label: Option<String>,
@@ -147,10 +158,19 @@ pub(crate) struct BodyEmitter<'f> {
     /// Whether the vendor's device math library is there to call. Without it a math
     /// function has no device form.
     math: bool,
-    /// Whether integer arithmetic is refused. A `@kernel` wraps on overflow and stops on a
-    /// zero divisor in its own way; a traversal's function must compute what the host's
-    /// does, guards included, so it has none.
-    strict: bool,
+    /// Whether integer overflow is a failed check, the debug tier, or wraps. A zero divisor
+    /// fails on both.
+    overflow: Overflow,
+    /// What a failed integer check does to the thread.
+    pub(super) failure: Failure,
+    /// The checks emitted so far, in the order their numbers count.
+    sites: Vec<Guard>,
+    /// The block a thread leaves the launch through, which a failed check branches to.
+    stop: Option<String>,
+    /// The row-major position, an `i64`, of the element this thread computes, where a failed
+    /// check's key needs it: a thread stops at its first failure, so the earliest element's
+    /// is the one the host meets first.
+    element: Option<String>,
     /// Where a `return` with a value stores it: the slot of the function being called, and
     /// its type. A `@kernel` returns nothing.
     returns: Option<(String, &'static str)>,
@@ -159,7 +179,7 @@ pub(crate) struct BodyEmitter<'f> {
 impl<'f> BodyEmitter<'f> {
     pub(crate) fn new(
         function: &'f HirFunction,
-        guard: GuardStyle,
+        (guard, overflow): (GuardStyle, Overflow),
         threads: [u32; 3],
         grid: Vec<usize>,
         math: bool,
@@ -189,7 +209,11 @@ impl<'f> BodyEmitter<'f> {
             loops: Vec::new(),
             terminated: false,
             math,
-            strict: false,
+            overflow,
+            failure: Failure::Stop,
+            sites: Vec::new(),
+            stop: None,
+            element: None,
             returns: None,
         }
     }
@@ -991,44 +1015,78 @@ impl<'f> BodyEmitter<'f> {
         if int_width(operand_ty).is_none() {
             return Err(Refused::new(expr.span, "this operator on a `bool`"));
         }
-        if self.strict && !matches!(op, BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor) {
-            return Err(Refused::new(expr.span, STRICT_INTEGERS));
-        }
-        // Integer arithmetic wraps, as it does in a release build; the kernel has no
-        // debug tier to panic in.
         let name = match op {
-            BinaryOp::Add => "addi",
-            BinaryOp::Subtract => "subi",
-            BinaryOp::Multiply => "muli",
+            BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Modulo => {
+                return Ok(self.checked_int(op, (&lhs, &rhs), operand_ty, expr.span.start));
+            }
             BinaryOp::BitAnd => "andi",
             BinaryOp::BitOr => "ori",
             BinaryOp::BitXor => "xori",
-            BinaryOp::Divide | BinaryOp::Modulo => {
-                return Ok(self.int_div_rem(op, &lhs, &rhs, operand_ty, mlir));
-            }
             _ => return Err(Refused::new(expr.span, "this operator on an integer")),
         };
         Ok(self.assign(&format!("arith.{name} {lhs}, {rhs} : {mlir}")))
     }
 
-    /// A zero divisor stops the thread. `MIN / -1` has no representable quotient, so it
-    /// divides by 1 instead, which gives the wrapped answer (`MIN`, remainder 0) the host
-    /// gives in a release build without handing the instruction its one undefined case.
-    fn int_div_rem(
+    /// Integer `op` as the host computes it, with its checks: an overflow on the debug tier
+    /// through LLVM's `with.overflow` intrinsics, a zero divisor on every tier, `MIN / -1` on
+    /// the debug tier. A divisor that failed is replaced by 1, so nothing undefined runs
+    /// before the thread stops; on the release tier that is also `MIN / -1`'s wrap.
+    fn checked_int(
         &mut self,
         op: BinaryOp,
-        lhs: &str,
-        rhs: &str,
+        (lhs, rhs): (&str, &str),
         ty: &HirType,
-        mlir: &str,
+        offset: usize,
     ) -> String {
-        let zero = self.assign(&format!("arith.constant 0 : {mlir}"));
-        let nonzero = self.assign(&format!("arith.cmpi ne, {rhs}, {zero} : {mlir}"));
-        self.guard(&nonzero, DIVIDE_BY_ZERO);
+        let overflow = self.overflow;
+        let mlir = scalar_type(ty).unwrap_or("i64");
+        let unsigned = is_unsigned(ty);
+        let intrinsic = match op {
+            BinaryOp::Add => "add",
+            BinaryOp::Subtract => "sub",
+            BinaryOp::Multiply => "mul",
+            _ => return self.checked_div_rem(op, (lhs, rhs), ty, offset),
+        };
+        if overflow == Overflow::Wrapping {
+            return self.assign(&format!("arith.{intrinsic}i {lhs}, {rhs} : {mlir}"));
+        }
+        let sign = if unsigned { "u" } else { "s" };
+        let pair = format!("!llvm.struct<({mlir}, i1)>");
+        let both = self.assign(&format!(
+            "\"llvm.intr.{sign}{intrinsic}.with.overflow\"({lhs}, {rhs}) : ({mlir}, {mlir}) -> {pair}"
+        ));
+        let value = self.assign(&format!("llvm.extractvalue {both}[0] : {pair}"));
+        let overflowed = self.assign(&format!("llvm.extractvalue {both}[1] : {pair}"));
+        self.fail_if(&overflowed, GuardKind::Overflow, offset);
+        value
+    }
+
+    fn checked_div_rem(
+        &mut self,
+        op: BinaryOp,
+        (lhs, rhs): (&str, &str),
+        ty: &HirType,
+        offset: usize,
+    ) -> String {
+        let overflow = self.overflow;
+        let mlir = scalar_type(ty).unwrap_or("i64");
         let remainder = matches!(op, BinaryOp::Modulo);
+        let zero = self.assign(&format!("arith.constant 0 : {mlir}"));
+        let one = self.assign(&format!("arith.constant 1 : {mlir}"));
+        let by_zero = self.assign(&format!("arith.cmpi eq, {rhs}, {zero} : {mlir}"));
+        let kind = match remainder {
+            true => GuardKind::RemainderByZero,
+            false => GuardKind::DivisionByZero,
+        };
+        self.fail_if(&by_zero, kind, offset);
+        let divisor = self.assign(&format!("arith.select {by_zero}, {one}, {rhs} : {mlir}"));
         if is_unsigned(ty) {
             let name = if remainder { "remui" } else { "divui" };
-            return self.assign(&format!("arith.{name} {lhs}, {rhs} : {mlir}"));
+            return self.assign(&format!("arith.{name} {lhs}, {divisor} : {mlir}"));
         }
         let width = int_width(ty).unwrap_or(64);
         let min = self.assign(&format!(
@@ -1036,13 +1094,55 @@ impl<'f> BodyEmitter<'f> {
             signed_bits(1i128 << (width - 1), width)
         ));
         let minus_one = self.assign(&format!("arith.constant -1 : {mlir}"));
-        let one = self.assign(&format!("arith.constant 1 : {mlir}"));
         let lhs_min = self.assign(&format!("arith.cmpi eq, {lhs}, {min} : {mlir}"));
-        let rhs_minus_one = self.assign(&format!("arith.cmpi eq, {rhs}, {minus_one} : {mlir}"));
+        let rhs_minus_one = self.assign(&format!("arith.cmpi eq, {divisor}, {minus_one} : {mlir}"));
         let overflows = self.assign(&format!("arith.andi {lhs_min}, {rhs_minus_one} : i1"));
-        let divisor = self.assign(&format!("arith.select {overflows}, {one}, {rhs} : {mlir}"));
+        if overflow == Overflow::Checked {
+            self.fail_if(&overflows, GuardKind::Overflow, offset);
+        }
+        let safe = self.assign(&format!(
+            "arith.select {overflows}, {one}, {divisor} : {mlir}"
+        ));
         let name = if remainder { "remsi" } else { "divsi" };
-        self.assign(&format!("arith.{name} {lhs}, {divisor} : {mlir}"))
+        self.assign(&format!("arith.{name} {lhs}, {safe} : {mlir}"))
+    }
+
+    /// Stop the thread when `failed` holds: a `@kernel`'s whole kernel, or, for an outlined
+    /// body, after recording the check at `offset` and lowering [`STATUS`] to its key (an
+    /// atomic unsigned min, see `crate::guards`: the element's position above the check's
+    /// number, so the earliest element any thread failed at is the one reported).
+    fn fail_if(&mut self, failed: &str, kind: GuardKind, offset: usize) {
+        if self.failure == Failure::Stop {
+            let message = match kind {
+                GuardKind::Overflow => OVERFLOW,
+                GuardKind::DivisionByZero => DIVIDE_BY_ZERO,
+                GuardKind::RemainderByZero => REMAINDER_BY_ZERO,
+            };
+            let all = self.assign("arith.constant true");
+            let passed = self.assign(&format!("arith.xori {failed}, {all} : i1"));
+            self.guard(&passed, message);
+            return;
+        }
+        self.sites.push(Guard { kind, offset });
+        let number = self.sites.len();
+        let stop = self.stop.clone().unwrap_or_default();
+        let report = self.block();
+        let ok = self.block();
+        self.cond_branch(failed, &report, &ok);
+        self.start(&report);
+        let word = format!("i{STATUS_BITS}");
+        let mut key = self.assign(&format!("arith.constant {number} : {word}"));
+        if let Some(element) = self.element.clone() {
+            let shift = self.assign(&format!("arith.constant {SITE_BITS} : {word}"));
+            let shifted = self.assign(&format!("arith.shli {element}, {shift} : {word}"));
+            key = self.assign(&format!("arith.ori {shifted}, {key} : {word}"));
+        }
+        let first = self.assign("arith.constant 0 : index");
+        self.assign(&format!(
+            "memref.atomic_rmw minu {key}, {STATUS}[{first}] : ({word}, memref<1x{word}>) -> {word}"
+        ));
+        self.branch(&stop);
+        self.start(&ok);
     }
 
     /// `&&` / `||`: the right operand runs only when the left one leaves the answer open,
@@ -1084,12 +1184,15 @@ impl<'f> BodyEmitter<'f> {
         let value = self.expr(operand, exit)?;
         let text = match (op, &operand.ty) {
             (UnaryOp::Negate, ty) if is_float(ty) => format!("arith.negf {value} : {mlir}"),
-            (UnaryOp::Negate, ty) if int_width(ty).is_some() && self.strict => {
-                return Err(Refused::new(expr.span, STRICT_INTEGERS));
-            }
             (UnaryOp::Negate, ty) if int_width(ty).is_some() => {
                 let zero = self.assign(&format!("arith.constant 0 : {mlir}"));
-                format!("arith.subi {zero}, {value} : {mlir}")
+                // `-x` is `0 - x` on the host, so it fails where that subtraction does.
+                return Ok(self.checked_int(
+                    BinaryOp::Subtract,
+                    (&zero, &value),
+                    ty,
+                    expr.span.start,
+                ));
             }
             (UnaryOp::Not, HirType::Bool) => {
                 let all = self.assign("arith.constant true");

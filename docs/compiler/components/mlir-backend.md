@@ -97,8 +97,9 @@ func.func @f(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> tensor<2x3xf32> 
 }
 ```
 
-Float elements use the `arith` float operations and integer elements theirs, with division
-splitting on signedness (`divsi` / `divui`).
+Float elements use the `arith` float operations. Integer elements use theirs, with division
+splitting on signedness (`divsi` / `divui`), plus the LLVM backend's checks, described under
+[Linking into a compile](#linking-into-a-compile).
 
 ### Broadcasting
 
@@ -229,11 +230,19 @@ stage: `PassPipelineFailed`, `TranslationFailed`, `LlvmVerificationFailed`.
 
 `lower_for_link` builds a second module holding only the bodies that are safe to swap in, each
 defined under `__neuro_mlir_` plus its function's name, and returns its LLVM IR with the
-`(function, symbol)` pairs. A body qualifies when it lowers (above) and its signature is `f32` /
-`f64` scalars and static tensors of them, owned or behind `&`, returning a static tensor.
+`(function, symbol)` pairs. A body qualifies when it lowers (above) and its signature is numeric
+scalars and static tensors of them, owned or behind `&`, returning a static tensor.
 
-Integer elements stay on the LLVM backend because it guards them (an overflowing element panics
-in a debug build, a zero divisor in every build) and `arith` has neither guard. A dynamic
+The LLVM backend checks integer elements: an overflowing element panics in a debug build (`-O0`),
+a zero divisor in every build, each naming the operator. A body here cannot panic, and on a GPU
+nothing can stop the program, so a checked body takes one more parameter, an `i64` status word
+its caller fills with all ones. A failed check (LLVM's `with.overflow` intrinsics for `+ - *`, a
+compare for a divisor) lowers the word with an atomic unsigned min to a key: the operation's
+number, then the element's row-major position, then the check's number in the low 12 bits. The
+smallest key is the failure the host would have stopped at, whichever GPU thread got there first.
+`lower_for_link` returns each symbol's checks with it, and the LLVM backend panics for the one
+left in the word after the call, with its own message and location. `neurc` passes the tier down,
+so overflow checks exist only in a debug build. A dynamic
 signature never has a body to link, since the frontend gives a `?` axis no arithmetic. The module
 declares nothing, because a declaration here would name a Neuro-ABI function at an MLIR
 signature.
@@ -304,7 +313,8 @@ A `@kernel` body is the per-thread code itself, so it does not go through `linal
 extents and the `threads` block shape, and a `gpu.launch` whose region is the body. Locals are
 `memref.alloca` slots hoisted to the region's entry and control flow is `cf` branches, so a loop
 needs no loop-carried values and `break` or `return` is a plain branch. Every tensor index is
-bounds-checked and every integer divisor tested for zero: NVIDIA stops the thread with
+bounds-checked, every integer divisor tested for zero and, in a debug build, every integer
+`+ - *` tested for overflow: NVIDIA stops the thread with
 `cf.assert` (a device assertion with a message), and AMD, whose `rocdl` lowering has no
 `cf.assert`, with a trap. The block size is written as a constant, because `gpu.block_dim`
 lowers to a ROCm device-library call on AMD.
@@ -319,8 +329,10 @@ A construct the body lowering does not cover (a function call, a slice, a `match
 The same per-thread lowering runs the outlined operations `linalg` cannot express: a compound
 assignment, one thread per element writing the target's own buffer, and `.map` / `.zip`, one
 thread per element calling the closure inline, with `.reduce` folding in a single thread in the
-host's order. There it refuses integer arithmetic, which the GPU would run without the host's
-guards, and a body it refuses keeps its host copy rather than being an error. See
+host's order. Integer arithmetic there reports a failed check through the same status word and
+stops the thread; in a `@kernel` it stops the kernel instead, as a bad index does, and an overflow
+is checked in a debug build only. A body the lowering refuses keeps its host copy rather than
+being an error. See
 [`kernel/body/traversal.rs`](../../../compiler/mlir-backend/src/kernel/body/traversal.rs).
 
 ## Coexistence with inkwell

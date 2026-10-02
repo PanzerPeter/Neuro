@@ -64,8 +64,8 @@ Native Executable (`.exe` on Windows, no extension on Unix)
 
 The typed HIR (`neuro-hir`) is the stable, backend-agnostic contract between the frontend (parser +
 type checker) and the backends. `llvm-backend` consumes it, and so does the experimental `mlir-backend`.
-`neurc` asks the latter for the straight-line `f32` / `f64` tensor bodies it computes exactly as the
-LLVM backend would, and the LLVM backend links those in, wrapped in the program's own tensor ABI,
+`neurc` asks the latter for the straight-line float and integer tensor bodies it computes exactly as
+the LLVM backend would, integer checks included, and the LLVM backend links those in, wrapped in the program's own tensor ABI,
 instead of generating them. On Linux it also lowers each `@gpu` function's body, and each
 `@kernel` function's per-thread body, through the MLIR GPU dialects to an NVIDIA or AMD kernel,
 and the LLVM backend links that kernel in with its launcher and the GPU runtime. See the [HIR Lowering](components/hir-lowering.md),

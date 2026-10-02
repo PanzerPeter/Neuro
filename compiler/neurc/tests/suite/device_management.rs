@@ -110,14 +110,14 @@ fn a_gpu_index_the_machine_lacks_is_refused() {
 
 /// Host code cannot dereference device memory, so a tensor operation with no device form
 /// checks where its operand lives and names the way out, at the operation. A traversal whose
-/// function does integer arithmetic has none on any build; off Linux the operators,
+/// function shifts an integer has none on any build; off Linux the operators,
 /// reductions, slices and traversals have none either. `device_operations.rs`
 /// covers the operations that do run on the device.
 #[cfg(unix)]
 #[test]
 fn host_code_refuses_a_device_tensor_at_the_operation() {
     // Each operation's tensor operand starts in column 13, after `    val r = `.
-    let mut operations = vec!["val r = g.map(|v: f32| -> f32 { (v as i32 * 2) as f32 })"];
+    let mut operations = vec!["val r = g.map(|v: f32| -> f32 { ((v as i32) << 1) as f32 })"];
     if !cfg!(target_os = "linux") {
         operations.extend([
             "val r = g.map(|v: f32| v * 2.0f32)",

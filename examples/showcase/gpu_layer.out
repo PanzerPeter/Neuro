@@ -1,3 +1,4 @@
 batch 0: activated total 4.0, row peak 0.75, leading unit 0, first row's unit 1 0.25, host agrees: true
 batch 1: activated total 4.0, row peak 0.75, leading unit 0, first row's unit 1 0.25, host agrees: true
 batch 2: activated total 3.25, row peak 0.5625, leading unit 0, first row's unit 1 0.125, host agrees: true
+rows saw 216 samples, the busiest 96, row 0 16 a batch

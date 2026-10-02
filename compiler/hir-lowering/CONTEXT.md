@@ -427,8 +427,8 @@ an identifier that is no local but names a function becomes a closure forwarding
 ### Device operations
 `device_ops.rs` runs last in `lower_program`, after the derivatives, and only when the program
 lowered a tensor `.to(...)` (`transfers`), the one way a device tensor comes to exist. It
-outlines each tensor operation a GPU body can compute (a float tensor of static shape, rank 1 or
-more) out of host code (`Host` functions, methods, closures) into a `HirTarget::FollowsOperands`
+outlines each tensor operation a GPU body can compute (a numeric tensor of static shape, rank 1 or
+more; an integer one keeps the host's checks there) out of host code (`Host` functions, methods, closures) into a `HirTarget::FollowsOperands`
 function named `__device_op_N`, its parameters named `__operandN`. A maximal tree becomes one
 function over its leaves: `+ - * / @` and a permuting shape cast take their operands as written,
 elementwise math, a slice and an `einsum` with output letters only read theirs, so each takes

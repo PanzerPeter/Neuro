@@ -14,9 +14,14 @@ mod body;
 
 use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
 
-use crate::{errors::KernelRefusal, gpu::GpuTarget, lower::LINKED_SYMBOL_PREFIX};
+use crate::{
+    errors::KernelRefusal,
+    gpu::GpuTarget,
+    guards::{Guard, MAX_SITES, Overflow, STATUS_BITS},
+    lower::LINKED_SYMBOL_PREFIX,
+};
 
-use body::{BodyEmitter, Launch, Refused, memref_type, outlined_launch, scalar_type};
+use body::{BodyEmitter, Launch, Refused, STATUS, memref_type, outlined_launch, scalar_type};
 
 /// How a body stops a thread that broke a runtime rule (an index past an extent, a zero
 /// divisor). NVIDIA lowers `cf.assert` to its device assertion, which prints the message
@@ -36,11 +41,12 @@ impl GuardStyle {
     }
 }
 
-/// The launchers of a program's kernels: one MLIR module in text, and the `(function,
-/// symbol)` pairs it defines.
+/// The launchers of a program's kernels: one MLIR module in text, the `(function, symbol)`
+/// pairs it defines, and the checks of each symbol that reports through a status word.
 pub(crate) struct KernelLaunchers {
     pub(crate) text: String,
     pub(crate) functions: Vec<(String, String)>,
+    pub(crate) guards: Vec<(String, Vec<Guard>)>,
 }
 
 /// Every `@kernel` function in `program` as a `func.func` that launches its body, in MLIR
@@ -51,7 +57,9 @@ pub(crate) struct KernelLaunchers {
 /// A function outlined to follow its operands joins them when its body is a compound
 /// assignment or a `.map` / `.zip` / `.reduce` the per-thread lowering covers, its result
 /// (if any) an out-param after its parameters, as `linalg`'s are. One it does not cover is
-/// left to the host, which is no error.
+/// left to the host, which is no error. Its integer arithmetic carries the host's checks,
+/// the overflow ones where `overflow` says they panic, reported through a status word the
+/// launcher takes after its parameters, as a `linalg` body's are.
 ///
 /// `math` answers whether the GPU vendor's device math library is there to call; it is
 /// asked only of a body that calls a math function.
@@ -63,11 +71,13 @@ pub(crate) struct KernelLaunchers {
 pub(crate) fn kernel_launchers(
     program: &HirProgram,
     target: &GpuTarget,
+    overflow: Overflow,
     math: &dyn Fn() -> bool,
 ) -> Result<KernelLaunchers, Vec<KernelRefusal>> {
     let guard = GuardStyle::for_target(target);
     let mut text = String::from("module {\n");
     let mut functions = Vec::new();
+    let mut guards = Vec::new();
     let mut refusals = Vec::new();
     for item in &program.items {
         let HirItem::Function(function) = item else {
@@ -75,8 +85,12 @@ pub(crate) fn kernel_launchers(
         };
         let symbol = format!("{LINKED_SYMBOL_PREFIX}{}", function.name);
         if function.target == HirTarget::FollowsOperands {
-            if let Some(launcher) = follows_operands(program, function, &symbol, guard, math) {
+            let launched = follows_operands(program, function, &symbol, (guard, overflow), math);
+            if let Some((launcher, checks)) = launched {
                 text.push_str(&launcher);
+                if !checks.is_empty() {
+                    guards.push((symbol.clone(), checks));
+                }
                 functions.push((function.name.clone(), symbol));
             }
             continue;
@@ -84,7 +98,7 @@ pub(crate) fn kernel_launchers(
         let HirTarget::Kernel { threads } = function.target else {
             continue;
         };
-        match launcher(function, &symbol, threads, guard, math) {
+        match launcher(function, &symbol, threads, (guard, overflow), math) {
             Ok(launcher) => {
                 text.push_str(&launcher);
                 functions.push((function.name.clone(), symbol));
@@ -100,7 +114,11 @@ pub(crate) fn kernel_launchers(
     if !refusals.is_empty() {
         return Err(refusals);
     }
-    Ok(KernelLaunchers { text, functions })
+    Ok(KernelLaunchers {
+        text,
+        functions,
+        guards,
+    })
 }
 
 /// One kernel's launcher: the grid sizes, then a `gpu.launch` whose region is the body.
@@ -108,7 +126,7 @@ fn launcher(
     function: &HirFunction,
     symbol: &str,
     threads: [u32; 3],
-    guard: GuardStyle,
+    style: (GuardStyle, Overflow),
     math: &dyn Fn() -> bool,
 ) -> Result<String, Refused> {
     let params = parameters(function)?;
@@ -124,39 +142,49 @@ fn launcher(
     if blocks.contains(&0) {
         return Ok(launch_text(symbol, &params, blocks, threads, ""));
     }
-    let mut region = BodyEmitter::new(function, guard, threads, extents.clone(), true).emit()?;
+    let mut region = BodyEmitter::new(function, style, threads, extents.clone(), true).emit()?;
     if uses_math(&region) && !math() {
-        region = BodyEmitter::new(function, guard, threads, extents, false).emit()?;
+        region = BodyEmitter::new(function, style, threads, extents, false).emit()?;
     }
     Ok(launch_text(symbol, &params, blocks, threads, &region))
 }
 
-/// The launcher of an outlined `function`, or `None` where the per-thread lowering does not
-/// cover its body, which then runs on the host alone.
+/// The launcher of an outlined `function` and its checks, or `None` where the per-thread
+/// lowering does not cover its body, which then runs on the host alone.
 fn follows_operands(
     program: &HirProgram,
     function: &HirFunction,
     symbol: &str,
-    guard: GuardStyle,
+    (guard, overflow): (GuardStyle, Overflow),
     math: &dyn Fn() -> bool,
-) -> Option<String> {
+) -> Option<(String, Vec<Guard>)> {
     let mut params = parameters(function).ok()?;
     let Launch {
         blocks,
         threads,
         region,
         result,
-    } = outlined_launch(program, function, guard, true).ok()??;
-    if uses_math(&region) && !math() {
+        guards,
+    } = outlined_launch(program, function, guard, overflow, true).ok()??;
+    if (uses_math(&region) && !math()) || guards.len() > MAX_SITES {
         return None;
     }
+    // The status word sits between the parameters and the result, where the caller passes
+    // it to a `linalg` body too. The result keeps its positional name.
+    let result_name = format!("%arg{}", params.len());
+    if !guards.is_empty() {
+        params.push(format!("{STATUS}: memref<1xi{STATUS_BITS}>"));
+    }
     if let Some(result) = result {
-        params.push(format!("%arg{}: {result}", params.len()));
+        params.push(format!("{result_name}: {result}"));
     }
     if blocks.contains(&0) {
-        return Some(launch_text(symbol, &params, blocks, threads, ""));
+        return Some((launch_text(symbol, &params, blocks, threads, ""), guards));
     }
-    Some(launch_text(symbol, &params, blocks, threads, &region))
+    Some((
+        launch_text(symbol, &params, blocks, threads, &region),
+        guards,
+    ))
 }
 
 /// Whether a region calls a math function, which only the vendor's device math library
@@ -283,8 +311,15 @@ func main() -> i32 {
 
     #[test]
     fn a_kernel_launches_over_its_grid_behind_a_descriptor_signature() {
-        let KernelLaunchers { text, functions } =
-            kernel_launchers(&program(KERNEL), &nvidia(), &|| true).expect("the body lowers");
+        let KernelLaunchers {
+            text, functions, ..
+        } = kernel_launchers(
+            &program(KERNEL),
+            &nvidia(),
+            crate::Overflow::Checked,
+            &|| true,
+        )
+        .expect("the body lowers");
         assert_eq!(
             functions,
             vec![("add_relu".to_string(), "__neuro_mlir_add_relu".to_string())]
@@ -296,7 +331,7 @@ func main() -> i32 {
             "37 x 45 in 16 x 16 blocks is a 3 x 3 grid:\n{text}"
         );
 
-        let ir = lower_with_format(&program(KERNEL), &nvidia(), "isa")
+        let ir = lower_with_format(&program(KERNEL), &nvidia(), crate::Overflow::Checked, "isa")
             .expect("the kernel lowers for NVIDIA")
             .llvm_ir;
         // Two exploded rank-2 descriptors (two pointers and five integers each) around
@@ -318,18 +353,45 @@ func main() -> i32 {
     }
 
     #[test]
+    fn integer_overflow_stops_a_kernel_on_the_debug_tier_only() {
+        let source = KERNEL
+            .replace("f32", "i32")
+            .replace("0.0f32", "0")
+            .replace("0.0", "0")
+            .replace("2.0i32", "2");
+        let checked = kernel_launchers(&program(&source), &nvidia(), Overflow::Checked, &|| true)
+            .expect("the body lowers")
+            .text;
+        assert!(
+            checked.contains("llvm.intr.smul.with.overflow")
+                && checked.contains("integer overflow in a `@kernel` body"),
+            "{checked}"
+        );
+        let wrapping = kernel_launchers(&program(&source), &nvidia(), Overflow::Wrapping, &|| true)
+            .expect("the body lowers")
+            .text;
+        assert!(!wrapping.contains("with.overflow"), "{wrapping}");
+        assert!(
+            !wrapping.contains("%status"),
+            "a kernel reports nothing: {wrapping}"
+        );
+    }
+
+    #[test]
     fn an_amd_kernel_traps_instead_of_asserting() {
         let target = GpuTarget::Amd {
             chip: "gfx90a".to_string(),
         };
-        let text = kernel_launchers(&program(KERNEL), &target, &|| true)
-            .expect("the body lowers")
-            .text;
+        let text = kernel_launchers(&program(KERNEL), &target, crate::Overflow::Checked, &|| {
+            true
+        })
+        .expect("the body lowers")
+        .text;
         assert!(
             text.contains("llvm.intr.trap") && !text.contains("cf.assert"),
             "{text}"
         );
-        let ir = lower_with_format(&program(KERNEL), &target, "isa")
+        let ir = lower_with_format(&program(KERNEL), &target, crate::Overflow::Checked, "isa")
             .expect("the kernel lowers for AMD")
             .llvm_ir;
         assert!(ir.contains("amdgcn-amd-amdhsa-unknown-gfx90a"), "{ir}");
@@ -346,9 +408,12 @@ func main() -> i32 {
                 "func main()",
                 "func relu(x: f32) -> f32 {\n    if x > 0.0 { x } else { 0.0 }\n}\n\nfunc main()",
             );
-        let Err(MlirError::KernelBodiesNotLowered(refusals)) =
-            lower_with_format(&program(&source), &nvidia(), "isa")
-        else {
+        let Err(MlirError::KernelBodiesNotLowered(refusals)) = lower_with_format(
+            &program(&source),
+            &nvidia(),
+            crate::Overflow::Checked,
+            "isa",
+        ) else {
             panic!("expected the body refused");
         };
         let [refusal] = refusals.as_slice() else {
@@ -385,9 +450,14 @@ func main() -> i32 {
 
     #[test]
     fn a_partition_runs_in_each_thread_that_owns_a_grid_element() {
-        let text = kernel_launchers(&program(PARTITION), &nvidia(), &|| true)
-            .expect("the body lowers")
-            .text;
+        let text = kernel_launchers(
+            &program(PARTITION),
+            &nvidia(),
+            crate::Overflow::Checked,
+            &|| true,
+        )
+        .expect("the body lowers")
+        .text;
         // Threads 6 and 7 of the two blocks of 4 own no element of the grid tensor.
         assert!(
             text.contains("arith.constant 6 : index"),
@@ -397,15 +467,24 @@ func main() -> i32 {
         // slice's own bounds check read.
         assert!(text.contains("arith.constant 3 : i64"), "{text}");
         assert!(text.contains("arith.constant 1 : i64"), "{text}");
-        lower_with_format(&program(PARTITION), &nvidia(), "isa").expect("it lowers for NVIDIA");
+        lower_with_format(
+            &program(PARTITION),
+            &nvidia(),
+            crate::Overflow::Checked,
+            "isa",
+        )
+        .expect("it lowers for NVIDIA");
     }
 
     #[test]
     fn a_partition_the_grid_cannot_share_is_refused_per_instance() {
         let source = PARTITION.replace("[18]", "[20]");
-        let Err(MlirError::KernelBodiesNotLowered(refusals)) =
-            lower_with_format(&program(&source), &nvidia(), "isa")
-        else {
+        let Err(MlirError::KernelBodiesNotLowered(refusals)) = lower_with_format(
+            &program(&source),
+            &nvidia(),
+            crate::Overflow::Checked,
+            "isa",
+        ) else {
             panic!("expected the partition refused");
         };
         let [refusal] = refusals.as_slice() else {
@@ -436,9 +515,14 @@ func main() -> i32 {
     return 0
 }
 "#;
-        let text = kernel_launchers(&program(source), &nvidia(), &|| true)
-            .expect("the body lowers")
-            .text;
+        let text = kernel_launchers(
+            &program(source),
+            &nvidia(),
+            crate::Overflow::Checked,
+            &|| true,
+        )
+        .expect("the body lowers")
+        .text;
         assert!(!text.contains("gpu.launch"), "{text}");
     }
 }

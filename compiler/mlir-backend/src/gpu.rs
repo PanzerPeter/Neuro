@@ -2,6 +2,7 @@ use crate::{
     bridge::{BUFFERIZE, LinkableBodies, llvm_descent, translate_llvm_dialects},
     context::new_context,
     errors::MlirError,
+    guards::Overflow,
     kernel::kernel_launchers,
     lower::build_linkable_module,
     tensor_arithmetic::read_type,
@@ -203,8 +204,9 @@ const DEVICE_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm{use-generic-functio
 pub fn lower_for_gpu(
     program: &HirProgram,
     target: &GpuTarget,
+    overflow: Overflow,
 ) -> Result<LinkableBodies, MlirError> {
-    lower_with_format(program, target, target.object_format())
+    lower_with_format(program, target, overflow, target.object_format())
 }
 
 /// [`lower_for_gpu`] with the device object format chosen by the caller, so a test
@@ -212,6 +214,7 @@ pub fn lower_for_gpu(
 pub(crate) fn lower_with_format(
     program: &HirProgram,
     target: &GpuTarget,
+    overflow: Overflow,
     format: &str,
 ) -> Result<LinkableBodies, MlirError> {
     let chip = target.chip();
@@ -223,21 +226,22 @@ pub(crate) fn lower_with_format(
     // Asked once, and only of a program whose GPU code calls a math function.
     let probed = OnceCell::new();
     let math = || *probed.get_or_init(|| device_math(&context, target, format));
-    let (module, mut functions) = build_linkable_module(&context, program, &runs_on_gpu)?;
+    let (module, (mut functions, mut guards)) =
+        build_linkable_module(&context, program, overflow, &runs_on_gpu)?;
     let calling_math = math_functions(&module, &functions);
     let without_math = !calling_math.is_empty() && !math();
     let admit = |function: &HirFunction| {
         runs_on_gpu(function) && !(without_math && calling_math.contains(&function.name))
     };
     if without_math {
-        functions = build_linkable_module(&context, program, &admit)?.1;
+        (functions, guards) = build_linkable_module(&context, program, overflow, &admit)?.1;
     }
     let refused = refused_bodies(program, &functions);
     if !refused.is_empty() {
         return Err(MlirError::GpuBodiesNotLowered(refused));
     }
-    let kernels =
-        kernel_launchers(program, target, &math).map_err(MlirError::KernelBodiesNotLowered)?;
+    let kernels = kernel_launchers(program, target, overflow, &math)
+        .map_err(MlirError::KernelBodiesNotLowered)?;
 
     let mut tilings = Vec::new();
     for function in program.items.iter().filter_map(|item| match item {
@@ -253,7 +257,7 @@ pub(crate) fn lower_with_format(
     }
     let mut lowered = Vec::with_capacity(tilings.len() + 1);
     for tiling in tilings {
-        let (mut module, _) = build_linkable_module(&context, program, &|function| {
+        let (mut module, _) = build_linkable_module(&context, program, overflow, &|function| {
             admit(function) && self::tiling(function) == tiling
         })?;
         lower_module(
@@ -281,17 +285,20 @@ pub(crate) fn lower_with_format(
         )?;
         lowered.push(kernel_module);
         functions.extend(kernels.functions);
+        guards.extend(kernels.guards);
     }
     if lowered.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),
             functions,
+            guards,
         });
     }
 
     Ok(LinkableBodies {
         llvm_ir: translate_llvm_dialects(&lowered)?,
         functions,
+        guards,
     })
 }
 
@@ -520,7 +527,7 @@ mod tests {
     }
 
     fn refused(program: &HirProgram) -> Vec<(String, Span)> {
-        match lower_for_gpu(program, &nvidia()) {
+        match lower_for_gpu(program, &nvidia(), crate::Overflow::Checked) {
             Err(MlirError::GpuBodiesNotLowered(functions)) => functions,
             other => panic!("expected the `@gpu` body refused, got {other:?}"),
         }
@@ -545,7 +552,7 @@ mod tests {
 
     #[test]
     fn an_element_wise_body_becomes_a_ptx_kernel() {
-        let bodies = lower_for_gpu(&element_wise(&[2, 3]), &nvidia())
+        let bodies = lower_for_gpu(&element_wise(&[2, 3]), &nvidia(), crate::Overflow::Checked)
             .expect("an element-wise body should lower to a kernel");
 
         let ir = &bodies.llvm_ir;
@@ -568,9 +575,13 @@ mod tests {
     #[test]
     fn kernels_run_many_threads_a_block() {
         // Without tiling every block runs one thread, and the kernel says so.
-        let ir = lower_for_gpu(&element_wise(&[64, 64]), &nvidia())
-            .expect("the body should lower")
-            .llvm_ir;
+        let ir = lower_for_gpu(
+            &element_wise(&[64, 64]),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("the body should lower")
+        .llvm_ir;
 
         assert!(ir.contains("%tid.x"), "expected per-thread indexing:\n{ir}");
         assert!(!ir.contains(".maxntid 1, 1, 1"), "{ir}");
@@ -598,9 +609,13 @@ mod tests {
     fn a_warp_walks_the_innermost_axis_and_a_wide_tensor_launches() {
         // With the outermost axis on x, 2,000,000 columns in blocks of 16 asked grid y
         // for 125,000 blocks, past its limit, and the launch failed.
-        let ir = lower_for_gpu(&element_wise(&[4, 2_000_000]), &nvidia())
-            .expect("a wide body should lower")
-            .llvm_ir;
+        let ir = lower_for_gpu(
+            &element_wise(&[4, 2_000_000]),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("a wide body should lower")
+        .llvm_ir;
 
         // Grid (62500, 1, 1), blocks of (32, 8, 1).
         assert!(
@@ -618,7 +633,8 @@ mod tests {
         vector.name = "g".to_string();
         program.items.push(HirItem::Function(vector));
 
-        let bodies = lower_for_gpu(&program, &nvidia()).expect("both bodies should lower");
+        let bodies = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
+            .expect("both bodies should lower");
         assert_eq!(bodies.functions.len(), 2, "{:?}", bodies.functions);
         assert!(
             bodies.llvm_ir.contains("define void @__neuro_mlir_f(")
@@ -630,7 +646,7 @@ mod tests {
 
     #[test]
     fn a_matrix_product_becomes_a_fill_and_a_contraction_kernel() {
-        let ir = lower_for_gpu(&matmul(), &nvidia())
+        let ir = lower_for_gpu(&matmul(), &nvidia(), crate::Overflow::Checked)
             .expect("a matrix product should lower to kernels")
             .llvm_ir;
 
@@ -644,15 +660,21 @@ mod tests {
     #[test]
     fn a_rank_three_body_lowers() {
         // Tiling names two axes; a third must still map to the grid or a loop.
-        let bodies = lower_for_gpu(&element_wise(&[2, 3, 4]), &nvidia())
-            .expect("a rank-3 body should lower");
+        let bodies = lower_for_gpu(
+            &element_wise(&[2, 3, 4]),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("a rank-3 body should lower");
         assert_is_a_launcher(&bodies.llvm_ir);
     }
 
     #[test]
     fn the_symbols_match_the_cpu_path() {
-        let gpu = lower_for_gpu(&matmul(), &nvidia()).expect("the GPU path should lower");
-        let cpu = lower_for_link(&host_matmul()).expect("the CPU path should lower");
+        let gpu = lower_for_gpu(&matmul(), &nvidia(), crate::Overflow::Checked)
+            .expect("the GPU path should lower");
+        let cpu = lower_for_link(&host_matmul(), crate::Overflow::Checked)
+            .expect("the CPU path should lower");
 
         assert_eq!(gpu.functions, cpu.functions);
         let signature = |ir: &str| {
@@ -669,9 +691,14 @@ mod tests {
         let target = GpuTarget::Amd {
             chip: "gfx90a".to_string(),
         };
-        let ir = lower_with_format(&element_wise(&[2, 3]), &target, "isa")
-            .expect("an AMD target should lower")
-            .llvm_ir;
+        let ir = lower_with_format(
+            &element_wise(&[2, 3]),
+            &target,
+            crate::Overflow::Checked,
+            "isa",
+        )
+        .expect("an AMD target should lower")
+        .llvm_ir;
 
         assert_is_a_launcher(&ir);
         assert!(ir.contains("amdgcn-amd-amdhsa-unknown-gfx90a"), "{ir}");
@@ -686,14 +713,15 @@ mod tests {
         let target = GpuTarget::Nvidia {
             chip: "sm_80},func.func(canonicalize".to_string(),
         };
-        let error = lower_for_gpu(&element_wise(&[2]), &target).expect_err("should refuse");
+        let error = lower_for_gpu(&element_wise(&[2]), &target, crate::Overflow::Checked)
+            .expect_err("should refuse");
         assert!(matches!(error, MlirError::InvalidGpuChip(_)), "{error}");
 
         let empty = GpuTarget::Amd {
             chip: String::new(),
         };
         assert!(matches!(
-            lower_for_gpu(&element_wise(&[2]), &empty),
+            lower_for_gpu(&element_wise(&[2]), &empty, crate::Overflow::Checked),
             Err(MlirError::InvalidGpuChip(_))
         ));
     }
@@ -715,7 +743,12 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    lower_with_format(&element_wise(&[2]), &target, "isa"),
+                    lower_with_format(
+                        &element_wise(&[2]),
+                        &target,
+                        crate::Overflow::Checked,
+                        "isa"
+                    ),
                     Err(MlirError::InvalidGpuChip(_))
                 ),
                 "{target:?}"
@@ -756,9 +789,13 @@ mod tests {
     fn element_wise_operations_fuse_into_one_kernel() {
         // `(a + b) * b`: the sum is computed where it is used and never stored.
         let ty = tensor(static_shape(&[37, 45]));
-        let ir = lower_for_gpu(&times_b(element_wise(&[37, 45]), ty), &nvidia())
-            .expect("a two-operation body should lower")
-            .llvm_ir;
+        let ir = lower_for_gpu(
+            &times_b(element_wise(&[37, 45]), ty),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("a two-operation body should lower")
+        .llvm_ir;
 
         assert_eq!(ir.matches("call void @mgpuLaunchKernel").count(), 1, "{ir}");
         assert!(!ir.contains("@_mlir_memref_to_llvm_alloc("), "{ir}");
@@ -779,7 +816,7 @@ mod tests {
             ty,
         );
 
-        let ir = lower_for_gpu(&program, &nvidia())
+        let ir = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
             .expect("a two-operation body should lower")
             .llvm_ir;
 
@@ -827,19 +864,30 @@ mod tests {
     }
 
     #[test]
-    fn an_integer_body_is_refused() {
+    fn an_integer_body_becomes_a_kernel_with_its_checks() {
         let ty = HirType::Tensor {
             element: Box::new(HirType::I32),
             shape: static_shape(&[2]),
             names: neuro_hir::AxisNames::default(),
         };
         let program = on_gpu(program_with_tensor_operator(
-            BinaryOp::Add,
+            BinaryOp::Divide,
             ty.clone(),
             ty.clone(),
             ty,
         ));
-        assert_eq!(refused(&program).len(), 1);
+        let bodies = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
+            .expect("an integer `@gpu` body lowers");
+        assert_is_a_launcher(&bodies.llvm_ir);
+        assert_eq!(bodies.guards.len(), 1, "{:?}", bodies.guards);
+        // The status word is one more descriptor before the result's.
+        assert!(
+            bodies.llvm_ir.contains(
+                "define void @__neuro_mlir_f(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9, ptr %10, ptr %11, i64 %12, i64 %13, i64 %14, ptr %15,"
+            ),
+            "{}",
+            bodies.llvm_ir
+        );
     }
 
     #[test]
@@ -858,8 +906,10 @@ mod tests {
         program.items.push(HirItem::Function(host));
         program.items.push(HirItem::Function(either));
 
-        let gpu = lower_for_gpu(&program, &nvidia()).expect("the GPU path should lower");
-        let cpu = lower_for_link(&program).expect("the CPU path should lower");
+        let gpu = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
+            .expect("the GPU path should lower");
+        let cpu =
+            lower_for_link(&program, crate::Overflow::Checked).expect("the CPU path should lower");
         assert_eq!(
             gpu.functions,
             [
@@ -872,7 +922,8 @@ mod tests {
 
     #[test]
     fn a_program_with_no_gpu_function_lowers_to_nothing() {
-        let bodies = lower_for_gpu(&host_matmul(), &nvidia()).expect("nothing to refuse");
+        let bodies = lower_for_gpu(&host_matmul(), &nvidia(), crate::Overflow::Checked)
+            .expect("nothing to refuse");
         assert!(bodies.functions.is_empty() && bodies.llvm_ir.is_empty());
     }
 }

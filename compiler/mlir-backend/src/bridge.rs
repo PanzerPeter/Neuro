@@ -1,6 +1,7 @@
 use crate::{
     context::new_context,
     errors::MlirError,
+    guards::{Guard, Overflow},
     lower::{build_linkable_module, build_module},
 };
 
@@ -110,11 +111,20 @@ pub struct LinkableBodies {
     /// `(function, symbol)`: a HIR function, and the symbol in `llvm_ir` that computes its
     /// body.
     pub functions: Vec<(String, String)>,
+    /// `(symbol, checks)` for each symbol whose integer arithmetic is checked. Such a symbol
+    /// takes one more parameter after the others, before its results: a `memref<1xi64>`
+    /// status word the caller fills with all ones. A failed check lowers it to a key whose
+    /// low 12 bits are the check's position in `checks`, counted from 1, and whose higher
+    /// bits order failures as the LLVM backend meets them, so the one left is the one it
+    /// would have stopped at. The caller panics with that check's message at its offset once
+    /// the call returns.
+    pub guards: Vec<(String, Vec<Guard>)>,
 }
 
 /// Lower every function this path computes exactly as the LLVM backend would into
-/// linkable LLVM IR: element-wise arithmetic and matrix products over `f32` /
-/// `f64` tensors of static shape, straight-line, with owned or `&` operands. A
+/// linkable LLVM IR: element-wise arithmetic and matrix products over numeric tensors of
+/// static shape, straight-line, with owned or `&` operands. Integer arithmetic carries the
+/// LLVM backend's checks, its overflow ones only where `overflow` says they panic. A
 /// `@gpu` function is never one of them: it is [`lower_for_gpu`](crate::lower_for_gpu)'s.
 ///
 /// Each symbol has MLIR's calling convention rather than Neuro's. A tensor
@@ -127,21 +137,27 @@ pub struct LinkableBodies {
 /// # Errors
 ///
 /// As [`translate_to_llvm_ir`].
-pub fn lower_for_link(program: &HirProgram) -> Result<LinkableBodies, MlirError> {
+pub fn lower_for_link(
+    program: &HirProgram,
+    overflow: Overflow,
+) -> Result<LinkableBodies, MlirError> {
     let context = new_context();
-    let (mut module, functions) = build_linkable_module(&context, program, &|function| {
-        function.target == HirTarget::Host
-    })?;
+    let (mut module, (functions, guards)) =
+        build_linkable_module(&context, program, overflow, &|function| {
+            function.target == HirTarget::Host
+        })?;
     if functions.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),
             functions,
+            guards,
         });
     }
 
     Ok(LinkableBodies {
         llvm_ir: translate_module(&context, &mut module)?,
         functions,
+        guards,
     })
 }
 
@@ -422,12 +438,15 @@ pub(crate) mod tests {
     #[test]
     fn a_float_body_is_linked_under_its_own_symbol_with_an_out_param() {
         let shape = static_shape(&[2, 3]);
-        let bodies = lower_for_link(&program_with_tensor_operator(
-            BinaryOp::Add,
-            tensor(shape.clone()),
-            tensor(shape.clone()),
-            tensor(shape),
-        ))
+        let bodies = lower_for_link(
+            &program_with_tensor_operator(
+                BinaryOp::Add,
+                tensor(shape.clone()),
+                tensor(shape.clone()),
+                tensor(shape),
+            ),
+            crate::Overflow::Checked,
+        )
         .expect("a float body should lower for linking");
 
         assert_eq!(
@@ -453,37 +472,79 @@ pub(crate) mod tests {
     #[test]
     fn borrowed_operands_are_read_as_tensors() {
         let ty = tensor(static_shape(&[2, 2]));
-        let bodies = lower_for_link(&program_with_tensor_operator(
-            BinaryOp::MatMul,
-            borrowed(ty.clone()),
-            borrowed(ty.clone()),
-            ty,
-        ))
+        let bodies = lower_for_link(
+            &program_with_tensor_operator(
+                BinaryOp::MatMul,
+                borrowed(ty.clone()),
+                borrowed(ty.clone()),
+                ty,
+            ),
+            crate::Overflow::Checked,
+        )
         .expect("borrowed operands should lower for linking");
 
         assert_eq!(bodies.functions.len(), 1, "{}", bodies.llvm_ir);
         assert!(bodies.llvm_ir.contains("fmul float"), "{}", bodies.llvm_ir);
     }
 
-    #[test]
-    fn an_integer_body_stays_with_the_llvm_backend() {
-        // The LLVM backend guards integer elements against overflow and a zero
-        // divisor; `arith` does not, so linking one would drop the guard.
+    fn integer_program(op: BinaryOp) -> HirProgram {
         let ty = HirType::Tensor {
             element: Box::new(HirType::I32),
             shape: static_shape(&[2]),
             names: AxisNames::default(),
         };
-        let bodies = lower_for_link(&program_with_tensor_operator(
-            BinaryOp::Add,
-            ty.clone(),
-            ty.clone(),
-            ty,
-        ))
-        .expect("an integer program should still lower");
+        program_with_tensor_operator(op, ty.clone(), ty.clone(), ty)
+    }
 
-        assert!(bodies.functions.is_empty());
-        assert!(bodies.llvm_ir.is_empty());
+    #[test]
+    fn an_integer_body_links_with_its_overflow_check_on_the_debug_tier() {
+        let bodies = lower_for_link(&integer_program(BinaryOp::Add), crate::Overflow::Checked)
+            .expect("an integer body lowers");
+        assert_eq!(bodies.functions.len(), 1, "{}", bodies.llvm_ir);
+        let overflow = crate::Guard {
+            kind: crate::GuardKind::Overflow,
+            offset: 0,
+        };
+        assert_eq!(
+            bodies.guards,
+            vec![("__neuro_mlir_f".to_string(), vec![overflow])]
+        );
+        assert!(
+            bodies.llvm_ir.contains("@llvm.sadd.with.overflow.i32")
+                && bodies.llvm_ir.contains("atomicrmw umin ptr"),
+            "an overflow lowers the status word to its check's number:\n{}",
+            bodies.llvm_ir
+        );
+
+        let release = lower_for_link(&integer_program(BinaryOp::Add), crate::Overflow::Wrapping)
+            .expect("an integer body lowers");
+        assert!(release.guards.is_empty(), "{:?}", release.guards);
+        assert!(
+            !release.llvm_ir.contains("with.overflow") && release.llvm_ir.contains("add i32"),
+            "the release tier wraps:\n{}",
+            release.llvm_ir
+        );
+    }
+
+    #[test]
+    fn an_integer_division_checks_its_divisor_on_every_tier() {
+        let release = lower_for_link(
+            &integer_program(BinaryOp::Divide),
+            crate::Overflow::Wrapping,
+        )
+        .expect("an integer division lowers");
+        let kinds: Vec<_> = release.guards[0].1.iter().map(|guard| guard.kind).collect();
+        assert_eq!(kinds, vec![crate::GuardKind::DivisionByZero]);
+        assert!(release.llvm_ir.contains("sdiv i32"), "{}", release.llvm_ir);
+
+        let debug = lower_for_link(&integer_program(BinaryOp::Divide), crate::Overflow::Checked)
+            .expect("an integer division lowers");
+        let kinds: Vec<_> = debug.guards[0].1.iter().map(|guard| guard.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![crate::GuardKind::DivisionByZero, crate::GuardKind::Overflow],
+            "`MIN / -1` is an overflow on the debug tier"
+        );
     }
 
     #[test]
@@ -500,7 +561,8 @@ pub(crate) mod tests {
             Span::new(0, 0),
         ))];
 
-        let bodies = lower_for_link(&program).expect("the program should still lower");
+        let bodies = lower_for_link(&program, crate::Overflow::Checked)
+            .expect("the program should still lower");
         assert!(bodies.functions.is_empty(), "{}", bodies.llvm_ir);
     }
 
@@ -520,7 +582,8 @@ pub(crate) mod tests {
         };
         function.body.push(HirStmt::Expr(value));
 
-        let bodies = lower_for_link(&program).expect("a tail expression should lower");
+        let bodies = lower_for_link(&program, crate::Overflow::Checked)
+            .expect("a tail expression should lower");
         assert_eq!(bodies.functions.len(), 1, "{}", bodies.llvm_ir);
         assert!(bodies.llvm_ir.contains("fsub float"), "{}", bodies.llvm_ir);
     }

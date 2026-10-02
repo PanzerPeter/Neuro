@@ -15,6 +15,7 @@ mod bridge;
 mod context;
 mod errors;
 mod gpu;
+mod guards;
 mod kernel;
 mod lower;
 #[cfg(test)]
@@ -29,4 +30,5 @@ mod tensor_sort;
 pub use bridge::{LinkableBodies, lower_for_link, translate_to_llvm_ir};
 pub use errors::{KernelRefusal, MlirError};
 pub use gpu::{GpuTarget, lower_for_gpu};
+pub use guards::{Guard, GuardKind, Overflow};
 pub use lower::lower_program;

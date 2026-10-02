@@ -451,7 +451,14 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             // NVIDIA's needs no toolkit to serialize, so `check` lowers for it.
             if cfg!(target_os = "linux") && gpu_functions(&hir).next().is_some() {
                 let source = single_module_source(path, module_count);
-                tensor_bodies(&hir, path, source.as_deref(), &GpuArch::default())?;
+                // Which bodies qualify does not depend on the tier either.
+                tensor_bodies(
+                    &hir,
+                    path,
+                    source.as_deref(),
+                    &GpuArch::default(),
+                    mlir_backend::Overflow::Checked,
+                )?;
             }
             println!(
                 "Type checking passed for {:?} ({} module(s), {} HIR items)",
@@ -557,7 +564,13 @@ fn compile_file(
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
     let rendered = (module_count == 1).then_some(source.as_str());
-    let external = tensor_bodies(&hir, input, rendered, gpu)?;
+    // The LLVM backend checks integer overflow on the debug tier alone, and so do the bodies
+    // computed beside it.
+    let overflow = match optimization {
+        OptimizationLevelSetting::O0 => mlir_backend::Overflow::Checked,
+        _ => mlir_backend::Overflow::Wrapping,
+    };
+    let external = tensor_bodies(&hir, input, rendered, gpu, overflow)?;
     // A `.to(device)` links the GPU runtime as surely as a `@gpu` body does, and only the
     // backend sees which programs make one, so every link where the runtime can exist
     // offers what it needs.
@@ -657,14 +670,16 @@ fn tensor_bodies(
     path: &Path,
     source: Option<&str>,
     gpu: &GpuArch,
+    overflow: mlir_backend::Overflow,
 ) -> Result<Vec<llvm_backend::ExternalBodies>> {
-    let host = mlir_backend::lower_for_link(hir)
+    let host = mlir_backend::lower_for_link(hir, overflow)
         .map_err(|e| anyhow::anyhow!("MLIR lowering error: {}", e))
         .context("Failed to lower tensor bodies through MLIR")?;
     let mut bodies = vec![llvm_backend::ExternalBodies {
         llvm_ir: host.llvm_ir,
         functions: host.functions,
         memory: llvm_backend::BodyMemory::Host,
+        guards: body_guards(host.guards),
     }];
     // A tensor operation outlined to run where its operands live wants a GPU body too,
     // though lacking one is no error.
@@ -696,7 +711,7 @@ fn tensor_bodies(
         llvm_backend::GpuVendor::Nvidia => mlir_backend::GpuTarget::Nvidia { chip },
         llvm_backend::GpuVendor::Amd => mlir_backend::GpuTarget::Amd { chip },
     };
-    let device = mlir_backend::lower_for_gpu(hir, &target).map_err(|e| {
+    let device = mlir_backend::lower_for_gpu(hir, &target, overflow).map_err(|e| {
         match &e {
             mlir_backend::MlirError::GpuBodiesNotLowered(functions) => {
                 for (name, span) in functions {
@@ -724,8 +739,33 @@ fn tensor_bodies(
         llvm_ir: device.llvm_ir,
         functions: device.functions,
         memory: llvm_backend::BodyMemory::Device,
+        guards: body_guards(device.guards),
     });
     Ok(bodies)
+}
+
+/// The checks of each linked symbol, as the LLVM backend raises them.
+fn body_guards(
+    guards: Vec<(String, Vec<mlir_backend::Guard>)>,
+) -> Vec<(String, Vec<llvm_backend::BodyGuard>)> {
+    let kind = |kind| match kind {
+        mlir_backend::GuardKind::Overflow => llvm_backend::BodyGuardKind::Overflow,
+        mlir_backend::GuardKind::DivisionByZero => llvm_backend::BodyGuardKind::DivisionByZero,
+        mlir_backend::GuardKind::RemainderByZero => llvm_backend::BodyGuardKind::RemainderByZero,
+    };
+    guards
+        .into_iter()
+        .map(|(symbol, checks)| {
+            let checks = checks
+                .into_iter()
+                .map(|guard| llvm_backend::BodyGuard {
+                    kind: kind(guard.kind),
+                    offset: guard.offset,
+                })
+                .collect();
+            (symbol, checks)
+        })
+        .collect()
 }
 
 /// Report the `@gpu` functions of a build that cannot give them GPU bodies, each at its

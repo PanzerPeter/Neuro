@@ -1,16 +1,22 @@
-use crate::{context::new_context, errors::MlirError, tensor_arithmetic};
+use crate::{
+    context::new_context,
+    errors::MlirError,
+    guards::{Element, Guard, Overflow},
+    tensor_arithmetic,
+};
 
 use melior::{
     Context,
     dialect::{func, llvm},
     ir::{
-        BlockLike, Identifier, Location, Module, Operation, Region, Type, TypeLike,
+        BlockLike, Identifier, Location, Module, Operation, Region, RegionLike, Type, TypeLike,
+        ValueLike,
         attribute::{StringAttribute, TypeAttribute},
         operation::OperationLike,
         r#type::{FunctionType, IntegerType, RankedTensorType},
     },
 };
-use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirTarget, HirType};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirType};
 
 /// Prepended to a linked body's symbol, so it never collides with the Neuro-ABI
 /// function of the same name the LLVM backend defines around it.
@@ -49,7 +55,8 @@ pub fn lower_program(program: &HirProgram) -> Result<String, MlirError> {
 /// Build the verified module in a caller-owned context.
 ///
 /// Split out of [`lower_program`] so the translating path can keep working on the
-/// live `Module` instead of re-parsing its printed form.
+/// live `Module` instead of re-parsing its printed form. Its integer bodies are the debug
+/// tier's: a module read for its text shows every check a body can carry.
 pub(crate) fn build_module<'c>(
     context: &'c Context,
     program: &HirProgram,
@@ -64,12 +71,16 @@ pub(crate) fn build_module<'c>(
                 // A tensor-arithmetic body is the one kind this path defines rather
                 // than declares; everything else stays external, which is what keeps
                 // scalar codegen from existing twice.
-                let op = match tensor_arithmetic::build_body(context, location, function)? {
-                    Some(region) => define_function(
+                let op = match tensor_arithmetic::build_body(
+                    context,
+                    location,
+                    function,
+                    Overflow::Checked,
+                )? {
+                    Some((region, _)) => define_function(
                         context,
                         location,
                         &function.name,
-                        &read_types(function),
                         &function.return_type,
                         region,
                     )?,
@@ -127,9 +138,13 @@ pub(crate) fn build_module<'c>(
     Ok(module)
 }
 
+/// What [`build_linkable_module`] defines: the `(function, symbol)` pairs, and each guarded
+/// symbol's checks.
+pub(crate) type Linked = (Vec<(String, String)>, Vec<(String, Vec<Guard>)>);
+
 /// Build a module holding only the bodies the LLVM backend links in, each under
 /// [`LINKED_SYMBOL_PREFIX`] plus its function's name, and return it with the
-/// `(function, symbol)` pairs it defines.
+/// `(function, symbol)` pairs it defines and the checks of each symbol that has any.
 ///
 /// A function reaches it only when [`linkable_signature`] holds, `admit` accepts it
 /// and its body lowers. Nothing is declared: the linked module is read for its
@@ -138,11 +153,13 @@ pub(crate) fn build_module<'c>(
 pub(crate) fn build_linkable_module<'c>(
     context: &'c Context,
     program: &HirProgram,
+    overflow: Overflow,
     admit: &dyn Fn(&HirFunction) -> bool,
-) -> Result<(Module<'c>, Vec<(String, String)>), MlirError> {
+) -> Result<(Module<'c>, Linked), MlirError> {
     let location = Location::unknown(context);
     let module = Module::new(location);
     let mut linked = Vec::new();
+    let mut guards = Vec::new();
 
     for item in &program.items {
         let HirItem::Function(function) = item else {
@@ -151,7 +168,9 @@ pub(crate) fn build_linkable_module<'c>(
         if !linkable_signature(function) || !admit(function) {
             continue;
         }
-        let Some(region) = tensor_arithmetic::build_body(context, location, function)? else {
+        let Some((region, sites)) =
+            tensor_arithmetic::build_body(context, location, function, overflow)?
+        else {
             continue;
         };
         let symbol = format!("{LINKED_SYMBOL_PREFIX}{}", function.name);
@@ -159,10 +178,12 @@ pub(crate) fn build_linkable_module<'c>(
             context,
             location,
             &symbol,
-            &read_types(function),
             &function.return_type,
             region,
         )?);
+        if !sites.is_empty() {
+            guards.push((symbol.clone(), sites));
+        }
         linked.push((function.name.clone(), symbol));
     }
 
@@ -170,73 +191,43 @@ pub(crate) fn build_linkable_module<'c>(
         return Err(MlirError::ModuleVerificationFailed);
     }
 
-    Ok((module, linked))
+    Ok((module, (linked, guards)))
 }
 
 /// Whether this path computes a function exactly as the LLVM backend would, so the
 /// two are interchangeable: a static tensor result ([`linkable_result`]), and parameters
-/// that are `f32` / `f64` scalars or static tensors of them, owned or behind `&`, plus
-/// the checked slice positions of an outlined function.
+/// that are numeric scalars or static tensors of them, owned or behind `&`.
 ///
-/// Floats only, because the LLVM backend guards integer elements (an overflowing
-/// element panics on the debug tier, a zero divisor in every build) and `arith`
-/// has neither guard. Static extents only, because the frontend gives a `?` axis no
-/// arithmetic, so a dynamic signature never has a body worth linking.
+/// An integer element is the LLVM backend's as much as a float one: its checks travel with
+/// the body ([`Guard`]) and its caller raises the same panic. Static extents only, because
+/// the frontend gives a `?` axis no arithmetic, so a dynamic signature never has a body worth
+/// linking.
 fn linkable_signature(function: &HirFunction) -> bool {
     linkable_result(&function.return_type)
-        && function.params.iter().all(|param| {
-            linkable_type(tensor_arithmetic::read_type(&param.ty))
-                || (function.target == HirTarget::FollowsOperands && position_type(&param.ty))
-        })
-}
-
-/// The integer a slice position is. A function outlined to follow its operands takes one
-/// as a parameter, its call site having checked it; no arithmetic is done on it.
-fn position_type(ty: &HirType) -> bool {
-    matches!(
-        ty,
-        HirType::I8
-            | HirType::I16
-            | HirType::I32
-            | HirType::I64
-            | HirType::U8
-            | HirType::U16
-            | HirType::U32
-            | HirType::U64
-    )
+        && function
+            .params
+            .iter()
+            .all(|param| linkable_type(tensor_arithmetic::read_type(&param.ty)))
 }
 
 fn linkable_type(ty: &HirType) -> bool {
     match ty {
-        HirType::F32 | HirType::F64 => true,
         HirType::Tensor { element, shape, .. } => {
-            matches!(**element, HirType::F32 | HirType::F64) && shape.iter().all(Option::is_some)
+            Element::of(element).is_some() && shape.iter().all(Option::is_some)
         }
-        _ => false,
+        scalar => Element::of(scalar).is_some(),
     }
 }
 
-/// A static tensor of floats, or of the `i32` indices a sort writes, or a tuple of them
-/// (`.topk`'s values and indices). An `i32` result carries no arithmetic: every parameter
-/// is a float, and the element-wise path only yields its operands' element type.
+/// A static tensor of numbers, or a tuple of them (`.topk`'s values and indices).
 fn linkable_result(ty: &HirType) -> bool {
     match ty {
         HirType::Tuple(parts) => !parts.is_empty() && parts.iter().all(linkable_result),
         HirType::Tensor { element, shape, .. } => {
-            matches!(**element, HirType::F32 | HirType::F64 | HirType::I32)
-                && shape.iter().all(Option::is_some)
+            Element::of(element).is_some() && shape.iter().all(Option::is_some)
         }
         _ => false,
     }
-}
-
-/// A defined function's parameter types, each as its body reads it.
-fn read_types(function: &HirFunction) -> Vec<HirType> {
-    function
-        .params
-        .iter()
-        .map(|param| tensor_arithmetic::read_type(&param.ty).clone())
-        .collect()
 }
 
 /// The HIR type of a method receiver: a borrow of the impl's target (a struct or an
@@ -294,7 +285,9 @@ fn declare_function<'c>(
     ))
 }
 
-/// Build a `func.func` definition carrying an already-lowered body region.
+/// Build a `func.func` definition carrying an already-lowered body region, whose entry
+/// block's parameters are the function's: one per HIR parameter as the body reads it, and
+/// the status word after them when the body has checks.
 ///
 /// The visibility attribute the declaration path sets is deliberately absent: a
 /// definition is the module's exported surface, and marking it private would hide
@@ -303,7 +296,6 @@ fn define_function<'c>(
     context: &'c Context,
     location: Location<'c>,
     name: &str,
-    param_types: &[HirType],
     return_type: &HirType,
     body: Region<'c>,
 ) -> Result<Operation<'c>, MlirError> {
@@ -312,7 +304,17 @@ fn define_function<'c>(
         HirType::Tuple(parts) => parts.as_slice(),
         single => std::slice::from_ref(single),
     };
-    let fn_type = signature(context, param_types, results)?;
+    let entry = body
+        .first_block()
+        .ok_or(MlirError::ModuleVerificationFailed)?;
+    let inputs = (0..entry.argument_count())
+        .map(|index| Ok(entry.argument(index)?.r#type()))
+        .collect::<Result<Vec<_>, MlirError>>()?;
+    let results = results
+        .iter()
+        .map(|ty| map_type(context, ty))
+        .collect::<Result<Vec<_>, _>>()?;
+    let fn_type = FunctionType::new(context, &inputs, &results);
 
     Ok(func::func(
         context,

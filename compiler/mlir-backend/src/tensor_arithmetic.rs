@@ -1,8 +1,9 @@
 use crate::{
     errors::MlirError,
+    guards::{At, Element, Guard, Lowering, MAX_SITES, Overflow},
     lower::map_type,
     tensor_einsum::build_einsum,
-    tensor_layout::{build_permute, build_slice},
+    tensor_layout::{build_permute, build_slice, linalg_index},
     tensor_math::build_math,
     tensor_reduce::build_reduce,
     tensor_sort::build_sort,
@@ -41,11 +42,6 @@ const BROADCAST_EXTENT: usize = 1;
 /// it covers. Written into the operand's affine map in place of a dimension.
 const STRETCHED_INDEX: &str = "0";
 
-/// The `arith` operation that carries one element of an element-wise tensor
-/// operation. A function pointer rather than an enum because every candidate
-/// already has this exact shape in `melior`.
-type ScalarOp = for<'c, 'a> fn(Value<'c, 'a>, Value<'c, 'a>, Location<'c>) -> Operation<'c>;
-
 /// How one operand is read at each point of the result's index space.
 ///
 /// `None` is a scalar operand: it has no index space, so its affine map has no
@@ -62,11 +58,16 @@ pub(crate) type OperandAxes = Option<Vec<Option<usize>>>;
 /// the inkwell backend permanently. A body it cannot express leaves its function
 /// as the external declaration it already was, which is why the caller treats
 /// `None` as "declare".
+///
+/// A body whose integer arithmetic carries checks comes back with them, in the order their
+/// numbers count, and its block takes the status word they report through as its last
+/// parameter.
 pub(crate) fn build_body<'c>(
     context: &'c Context,
     location: Location<'c>,
     function: &HirFunction,
-) -> Result<Option<Region<'c>>, MlirError> {
+    overflow: Overflow,
+) -> Result<Option<(Region<'c>, Vec<Guard>)>, MlirError> {
     // Cheap filter first: a function that does not hand a tensor back (or `.topk`'s
     // pair of them) cannot be one of these, and every scalar function hits it.
     if !matches!(
@@ -82,33 +83,36 @@ pub(crate) fn build_body<'c>(
     }
 
     let block = Block::new(&slots);
-    // Every tensor operation beyond the arithmetic this path was built for is lowered for a
-    // GPU body only. On the host it stays the LLVM backend's.
-    let target = function.target;
 
-    let built = {
+    let (built, sites) = {
+        // Every tensor operation beyond the arithmetic this path was built for is lowered for
+        // a GPU body only. On the host it stays the LLVM backend's.
+        let lowering = Lowering::new(context, location, &block, function.target, overflow);
         let mut scope: Vec<(String, Value<'c, '_>)> = Vec::with_capacity(function.params.len());
         for (index, param) in function.params.iter().enumerate() {
             scope.push((param.name.clone(), block.argument(index)?.into()));
         }
-        build_statements(
+        let built = build_statements(
             context,
             location,
             &block,
             &function.body,
             &mut scope,
-            target,
-        )?
+            &lowering,
+        )?;
+        (built, lowering.into_sites())
     };
 
-    if !built {
+    // A key numbers a body's checks in a fixed width, so a body with more stays the LLVM
+    // backend's.
+    if !built || sites.len() > MAX_SITES {
         return Ok(None);
     }
 
     let region = Region::new();
     region.append_block(block);
 
-    Ok(Some(region))
+    Ok(Some((region, sites)))
 }
 
 /// A tensor's element type and its shape, `None` for every other type. A shared
@@ -142,7 +146,7 @@ fn build_statements<'c, 'a>(
     block: &'a Block<'c>,
     statements: &[HirStmt],
     scope: &mut Vec<(String, Value<'c, 'a>)>,
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<bool, MlirError> {
     let Some((last, leading)) = statements.split_last() else {
         return Ok(false);
@@ -157,7 +161,7 @@ fn build_statements<'c, 'a>(
         else {
             return Ok(false);
         };
-        let Some(value) = build_expression(context, location, block, init, scope, target)? else {
+        let Some(value) = build_expression(context, location, block, init, scope, lowering)? else {
             return Ok(false);
         };
         scope.push((name.clone(), value));
@@ -177,8 +181,10 @@ fn build_statements<'c, 'a>(
         HirExprKind::TensorSort {
             kind: HirSortKind::TopK(_),
             ..
-        } if device(target) => build_sort(context, location, block, value, scope, target)?,
-        _ => build_expression(context, location, block, value, scope, target)?
+        } if device(lowering.target) => {
+            build_sort(context, location, block, value, scope, lowering)?
+        }
+        _ => build_expression(context, location, block, value, scope, lowering)?
             .map(|result| vec![result]),
     };
     let Some(results) = results else {
@@ -212,7 +218,7 @@ pub(crate) fn build_expression<'c, 'a>(
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     match &expression.kind {
         // Searched from the back so a shadowing binding wins over the one it hides.
@@ -226,14 +232,14 @@ pub(crate) fn build_expression<'c, 'a>(
         HirExprKind::Reference {
             operand,
             mutable: false,
-        } => build_expression(context, location, block, operand, scope, target),
-        _ if !device(target) => match &expression.kind {
+        } => build_expression(context, location, block, operand, scope, lowering),
+        _ if !device(lowering.target) => match &expression.kind {
             HirExprKind::Binary {
                 op: BinaryOp::MatMul,
                 ..
-            } => build_matmul(context, location, block, expression, scope, target),
+            } => build_matmul(context, location, block, expression, scope, lowering),
             HirExprKind::Binary { .. } => {
-                build_elementwise(context, location, block, expression, scope, target)
+                build_elementwise(context, location, block, expression, scope, lowering)
             }
             _ => Ok(None),
         },
@@ -244,13 +250,13 @@ pub(crate) fn build_expression<'c, 'a>(
             expression,
             &expression.ty,
             scope,
-            target,
+            lowering,
         ),
         HirExprKind::TensorSort {
             kind: HirSortKind::Values | HirSortKind::Indices,
             ..
         } => Ok(
-            build_sort(context, location, block, expression, scope, target)?
+            build_sort(context, location, block, expression, scope, lowering)?
                 .and_then(|results| results.into_iter().next()),
         ),
         // A whole-tensor reduction or a full contraction reaches a GPU body boxed in a
@@ -268,7 +274,7 @@ pub(crate) fn build_expression<'c, 'a>(
                 reduce,
                 &expression.ty,
                 scope,
-                target,
+                lowering,
             ),
             [
                 einsum @ HirExpr {
@@ -282,7 +288,7 @@ pub(crate) fn build_expression<'c, 'a>(
                 einsum,
                 &expression.ty,
                 scope,
-                target,
+                lowering,
             ),
             _ => Ok(None),
         },
@@ -293,24 +299,26 @@ pub(crate) fn build_expression<'c, 'a>(
             expression,
             &expression.ty,
             scope,
-            target,
+            lowering,
         ),
-        HirExprKind::Math { .. } => build_math(context, location, block, expression, scope, target),
+        HirExprKind::Math { .. } => {
+            build_math(context, location, block, expression, scope, lowering)
+        }
         HirExprKind::TensorIndex { .. } => {
-            build_slice(context, location, block, expression, scope, target)
+            build_slice(context, location, block, expression, scope, lowering)
         }
         HirExprKind::TensorShapeCast {
             permutation: Some(_),
             ..
-        } => build_permute(context, location, block, expression, scope, target),
+        } => build_permute(context, location, block, expression, scope, lowering),
         // `@` contracts an axis instead of walking the result element for element, so it
         // is a different index space rather than a different body.
         HirExprKind::Binary {
             op: BinaryOp::MatMul,
             ..
-        } => build_matmul(context, location, block, expression, scope, target),
+        } => build_matmul(context, location, block, expression, scope, lowering),
         HirExprKind::Binary { .. } => {
-            build_elementwise(context, location, block, expression, scope, target)
+            build_elementwise(context, location, block, expression, scope, lowering)
         }
         _ => Ok(None),
     }
@@ -323,7 +331,7 @@ fn build_elementwise<'c, 'a>(
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::Binary { op, left, right } = &expression.kind else {
         return Ok(None);
@@ -331,7 +339,7 @@ fn build_elementwise<'c, 'a>(
     let Some((element, result_shape)) = tensor_parts(&expression.ty) else {
         return Ok(None);
     };
-    let Some(scalar) = scalar_op(*op, element) else {
+    let Some(kind) = arithmetic(*op, element) else {
         return Ok(None);
     };
     let Some(axes) = [&left.ty, &right.ty]
@@ -341,10 +349,10 @@ fn build_elementwise<'c, 'a>(
     else {
         return Ok(None);
     };
-    let Some(lhs) = build_expression(context, location, block, left, scope, target)? else {
+    let Some(lhs) = build_expression(context, location, block, left, scope, lowering)? else {
         return Ok(None);
     };
-    let Some(rhs) = build_expression(context, location, block, right, scope, target)? else {
+    let Some(rhs) = build_expression(context, location, block, right, scope, lowering)? else {
         return Ok(None);
     };
     let Some(sizes) = dynamic_sizes(context, location, block, result_shape, &[lhs, rhs], &axes)?
@@ -365,7 +373,14 @@ fn build_elementwise<'c, 'a>(
     // makes the operation element-wise rather than a gather.
     let destination_axes = Some((0..rank).map(Some).collect());
     let body = Region::new();
-    body.append_block(scalar_body(location, element_type, scalar)?);
+    body.append_block(scalar_body(
+        context,
+        location,
+        (element_type, result_shape),
+        lowering,
+        (*op, kind),
+        expression.span.start,
+    )?);
     let generic = generic_op(
         context,
         location,
@@ -395,7 +410,7 @@ fn build_matmul<'c, 'a>(
     block: &'a Block<'c>,
     expression: &HirExpr,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::Binary { left, right, .. } = &expression.kind else {
         return Ok(None);
@@ -403,10 +418,7 @@ fn build_matmul<'c, 'a>(
     let Some((element, result_shape)) = tensor_parts(&expression.ty) else {
         return Ok(None);
     };
-    let (Some(multiply), Some(add)) = (
-        scalar_op(BinaryOp::Multiply, element),
-        scalar_op(BinaryOp::Add, element),
-    ) else {
+    let Some(kind) = arithmetic(BinaryOp::MatMul, element) else {
         return Ok(None);
     };
     let Some(zero) = zero_attribute(context, element, map_type(context, element)?) else {
@@ -418,10 +430,10 @@ fn build_matmul<'c, 'a>(
     if !contraction_is_static(left, right, result_shape) {
         return Ok(None);
     }
-    let Some(lhs) = build_expression(context, location, block, left, scope, target)? else {
+    let Some(lhs) = build_expression(context, location, block, left, scope, lowering)? else {
         return Ok(None);
     };
-    let Some(rhs) = build_expression(context, location, block, right, scope, target)? else {
+    let Some(rhs) = build_expression(context, location, block, right, scope, lowering)? else {
         return Ok(None);
     };
 
@@ -462,7 +474,13 @@ fn build_matmul<'c, 'a>(
     let right_axes: OperandAxes = Some(vec![Some(2), Some(1)]);
     let accumulator_axes: OperandAxes = Some(vec![Some(0), Some(1)]);
     let body = Region::new();
-    body.append_block(contraction_block(location, element_type, multiply, add)?);
+    body.append_block(contraction_block(
+        location,
+        element_type,
+        lowering,
+        kind,
+        expression.span.start,
+    )?);
 
     Ok(Some(
         block
@@ -514,7 +532,7 @@ fn contraction_is_static(left: &HirExpr, right: &HirExpr, result: &[Option<usize
 
 /// The additive identity of `element`, as the attribute an `arith.constant` carries.
 /// `None` for an element the language gives no arithmetic, which is the same set
-/// `scalar_op` refuses.
+/// `arithmetic` refuses.
 fn zero_attribute<'c>(
     context: &'c Context,
     element: &HirType,
@@ -552,27 +570,29 @@ pub(crate) fn fill_block<'c>(
 }
 
 /// The matrix-product body: multiply the two operand elements and add the product to
-/// the accumulator the destination already carries.
+/// the accumulator the destination already carries, each with the host's checks.
 fn contraction_block<'c>(
     location: Location<'c>,
     element: Type<'c>,
-    multiply: ScalarOp,
-    add: ScalarOp,
+    lowering: &Lowering<'c, '_>,
+    kind: Element,
+    offset: usize,
 ) -> Result<Block<'c>, MlirError> {
     let block = Block::new(&[(element, location); ELEMENTWISE_BODY_ARGUMENTS]);
-
-    let product = block
-        .append_operation(multiply(
-            block.argument(0)?.into(),
-            block.argument(1)?.into(),
-            location,
-        ))
-        .result(0)?
-        .into();
-    let summed = block
-        .append_operation(add(block.argument(2)?.into(), product, location))
-        .result(0)?
-        .into();
+    let at = At {
+        offset,
+        position: None,
+    };
+    let lowered = |op, operands| {
+        lowering
+            .arith(&block, op, kind, operands, at)?
+            .ok_or(MlirError::ModuleVerificationFailed)
+    };
+    let product = lowered(
+        BinaryOp::Multiply,
+        (block.argument(0)?.into(), block.argument(1)?.into()),
+    )?;
+    let summed = lowered(BinaryOp::Add, (block.argument(2)?.into(), product))?;
 
     block.append_operation(
         OperationBuilder::new("linalg.yield", location)
@@ -715,22 +735,31 @@ pub(crate) fn generic_op<'c>(
         .build()?)
 }
 
-/// The `linalg.generic` body: apply `scalar` to the two input elements and yield it.
+/// The `linalg.generic` body: apply `op` to the two input elements and yield it.
 fn scalar_body<'c>(
+    context: &'c Context,
     location: Location<'c>,
-    element: Type<'c>,
-    scalar: ScalarOp,
+    (element, extents): (Type<'c>, &[Option<usize>]),
+    lowering: &Lowering<'c, '_>,
+    (op, kind): (BinaryOp, Element),
+    offset: usize,
 ) -> Result<Block<'c>, MlirError> {
     // The region takes one argument per operand, so the third is whatever the
     // destination already holds. An element-wise write overwrites it unread.
     let block = Block::new(&[(element, location); ELEMENTWISE_BODY_ARGUMENTS]);
 
-    let lhs = block.argument(0)?.into();
-    let rhs = block.argument(1)?.into();
-    let value = block
-        .append_operation(scalar(lhs, rhs, location))
-        .result(0)?
-        .into();
+    // A division's two checks report different diagnostics, so which element failed first
+    // decides which one the host gives.
+    let position = match (op, kind) {
+        (BinaryOp::Divide, Element::Signed(_) | Element::Unsigned(_)) => {
+            row_major(context, location, &block, extents)?
+        }
+        _ => None,
+    };
+    let operands = (block.argument(0)?.into(), block.argument(1)?.into());
+    let value = lowering
+        .arith(&block, op, kind, operands, At { offset, position })?
+        .ok_or(MlirError::ModuleVerificationFailed)?;
 
     block.append_operation(
         OperationBuilder::new("linalg.yield", location)
@@ -739,6 +768,51 @@ fn scalar_body<'c>(
     );
 
     Ok(block)
+}
+
+/// The row-major position of the element a `linalg.generic` over `extents` is computing,
+/// as an `index`. `None` where an extent is `?`, which no linked body has.
+fn row_major<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    extents: &[Option<usize>],
+) -> Result<Option<Value<'c, 'a>>, MlirError> {
+    let Some(extents) = extents.iter().copied().collect::<Option<Vec<usize>>>() else {
+        return Ok(None);
+    };
+    let index = Type::index(context);
+    let mut position: Value = block
+        .append_operation(arith::constant(
+            context,
+            IntegerAttribute::new(index, 0).into(),
+            location,
+        ))
+        .result(0)?
+        .into();
+    for (dimension, extent) in extents.iter().enumerate() {
+        let extent = block
+            .append_operation(arith::constant(
+                context,
+                IntegerAttribute::new(index, *extent as i64).into(),
+                location,
+            ))
+            .result(0)?
+            .into();
+        let at = block
+            .append_operation(linalg_index(context, location, dimension)?)
+            .result(0)?
+            .into();
+        let scaled = block
+            .append_operation(arith::muli(position, extent, location))
+            .result(0)?
+            .into();
+        position = block
+            .append_operation(arith::addi(scaled, at, location))
+            .result(0)?
+            .into();
+    }
+    Ok(Some(position))
 }
 
 /// The destination `linalg.generic` writes its result into. `sizes` carries one
@@ -767,38 +841,20 @@ fn dim_op<'c>(
         .build()?)
 }
 
-/// Which `arith` operation carries one element, or `None` where the language
-/// defines no such arithmetic on tensors.
-///
-/// `f16` / `bf16` are absent deliberately: the HIR contract gives them a narrow
-/// scalar role with no arithmetic, so a tensor of them has none either. Integer
-/// division is the one place signedness changes the operation rather than only
-/// the type.
-fn scalar_op(op: BinaryOp, element: &HirType) -> Option<ScalarOp> {
-    match element {
-        HirType::F32 | HirType::F64 => match op {
-            BinaryOp::Add => Some(arith::addf),
-            BinaryOp::Subtract => Some(arith::subf),
-            BinaryOp::Multiply => Some(arith::mulf),
-            BinaryOp::Divide => Some(arith::divf),
-            _ => None,
-        },
-        HirType::I8 | HirType::I16 | HirType::I32 | HirType::I64 => match op {
-            BinaryOp::Add => Some(arith::addi),
-            BinaryOp::Subtract => Some(arith::subi),
-            BinaryOp::Multiply => Some(arith::muli),
-            BinaryOp::Divide => Some(arith::divsi),
-            _ => None,
-        },
-        HirType::U8 | HirType::U16 | HirType::U32 | HirType::U64 => match op {
-            BinaryOp::Add => Some(arith::addi),
-            BinaryOp::Subtract => Some(arith::subi),
-            BinaryOp::Multiply => Some(arith::muli),
-            BinaryOp::Divide => Some(arith::divui),
-            _ => None,
-        },
-        _ => None,
-    }
+/// How `op` computes one element of `element`, or `None` where this path lowers no such
+/// arithmetic on tensors: `%`, and `f16` / `bf16`, which the HIR contract gives a narrow
+/// scalar role with no arithmetic. `@` is a multiply and an add.
+fn arithmetic(op: BinaryOp, element: &HirType) -> Option<Element> {
+    let kind = Element::of(element)?;
+    matches!(
+        op,
+        BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::MatMul
+    )
+    .then_some(kind)
 }
 
 /// One affine map per `linalg.generic` operand, in operand order, saying where
@@ -1326,13 +1382,42 @@ mod tests {
     }
 
     #[test]
-    fn an_integer_matrix_product_accumulates_with_addi() {
+    fn an_integer_matrix_product_checks_its_multiply_and_its_add() {
         let ir = lower_program(&returns_product(HirType::I32, 2, 2, 2))
             .expect("a matrix product should lower");
 
         assert!(
-            ir.contains("arith.muli") && ir.contains("arith.addi"),
-            "expected the integer multiply-accumulate:\n{ir}"
+            ir.contains("llvm.intr.smul.with.overflow")
+                && ir.contains("llvm.intr.sadd.with.overflow"),
+            "expected the checked multiply-accumulate:\n{ir}"
+        );
+        assert!(
+            ir.contains("memref<1xi64>"),
+            "a checked body takes its status word:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn an_unsigned_element_takes_the_unsigned_checks() {
+        let ir = lower_program(&returns_binary(BinaryOp::Subtract, HirType::U8, &[4]))
+            .expect("an unsigned subtraction should lower");
+        assert!(ir.contains("llvm.intr.usub.with.overflow"), "{ir}");
+
+        let ir = lower_program(&returns_binary(BinaryOp::Divide, HirType::U16, &[4]))
+            .expect("an unsigned division should lower");
+        assert!(
+            ir.contains("arith.divui") && !ir.contains("arith.divsi"),
+            "{ir}"
+        );
+    }
+
+    #[test]
+    fn a_float_body_takes_no_status_word() {
+        let ir = lower_program(&returns_binary(BinaryOp::Divide, HirType::F32, &[4]))
+            .expect("a float division should lower");
+        assert!(
+            !ir.contains("memref<1xi64>") && !ir.contains("scf.if"),
+            "{ir}"
         );
     }
 

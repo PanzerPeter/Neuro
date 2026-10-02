@@ -14,6 +14,7 @@
 
 use crate::{
     errors::MlirError,
+    guards::{At, Element, Lowering},
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, empty_tensor, fill_block, indexing_maps,
@@ -22,12 +23,16 @@ use crate::{
     tensor_reduce::{append, apply, yield_value},
 };
 
+use ast_types::BinaryOp;
 use melior::{
     Context,
     dialect::arith,
-    ir::{Block, BlockLike, Location, Type, Value, attribute::FloatAttribute},
+    ir::{
+        Block, BlockLike, Location, Type, Value,
+        attribute::{FloatAttribute, IntegerAttribute},
+    },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirTarget, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 /// Lower `einsum`, a `TensorEinsum`, into a tensor of type `result`: its own type, or the
 /// one-element tensor a full contraction is boxed in.
@@ -38,7 +43,7 @@ pub(crate) fn build_einsum<'c, 'a>(
     einsum: &HirExpr,
     result: &HirType,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::TensorEinsum {
         operands,
@@ -53,8 +58,10 @@ pub(crate) fn build_einsum<'c, 'a>(
         return Ok(None);
     };
     let boxed = output.is_empty();
-    if !matches!(element, HirType::F32 | HirType::F64)
-        || operands.is_empty()
+    let Some(kind) = Element::of(element) else {
+        return Ok(None);
+    };
+    if operands.is_empty()
         || operands.len() != inputs.len()
         || result_shape.len() != output.len().max(usize::from(boxed))
         || inputs
@@ -99,7 +106,7 @@ pub(crate) fn build_einsum<'c, 'a>(
             return Ok(None);
         };
         maps.push(Some(axes));
-        let Some(value) = build_expression(context, location, block, operand, scope, target)?
+        let Some(value) = build_expression(context, location, block, operand, scope, lowering)?
         else {
             return Ok(None);
         };
@@ -110,14 +117,11 @@ pub(crate) fn build_einsum<'c, 'a>(
 
     let tensor_type = map_type(context, result)?;
     let element_type = map_type(context, element)?;
-    let zero = append(
-        block,
-        arith::constant(
-            context,
-            FloatAttribute::new(context, element_type, 0.0).into(),
-            location,
-        ),
-    )?;
+    let zero = match kind {
+        Element::Float => FloatAttribute::new(context, element_type, 0.0).into(),
+        _ => IntegerAttribute::new(element_type, 0).into(),
+    };
+    let zero = append(block, arith::constant(context, zero, location))?;
     let empty = append(block, empty_tensor(location, tensor_type, &[])?)?;
     let seeded = apply(
         context,
@@ -144,29 +148,40 @@ pub(crate) fn build_einsum<'c, 'a>(
             iterators: iterator_types(context, rank, contracted.len())?,
         },
         tensor_type,
-        product_block(location, element_type, values.len())?,
+        product_block(
+            location,
+            element_type,
+            values.len(),
+            lowering,
+            (kind, einsum.span.start),
+        )?,
     )?))
 }
 
 /// The body over `(operand elements..., accumulator)`: the elements multiplied left to
-/// right, then added to the accumulator.
+/// right, then added to the accumulator, each step with the host's checks at the `einsum`.
 fn product_block<'c>(
     location: Location<'c>,
     element: Type<'c>,
     operands: usize,
+    lowering: &Lowering<'c, '_>,
+    (kind, offset): (Element, usize),
 ) -> Result<Block<'c>, MlirError> {
     let block = Block::new(&vec![(element, location); operands + 1]);
+    let at = At {
+        offset,
+        position: None,
+    };
+    let step = |op, pair| {
+        lowering
+            .arith(&block, op, kind, pair, at)?
+            .ok_or(MlirError::ModuleVerificationFailed)
+    };
     let mut product: Value = block.argument(0)?.into();
     for index in 1..operands {
-        product = append(
-            &block,
-            arith::mulf(product, block.argument(index)?.into(), location),
-        )?;
+        product = step(BinaryOp::Multiply, (product, block.argument(index)?.into()))?;
     }
-    let total = append(
-        &block,
-        arith::addf(block.argument(operands)?.into(), product, location),
-    )?;
+    let total = step(BinaryOp::Add, (block.argument(operands)?.into(), product))?;
     yield_value(&block, location, total)?;
     Ok(block)
 }
@@ -187,10 +202,11 @@ mod tests {
 
     fn device_module(program: &HirProgram) -> String {
         let context = new_context();
-        let (module, _) = build_linkable_module(&context, program, &|function| {
-            function.target == HirTarget::FollowsOperands
-        })
-        .expect("the bodies build");
+        let (module, _) =
+            build_linkable_module(&context, program, crate::Overflow::Checked, &|function| {
+                function.target == HirTarget::FollowsOperands
+            })
+            .expect("the bodies build");
         module.as_operation().to_string()
     }
 
@@ -228,6 +244,7 @@ mod tests {
             &GpuTarget::Nvidia {
                 chip: "sm_80".to_string(),
             },
+            crate::Overflow::Checked,
         )
         .expect("the body lowers");
         assert_eq!(

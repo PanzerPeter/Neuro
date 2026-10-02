@@ -1,5 +1,5 @@
-// Device operations: in a program that moves a tensor to a device, each float tensor
-// operation a GPU can run is outlined into a function that runs where its operands live.
+// Device operations: in a program that moves a tensor to a device, each tensor operation a
+// GPU can run is outlined into a function that runs where its operands live.
 // This harness runs no prelude and no argument binding, so `Device` is declared here and
 // the reduction axis is written positionally.
 
@@ -96,14 +96,15 @@ fn a_whole_reduction_returns_one_element_the_call_site_reads() {
     assert_eq!(total.return_type.to_string(), "Tensor<f32, [1]>");
     // The receiver is a temporary, itself an outlined sum, so it is moved in.
     assert_eq!(total.params[0].ty.to_string(), "Tensor<f32, [2, 3]>");
-    assert_eq!(outlined(&program).len(), 5);
+    assert_eq!(outlined(&program).len(), 6);
 }
 
 #[test]
-fn integer_tensors_stay_inline() {
+fn integer_tensors_are_outlined_like_float_ones() {
     let program = lower(PROGRAM);
-    let kept = binding_init(function_body(&program, "main"), "kept");
-    assert!(matches!(kept.kind, HirExprKind::Binary { .. }));
+    let kept = callee(&program, "kept");
+    assert_eq!(kept.params[0].ty.to_string(), "&Tensor<i32, [4]>");
+    assert_eq!(kept.return_type.to_string(), "Tensor<i32, [4]>");
 }
 
 #[test]
@@ -177,12 +178,9 @@ func main() -> i32 {
         topk.return_type.to_string(),
         "(Tensor<f32, [2, 2]>, Tensor<i32, [2, 2]>)"
     );
-    let kept = binding_init(function_body(&program, "main"), "kept");
-    assert!(
-        matches!(kept.kind, HirExprKind::TensorSort { .. }),
-        "an integer sort has no device form"
-    );
-    assert_eq!(outlined(&program).len(), 4);
+    let kept = callee(&program, "kept");
+    assert_eq!(kept.return_type.to_string(), "Tensor<i32, [4]>");
+    assert_eq!(outlined(&program).len(), 5);
 }
 
 const MORE: &str = r#"

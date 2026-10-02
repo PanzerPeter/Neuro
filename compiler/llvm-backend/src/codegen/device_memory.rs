@@ -486,6 +486,24 @@ impl<'ctx> CodegenContext<'ctx> {
         })
     }
 
+    /// The device copy of a checked body's status word `host`, set from it before the
+    /// kernels run and copied back over it after them.
+    pub(crate) fn stage_status(
+        &mut self,
+        staging: &mut DeviceStaging<'ctx>,
+        host: PointerValue<'ctx>,
+        status_ty: &Type,
+    ) -> CodegenResult<StagedResult<'ctx>> {
+        let word = self.device_scratch(status_ty)?;
+        self.build_device_copy(staging, word, host, status_ty)?;
+        staging.buffers.push(word);
+        Ok(StagedResult {
+            handle: host,
+            written: word,
+            copy_back: host,
+        })
+    }
+
     /// Where the kernels write a `tensor_ty` result. With any operand on the device the
     /// result stays there too, in a device tensor of its own; otherwise it goes to scratch
     /// and is copied back into a host tensor, so an all-host call is what it always was.

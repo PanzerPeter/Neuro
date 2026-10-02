@@ -251,6 +251,23 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(phi.as_basic_value())
     }
 
+    /// Panic unless `ok`, with the diagnostic this backend's own integer arithmetic gives a
+    /// failure of `kind` at `offset`. Raised for a check an external body reported, so a
+    /// body computed elsewhere fails exactly as one computed here would.
+    pub(crate) fn codegen_body_guard(
+        &mut self,
+        ok: IntValue<'ctx>,
+        kind: crate::BodyGuardKind,
+        offset: usize,
+    ) -> CodegenResult<()> {
+        let message = match kind {
+            crate::BodyGuardKind::Overflow => OVERFLOW_PANIC,
+            crate::BodyGuardKind::DivisionByZero => DIVIDE_BY_ZERO_PANIC,
+            crate::BodyGuardKind::RemainderByZero => REMAINDER_BY_ZERO_PANIC,
+        };
+        self.codegen_guard_or_panic(ok, message, offset)
+    }
+
     /// Emit integer `+`, `-`, or `*`.
     ///
     /// In debug builds (`-O0`, `overflow_checks` enabled) the operation uses the

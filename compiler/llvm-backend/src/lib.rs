@@ -63,6 +63,29 @@ pub struct ExternalBodies {
     pub functions: Vec<(String, String)>,
     /// Where every buffer a symbol reads or writes must live.
     pub memory: BodyMemory,
+    /// `(symbol, checks)` for each symbol whose arithmetic is checked. Such a symbol takes
+    /// one more descriptor after its parameters, before its results: a one-element `i64`
+    /// buffer this backend fills with all ones, which a failed check lowers to a key whose
+    /// low 12 bits are its position in `checks`, counted from 1. This backend panics for
+    /// the check left there once the call returns.
+    pub guards: Vec<(String, Vec<BodyGuard>)>,
+}
+
+/// One check inside an external body: what failing it means, and the byte offset of the
+/// operation in the source, where the panic it raises points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BodyGuard {
+    pub kind: BodyGuardKind,
+    pub offset: usize,
+}
+
+/// The panic a failed [`BodyGuard`] raises: the one this backend's own integer arithmetic
+/// raises for the same failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyGuardKind {
+    Overflow,
+    DivisionByZero,
+    RemainderByZero,
 }
 
 /// Where an external body's buffers live, which decides what its wrapper passes it.
@@ -356,6 +379,10 @@ fn build_module<'ctx>(
 
     // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);
+    codegen_ctx.external_guards = external
+        .iter()
+        .flat_map(|bodies| bodies.guards.iter().cloned())
+        .collect();
 
     if device_bodies {
         codegen_ctx.set_body_memory(BodyMemory::Device);

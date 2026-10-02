@@ -21,9 +21,14 @@
 // with the run's first element for `.max()` / `.min()`, which the fold then meets again
 // harmlessly. That is the LLVM backend's own start, so a NaN or an all-equal run picks the
 // same element on both.
+//
+// An integer sum starts at 0 and folds left to right with the host's overflow check, never in
+// lanes: the host folds an integer run in order, and where an overflow is caught depends on
+// the order of the additions.
 
 use crate::{
     errors::MlirError,
+    guards::{At, Element, Lowering},
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, empty_tensor, fill_block, generic_op,
@@ -33,6 +38,7 @@ use crate::{
     tensor_sort::precedes,
 };
 
+use ast_types::BinaryOp;
 use melior::{
     Context,
     dialect::arith::{self, CmpiPredicate},
@@ -43,7 +49,7 @@ use melior::{
         r#type::RankedTensorType,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirReduceOp, HirTarget, HirType, REDUCE_LANES};
+use neuro_hir::{HirExpr, HirExprKind, HirReduceOp, HirType, REDUCE_LANES};
 
 /// How many region arguments a fold body takes: the source element, then the accumulator.
 const FOLD_BODY_ARGUMENTS: usize = 2;
@@ -60,7 +66,7 @@ pub(crate) fn build_reduce<'c, 'a>(
     reduce: &HirExpr,
     result: &HirType,
     scope: &[(String, Value<'c, 'a>)],
-    target: HirTarget,
+    lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let HirExprKind::TensorReduce { receiver, op, axis } = &reduce.kind else {
         return Ok(None);
@@ -73,19 +79,29 @@ pub(crate) fn build_reduce<'c, 'a>(
     let Some(layout) = ReduceLayout::new(source, extents, *axis) else {
         return Ok(None);
     };
-    if !matches!(element, HirType::F32 | HirType::F64) {
+    let Some(kind) = Element::of(element) else {
+        return Ok(None);
+    };
+    if kind != Element::Float && *op == HirReduceOp::Mean {
         return Ok(None);
     }
-    let Some(source) = build_expression(context, location, block, receiver, scope, target)? else {
+    let Some(source) = build_expression(context, location, block, receiver, scope, lowering)?
+    else {
         return Ok(None);
     };
 
     let tensor_type = map_type(context, result)?;
     let element_type = map_type(context, element)?;
     let length = layout.length;
+    let fold = Fold {
+        lowering,
+        op: *op,
+        kind,
+        offset: reduce.span.start,
+    };
     let (source, layout) = match layout.lanes {
-        Some(ref run) if length > REDUCE_LANES => {
-            let partials = build_lanes(context, location, block, source, run, *op, element_type)?;
+        Some(ref run) if length > REDUCE_LANES && kind == Element::Float => {
+            let partials = build_lanes(context, location, block, source, run, &fold, element_type)?;
             let Some(lanes) = ReduceLayout::new(&run.partials(), extents, Some(run.result_rank))
             else {
                 return Ok(None);
@@ -103,7 +119,10 @@ pub(crate) fn build_reduce<'c, 'a>(
 
     let (seed_input, seed_axes) = match op {
         HirReduceOp::Sum | HirReduceOp::Mean => {
-            let seed = FloatAttribute::new(context, element_type, SUM_SEED).into();
+            let seed = match kind {
+                Element::Float => FloatAttribute::new(context, element_type, SUM_SEED).into(),
+                _ => IntegerAttribute::new(element_type, 0).into(),
+            };
             let seed = block
                 .append_operation(arith::constant(context, seed, location))
                 .result(0)?
@@ -141,7 +160,7 @@ pub(crate) fn build_reduce<'c, 'a>(
             iterators: iterator_types(context, layout.space, layout.space - parallel)?,
         },
         tensor_type,
-        fold_block(context, location, element_type, *op)?,
+        fold_block(context, location, element_type, &fold)?,
     )?;
     if *op != HirReduceOp::Mean {
         return Ok(Some(folded));
@@ -165,6 +184,15 @@ pub(crate) fn build_reduce<'c, 'a>(
         tensor_type,
         mean_block(location, element_type)?,
     )?))
+}
+
+/// What one fold step computes: the reduction, its element, and where a sum's overflow
+/// check points.
+struct Fold<'l, 'c, 'a> {
+    lowering: &'l Lowering<'c, 'a>,
+    op: HirReduceOp,
+    kind: Element,
+    offset: usize,
 }
 
 /// Where one reduction's index space puts each axis.
@@ -269,7 +297,7 @@ fn build_lanes<'c, 'a>(
     block: &'a Block<'c>,
     source: Value<'c, 'a>,
     run: &Run,
-    op: HirReduceOp,
+    fold: &Fold<'_, 'c, '_>,
     element_type: Type<'c>,
 ) -> Result<Value<'c, 'a>, MlirError> {
     let index = Type::index(context);
@@ -330,7 +358,7 @@ fn build_lanes<'c, 'a>(
         at,
         element_type,
     )?;
-    let folded = fold_step(context, location, &step, op, value, carried)?;
+    let folded = fold_step(context, location, &step, fold, value, carried)?;
     let kept_value = append(&step, arith::select(inside, folded, carried, location))?;
     step.append_operation(
         OperationBuilder::new("scf.yield", location)
@@ -457,33 +485,48 @@ fn fold_block<'c>(
     context: &'c Context,
     location: Location<'c>,
     element: Type<'c>,
-    op: HirReduceOp,
+    fold: &Fold<'_, 'c, '_>,
 ) -> Result<Block<'c>, MlirError> {
     let block = Block::new(&[(element, location); FOLD_BODY_ARGUMENTS]);
     let value: Value = block.argument(0)?.into();
     let carried: Value = block.argument(1)?.into();
-    let folded = fold_step(context, location, &block, op, value, carried)?;
+    let folded = fold_step(context, location, &block, fold, value, carried)?;
     yield_value(&block, location, folded)?;
     Ok(block)
 }
 
-/// `value` folded into `carried`, appended to `block`.
+/// `value` folded into `carried`, appended to `block`. An integer sum carries the host's
+/// overflow check, at the reduction.
 fn fold_step<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
-    op: HirReduceOp,
+    fold: &Fold<'_, 'c, '_>,
     value: Value<'c, '_>,
     carried: Value<'c, '_>,
 ) -> Result<Value<'c, 'a>, MlirError> {
-    let descending = match op {
+    let descending = match fold.op {
         HirReduceOp::Sum | HirReduceOp::Mean => {
-            return append(block, arith::addf(carried, value, location));
+            let at = At {
+                offset: fold.offset,
+                position: None,
+            };
+            return fold
+                .lowering
+                .arith(block, BinaryOp::Add, fold.kind, (carried, value), at)?
+                .ok_or(MlirError::ModuleVerificationFailed);
         }
         HirReduceOp::Max => true,
         HirReduceOp::Min => false,
     };
-    let wins = precedes(context, location, block, value, carried, descending)?;
+    let wins = precedes(
+        context,
+        location,
+        block,
+        (value, carried),
+        fold.kind,
+        descending,
+    )?;
     append(block, arith::select(wins, value, carried, location))
 }
 
@@ -563,7 +606,8 @@ mod tests {
             ("    val r = g.min(1)", 2),
         ] {
             let program = program(body);
-            let bodies = lower_for_gpu(&program, &nvidia()).expect("a reduction lowers");
+            let bodies = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
+                .expect("a reduction lowers");
             assert_eq!(bodies.functions.len(), 1, "`{body}`");
             let ir = &bodies.llvm_ir;
             assert_eq!(
@@ -589,7 +633,7 @@ mod tests {
             );
             let ast = syntax_parsing::parse(&source).expect("the program parses");
             let program = hir_lowering::lower_program(&ast).expect("the program lowers to HIR");
-            let ir = lower_for_gpu(&program, &nvidia())
+            let ir = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
                 .expect("a reduction lowers")
                 .llvm_ir;
             assert_eq!(
@@ -602,9 +646,13 @@ mod tests {
 
     #[test]
     fn a_max_keeps_the_host_comparator() {
-        let ir = lower_for_gpu(&program("    val r = g.max()"), &nvidia())
-            .expect("a reduction lowers")
-            .llvm_ir;
+        let ir = lower_for_gpu(
+            &program("    val r = g.max()"),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("a reduction lowers")
+        .llvm_ir;
         assert!(
             ir.contains("setp.gt.f32") || ir.contains("setp.gtu.f32"),
             "{ir}"
@@ -617,14 +665,41 @@ mod tests {
 
     #[test]
     fn a_body_the_gpu_path_cannot_take_keeps_its_host_body_without_error() {
-        // A rank-1 axis reduction has a rank-0 result, so it stays inline; an integer one
-        // is never outlined. Neither reaches the GPU, and neither is an error.
-        let program = program(
-            "    val v: Tensor<f32, [4]> = Tensor::ones()\n    val s = v.sum(0)\n    val i: Tensor<i32, [4]> = Tensor::ones()\n    val t = &i + &i",
-        );
+        // A rank-1 axis reduction has a rank-0 result, so it stays inline, reaching neither
+        // the GPU nor an error.
+        let program = program("    val v: Tensor<f32, [4]> = Tensor::ones()\n    val s = v.sum(0)");
         assert_eq!(outlined(&program), 0);
-        let bodies = lower_for_gpu(&program, &nvidia()).expect("nothing to refuse");
+        let bodies = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
+            .expect("nothing to refuse");
         assert!(bodies.functions.is_empty());
+    }
+
+    #[test]
+    fn an_integer_sum_folds_in_order_with_its_overflow_check() {
+        let integer = program(
+            "    val i: Tensor<i32, [100, 50]> = Tensor::ones()\n    val gi = i.to(Device::GPU(0))\n    val s = gi.sum()",
+        );
+        assert_eq!(outlined(&integer), 1);
+        let bodies = lower_for_gpu(&integer, &nvidia(), crate::Overflow::Checked)
+            .expect("an integer sum lowers");
+        assert_eq!(bodies.functions.len(), 1);
+        let [(_, checks)] = bodies.guards.as_slice() else {
+            panic!("expected one checked symbol, got {:?}", bodies.guards);
+        };
+        assert_eq!(checks.len(), 1, "one add, checked for overflow");
+        // 5000 elements, past `REDUCE_LANES`, fold in one thread rather than in lanes, the
+        // host's order: a seed and a fold, where a float sum takes a lane pass between them.
+        let launches = |ir: &str| ir.matches("call void @mgpuLaunchKernel").count();
+        let float = lower_for_gpu(
+            &program(
+                "    val f: Tensor<f32, [100, 50]> = Tensor::ones()\n    val gf = f.to(Device::GPU(0))\n    val s = gf.sum()",
+            ),
+            &nvidia(),
+            crate::Overflow::Checked,
+        )
+        .expect("a float sum lowers");
+        assert_eq!(launches(&bodies.llvm_ir), 2, "{}", bodies.llvm_ir);
+        assert_eq!(launches(&float.llvm_ir), 3, "{}", float.llvm_ir);
     }
 
     #[test]
@@ -635,7 +710,8 @@ mod tests {
                 f.target = HirTarget::Host;
             }
         }
-        let bodies = lower_for_link(&program).expect("the CPU path lowers");
+        let bodies =
+            lower_for_link(&program, crate::Overflow::Checked).expect("the CPU path lowers");
         assert!(bodies.functions.is_empty(), "{:?}", bodies.functions);
     }
 }

@@ -1,8 +1,9 @@
 //! The bodies a function outlined to follow its operands launches where `linalg` cannot say
 //! them: a compound assignment, which must write its target's own buffer, and a traversal
 //! (`.map`, `.zip`, `.reduce`), which calls a closure per element. Both are per-thread code,
-//! so they are emitted like a `@kernel` body, in strict mode: a traversal's closure must give
-//! the host's answer, and integer arithmetic has none of the host's guards on a GPU.
+//! so they are emitted like a `@kernel` body, but with the host's integer checks: a failed one
+//! lowers the launcher's status word to its number and stops the thread, and the caller
+//! panics as the host would.
 //!
 //! `.map` and `.zip` run one thread per element. `.reduce` folds in one thread, in the
 //! receiver's row-major order, because its function is arbitrary and only that order is the
@@ -14,19 +15,22 @@ use neuro_hir::{
     HirTensorApply, HirType,
 };
 
-use super::{Binding, BodyEmitter, Lowered, Refused, is_float, memref_type, scalar_type};
+use super::{Binding, BodyEmitter, Failure, Lowered, Refused, is_float, memref_type, scalar_type};
+use crate::guards::{Guard, Overflow};
 use crate::kernel::GuardStyle;
 
 /// Threads per block of an element-wise launch: one thread per element, the grid's one axis.
 const THREADS_PER_BLOCK: u32 = 256;
 
-/// One launch: the grid, the region the threads run, and the `memref` type of the result
-/// the launcher takes after its parameters, if it has one.
+/// One launch: the grid, the region the threads run, the `memref` type of the result the
+/// launcher takes after its parameters, if it has one, and the checks the region reports
+/// through the status word, which the launcher then takes before the result.
 pub(in crate::kernel) struct Launch {
     pub(in crate::kernel) blocks: [u64; 3],
     pub(in crate::kernel) threads: [u32; 3],
     pub(in crate::kernel) region: String,
     pub(in crate::kernel) result: Option<String>,
+    pub(in crate::kernel) guards: Vec<Guard>,
 }
 
 /// The launch an outlined `function` computes its body with, `None` for a body of another
@@ -39,8 +43,14 @@ pub(in crate::kernel) fn outlined_launch(
     program: &HirProgram,
     function: &HirFunction,
     guard: GuardStyle,
+    overflow: Overflow,
     math: bool,
 ) -> Lowered<Option<Launch>> {
+    let emitter = |threads| {
+        let mut emitter = BodyEmitter::new(function, (guard, overflow), threads, Vec::new(), math);
+        emitter.failure = Failure::Report;
+        emitter
+    };
     match function.body.as_slice() {
         [
             HirStmt::TensorCompoundAssign {
@@ -50,10 +60,9 @@ pub(in crate::kernel) fn outlined_launch(
                 ty,
                 span,
             },
-        ] => {
-            let emitter = BodyEmitter::new(function, guard, element_threads(), Vec::new(), math);
-            emitter.compound(pointer, *op, value, ty, *span).map(Some)
-        }
+        ] => emitter(element_threads())
+            .compound(pointer, *op, value, ty, *span)
+            .map(Some),
         [HirStmt::Expr(expr)] => match &expr.kind {
             HirExprKind::TensorApply {
                 kind: HirTensorApply::Map | HirTensorApply::Zip,
@@ -62,10 +71,7 @@ pub(in crate::kernel) fn outlined_launch(
                 callee,
             } => {
                 let closure = closure(program, callee)?;
-                let mut emitter =
-                    BodyEmitter::new(function, guard, element_threads(), Vec::new(), math);
-                emitter.strict = true;
-                emitter
+                emitter(element_threads())
                     .elementwise(closure, receiver, operand.as_deref(), &expr.ty)
                     .map(Some)
             }
@@ -83,10 +89,9 @@ pub(in crate::kernel) fn outlined_launch(
                     },
                 ] => {
                     let closure = closure(program, callee)?;
-                    let mut emitter =
-                        BodyEmitter::new(function, guard, [1, 1, 1], Vec::new(), math);
-                    emitter.strict = true;
-                    emitter.fold(closure, receiver, seed, &expr.ty).map(Some)
+                    emitter([1, 1, 1])
+                        .fold(closure, receiver, seed, &expr.ty)
+                        .map(Some)
                 }
                 _ => Ok(None),
             },
@@ -139,13 +144,13 @@ impl BodyEmitter<'_> {
         let HirType::Tensor { element, .. } = ty else {
             return Err(Refused::new(span, "a compound assignment to a non-tensor"));
         };
-        let Some(mlir) = scalar_type(element).filter(|_| is_float(element)) else {
+        let Some(mlir) = scalar_type(element).filter(|_| **element != HirType::Bool) else {
             return Err(Refused::new(
                 span,
-                "a compound assignment to a non-float tensor",
+                "a compound assignment to a non-numeric tensor",
             ));
         };
-        let name = match op {
+        let float = match op {
             BinaryOp::Add => "addf",
             BinaryOp::Subtract => "subf",
             BinaryOp::Multiply => "mulf",
@@ -154,6 +159,7 @@ impl BodyEmitter<'_> {
         };
         let count: usize = extents.iter().product();
         let exit = self.block();
+        self.stop = Some(exit.clone());
         let indices = self.thread_element(count, &extents, &exit);
         let joined = indices.join(", ");
         let current = self.assign(&format!("memref.load {target}[{joined}] : {target_ty}"));
@@ -177,16 +183,23 @@ impl BodyEmitter<'_> {
             }
             _ => self.expr(value, &exit)?,
         };
-        let updated = self.assign(&format!("arith.{name} {current}, {operand} : {mlir}"));
+        // The host checks a tensor's integer element exactly as the scalar operator, at the
+        // statement.
+        let updated = match is_float(element) {
+            true => self.assign(&format!("arith.{float} {current}, {operand} : {mlir}")),
+            false => self.checked_int(op, (&current, &operand), element, span.start),
+        };
         self.line(&format!(
             "memref.store {updated}, {target}[{joined}] : {target_ty}"
         ));
         let threads = self.threads;
+        let (region, guards) = self.finish(&exit);
         Ok(Launch {
             blocks: blocks_for(count, threads),
             threads,
-            region: self.finish(&exit),
+            region,
             result: None,
+            guards,
         })
     }
 
@@ -209,6 +222,7 @@ impl BodyEmitter<'_> {
         }
         let count: usize = extents.iter().product();
         let exit = self.block();
+        self.stop = Some(exit.clone());
         let indices = self.thread_element(count, &extents, &exit).join(", ");
         let mut args = vec![self.assign(&format!("memref.load {source}[{indices}] : {source_ty}"))];
         if let Some((memref, ty, _)) = paired {
@@ -219,11 +233,13 @@ impl BodyEmitter<'_> {
             "memref.store {value}, {out}[{indices}] : {out_ty}"
         ));
         let threads = self.threads;
+        let (region, guards) = self.finish(&exit);
         Ok(Launch {
             blocks: blocks_for(count, threads),
             threads,
-            region: self.finish(&exit),
+            region,
             result: Some(out_ty),
+            guards,
         })
     }
 
@@ -245,6 +261,7 @@ impl BodyEmitter<'_> {
         };
         let count: usize = extents.iter().product();
         let exit = self.block();
+        self.stop = Some(exit.clone());
         let start = self.expr(seed, &exit)?;
         let accumulator = self.slot(carried);
         self.line(&format!(
@@ -285,11 +302,13 @@ impl BodyEmitter<'_> {
         let first = self.assign("arith.constant 0 : index");
         self.line(&format!("memref.store {total}, {out}[{first}] : {out_ty}"));
         let threads = self.threads;
+        let (region, guards) = self.finish(&exit);
         Ok(Launch {
             blocks: [1, 1, 1],
             threads,
-            region: self.finish(&exit),
+            region,
             result: Some(out_ty),
+            guards,
         })
     }
 
@@ -303,6 +322,7 @@ impl BodyEmitter<'_> {
         self.cond_branch(&inside, &run, exit);
         self.start(&run);
         let flat = self.assign(&format!("arith.index_cast {position} : index to i64"));
+        self.element = Some(flat.clone());
         self.delinearize_each(&flat, extents)
     }
 
@@ -346,12 +366,12 @@ impl BodyEmitter<'_> {
         Ok(self.assign(&format!("memref.load {slot}[] : memref<{ty}>")))
     }
 
-    /// The region's text, ending in the block that terminates the launch.
-    fn finish(mut self, exit: &str) -> String {
+    /// The region's text, ending in the block that terminates the launch, and its checks.
+    fn finish(mut self, exit: &str) -> (String, Vec<Guard>) {
         self.branch(exit);
         self.start(exit);
         self.line("gpu.terminator");
-        format!("{}{}", self.slots, self.text)
+        (format!("{}{}", self.slots, self.text), self.sites)
     }
 }
 
@@ -376,7 +396,10 @@ mod tests {
     }
 
     fn launched(body: &str, math: bool) -> (String, usize) {
-        let launchers = kernel_launchers(&program(body), &nvidia(), &|| math)
+        let launchers =
+            kernel_launchers(&program(body), &nvidia(), crate::Overflow::Checked, &|| {
+                math
+            })
             .expect("an outlined body is never refused");
         (launchers.text, launchers.functions.len())
     }
@@ -395,6 +418,7 @@ mod tests {
         lower_for_gpu(
             &program("    val r = g.map(|x: f32| -> f32 { x * scale })"),
             &nvidia(),
+            crate::Overflow::Checked,
         )
         .expect("the launcher lowers for NVIDIA");
     }
@@ -425,9 +449,28 @@ mod tests {
     }
 
     #[test]
+    fn integer_arithmetic_in_a_closure_reports_through_the_status_word() {
+        let (text, count) = launched(
+            "    val r = g.map(|x: f32| -> f32 { ((x as i32 + 1) / (x as i32)) as f32 })",
+            true,
+        );
+        assert_eq!(count, 1);
+        assert!(
+            text.contains("llvm.intr.sadd.with.overflow")
+                && text.contains("%status: memref<1xi64>, %arg1: memref<37x19xf32>"),
+            "the status word sits before the result:\n{text}"
+        );
+        assert_eq!(
+            text.matches("memref.atomic_rmw minu").count(),
+            3,
+            "the add's overflow, the divisor and `MIN / -1` each report a failure:\n{text}"
+        );
+    }
+
+    #[test]
     fn what_the_device_cannot_compute_is_left_to_the_host() {
         for body in [
-            "    val r = g.map(|x: f32| -> f32 { (x as i32 + 1) as f32 })",
+            "    val r = g.map(|x: f32| -> f32 { ((x as i32) << 1) as f32 })",
             "    val r = g.map(|x: f32| -> f32 { x.exp() })",
         ] {
             let (_, count) = launched(body, false);
@@ -457,14 +500,16 @@ func main() -> i32 {
 "#;
         let ast = syntax_parsing::parse(source).expect("the kernel parses");
         let program = hir_lowering::lower_program(&ast).expect("the kernel lowers to HIR");
-        let Err(refusals) = kernel_launchers(&program, &nvidia(), &|| false) else {
+        let Err(refusals) =
+            kernel_launchers(&program, &nvidia(), crate::Overflow::Checked, &|| false)
+        else {
             panic!("expected the math call refused");
         };
         assert!(
             refusals[0].what.contains("device math library"),
             "{refusals:?}"
         );
-        assert!(kernel_launchers(&program, &nvidia(), &|| true).is_ok());
+        assert!(kernel_launchers(&program, &nvidia(), crate::Overflow::Checked, &|| true).is_ok());
         let _ = MlirError::KernelBodiesNotLowered(refusals);
     }
 }

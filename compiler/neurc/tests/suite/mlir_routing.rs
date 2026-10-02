@@ -46,7 +46,7 @@ func main() -> i32 {
 }
 "#;
 
-/// Integer element arithmetic, which the LLVM backend guards and MLIR's `arith` does not.
+/// Integer element arithmetic, which MLIR computes with the LLVM backend's checks.
 const INTEGER: &str = r#"
 func add(a: Tensor<i32, [2]>, b: Tensor<i32, [2]>) -> Tensor<i32, [2]> {
     a + b
@@ -55,6 +55,27 @@ func add(a: Tensor<i32, [2]>, b: Tensor<i32, [2]>) -> Tensor<i32, [2]> {
 func main() -> i32 {
     val s = add([1, 2], [3, 4])
     return s[1]
+}
+"#;
+
+/// A linked integer body that fails a check: an overflow in `add`, a zero divisor in `div`.
+const FAILING: &str = r#"
+func add(a: Tensor<i32, [2]>, b: Tensor<i32, [2]>) -> Tensor<i32, [2]> {
+    a + b
+}
+
+func div(a: &Tensor<i64, [2]>, b: &Tensor<i64, [2]>) -> Tensor<i64, [2]> {
+    a / b
+}
+
+func main() -> i32 {
+    val s = add([1, 2147483647], [3, 4])
+    println("{s[1]}")
+    val n: Tensor<i64, [2]> = [-9223372036854775807 - 1, 5]
+    val d: Tensor<i64, [2]> = [-1, 0]
+    val q = div(&n, &d)
+    println("{q[0]}")
+    return 0
 }
 "#;
 
@@ -107,10 +128,44 @@ fn float_bodies_are_computed_by_mlir() {
 }
 
 #[test]
-fn integer_bodies_keep_their_guards_on_the_llvm_backend() {
+fn integer_bodies_are_computed_by_mlir() {
     let ir = emit_llvm_ir(&CompileTest::new(), "integer.nr", INTEGER);
     assert!(
-        !ir.contains("__neuro_mlir_"),
-        "an integer body must not lose its overflow guard to MLIR:\n{ir}"
+        ir.contains("define internal void @__neuro_mlir_add(")
+            && ir.contains("@llvm.sadd.with.overflow.i32"),
+        "an integer body keeps its overflow check through MLIR:\n{ir}"
     );
+}
+
+/// A failed check in a linked body is the LLVM backend's own panic, at the operator: an
+/// overflow on the debug tier only, and a zero divisor on every tier.
+#[test]
+fn a_linked_body_fails_its_checks_as_the_llvm_backend_does() {
+    let test = CompileTest::new();
+    let source = test.write_source("failing.nr", FAILING);
+    for (level, stdout, panic, at) in [
+        ("0", "", "panic: integer overflow at ", "/failing.nr:3:5\n"),
+        (
+            "2",
+            "-2147483645\n",
+            "panic: division by zero at ",
+            "/failing.nr:7:5\n",
+        ),
+    ] {
+        let exe = source.with_extension(format!("o{level}"));
+        let built = Command::new(env!("CARGO_BIN_EXE_neurc"))
+            .args(["compile", "-O", level, "-o"])
+            .arg(&exe)
+            .arg(&source)
+            .output()
+            .expect("neurc runs");
+        assert!(built.status.success(), "{built:?}");
+        let output = Command::new(&exe).output().expect("the program runs");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), stdout, "-O{level}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.starts_with(panic) && stderr.ends_with(at) && stderr.lines().count() == 1,
+            "-O{level}: {stderr}"
+        );
+    }
 }

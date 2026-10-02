@@ -209,7 +209,7 @@ prefix is also what makes inkwell and melior share a single LLVM. `mlir-sys` run
 over the MLIR-C headers at build time, which needs a libclang; the platform sections above
 say where each one comes from.
 
-`neurc` hands straight-line `f32` / `f64` tensor arithmetic to the MLIR path and links the
+`neurc` hands straight-line tensor arithmetic to the MLIR path and links the
 result into the program; every other body comes from the LLVM backend. It also builds
 `@gpu` kernels, on Linux only: elsewhere `neurc` refuses a bare `@gpu` function rather than
 run it on the CPU, and compiles a `@gpu(fallback: true)` one to its host copy only, with a

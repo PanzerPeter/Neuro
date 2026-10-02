@@ -261,3 +261,39 @@ fn an_index_past_an_extent_stops_the_kernel_and_the_program() {
         "{stderr}"
     );
 }
+
+/// Integer arithmetic in a kernel follows the build's tier: an overflow stops the kernel and
+/// the program on the debug tier, as an index past an extent does, and wraps from `-O1` up.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_integer_overflow_stops_the_kernel_on_the_debug_tier_only() {
+    use std::os::unix::process::ExitStatusExt;
+    let test = CompileTest::new();
+    let source = test.write_source(
+        "kernel_overflow.nr",
+        "@kernel(threads: [4])\nfunc bump(a: Tensor<i32, [4]>, out: KernelOut<Tensor<i32, [4]>>) {\n    val i = thread_id.x\n    if i < 4 {\n        unsafe { out[i] = a[i] + 1 }\n    }\n}\nfunc main() -> i32 {\n    val a: Tensor<i32, [4]> = [1, 2, 3, 2147483647]\n    mut out: Tensor<i32, [4]> = Tensor::zeros()\n    bump(a, &mut out)\n    println(\"{out[3]}\")\n    return 0\n}\n",
+    );
+    for (level, stopped) in [("0", true), ("2", false)] {
+        let exe = source.with_extension(format!("o{level}"));
+        let built = std::process::Command::new(env!("CARGO_BIN_EXE_neurc"))
+            .args(["compile", "-O", level, "-o"])
+            .arg(&exe)
+            .arg(&source)
+            .output()
+            .expect("neurc runs");
+        assert!(built.status.success(), "{built:?}");
+        let output = std::process::Command::new(&exe)
+            .output()
+            .expect("the program should start");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("none is usable") {
+            return;
+        }
+        if stopped {
+            assert_eq!(output.status.signal(), Some(6), "-O0: {stderr}");
+            assert!(stderr.contains("CUDA_ERROR_ASSERT"), "-O0: {stderr}");
+        } else {
+            assert_eq!(String::from_utf8_lossy(&output.stdout), "-2147483648\n");
+        }
+    }
+}

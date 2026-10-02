@@ -15,12 +15,14 @@ caches.
 - `translate_to_llvm_ir(&HirProgram) -> Result<String, MlirError>`: the same module carried on
   through a bufferization and conversion pipeline into the `llvm` dialect, translated into an
   inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
-- `lower_for_link(&HirProgram) -> Result<LinkableBodies, MlirError>`: the driver's entry. A module
-  of only the bodies worth linking, each defined as `__neuro_mlir_<function>`, carried through the
-  same pipeline and returned as LLVM IR with its `(function, symbol)` pairs. Empty IR and no pairs
-  when nothing qualifies. A `@gpu` function (`HirTarget::Gpu` or `GpuOrHost`) never qualifies
+- `lower_for_link(&HirProgram, Overflow) -> Result<LinkableBodies, MlirError>`: the driver's
+  entry. A module of only the bodies worth linking, each defined as `__neuro_mlir_<function>`,
+  carried through the same pipeline and returned as LLVM IR with its `(function, symbol)` pairs
+  and each checked symbol's `Guard`s (see Notes, integer checks). `Overflow::Checked` is the
+  debug tier, where integer overflow is a failed check; `Wrapping` the release tier. Empty IR and
+  no pairs when nothing qualifies. A `@gpu` function (`HirTarget::Gpu` or `GpuOrHost`) never qualifies
   here; a fallback function's host copy is the LLVM backend's own body.
-- `lower_for_gpu(&HirProgram, &GpuTarget) -> Result<LinkableBodies, MlirError>`: every `@gpu`
+- `lower_for_gpu(&HirProgram, &GpuTarget, Overflow) -> Result<LinkableBodies, MlirError>`: every `@gpu`
   function, `fallback: true` ones included, with the pairs and symbol signatures `lower_for_link` would give it, but each symbol
   launches its `linalg` ops as GPU kernels for `GpuTarget::Nvidia { chip }` (`nvvm`, PTX) or
   `GpuTarget::Amd { chip }` (`rocdl`, a code object). A `@gpu` body that would not reach
@@ -149,13 +151,13 @@ the values of `if` / `&&` / `||` / blocks are `memref.alloca` slots hoisted to t
 entry; control flow is `cf` branches, so loops carry nothing in SSA and `break` / `continue` /
 `return` are branches (`return` to the block holding `gpu.terminator`). Every tensor index is
 widened to `i64` (sign-extended when signed, so a negative one fails the same `ult` test) and
-bounds-checked; an integer divisor is tested for zero and `MIN / -1` divides by 1, the release
-build's wrap. The guard is `cf.assert` on NVIDIA and a trap block on AMD, whose ROCDL lowering
+bounds-checked. Integer arithmetic has the host's checks (`checked_int`): a zero divisor on every
+tier, and an overflow (through LLVM's `with.overflow` intrinsics) and `MIN / -1` on the debug
+tier, where the release tier wraps; a failed one stops the kernel (`Failure::Stop`). The guard is `cf.assert` on NVIDIA and a trap block on AMD, whose ROCDL lowering
 has no `cf.assert`; the trap block branches on, since `gpu.launch` wants every exiting block to
 end in `gpu.terminator`. `thread_id` is `block_id * threads[axis] + gpu.thread_id` with the block
 size as a constant, because `gpu.block_dim` lowers to a ROCm device-library call. Float to integer
-casts saturate through `llvm.call_intrinsic "llvm.fptosi.sat..."`, as on the host. Integer
-arithmetic wraps. A `KernelPartition` runs its body in each thread whose global position is
+casts saturate through `llvm.call_intrinsic "llvm.fptosi.sat..."`, as on the host. A `KernelPartition` runs its body in each thread whose global position is
 inside the grid tensor; the thread's number is that position read row-major, and its run of
 `out` starts at `number * chunk`, `chunk` being `out`'s element count over the grid tensor's (a
 count the grid cannot share is a refusal, which reaches only a generic instance, the checker
@@ -197,7 +199,9 @@ whose fold keeps the element when it is a number that sorts before the accumulat
 accumulator is NaN (the LLVM backend's sorting comparator). A mean divides by the run length in
 a third generic. A whole-tensor reduction arrives boxed in a one-element `TensorLiteral` (a GPU
 body returns buffers only) and becomes a reduction into `tensor<1xT>` with one parallel axis of
-extent 1.
+extent 1. An integer `.sum()` seeds 0, folds left to right with the overflow check
+and never in lanes, since the host folds an integer run in order and where an overflow is caught
+depends on that order.
 
 **Sorts, for GPU bodies only.** `tensor_sort::build_sort` lowers `.sort()` / `.argsort()` /
 `.topk()` when the target is not `Host`, as a rank sort in two `linalg.generic`s. The count's index
@@ -211,8 +215,8 @@ with 0 first. `.topk` sorts descending and has `k` output positions per run, so 
 two outputs and nothing more. Each answer is the host's exactly, permutation included; the work
 is O(extent²) per run. A `.topk` body returns two tensors, so a defined function's tuple of tensors
 is one MLIR result per tensor, each its own out-param after bufferization, and `linkable_result`
-admits it, as it admits an `i32` result tensor: an index a sort writes, never arithmetic, since
-every parameter is a float.
+admits it, as it admits the `i32` indices tensor a sort writes. An integer element sorts by
+`cmpi` of its signedness, with no NaN rule.
 
 **Device-only bodies beyond reductions and sorts.** `build_expression` takes the function's
 `HirTarget`; a body for a GPU target (`device(target)`) also lowers elementwise math
@@ -225,8 +229,8 @@ reversed, and a position axis at one index) and `einsum` (`tensor_einsum.rs`: ou
 to right and added to the accumulator, the LLVM backend's order exactly; a full contraction
 arrives boxed in `[1]` and gets one leading parallel dimension of extent 1). A slice position is a
 literal inside its axis, or, only for a `FollowsOperands` target, an integer parameter the call
-site has checked; `linkable_signature` admits integer scalar parameters for that target alone.
-Anything else leaves the body to the LLVM backend, since a GPU body cannot stop the program.
+site has checked. Anything else leaves the body to the LLVM backend, since a GPU body cannot stop
+the program.
 
 **Per-thread launchers for outlined bodies.** A `FollowsOperands` function whose body is a compound
 assignment (through `*__operand1`) or a traversal is written as MLIR text like a `@kernel`
@@ -237,9 +241,10 @@ value read with the host's trailing-axis broadcast) or calling the closure and s
 result out-param; a `.reduce` runs one thread folding the closure over the buffer in row-major
 order into a `[1]` out-param. The closure is the lifted `HirClosure` the body's `Closure`
 expression names, its parameters bound to the loaded elements and its captures to the launcher
-parameters of the same name. The emitter runs in strict mode there: integer arithmetic is refused
-(the GPU has none of the host's overflow and zero-divisor guards) and `return` with a value stores
-into the call's result slot. A body it refuses leaves the function to the host. `BodyEmitter`
+parameters of the same name. The emitter runs with `Failure::Report` there: a failed integer
+check lowers the launcher's `%status` word (a parameter between the others and the result) to its
+key and the thread leaves the launch, and `return` with a value stores into the call's result
+slot. A body it refuses leaves the function to the host. `BodyEmitter`
 also lowers scalar math functions (`math.*`, `sign` as selects) for `@kernel` bodies.
 
 **The device math probe.** A `math` op inside a `gpu.module` becomes a call into libdevice (NVIDIA)
@@ -262,8 +267,24 @@ borrow is left alone. A body that hands back one of its arguments unchanged is r
 performs no arithmetic and linking it would copy a buffer the LLVM backend returns as is. The
 definition is one `tensor.empty` destination plus one
 `linalg.generic` per operator, with one indexing map per operand, all-`parallel` iterators, and
-an `arith` body terminated by `linalg.yield`. `@` is the exception and is described below. Float elements use the `arith` float operations
-and integer elements theirs, with division splitting on signedness.
+an `arith` body terminated by `linalg.yield`. `@` is the exception and is described below. Float
+elements use the `arith` float operations; integer elements go through `Lowering::arith`
+(`guards.rs`), which adds the LLVM backend's checks.
+
+**Integer checks.** The LLVM backend panics on an integer overflow on the debug tier and on a zero
+divisor on every tier, naming the operator. A body here can neither panic nor render a location,
+and a GPU cannot stop the program at all, so a checked body takes a `memref<1xi64>` status word
+after its parameters (added to its entry block on first use, so the defined signature comes from
+the block's arguments). Its caller fills the word with all ones; a failed check (an `scf.if` in
+the `linalg` body) lowers it with `memref.atomic_rmw minu` to a key: the operation's number on top,
+the element's row-major position in the middle (a division's alone, the one operation whose two
+checks report different diagnostics) and the check's number, counted from 1, in the low 12 bits.
+The min therefore keeps the failure the host meets first (operations run one after another,
+elements in row-major order), whichever thread wrote it. The checks travel as
+`LinkableBodies::guards` and the caller panics for the one left. A failed divisor is replaced by 1
+so the body stays defined; a body with more than 4095 checks stays the LLVM backend's.
+`linalg-fuse-elementwise-ops` does not erase a fused producer whose body has a check, since the
+`scf.if` store is a side effect, so its checks run once more in a loop of their own.
 
 **Broadcasting is per-operand indexing maps.** Operand shapes align at their *trailing* axis,
 so an operand of lower rank supplies the innermost axes and its map simply omits the leading
@@ -310,11 +331,10 @@ the linked symbol, passing each buffer out of its handle and a result buffer it 
 That keeps every allocation a Neuro tensor owns on the LLVM backend's side.
 
 **What `lower_for_link` links.** `build_linkable_module` takes a free function only when
-`linkable_signature` holds (an `f32` / `f64` scalar or static tensor of one for every parameter,
-owned or behind `&`, and a static tensor result or tuple of them, see `linkable_result`) and `build_body` lowers it. Floats only, because
-the LLVM backend guards integer elements (an overflow panics on the debug tier, a zero divisor in
-every build) and `arith` has neither guard, so the two would not be interchangeable. Static only,
-because the frontend gives a `?` axis no arithmetic. The module declares nothing: a declaration
+`linkable_signature` holds (a numeric scalar or static tensor of one for every parameter, owned or
+behind `&`, and a static tensor result or tuple of them, see `linkable_result`) and `build_body`
+lowers it. An integer body carries its checks, so it is as interchangeable as a float one. Static
+only, because the frontend gives a `?` axis no arithmetic. The module declares nothing: a declaration
 would name a Neuro-ABI function at an MLIR signature, and the linked IR is read for its
 definitions alone. The `__neuro_mlir_` prefix keeps each symbol off the Neuro-ABI name the LLVM
 backend defines.
