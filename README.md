@@ -23,8 +23,8 @@ for anything that has to be fast. Crossing that boundary is where performance an
 lost. Neuro is one language on both sides of it.
 
 - **Native code, no interpreter.** Compiled ahead of time through LLVM 23, with no bytecode VM and
-  no global interpreter lock. On compute-bound programs it lands in the same range as
-  `clang -O2`; see [Performance](#performance).
+  no global interpreter lock. On scalar compute-bound programs it lands in the same range as
+  `clang++ -O3` and Rust; see [Performance](#performance).
 - **Shapes checked by the compiler.** `Tensor<T, [d0, d1]>` carries its dimensions in the type, so
   a dimension mismatch is a compile error rather than an exception thrown ninety minutes into a
   training run.
@@ -192,45 +192,53 @@ Every row is implemented, tested and usable today. Depth lives in the
 
 ## Performance
 
-`neurc compile -O 3` hands the module to the same LLVM 23 pipeline `clang -O2` uses. The default
-is `-O 0`, checked arithmetic with no optimization, so pass `-O 3` before drawing any conclusion
-about speed.
+`neurc compile -O 3` runs LLVM's `-O3` pipeline, the same level the C++ and Rust rows are
+built at (`clang++ -O3`, `rustc -C opt-level=3`), and all three target the generic x86-64 CPU
+with no `-march=native`. The default is `-O 0`, checked arithmetic with no optimization, so pass
+`-O 3` before drawing any conclusion about speed.
 
-Best of nine runs on one machine, lower is better. Reproduce with
-`python benchmarks/run.py --reps 9 --levels 3`, which builds every implementation of each program
-and refuses to report timings if they disagree on output. The Python column is the language
-itself; the NumPy column is what a Python programmer would write where the work vectorizes.
+Best of nine runs on one machine (Core i5-14600K, RTX 5070), lower is better. Reproduce with
+`cd benchmarks && uv run python run.py --reps 9 --levels 3`, which builds every implementation
+of each program and refuses to report timings if they disagree on output. Each one is written
+the way a programmer of that language would write it for speed. The Python column is the
+language itself; the NumPy column is what a Python programmer would write where the work
+vectorizes.
 
-| Benchmark | What it stresses | Neuro `-O 3` | `clang -O2` | Python 3.14 | NumPy |
-|---|---|---|---|---|---|
-| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 6678 ms | 1240 ms |
-| `vector_sum` | `Vec` push, indexed sweep | 25 ms | 25 ms | 11511 ms | 135 ms |
-| `call_overhead` | recursion, call and inline cost | 47 ms | 51 ms | 1387 ms | |
-| `print_lines` | integer holes to standard output | 13 ms | 20 ms | 113 ms | |
-| `format_floats` | `f64` holes at a fixed precision | 111 ms | 106 ms | 216 ms | |
-| `int_divide` | guarded `/` and `%`, opaque divisor | 96 ms | 88 ms | 1503 ms | |
-| `matmul` | `@` on `[256, 256]` `f32` tensors | 21 ms | 21 ms | 2896 ms | 82 ms |
+| Benchmark | What it stresses | Neuro `-O 3` | `clang++ -O3` | `rustc -O3` | Python 3.14 | NumPy |
+|---|---|---|---|---|---|---|
+| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 166 ms | 6668 ms | 1268 ms |
+| `vector_sum` | `Vec` push, indexed sweep | 24 ms | 26 ms | 24 ms | 6008 ms | 130 ms |
+| `call_overhead` | recursion, call and inline cost | 49 ms | 51 ms | 48 ms | 1409 ms | |
+| `print_lines` | integer holes to standard output | 13 ms | 20 ms | 13 ms | 111 ms | |
+| `format_floats` | `f64` holes at a fixed precision | 115 ms | 110 ms | 38 ms | 222 ms | |
+| `int_divide` | guarded `/` and `%`, opaque divisor | 95 ms | 88 ms | 89 ms | 1515 ms | |
+| `matmul` | `@` on `[256, 256]` `f32` tensors | 22 ms | 3.6 ms | 3.5 ms | 769 ms | 77 ms |
 
-Absolute times belong to the machine, and the Python columns to whichever interpreter runs the
-harness (NumPy here is the PyPI wheel, which bundles OpenBLAS). Two rows are worth a word:
-`print_lines` beats C because an integer hole renders through a digit loop instead of
-`snprintf`, and `int_divide` is the one place the compiler spends rather than saves, since `/`
-and `%` guard the operand pairs the hardware leaves undefined.
+Absolute times belong to the machine. Four rows are worth a word. `print_lines` beats C because
+an integer hole renders through a digit loop instead of `snprintf`, as Rust's does.
+`format_floats` loses to Rust, whose own float formatter is three times faster than the C
+library conversion Neuro and C++ both call. `int_divide` is the one place the compiler spends:
+`/` and `%` guard the operand pairs the hardware leaves undefined, and Rust guards the same pairs
+for 7% less. `matmul` is the real gap: a host `@` is a plain loop per output element, while the
+C++ and Rust versions run the cache-friendly i-k-j order that vectorizes, six times faster.
 
-The GPU benchmarks run their Neuro side as `@gpu` kernels on an RTX 5070, compiled on Linux,
-against NumPy on the CPU:
+The GPU benchmarks run their Neuro side as `@gpu` kernels, against PyTorch on the same GPU and
+NumPy on the CPU. Each moves the same data between host and device:
 
-| Benchmark | What it stresses | Neuro `@gpu` | NumPy |
-|---|---|---|---|
-| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 261 ms | 653 ms |
-| `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 732 ms | 1224 ms |
-| `gpu_matmul` | five `[2048, 2048]` `f32` products | 346 ms | 230 ms |
+| Benchmark | What it stresses | Neuro `@gpu` | PyTorch (CUDA) | NumPy (CPU) |
+|---|---|---|---|---|
+| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 262 ms | 1080 ms | 619 ms |
+| `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 747 ms | 1144 ms | 1251 ms |
+| `gpu_matmul` | five `[2048, 2048]` `f32` products | 357 ms | 1154 ms | 239 ms |
+| `gpu_mlp` | twenty batches through a two-layer perceptron | 294 ms | 1153 ms | 232 ms |
 
-About 230 ms of each Neuro time is fixed, most of it the CUDA driver starting up; the 200 relax
-steps themselves take about 16 ms. A long reduction folds in 4096 lanes, one GPU thread each, in
-the order the host folds in too, so the two agree bit for bit. The matrix product is a plain loop
-per output element, with no shared-memory tiling and no tensor cores yet, so a multithreaded
-BLAS on the CPU still beats it.
+These are whole-program times, and both GPU columns start with a fixed cost: about 220 ms for a
+Neuro program, most of it the CUDA driver starting up, and about 1100 ms for PyTorch's import and
+CUDA setup. Past that, PyTorch's kernels are faster on every row: timed warm inside one process
+they take 23, 56, 37 and 13 ms, against Neuro's roughly 44, 530, 140 and 75. A long reduction folds
+in 4096 lanes, one GPU thread each, in the order the host folds in too, so the two agree bit for
+bit. The matrix product is a plain loop per output element, with no shared-memory tiling and no
+tensor cores yet, so a multithreaded BLAS on the CPU still beats it.
 
 ---
 

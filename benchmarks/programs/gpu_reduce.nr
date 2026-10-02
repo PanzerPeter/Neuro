@@ -2,8 +2,7 @@
 // [2048, 2048] f32 tensor that stays on the device, with one element bumped between rounds
 // so no round can be hoisted. Every element is 0 to 3, so each total stays below 2^24 and is
 // exact in f32 whatever order it is added in, which is what lets the checksum match NumPy's
-// pairwise sums to the digit. Needs a neurc built with `--features mlir` and an NVIDIA GPU;
-// the harness skips the row without either.
+// pairwise sums to the digit. Needs an NVIDIA GPU; the harness skips the row without one.
 
 func main() -> i32 {
     mut x = Tensor::<f32, [2048, 2048]>::zeros()

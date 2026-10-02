@@ -1,0 +1,12 @@
+# The Python side of the benchmark harness: `uv run python run.py` from this directory
+# builds `.venv` with these and runs the harness inside it. The PyPI wheels are the point:
+# NumPy's bundles OpenBLAS, and PyTorch's Linux wheel bundles CUDA.
+
+[project]
+name = "neuro-benchmarks"
+version = "0"
+requires-python = ">=3.14"
+dependencies = ["numpy", "torch"]
+
+[tool.uv]
+package = false

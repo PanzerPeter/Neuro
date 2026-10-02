@@ -3,8 +3,7 @@
 // reading two buffers and writing a third, and nothing crosses the bus until the end.
 // IEEE addition and multiplication give the same bits everywhere (no contraction into
 // a fused multiply-add), so the checksum of the scaled result matches NumPy's exactly.
-// Needs a neurc built with `--features mlir` and an NVIDIA GPU; the harness skips the
-// row without either.
+// Needs an NVIDIA GPU; the harness skips the row without one.
 
 @gpu
 func relax(y: &Tensor<f32, [2048, 2048]>, x: &Tensor<f32, [2048, 2048]>, h: f32) -> Tensor<f32, [2048, 2048]> {

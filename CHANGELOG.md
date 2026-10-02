@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.1] - 2026-10-02
+
+### Changed
+
+- The benchmark harness builds C++ at the same `-O` levels as Neuro, so the README compares
+  `neurc -O 3` with `clang++ -O3` rather than `clang -O2`, and adds a Rust row (`rustc`, same
+  levels) to every CPU benchmark and a PyTorch row on the same GPU to every `gpu_*` one. The
+  Python side runs from a uv project in `benchmarks/` (Python 3.14, NumPy with OpenBLAS,
+  PyTorch with CUDA).
+- Each implementation is now written the way that language would be written for speed: the
+  C++ matrix product runs the i-k-j loop order, and the Python matrix product and `Vec` sweep
+  use builtins instead of index loops. The C++ change exposes a gap the old naive loop hid: a
+  host `@` is about six times slower than vectorized C++ or Rust.
+- The README's performance tables are re-measured, and say how much of each GPU row is fixed
+  startup: about 220 ms for Neuro and 1100 ms for PyTorch, whose kernels are faster on every
+  row once warm.
+
+### Added
+
+- `gpu_mlp`, a fourth GPU benchmark: twenty batches through a two-layer perceptron,
+  `relu(x @ w1 + b1) @ w2 + b2` in one `@gpu` function, against PyTorch and NumPy.
+
 ## [5.1.0] - 2026-10-02
 
 ### Changed

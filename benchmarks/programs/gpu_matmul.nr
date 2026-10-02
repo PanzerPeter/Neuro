@@ -3,8 +3,8 @@
 // no round can be hoisted. The right operand moves to the GPU once; the left one is
 // staged each call. Each product comes back to the host for the checksum, which walks
 // every element. Every element is a small integer, so each sum is exact in f32 and
-// matches NumPy's BLAS to the digit. Needs a neurc built with `--features mlir` and an
-// NVIDIA GPU; the harness skips the row without either.
+// matches NumPy's and PyTorch's to the digit. Needs an NVIDIA GPU; the harness skips
+// the row without one.
 
 @gpu
 func product(a: &Tensor<f32, [2048, 2048]>, b: &Tensor<f32, [2048, 2048]>) -> Tensor<f32, [2048, 2048]> {
