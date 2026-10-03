@@ -178,6 +178,11 @@ impl<'c, 'a> Lowering<'c, 'a> {
         }
     }
 
+    /// How many checks have been recorded so far.
+    pub(crate) fn checks(&self) -> usize {
+        self.sites.borrow().len()
+    }
+
     /// The checks recorded, in site order.
     pub(crate) fn into_sites(self) -> Vec<Guard> {
         self.sites.into_inner()

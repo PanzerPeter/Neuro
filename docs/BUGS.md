@@ -5,6 +5,41 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-096: `@` and `einsum` on `f16` / `bf16` round after every product and every sum
+
+- **Status**: open, confirmed
+- **Area**: `mlir-backend`; `Element::Half` in `guards.rs`, which `build_matmul` and
+  `build_einsum` share with the elementwise operators
+- **Severity**: minor. A wrong last bit or more on a half-precision product, never a crash
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val a: Tensor<bf16, [1, 3]> = [[1.0bf16, 1.0bf16, 1.0bf16]]
+    val b: Tensor<bf16, [3, 1]> = [[1.0bf16], [0.00390625bf16], [0.00390625bf16]]
+    val c = &a @ &b
+    println("{c[0, 0] as f32}")
+    return 0
+}
+```
+
+Expected: `1.0078125`. The language reference says `@` on `f16` and `bf16` accumulates in
+`f32` and rounds the result once, and `1 + 2^-8 + 2^-8` is exact in `f32` and in `bf16`.
+Observed: `1.0`. `einsum("ij,jk->ik", ...)` gives the same.
+
+**Root cause**: confirmed in the code. A contraction's body is built from the element-wise
+rule for half precision, which widens both operands to `f32`, computes and rounds back after
+each operation. That rule is right for `+` and `*` on their own, but in a contraction it rounds
+the accumulator to `bf16` after every product, so `1 + 2^-8` falls back to `1` twice.
+
+**Workaround**: copy each operand into an `f32` tensor element by element (`m[i, j] as f32`),
+take the product there, and narrow each element of the result with `as bf16`.
+
+**Fix sketch**: give a half-precision contraction an `f32` accumulator, a `tensor.empty` of
+`f32` filled with zero, so its body widens each operand, multiplies, adds in `f32` and never
+narrows. One element-wise `arith.truncf` over the finished sum rounds it once.
+
 ## BUG-092: a struct returned from a function never releases the `string` buffers it holds
 
 - **Status**: open, confirmed

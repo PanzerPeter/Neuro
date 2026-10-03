@@ -16,9 +16,10 @@ use crate::{
     errors::MlirError,
     guards::{At, Element, Lowering},
     lower::map_type,
+    schedule,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, empty_tensor, fill_block, indexing_maps,
-        iterator_types, tensor_parts,
+        Generic, OperandAxes, build_expression, empty_tensor, fill_block, generic_op,
+        indexing_maps, iterator_types, tensor_parts,
     },
     tensor_reduce::{append, apply, yield_value},
 };
@@ -28,7 +29,7 @@ use melior::{
     Context,
     dialect::arith,
     ir::{
-        Block, BlockLike, Location, Type, Value,
+        Block, BlockLike, Location, Region, RegionLike, Type, Value,
         attribute::{FloatAttribute, IntegerAttribute},
     },
 };
@@ -137,10 +138,18 @@ pub(crate) fn build_einsum<'c, 'a>(
         fill_block(location, element_type)?,
     )?;
     let map_refs: Vec<&OperandAxes> = maps.iter().collect();
-    Ok(Some(apply(
+    let checks = lowering.checks();
+    let body = Region::new();
+    body.append_block(product_block(
+        location,
+        element_type,
+        values.len(),
+        lowering,
+        (kind, einsum.span.start),
+    )?);
+    let mut contraction = generic_op(
         context,
         location,
-        block,
         Generic {
             inputs: &values,
             destination: seeded,
@@ -148,14 +157,34 @@ pub(crate) fn build_einsum<'c, 'a>(
             iterators: iterator_types(context, rank, contracted.len())?,
         },
         tensor_type,
-        product_block(
-            location,
-            element_type,
-            values.len(),
-            lowering,
-            (kind, einsum.span.start),
-        )?,
-    )?))
+        body,
+    )?;
+    // A letter repeated within one operand walks a diagonal, which no block reads as a vector.
+    let diagonal = inputs.iter().any(|subscript| {
+        subscript
+            .iter()
+            .enumerate()
+            .any(|(at, letter)| subscript[..at].contains(letter))
+    });
+    if !diagonal && lowering.checks() == checks {
+        let loops: Vec<u64> = std::iter::repeat_n(1, lead)
+            .chain(
+                output
+                    .iter()
+                    .chain(&contracted)
+                    .map(|&letter| extents[letter] as u64),
+            )
+            .collect();
+        schedule::tag(
+            context,
+            &mut contraction,
+            lowering.side,
+            (&loops, lead + output.len()),
+            element,
+        );
+    }
+
+    Ok(Some(block.append_operation(contraction).result(0)?.into()))
 }
 
 /// The body over `(operand elements..., accumulator)`: the elements multiplied left to

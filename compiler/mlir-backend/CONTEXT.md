@@ -85,8 +85,10 @@ static result is written straight into the caller's buffer) turns each returned 
 trailing parameter, `buffer-deallocation-pipeline` gives every buffer still allocated inside an
 owner, and only then does `convert-linalg-to-loops` (nested under `func.func`, which is
 what it is anchored on) produce `scf` loops; run before bufferization it silently leaves the op
-alone. The rest is the descent those loops land in: `convert-scf-to-cf`, `finalize-memref-to-llvm`,
-then `func` / `math` / `arith` / `cf` / `index` to LLVM (`convert-math-to-llvm` emits the
+alone. The rest is the descent those loops land in: a scheduled contraction's vector transfers
+unrolled (`convert-vector-to-scf`) and its tile subviews turned into index arithmetic
+(`expand-strided-metadata`, `lower-affine`), then `convert-scf-to-cf`, `convert-vector-to-llvm`,
+`finalize-memref-to-llvm`, then `func` / `math` / `arith` / `cf` / `index` / `ub` to LLVM (`convert-math-to-llvm` emits the
 `llvm.exp` / `llvm.log` / `llvm.tanh` / `llvm.pow` / `llvm.sqrt` / `llvm.fabs` intrinsics, the ones
 the LLVM backend called, so host math keeps its bits) and `reconcile-unrealized-casts` last by necessity,
 since each conversion leaves `unrealized_conversion_cast` ops at its boundary with the dialects the
@@ -120,13 +122,16 @@ prefix. `mlir-sys` uses Rust 2024 let-chains in its build script, which the work
 covers.
 
 **The GPU pipeline.** `lower_for_gpu` builds the `lower_for_link` module and swaps the middle of
-the CPU pipeline: `convert-linalg-to-parallel-loops`, `scf-parallel-loop-tiling` (guarded rather
+the CPU pipeline: `scf-forall-to-parallel` (a scheduled contraction's per-thread blocks),
+`convert-linalg-to-parallel-loops`, `convert-vector-to-scf`, `scf-parallel-loop-tiling` (guarded rather
 than clamped, so the outer loop maps to blocks and the inner to threads), `gpu-map-parallel-loops`,
 `convert-parallel-loops-to-gpu`, `gpu-kernel-outlining`,
 `gpu-async-region` (a body's launches chain on one stream with a single wait at its end, instead
 of a stream created, waited on and destroyed per launch), then
 `nvvm-attach-target` / `rocdl-attach-target` with the chip and `convert-gpu-to-nvvm` /
-`convert-gpu-to-rocdl` inside each `gpu.module`. `lower-affine` is added for the index arithmetic
+`convert-gpu-to-rocdl` inside each `gpu.module`, after `expand-strided-metadata`, `lower-affine`
+and `convert-vector-to-llvm` there, since the vendor conversion handles neither a block's subviews
+nor its vectors. `lower-affine` is added for the index arithmetic
 the GPU mapping writes; `gpu-to-llvm` turns each launch into calls to MLIR's GPU runtime ABI
 (`mgpuModuleLoad[JIT]`, `mgpuLaunchKernel`, `mgpuStream*`), which the IR declares and nothing in
 this crate defines.
@@ -357,6 +362,26 @@ generates from `LinalgOps.td` only) so all three go through the one `generic_op`
 takes its operand split, maps, iterators and body region as arguments. Every extent must be
 static here: `tensor.dim` can recover a dynamic result axis but not the contracted one, which
 appears in no operand of the destination, so a `?` anywhere answers `Ok(None)`.
+
+**Contractions are scheduled (`schedule.rs`).** `build_matmul` and `build_einsum` tag their
+contracting generic with tile sizes (`neuro.tiles`, `neuro.peel`, `neuro.vectorize`) when its body
+carries no integer check, its element is not half precision (the vectorizer does not see a reduction
+through the widening) and no `einsum` operand repeats a letter. `lower_for_link` and
+`lower_for_gpu` call `schedule::apply` on the module they lower, before bufferization: it reads the
+distinct tags back with a walk, writes one transform-dialect script and runs it through
+`mlirTransformApplyNamedSequence` (melior wraps no interpreter). On the host the result axes tile
+into a register block of 4 rows by 64 bytes of columns (`tile_using_for`), each contracted letter
+gets a loop of step 1 outside the block, an axis the block does not divide is peeled, every block
+vectorizes, and `hoist_loop_invariant_subsets` lifts the accumulator into the contracted loops'
+iteration arguments, so it stays in registers. On a GPU the block is up to 4 x 4 per thread, sized
+to divide its axes (`tile_using_forall`, never peeled), and a contraction one block would cover
+whole is left untagged: a one-iteration `scf.forall` folds into its body and would run in the host
+launcher. Each element still adds its products one at a time in contracted order from the fill's
+zero, a separate multiply and add each rounded, so every result keeps the naive nest's bits on both
+sides. No tensor-core MMA and no vendor BLAS: both split the contracted extent or fuse the multiply
+into the add. The producer of an operand is never fused in (`structured.fuse` would recompute a
+chained product per block), and the fill stays a loop of its own. `build_linkable_module` returns
+the unscheduled module, which is what the construction tests read.
 
 **The bufferized function has MLIR's tensor ABI, not Neuro's.** A tensor parameter crosses as an
 exploded row-major `memref` descriptor (allocated pointer, aligned pointer, offset, then one size

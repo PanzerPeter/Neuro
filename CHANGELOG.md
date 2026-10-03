@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-10-03
+
+### Changed
+
+- A tensor matrix product, `@` or an `einsum` that contracts a letter, runs as a register-blocked,
+  vectorized loop nest on the CPU. A `[256, 256]` `f32` product is about seven times faster at
+  `-O3`, level with vectorized C++ and Rust, and four times faster at `-O0`. On a GPU each thread
+  computes a block of up to 4 × 4 result elements, which makes a `[2048, 2048]` product about six
+  times faster. Every result keeps its exact bits, because each element still adds its products
+  one at a time, in contracted order, on the host and on the GPU. Products over `f16` / `bf16`, products
+  with overflow checks (`-O0` integers), and an `einsum` that repeats a letter in one operand keep
+  the plain loop.
+
 ## [5.4.0] - 2026-10-03
 
 ### Changed

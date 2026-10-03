@@ -212,15 +212,15 @@ vectorizes.
 | `print_lines` | integer holes to standard output | 13 ms | 20 ms | 13 ms | 111 ms | |
 | `format_floats` | `f64` holes at a fixed precision | 115 ms | 110 ms | 38 ms | 222 ms | |
 | `int_divide` | guarded `/` and `%`, opaque divisor | 95 ms | 88 ms | 89 ms | 1515 ms | |
-| `matmul` | `@` on `[256, 256]` `f32` tensors | 22 ms | 3.6 ms | 3.5 ms | 769 ms | 77 ms |
+| `matmul` | `@` on `[256, 256]` `f32` tensors | 3.5 ms | 3.9 ms | 3.8 ms | 770 ms | 61 ms |
 
 Absolute times belong to the machine. Four rows are worth a word. `print_lines` beats C because
 an integer hole renders through a digit loop instead of `snprintf`, as Rust's does.
 `format_floats` loses to Rust, whose own float formatter is three times faster than the C
 library conversion Neuro and C++ both call. `int_divide` is the one place the compiler spends:
 `/` and `%` guard the operand pairs the hardware leaves undefined, and Rust guards the same pairs
-for 7% less. `matmul` is the real gap: a host `@` is a plain loop per output element, while the
-C++ and Rust versions run the cache-friendly i-k-j order that vectorizes, six times faster.
+for 7% less. `matmul` runs each `@` as a register-blocked, vectorized loop nest, level with the
+i-k-j loops the C++ and Rust versions vectorize, and with the same bits as a plain loop.
 
 The GPU benchmarks run their Neuro side as `@gpu` kernels, against PyTorch on the same GPU and
 NumPy on the CPU. Each moves the same data between host and device:
@@ -229,16 +229,16 @@ NumPy on the CPU. Each moves the same data between host and device:
 |---|---|---|---|---|
 | `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 262 ms | 1080 ms | 619 ms |
 | `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 747 ms | 1144 ms | 1251 ms |
-| `gpu_matmul` | five `[2048, 2048]` `f32` products | 357 ms | 1154 ms | 239 ms |
-| `gpu_mlp` | twenty batches through a two-layer perceptron | 294 ms | 1153 ms | 232 ms |
+| `gpu_matmul` | five `[2048, 2048]` `f32` products | 292 ms | 1137 ms | 217 ms |
+| `gpu_mlp` | twenty batches through a two-layer perceptron | 275 ms | 1133 ms | 158 ms |
 
 These are whole-program times, and both GPU columns start with a fixed cost: about 220 ms for a
 Neuro program, most of it the CUDA driver starting up, and about 1100 ms for PyTorch's import and
-CUDA setup. Past that, PyTorch's kernels are faster on every row: timed warm inside one process
-they take 23, 56, 37 and 13 ms, against Neuro's roughly 44, 530, 140 and 75. A long reduction folds
-in 4096 lanes, one GPU thread each, in the order the host folds in too, so the two agree bit for
-bit. The matrix product is a plain loop per output element, with no shared-memory tiling and no
-tensor cores yet, so a multithreaded BLAS on the CPU still beats it.
+CUDA setup. Past that, timed warm inside one process, PyTorch takes 23, 56, 37 and 13 ms against
+Neuro's roughly 44, 530, 40 and 25. A long reduction folds in 4096 lanes, one GPU thread each, in
+the order the host folds in too, so the two agree bit for bit. Each GPU thread computes a block of
+up to 4 × 4 elements of a matrix product, every element summed in order, so the device keeps the
+host's bits; there is no shared-memory staging and no tensor-core path.
 
 ---
 

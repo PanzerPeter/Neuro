@@ -2,6 +2,7 @@ use crate::{
     errors::MlirError,
     guards::{At, Element, Guard, Lowering, MAX_SITES, Overflow, Side},
     lower::map_type,
+    schedule,
     tensor_apply::build_traversal,
     tensor_compound::build_compound,
     tensor_einsum::build_einsum,
@@ -35,6 +36,9 @@ const FILL_BODY_ARGUMENTS: usize = 2;
 /// The index-space rank of a matrix product: two parallel axes over the result and
 /// one reduction axis over the contracted extent.
 const CONTRACTION_RANK: usize = 3;
+
+/// A matrix product's result axes, the parallel ones of its index space.
+const RESULT_RANK: usize = 2;
 
 /// The only extent that may be stretched across a larger result axis. Any other
 /// mismatch is a shape error the frontend owns, not something to lower.
@@ -463,6 +467,7 @@ fn build_matmul<'c, 'a>(
     let left_axes: OperandAxes = Some(vec![Some(0), Some(2)]);
     let right_axes: OperandAxes = Some(vec![Some(2), Some(1)]);
     let accumulator_axes: OperandAxes = Some(vec![Some(0), Some(1)]);
+    let checks = lowering.checks();
     let body = Region::new();
     body.append_block(contraction_block(
         location,
@@ -471,28 +476,50 @@ fn build_matmul<'c, 'a>(
         kind,
         expression.span.start,
     )?);
-
-    Ok(Some(
-        block
-            .append_operation(generic_op(
+    let mut contraction = generic_op(
+        context,
+        location,
+        Generic {
+            inputs: &[lhs, rhs],
+            destination: filled,
+            indexing_maps: indexing_maps(
                 context,
-                location,
-                Generic {
-                    inputs: &[lhs, rhs],
-                    destination: filled,
-                    indexing_maps: indexing_maps(
-                        context,
-                        CONTRACTION_RANK,
-                        &[&left_axes, &right_axes, &accumulator_axes],
-                    )?,
-                    iterators: iterator_types(context, CONTRACTION_RANK, 1)?,
-                },
-                tensor_type,
-                body,
-            )?)
-            .result(0)?
-            .into(),
-    ))
+                CONTRACTION_RANK,
+                &[&left_axes, &right_axes, &accumulator_axes],
+            )?,
+            iterators: iterator_types(context, CONTRACTION_RANK, 1)?,
+        },
+        tensor_type,
+        body,
+    )?;
+    if let (Some(extents), true) = (
+        contraction_extents(left, result_shape),
+        lowering.checks() == checks,
+    ) {
+        schedule::tag(
+            context,
+            &mut contraction,
+            lowering.side,
+            (&extents, RESULT_RANK),
+            element,
+        );
+    }
+
+    Ok(Some(block.append_operation(contraction).result(0)?.into()))
+}
+
+/// `[rows, columns, contracted]`, the loop extents of a static matrix product.
+fn contraction_extents(
+    left: &HirExpr,
+    result: &[Option<usize>],
+) -> Option<[u64; CONTRACTION_RANK]> {
+    let (_, [_, Some(contracted)]) = tensor_parts(&left.ty)? else {
+        return None;
+    };
+    let [Some(rows), Some(columns)] = result else {
+        return None;
+    };
+    Some([*rows as u64, *columns as u64, *contracted as u64])
 }
 
 /// Whether the three shapes really are the static `[M, K] @ [K, N] -> [M, N]` this

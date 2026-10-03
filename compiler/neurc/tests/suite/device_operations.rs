@@ -528,6 +528,57 @@ func main() -> i32 {
     );
 }
 
+/// A product the GPU computes in register blocks (36 x 44 in blocks of 4 x 4, 6 x 9 in
+/// blocks of 3 x 3) gives the bits of the host's, which adds each element's products in
+/// contracted order too: a block is independent accumulators, never a split sum.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_blocked_product_on_the_device_matches_the_host() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    mut a: Tensor<f32, [36, 20]> = Tensor::zeros()
+    mut b: Tensor<f32, [20, 44]> = Tensor::zeros()
+    for i in 0..36 {
+        for k in 0..20 {
+            a[i, k] = ((i * 7 + k * 13) % 23) as f32 * 0.37f32 - 3.1f32
+        }
+    }
+    for k in 0..20 {
+        for j in 0..44 {
+            b[k, j] = ((k * 5 + j * 3) % 29) as f32 * 0.013f32 + 0.7f32
+        }
+    }
+    val small_a = a[0..6, ..]
+    val small_b = b[.., 0..9]
+    val ga = a.clone().to(Device::GPU(0))
+    val gb = b.clone().to(Device::GPU(0))
+    val product = (&ga @ &gb).to(Device::CPU)
+    val small = (small_a.clone().to(Device::GPU(0)) @ small_b.clone().to(Device::GPU(0))).to(Device::CPU)
+    val host = &a @ &b
+    mut wrong = 0
+    for i in 0..36 {
+        for j in 0..44 {
+            if product[i, j] != host[i, j] { wrong += 1 }
+        }
+    }
+    for i in 0..6 {
+        for j in 0..9 {
+            if small[i, j] != host[i, j] { wrong += 1 }
+        }
+    }
+    println("{product[35, 43]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "blocked_product.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+}
+
 /// `sqrt` and `abs` on a device tensor are exact, as on the host. The transcendental functions
 /// are the GPU vendor's device math library, which may differ from the host's C library in the
 /// last bits, so they are held to a relative error. A compiler that found no device math

@@ -209,6 +209,31 @@ destination, so a `?` anywhere leaves the function a declaration.
 A `linalg` body survives `translate_to_llvm_ir`: the pipeline below bufferizes it and turns it
 into loops. See [MLIR to LLVM IR](#mlir-to-llvm-ir).
 
+### The contraction schedule
+
+Lowered as it is, that contraction is the naive loop nest: one output element at a time, the
+contracted axis innermost, the right operand read down a column. Before `lower_for_link` and
+`lower_for_gpu` bufferize a module, `schedule.rs` runs a transform-dialect script over every
+contraction the builders tagged (`@`, and an `einsum` with a contracted letter), through
+`mlirTransformApplyNamedSequence`:
+
+- **Host**: the result axes tile into a register block of 4 rows by 64 bytes of columns (16
+  `f32` or 8 `f64`), each contracted letter becomes a loop of its own outside the block, an axis
+  the block does not divide is peeled into one smaller static block, every block vectorizes, and
+  the accumulator is hoisted out of the contracted loops so it stays in registers.
+- **GPU**: the block is up to 4 × 4 elements per thread, sized to divide the result axes, as an
+  `scf.forall` the parallel-loop mapping turns into threads. A product a single block would cover
+  keeps the plain kernel.
+
+Each element still adds its products one at a time, in contracted order, starting from the fill's
+zero, with the multiply and the add rounded separately. A block holds one accumulator per element
+and never splits an element's sum, so a scheduled product has exactly the bits of the naive nest,
+on the host and on a GPU. That rules out tensor-core MMA and a vendor BLAS, which both split the
+contracted extent or fuse the multiply into the add.
+
+A body with integer overflow checks (the `-O0` tier), a half-precision element, and an `einsum`
+operand that repeats a letter are left as the naive nest.
+
 ## MLIR to LLVM IR
 
 `translate_to_llvm_ir` runs a real MLIR pass pipeline rather than emitting LLVM by hand:
@@ -230,9 +255,11 @@ into loops. See [MLIR to LLVM IR](#mlir-to-llvm-ir).
    loads and stores. It is nested under `func.func` because that is the operation it is anchored
    on, and it must run *after* bufferization: against tensor operands it silently leaves the op
    alone.
-6. `convert-scf-to-cf` and `finalize-memref-to-llvm` lower what those loops are made of, then
-   `func-to-llvm`, `arith-to-llvm`, `cf-to-llvm` and `index-to-llvm` take the rest into the
-   `llvm` dialect.
+6. `convert-vector-to-scf`, `expand-strided-metadata` and `lower-affine` take apart a scheduled
+   contraction's vector transfers and tile views. Then `convert-scf-to-cf`, `convert-vector-to-llvm`
+   and `finalize-memref-to-llvm` lower what the loops are made of, and `func-to-llvm`,
+   `arith-to-llvm`, `cf-to-llvm`, `index-to-llvm` and `ub-to-llvm` take the rest into the `llvm`
+   dialect.
 7. `reconcile-unrealized-casts` clears the `unrealized_conversion_cast` ops each conversion leaves
    at its boundary with the dialects the others own. The translation rejects any that survive, so
    this pass runs last by necessity, not by convention.
@@ -304,7 +331,8 @@ threads a block (`256`, `8 × 32`, `1 × 8 × 32`). Rank 4 and up, and a tensor 
 too long for grid y or z, which hold 65,535 blocks, keep a 16 × 16 tile over the first two axes
 with the outermost axis on grid x. Functions that need different tilings lower as separate
 modules. A matrix
-product is two kernels, the zero fill and the contraction. A reduction (`.sum()`, `.mean()`,
+product is two kernels, the zero fill and the contraction, whose threads each compute a block of
+the result ([the contraction schedule](#the-contraction-schedule)). A reduction (`.sum()`, `.mean()`,
 `.max()`, `.min()`) is a seed and a fold, plus a division for
 a mean: one thread per result element folds its run in order, which is the LLVM backend's order,
 so the device and host answers match exactly. A run longer than the language's 4096 reduction

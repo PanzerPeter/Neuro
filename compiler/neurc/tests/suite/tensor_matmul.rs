@@ -159,3 +159,126 @@ func main() -> i32 {
     // ([[1,1],[0,1]] @ [[1,0],[1,1]])[0, 0] = 2, doubled by the diagonal c.
     assert_eq!(exit, 4);
 }
+
+/// A product of fractional `f32`s whose sums depend on their order, against the naive
+/// nest written out: each element starts at zero and adds its products one at a time, in
+/// contracted order. 37 rows and 45 columns leave a remainder on both axes of the host's
+/// register block, so the peeled loops are checked as well as the main one.
+const ORDERED_PRODUCT: &str = r#"
+func main() -> i32 {
+    mut a: Tensor<f32, [37, 19]> = Tensor::zeros()
+    mut b: Tensor<f32, [19, 45]> = Tensor::zeros()
+    mut w: Tensor<f64, [9, 5]> = Tensor::zeros()
+    mut x: Tensor<f64, [5, 33]> = Tensor::zeros()
+    for i in 0..37 {
+        for k in 0..19 {
+            a[i, k] = ((i * 7 + k * 13) % 23) as f32 * 0.37f32 - 3.1f32
+        }
+    }
+    for k in 0..19 {
+        for j in 0..45 {
+            b[k, j] = ((k * 5 + j * 3) % 29) as f32 * 0.013f32 + 0.7f32
+        }
+    }
+    for i in 0..9 {
+        for k in 0..5 {
+            w[i, k] = ((i * 3 + k) % 7) as f64 * 0.1 - 0.35
+        }
+    }
+    for k in 0..5 {
+        for j in 0..33 {
+            x[k, j] = ((k * 11 + j) % 13) as f64 * 0.07 + 0.003
+        }
+    }
+    val c = &a @ &b
+    val e = einsum("ij,jk->ik", &a, &b)
+    val y = &w @ &x
+    mut wrong = 0
+    for i in 0..37 {
+        for j in 0..45 {
+            mut s = 0.0f32
+            for k in 0..19 {
+                s = s + a[i, k] * b[k, j]
+            }
+            if c[i, j] != s { wrong += 1 }
+            if e[i, j] != s { wrong += 1 }
+        }
+    }
+    for i in 0..9 {
+        for j in 0..33 {
+            mut s = 0.0
+            for k in 0..5 {
+                s = s + w[i, k] * x[k, j]
+            }
+            if y[i, j] != s { wrong += 1 }
+        }
+    }
+    println("{c[36, 44]} {y[8, 32]}")
+    return wrong
+}
+"#;
+
+#[test]
+fn a_blocked_product_adds_each_element_in_contracted_order() {
+    assert_eq!(run_program("matmul_ordered.nr", ORDERED_PRODUCT), 0);
+}
+
+/// An integer product is blocked only where it wraps: on the debug tier its overflow check
+/// still stops the program at the `@`.
+#[test]
+fn an_integer_product_wraps_on_release_and_traps_on_debug() {
+    let test = CompileTest::new();
+    let source = test.write_source(
+        "matmul_wrap.nr",
+        r#"
+func main() -> i32 {
+    mut a: Tensor<i32, [8, 20]> = Tensor::zeros()
+    mut b: Tensor<i32, [20, 24]> = Tensor::zeros()
+    for i in 0..8 {
+        for k in 0..20 {
+            a[i, k] = (i * 20 + k) * 9973 + 1000003
+        }
+    }
+    for k in 0..20 {
+        for j in 0..24 {
+            b[k, j] = (k * 24 + j) * 7919 - 500009
+        }
+    }
+    val c = &a @ &b
+    mut wrong = 0
+    for i in 0..8 {
+        for j in 0..24 {
+            mut s = 0
+            for k in 0..20 {
+                s = s.wrapping_add(a[i, k].wrapping_mul(b[k, j]))
+            }
+            if c[i, j] != s { wrong += 1 }
+        }
+    }
+    return wrong
+}
+"#,
+    );
+    for (level, panic) in [("0", true), ("2", false)] {
+        let exe = source.with_extension(format!("o{level}"));
+        let built = std::process::Command::new(env!("CARGO_BIN_EXE_neurc"))
+            .args(["compile", "-O", level, "-o"])
+            .arg(&exe)
+            .arg(&source)
+            .output()
+            .expect("neurc runs");
+        assert!(built.status.success(), "{built:?}");
+        let output = std::process::Command::new(&exe)
+            .output()
+            .expect("the program runs");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            stderr.starts_with("panic: integer overflow at "),
+            panic,
+            "-O{level}: {stderr}"
+        );
+        if !panic {
+            assert_eq!(output.status.code(), Some(0), "-O{level}: {stderr}");
+        }
+    }
+}

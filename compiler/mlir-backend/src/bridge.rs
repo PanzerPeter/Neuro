@@ -3,6 +3,7 @@ use crate::{
     errors::MlirError,
     guards::{Guard, Overflow, Side},
     lower::{build_linkable_module, build_module},
+    schedule,
 };
 
 use melior::{Context, ir::Module, pass::PassManager, utility::parse_pass_pipeline};
@@ -69,12 +70,18 @@ const HOST_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm";
 
 /// Loops over buffers into the `llvm` dialect, short of reconciling the casts.
 ///
+/// The first three entries are for a scheduled contraction (`schedule`): its register
+/// block's vector transfers unroll into one per row, its tiles are `memref.subview`s whose
+/// offsets become plain index arithmetic, and the vectors left convert with the rest.
+///
 /// `memref_to_llvm` is where the CPU and GPU paths part: it decides which allocator
 /// a buffer the body allocates for itself calls.
 pub(crate) fn llvm_descent(memref_to_llvm: &str) -> String {
     format!(
-        "convert-scf-to-cf,{memref_to_llvm},convert-func-to-llvm,convert-math-to-llvm,convert-arith-to-llvm,\
-         convert-cf-to-llvm,convert-index-to-llvm"
+        "convert-vector-to-scf{{full-unroll=true}},expand-strided-metadata,lower-affine,\
+         convert-scf-to-cf,convert-vector-to-llvm,{memref_to_llvm},convert-func-to-llvm,\
+         convert-math-to-llvm,convert-arith-to-llvm,convert-cf-to-llvm,convert-index-to-llvm,\
+         convert-ub-to-llvm"
     )
 }
 
@@ -170,6 +177,7 @@ pub fn lower_for_link(
         })
         .map(|(_, symbol)| symbol.as_str())
         .collect();
+    schedule::apply(&context, &module, Side::Host)?;
     convert_to_llvm_dialect(&context, &mut module)?;
     let llvm_ir = translate_finishing(std::slice::from_ref(&module), &|llvm_module| {
         for symbol in &exclusive {
@@ -535,7 +543,11 @@ pub(crate) mod tests {
         .expect("borrowed operands should lower for linking");
 
         assert_eq!(bodies.functions.len(), 1, "{}", bodies.llvm_ir);
-        assert!(bodies.llvm_ir.contains("fmul float"), "{}", bodies.llvm_ir);
+        assert!(
+            bodies.llvm_ir.contains("fmul <2 x float>"),
+            "{}",
+            bodies.llvm_ir
+        );
     }
 
     fn integer_program(op: BinaryOp) -> HirProgram {

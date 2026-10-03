@@ -18,6 +18,7 @@ mod gpu;
 mod guards;
 mod kernel;
 mod lower;
+mod schedule;
 #[cfg(test)]
 mod smoke;
 mod tensor_apply;

@@ -5,6 +5,7 @@ use crate::{
     guards::{Overflow, Side},
     kernel::kernel_launchers,
     lower::build_linkable_module,
+    schedule,
     tensor_arithmetic::read_type,
 };
 
@@ -265,6 +266,7 @@ pub(crate) fn lower_with_format(
             build_linkable_module(&context, program, (overflow, Side::Device), &|function| {
                 admit(function) && self::tiling(function) == tiling
             })?;
+        schedule::apply(&context, &module, Side::Device)?;
         lower_module(
             &context,
             &mut module,
@@ -495,6 +497,11 @@ fn launches_every_op(function: &HirFunction) -> bool {
 /// destroys the stream, so the host stalls between two kernels that need nothing
 /// from it.
 ///
+/// A scheduled contraction (`schedule`) arrives as an `scf.forall` over each thread's
+/// register block, which becomes one more parallel loop to map, its vector transfers
+/// unrolled first. Inside each kernel module its tiles' subviews become index arithmetic
+/// and its vectors convert before the vendor conversion, which handles neither.
+///
 /// `lower-affine` is there for the index arithmetic `convert-parallel-loops-to-gpu`
 /// writes as `affine.apply`, which the CPU path never produces. Serializing the
 /// kernels is a separate run so a missing toolkit is told apart from a lowering
@@ -502,12 +509,13 @@ fn launches_every_op(function: &HirFunction) -> bool {
 fn gpu_lowering_pipeline(target: &GpuTarget, tiling: Tiling) -> String {
     format!(
         "builtin.module({BUFFERIZE},\
-         func.func(convert-linalg-to-parallel-loops,\
+         func.func(scf-forall-to-parallel,convert-linalg-to-parallel-loops,\
+         convert-vector-to-scf{{full-unroll=true}},\
          scf-parallel-loop-tiling{{parallel-loop-tile-sizes={tiles} no-min-max-bounds=true}},\
          gpu-map-parallel-loops{{mapping-policy={policy}}},convert-parallel-loops-to-gpu),\
          gpu-kernel-outlining,func.func(gpu-async-region),\
          {attach}{{chip={chip}}},\
-         gpu.module({convert}),\
+         gpu.module(expand-strided-metadata,lower-affine,convert-vector-to-llvm,{convert}),\
          lower-affine,{descent},gpu-to-llvm,reconcile-unrealized-casts)",
         tiles = tiling.tiles,
         policy = tiling.policy,
