@@ -10,7 +10,7 @@
 
 use crate::{
     errors::MlirError,
-    guards::{At, Element, Guard, Lowering, MAX_SITES, Overflow},
+    guards::{At, Element, Guard, Lowering, MAX_SITES, Overflow, Side},
     lower::map_type,
     tensor_arithmetic::{
         OperandAxes, broadcast_axes, indexing_maps, iterator_types, read_type, row_major,
@@ -86,7 +86,13 @@ pub(crate) fn build_compound<'c>(
     }
     let block = Block::new(&slots);
     let sites = {
-        let lowering = Lowering::new(context, location, &block, function.target, overflow);
+        let lowering = Lowering::new(
+            context,
+            location,
+            &block,
+            (function.target, Side::Host),
+            overflow,
+        );
         let element_type = map_type(context, element)?;
         let body = Block::new(&[(element_type, location), (element_type, location)]);
         let at = At {

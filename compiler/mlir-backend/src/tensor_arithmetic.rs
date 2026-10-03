@@ -100,7 +100,7 @@ pub(crate) fn build_body<'c>(
     let (built, sites) = {
         // Every tensor operation beyond the arithmetic this path was built for is lowered for
         // a GPU body only. On the host it stays the LLVM backend's.
-        let lowering = Lowering::new(context, location, &block, function.target, overflow);
+        let lowering = Lowering::new(context, location, &block, (function.target, side), overflow);
         let mut scope: Vec<(String, Value<'c, '_>)> = Vec::with_capacity(function.params.len());
         for (index, param) in function.params.iter().enumerate() {
             scope.push((param.name.clone(), block.argument(index)?.into()));

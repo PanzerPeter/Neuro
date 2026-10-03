@@ -214,20 +214,28 @@ extent 1. An integer `.sum()` seeds 0, folds left to right with the overflow che
 and never in lanes, since the host folds an integer run in order and where an overflow is caught
 depends on that order.
 
-**Sorts.** `tensor_sort::build_sort` lowers `.sort()` / `.argsort()` / `.topk()`, for the host and
-a GPU alike, as a rank sort in two `linalg.generic`s. The count's index
-space is the source's axes (`parallel`, one GPU thread per element) and then the compared
-element's run position (`reduction`): each element counts the ones that precede it under the LLVM
-backend's comparator (`precedes`, which the `.max()` / `.min()` fold also uses) plus the equal
-ones at earlier positions, which is where a stable sort puts it. The gather's index space is the
-output's axes and then the run: each output position takes the element whose count is its
-position, its value or (as `index_cast` to `i32`) its run position. Both destinations are seeded
-with 0 first. `.topk` sorts descending and has `k` output positions per run, so it gathers those
-two outputs and nothing more. Each answer is the host's exactly, permutation included; the work
-is O(extent²) per run. A `.topk` body returns two tensors, so a defined function's tuple of tensors
+**Sorts.** `tensor_sort::build_sort` lowers `.sort()` / `.argsort()` / `.topk()` by building
+the stable order of every run (a tensor of run positions shaped like the source), then one
+all-parallel gather per output that reads through it: the element, or the position as
+`index_cast` to `i32`. `.topk` gathers only its `k` positions. Any stable sort under one
+comparator gives the same order, so the algorithm is never observable.
+
+- *Merge sort, host and GPU.* Bottom-up, one all-parallel `linalg.generic` per doubling of the
+  block width (`ceil(log2(extent))` of them, none for a run of one). Each point finds the run
+  position it holds by a merge-path binary search over the pair of blocks it merges, a fixed-count
+  `scf.for` inside the body, reading the previous order and the source with `tensor.extract`.
+  A right element goes first only if it strictly precedes (`precedes`, the LLVM backend's
+  comparator with NaN last, which the `.max()` / `.min()` fold also uses), which keeps it stable.
+  O(n log² n) comparisons a run.
+- *LSD radix, host integers only.* A run at least `RADIX_BUCKETS` (256) long on the host
+  (`Lowering::side`) sorts one byte a pass in `scf.for` loops over tensor values (count, prefix,
+  place), two order tensors written in turn. The key flips the sign bit when signed and every bit
+  when descending. A device body cannot take it: loops outside `linalg` would run on the host
+  against device memory, and a radix pass in `linalg` needs a scan and a scatter.
+
+A `.topk` body returns two tensors, so a defined function's tuple of tensors
 is one MLIR result per tensor, each its own out-param after bufferization, and `linkable_result`
-admits it, as it admits the `i32` indices tensor a sort writes. An integer element sorts by
-`cmpi` of its signedness, with no NaN rule.
+admits it, as it admits the `i32` indices tensor a sort writes.
 
 **Math, layouts and contractions.** `build_expression` also lowers elementwise math
 (`tensor_math.rs`: one `linalg.generic` whose body is the `math` dialect op of the function's

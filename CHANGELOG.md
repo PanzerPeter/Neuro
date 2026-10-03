@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-10-03
+
+### Changed
+
+- `.sort()`, `.argsort()` and `.topk()` are no longer quadratic in the length of the sorted
+  axis. On the host, an integer axis of 256 or more elements uses a radix sort, so a million
+  `i32` take about 20 ms where the old algorithm needed about 12 minutes. Floats, shorter
+  axes, and every sort on a GPU use a parallel merge sort: a million elements now sort on the
+  GPU in about 0.35 s, start-up included, instead of 7.6 s. Results are unchanged: the same order,
+  equal elements in source order, and `NaN` last.
+
 ## [5.3.0] - 2026-10-03
 
 ### Changed

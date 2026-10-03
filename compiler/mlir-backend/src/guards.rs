@@ -146,6 +146,7 @@ pub(crate) struct At<'c, 'v> {
 /// first time a check needs it, so a body with none keeps its signature.
 pub(crate) struct Lowering<'c, 'a> {
     pub(crate) target: HirTarget,
+    pub(crate) side: Side,
     context: &'c Context,
     location: Location<'c>,
     entry: &'a Block<'c>,
@@ -161,11 +162,12 @@ impl<'c, 'a> Lowering<'c, 'a> {
         context: &'c Context,
         location: Location<'c>,
         entry: &'a Block<'c>,
-        target: HirTarget,
+        (target, side): (HirTarget, Side),
         overflow: Overflow,
     ) -> Self {
         Lowering {
             target,
+            side,
             context,
             location,
             entry,

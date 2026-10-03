@@ -464,7 +464,7 @@ fn read_run<'c, 'a>(
     )
 }
 
-fn index_constant<'c, 'a>(
+pub(crate) fn index_constant<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     at: &'a Block<'c>,

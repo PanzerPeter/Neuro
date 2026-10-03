@@ -142,7 +142,9 @@ Every one of these lowers for the host and for a GPU alike.
   per parallel point folding its run in order, and runs longer than the language's 4096
   reduction lanes folded lane by lane first, as [GPU kernels](#gpu-kernels) describes. A
   half-precision run is widened to `f32`, folded there, and rounded back once.
-- **Sorts** (`.sort()`, `.argsort()`, `.topk()`): a stable rank sort in two `linalg.generic`s.
+- **Sorts** (`.sort()`, `.argsort()`, `.topk()`): a stable bottom-up merge sort, one parallel
+  `linalg.generic` per doubling of the block width, each point placed by a binary search; on the
+  host, an integer run of 256 or more sorts by LSD radix, a byte a pass, instead.
 - **Elementwise math**: the `math` dialect op of each function's name, which the CPU pipeline
   turns into the same LLVM intrinsics the LLVM backend calls on a scalar.
 - **Slices and permutations**: a gather reading the source at each result position, and an

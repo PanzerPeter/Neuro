@@ -377,3 +377,166 @@ func main() -> i32 {
         "the diagnostic asks for the label: {errors}"
     );
 }
+
+/// Runs long enough for the sort's own algorithm to matter: a host integer run of 256 or
+/// more sorts by radix, and anything else by merging. Each program checks itself and
+/// answers 0, or the number of the first rule it found broken: ascending, descending,
+/// each argsort entry naming an element equal to the sorted one there, equal elements in
+/// source order, and `.topk` agreeing with the descending sort.
+const LONG_RUN_CHECKS: &str = r#"
+func next(seed: i64) -> i64 {
+    return (seed * 1103515245 + 12345) % 2147483648
+}
+"#;
+
+#[test]
+fn long_integer_runs_sort_on_every_axis() {
+    let source = format!(
+        "{LONG_RUN_CHECKS}{}",
+        r#"
+func main() -> i32 {
+    mut v: Tensor<i32, [2, 700]> = Tensor::zeros()
+    mut seed: i64 = 7
+    for r in 0..2 {
+        for i in 0..700 {
+            seed = next(seed)
+            v[r, i] = (((seed / 65536) % 41) as i32 - 20) * 104729
+        }
+    }
+    v[0, 3] = 2147483647
+    v[1, 5] = -2147483647
+    val up: Tensor<i32, [2, 700]> = v.sort()
+    val down: Tensor<i32, [2, 700]> = v.sort(descending: true)
+    val order: Tensor<i32, [2, 700]> = v.argsort()
+    val back: Tensor<i32, [2, 700]> = v.argsort(descending: true)
+    val (top, at) = v.topk(k: 9)
+    for r in 0..2 {
+        for i in 1..700 {
+            if up[r, i - 1] > up[r, i] { return 1 }
+            if down[r, i - 1] < down[r, i] { return 2 }
+            if up[r, i - 1] == up[r, i] && order[r, i - 1] >= order[r, i] { return 4 }
+            if down[r, i - 1] == down[r, i] && back[r, i - 1] >= back[r, i] { return 4 }
+        }
+        for i in 0..700 {
+            if v[r, order[r, i] as u64] != up[r, i] { return 3 }
+            if v[r, back[r, i] as u64] != down[r, i] { return 3 }
+        }
+        for i in 0..9 {
+            if top[r, i] != down[r, i] || at[r, i] != back[r, i] { return 5 }
+        }
+    }
+    if up[0, 699] != 2147483647 || up[1, 0] != -2147483647 { return 6 }
+    // Down the columns: runs of two, merged.
+    val cols: Tensor<i32, [2, 700]> = v.sort(axis: 0)
+    for i in 0..700 {
+        if cols[0, i] > cols[1, i] { return 7 }
+    }
+    return 0
+}
+"#
+    );
+    assert_eq!(run_program("tensor_sort_long_i32.nr", &source), 0);
+}
+
+#[test]
+fn a_long_run_along_the_first_axis_sorts_every_width() {
+    let source = format!(
+        "{LONG_RUN_CHECKS}{}",
+        r#"
+func main() -> i32 {
+    mut wide: Tensor<i64, [300, 3]> = Tensor::zeros()
+    mut narrow: Tensor<u8, [300, 2]> = Tensor::zeros()
+    mut seed: i64 = 99
+    for i in 0..300 {
+        for c in 0..3 {
+            seed = next(seed)
+            wide[i, c] = (seed - 1073741824) * 4294967311
+        }
+        for c in 0..2 {
+            seed = next(seed)
+            narrow[i, c] = ((seed / 256) % 256) as u8
+        }
+    }
+    val up: Tensor<i64, [300, 3]> = wide.sort(axis: 0)
+    val order: Tensor<i32, [300, 3]> = wide.argsort(axis: 0)
+    val down: Tensor<u8, [300, 2]> = narrow.sort(axis: 0, descending: true)
+    val back: Tensor<i32, [300, 2]> = narrow.argsort(axis: 0, descending: true)
+    for c in 0..3 {
+        for i in 1..300 {
+            if up[i - 1, c] > up[i, c] { return 1 }
+        }
+        for i in 0..300 {
+            if wide[order[i, c] as u64, c] != up[i, c] { return 3 }
+        }
+    }
+    for c in 0..2 {
+        for i in 1..300 {
+            if down[i - 1, c] < down[i, c] { return 2 }
+            if down[i - 1, c] == down[i, c] && back[i - 1, c] >= back[i, c] { return 4 }
+        }
+        for i in 0..300 {
+            if narrow[back[i, c] as u64, c] != down[i, c] { return 3 }
+        }
+    }
+    return 0
+}
+"#
+    );
+    assert_eq!(run_program("tensor_sort_long_axis0.nr", &source), 0);
+}
+
+#[test]
+fn a_long_float_run_keeps_nan_last_and_signed_zeros_in_order() {
+    let source = format!(
+        "{LONG_RUN_CHECKS}{}",
+        r#"
+func main() -> i32 {
+    val nan = 0.0 / 0.0
+    mut v: Tensor<f64, [1000]> = Tensor::zeros()
+    mut seed: i64 = 3
+    mut nans: i32 = 0
+    for i in 0..1000 {
+        seed = next(seed)
+        val pick = (seed / 65536) % 13
+        if pick == 0 {
+            v[i] = nan
+            nans = nans + 1
+        } else if pick == 1 {
+            v[i] = -0.0
+        } else {
+            v[i] = (pick as f64 - 7.0) * 0.5
+        }
+    }
+    val up: Tensor<f64, [1000]> = v.sort()
+    val down: Tensor<f64, [1000]> = v.sort(descending: true)
+    val order: Tensor<i32, [1000]> = v.argsort()
+    val back: Tensor<i32, [1000]> = v.argsort(descending: true)
+    val real = 1000 - nans
+    for i in 0..1000 {
+        if (i >= real) != up[i].is_nan() { return 6 }
+        if (i >= real) != down[i].is_nan() { return 6 }
+        if i >= real {
+            // The NaNs, in source order in both directions.
+            if i > real && order[i - 1] >= order[i] { return 4 }
+            if i > real && back[i - 1] >= back[i] { return 4 }
+        } else {
+            if v[order[i] as u64] != up[i] { return 3 }
+            if v[back[i] as u64] != down[i] { return 3 }
+            if i > 0 {
+                if up[i - 1] > up[i] { return 1 }
+                if down[i - 1] < down[i] { return 2 }
+                if up[i - 1] == up[i] && order[i - 1] >= order[i] { return 4 }
+                if down[i - 1] == down[i] && back[i - 1] >= back[i] { return 4 }
+            }
+        }
+    }
+    val (top, at) = v.topk(k: 20)
+    for i in 0..20 {
+        if top[i] != down[i] || at[i] != back[i] { return 5 }
+    }
+    return 0
+}
+"#
+    );
+    assert_eq!(run_program("tensor_sort_long_f64.nr", &source), 0);
+}
