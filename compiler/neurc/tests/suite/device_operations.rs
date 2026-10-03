@@ -340,14 +340,20 @@ fn a_failed_integer_check_on_the_device_is_the_hosts_panic() {
             return;
         }
         let column = 5 + operation.find(at).expect("the operation's position");
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Windows writes text-mode `\r\n` and names the source with `\` separators.
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .replace("\r\n", "\n")
+            .replace('\\', "/");
         assert!(
             stderr.starts_with(&format!("panic: {message} at "))
                 && stderr.ends_with(&format!("/checked.nr:8:{column}\n"))
                 && stderr.lines().count() == 1,
             "`{operation}`: {stderr}"
         );
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "before\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "before\n"
+        );
         assert!(!output.status.success());
     }
 }

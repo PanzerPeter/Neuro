@@ -161,8 +161,12 @@ fn a_linked_body_fails_its_checks_as_the_llvm_backend_does() {
             .expect("neurc runs");
         assert!(built.status.success(), "{built:?}");
         let output = Command::new(&exe).output().expect("the program runs");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), stdout, "-O{level}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Windows writes text-mode `\r\n` and names the source with `\` separators.
+        let stdout_text = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout_text, stdout, "-O{level}");
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .replace("\r\n", "\n")
+            .replace('\\', "/");
         assert!(
             stderr.starts_with(panic) && stderr.ends_with(at) && stderr.lines().count() == 1,
             "-O{level}: {stderr}"

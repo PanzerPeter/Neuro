@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.1] - 2026-10-03
+
+### Fixed
+
+- The MLIR routing panic test failed on Windows: it matched the source location with a `/`
+  separator and a bare `\n`, while a Windows build names the file with `\` and writes `\r\n`.
+  It, and the device check test that shares the pattern, now normalize both before comparing.
+
 ## [5.2.0] - 2026-10-02
 
 ### Added
