@@ -132,10 +132,12 @@ with 1s to three axes; its body reads `thread_id.x` / `block_id.y` as
 `HirExprKind::KernelPartition { out, base, slice, body }`, the closure inlined with its two
 parameters as locals. No host body contains either node, so the LLVM backend's arms for them are
 internal errors. `.flat(i)` has no node: lowering spells it as a `TensorIndex`.
-`FollowsOperands` is no attribute: it marks a function lowering outlined from one tensor
-operation, whose backends pick the GPU or the host body per call from where its tensor operands
-live. `has_gpu_body` answers `false` for it, since its GPU body is optional and never an error to
-lack.
+`FollowsOperands` and `HostOperation` are no attributes: each marks a function lowering outlined
+from one tensor operation (`outlined()` answers for both). A `FollowsOperands` one, in a program
+that moves a tensor to a device, has backends pick the GPU or the host body per call from where
+its tensor operands live; a `HostOperation` one, in a program that moves none, runs on the host
+always. `has_gpu_body` answers `false` for both, since a GPU body is optional and never an error
+to lack.
 
 ### Nodes that carry a deliberate design decision
 

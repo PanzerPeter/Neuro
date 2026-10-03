@@ -1,4 +1,4 @@
-use super::{binding_init, function_body, lower};
+use super::{binding_init, function_body, lower, operation};
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirItem, HirTensorAxis, HirType};
 use shared_types::Literal;
 
@@ -262,7 +262,7 @@ func main() -> i32 {
 }
 "#,
     );
-    let row = binding_init(function_body(&program, "main"), "row");
+    let row = operation(&program, "row");
     let HirExprKind::TensorIndex { axes, .. } = &row.kind else {
         panic!(
             "a tensor index should lower to TensorIndex, got {:?}",
@@ -302,7 +302,7 @@ func main() -> i32 {
 }
 "#,
     );
-    let slice = binding_init(function_body(&program, "main"), "every_third");
+    let slice = operation(&program, "every_third");
     let HirExprKind::TensorIndex { axes, .. } = &slice.kind else {
         panic!(
             "a tensor index should lower to TensorIndex, got {:?}",
@@ -341,7 +341,7 @@ func main() -> i32 {
 }
 "#,
     );
-    let block = binding_init(function_body(&program, "main"), "block");
+    let block = operation(&program, "block");
     let HirExprKind::TensorIndex { axes, .. } = &block.kind else {
         panic!(
             "a tensor index should lower to TensorIndex, got {:?}",
@@ -508,11 +508,11 @@ func main() -> i32 {
     assert_eq!(binding_init(body, "scaled").ty, expected);
     assert_eq!(binding_init(body, "shrunk").ty, expected);
 
-    let HirExprKind::Binary { right, .. } = &binding_init(body, "scaled").kind else {
+    let HirExprKind::Binary { right, .. } = &operation(&program, "scaled").kind else {
         panic!("a tensor operator stays a binary node");
     };
     assert_eq!(right.ty, HirType::F32);
-    let HirExprKind::Binary { left, .. } = &binding_init(body, "shrunk").kind else {
+    let HirExprKind::Binary { left, .. } = &operation(&program, "shrunk").kind else {
         panic!("a tensor operator stays a binary node");
     };
     assert_eq!(left.ty, HirType::F32);

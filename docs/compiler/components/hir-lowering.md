@@ -108,17 +108,20 @@ set, so a construct it has no rule for is a `LoweringError::NotDifferentiable` t
 construct's span, and `neurc` renders it like a type error. See
 [Automatic Differentiation](../../language-reference/autodiff.md) for the accepted body.
 
-### Device operations
+### Tensor operations
 
-In a program that moves a tensor to a device with `.to(...)`, the last step of lowering outlines
-each tensor operation a GPU can compute over float tensors of static shape into a function of
-its own whose target is `HirTarget::FollowsOperands`: a tree of operators, `@`, elementwise math,
-slices, permutations and `einsum`, or a reduction, a sort, a traversal over a closure literal,
-or a compound assignment. The backends then choose per call where it runs, from where its
-operands live. The operands are passed as written, so ownership is unchanged; one an operation
-only reads is lent, a compound assignment's target is passed as `&mut`, and a slice position is
-checked against its axis at the call with the host's own guard. The source lives in
-[`src/device_ops.rs`](../../../compiler/hir-lowering/src/device_ops.rs).
+The last step of lowering outlines every tensor operation into a function of its own, whose body
+the [MLIR backend](mlir-backend.md) computes: a tree of operators, `@`, elementwise math, slices,
+permutations and `einsum`, or a reduction, a sort, a traversal, or a compound assignment. In a
+program that moves a tensor to a device with `.to(...)` the function's target is
+`HirTarget::FollowsOperands`, and the backends choose per call where it runs, from where its
+operands live; in any other program it is `HirTarget::HostOperation`, which runs on the host.
+The operands are passed as written, so ownership is unchanged: one an operation only reads is
+lent (a field or an element too), a compound assignment's target is passed as `&mut`, a
+traversal's function is passed as a value, and a slice position is checked against its axis at
+the call with the host's own guard. A `.reduce` whose accumulator is no number is instead
+lowered to the loop it is, over element reads. The source lives in
+[`src/tensor_ops.rs`](../../../compiler/hir-lowering/src/tensor_ops.rs).
 
 ## Testing
 

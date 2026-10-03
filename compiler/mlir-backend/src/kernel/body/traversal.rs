@@ -408,10 +408,13 @@ mod tests {
     fn a_map_calls_its_closure_once_per_element() {
         let (text, count) = launched("    val r = g.map(|x: f32| -> f32 { x * scale })", true);
         assert_eq!(count, 1);
-        // 703 elements in blocks of 256, the capture after the receiver, the result last.
+        // 703 elements in blocks of 256, the capture after the receiver, then the function
+        // value a host body calls, the result last.
         assert!(text.contains("%grid0 = arith.constant 3 : index"), "{text}");
         assert!(
-            text.contains("(%arg0: memref<37x19xf32>, %arg1: f32, %arg2: memref<37x19xf32>)"),
+            text.contains(
+                "(%arg0: memref<37x19xf32>, %arg1: f32, %arg2: !llvm.struct<(ptr, ptr)>, %arg3: memref<37x19xf32>)"
+            ),
             "{text}"
         );
         assert!(text.contains("arith.mulf"), "{text}");
@@ -457,7 +460,7 @@ mod tests {
         assert_eq!(count, 1);
         assert!(
             text.contains("llvm.intr.sadd.with.overflow")
-                && text.contains("%status: memref<1xi64>, %arg1: memref<37x19xf32>"),
+                && text.contains("%status: memref<1xi64>, %arg2: memref<37x19xf32>"),
             "the status word sits before the result:\n{text}"
         );
         assert_eq!(

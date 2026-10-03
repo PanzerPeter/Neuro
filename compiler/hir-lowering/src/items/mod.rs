@@ -292,9 +292,11 @@ impl Lowerer {
         )?;
         // After the derivatives, which are host code of their own and read the operations
         // as written.
-        if self.transfers {
-            crate::device_ops::outline(&mut hir_items);
-        }
+        let target = match self.transfers {
+            true => HirTarget::FollowsOperands,
+            false => HirTarget::HostOperation,
+        };
+        crate::tensor_ops::outline(&mut hir_items, target);
 
         Ok(HirProgram { items: hir_items })
     }

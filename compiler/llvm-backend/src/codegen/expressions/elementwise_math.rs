@@ -1,91 +1,34 @@
-// Codegen for elementwise math: `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()`,
-// `.pow(p)`, and the `sign` the derivative of `.abs()` is written with.
+// Codegen for elementwise math on a scalar: `.exp()`, `.log()`, `.sqrt()`, `.tanh()`,
+// `.abs()`, `.pow(p)`, and the `sign` the derivative of `.abs()` is written with. On a tensor
+// each is computed in MLIR.
 //
-// A scalar is one application of the function. A tensor is one counted loop over its flat
-// buffer writing a fresh result, the walk `.map` does with the function inlined, so the
-// receiver is read and never consumed. Each function is the LLVM intrinsic of its name,
-// which becomes one instruction (`sqrt`, `fabs`) or a call into the C math library the
-// driver links; `sign` has no intrinsic and is two compares.
+// Each function is the LLVM intrinsic of its name, which becomes one instruction (`sqrt`,
+// `fabs`) or a call into the C math library the driver links; `sign` has no intrinsic and is
+// two compares.
 //
-// A half-precision element is widened to `f32` for the function and narrowed back. The
+// A half-precision value is widened to `f32` for the function and narrowed back. The
 // intrinsics' `half` / `bfloat` overloads are not ones every target can lower, and the
 // widened computation rounds once, on the way back.
 
+use inkwell::FloatPredicate;
 use inkwell::intrinsics::Intrinsic;
 use inkwell::values::{BasicValueEnum, FloatValue};
-use inkwell::{FloatPredicate, IntPredicate};
 use neuro_hir::{HirExpr, HirMathOp};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Lower one math call: the function's value for a scalar, a fresh tensor for a tensor.
+    /// Lower one math call on a scalar.
     pub(crate) fn codegen_math(
         &mut self,
         op: HirMathOp,
         operand: &HirExpr,
         exponent: Option<&HirExpr>,
-        result_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        if !matches!(result_ty, Type::Tensor { .. }) {
-            let value = self.codegen_float(operand)?;
-            let exponent = exponent.map(|e| self.codegen_float(e)).transpose()?;
-            return Ok(self.apply_math(op, value, exponent)?.into());
-        }
-
-        let source = self.walk_tensor(operand)?;
-        let count = self.element_count(operand)?;
-        // Evaluated once, after the receiver, which is the order the call is written in.
+        let value = self.codegen_float(operand)?;
         let exponent = exponent.map(|e| self.codegen_float(e)).transpose()?;
-        let handle = self.alloc_dlpack_tensor(result_ty, "tensor.math")?;
-        let written = self.load_dlpack_data(handle)?;
-
-        let function = self.current_function.ok_or_else(|| {
-            CodegenError::InternalError("elementwise math outside a function".to_string())
-        })?;
-        let i64_type = self.context.i64_type();
-        let cursor = self.entry_alloca(i64_type, "tensor.math.i")?;
-        self.builder.build_store(cursor, i64_type.const_zero())?;
-        let head = self
-            .context
-            .append_basic_block(function, "tensor.math.head");
-        let body = self
-            .context
-            .append_basic_block(function, "tensor.math.body");
-        let done = self
-            .context
-            .append_basic_block(function, "tensor.math.done");
-
-        self.builder.build_unconditional_branch(head)?;
-        self.builder.position_at_end(head);
-        let index = self
-            .builder
-            .build_load(i64_type, cursor, "tensor.math.idx")?
-            .into_int_value();
-        let more = self.builder.build_int_compare(
-            IntPredicate::ULT,
-            index,
-            i64_type.const_int(count as u64, false),
-            "tensor.math.more",
-        )?;
-        self.builder.build_conditional_branch(more, body, done)?;
-
-        self.builder.position_at_end(body);
-        let element = self.load_walked(&source, index)?.into_float_value();
-        let value = self.apply_math(op, element, exponent)?;
-        let slot = self.buffer_slot(source.elem_llvm, written, index)?;
-        self.builder.build_store(slot, value)?;
-        let next =
-            self.builder
-                .build_int_add(index, i64_type.const_int(1, false), "tensor.math.next")?;
-        self.builder.build_store(cursor, next)?;
-        self.builder.build_unconditional_branch(head)?;
-
-        self.builder.position_at_end(done);
-        self.release_receiver_temporary(operand, source.handle)?;
-        Ok(handle.into())
+        Ok(self.apply_math(op, value, exponent)?.into())
     }
 
     fn codegen_float(&mut self, expr: &HirExpr) -> CodegenResult<FloatValue<'ctx>> {

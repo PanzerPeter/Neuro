@@ -52,8 +52,9 @@ inkwell 0.10.0 (feature `llvm23-1`) is a third-party crate, not Shared Kernel. N
 supports LLVM 23 yet, so the root `Cargo.toml` pins it to a commit of inkwell's master. Requires LLVM 23;
 set `LLVM_SYS_231_PREFIX` (e.g. `/usr` on Arch) before building. `semantic-analysis` is not a
 production dependency: neurc orders type-check then HIR lowering before codegen.
-`syntax-parsing` and `hir-lowering` appear only in `[dev-dependencies]` (tests and benches lower
-source to HIR before compiling).
+`syntax-parsing`, `hir-lowering` and `mlir-backend` appear only in `[dev-dependencies]` (tests and
+benches lower source to HIR before compiling, and a test compiling a tensor operation links the
+host body `mlir-backend` computes for it, as `neurc` does).
 
 `resolve_builtin_method` / `is_panic_builtin` / `is_io_builtin` are duplicated from
 `semantic-analysis` to keep the backend independent of the type-checker slice.
@@ -109,10 +110,20 @@ check's offset), so a body computed elsewhere fails exactly as one computed here
 
 `link_external_bodies` parses the text into the module's own context (the IR crosses as text, so
 the other backend never shares an `LLVMContext` with this one), links it, and makes each symbol
-`internal` so the optimizer may inline it into its one caller. The caller promises every named
-function has scalar, tensor or `&Tensor` parameters and a statically shaped tensor result (or
-a tuple of them); the
-descriptor needs a compile-time extent per axis.
+`internal` so the optimizer may inline it into its one caller. A `Host` set is first run through
+LLVM's `default<O2>`, whatever `-O` the program is built at: it is the program's tensor
+arithmetic, optimized the way a library it calls would be, and nothing in it licenses
+reassociating floats, so the bits are unchanged. The caller promises every named function has
+scalar, tensor, `&Tensor`, `&mut Tensor` or function-value parameters and a statically shaped
+tensor result, a tuple of them, or none; the descriptor needs a compile-time extent per axis.
+
+`codegen_external_body` is a shell around `emit_external_call`, which emits the call where the
+builder stands over argument values and returns the result. A call to an outlined function with a
+host body and no device one (`HirTarget::HostOperation`, or a `FollowsOperands` function MLIR gave
+no device body) is expanded where it is made: `build_module` records it in `expanded_calls`,
+skips its definition, and `codegen_call` hands the evaluated arguments to `emit_external_call`.
+The result is then the caller's own allocation, so a `pool` body keeps its arena, which an
+allocation inside a callee never reaches.
 
 `ExternalBodies::memory` (`BodyMemory`) says where a symbol's buffers must live, and
 `codegen_external_body` takes it per function. `Host` passes
@@ -191,10 +202,10 @@ run in global constructors, so no call has picked its GPU body yet.
 `FollowsOperands` (a tensor operation lowering lifted out of host code) goes through
 `codegen_follows_operands`, which shares `codegen_body_choice` with the fallback: the same `f.gpu`
 and `f.host`, but `f` picks per call, `f.gpu` when any tensor operand's DLPack device is not
-`kDLCPU`. So a call over host tensors is this backend's own body, exactly as before a device
-existed, and a call over a device tensor runs and leaves its result there (the staging's resident
-path). One without a `Device` body is an ordinary function whose host body refuses a device
-operand through `load_host_data`.
+`kDLCPU`. So a call over host tensors runs the host body MLIR computed, and a call over a device
+tensor runs and leaves its result there (the staging's resident path). One without a `Device`
+body is expanded at each call, its host body refusing a device operand through
+`load_host_data`. A `@gpu(fallback: true)` function's host copy is MLIR's too.
 
 ## Stack Slot Placement
 `CodegenContext::entry_alloca` positions the builder before the entry block's first instruction,
@@ -677,168 +688,46 @@ than an instruction per element; a literal mentioning a runtime value is written
 float intrinsics its Box-Muller transform calls. Nothing else in the backend draws a random
 number.
 
-A half-precision tensor element is widened to `f32` for each operation and rounded back once
-(`widen_half` / `narrow_float` in `tensor_arith.rs`, used by `tensor_element_arith`, so by the
-elementwise operators, compound assignment and `@`), and a reduction over one folds in an `f32`
-accumulator and narrows the finished value (BUG-073). LLVM's own `half` / `bfloat` arithmetic is
-not relied on, for the reason `elementwise_math.rs` gives.
+**No tensor loops.** Every operation over a tensor's elements (the operators, `@`, compound
+assignment, slices, permuting shape casts, reductions, sorts, `einsum`, elementwise math and the
+traversals) reaches this backend as a call to the function `hir-lowering` outlined it into,
+whose body `mlir-backend` computes. Their HIR arms here answer `computed_in_mlir`, an internal
+error. What stays is what has no loop: building a handle, reading or writing one element,
+re-describing a handle, cloning, moving between devices, and the grad slots.
 
-`expressions/tensor_arith.rs` owns the binary operators, the broadcast machinery, the `@`
-contraction and the in-place compound assignment: everything that READS buffers that already
-exist, as against `tensors.rs`, which builds and re-describes tensor values. The two share the
-allocation helpers (`tensor_layout`, `alloc_tensor`, `tensor_slot`) and nothing else.
+`expressions/tensor_index.rs` owns the element read `t[i, j]` and the element write. Every stride
+is a compile-time constant, so the index is arithmetic on the flat row-major run behind `data`:
+each position contributes `position * stride[k]`, guarded by `guard_tensor_position` in every
+build as an array index is (`overflow_checks` gates integer overflow only, because wrapping gives
+an overflow a defined result and an index past the storage has none). One `getelementptr` and one
+`load`; with no axes (`.item()` on a rank-0 tensor) the offset is zero. A receiver no binding owns
+is freed afterwards through `release_receiver_temporary`.
 
-`codegen_tensor_compound_assign` there is the one tensor node that allocates
-**nothing**: `HirStmt::TensorCompoundAssign` loads the target's own handle out of its variable
-slot and runs a counted loop writing each updated element back into the buffer that handle
-already addresses, so the handle and its `data` pointer are the same values after the statement
-as before. The right-hand side is evaluated before the target is touched, and an owned operand
-is released through `build_dlpack_release` after the loop (`mark_moved_for_drop` first, so the
-buffer is not freed twice) while a borrowed one is only read. Element arithmetic goes through
-`tensor_element_arith`, which reuses the scalar `codegen_int_arith` / `codegen_int_div_rem`
-guards: an overflowing element panics on the debug tier and a zero divisor panics in every
-build, exactly as the scalar operator does.
+`release_receiver_temporary` frees the buffer of a value built for its one consumer (an operator
+result, a call's return, a tensor constructor, a reduction, a slice) that otherwise has nothing to
+release it. The predicate (`builds_its_own_buffer`) is a whitelist of shapes that provably
+allocate their own buffer, not "anything that is not a place": an `if`, a `match` or a block
+yields whatever its branch yields, which may be a buffer a binding still owns. A shape cast and a
+`.detach()` are on it, since they consume their receiver. An element read uses it, and so does an
+expression statement whose value is a tensor: nothing reads that value, so `&a + &a;` would leak.
 
-`codegen_tensor_binary` (same file) is the by-value operator, dispatched from the `Binary` arm
-of `codegen_expr` on the **result** type rather than the left operand's, since either side may
-be the scalar being broadcast. It allocates, which is the whole difference from the compound
-form: a fresh handle and buffer, both operands read, and each owned operand released afterwards.
-Both nodes share `emit_elementwise_loop`. Each operand resolves to an `ElementSource`: a
-`Scalar` value, or a `Buffer` plus one flat stride per axis of the result, computed by
-`broadcast_strides`. A stretched axis carries stride **0**, which is the whole of broadcasting;
-an operand of the result's own shape is marked `contiguous` and walked slot for slot, so the
-common case pays no coordinate arithmetic. The destination is always contiguous, so the loop
-counter is its slot index, and the result coordinates are decomposed once per iteration and
-shared by both sources.
+`tensors.rs`'s `codegen_tensor_redescribe` lowers the order-keeping casts, `.reshape(...)` and
+`.flatten(...)`: the receiver is consumed (`mark_moved_for_drop`) and its own handle returned
+after `build_dlpack_redescribe` rewrites its `ndim`, `shape` and `strides` to the result type's
+globals. The elements are already in the result's order, so a reshape of any size costs three
+stores, allocates nothing, and does not move `data`.
 
-`@` branches out of `codegen_tensor_binary` into `codegen_tensor_matmul` before any of that: a
-matrix product contracts an axis instead of walking the result element for element, so it is a
-different loop shape rather than a different body. `emit_contraction_loop` walks the destination
-flat, one iteration per output element, recovering the row and column from the counter by
-division and remainder on `N`, and reduces over K in an inner loop. The accumulator is an entry
-`alloca` rather than a `phi`, because `tensor_element_arith` may split the body around an
-overflow guard and a `phi` would then have to chase whichever block came out of it. Both
-operands resolve through `codegen_tensor_operand`, the same handle/buffer/owned triple
-`codegen_operand_source` builds an `ElementSource` from, and an owned one is released by
-`release_consumed_buffer` once the product is built. Overflow and divide-by-zero guards are the
-element's, exactly as for the element-wise family, so an overflowing accumulation panics where
-an overflowing scalar `+` would.
+`expressions/elementwise_math.rs` lowers `HirExprKind::Math` on a scalar: each function is its
+LLVM intrinsic (`llvm.exp`, `llvm.log`, `llvm.sqrt`, `llvm.tanh`, `llvm.fabs`, `llvm.pow`),
+resolved to libm by the `-lm` the driver links; `Sign` is two ordered compares and two selects,
+so NaN passes through. A half-precision value is widened to `f32` around the function and
+narrowed once after it, because the intrinsics' `half` / `bfloat` overloads are not ones every
+target lowers. `mlir-backend` emits the same intrinsics for a tensor.
 
-`codegen_tensor_shape_cast` (same file) lowers `HirExprKind::TensorShapeCast`: `.t()`,
-`.reshape(...)`, `.permute(...)` and `.flatten(...)`. It is not a `BuiltinMethod`: the method
-name alone would not say how the axes move, so lowering resolved that into the node's
-`permutation` and the backend never sees the four spellings. Both halves consume the receiver
-(`mark_moved_for_drop`), leaving exactly one buffer alive. With no permutation the receiver's own
-handle is returned after `build_dlpack_redescribe` rewrites its `ndim`, `shape`, and `strides`
-to the result type's globals: the elements are already in the result's order, so a reshape of any
-size costs three stores, allocates nothing, and does not move `data`. With one, a fresh handle and
-buffer are allocated and `emit_permuted_copy` fills them, then the receiver's handle is released
-through `build_dlpack_release` (the deleter, not a private free). That copy is ONE flat loop over
-the result's linear index rather than a nest of `rank` loops: both stride vectors are compile-time
-constants, so a result index decomposes into coordinates with constant `udiv`/`urem` and
-recomposes into a source offset with constant `mul`, and the IR is the same size at every rank.
-
-`expressions/tensor_reduce.rs` owns `HirExprKind::TensorReduce`: `.sum()`, `.mean()`,
-`.max()` and `.min()`. Reducing along axis `k` splits the flat run into three constant
-factors (`outer` elements above the axis, `mid` along it, `inner` below) so result slot
-`r` gathers `(r / inner) * mid * inner + j * inner + (r % inner)` for `j` in `0..mid`, and a
-whole-tensor reduction is that same walk with `outer` and `inner` both 1. Two counted loops,
-never a nest of `rank` of them, for the reason the permuted copy gives. The accumulator
-starts at the run's FIRST element rather than at an identity, which is what gives `.max()` and
-`.min()` a starting value without a per-dtype sentinel (the checker has already refused an
-empty run). A sum reuses `codegen_int_arith`, so an overflowing reduction panics exactly where
-an overflowing `+` would; `.mean()` divides the float accumulator by the run length. A float
-run longer than `neuro_hir::REDUCE_LANES` folds in the language's lane order instead
-(`fold_lanes`): an array of that many accumulators, each seeded with its lane's first element,
-a row loop whose inner lane loop has no dependence between lanes (so it vectorizes with no
-fast-math flag), the ragged tail, then the lanes folded in order into the accumulator. The array
-is allocated where the reduction starts, between `llvm.stacksave` and `llvm.stackrestore`, so
-only one is ever live however many reductions a function holds. This is the order the GPU
-lowering folds in. Nothing
-is moved here, and a receiver a binding owns is left to that binding's own drop. What IS
-released, once the fold has read everything, is a receiver that no binding owns:
-`release_receiver_temporary` frees the buffer of a receiver built for the call (an operator
-result, a call's return, a tensor constructor, another reduction) which otherwise has nothing
-to release it. The predicate is a whitelist of shapes that provably allocate their own buffer,
-not "anything that is not a place": an `if`, a `match` or a block yields whatever its branch
-yields, which may be a buffer a binding still owns. A slice (a `TensorIndex` of tensor type) is on
-the list, since it copies; so are a shape cast and a `.detach()`, which consume their receiver
-and hand its buffer on with no other owner left. Without them `t[0..2][1]` and `m.t()[0, 1]`
-leaked a buffer per evaluation.
-
-`expressions/tensor_sort.rs` owns `HirExprKind::TensorSort`: `.sort()`, `.argsort()` and
-`.topk()`. It walks the same `outer`/`mid`/`inner` split the reduction does, and builds, per
-run, a permutation of `0..mid` in one stack scratch array; the three methods then differ only
-in what the writer at the end reads out of it: the elements in that order, the permutation
-truncated to `i32`, or the leading `k` of both into a two-tensor tuple. The permutation is
-seeded with the identity and carried by a stable insertion sort, so equal elements never
-cross and an argsort of a tensor with ties is reproducible. The float comparator spells out
-only the two `NaN` tests: an ordered `<` / `>` is already false on a `NaN` operand, so
-"`a` is real AND (`a` beats `b` OR `b` is `NaN`)" is exactly the specification's rule that
-`NaN` sorts to the end whatever the direction. Nothing is moved here and every result is a
-fresh handle, so a receiver a binding owns stays that binding's; a receiver no binding owns is
-released once the selection has copied what it needs, through the same
-`release_receiver_temporary` the reduction uses.
-
-`expressions/tensor_apply.rs` owns `HirExprKind::TensorApply`, the functional traversals
-`.map` / `.zip` / `.reduce`. One counted loop over the flat buffer whatever the receiver's
-rank: the traversals are elementwise, so the element count is a single compile-time product
-and there is no axis arithmetic at all: the simplest of the tensor walks. The function value
-is lowered ONCE, before the loop, and `split_function_value` keeps its `{ fn_ptr, env_ptr }`
-halves so `call_function_value` can dispatch per element without rebuilding them; that split
-is what `codegen_indirect_call` in `closures.rs` now also calls, so an ordinary `f(x)` and a
-traversal's per-element call go through one path. `t.map(make_rule())` must not rebuild its
-rule per element, the same rule an adapter chain in a `for` head follows. `.map` and `.zip`
-write each answer into a freshly allocated buffer at the index they read from, and `.reduce`
-carries its answer in an `alloca` seeded from `init` and loads it out at the end, which is
-also why a fold produces a scalar rather than a handle. Nothing is moved here; the receiver
-and a `.zip`'s operand are each freed through the same `release_receiver_temporary` the
-reduction uses, so a chained `t.map(..).map(..)` releases its intermediate.
-
-`expressions/elementwise_math.rs` owns `HirExprKind::Math`. A scalar is one application; a
-tensor is the `.map` loop with the function inlined, reusing `tensor_apply.rs`'s walk helpers
-(`walk_tensor`, `element_count`, `load_walked`, `buffer_slot`), and releases a temporary
-receiver the same way. Each function is its LLVM intrinsic (`llvm.exp`, `llvm.log`,
-`llvm.sqrt`, `llvm.tanh`, `llvm.fabs`, `llvm.pow`), resolved to libm by the `-lm` the driver
-links; `Sign` is two ordered compares and two selects, so NaN passes through. A half-precision
-element is widened to `f32` around the function and narrowed once after it, because the
-intrinsics' `half` / `bfloat` overloads are not ones every target lowers. `Math` is one of
-`builds_its_own_buffer`'s shapes.
-
-`expressions/tensor_einsum.rs` owns `HirExprKind::TensorEinsum`, the Einstein-notation
-contraction. The notation is gone by this point: HIR supplies one extent per subscript letter
-and, per operand, which letter each of its axes carries, which reduces the whole construct to
-flat index arithmetic over row-major buffers with every factor a compile-time constant. Two
-counted loops for the reason the reduction gives (the outer walks the result's elements, the
-inner the contracted letters' product) so the IR is the same size whatever the ranks are. A
-letter's index is recovered from a counter by dividing out the letters below it and taking the
-remainder (`decode_counter`), and an operand's offset is that index times a per-letter
-COEFFICIENT: the row-major strides of every axis the letter sits on, ADDED together
-(`coefficients`). Summing them is what makes a letter repeated within one operand walk its
-diagonal, which is the whole of `"ii->"`. The accumulator starts at the additive identity
-rather than at a first element, unlike the reduction's: the loop sums products, so there is no
-element to seed it with and an empty contraction is genuinely zero. Both the product and the
-accumulation reuse `codegen_int_arith`, so an overflowing contraction panics exactly where an
-overflowing `*` or `+` would, which is also why the inner counter is reloaded before its
-increment: a checked operation may have split the body around its guard. Nothing is moved
-here; each operand that no binding owns is freed through the same
-`release_receiver_temporary` the reduction uses, once every read is behind the loops.
-
-`expressions/tensor_index.rs` owns `HirExprKind::TensorIndex`. Every stride is a compile-time
-constant (every extent is part of the type), so the index is arithmetic on the flat row-major
-run behind `data`: each `Position` axis contributes `position * stride[k]` and each `Range` axis
-contributes `start * stride[k]`. Reading an element is that offset, one `getelementptr`, and one
-`load`; with no axes (`.item()` on a rank-0 tensor) the offset is zero. Either way the
-receiver is then freed through `release_receiver_temporary` when no binding owns it, since
-neither an element nor a slice copy keeps its buffer alive. A slice ALLOCATES a fresh handle through `alloc_dlpack_tensor` and copies into it: a
-tensor owns its buffer and releases it through its own deleter, so a view sharing one would be a
-double free, and a copy is also what keeps the DLPack contract's contiguous `strides` and
-zero `byte_offset` true of every value. The copy loop walks the RESULT, whose linear index is its own buffer index,
-and recovers each source coordinate as `(i / result_stride) % extent`; both divisors are
-constants. A run-time position is guarded by `guard_tensor_position` in every build, as an array
-index is: `overflow_checks` gates integer overflow only, because wrapping gives an overflow a defined
-result and an index past the storage has none. A slice's bounds were settled at compile time, so
-nothing about them is checked here.
+`codegen_reference` lends a tensor that is no binding (a field, an element, a referent) through a
+fresh cell holding its handle: a `&Tensor` is the address of a cell holding the handle, and
+whoever borrows it reads and writes the buffer the place owns, never the cell. That is how an
+outlined operation borrows `layer.w`.
 
 ## DLPack Representation
 A tensor value *is* the exchange structure DLPack 1.1 defines, so the pointer a Neuro

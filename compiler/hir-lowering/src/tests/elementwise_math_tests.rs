@@ -1,12 +1,12 @@
-use super::{binding_init, function_body, lower};
+use super::{function_body, lower, operation, outlined_operation};
 use crate::{LoweringError, lower_program};
 
-use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirItem, HirMathOp, HirStmt, HirType};
+use neuro_hir::{AxisNames, HirExprKind, HirMathOp, HirProgram, HirStmt, HirType};
 
 /// The node one math call lowers to: its function, its exponent's type, and its own type.
 fn math_of(src: &str, binding: &str) -> (HirMathOp, Option<HirType>, HirType) {
     let program = lower(src);
-    let init = binding_init(function_body(&program, "main"), binding);
+    let init = operation(&program, binding);
     let HirExprKind::Math { op, exponent, .. } = &init.kind else {
         panic!("'{binding}' should lower to math, got {:?}", init.kind);
     };
@@ -49,38 +49,27 @@ func main() -> i32 {
     );
 }
 
-/// The function of each top-level binding of `body` that is math, in order. The
-/// derivative binds every value it computes, so this is every math node it emits.
-fn math_ops(body: &[HirStmt]) -> Vec<HirMathOp> {
-    body.iter()
+/// The function of each top-level binding of the derivative that is math, in order, through
+/// the outlined operation each binding calls. The derivative binds every value it computes,
+/// so this is every math node it emits.
+fn math_ops(program: &HirProgram) -> Vec<HirMathOp> {
+    function_body(program, "__loss__rev")
+        .iter()
         .filter_map(|stmt| match stmt {
             HirStmt::VarDecl {
-                init:
-                    Some(HirExpr {
-                        kind: HirExprKind::Math { op, .. },
-                        ..
-                    }),
-                ..
-            } => Some(*op),
+                init: Some(init), ..
+            } => match &outlined_operation(program, init).kind {
+                HirExprKind::Math { op, .. } => Some(*op),
+                _ => None,
+            },
             _ => None,
         })
         .collect()
 }
 
-fn reverse_body(src: &str) -> Vec<HirStmt> {
-    lower(src)
-        .items
-        .into_iter()
-        .find_map(|item| match item {
-            HirItem::Function(f) if f.name == "__loss__rev" => Some(f.body),
-            _ => None,
-        })
-        .expect("the derivative is generated")
-}
-
 #[test]
 fn abs_differentiates_through_sign_and_pow_through_a_lowered_power() {
-    let body = reverse_body(
+    let program = lower(
         r#"
 @grad
 func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
@@ -90,7 +79,7 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
 }
 "#,
     );
-    let ops = math_ops(&body);
+    let ops = math_ops(&program);
     // The forward replay, then the reverse pass's own: one `sign` and one `x^(p - 1)`.
     assert_eq!(
         ops,
@@ -105,7 +94,7 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
 
 #[test]
 fn exp_and_tanh_read_their_own_value_instead_of_recomputing_it() {
-    let body = reverse_body(
+    let program = lower(
         r#"
 @grad
 func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
@@ -115,7 +104,7 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
 }
 "#,
     );
-    assert_eq!(math_ops(&body), [HirMathOp::Exp, HirMathOp::Tanh]);
+    assert_eq!(math_ops(&program), [HirMathOp::Exp, HirMathOp::Tanh]);
 }
 
 #[test]

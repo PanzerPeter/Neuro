@@ -420,6 +420,10 @@ pub(crate) struct CodegenContext<'ctx> {
     pub(crate) body_memory: crate::BodyMemory,
     /// Each checked external body's checks, by symbol. See [`crate::ExternalBodies::guards`].
     pub(crate) external_guards: HashMap<String, Vec<crate::BodyGuard>>,
+    /// The functions a call expands in place, each with the host body it calls: an
+    /// operation outlined to run where its operands live, in a program with no device body
+    /// for it, so it always runs on the host.
+    pub(crate) expanded_calls: HashMap<String, (neuro_hir::HirFunction, String)>,
 
     /// Whose runtime a device body or tensor links, and what DLPack calls its memory.
     pub(crate) gpu_vendor: crate::GpuVendor,
@@ -472,6 +476,7 @@ impl<'ctx> CodegenContext<'ctx> {
             pool_locals: Vec::new(),
             body_memory: crate::BodyMemory::Host,
             external_guards: HashMap::new(),
+            expanded_calls: HashMap::new(),
             gpu_vendor: crate::GpuVendor::Nvidia,
         }
     }

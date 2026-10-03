@@ -1,9 +1,9 @@
-// Device operations: in a program that moves a tensor to a device, each tensor operation a
-// GPU can run is outlined into a function that runs where its operands live.
+// Tensor operations: each is outlined into a function that runs where its operands live,
+// whose body `mlir-backend` computes.
 // This harness runs no prelude and no argument binding, so `Device` is declared here and
 // the reduction axis is written positionally.
 
-use neuro_hir::{HirExprKind, HirFunction, HirItem, HirProgram, HirStmt, HirTarget, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirItem, HirProgram, HirStmt, HirType};
 
 use super::{binding_init, function_body, lower};
 
@@ -33,7 +33,7 @@ fn outlined(program: &HirProgram) -> Vec<&HirFunction> {
         .items
         .iter()
         .filter_map(|item| match item {
-            HirItem::Function(f) if f.target == HirTarget::FollowsOperands => Some(f),
+            HirItem::Function(f) if f.target.outlined() => Some(f),
             _ => None,
         })
         .collect()
@@ -108,37 +108,41 @@ fn integer_tensors_are_outlined_like_float_ones() {
 }
 
 #[test]
-fn a_program_that_moves_no_tensor_is_left_alone() {
+fn a_program_that_moves_no_tensor_is_outlined_alike() {
+    let moving = lower(PROGRAM);
     let program = lower(&PROGRAM.replace(".to(Device::GPU(0))", ""));
-    assert!(outlined(&program).is_empty());
-    let fused = binding_init(function_body(&program, "main"), "fused");
-    assert!(matches!(fused.kind, HirExprKind::Binary { .. }));
+    assert_eq!(outlined(&program).len(), outlined(&moving).len());
+    assert_eq!(callee(&program, "fused").params.len(), 3);
 }
 
 #[test]
-fn a_reduction_over_a_field_stays_inline() {
-    // A backend borrows only a binding, and moving the field out would free it twice.
+fn a_reduction_over_a_field_lends_the_field() {
     let program = lower(
         r#"
-enum Device {
-    CPU,
-    GPU(i32)
-}
-
 struct Layer {
     w: Tensor<f32, [2, 3]>
 }
 
 func main() -> i32 {
-    val layer = Layer { w: Tensor::<f32, [2, 3]>::ones().to(Device::GPU(0)) }
+    val layer = Layer { w: Tensor::<f32, [2, 3]>::ones() }
     val total = layer.w.sum()
     return 0
 }
 "#,
     );
-    let total = binding_init(function_body(&program, "main"), "total");
-    assert!(matches!(total.kind, HirExprKind::TensorReduce { .. }));
-    assert!(outlined(&program).is_empty());
+    let total = callee(&program, "total");
+    assert_eq!(total.params[0].ty.to_string(), "&Tensor<f32, [2, 3]>");
+    let init = binding_init(function_body(&program, "main"), "total");
+    let HirExprKind::TensorIndex { object, .. } = &init.kind else {
+        panic!("a whole reduction is read back: {:?}", init.kind);
+    };
+    let HirExprKind::Call { args, .. } = &object.kind else {
+        panic!("the reduction is a call");
+    };
+    let HirExprKind::Reference { operand, .. } = &args[0].kind else {
+        panic!("the field is lent: {:?}", args[0].kind);
+    };
+    assert!(matches!(operand.kind, HirExprKind::FieldAccess { .. }));
 }
 
 #[test]
@@ -272,7 +276,8 @@ fn a_traversal_keeps_its_closure_and_takes_its_captures() {
     let program = lower(MORE);
     let mapped = callee(&program, "mapped");
     let names: Vec<&str> = mapped.params.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, ["__operand0", "scale"]);
+    assert_eq!(names, ["__operand0", "scale", "__callee"]);
+    assert_eq!(mapped.params[2].ty.to_string(), "fn(f32) -> f32");
     let [HirStmt::Expr(body)] = mapped.body.as_slice() else {
         panic!("one tail expression");
     };
@@ -286,27 +291,64 @@ fn a_traversal_keeps_its_closure_and_takes_its_captures() {
 }
 
 #[test]
-fn a_traversal_over_a_function_local_stays_inline() {
-    // Through a local the closure is a value only the run time knows.
+fn a_traversal_over_a_function_local_calls_it_through_its_value() {
     let program = lower(&MORE.replace(
         "val named = g.map(twice)",
         "val f = |x: f32| -> f32 { x }\n    val named = g.map(f)",
     ));
-    assert_eq!(callee_name(&program, "named"), "inline");
+    let named = callee(&program, "named");
+    let names: Vec<&str> = named.params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["__operand0", "__callee"]);
+    let [HirStmt::Expr(body)] = named.body.as_slice() else {
+        panic!("one tail expression");
+    };
+    let HirExprKind::TensorApply { callee, .. } = &body.kind else {
+        panic!("the traversal itself: {:?}", body.kind);
+    };
+    assert!(matches!(&callee.kind, HirExprKind::Variable(name) if name == "__callee"));
+}
+
+#[test]
+fn a_fold_into_a_non_scalar_accumulator_is_a_loop() {
+    let program = lower(
+        r#"
+func main() -> i32 {
+    val t: Tensor<f32, [2, 3]> = Tensor::ones()
+    val pair = t.reduce((0, 0.0f32), |acc: (i32, f32), x: f32| -> (i32, f32) { (acc.0 + 1, acc.1 + x) })
+    return 0
+}
+"#,
+    );
+    assert!(outlined(&program).is_empty());
+    let pair = binding_init(function_body(&program, "main"), "pair");
+    let HirExprKind::Block { stmts } = &pair.kind else {
+        panic!("the fold is a block: {:?}", pair.kind);
+    };
+    assert!(matches!(
+        stmts.as_slice(),
+        [
+            HirStmt::VarDecl { .. },
+            HirStmt::VarDecl { mutable: true, .. },
+            HirStmt::VarDecl { .. },
+            HirStmt::ForRange { .. },
+            HirStmt::Expr(_)
+        ]
+    ));
 }
 
 #[test]
 fn a_compound_assignment_writes_through_a_mutable_borrow() {
     let program = lower(MORE);
     let main = function_body(&program, "main");
-    let calls: Vec<&HirFunction> = main
+    let calls: Vec<(&HirFunction, &HirExpr)> = main
         .iter()
         .filter_map(|stmt| match stmt {
             HirStmt::Expr(expr) => match &expr.kind {
-                HirExprKind::Call { callee, .. } => match &callee.kind {
-                    HirExprKind::Variable(name) => {
-                        outlined(&program).into_iter().find(|f| &f.name == name)
-                    }
+                HirExprKind::Call { callee, args } => match &callee.kind {
+                    HirExprKind::Variable(name) => outlined(&program)
+                        .into_iter()
+                        .find(|f| &f.name == name)
+                        .map(|f| (f, &args[1])),
                     _ => None,
                 },
                 _ => None,
@@ -314,19 +356,22 @@ fn a_compound_assignment_writes_through_a_mutable_borrow() {
             _ => None,
         })
         .collect();
-    let [update] = calls.as_slice() else {
-        panic!("only `w -= &g` is outlined, not the field: {calls:?}");
+    let [(update, _), (field, target)] = calls.as_slice() else {
+        panic!("`w -= &g` and `layer.w -= &g` are both outlined: {calls:?}");
     };
-    let types: Vec<String> = update.params.iter().map(|p| p.ty.to_string()).collect();
-    assert_eq!(types, ["&Tensor<f32, [2, 3]>", "&mut Tensor<f32, [2, 3]>"]);
-    assert_eq!(update.return_type, HirType::Void);
-    assert!(main.iter().any(|stmt| matches!(
-        stmt,
-        HirStmt::TensorCompoundAssign {
-            place: neuro_hir::HirPlace::Field { .. },
-            ..
-        }
-    )));
+    for function in [update, field] {
+        let types: Vec<String> = function.params.iter().map(|p| p.ty.to_string()).collect();
+        assert_eq!(types, ["&Tensor<f32, [2, 3]>", "&mut Tensor<f32, [2, 3]>"]);
+        assert_eq!(function.return_type, HirType::Void);
+    }
+    let HirExprKind::Reference {
+        operand,
+        mutable: true,
+    } = &target.kind
+    else {
+        panic!("the field is borrowed mutably: {:?}", target.kind);
+    };
+    assert!(matches!(operand.kind, HirExprKind::FieldAccess { .. }));
 }
 
 /// "outlined" when `binding` is initialized by a call to an outlined function, whether its

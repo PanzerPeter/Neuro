@@ -63,10 +63,10 @@ Native Executable (`.exe` on Windows, no extension on Unix)
 ```
 
 The typed HIR (`neuro-hir`) is the stable, backend-agnostic contract between the frontend (parser +
-type checker) and the backends. `llvm-backend` consumes it, and so does the experimental `mlir-backend`.
-`neurc` asks the latter for the straight-line float and integer tensor bodies it computes exactly as
-the LLVM backend would, integer checks included, and the LLVM backend links those in, wrapped in the program's own tensor ABI,
-instead of generating them. On Linux it also lowers each `@gpu` function's body, and each
+type checker) and the backends. `llvm-backend` consumes it, and so does `mlir-backend`. HIR
+lowering outlines every tensor operation into a function of its own, and `neurc` asks
+`mlir-backend` for each one's body, integer checks included. The LLVM backend, which has no tensor
+loops of its own, links those in and calls them through the program's own tensor ABI. On Linux it also lowers each `@gpu` function's body, and each
 `@kernel` function's per-thread body, through the MLIR GPU dialects to an NVIDIA or AMD kernel,
 and the LLVM backend links that kernel in with its launcher and the GPU runtime. See the [HIR Lowering](components/hir-lowering.md),
 [LLVM Backend](components/llvm-backend.md) and [MLIR Backend](components/mlir-backend.md) component
@@ -196,7 +196,7 @@ incremental compilation with a persistent cache, and LTO defaults for release bu
 
 LLVM 23 with `LLVM_SYS_231_PREFIX` set is required to build the compiler. See the
 [Installation Guide](../getting-started/installation.md) for per-platform instructions (Linux,
-macOS, Windows) and the optional MLIR backend setup. Common build problems are covered in
+macOS, Windows), MLIR included, since every build needs it. Common build problems are covered in
 [Troubleshooting](../guides/troubleshooting.md).
 
 ## References

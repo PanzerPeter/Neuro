@@ -675,6 +675,24 @@ fn tensor_bodies(
     let host = mlir_backend::lower_for_link(hir, overflow)
         .map_err(|e| anyhow::anyhow!("MLIR lowering error: {}", e))
         .context("Failed to lower tensor bodies through MLIR")?;
+    // Every tensor operation is outlined for MLIR to compute, and the LLVM backend has no
+    // loop of its own to fall back on, so one MLIR did not lower is a compiler bug.
+    for item in &hir.items {
+        if let neuro_hir::HirItem::Function(f) = item
+            && f.target.outlined()
+            && !host
+                .functions
+                .iter()
+                .any(|(function, _)| *function == f.name)
+        {
+            let message = format!(
+                "internal error: no MLIR body computes the tensor operation `{}`",
+                f.name
+            );
+            eprintln!("{}\n", render_diagnostic(path, source, &message, f.span));
+            anyhow::bail!("a tensor operation has no MLIR lowering");
+        }
+    }
     let mut bodies = vec![llvm_backend::ExternalBodies {
         llvm_ir: host.llvm_ir,
         functions: host.functions,

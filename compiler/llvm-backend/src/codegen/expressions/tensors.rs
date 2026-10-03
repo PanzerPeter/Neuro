@@ -25,7 +25,6 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::HirExpr;
 
-use super::row_major_strides;
 use crate::codegen::context::CodegenContext;
 use crate::codegen::dlpack::TensorHome;
 use crate::errors::{CodegenError, CodegenResult};
@@ -351,19 +350,13 @@ impl<'ctx> CodegenContext<'ctx> {
         cloned.ok_or_else(|| CodegenError::InternalError("a clone produced no tensor".into()))
     }
 
-    /// Lower `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`.
-    ///
-    /// Both halves consume the receiver, so exactly one buffer is alive afterwards.
-    /// An order-preserving cast (`permutation` is `None`) hands the receiver's own handle
-    /// back with its rank, extents, and strides rewritten: the elements are already where
-    /// the result wants them, so there is nothing to copy and the DLPack `data` pointer
-    /// does not move. A permuting cast has to build the result's buffer, because the
-    /// element order genuinely differs, and then releases the receiver's handle — the
-    /// deleter, not a private free, so a `pool`-allocated tensor stays correct.
-    pub(crate) fn codegen_tensor_shape_cast(
+    /// Lower `.reshape(...)` / `.flatten(...)`, which keep the element order: the
+    /// receiver's own handle comes back with its rank, extents, and strides rewritten. The
+    /// elements are already where the result wants them, so nothing is copied and the
+    /// DLPack `data` pointer does not move. A permuting cast is computed in MLIR.
+    pub(crate) fn codegen_tensor_redescribe(
         &mut self,
         receiver: &HirExpr,
-        permutation: Option<&[usize]>,
         result_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let BasicValueEnum::PointerValue(source) = self.codegen_expr(receiver)? else {
@@ -372,155 +365,11 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
         self.mark_moved_for_drop(receiver);
-
-        let Some(permutation) = permutation else {
-            self.build_dlpack_redescribe(source, result_ty)?;
-            // The derivatives belonged to the consumed receiver and are shaped like it, so
-            // the result starts without them, exactly as the permuting path's fresh handle
-            // does.
-            self.release_derivatives(source)?;
-            return Ok(source.into());
-        };
-
-        let source_ty = Type::from_hir(receiver.ty.referent());
-        let Type::Tensor {
-            shape: src_shape, ..
-        } = &source_ty
-        else {
-            return Err(CodegenError::InternalError(
-                "a shape cast's receiver does not carry a tensor type".to_string(),
-            ));
-        };
-        let src_shape = crate::types::static_extents(src_shape)?;
-        let (_, count) = self.tensor_layout(result_ty)?;
-        let Type::Tensor {
-            shape: dst_shape, ..
-        } = result_ty
-        else {
-            return Err(CodegenError::InternalError(
-                "a shape cast does not produce a tensor type".to_string(),
-            ));
-        };
-        let dst_shape = crate::types::static_extents(dst_shape)?;
-        if permutation.len() != dst_shape.len() || permutation.len() != src_shape.len() {
-            return Err(CodegenError::InternalError(
-                "a shape cast's permutation does not match its ranks".to_string(),
-            ));
-        }
-
-        let buffer_ty = self.type_mapper.tensor_buffer_type(result_ty)?;
-        let source_data = self.load_host_data(source, receiver.span.start)?;
-        let (handle, data) = self.alloc_tensor(result_ty, "tensor.permute")?;
-        self.emit_permuted_copy(
-            buffer_ty,
-            source_data,
-            data,
-            count,
-            &src_shape,
-            &dst_shape,
-            permutation,
-        )?;
-        self.build_dlpack_release(source)?;
-        Ok(handle.into())
-    }
-
-    /// Copy `count` elements from `source` into `destination`, reading each result slot
-    /// from the receiver slot the permutation points it at.
-    ///
-    /// One flat loop over the result's linear index rather than a nest of `rank` loops:
-    /// the extents and both stride vectors are compile-time constants, so a result index
-    /// decomposes into coordinates with constant divisions and recomposes into a source
-    /// offset with constant multiplies. The IR is then the same size whatever the rank is.
-    #[expect(clippy::too_many_arguments)]
-    fn emit_permuted_copy(
-        &mut self,
-        buffer_ty: BasicTypeEnum<'ctx>,
-        source: PointerValue<'ctx>,
-        destination: PointerValue<'ctx>,
-        count: usize,
-        src_shape: &[usize],
-        dst_shape: &[usize],
-        permutation: &[usize],
-    ) -> CodegenResult<()> {
-        let src_strides = row_major_strides(src_shape);
-        let dst_strides = row_major_strides(dst_shape);
-        let i64_type = self.context.i64_type();
-        let BasicTypeEnum::ArrayType(buffer_array) = buffer_ty else {
-            return Err(CodegenError::InternalError(
-                "a tensor buffer is not an array type".to_string(),
-            ));
-        };
-        let element_ty = buffer_array.get_element_type();
-
-        let function = self.current_function.ok_or_else(|| {
-            CodegenError::InternalError("a shape cast outside a function".to_string())
-        })?;
-        let index = self.entry_alloca(i64_type, "tensor.permute.i")?;
-        self.builder.build_store(index, i64_type.const_zero())?;
-        let head = self
-            .context
-            .append_basic_block(function, "tensor.permute.head");
-        let body = self
-            .context
-            .append_basic_block(function, "tensor.permute.body");
-        let done = self
-            .context
-            .append_basic_block(function, "tensor.permute.done");
-
-        self.builder.build_unconditional_branch(head)?;
-        self.builder.position_at_end(head);
-        let i = self
-            .builder
-            .build_load(i64_type, index, "tensor.permute.idx")?
-            .into_int_value();
-        let more = self.builder.build_int_compare(
-            IntPredicate::ULT,
-            i,
-            i64_type.const_int(count as u64, false),
-            "tensor.permute.more",
-        )?;
-        self.builder.build_conditional_branch(more, body, done)?;
-
-        self.builder.position_at_end(body);
-        let mut offset = i64_type.const_zero();
-        for axis in 0..dst_shape.len() {
-            let coord = self.builder.build_int_unsigned_div(
-                i,
-                i64_type.const_int(dst_strides[axis] as u64, false),
-                "tensor.permute.div",
-            )?;
-            let coord = self.builder.build_int_unsigned_rem(
-                coord,
-                i64_type.const_int(dst_shape[axis] as u64, false),
-                "tensor.permute.coord",
-            )?;
-            let scaled = self.builder.build_int_mul(
-                coord,
-                i64_type.const_int(src_strides[permutation[axis]] as u64, false),
-                "tensor.permute.scaled",
-            )?;
-            offset = self
-                .builder
-                .build_int_add(offset, scaled, "tensor.permute.offset")?;
-        }
-
-        // Both indices are below `count` on this edge: `i` by the loop head's test, and
-        // `offset` because a permutation is a bijection over the same element run.
-        let from = self.tensor_slot(buffer_ty, source, offset)?;
-        let value = self
-            .builder
-            .build_load(element_ty, from, "tensor.permute.value")?;
-        let into = self.tensor_slot(buffer_ty, destination, i)?;
-        self.builder.build_store(into, value)?;
-
-        let next =
-            self.builder
-                .build_int_add(i, i64_type.const_int(1, false), "tensor.permute.next")?;
-        self.builder.build_store(index, next)?;
-        self.builder.build_unconditional_branch(head)?;
-
-        self.builder.position_at_end(done);
-        Ok(())
+        self.build_dlpack_redescribe(source, result_ty)?;
+        // The derivatives belonged to the consumed receiver and are shaped like it, so the
+        // result starts without them.
+        self.release_derivatives(source)?;
+        Ok(source.into())
     }
 
     /// Lower `tensor.to(device)`: the consuming device transfer.

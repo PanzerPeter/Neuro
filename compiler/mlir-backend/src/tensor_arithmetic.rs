@@ -1,7 +1,9 @@
 use crate::{
     errors::MlirError,
-    guards::{At, Element, Guard, Lowering, MAX_SITES, Overflow},
+    guards::{At, Element, Guard, Lowering, MAX_SITES, Overflow, Side},
     lower::map_type,
+    tensor_apply::build_traversal,
+    tensor_compound::build_compound,
     tensor_einsum::build_einsum,
     tensor_layout::{build_permute, build_slice, linalg_index},
     tensor_math::build_math,
@@ -20,7 +22,7 @@ use melior::{
         operation::OperationBuilder,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirSortKind, HirStmt, HirTarget, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirSortKind, HirStmt, HirType};
 
 /// How many region arguments `linalg.generic` passes an element-wise binary body:
 /// one per operand, the destination's included.
@@ -66,8 +68,19 @@ pub(crate) fn build_body<'c>(
     context: &'c Context,
     location: Location<'c>,
     function: &HirFunction,
-    overflow: Overflow,
+    (overflow, side): (Overflow, Side),
 ) -> Result<Option<(Region<'c>, Vec<Guard>)>, MlirError> {
+    // A compound assignment writes a buffer in place and a traversal calls back into the
+    // LLVM backend's code, neither of which a GPU body can do: a device runs both as
+    // per-thread launchers of its own.
+    if side == Side::Host {
+        if let Some(built) = build_compound(context, location, function, overflow)? {
+            return Ok(Some(built));
+        }
+        if let Some(built) = build_traversal(context, location, function)? {
+            return Ok(Some(built));
+        }
+    }
     // Cheap filter first: a function that does not hand a tensor back (or `.topk`'s
     // pair of them) cannot be one of these, and every scalar function hits it.
     if !matches!(
@@ -124,17 +137,13 @@ pub(crate) fn tensor_parts(ty: &HirType) -> Option<(&HirType, &[Option<usize>])>
     }
 }
 
-/// The type a body reads through `ty`: the tensor itself for `&Tensor`, `ty` otherwise.
-///
-/// A `&mut` borrow is left alone. It is the one parameter a body could write
-/// through, and no `linalg` body here writes an operand, so it has no business
-/// reaching one as a plain tensor.
+/// The type a body reads through `ty`: the tensor itself for a borrowed tensor, `ty`
+/// otherwise. An operand behind `&mut` (`w * w` with `w: &mut Tensor`) is only read; the one
+/// body that writes through a `&mut` is a compound assignment's, which reads its target's
+/// type for itself.
 pub(crate) fn read_type(ty: &HirType) -> &HirType {
     match ty {
-        HirType::Reference {
-            inner,
-            mutable: false,
-        } if matches!(**inner, HirType::Tensor { .. }) => inner,
+        HirType::Reference { inner, .. } if matches!(**inner, HirType::Tensor { .. }) => inner,
         _ => ty,
     }
 }
@@ -181,9 +190,7 @@ fn build_statements<'c, 'a>(
         HirExprKind::TensorSort {
             kind: HirSortKind::TopK(_),
             ..
-        } if device(lowering.target) => {
-            build_sort(context, location, block, value, scope, lowering)?
-        }
+        } => build_sort(context, location, block, value, scope, lowering)?,
         _ => build_expression(context, location, block, value, scope, lowering)?
             .map(|result| vec![result]),
     };
@@ -201,12 +208,6 @@ fn build_statements<'c, 'a>(
     block.append_operation(func::r#return(&results, location));
 
     Ok(true)
-}
-
-/// Whether a body for `target` runs on a GPU, which is what admits the reductions, the sorts
-/// and every other operation beyond element-wise arithmetic and `@`.
-pub(crate) fn device(target: HirTarget) -> bool {
-    target != HirTarget::Host
 }
 
 /// Lower one expression, yielding the SSA value it produces. A body for a GPU `target`
@@ -229,20 +230,9 @@ pub(crate) fn build_expression<'c, 'a>(
             .map(|(_, value)| *value)),
         // `&a + &b` reads the same elements `a + b` does; tensor values carry no
         // identity for a borrow to preserve.
-        HirExprKind::Reference {
-            operand,
-            mutable: false,
-        } => build_expression(context, location, block, operand, scope, lowering),
-        _ if !device(lowering.target) => match &expression.kind {
-            HirExprKind::Binary {
-                op: BinaryOp::MatMul,
-                ..
-            } => build_matmul(context, location, block, expression, scope, lowering),
-            HirExprKind::Binary { .. } => {
-                build_elementwise(context, location, block, expression, scope, lowering)
-            }
-            _ => Ok(None),
-        },
+        HirExprKind::Reference { operand, .. } => {
+            build_expression(context, location, block, operand, scope, lowering)
+        }
         HirExprKind::TensorReduce { .. } => build_reduce(
             context,
             location,
@@ -539,7 +529,9 @@ fn zero_attribute<'c>(
     element_type: Type<'c>,
 ) -> Option<Attribute<'c>> {
     match element {
-        HirType::F32 | HirType::F64 => Some(FloatAttribute::new(context, element_type, 0.0).into()),
+        HirType::F16 | HirType::BF16 | HirType::F32 | HirType::F64 => {
+            Some(FloatAttribute::new(context, element_type, 0.0).into())
+        }
         HirType::I8
         | HirType::I16
         | HirType::I32
@@ -609,7 +601,7 @@ fn contraction_block<'c>(
 ///
 /// Shapes align at their **trailing** axis, so an operand of lower rank supplies
 /// the innermost axes and is repeated across the leading ones.
-fn broadcast_axes(
+pub(crate) fn broadcast_axes(
     operand: &HirType,
     element: &HirType,
     result: &[Option<usize>],
@@ -751,7 +743,7 @@ fn scalar_body<'c>(
     // A division's two checks report different diagnostics, so which element failed first
     // decides which one the host gives.
     let position = match (op, kind) {
-        (BinaryOp::Divide, Element::Signed(_) | Element::Unsigned(_)) => {
+        (BinaryOp::Divide | BinaryOp::Modulo, Element::Signed(_) | Element::Unsigned(_)) => {
             row_major(context, location, &block, extents)?
         }
         _ => None,
@@ -772,7 +764,7 @@ fn scalar_body<'c>(
 
 /// The row-major position of the element a `linalg.generic` over `extents` is computing,
 /// as an `index`. `None` where an extent is `?`, which no linked body has.
-fn row_major<'c, 'a>(
+pub(crate) fn row_major<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
@@ -815,6 +807,77 @@ fn row_major<'c, 'a>(
     Ok(Some(position))
 }
 
+/// Whether `element` is a half-precision float, which every operation but the element-wise
+/// ones computes in `f32` throughout and rounds back once.
+pub(crate) fn half_precision(element: &HirType) -> bool {
+    matches!(element, HirType::F16 | HirType::BF16)
+}
+
+/// `tensor`, a tensor type, with `element` in place of its own.
+pub(crate) fn with_element(tensor: &HirType, element: &HirType) -> HirType {
+    match read_type(tensor) {
+        HirType::Tensor { shape, names, .. } => HirType::Tensor {
+            element: Box::new(element.clone()),
+            shape: shape.clone(),
+            names: names.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
+/// `source`, a tensor of `from` floats, converted element by element to the float tensor
+/// `target`: widened exactly from a half-precision one, or rounded to one to the nearest.
+pub(crate) fn cast_elements<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    source: Value<'c, 'a>,
+    (from, target): (&HirType, &HirType),
+) -> Result<Value<'c, 'a>, MlirError> {
+    let Some((element, shape)) = tensor_parts(target) else {
+        return Err(MlirError::ModuleVerificationFailed);
+    };
+    let tensor_type = map_type(context, target)?;
+    let to = map_type(context, element)?;
+    let rank = shape.len();
+    let body = Block::new(&[(map_type(context, from)?, location), (to, location)]);
+    let value = body.argument(0)?.into();
+    let converted = body
+        .append_operation(match half_precision(from) {
+            true => arith::extf(value, to, location),
+            false => arith::truncf(value, to, location),
+        })
+        .result(0)?
+        .into();
+    body.append_operation(
+        OperationBuilder::new("linalg.yield", location)
+            .add_operands(&[converted])
+            .build()?,
+    );
+    let region = Region::new();
+    region.append_block(body);
+    let destination = block
+        .append_operation(empty_tensor(location, tensor_type, &[])?)
+        .result(0)?
+        .into();
+    let own: OperandAxes = Some((0..rank).map(Some).collect());
+    Ok(block
+        .append_operation(generic_op(
+            context,
+            location,
+            Generic {
+                inputs: &[source],
+                destination,
+                indexing_maps: indexing_maps(context, rank, &[&own, &own])?,
+                iterators: iterator_types(context, rank, 0)?,
+            },
+            tensor_type,
+            region,
+        )?)
+        .result(0)?
+        .into())
+}
+
 /// The destination `linalg.generic` writes its result into. `sizes` carries one
 /// extent per dynamic axis, in shape order, which is what `tensor.empty` expects.
 pub(crate) fn empty_tensor<'c>(
@@ -841,17 +904,17 @@ fn dim_op<'c>(
         .build()?)
 }
 
-/// How `op` computes one element of `element`, or `None` where this path lowers no such
-/// arithmetic on tensors: `%`, and `f16` / `bf16`, which the HIR contract gives a narrow
-/// scalar role with no arithmetic. `@` is a multiply and an add.
+/// How `op` computes one element of `element`, or `None` where the language gives tensors
+/// no such arithmetic. `@` is a multiply and an add.
 fn arithmetic(op: BinaryOp, element: &HirType) -> Option<Element> {
-    let kind = Element::of(element)?;
+    let kind = Element::computed(element)?;
     matches!(
         op,
         BinaryOp::Add
             | BinaryOp::Subtract
             | BinaryOp::Multiply
             | BinaryOp::Divide
+            | BinaryOp::Modulo
             | BinaryOp::MatMul
     )
     .then_some(kind)

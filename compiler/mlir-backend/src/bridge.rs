@@ -1,12 +1,12 @@
 use crate::{
     context::new_context,
     errors::MlirError,
-    guards::{Guard, Overflow},
+    guards::{Guard, Overflow, Side},
     lower::{build_linkable_module, build_module},
 };
 
 use melior::{Context, ir::Module, pass::PassManager, utility::parse_pass_pipeline};
-use neuro_hir::{HirProgram, HirTarget};
+use neuro_hir::{HirItem, HirProgram, HirTarget, HirType};
 
 /// The route from the dialects this slice builds in down to the `llvm` dialect.
 ///
@@ -73,7 +73,7 @@ const HOST_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm";
 /// a buffer the body allocates for itself calls.
 pub(crate) fn llvm_descent(memref_to_llvm: &str) -> String {
     format!(
-        "convert-scf-to-cf,{memref_to_llvm},convert-func-to-llvm,convert-arith-to-llvm,\
+        "convert-scf-to-cf,{memref_to_llvm},convert-func-to-llvm,convert-math-to-llvm,convert-arith-to-llvm,\
          convert-cf-to-llvm,convert-index-to-llvm"
     )
 }
@@ -143,8 +143,11 @@ pub fn lower_for_link(
 ) -> Result<LinkableBodies, MlirError> {
     let context = new_context();
     let (mut module, (functions, guards)) =
-        build_linkable_module(&context, program, overflow, &|function| {
-            function.target == HirTarget::Host
+        build_linkable_module(&context, program, (overflow, Side::Host), &|function| {
+            matches!(
+                function.target,
+                HirTarget::FollowsOperands | HirTarget::HostOperation | HirTarget::GpuOrHost
+            )
         })?;
     if functions.is_empty() {
         return Ok(LinkableBodies {
@@ -153,12 +156,50 @@ pub fn lower_for_link(
             guards,
         });
     }
+    // A body with a tensor result only reads its operands and writes a buffer its caller
+    // has just allocated, so no two of its buffers alias in a way that matters. Saying so
+    // lets LLVM keep an accumulator in a register once the body is inlined. A compound
+    // assignment's body writes its target in place, and is left as it is.
+    let exclusive: Vec<&str> = functions
+        .iter()
+        .filter(|(function, _)| {
+            program.items.iter().any(|item| {
+                matches!(item, HirItem::Function(f)
+                    if f.name == *function && f.return_type != HirType::Void)
+            })
+        })
+        .map(|(_, symbol)| symbol.as_str())
+        .collect();
+    convert_to_llvm_dialect(&context, &mut module)?;
+    let llvm_ir = translate_finishing(std::slice::from_ref(&module), &|llvm_module| {
+        for symbol in &exclusive {
+            if let Some(function) = llvm_module.get_function(symbol) {
+                mark_noalias(llvm_module.get_context(), function);
+            }
+        }
+    })?;
 
     Ok(LinkableBodies {
-        llvm_ir: translate_module(&context, &mut module)?,
+        llvm_ir,
         functions,
         guards,
     })
+}
+
+/// Mark every pointer parameter of `function` `noalias`.
+fn mark_noalias(
+    context: inkwell::context::ContextRef<'_>,
+    function: inkwell::values::FunctionValue<'_>,
+) {
+    let kind = inkwell::attributes::Attribute::get_named_enum_kind_id("noalias");
+    for (index, param) in function.get_param_iter().enumerate() {
+        if param.is_pointer_value() {
+            function.add_attribute(
+                inkwell::attributes::AttributeLoc::Param(index as u32),
+                context.create_enum_attribute(kind, 0),
+            );
+        }
+    }
 }
 
 /// Run the `llvm`-dialect conversion and the LLVM-IR translation over a built module.
@@ -179,6 +220,15 @@ pub(crate) fn translate_llvm_dialect(module: &Module<'_>) -> Result<String, Mlir
 /// [`translate_llvm_dialect`] over several modules, linked into one LLVM module. Modules
 /// that went through different pass pipelines meet here rather than as MLIR.
 pub(crate) fn translate_llvm_dialects(modules: &[Module<'_>]) -> Result<String, MlirError> {
+    translate_finishing(modules, &|_| {})
+}
+
+/// [`translate_llvm_dialects`], with `finish` given the linked LLVM module before it is
+/// verified and printed.
+fn translate_finishing(
+    modules: &[Module<'_>],
+    finish: &dyn Fn(&inkwell::module::Module<'_>),
+) -> Result<String, MlirError> {
     let llvm_context = inkwell::context::Context::create();
     let mut linked: Option<inkwell::module::Module<'_>> = None;
     for module in modules {
@@ -191,6 +241,7 @@ pub(crate) fn translate_llvm_dialects(modules: &[Module<'_>]) -> Result<String, 
         }
     }
     let llvm_module = linked.ok_or(MlirError::TranslationFailed)?;
+    finish(&llvm_module);
 
     llvm_module
         .verify()
@@ -269,7 +320,7 @@ pub(crate) mod tests {
                 ],
                 return_type: HirType::I32,
                 body: Vec::new(),
-                target: neuro_hir::HirTarget::Host,
+                target: neuro_hir::HirTarget::FollowsOperands,
                 span: Span::new(0, 0),
             })],
         }
@@ -348,7 +399,7 @@ pub(crate) mod tests {
                     )),
                     span: Span::new(0, 0),
                 }],
-                target: neuro_hir::HirTarget::Host,
+                target: neuro_hir::HirTarget::FollowsOperands,
                 span: Span::new(0, 0),
             })],
         }

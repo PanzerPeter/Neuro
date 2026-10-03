@@ -132,6 +132,9 @@ pub enum HirTarget {
     /// tensor to a device. A backend that cannot lower the body to a kernel keeps only the
     /// host body, which refuses a device operand at run time.
     FollowsOperands,
+    /// On the host, always: a tensor operation outlined in a program that moves no tensor
+    /// to a device, so no operand can live anywhere else. Never written by the user.
+    HostOperation,
 }
 
 impl HirTarget {
@@ -143,6 +146,12 @@ impl HirTarget {
     /// Whether the function runs on a GPU or not at all: a program with one needs a GPU.
     pub fn requires_gpu(self) -> bool {
         matches!(self, Self::Gpu | Self::Kernel { .. })
+    }
+
+    /// Whether lowering outlined the function out of a tensor operation, whose body every
+    /// backend computes the same way wherever it runs.
+    pub fn outlined(self) -> bool {
+        matches!(self, Self::FollowsOperands | Self::HostOperation)
     }
 }
 

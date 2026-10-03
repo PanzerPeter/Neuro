@@ -701,8 +701,7 @@ func main() -> i32 {
 }
 
 /// What has no device form refuses a device tensor at the operation: a traversal whose
-/// function shifts an integer (no device form) or is reached through a local, and a compound
-/// assignment to a field, which a backend cannot borrow mutably.
+/// function shifts an integer (no device form) or is reached through a local.
 #[cfg(unix)]
 #[test]
 fn what_has_no_device_form_refuses_a_device_tensor() {
@@ -712,7 +711,6 @@ fn what_has_no_device_form_refuses_a_device_tensor() {
             13,
         ),
         ("val r = g.map(f)", 13),
-        ("layer.w -= &g", 16),
     ] {
         let source = format!(
             "struct Layer {{\n    w: Tensor<f32, [2, 3]>\n}}\n\nfunc main() -> i32 {{\n    val f = |v: f32| v\n    val g = Tensor::<f32, [2, 3]>::ones().to(Device::GPU(0))\n    mut layer = Layer {{ w: Tensor::<f32, [2, 3]>::ones().to(Device::GPU(0)) }}\n    {operation}\n    return 0\n}}\n"
@@ -728,6 +726,35 @@ fn what_has_no_device_form_refuses_a_device_tensor() {
             "`{operation}`: {stderr}"
         );
     }
+}
+
+/// A tensor inside a struct is reached through its field and updated, reduced and mapped on
+/// the device it lives on.
+#[cfg(unix)]
+#[test]
+fn a_field_is_computed_on_its_device() {
+    const SOURCE: &str = r#"
+struct Layer {
+    w: Tensor<f32, [2, 3]>
+}
+
+func main() -> i32 {
+    val g = Tensor::<f32, [2, 3]>::ones().to(Device::GPU(0))
+    mut layer = Layer { w: Tensor::<f32, [2, 3]>::ones().to(Device::GPU(0)) }
+    layer.w -= &g
+    layer.w += 2.5f32
+    val total = layer.w.sum()
+    val doubled = layer.w.map(|x: f32| -> f32 { x * 2.0f32 }).to(Device::CPU)
+    println("{total} {doubled[1, 2]}")
+    return 0
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "field.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_ran(&output, 0, "15.0 5.0\n");
 }
 
 /// A program that transfers but slices, permutes, contracts, maps, folds and updates host

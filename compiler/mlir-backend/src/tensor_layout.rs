@@ -28,7 +28,7 @@ use melior::{
         operation::OperationBuilder, r#type::IntegerType,
     },
 };
-use neuro_hir::{HirExpr, HirExprKind, HirTarget, HirTensorAxis, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirTensorAxis, HirType};
 use shared_types::Literal;
 
 /// The width of the integer attribute `linalg.index` names its dimension with.
@@ -189,7 +189,7 @@ fn position_index<'c, 'a>(
                 ),
             )?))
         }
-        HirExprKind::Variable(_) if lowering.target == HirTarget::FollowsOperands => {
+        HirExprKind::Variable(_) if lowering.target.outlined() => {
             let Some(value) =
                 build_expression(context, location, block, position, scope, lowering)?
             else {

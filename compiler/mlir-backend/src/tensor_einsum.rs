@@ -58,7 +58,7 @@ pub(crate) fn build_einsum<'c, 'a>(
         return Ok(None);
     };
     let boxed = output.is_empty();
-    let Some(kind) = Element::of(element) else {
+    let Some(kind) = Element::computed(element) else {
         return Ok(None);
     };
     if operands.is_empty()
@@ -118,7 +118,7 @@ pub(crate) fn build_einsum<'c, 'a>(
     let tensor_type = map_type(context, result)?;
     let element_type = map_type(context, element)?;
     let zero = match kind {
-        Element::Float => FloatAttribute::new(context, element_type, 0.0).into(),
+        Element::Float | Element::Half => FloatAttribute::new(context, element_type, 0.0).into(),
         _ => IntegerAttribute::new(element_type, 0).into(),
     };
     let zero = append(block, arith::constant(context, zero, location))?;
@@ -202,11 +202,13 @@ mod tests {
 
     fn device_module(program: &HirProgram) -> String {
         let context = new_context();
-        let (module, _) =
-            build_linkable_module(&context, program, crate::Overflow::Checked, &|function| {
-                function.target == HirTarget::FollowsOperands
-            })
-            .expect("the bodies build");
+        let (module, _) = build_linkable_module(
+            &context,
+            program,
+            (crate::Overflow::Checked, crate::guards::Side::Device),
+            &|function| function.target == HirTarget::FollowsOperands,
+        )
+        .expect("the bodies build");
         module.as_operation().to_string()
     }
 

@@ -13,8 +13,8 @@ use crate::{
     guards::Lowering,
     lower::map_type,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, empty_tensor, indexing_maps, iterator_types,
-        tensor_parts,
+        Generic, OperandAxes, build_expression, cast_elements, empty_tensor, half_precision,
+        indexing_maps, iterator_types, tensor_parts, with_element,
     },
     tensor_reduce::{append, apply, yield_value},
 };
@@ -50,14 +50,32 @@ pub(crate) fn build_math<'c, 'a>(
     let Some((element, shape)) = tensor_parts(&math.ty) else {
         return Ok(None);
     };
-    if !matches!(element, HirType::F32 | HirType::F64)
-        || shape.iter().any(Option::is_none)
+    if !matches!(
+        element,
+        HirType::F16 | HirType::BF16 | HirType::F32 | HirType::F64
+    ) || shape.iter().any(Option::is_none)
         || (*op == HirMathOp::Pow) != exponent.is_some()
     {
         return Ok(None);
     }
+    // A half-precision element is computed in `f32` and rounded back once, as the LLVM
+    // backend computes a scalar one.
+    let half = half_precision(element);
+    let narrow = element;
+    let wide = HirType::F32;
+    let element = if half { &wide } else { element };
     let Some(source) = build_expression(context, location, block, operand, scope, lowering)? else {
         return Ok(None);
+    };
+    let source = match half {
+        true => cast_elements(
+            context,
+            location,
+            block,
+            source,
+            (narrow, &with_element(&math.ty, &wide)),
+        )?,
+        false => source,
     };
     let mut inputs = vec![source];
     if let Some(exponent) = exponent {
@@ -65,10 +83,14 @@ pub(crate) fn build_math<'c, 'a>(
         else {
             return Ok(None);
         };
+        let power = match half_precision(&exponent.ty) {
+            true => append(block, arith::extf(power, Type::float32(context), location))?,
+            false => power,
+        };
         inputs.push(power);
     }
 
-    let tensor_type = map_type(context, &math.ty)?;
+    let tensor_type = map_type(context, &with_element(&math.ty, element))?;
     let element_type = map_type(context, element)?;
     let rank = shape.len();
     let own: OperandAxes = Some((0..rank).map(Some).collect());
@@ -79,7 +101,7 @@ pub(crate) fn build_math<'c, 'a>(
     }
     maps.push(&own);
     let empty = append(block, empty_tensor(location, tensor_type, &[])?)?;
-    Ok(Some(apply(
+    let value = apply(
         context,
         location,
         block,
@@ -91,7 +113,11 @@ pub(crate) fn build_math<'c, 'a>(
         },
         tensor_type,
         math_block(context, location, element_type, *op, inputs.len())?,
-    )?))
+    )?;
+    Ok(Some(match half {
+        true => cast_elements(context, location, block, value, (&wide, &math.ty))?,
+        false => value,
+    }))
 }
 
 /// The body over `(element[, exponent], destination)`: the function applied to the element.
@@ -194,11 +220,13 @@ mod tests {
     /// The device bodies before they are lowered for any GPU.
     fn device_module(program: &HirProgram) -> String {
         let context = new_context();
-        let (module, _) =
-            build_linkable_module(&context, program, crate::Overflow::Checked, &|function| {
-                function.target == HirTarget::FollowsOperands
-            })
-            .expect("the bodies build");
+        let (module, _) = build_linkable_module(
+            &context,
+            program,
+            (crate::Overflow::Checked, crate::guards::Side::Device),
+            &|function| function.target == HirTarget::FollowsOperands,
+        )
+        .expect("the bodies build");
         module.as_operation().to_string()
     }
 

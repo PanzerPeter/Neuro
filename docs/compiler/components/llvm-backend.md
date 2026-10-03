@@ -29,7 +29,7 @@ located runtime-panic diagnostics (array bounds, slice boundaries, integer overf
 
 ## Architecture
 
-- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `inkwell 0.10.0`, `thiserror`; `syntax-parsing` and `hir-lowering` are dev-dependencies (tests and benches lower before compiling)
+- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `inkwell 0.10.0`, `thiserror`; `syntax-parsing`, `hir-lowering` and `mlir-backend` are dev-dependencies (tests and benches lower before compiling, and link the tensor bodies `mlir-backend` computes)
 - **Public API**: `compile`, `compile_to_ir`, `ExternalBodies`, `OptimizationLevelSetting`, `CodegenError`
 - **All internals**: `pub(crate)`, `CodegenContext`, `TypeMapper`, `codegen_*` helpers
 - **Output**: platform object code (`.o`) passed to the system linker by `neurc`
@@ -265,15 +265,19 @@ The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
 
 ## MLIR bodies
 
-`neurc` hands this backend the tensor bodies the
-[MLIR backend](mlir-backend.md) computed, as LLVM IR text plus the function each symbol stands
-for. Each named function is still declared and defined here, with its ordinary tensor ABI, but
-its body is a call: the backend loads each tensor's buffer out of its DLPack handle and passes it
-as an exploded row-major `memref` descriptor, allocates the result tensor itself and passes that
-buffer as one more descriptor, then releases every tensor the function took by value. The IR is
-parsed into the module's own context and linked in after every body, and each linked symbol is
-made internal so the optimizer can inline it. inkwell stays the terminal code-emission layer on
-every path.
+This backend has no loops over a tensor's elements: every such operation reaches it as a call
+to a function lowering outlined it into, whose body the [MLIR backend](mlir-backend.md)
+computed. `neurc` hands those bodies over as LLVM IR text plus the function each symbol stands
+for. A call to one is a call to its symbol: the backend loads each tensor's buffer out of its
+DLPack handle and passes it as an exploded row-major `memref` descriptor, allocates the result
+tensor itself and passes that buffer as one more descriptor, then releases every tensor the
+operation took by value. In a program that moves no tensor to a device the call is emitted right
+where it is made, so the result is the caller's own allocation, and a `pool` body's operations
+allocate from its arena. The IR is parsed into the module's own context, optimized at `-O2`
+whatever level the program is built at (it is the program's tensor arithmetic, and nothing in it
+may reassociate floats, so the bits do not change), linked in after every body, and each linked
+symbol is made internal so the optimizer can inline it. inkwell stays the terminal code-emission
+layer on every path.
 
 A body with integer arithmetic carries checks it cannot raise itself, so it takes an `i64`
 status word as one more descriptor before the result's. The wrapper fills it with all ones, and
@@ -307,15 +311,15 @@ program with a `@kernel` function, like one with a bare `@gpu` function, has no 
 fall back on, so a missing GPU is fatal at startup.
 
 A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging wrapper above;
-`f.host`, the backend's own body; and `f` itself, which asks the runtime's
+`f.host`, a call to its host body from the MLIR backend; and `f` itself, which asks the runtime's
 `__neuro_gpu_usable` which of the two to call. The backend also defines the constant
 `__neuro_gpu_fallback`, 1 when no bare `@gpu` function exists. With it set, a module load
 that finds no usable GPU leaves the module unloaded instead of aborting, and every call takes
 its host body.
 
-A tensor operation lowering outlined to follow its operands (`HirTarget::FollowsOperands`) is
-emitted the same three ways, but `f` picks per call: `f.gpu` when any tensor operand lives on a
-GPU, `f.host` when every one is a host tensor. Element reads and writes and `.clone()` need no
+A tensor operation lowering outlined to follow its operands (`HirTarget::FollowsOperands`, in a
+program that moves a tensor to a device) is emitted the same three ways, but `f` picks per call:
+`f.gpu` when any tensor operand lives on a GPU, `f.host` when every one is a host tensor. Element reads and writes and `.clone()` need no
 kernel. They branch on the tensor's DLPack device where they stand, copying one element through
 the runtime or cloning the buffer on its GPU, so they work on a device tensor in any build.
 

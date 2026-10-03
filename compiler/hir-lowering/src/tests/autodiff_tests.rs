@@ -118,9 +118,16 @@ func loss(w: &mut Tensor<f32, [2]>, unused: &mut Tensor<f32, [4]>) -> Tensor<f32
     );
 }
 
+/// Whether `expr` calls a function, a tensor operation's outlined one aside.
 fn calls_in(expr: &neuro_hir::HirExpr) -> bool {
     match &expr.kind {
-        HirExprKind::Call { .. } => true,
+        HirExprKind::Call { callee, args } => match &callee.kind {
+            HirExprKind::Variable(name) if name.starts_with("__tensor_op_") => {
+                args.iter().any(calls_in)
+            }
+            _ => true,
+        },
+        HirExprKind::TensorIndex { object, .. } => calls_in(object),
         HirExprKind::Binary { left, right, .. } => calls_in(left) || calls_in(right),
         HirExprKind::Unary { operand, .. } | HirExprKind::Reference { operand, .. } => {
             calls_in(operand)

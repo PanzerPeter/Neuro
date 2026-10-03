@@ -370,7 +370,7 @@ pub(crate) fn precedes<'c, 'a>(
     descending: bool,
 ) -> Result<Value<'c, 'a>, MlirError> {
     let integer = match (kind, descending) {
-        (Element::Float, _) => None,
+        (Element::Float | Element::Half, _) => None,
         (Element::Signed(_), true) => Some(CmpiPredicate::Sgt),
         (Element::Signed(_), false) => Some(CmpiPredicate::Slt),
         (Element::Unsigned(_), true) => Some(CmpiPredicate::Ugt),
@@ -401,7 +401,7 @@ pub(crate) fn precedes<'c, 'a>(
 mod tests {
     use crate::{GpuTarget, lower_for_gpu, lower_for_link};
 
-    use neuro_hir::{HirItem, HirProgram, HirTarget};
+    use neuro_hir::HirProgram;
 
     /// A program with a transfer, so lowering outlines its operations. The harness binds
     /// no named arguments, so `k` and the axis are positional.
@@ -459,15 +459,10 @@ mod tests {
     }
 
     #[test]
-    fn the_cpu_path_leaves_selections_to_the_llvm_backend() {
-        let mut program = program("    val s = g.sort()\n    val (v, i) = g.topk(3)");
-        for item in &mut program.items {
-            if let HirItem::Function(f) = item {
-                f.target = HirTarget::Host;
-            }
-        }
+    fn the_cpu_path_computes_every_selection() {
+        let program = program("    val s = g.sort()\n    val (v, i) = g.topk(3)");
         let bodies =
             lower_for_link(&program, crate::Overflow::Checked).expect("the CPU path lowers");
-        assert!(bodies.functions.is_empty(), "{:?}", bodies.functions);
+        assert_eq!(bodies.functions.len(), 2, "{:?}", bodies.functions);
     }
 }

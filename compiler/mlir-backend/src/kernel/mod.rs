@@ -18,7 +18,7 @@ use crate::{
     errors::KernelRefusal,
     gpu::GpuTarget,
     guards::{Guard, MAX_SITES, Overflow, STATUS_BITS},
-    lower::LINKED_SYMBOL_PREFIX,
+    lower::DEVICE_SYMBOL_PREFIX,
 };
 
 use body::{BodyEmitter, Launch, Refused, STATUS, memref_type, outlined_launch, scalar_type};
@@ -83,7 +83,7 @@ pub(crate) fn kernel_launchers(
         let HirItem::Function(function) = item else {
             continue;
         };
-        let symbol = format!("{LINKED_SYMBOL_PREFIX}{}", function.name);
+        let symbol = format!("{DEVICE_SYMBOL_PREFIX}{}", function.name);
         if function.target == HirTarget::FollowsOperands {
             let launched = follows_operands(program, function, &symbol, (guard, overflow), math);
             if let Some((launcher, checks)) = launched {
@@ -194,13 +194,17 @@ fn uses_math(region: &str) -> bool {
 }
 
 /// Each parameter as the launcher declares it: a tensor, owned or borrowed, as its `memref`,
-/// and a scalar as itself.
+/// and a scalar as itself. A traversal's function value is what a host body calls; a device
+/// body calls the closure literal it keeps, so the pair is taken and left unread.
 fn parameters(function: &HirFunction) -> Result<Vec<String>, Refused> {
     let mut params = Vec::with_capacity(function.params.len());
     for (index, param) in function.params.iter().enumerate() {
         let ty = match &param.ty {
             HirType::Reference { inner, .. } => memref_type(inner),
             tensor @ HirType::Tensor { .. } => memref_type(tensor),
+            HirType::Function { .. } if function.target == HirTarget::FollowsOperands => {
+                Some("!llvm.struct<(ptr, ptr)>".to_string())
+            }
             other => scalar_type(other).map(str::to_string),
         }
         .ok_or_else(|| Refused::new(param.span, "a parameter of this type"))?;
@@ -322,7 +326,7 @@ func main() -> i32 {
         .expect("the body lowers");
         assert_eq!(
             functions,
-            vec![("add_relu".to_string(), "__neuro_mlir_add_relu".to_string())]
+            vec![("add_relu".to_string(), "__neuro_gpu_add_relu".to_string())]
         );
         assert!(
             text.contains("%grid0 = arith.constant 3 : index")
@@ -338,7 +342,7 @@ func main() -> i32 {
         // the scalar, and nothing returned.
         assert!(
             ir.contains(
-                "define void @__neuro_mlir_add_relu(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, float %7, ptr %8,"
+                "define void @__neuro_gpu_add_relu(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, i64 %5, i64 %6, float %7, ptr %8,"
             ),
             "{ir}"
         );

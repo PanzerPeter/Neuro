@@ -457,16 +457,9 @@ impl<'ctx> CodegenContext<'ctx> {
             HirStmt::Assign { place, value, span } => {
                 self.store_outside_pool(place, |ctx| ctx.codegen_place_store(place, value, *span))
             }
-            HirStmt::TensorCompoundAssign {
-                place,
-                op,
-                value,
-                ty,
-                span,
-            } => {
-                let receiver = place.to_expr(*span);
-                self.codegen_tensor_compound_assign(&receiver, *op, value, ty, span.start)
-            }
+            HirStmt::TensorCompoundAssign { .. } => Err(
+                crate::codegen::expressions::computed_in_mlir("a tensor compound assignment"),
+            ),
             HirStmt::Return { value, .. } => self.codegen_return(value.as_ref()),
             HirStmt::If {
                 condition,
@@ -630,6 +623,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 if let Some(value) = value {
                     self.release_string_temporary(expr, value)?;
                     self.drop_unbound_temporary(expr, value)?;
+                    // A tensor nothing binds is released here for the same reason.
+                    if let (
+                        HirType::Tensor { .. },
+                        inkwell::values::BasicValueEnum::PointerValue(handle),
+                    ) = (&expr.ty, value)
+                    {
+                        self.release_receiver_temporary(expr, handle)?;
+                    }
                 }
                 Ok(())
             }

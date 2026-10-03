@@ -2,7 +2,7 @@ use crate::{
     bridge::{BUFFERIZE, LinkableBodies, llvm_descent, translate_llvm_dialects},
     context::new_context,
     errors::MlirError,
-    guards::Overflow,
+    guards::{Overflow, Side},
     kernel::kernel_launchers,
     lower::build_linkable_module,
     tensor_arithmetic::read_type,
@@ -10,13 +10,16 @@ use crate::{
 
 use std::cell::OnceCell;
 
+use ast_types::BinaryOp;
 use melior::{
     Context,
     ir::{BlockLike, Module, attribute::StringAttribute, operation::OperationLike},
     pass::PassManager,
     utility::parse_pass_pipeline,
 };
-use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
+use neuro_hir::{
+    HirExpr, HirExprKind, HirFunction, HirItem, HirProgram, HirStmt, HirTarget, HirType,
+};
 use shared_types::Span;
 
 /// The GPU a set of kernels is compiled for, and the chip that fixes its ISA.
@@ -227,14 +230,15 @@ pub(crate) fn lower_with_format(
     let probed = OnceCell::new();
     let math = || *probed.get_or_init(|| device_math(&context, target, format));
     let (module, (mut functions, mut guards)) =
-        build_linkable_module(&context, program, overflow, &runs_on_gpu)?;
+        build_linkable_module(&context, program, (overflow, Side::Device), &runs_on_gpu)?;
     let calling_math = math_functions(&module, &functions);
     let without_math = !calling_math.is_empty() && !math();
     let admit = |function: &HirFunction| {
         runs_on_gpu(function) && !(without_math && calling_math.contains(&function.name))
     };
     if without_math {
-        (functions, guards) = build_linkable_module(&context, program, overflow, &admit)?.1;
+        (functions, guards) =
+            build_linkable_module(&context, program, (overflow, Side::Device), &admit)?.1;
     }
     let refused = refused_bodies(program, &functions);
     if !refused.is_empty() {
@@ -257,9 +261,10 @@ pub(crate) fn lower_with_format(
     }
     let mut lowered = Vec::with_capacity(tilings.len() + 1);
     for tiling in tilings {
-        let (mut module, _) = build_linkable_module(&context, program, overflow, &|function| {
-            admit(function) && self::tiling(function) == tiling
-        })?;
+        let (mut module, _) =
+            build_linkable_module(&context, program, (overflow, Side::Device), &|function| {
+                admit(function) && self::tiling(function) == tiling
+            })?;
         lower_module(
             &context,
             &mut module,
@@ -392,6 +397,67 @@ fn is_gpu_body(function: &HirFunction) -> bool {
 fn runs_on_gpu(function: &HirFunction) -> bool {
     (is_gpu_body(function) || function.target == HirTarget::FollowsOperands)
         && launches_every_op(function)
+        && exact_on_gpu(function)
+}
+
+/// Whether a GPU computes `function` with the host's bits: no half-precision tensor, whose
+/// conversions not every chip has, no `bool` tensor, and no float `%`, which a GPU computes in
+/// fewer steps than the host's `fmod`.
+fn exact_on_gpu(function: &HirFunction) -> bool {
+    let half = |ty: &HirType| {
+        matches!(
+            read_type(ty),
+            HirType::Tensor { element, .. }
+                if matches!(**element, HirType::F16 | HirType::BF16 | HirType::Bool)
+        )
+    };
+    !std::iter::once(&function.return_type)
+        .chain(function.params.iter().map(|param| &param.ty))
+        .any(half)
+        && !function.body.iter().any(|statement| match statement {
+            HirStmt::VarDecl {
+                init: Some(value), ..
+            }
+            | HirStmt::Return {
+                value: Some(value), ..
+            }
+            | HirStmt::Expr(value) => float_remainder(value),
+            _ => false,
+        })
+}
+
+/// Whether `expr` takes a float `%` anywhere in the operations a GPU body lowers.
+fn float_remainder(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::Binary { op, left, right } => {
+            (*op == BinaryOp::Modulo
+                && matches!(
+                    read_type(&expr.ty),
+                    HirType::Tensor { element, .. } if matches!(**element, HirType::F32 | HirType::F64)
+                ))
+                || float_remainder(left)
+                || float_remainder(right)
+        }
+        HirExprKind::Reference { operand, .. }
+        | HirExprKind::TensorReduce {
+            receiver: operand, ..
+        }
+        | HirExprKind::TensorSort {
+            receiver: operand, ..
+        }
+        | HirExprKind::TensorShapeCast {
+            receiver: operand, ..
+        }
+        | HirExprKind::TensorIndex {
+            object: operand, ..
+        }
+        | HirExprKind::Math { operand, .. } => float_remainder(operand),
+        HirExprKind::TensorLiteral { elements }
+        | HirExprKind::TensorEinsum {
+            operands: elements, ..
+        } => elements.iter().any(float_remainder),
+        _ => false,
+    }
 }
 
 /// Every `@gpu` function missing from `lowered`, with where it is declared.
@@ -514,12 +580,18 @@ mod tests {
     }
 
     fn host_matmul() -> HirProgram {
-        program_with_tensor_operator(
+        let mut program = program_with_tensor_operator(
             BinaryOp::MatMul,
             tensor(static_shape(&[2, 3])),
             tensor(static_shape(&[3, 4])),
             tensor(static_shape(&[2, 4])),
-        )
+        );
+        for item in &mut program.items {
+            if let HirItem::Function(function) = item {
+                function.target = HirTarget::Host;
+            }
+        }
+        program
     }
 
     fn matmul() -> HirProgram {
@@ -537,7 +609,7 @@ mod tests {
     /// lives only in the embedded device object.
     fn assert_is_a_launcher(ir: &str) {
         assert!(
-            ir.contains("define void @__neuro_mlir_f("),
+            ir.contains("define void @__neuro_gpu_f("),
             "expected the host symbol to be defined:\n{ir}"
         );
         assert!(
@@ -637,8 +709,8 @@ mod tests {
             .expect("both bodies should lower");
         assert_eq!(bodies.functions.len(), 2, "{:?}", bodies.functions);
         assert!(
-            bodies.llvm_ir.contains("define void @__neuro_mlir_f(")
-                && bodies.llvm_ir.contains("define void @__neuro_mlir_g("),
+            bodies.llvm_ir.contains("define void @__neuro_gpu_f(")
+                && bodies.llvm_ir.contains("define void @__neuro_gpu_g("),
             "{}",
             bodies.llvm_ir
         );
@@ -673,16 +745,25 @@ mod tests {
     fn the_symbols_match_the_cpu_path() {
         let gpu = lower_for_gpu(&matmul(), &nvidia(), crate::Overflow::Checked)
             .expect("the GPU path should lower");
-        let cpu = lower_for_link(&host_matmul(), crate::Overflow::Checked)
-            .expect("the CPU path should lower");
+        let mut fallback = matmul();
+        if let HirItem::Function(function) = &mut fallback.items[0] {
+            function.target = HirTarget::GpuOrHost;
+        }
+        let cpu =
+            lower_for_link(&fallback, crate::Overflow::Checked).expect("the CPU path should lower");
 
-        assert_eq!(gpu.functions, cpu.functions);
-        let signature = |ir: &str| {
+        assert_eq!(gpu.functions, [("f".into(), "__neuro_gpu_f".into())]);
+        assert_eq!(cpu.functions, [("f".into(), "__neuro_mlir_f".into())]);
+        let signature = |ir: &str, symbol: &str| {
             ir.lines()
-                .find(|line| line.starts_with("define void @__neuro_mlir_f("))
-                .map(str::to_string)
+                .find(|line| line.starts_with(&format!("define void @{symbol}(")))
+                // The host body also promises its buffers do not alias.
+                .map(|line| line.replacen(symbol, "f", 1).replace(" noalias", ""))
         };
-        assert_eq!(signature(&gpu.llvm_ir), signature(&cpu.llvm_ir));
+        assert_eq!(
+            signature(&gpu.llvm_ir, "__neuro_gpu_f"),
+            signature(&cpu.llvm_ir, "__neuro_mlir_f")
+        );
     }
 
     #[test]
@@ -883,7 +964,7 @@ mod tests {
         // The status word is one more descriptor before the result's.
         assert!(
             bodies.llvm_ir.contains(
-                "define void @__neuro_mlir_f(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9, ptr %10, ptr %11, i64 %12, i64 %13, i64 %14, ptr %15,"
+                "define void @__neuro_gpu_f(ptr %0, ptr %1, i64 %2, i64 %3, i64 %4, ptr %5, ptr %6, i64 %7, i64 %8, i64 %9, ptr %10, ptr %11, i64 %12, i64 %13, i64 %14, ptr %15,"
             ),
             "{}",
             bodies.llvm_ir
@@ -899,7 +980,8 @@ mod tests {
         let mut host = gpu.clone();
         host.name = "g".to_string();
         host.target = HirTarget::Host;
-        // A fallback's host copy is the LLVM backend's own body, not the CPU path's.
+        // A host function is the LLVM backend's, its tensor operations outlined; a fallback's
+        // host copy is the CPU path's.
         let mut either = gpu.clone();
         either.name = "h".to_string();
         either.target = HirTarget::GpuOrHost;
@@ -913,11 +995,11 @@ mod tests {
         assert_eq!(
             gpu.functions,
             [
-                ("f".into(), "__neuro_mlir_f".into()),
-                ("h".into(), "__neuro_mlir_h".into())
+                ("f".into(), "__neuro_gpu_f".into()),
+                ("h".into(), "__neuro_gpu_h".into())
             ]
         );
-        assert_eq!(cpu.functions, [("g".into(), "__neuro_mlir_g".into())]);
+        assert_eq!(cpu.functions, [("h".into(), "__neuro_mlir_h".into())]);
     }
 
     #[test]

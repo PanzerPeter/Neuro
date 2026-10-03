@@ -68,6 +68,16 @@ pub enum Overflow {
     Wrapping,
 }
 
+/// Which side of the program a body is built for. A host body may call back into the LLVM
+/// backend's code and write a `&mut` buffer in place; a device body is launched on a GPU,
+/// where neither is possible, and its compound assignments and traversals are per-thread
+/// launchers of their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    Host,
+    Device,
+}
+
 /// What a failed check in a linked body means, which picks the caller's panic message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuardKind {
@@ -90,13 +100,23 @@ pub struct Guard {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Element {
     Float,
+    /// `f16` or `bf16`: each operation widens its operands to `f32` and rounds its answer
+    /// back once, as the LLVM backend computes them.
+    Half,
     Signed(u32),
     Unsigned(u32),
 }
 
 impl Element {
-    /// `None` for an element the language gives no tensor arithmetic: `f16`, `bf16`,
-    /// `bool` and everything that is not a number.
+    /// [`Self::of`], or [`Element::Half`] for a half-precision float.
+    pub(crate) fn computed(ty: &HirType) -> Option<Self> {
+        match ty {
+            HirType::F16 | HirType::BF16 => Some(Element::Half),
+            other => Self::of(other),
+        }
+    }
+
+    /// `None` for a half-precision float, `bool` and everything that is not a number.
     pub(crate) fn of(ty: &HirType) -> Option<Self> {
         Some(match ty {
             HirType::F32 | HirType::F64 => Element::Float,
@@ -172,24 +192,55 @@ impl<'c, 'a> Lowering<'c, 'a> {
         at: At<'c, '_>,
     ) -> Result<Option<Value<'c, 'b>>, MlirError> {
         let location = self.location;
+        if element == Element::Half {
+            return self.half(block, op, (lhs, rhs));
+        }
         self.unit.set(self.sites.borrow().len() + 1);
         let operation = match (element, op) {
             (Element::Float, BinaryOp::Add) => arith::addf(lhs, rhs, location),
             (Element::Float, BinaryOp::Subtract) => arith::subf(lhs, rhs, location),
             (Element::Float, BinaryOp::Multiply) => arith::mulf(lhs, rhs, location),
             (Element::Float, BinaryOp::Divide) => arith::divf(lhs, rhs, location),
+            (Element::Float, BinaryOp::Modulo) => arith::remf(lhs, rhs, location),
             (Element::Float, _) => return Ok(None),
             (_, BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply) => {
                 return self
                     .overflowing(block, op, element, (lhs, rhs), at)
                     .map(Some);
             }
-            (_, BinaryOp::Divide) => {
-                return self.divide(block, element, (lhs, rhs), at).map(Some);
+            (_, BinaryOp::Divide | BinaryOp::Modulo) => {
+                return self.divide(block, op, element, (lhs, rhs), at).map(Some);
             }
             _ => return Ok(None),
         };
         append(block, operation).map(Some)
+    }
+
+    /// Half-precision `lhs op rhs`: both widened to `f32`, computed there, and rounded back.
+    fn half<'b>(
+        &self,
+        block: &'b Block<'c>,
+        op: BinaryOp,
+        (lhs, rhs): (Value<'c, '_>, Value<'c, '_>),
+    ) -> Result<Option<Value<'c, 'b>>, MlirError> {
+        let location = self.location;
+        let narrow = lhs.r#type();
+        let wide = Type::float32(self.context);
+        let lhs = append(block, arith::extf(lhs, wide, location))?;
+        let rhs = append(block, arith::extf(rhs, wide, location))?;
+        let Some(value) = self.arith(block, op, Element::Float, (lhs, rhs), self.no_position())?
+        else {
+            return Ok(None);
+        };
+        append(block, arith::truncf(value, narrow, location)).map(Some)
+    }
+
+    /// A float operation's place: it has no checks, so neither offset nor position matters.
+    fn no_position(&self) -> At<'c, 'static> {
+        At {
+            offset: 0,
+            position: None,
+        }
     }
 
     /// Integer `+`, `-` or `*`: through LLVM's `with.overflow` intrinsic on the debug tier,
@@ -249,11 +300,13 @@ impl<'c, 'a> Lowering<'c, 'a> {
         Ok(value)
     }
 
-    /// Integer `/`. A zero divisor fails on every tier, `MIN / -1` on the debug tier; each
-    /// then divides by 1, which also gives the release tier's wrap (`MIN / 1` is `MIN`).
+    /// Integer `/` or `%`. A zero divisor fails on every tier, `MIN / -1` (and `MIN % -1`)
+    /// on the debug tier; each then divides by 1, which also gives the release tier's wrap
+    /// (`MIN / 1` is `MIN`, `MIN % 1` is 0).
     fn divide<'b>(
         &self,
         block: &'b Block<'c>,
+        op: BinaryOp,
         element: Element,
         (lhs, rhs): (Value<'c, '_>, Value<'c, '_>),
         at: At<'c, '_>,
@@ -276,12 +329,23 @@ impl<'c, 'a> Lowering<'c, 'a> {
                 arith::cmpi(self.context, arith::CmpiPredicate::Eq, a, b, location),
             )
         };
+        let remainder = op == BinaryOp::Modulo;
         let one = constant(1)?;
         let by_zero = compare(rhs, constant(0)?)?;
-        self.fail_if(block, by_zero, GuardKind::DivisionByZero, at)?;
+        let kind = match remainder {
+            true => GuardKind::RemainderByZero,
+            false => GuardKind::DivisionByZero,
+        };
+        self.fail_if(block, by_zero, kind, at)?;
         let divisor = append(block, arith::select(by_zero, one, rhs, location))?;
         let Element::Signed(bits) = element else {
-            return append(block, arith::divui(lhs, divisor, location));
+            return append(
+                block,
+                match remainder {
+                    true => arith::remui(lhs, divisor, location),
+                    false => arith::divui(lhs, divisor, location),
+                },
+            );
         };
         // `MIN` of a `bits`-wide integer, sign-extended into the attribute's 64 bits.
         let min = constant(i64::MIN >> (i64::BITS - bits))?;
@@ -292,7 +356,13 @@ impl<'c, 'a> Lowering<'c, 'a> {
             self.fail_if(block, overflows, GuardKind::Overflow, at)?;
         }
         let safe = append(block, arith::select(overflows, one, divisor, location))?;
-        append(block, arith::divsi(lhs, safe, location))
+        append(
+            block,
+            match remainder {
+                true => arith::remsi(lhs, safe, location),
+                false => arith::divsi(lhs, safe, location),
+            },
+        )
     }
 
     /// Record a check at `at` and append, to `block`, the lowering of the status word to its

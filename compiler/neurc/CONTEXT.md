@@ -42,7 +42,9 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    (`tensor_bodies`) and passes the bodies it returns to the LLVM backend as `ExternalBodies`,
    which links them in place of its own. The two slices' types are mapped here, field for field,
    since neither may name the other's, a body's integer checks (`Guard` to `BodyGuard`)
-   included. Both lowerings get the tier from `-O`: `Overflow::Checked` at `-O0`, where the LLVM
+   included. Every tensor operation is outlined (`HostOperation` or `FollowsOperands`) and the
+   LLVM backend has no loop of its own to fall back on, so an outlined function MLIR returns no
+   host body for is an internal error rendered at the operation. Both lowerings get the tier from `-O`: `Overflow::Checked` at `-O0`, where the LLVM
    backend panics on integer overflow too, and `Wrapping` above it; `check` lowers with
    `Checked`, since which bodies qualify does not depend on the tier. A failure there stops the compile: it is a compiler bug,
    and handing the body back to the LLVM backend would hide it. A program with a `@gpu` function,

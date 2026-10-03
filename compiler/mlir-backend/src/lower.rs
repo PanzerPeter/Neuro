@@ -1,7 +1,7 @@
 use crate::{
     context::new_context,
     errors::MlirError,
-    guards::{Element, Guard, Overflow},
+    guards::{Element, Guard, Overflow, Side},
     tensor_arithmetic,
 };
 
@@ -21,6 +21,10 @@ use neuro_hir::{HirFunction, HirItem, HirProgram, HirSelfParam, HirType};
 /// Prepended to a linked body's symbol, so it never collides with the Neuro-ABI
 /// function of the same name the LLVM backend defines around it.
 pub(crate) const LINKED_SYMBOL_PREFIX: &str = "__neuro_mlir_";
+
+/// [`LINKED_SYMBOL_PREFIX`] for a body that launches GPU kernels. A tensor operation has a
+/// host body and a device body, linked into one module side by side.
+pub(crate) const DEVICE_SYMBOL_PREFIX: &str = "__neuro_gpu_";
 
 /// Bit widths for the fixed-size integer scalars, keyed off the HIR type.
 const I8_BITS: u32 = 8;
@@ -75,7 +79,7 @@ pub(crate) fn build_module<'c>(
                     context,
                     location,
                     function,
-                    Overflow::Checked,
+                    (Overflow::Checked, Side::Host),
                 )? {
                     Some((region, _)) => define_function(
                         context,
@@ -153,7 +157,7 @@ pub(crate) type Linked = (Vec<(String, String)>, Vec<(String, Vec<Guard>)>);
 pub(crate) fn build_linkable_module<'c>(
     context: &'c Context,
     program: &HirProgram,
-    overflow: Overflow,
+    (overflow, side): (Overflow, Side),
     admit: &dyn Fn(&HirFunction) -> bool,
 ) -> Result<(Module<'c>, Linked), MlirError> {
     let location = Location::unknown(context);
@@ -169,11 +173,15 @@ pub(crate) fn build_linkable_module<'c>(
             continue;
         }
         let Some((region, sites)) =
-            tensor_arithmetic::build_body(context, location, function, overflow)?
+            tensor_arithmetic::build_body(context, location, function, (overflow, side))?
         else {
             continue;
         };
-        let symbol = format!("{LINKED_SYMBOL_PREFIX}{}", function.name);
+        let prefix = match side {
+            Side::Host => LINKED_SYMBOL_PREFIX,
+            Side::Device => DEVICE_SYMBOL_PREFIX,
+        };
+        let symbol = format!("{prefix}{}", function.name);
         module.body().append_operation(define_function(
             context,
             location,
@@ -213,19 +221,37 @@ fn linkable_signature(function: &HirFunction) -> bool {
 fn linkable_type(ty: &HirType) -> bool {
     match ty {
         HirType::Tensor { element, shape, .. } => {
-            Element::of(element).is_some() && shape.iter().all(Option::is_some)
+            scalar(element).is_some() && shape.iter().all(Option::is_some)
         }
-        scalar => Element::of(scalar).is_some(),
+        // The target a compound assignment writes in place.
+        HirType::Reference {
+            inner,
+            mutable: true,
+        } => matches!(**inner, HirType::Tensor { .. }) && linkable_type(inner),
+        // The function a traversal calls on each element.
+        HirType::Function { params, ret } => {
+            params.iter().all(|param| scalar(param).is_some()) && scalar(ret).is_some()
+        }
+        other => scalar(other).is_some(),
     }
 }
 
-/// A static tensor of numbers, or a tuple of them (`.topk`'s values and indices).
+/// An element or scalar a body handles as itself: a number, or a `bool`, which only a
+/// traversal passes to and from its function.
+fn scalar(ty: &HirType) -> Option<Element> {
+    match ty {
+        HirType::Bool => Some(Element::Unsigned(1)),
+        other => Element::computed(other),
+    }
+}
+
+/// A static tensor of numbers, or a tuple of them (`.topk`'s values and indices), or
+/// nothing at all for a compound assignment, which writes its target in place.
 fn linkable_result(ty: &HirType) -> bool {
     match ty {
         HirType::Tuple(parts) => !parts.is_empty() && parts.iter().all(linkable_result),
-        HirType::Tensor { element, shape, .. } => {
-            Element::of(element).is_some() && shape.iter().all(Option::is_some)
-        }
+        HirType::Tensor { .. } => linkable_type(ty),
+        HirType::Void => true,
         _ => false,
     }
 }
@@ -302,6 +328,7 @@ fn define_function<'c>(
     // A tuple is one result per tensor, so bufferization gives each its own out-param.
     let results = match return_type {
         HirType::Tuple(parts) => parts.as_slice(),
+        HirType::Void => &[],
         single => std::slice::from_ref(single),
     };
     let entry = body
@@ -382,9 +409,13 @@ pub(crate) fn map_type<'c>(context: &'c Context, ty: &HirType) -> Result<Type<'c
         | HirType::Reference { .. }
         | HirType::Array { .. }
         | HirType::Tuple(_)
-        | HirType::Collection { .. }
         // Address space 0; all LLVM pointers are opaque (`!llvm.ptr`) since LLVM 19.
-        | HirType::Function { .. } => llvm::r#type::pointer(context, 0),
+        | HirType::Collection { .. } => llvm::r#type::pointer(context, 0),
+        // A function value is the LLVM backend's pair: the function, then its environment.
+        HirType::Function { .. } => {
+            let pointer = llvm::r#type::pointer(context, 0);
+            llvm::r#type::r#struct(context, &[pointer, pointer], false)
+        }
         HirType::Void => {
             return Err(MlirError::UnsupportedType(
                 "void cannot appear in value position".to_string(),

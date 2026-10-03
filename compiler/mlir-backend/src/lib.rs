@@ -20,7 +20,9 @@ mod kernel;
 mod lower;
 #[cfg(test)]
 mod smoke;
+mod tensor_apply;
 mod tensor_arithmetic;
+mod tensor_compound;
 mod tensor_einsum;
 mod tensor_layout;
 mod tensor_math;

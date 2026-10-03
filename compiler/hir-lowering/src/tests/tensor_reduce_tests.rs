@@ -2,7 +2,7 @@
 // in the pipeline but not in this slice's test harness, so the axis is written
 // positionally here. The labelled spelling is covered end to end by `neurc`'s tests.
 
-use super::{binding_init, function_body, lower};
+use super::{function_body, lower, operation, outlined_operation};
 
 use neuro_hir::{AxisNames, HirExprKind, HirReduceOp, HirType};
 
@@ -10,8 +10,7 @@ use neuro_hir::{AxisNames, HirExprKind, HirReduceOp, HirType};
 /// back.
 fn reduce_of(src: &str, binding: &str) -> (HirReduceOp, Option<usize>, HirType) {
     let program = lower(src);
-    let body = function_body(&program, "main");
-    let init = binding_init(body, binding);
+    let init = operation(&program, binding);
     let HirExprKind::TensorReduce { op, axis, .. } = &init.kind else {
         panic!(
             "'{binding}' should lower to a reduction, got {:?}",
@@ -98,6 +97,7 @@ func main() -> i32 {
     let neuro_hir::HirStmt::Expr(expr) = tail else {
         panic!("the body should end in an expression, got {tail:?}");
     };
+    let expr = outlined_operation(&program, expr);
     assert!(
         matches!(
             expr.kind,

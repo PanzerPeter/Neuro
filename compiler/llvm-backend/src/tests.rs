@@ -13,10 +13,48 @@ fn lower(source: &str) -> neuro_hir::HirProgram {
     hir_lowering::lower_program(&ast).expect("HIR lowering failed")
 }
 
+/// The host bodies `mlir-backend` computes for `hir`'s tensor operations, as `neurc` hands
+/// them over.
+fn host_bodies(
+    hir: &neuro_hir::HirProgram,
+    optimization: OptimizationLevelSetting,
+) -> Vec<ExternalBodies> {
+    let overflow = match optimization {
+        OptimizationLevelSetting::O0 => mlir_backend::Overflow::Checked,
+        _ => mlir_backend::Overflow::Wrapping,
+    };
+    let bodies = mlir_backend::lower_for_link(hir, overflow).expect("MLIR lowering failed");
+    let guards = bodies
+        .guards
+        .into_iter()
+        .map(|(symbol, checks)| {
+            let checks = checks
+                .into_iter()
+                .map(|guard| BodyGuard {
+                    kind: match guard.kind {
+                        mlir_backend::GuardKind::Overflow => BodyGuardKind::Overflow,
+                        mlir_backend::GuardKind::DivisionByZero => BodyGuardKind::DivisionByZero,
+                        mlir_backend::GuardKind::RemainderByZero => BodyGuardKind::RemainderByZero,
+                    },
+                    offset: guard.offset,
+                })
+                .collect();
+            (symbol, checks)
+        })
+        .collect();
+    vec![ExternalBodies {
+        llvm_ir: bodies.llvm_ir,
+        functions: bodies.functions,
+        memory: BodyMemory::Host,
+        guards,
+    }]
+}
+
 /// Compile `source` to LLVM IR text, for the tests that assert on module structure
 /// rather than on the opaque object code `compile` returns.
 fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
     let hir = lower(source);
+    let external = host_bodies(&hir, optimization);
     let context = LLVMContext::create();
     let codegen_ctx = build_module(
         &context,
@@ -24,7 +62,7 @@ fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
         optimization,
         source,
         "outlining.nr",
-        &[],
+        &external,
         GpuVendor::Nvidia,
     )
     .expect("module generation failed");
@@ -36,6 +74,7 @@ fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
 /// unoptimized IR `module_ir` returns.
 fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
     let hir = lower(source);
+    let external = host_bodies(&hir, optimization);
     let context = LLVMContext::create();
     let codegen_ctx = build_module(
         &context,
@@ -43,7 +82,7 @@ fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String 
         optimization,
         source,
         "optimized.nr",
-        &[],
+        &external,
         GpuVendor::Nvidia,
     )
     .expect("module generation failed");
@@ -58,7 +97,14 @@ fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String 
 fn function_body<'a>(ir: &'a str, name: &str) -> &'a str {
     let header = format!("@{}(", name);
     let start = ir
-        .find(&header)
+        .lines()
+        .scan(0, |offset, line| {
+            let at = *offset;
+            *offset += line.len() + 1;
+            Some((at, line))
+        })
+        .find(|(_, line)| line.starts_with("define") && line.contains(&header))
+        .map(|(at, line)| at + line.find(&header).unwrap_or(0))
         .unwrap_or_else(|| panic!("no definition of @{} in the module", name));
     let rest = &ir[start..];
     match rest.find("\n}\n") {
@@ -378,8 +424,10 @@ fn a_shape_cast_releases_the_receivers_gradient() {
     );
 }
 
-/// A reduction's receiver that no binding owns is released once the fold has read it.
-/// Without that release `(&a + &b).sum()` leaks the operator's buffer per evaluation.
+/// A reduction's receiver that no binding owns is moved into the reduction, which releases
+/// it once the fold has read it. Without that release `(&a + &b).sum()` leaks the
+/// operator's buffer per evaluation. A call computed on the host is expanded where it is
+/// made, so the release is in `main`.
 #[test]
 fn a_reduction_releases_an_unbound_receiver() {
     let source = r#"
@@ -390,10 +438,11 @@ fn a_reduction_releases_an_unbound_receiver() {
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
+    // `__tensor_op_0` is the sum of `a` and `b`; `__tensor_op_1` folds it.
     let body = function_body(&ir, "main");
     let fold = body
-        .find("tensor.reduce.done")
-        .expect("the reduction emits its exit block");
+        .find("call void @__neuro_mlir___tensor_op_1(")
+        .expect("the reduction calls its body");
     let release = body[fold..]
         .find("dlpack.deleter")
         .map(|at| at + fold)
@@ -412,12 +461,45 @@ fn a_reduction_leaves_a_bound_receiver_to_its_own_drop() {
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
+    // Lent to the reduction, so released once: `a` at its scope exit. The other release is
+    // the one-element tensor the sum comes back in.
     let body = function_body(&ir, "main");
     assert_eq!(
-        body.matches("%dlpack.deleter = load ptr").count(),
-        1,
+        body.matches("call void %dlpack.deleter").count(),
+        2,
         "a bound receiver is released exactly once, in:\n{body}"
     );
+}
+
+/// A tensor operation in a `pool` body allocates its result from the arena, as a tensor
+/// built there does: the call computing it is expanded in place, so the allocation is the
+/// body's own rather than a callee's.
+#[test]
+fn a_pool_body_computes_tensor_operations_in_its_arena() {
+    let source = r#"
+        func main() -> i32 {
+            val a: Tensor<f32, [4]> = [1.0, 2.0, 3.0, 4.0]
+            mut total = 0.0f32
+            pool {
+                val doubled = &a * 2.0f32
+                total = doubled[3]
+            }
+            return total as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    let mark = body
+        .find("call i64 @__neuro_arena_mark()")
+        .expect("entering a pool reads the arena mark");
+    let alloc = body[mark..]
+        .find("@__neuro_arena_aligned_alloc(")
+        .map(|at| at + mark)
+        .expect("the product's buffer comes from the arena");
+    let compute = body
+        .find("call void @__neuro_mlir___tensor_op_0(")
+        .expect("the product is computed in place");
+    assert!(alloc < compute, "{body}");
 }
 
 /// The arena's shape, read off the IR: a pool block is a mark and a restore, and
@@ -580,12 +662,11 @@ fn a_tensor_compound_assignment_allocates_nothing() {
         1,
         "only the construction allocates:\n{body}"
     );
-    // Block labels are defined at the start of a line; the branches naming them are
-    // indented, so this counts loops rather than mentions.
+    // Each update is one call of its body, which writes the target's buffer.
     assert_eq!(
-        body.matches("\ntensor.op.head").count(),
+        body.matches("call void @__neuro_mlir___tensor_op_").count(),
         2,
-        "each update is one counted loop over the buffer:\n{body}"
+        "{body}"
     );
 }
 
@@ -606,7 +687,7 @@ fn an_integer_compound_assignment_keeps_the_scalar_overflow_guard() {
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "step");
+    let body = function_body(&ir, "__neuro_mlir___tensor_op_0");
     assert!(
         body.contains("@llvm.sadd.with.overflow.i32"),
         "an i32 element overflows the way an i32 scalar does:\n{body}"
@@ -1531,6 +1612,8 @@ fn regression_a_tensor_index_releases_a_temporary_receiver() {
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
+    // The indexed `make()`, the reduced one once the fold has read it, and the reduction's
+    // rank-0 result, read by `.item()`.
     let body = function_body(&ir, "main");
     assert_eq!(
         body.matches("call void %dlpack.deleter").count(),
@@ -2505,14 +2588,33 @@ fn regression_a_slice_or_shape_cast_temporary_is_released() {
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
     let body = function_body(&ir, "main");
-    // The slice's receiver and the slice; the transpose's source (released inside the
-    // cast, which copies) and its result; the detach's gradient and Hessian slots, and
-    // the detached buffer. Before the fix the slice, the transpose and the detached
-    // buffer were never released: four calls.
+    // The slice's receiver and the slice; the transpose's source and its result; the
+    // detach's gradient and Hessian slots, and the detached buffer.
     assert_eq!(
         body.matches("call void %dlpack.deleter").count(),
         7,
         "every temporary tensor is released exactly once:\n{body}"
+    );
+}
+
+/// A tensor computed in statement position has no binding and no consumer, so the
+/// statement releases it. Each evaluation leaked one before.
+#[test]
+fn regression_a_discarded_tensor_result_is_released() {
+    let source = r#"
+        func main() -> i32 {
+            val a: Tensor<f32, [4]> = Tensor::ones()
+            &a + &a
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    // The sum, then `a` at its scope exit.
+    assert_eq!(
+        body.matches("call void %dlpack.deleter").count(),
+        2,
+        "{body}"
     );
 }
 
@@ -2629,7 +2731,7 @@ fn a_host_read_checks_the_tensor_is_on_the_host() {
     let source = r#"
         func main() -> i32 {
             val a = Tensor::<f32, [4]>::ones()
-            val s = a.sum()
+            val s = a.sum(0)
             return 0
         }
     "#;

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-10-03
+
+### Changed
+
+- The MLIR path computes every tensor operation, and the LLVM backend's own tensor loops are
+  gone: operators (`%` included), `@`, compound assignment, slices, `.t()` / `.permute`,
+  reductions, sorts, `einsum`, elementwise math and `.map` / `.zip` / `.reduce`. Programs give
+  the same output, exit code and diagnostics as before, half-precision and integer tensors
+  included. A `.map` / `.zip` / `.reduce` function still sees the elements in row-major order
+  and may have side effects, `println` included.
+- A tensor matrix product built at `-O0` runs about twice as fast, since the tensor bodies are
+  optimized whatever `-O` the program asks for. `-O3` is unchanged.
+
+### Added
+
+- Integer `%` between tensors runs on the GPU a tensor lives on, with the host's
+  `remainder by zero` check. A float `%` still has no device form.
+- A tensor inside a struct field is computed on the GPU it lives on: `layer.w.sum()`,
+  `layer.w.exp()` and `layer.w -= g` no longer abort on a device tensor.
+
+### Fixed
+
+- A tensor value left unused in statement position (`&a + &b` on a line of its own) leaked its
+  buffer every time it ran. It is now released.
+
 ## [5.2.1] - 2026-10-03
 
 ### Fixed

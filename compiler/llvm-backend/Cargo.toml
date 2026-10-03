@@ -23,6 +23,9 @@ syntax-parsing = { path = "../syntax-parsing" }
 # backend; this is a test-only convenience and never a production cross-slice
 # dependency (mirrors the existing syntax-parsing dev setup).
 hir-lowering = { path = "../hir-lowering" }
+# Every tensor operation's body is computed in MLIR, so a test compiling one links what
+# `mlir-backend` lowers, as `neurc` does. Test-only, like the two above.
+mlir-backend = { path = "../mlir-backend" }
 criterion = { workspace = true }
 
 [[bench]]

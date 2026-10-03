@@ -2,7 +2,6 @@ mod autodiff_tests;
 mod closure_tests;
 mod coalesce_tests;
 mod derive_tests;
-mod device_op_tests;
 mod elementwise_math_tests;
 mod enum_tests;
 mod expr_tests;
@@ -13,6 +12,7 @@ mod loop_adapter_tests;
 mod match_tests;
 mod newtype_tests;
 mod slice_tests;
+mod tensor_op_tests;
 mod tensor_reduce_tests;
 mod tensor_shape_tests;
 mod tensor_tests;
@@ -21,7 +21,7 @@ mod try_tests;
 mod val_else_tests;
 
 use crate::lower_program;
-use neuro_hir::{HirExpr, HirItem, HirProgram, HirStmt};
+use neuro_hir::{HirExpr, HirExprKind, HirItem, HirProgram, HirStmt};
 
 /// Parse and lower `src`, expecting success.
 pub(super) fn lower(src: &str) -> HirProgram {
@@ -51,6 +51,38 @@ pub(super) fn binding_init<'a>(body: &'a [HirStmt], name: &str) -> &'a HirExpr {
         }
     }
     panic!("binding '{}' not found", name);
+}
+
+/// The operation `binding` is initialized with, followed through the outlined function it is
+/// lowered to: that function's tail expression, unboxed from the one-element tensor a
+/// scalar result travels in.
+pub(super) fn operation<'a>(program: &'a HirProgram, binding: &str) -> &'a HirExpr {
+    outlined_operation(
+        program,
+        binding_init(function_body(program, "main"), binding),
+    )
+}
+
+/// [`operation`] for any expression: the outlined operation a call to it names, or the
+/// expression itself.
+pub(super) fn outlined_operation<'a>(program: &'a HirProgram, init: &'a HirExpr) -> &'a HirExpr {
+    let call = match &init.kind {
+        HirExprKind::TensorIndex { object, .. } => object.as_ref(),
+        _ => init,
+    };
+    let HirExprKind::Call { callee, .. } = &call.kind else {
+        return init;
+    };
+    let HirExprKind::Variable(name) = &callee.kind else {
+        return init;
+    };
+    let Some(HirStmt::Expr(tail)) = function_body(program, name).last() else {
+        panic!("`{name}` ends in no tail expression");
+    };
+    match &tail.kind {
+        HirExprKind::TensorLiteral { elements } if elements.len() == 1 => &elements[0],
+        _ => tail,
+    }
 }
 
 /// Names of every free function in the lowered program (monomorphized instances

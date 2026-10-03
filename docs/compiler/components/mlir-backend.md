@@ -6,19 +6,19 @@
 
 ## Overview
 
-The MLIR backend is the tensor lowering path, on the CPU and as NVIDIA or AMD GPU kernels (see
-[GPU kernels](#gpu-kernels)). It consumes the same typed High-Level IR ([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes and emits a verifier-clean
-MLIR module: one `func.func` *declaration* per function and `impl` method, except where a body is
-element-wise tensor arithmetic or a matrix product, which becomes a definition built from the
-`linalg` and `tensor` dialects. That module can be carried on through bufferization and the
-`llvm` dialect into a verified inkwell LLVM module, where a `linalg` body arrives as a real loop nest, proving the
-HIR → MLIR → llvm dialect → inkwell pipeline end-to-end. `neurc` links the bodies this path
-computes into every program it compiles; see
-[Linking into a compile](#linking-into-a-compile).
+The MLIR backend computes every tensor operation, on the CPU and as NVIDIA or AMD GPU kernels
+(see [GPU kernels](#gpu-kernels)). It consumes the same typed High-Level IR
+([`neuro-hir`](hir-lowering.md)) the LLVM backend consumes, in which
+[lowering](hir-lowering.md#tensor-operations) has outlined each tensor operation into a function
+of its own, and builds each one's body from the `linalg`, `tensor` and `memref` dialects. The
+module is carried on through bufferization and the `llvm` dialect into a verified inkwell LLVM
+module, where a `linalg` body arrives as a real loop nest. `neurc` links these bodies into every
+program it compiles; see [Linking into a compile](#linking-into-a-compile).
 
-Scalar arithmetic is deliberately **not** lowered here and never will be: it belongs to the
-[LLVM backend](llvm-backend.md) alone, so that tensor codegen does not exist in two maintained
-copies.
+The two backends split the work by kind. Every loop over a tensor's elements is here, and the
+LLVM backend has none of its own; scalar code, and the tensor work with no loop (building a
+handle, reading one element, moving a tensor between devices), belong to the
+[LLVM backend](llvm-backend.md) alone. Neither is written twice.
 
 ## Architecture
 
@@ -48,8 +48,8 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
   the textual form of a **verified** module.
 - `translate_to_llvm_ir`, the full path: the same module, converted to the `llvm` dialect, translated
   into an inkwell LLVM module, LLVM-verified, and returned as textual LLVM IR.
-- `lower_for_link`, the driver's entry: only the bodies worth linking, as LLVM IR, with the
-  function each symbol computes.
+- `lower_for_link`, the driver's entry: the host body of every outlined tensor operation and of
+  every `@gpu(fallback: true)` function, as LLVM IR, with the function each symbol computes.
 - `lower_for_gpu`, the `@gpu` functions (`fallback: true` ones included) and the `@kernel` ones
   as GPU kernels with host functions that launch them, reading and writing device memory only,
   or an error naming each function it cannot lower. It also takes the tensor operations lowering
@@ -68,8 +68,9 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
 - A tensor maps to a ranked MLIR tensor: `Tensor<f32, [2, 3]>` is `tensor<2x3xf32>`, and a dynamic
   `?` axis becomes MLIR's dynamic-size sentinel. The element must map to an MLIR integer or float;
   an aggregate element is a `MlirError::UnsupportedType`.
-- Every other aggregate / reference / string type maps to an opaque `!llvm.ptr` until real struct
-  lowering lands.
+- A function value maps to `!llvm.struct<(ptr, ptr)>`, the LLVM backend's pair of the function
+  and its environment. Every other aggregate / reference / string type maps to an opaque
+  `!llvm.ptr`.
 - `void` is the empty result list in return position; anywhere else it is a
   `MlirError::UnsupportedType`.
 - The module is run through the MLIR verifier before its textual form is returned.
@@ -77,9 +78,10 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget) -> Result<Linkabl
 ## Tensor Arithmetic
 
 A function whose body is a run of `val` bindings closed by one `return` or a tail expression,
-over element-wise `+ - * /` on tensors, is emitted as a definition instead. An operand may be
-owned or borrowed: a `&Tensor` parameter, or `&a` in the expression, reads the same elements. Each operator becomes a `tensor.empty`
-destination plus one `linalg.generic`:
+over element-wise `+ - * / %` on tensors and the operations below, is emitted as a definition.
+An operand may be owned or borrowed: a `&Tensor` or `&mut Tensor` parameter, or `&a` in the
+expression, reads the same elements. Each operator becomes a `tensor.empty` destination plus one
+`linalg.generic`:
 
 ```mlir
 #map = affine_map<(d0, d1) -> (d0, d1)>
@@ -97,9 +99,12 @@ func.func @f(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> tensor<2x3xf32> 
 }
 ```
 
-Float elements use the `arith` float operations. Integer elements use theirs, with division
-splitting on signedness (`divsi` / `divui`), plus the LLVM backend's checks, described under
-[Linking into a compile](#linking-into-a-compile).
+Float elements use the `arith` float operations (`remf` for `%`, which is C's `fmod`). Integer
+elements use theirs, with division and remainder splitting on signedness (`divsi` / `divui`,
+`remsi` / `remui`), plus the checks described under
+[Linking into a compile](#linking-into-a-compile). A half-precision element (`f16`, `bf16`) is
+widened to `f32` for each operation and the answer rounded back once, so `(a * b) + c` rounds
+twice, as two separate operations do.
 
 ### Broadcasting
 
@@ -122,11 +127,36 @@ back with `tensor.dim` on an operand that walks that axis. A stretched operand c
 one, since it is size 1 there and says nothing about the result.
 
 Anything the builder cannot express leaves the function an external declaration rather than
-failing: scalar bodies and every other tensor operation, which stay on the LLVM backend by
-design; an extent that neither matches the result's nor is 1; an operand outranking the result;
-a different element type; a `?` extent no operand can prove equal to the result's, which is
-never stretched because nothing at compile time can show it is 1; a literal operand; a body that
-hands back an argument unchanged; and `f16` / `bf16` elements.
+failing: scalar bodies, which stay on the LLVM backend by design; an extent that neither matches
+the result's nor is 1; an operand outranking the result; a different element type; a `?` extent
+no operand can prove equal to the result's, which is never stretched because nothing at compile
+time can show it is 1; and a body that hands back an argument unchanged. A scalar operand, a
+literal included, reaches an outlined body as a parameter. For an outlined operation a
+declaration is a compiler bug, which `neurc` reports at the operation.
+
+### The other operations
+
+Every one of these lowers for the host and for a GPU alike.
+
+- **Reductions** (`.sum()`, `.mean()`, `.max()`, `.min()`): a seed and a fold, one result element
+  per parallel point folding its run in order, and runs longer than the language's 4096
+  reduction lanes folded lane by lane first, as [GPU kernels](#gpu-kernels) describes. A
+  half-precision run is widened to `f32`, folded there, and rounded back once.
+- **Sorts** (`.sort()`, `.argsort()`, `.topk()`): a stable rank sort in two `linalg.generic`s.
+- **Elementwise math**: the `math` dialect op of each function's name, which the CPU pipeline
+  turns into the same LLVM intrinsics the LLVM backend calls on a scalar.
+- **Slices and permutations**: a gather reading the source at each result position, and an
+  input map.
+- **`einsum`**: the matrix product's contracting shape, adding in its letters' order.
+- **Compound assignment**, on the host only: one `linalg.generic` over `memref`s whose
+  destination is the `&mut` target's own buffer, so the update writes in place and nothing is
+  copied.
+- **Traversals** (`.map`, `.zip`, `.reduce`), on the host only: one `linalg.generic` whose body
+  calls the traversal's function through its function value, element by element in row-major
+  order.
+
+A GPU runs compound assignments and traversals as per-thread launchers of its own
+([GPU kernels](#gpu-kernels)).
 
 ### Matrix multiplication
 
@@ -228,10 +258,14 @@ stage: `PassPipelineFailed`, `TranslationFailed`, `LlvmVerificationFailed`.
 
 ## Linking into a compile
 
-`lower_for_link` builds a second module holding only the bodies that are safe to swap in, each
-defined under `__neuro_mlir_` plus its function's name, and returns its LLVM IR with the
-`(function, symbol)` pairs. A body qualifies when it lowers (above) and its signature is numeric
-scalars and static tensors of them, owned or behind `&`, returning a static tensor.
+`lower_for_link` builds a second module holding the host body of every outlined operation and
+every `@gpu(fallback: true)` function, each defined under `__neuro_mlir_` plus its function's
+name, and returns its LLVM IR with the `(function, symbol)` pairs. A body qualifies when it lowers
+(above) and its signature is numbers, `bool`s, static tensors of them, owned or behind `&` /
+`&mut`, and function values over them, returning a static tensor, a tuple of them, or nothing.
+A body with a tensor result marks its pointer parameters `noalias`: it only reads its operands
+and writes a buffer its caller has just allocated, which lets LLVM keep an accumulator in a
+register once the body is inlined.
 
 The LLVM backend checks integer elements: an overflowing element panics in a debug build (`-O0`),
 a zero divisor in every build, each naming the operator. A body here cannot panic, and on a GPU
@@ -247,8 +281,8 @@ signature never has a body to link, since the frontend gives a `?` axis no arith
 declares nothing, because a declaration here would name a Neuro-ABI function at an MLIR
 signature.
 
-The [LLVM backend](llvm-backend.md#mlir-bodies) defines each such function as a call to its
-symbol and links the IR in. The result buffer is the LLVM backend's allocation, so it is a
+The [LLVM backend](llvm-backend.md#mlir-bodies) emits each call to such a function as a call to
+its symbol and links the IR in. The result buffer is the LLVM backend's allocation, so it is a
 DLPack tensor like any other; a buffer the body needs in between is allocated and freed inside
 it.
 
@@ -269,16 +303,17 @@ too long for grid y or z, which hold 65,535 blocks, keep a 16 × 16 tile over th
 with the outermost axis on grid x. Functions that need different tilings lower as separate
 modules. A matrix
 product is two kernels, the zero fill and the contraction. A reduction (`.sum()`, `.mean()`,
-`.max()`, `.min()`), which only a GPU body lowers here, is a seed and a fold, plus a division for
+`.max()`, `.min()`) is a seed and a fold, plus a division for
 a mean: one thread per result element folds its run in order, which is the LLVM backend's order,
 so the device and host answers match exactly. A run longer than the language's 4096 reduction
 lanes first folds into a partials tensor, one thread per lane (and per result element), each
 looping over its lane's run positions, and the seed and fold then reduce the lanes: the lane
-order every backend shares, which puts a whole-tensor `.sum()` on thousands of threads. A GPU body also lowers elementwise math (the `math`
-dialect op of each function's name), slices (a gather reading the source at each result
-position), permutations (an input map) and `einsum` (the matrix product's contracting shape, in
-the LLVM backend's summation order). A slice position is a literal, or a parameter the call site
-has already checked: a GPU body cannot stop the program.
+order every backend shares, which puts a whole-tensor `.sum()` on thousands of threads. A GPU body
+also lowers elementwise math, slices, permutations and `einsum`, as the host does. A slice
+position is a literal, or a parameter the call site has already checked: a GPU body cannot stop
+the program. A body over a half-precision or `bool` tensor, or with a float `%`, stays off the
+GPU: NVPTX does not compute `%` as C's exact `fmod` does, and the other two have no device kernel
+checked against them.
 
 A math function becomes a call into the GPU vendor's device math library (libdevice on NVIDIA,
 ocml on AMD), which the kernels can link only when the CUDA toolkit or ROCm is found while
@@ -288,10 +323,12 @@ without it leaves such a body to the host (an outlined operation) or refuses it 
 
 Each symbol keeps `lower_for_link`'s signature, so the
 [LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The two paths split the
-program by `HirFunction::target`: `lower_for_link` takes only host functions and `lower_for_gpu`
-only `@gpu` ones, with or without a fallback, and `FollowsOperands` ones. The host copy of a
-fallback or `FollowsOperands` function is the LLVM backend's own body, not this crate's CPU
-path. A `FollowsOperands` body it cannot lower keeps that host copy alone. A `@gpu` body `lower_for_link` would not take, or one with a rank-0 tensor in it
+program by `HirFunction::target`: `lower_for_link` takes the outlined operations and the
+fallback functions' host copies, and `lower_for_gpu` the `@gpu` ones, with or without a fallback,
+and the outlined operations of a program that moves a tensor to a device (`FollowsOperands`).
+Device symbols are named `__neuro_gpu_` plus the function's name, so a function's host and
+device bodies link side by side. A `FollowsOperands` body it cannot lower keeps its host body
+alone. A `@gpu` body `lower_for_link` would not take, or one with a rank-0 tensor in it
 (a rank-0 operation has no parallel axis to launch over, so it would run on the host against
 device buffers), is `GpuBodiesNotLowered`, with the name and span of each: `@gpu` forbids running
 it anywhere but a GPU. The symbol's body calls MLIR's GPU runtime ABI (`mgpuModuleLoad` or

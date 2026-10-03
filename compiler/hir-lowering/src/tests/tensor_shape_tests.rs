@@ -3,7 +3,7 @@
 // pipeline but not in this slice's test harness. The labelled spelling is covered end to
 // end by `neurc`'s integration tests.
 
-use super::{binding_init, function_body, lower};
+use super::{binding_init, function_body, lower, operation};
 
 use neuro_hir::{HirExprKind, HirType};
 
@@ -19,8 +19,7 @@ fn extents(shape: &[Option<usize>]) -> Vec<usize> {
 /// The shape a shape-manipulation call lowers to, and where each result axis came from.
 fn cast_of(src: &str, binding: &str) -> (Vec<usize>, Option<Vec<usize>>) {
     let program = lower(src);
-    let body = function_body(&program, "main");
-    let init = binding_init(body, binding);
+    let init = operation(&program, binding);
     let HirExprKind::TensorShapeCast { permutation, .. } = &init.kind else {
         panic!(
             "'{binding}' should lower to a shape cast, got {:?}",

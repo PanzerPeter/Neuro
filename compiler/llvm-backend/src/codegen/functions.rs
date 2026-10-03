@@ -52,6 +52,9 @@ impl<'ctx> CodegenContext<'ctx> {
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
+        if let Some((callee, symbol)) = self.expanded_calls.get(func_name).cloned() {
+            return self.emit_external_call(&callee, &symbol, crate::BodyMemory::Host, &passed);
+        }
         let call_result = self
             .builder
             .build_call(function, &arg_values, "calltmp")

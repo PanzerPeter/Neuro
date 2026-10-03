@@ -147,11 +147,11 @@ Reading or writing a single element copies only that element between the host an
 waits for the copy to finish. A loop over the elements of a device tensor therefore pays one copy
 per element, so move the tensor back with `.to(Device::CPU)` before reading many of them.
 
-Some operations have no device form: `%` on tensors, `.map` / `.zip` / `.reduce` whose function
-uses an operator the GPU path lacks (a shift, say), calls a function (a function passed by name
-does) or is passed through a local, an operation on a tensor reached through a
-struct field (`layer.w.sum()`, `layer.w -= g`), and elementwise math when the compiler found no
-device math library. Given a device tensor, each one aborts at the operation with
+Some operations have no device form: `%` on float tensors, an operation on an `f16`, `bf16` or
+`bool` tensor, `.map` / `.zip` / `.reduce` whose function uses an operator the GPU path lacks (a
+shift, say), calls a function (a function passed by name does) or is passed through a local, and
+elementwise math when the compiler found no device math library. A tensor reached through a
+struct field works like any other: `layer.w.sum()` and `layer.w -= g` run where `layer.w` lives. Given a device tensor, each one aborts at the operation with
 ``panic: this tensor lives on a GPU, where host code cannot read it: move it back with
 `.to(Device::CPU)` first``, plus its location. Moving a device tensor, passing it, returning it,
 storing it in a struct and dropping it all work as they do for a host tensor.

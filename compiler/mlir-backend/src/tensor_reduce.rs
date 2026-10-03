@@ -31,8 +31,8 @@ use crate::{
     guards::{At, Element, Lowering},
     lower::map_type,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, empty_tensor, fill_block, generic_op,
-        indexing_maps, iterator_types, tensor_parts,
+        Generic, OperandAxes, build_expression, cast_elements, empty_tensor, fill_block,
+        generic_op, half_precision, indexing_maps, iterator_types, tensor_parts, with_element,
     },
     tensor_layout::linalg_index,
     tensor_sort::precedes,
@@ -76,6 +76,15 @@ pub(crate) fn build_reduce<'c, 'a>(
     else {
         return Ok(None);
     };
+    // A half-precision run folds in `f32` and is rounded once at the end, so a long sum
+    // does not stall where one more element no longer changes a 16-bit total.
+    let half = half_precision(element);
+    let wide = HirType::F32;
+    let narrow = element;
+    let (element, folded_type) = match half {
+        true => (&wide, with_element(result, &wide)),
+        false => (element, result.clone()),
+    };
     let Some(layout) = ReduceLayout::new(source, extents, *axis) else {
         return Ok(None);
     };
@@ -89,8 +98,18 @@ pub(crate) fn build_reduce<'c, 'a>(
     else {
         return Ok(None);
     };
+    let source = match half {
+        true => cast_elements(
+            context,
+            location,
+            block,
+            source,
+            (narrow, &with_element(&receiver.ty, &wide)),
+        )?,
+        false => source,
+    };
 
-    let tensor_type = map_type(context, result)?;
+    let tensor_type = map_type(context, &folded_type)?;
     let element_type = map_type(context, element)?;
     let length = layout.length;
     let fold = Fold {
@@ -162,28 +181,33 @@ pub(crate) fn build_reduce<'c, 'a>(
         tensor_type,
         fold_block(context, location, element_type, &fold)?,
     )?;
-    if *op != HirReduceOp::Mean {
-        return Ok(Some(folded));
-    }
-
-    let length = FloatAttribute::new(context, element_type, length as f64).into();
-    let length = block
-        .append_operation(arith::constant(context, length, location))
-        .result(0)?
-        .into();
-    Ok(Some(apply(
-        context,
-        location,
-        block,
-        Generic {
-            inputs: &[length],
-            destination: folded,
-            indexing_maps: indexing_maps(context, parallel, &[&None, &result_axes])?,
-            iterators: iterator_types(context, parallel, 0)?,
-        },
-        tensor_type,
-        mean_block(location, element_type)?,
-    )?))
+    let value = match *op {
+        HirReduceOp::Mean => {
+            let length = FloatAttribute::new(context, element_type, length as f64).into();
+            let length = block
+                .append_operation(arith::constant(context, length, location))
+                .result(0)?
+                .into();
+            apply(
+                context,
+                location,
+                block,
+                Generic {
+                    inputs: &[length],
+                    destination: folded,
+                    indexing_maps: indexing_maps(context, parallel, &[&None, &result_axes])?,
+                    iterators: iterator_types(context, parallel, 0)?,
+                },
+                tensor_type,
+                mean_block(location, element_type)?,
+            )?
+        }
+        _ => folded,
+    };
+    Ok(Some(match half {
+        true => cast_elements(context, location, block, value, (&wide, result))?,
+        false => value,
+    }))
 }
 
 /// What one fold step computes: the reduction, its element, and where a sum's overflow
@@ -244,9 +268,6 @@ impl ReduceLayout {
     ) -> Option<Self> {
         let extents = source.iter().copied().collect::<Option<Vec<usize>>>()?;
         let rank = extents.len();
-        if rank == 0 {
-            return None;
-        }
         let Some(axis) = axis else {
             // One parallel axis of extent 1, then every source axis reduced.
             return (result == [Some(1)]).then(|| Self {
@@ -266,7 +287,7 @@ impl ReduceLayout {
             .filter(|&i| i != axis)
             .map(|i| Some(extents[i]))
             .collect();
-        if axis >= rank || kept != result || kept.is_empty() {
+        if axis >= rank || kept != result {
             return None;
         }
         let result_axis = |i: usize| (i != axis).then(|| if i < axis { i } else { i - 1 });
@@ -665,13 +686,15 @@ mod tests {
 
     #[test]
     fn a_body_the_gpu_path_cannot_take_keeps_its_host_body_without_error() {
-        // A rank-1 axis reduction has a rank-0 result, so it stays inline, reaching neither
-        // the GPU nor an error.
+        // A rank-1 axis reduction has a rank-0 result, which no GPU launch covers, so it has
+        // a host body alone and is no error.
         let program = program("    val v: Tensor<f32, [4]> = Tensor::ones()\n    val s = v.sum(0)");
-        assert_eq!(outlined(&program), 0);
+        assert_eq!(outlined(&program), 1);
         let bodies = lower_for_gpu(&program, &nvidia(), crate::Overflow::Checked)
             .expect("nothing to refuse");
         assert!(bodies.functions.is_empty());
+        let host = lower_for_link(&program, crate::Overflow::Checked).expect("the host lowers");
+        assert_eq!(host.functions.len(), 1);
     }
 
     #[test]
@@ -703,15 +726,10 @@ mod tests {
     }
 
     #[test]
-    fn the_cpu_path_leaves_reductions_to_the_llvm_backend() {
-        let mut program = program("    val r = g.sum(1)");
-        for item in &mut program.items {
-            if let HirItem::Function(f) = item {
-                f.target = HirTarget::Host;
-            }
-        }
+    fn the_cpu_path_computes_every_reduction() {
+        let program = program("    val r = g.sum(1)\n    val t = g.mean()\n    val m = g.max(0)");
         let bodies =
             lower_for_link(&program, crate::Overflow::Checked).expect("the CPU path lowers");
-        assert!(bodies.functions.is_empty(), "{:?}", bodies.functions);
+        assert_eq!(bodies.functions.len(), outlined(&program));
     }
 }

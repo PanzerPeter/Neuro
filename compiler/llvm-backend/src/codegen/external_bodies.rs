@@ -4,7 +4,9 @@ use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{
+    BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
+};
 use inkwell::{AddressSpace, IntPredicate};
 use neuro_hir::HirFunction;
 
@@ -101,7 +103,31 @@ impl<'ctx> CodegenContext<'ctx> {
         let entry = self.context.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
         self.current_function = Some(function);
+        let params = (0..func_def.params.len())
+            .map(|index| {
+                function.get_nth_param(index as u32).ok_or_else(|| {
+                    CodegenError::InternalError(format!("missing parameter {index}"))
+                })
+            })
+            .collect::<CodegenResult<Vec<_>>>()?;
+        match self.emit_external_call(func_def, symbol, memory, &params)? {
+            Some(value) => self.builder.build_return(Some(&value))?,
+            None => self.builder.build_return(None)?,
+        };
+        Ok(())
+    }
 
+    /// The call [`Self::codegen_external_body`] makes, emitted where the builder stands over
+    /// `values`, the arguments of `func_def`'s parameters, and the value it returns. A call
+    /// to a host body is expanded at its call site this way, so its result is allocated
+    /// where the caller allocates, the arena of a `pool` body included.
+    pub(crate) fn emit_external_call(
+        &mut self,
+        func_def: &HirFunction,
+        symbol: &str,
+        memory: BodyMemory,
+        values: &[BasicValueEnum<'ctx>],
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let mut arg_types: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
         let mut args: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
@@ -110,10 +136,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // Every tensor handle is read before any is staged, because where the call runs,
         // and so where its first staged copy goes, depends on all of them.
         let mut operands = Vec::new();
-        for (index, param) in func_def.params.iter().enumerate() {
-            let value = function
-                .get_nth_param(index as u32)
-                .ok_or_else(|| CodegenError::InternalError(format!("missing parameter {index}")))?;
+        for (param, value) in func_def.params.iter().zip(values.iter().copied()) {
             let ty = Type::from_hir(&param.ty);
             let handle = match &ty {
                 Type::Tensor { .. } => {
@@ -253,7 +276,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.build_dlpack_release(handle)?;
         }
         match (&result_ty, results.as_slice()) {
-            (Type::Void, _) => self.builder.build_return(None)?,
+            (Type::Void, _) => Ok(None),
             (Type::Tuple(_), handles) => {
                 let BasicTypeEnum::StructType(tuple) = self.get_any_llvm_type(&result_ty)? else {
                     return Err(CodegenError::InternalError(
@@ -267,30 +290,28 @@ impl<'ctx> CodegenContext<'ctx> {
                         .build_insert_value(packed, *handle, index as u32, "external.pair")?
                         .into_struct_value();
                 }
-                self.builder.build_return(Some(&packed))?
+                Ok(Some(packed.into()))
             }
-            (_, [handle]) => self.builder.build_return(Some(handle))?,
-            _ => {
-                return Err(CodegenError::InternalError(
-                    "a tensor result staged no buffer".to_string(),
-                ));
-            }
-        };
-        Ok(())
+            (_, [handle]) => Ok(Some((*handle).into())),
+            _ => Err(CodegenError::InternalError(
+                "a tensor result staged no buffer".to_string(),
+            )),
+        }
     }
 
     /// Define `func_def`, a `@gpu(fallback: true)` function whose kernels `symbol`
     /// launches, as a choice between two bodies: the staged device one where the runtime
-    /// found a usable GPU, and this backend's own host body where it did not. The runtime
-    /// probes once, when the first module loads before `main`, so every call in a run takes
-    /// the same branch.
+    /// found a usable GPU, and the host one where it did not: `host`, a body lowered
+    /// outside this backend, or else this backend's own. The runtime probes once, when the
+    /// first module loads before `main`, so every call in a run takes the same branch.
     pub(crate) fn codegen_gpu_fallback(
         &mut self,
         func_def: &HirFunction,
         symbol: &str,
+        host: Option<&str>,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
-        self.codegen_body_choice(func_def, symbol, func_types, |this, _| {
+        self.codegen_body_choice(func_def, (symbol, host), func_types, |this, _| {
             let i32_type = this.context.i32_type();
             let probe = this.extern_fn(GPU_USABLE_FN, i32_type.fn_type(&[], false));
             let usable = this
@@ -313,15 +334,16 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Define `func_def`, a function outlined from one tensor operation whose kernels
     /// `symbol` launches, as a choice made per call: the staged device body when any tensor
-    /// operand lives on a GPU, and this backend's own host body when every one is a host
-    /// tensor, so a host program runs exactly as it did before a device existed.
+    /// operand lives on a GPU, and the host body (`host`, as for
+    /// [`Self::codegen_gpu_fallback`]) when every one is a host tensor.
     pub(crate) fn codegen_follows_operands(
         &mut self,
         func_def: &HirFunction,
         symbol: &str,
+        host: Option<&str>,
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
-        self.codegen_body_choice(func_def, symbol, func_types, |this, function| {
+        self.codegen_body_choice(func_def, (symbol, host), func_types, |this, function| {
             let ptr_type = this.context.ptr_type(AddressSpace::default());
             let mut resident = this.context.bool_type().const_zero();
             for (index, param) in func_def.params.iter().enumerate() {
@@ -345,12 +367,13 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Define `func_def` as a branch between two bodies of its own: the staged device one
-    /// launching `symbol`'s kernels where `choose` answers true, and this backend's host
-    /// body elsewhere. `choose` is emitted at the entry of the function being defined.
+    /// launching `device`'s kernels where `choose` answers true, and the host one elsewhere,
+    /// `host`'s if there is one. `choose` is emitted at the entry of the function being
+    /// defined.
     fn codegen_body_choice(
         &mut self,
         func_def: &HirFunction,
-        symbol: &str,
+        (device, host): (&str, Option<&str>),
         func_types: &HashMap<String, Type>,
         choose: impl FnOnce(&mut Self, FunctionValue<'ctx>) -> CodegenResult<IntValue<'ctx>>,
     ) -> CodegenResult<()> {
@@ -364,9 +387,15 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::UndefinedFunction(func_def.name.clone()))?;
 
         let gpu = self.declare_body_copy(func_def, function, GPU_BODY_SUFFIX);
-        self.codegen_external_body(&gpu, symbol, BodyMemory::Device)?;
-        let host = self.declare_body_copy(func_def, function, HOST_BODY_SUFFIX);
-        self.codegen_function(&host, &HashMap::from([(host.name.clone(), signature)]))?;
+        self.codegen_external_body(&gpu, device, BodyMemory::Device)?;
+        let host_copy = self.declare_body_copy(func_def, function, HOST_BODY_SUFFIX);
+        match host {
+            Some(symbol) => self.codegen_external_body(&host_copy, symbol, BodyMemory::Host)?,
+            None => self.codegen_function(
+                &host_copy,
+                &HashMap::from([(host_copy.name.clone(), signature)]),
+            )?,
+        }
 
         let entry = self.context.append_basic_block(function, "entry");
         let on_gpu = self.context.append_basic_block(function, "on_gpu");
@@ -379,7 +408,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let args: Vec<BasicMetadataValueEnum<'ctx>> =
             function.get_param_iter().map(Into::into).collect();
-        for (block, body) in [(on_gpu, &gpu.name), (on_host, &host.name)] {
+        for (block, body) in [(on_gpu, &gpu.name), (on_host, &host_copy.name)] {
             self.builder.position_at_end(block);
             let callee = *self
                 .functions
@@ -468,7 +497,28 @@ pub(crate) fn link_external_bodies<'ctx>(
     module: &Module<'ctx>,
     bodies: &ExternalBodies,
 ) -> CodegenResult<()> {
-    link_ir(context, module, &bodies.llvm_ir, "external bodies")?;
+    let parsed = parse_ir(context, &bodies.llvm_ir, "external bodies")?;
+    // A host body is the program's tensor arithmetic, so it is optimized whatever `-O` the
+    // program is built at, the way a library it calls would be. It computes the same bits:
+    // nothing here licenses reassociating float arithmetic, and its checks are code of its
+    // own.
+    if bodies.memory == BodyMemory::Host {
+        let (machine, triple) = crate::host_target_machine(crate::OptimizationLevelSetting::O2)?;
+        parsed.set_data_layout(&machine.get_target_data().get_data_layout());
+        parsed.set_triple(&triple);
+        parsed
+            .run_passes(
+                "default<O2>",
+                &machine,
+                inkwell::passes::PassBuilderOptions::create(),
+            )
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to optimize external bodies: {e}"))
+            })?;
+    }
+    module
+        .link_in_module(parsed)
+        .map_err(|e| CodegenError::LlvmError(format!("failed to link external bodies: {e}")))?;
 
     for (_, symbol) in &bodies.functions {
         let function = module.get_function(symbol).ok_or_else(|| {
@@ -504,16 +554,19 @@ fn link_ir<'ctx>(
     ir: &str,
     what: &str,
 ) -> CodegenResult<()> {
+    module
+        .link_in_module(parse_ir(context, ir, what)?)
+        .map_err(|e| CodegenError::LlvmError(format!("failed to link {what}: {e}")))
+}
+
+fn parse_ir<'ctx>(context: &'ctx Context, ir: &str, what: &str) -> CodegenResult<Module<'ctx>> {
     // The IR parser reads a C string, so the text needs the terminator it lacks.
     let mut bytes = ir.as_bytes().to_vec();
     bytes.push(0);
     let buffer = MemoryBuffer::create_from_memory_range_copy(&bytes, what);
-    let parsed = context
+    context
         .create_module_from_ir(buffer)
-        .map_err(|e| CodegenError::LlvmError(format!("failed to parse {what}: {e}")))?;
-    module
-        .link_in_module(parsed)
-        .map_err(|e| CodegenError::LlvmError(format!("failed to link {what}: {e}")))
+        .map_err(|e| CodegenError::LlvmError(format!("failed to parse {what}: {e}")))
 }
 
 fn internalize(module: &Module<'_>, names: &[&str]) {
@@ -583,7 +636,11 @@ mod tests {
 
     fn linked(source: &str, external: &[ExternalBodies], gpu: GpuVendor) -> String {
         let ast = syntax_parsing::parse(source).expect("parsing failed");
-        let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
+        let mut hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
+        // The functions under test have bodies of their own here, so nothing calls the
+        // operations lowering outlined out of them.
+        hir.items
+            .retain(|item| !matches!(item, neuro_hir::HirItem::Function(f) if f.target.outlined()));
         let context = Context::create();
         let codegen_ctx = build_module(
             &context,
@@ -611,6 +668,24 @@ mod tests {
 
     fn device_ir(source: &str) -> String {
         linked_ir(source, DEVICE_BODIES, BodyMemory::Device)
+    }
+
+    /// The device stand-ins beside host ones of their own, as a fallback function has both.
+    fn fallback_ir(source: &str) -> String {
+        let host = ExternalBodies {
+            llvm_ir: BODIES.replace("@ext_", "@ext_host_"),
+            functions: vec![
+                ("scale".to_string(), "ext_host_scale".to_string()),
+                ("consume".to_string(), "ext_host_consume".to_string()),
+            ],
+            memory: BodyMemory::Host,
+            guards: Vec::new(),
+        };
+        linked(
+            source,
+            &[host, both(DEVICE_BODIES, BodyMemory::Device)],
+            GpuVendor::Nvidia,
+        )
     }
 
     fn body<'a>(ir: &'a str, name: &str) -> &'a str {
@@ -986,7 +1061,7 @@ mod tests {
     #[test]
     fn a_fallback_function_chooses_its_device_or_host_body_per_run() {
         let fallback = "@gpu(fallback: true)";
-        let ir = device_ir(&attributed(fallback, fallback));
+        let ir = fallback_ir(&attributed(fallback, fallback));
         let scale = body(&ir, "scale");
         let probe = position(scale, "call i32 @__neuro_gpu_usable()", 0);
         position(scale, "call ptr @scale.gpu(", probe);
@@ -999,8 +1074,10 @@ mod tests {
         );
         let host = any_body(&ir, "scale.host");
         assert!(
-            host.starts_with("define internal") && host.contains("fmul") && !host.contains("mgpu"),
-            "the host body is this backend's own:\n{host}"
+            host.starts_with("define internal")
+                && host.contains("call void @ext_host_scale(")
+                && !host.contains("mgpu"),
+            "the host body is the one computed for the host:\n{host}"
         );
         assert!(
             ir.contains("@__neuro_gpu_fallback = internal constant i8 1"),
@@ -1010,7 +1087,7 @@ mod tests {
 
     #[test]
     fn one_bare_gpu_function_keeps_a_missing_gpu_fatal() {
-        let ir = device_ir(&attributed("@gpu", "@gpu(fallback: true)"));
+        let ir = fallback_ir(&attributed("@gpu", "@gpu(fallback: true)"));
         assert!(
             ir.contains("@__neuro_gpu_fallback = internal constant i8 0"),
             "{ir}"
@@ -1049,7 +1126,12 @@ mod tests {
                 guards: guards.clone(),
             };
             let ast = syntax_parsing::parse(SOURCE).expect("parsing failed");
-            let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
+            let mut hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
+            // Only `consume` is under test, and its body is the stand-in.
+            hir.items.retain(|item| {
+                !matches!(item, neuro_hir::HirItem::Function(f)
+                    if f.name == "scale" || f.target.outlined())
+            });
             let context = Context::create();
             let ir = build_module(
                 &context,

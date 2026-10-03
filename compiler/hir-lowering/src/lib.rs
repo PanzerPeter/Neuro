@@ -32,7 +32,6 @@ use shared_types::Span;
 mod autodiff;
 mod closures;
 mod collections;
-mod device_ops;
 mod elementwise_math;
 mod expressions;
 mod items;
@@ -43,6 +42,7 @@ mod statements;
 mod tensor_apply;
 mod tensor_einsum;
 mod tensor_index;
+mod tensor_ops;
 mod tensor_reduce;
 mod tensor_shape;
 mod tensor_sort;
@@ -198,8 +198,8 @@ struct Lowerer {
     /// Whether the body being lowered is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
-    /// Whether the program moves a tensor to a device anywhere, which is what makes its
-    /// tensor operations worth outlining for the GPU (`device_ops`).
+    /// Whether the program moves a tensor to a device anywhere, which is what lets an
+    /// outlined tensor operation run on one (`tensor_ops`).
     transfers: bool,
     /// For each `@kernel` function, which parameters are bare `Tensor` inputs: a call
     /// borrows those arguments instead of moving them.

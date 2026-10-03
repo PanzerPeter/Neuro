@@ -18,14 +18,9 @@ pub(crate) mod matches;
 mod methods;
 mod slices;
 mod struct_eq;
-mod tensor_apply;
-mod tensor_arith;
-mod tensor_einsum;
 mod tensor_grad;
 mod tensor_index;
-mod tensor_reduce;
 mod tensor_rng;
-mod tensor_sort;
 mod tensors;
 mod tuples;
 mod unary;
@@ -49,6 +44,14 @@ pub(super) fn row_major_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
+/// What reaching a tensor operation means here: `hir-lowering` outlines every one into a
+/// function whose body `mlir-backend` computes, so one left inline is a compiler bug.
+pub(crate) fn computed_in_mlir(what: &str) -> CodegenError {
+    CodegenError::InternalError(format!(
+        "{what} reached the LLVM backend: every tensor operation is computed in MLIR"
+    ))
+}
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for an expression. The HIR carries the resolved type on every
     /// node (`expr.ty`), so the backend reads it directly instead of consulting a
@@ -66,15 +69,8 @@ impl<'ctx> CodegenContext<'ctx> {
                 // A tensor operator allocates a fresh buffer and loops, so it is the one
                 // binary node whose lowering is decided by the RESULT type: either operand
                 // may be the scalar being broadcast across it.
-                let result_ty = Type::from_hir(&expr.ty);
-                if matches!(result_ty, Type::Tensor { .. }) {
-                    return self.codegen_tensor_binary(
-                        left,
-                        *op,
-                        right,
-                        &result_ty,
-                        expr.span.start,
-                    );
+                if matches!(expr.ty, neuro_hir::HirType::Tensor { .. }) {
+                    return Err(computed_in_mlir("a tensor operator"));
                 }
                 // `codegen_binary` dispatches on the left-operand type (instruction
                 // width / signedness), which is the operand's own type rather than the
@@ -220,69 +216,40 @@ impl<'ctx> CodegenContext<'ctx> {
                 let tensor_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_random_normal(mean, std, &tensor_ty)
             }
-            // Tensor indexing and slicing `t[i, j]` / `t[1..3, ..]`.
+            // An element read `t[i, j]`; a slice is computed in MLIR.
             HirExprKind::TensorIndex { object, axes } => {
+                if matches!(expr.ty, neuro_hir::HirType::Tensor { .. }) {
+                    return Err(computed_in_mlir("a tensor slice"));
+                }
                 let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_index(object, axes, &result_ty, expr.span.start)
+                self.codegen_tensor_element(object, axes, &result_ty, expr.span.start)
             }
-            // `.sum()` / `.mean()` / `.max()` / `.min()`, whole-tensor or along one axis.
-            HirExprKind::TensorReduce { receiver, op, axis } => {
-                let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_reduce(receiver, *op, *axis, &result_ty, expr.span.start)
-            }
-            // `einsum("bij,bjk->bik", a, b)`, an Einstein-notation contraction.
-            HirExprKind::TensorEinsum {
-                operands,
-                inputs,
-                output,
-                extents,
-            } => {
-                let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_einsum(
-                    operands,
-                    inputs,
-                    output,
-                    extents,
-                    &result_ty,
-                    expr.span.start,
-                )
-            }
-            // `.map(f)` / `.zip(other, f)` / `.reduce(init, f)` over the elements.
-            HirExprKind::TensorApply {
-                kind,
-                receiver,
-                operand,
-                callee,
-            } => {
-                let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_apply(*kind, receiver, operand.as_deref(), callee, &result_ty)
-            }
-            // `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`.
+            HirExprKind::TensorReduce { .. } => Err(computed_in_mlir("a tensor reduction")),
+            HirExprKind::TensorEinsum { .. } => Err(computed_in_mlir("`einsum`")),
+            HirExprKind::TensorApply { .. } => Err(computed_in_mlir("a tensor traversal")),
+            HirExprKind::TensorSort { .. } => Err(computed_in_mlir("a tensor sort")),
+            // `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)` on a scalar.
             HirExprKind::Math {
                 op,
                 operand,
                 exponent,
             } => {
-                let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_math(*op, operand, exponent.as_deref(), &result_ty)
+                if matches!(expr.ty, neuro_hir::HirType::Tensor { .. }) {
+                    return Err(computed_in_mlir("elementwise math on a tensor"));
+                }
+                self.codegen_math(*op, operand, exponent.as_deref())
             }
-            // `.sort()` / `.argsort()` / `.topk()`, along one axis.
-            HirExprKind::TensorSort {
-                receiver,
-                kind,
-                axis,
-                descending,
-            } => {
-                let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_sort(receiver, *kind, *axis, *descending, &result_ty)
-            }
-            // `.t()` / `.reshape(...)` / `.permute(...)` / `.flatten(...)`.
+            // `.reshape(...)` / `.flatten(...)`, which keep the element order; a permuting
+            // `.t()` / `.permute(...)` is computed in MLIR.
             HirExprKind::TensorShapeCast {
                 receiver,
                 permutation,
             } => {
+                if permutation.is_some() {
+                    return Err(computed_in_mlir("a permuting shape cast"));
+                }
                 let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_shape_cast(receiver, permutation.as_deref(), &result_ty)
+                self.codegen_tensor_redescribe(receiver, &result_ty)
             }
             HirExprKind::TensorDetach { receiver } => self.codegen_tensor_detach(receiver),
 
@@ -539,6 +506,16 @@ impl<'ctx> CodegenContext<'ctx> {
                     .get(name)
                     .ok_or_else(|| CodegenError::UndefinedVariable(name.clone()))?;
                 Ok((*ptr).into())
+            }
+            // A `&Tensor` is the address of a cell holding the handle, and a tensor inside
+            // a field, an element or a referent has no cell of its own. A fresh one holding
+            // the same handle serves: whoever borrows it reads and writes the buffer the
+            // place owns, never the cell.
+            _ if matches!(Type::from_hir(&operand.ty), Type::Tensor { .. }) => {
+                let handle = self.codegen_expr(operand)?;
+                let cell = self.entry_alloca(handle.get_type(), "borrow.cell")?;
+                self.builder.build_store(cell, handle)?;
+                Ok(cell.into())
             }
             other => Err(CodegenError::InternalError(format!(
                 "borrow of a non-place expression reached codegen: {:?}",

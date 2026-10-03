@@ -212,14 +212,17 @@ fn build_module<'ctx>(
     gpu: GpuVendor,
 ) -> CodegenResult<CodegenContext<'ctx>> {
     let items = &program.items;
-    let external_symbol = |name: &str| {
-        external.iter().find_map(|bodies| {
-            bodies
-                .functions
-                .iter()
-                .find(|(function, _)| function == name)
-                .map(|(_, symbol)| (symbol.as_str(), bodies.memory))
-        })
+    let external_symbol = |name: &str, memory: BodyMemory| {
+        external
+            .iter()
+            .filter(|bodies| bodies.memory == memory)
+            .find_map(|bodies| {
+                bodies
+                    .functions
+                    .iter()
+                    .find(|(function, _)| function == name)
+                    .map(|(_, symbol)| symbol.as_str())
+            })
     };
     let device_bodies = external
         .iter()
@@ -395,6 +398,23 @@ fn build_module<'ctx>(
         codegen_ctx.define_gpu_fallback_flag(every_function_falls_back);
     }
 
+    // An outlined operation with a host body and none for a device runs on the host at
+    // every call, so each call computes it in place rather than calling a function: the
+    // result is then allocated where the caller allocates, the arena of a `pool` body
+    // included, which an allocation inside a callee never is.
+    for item in items {
+        if let HirItem::Function(func_def) = item
+            && func_def.target.outlined()
+            && external_symbol(&func_def.name, BodyMemory::Device).is_none()
+            && let Some(symbol) = external_symbol(&func_def.name, BodyMemory::Host)
+        {
+            codegen_ctx.expanded_calls.insert(
+                func_def.name.clone(),
+                (func_def.clone(), symbol.to_string()),
+            );
+        }
+    }
+
     // Emit module-level constants as LLVM global constants before any function.
     // This ensures all globals are defined before function bodies reference them.
     for item in items {
@@ -430,20 +450,31 @@ fn build_module<'ctx>(
     // Generate code for each function and impl method
     for item in items {
         match item {
-            HirItem::Function(func_def) => match external_symbol(&func_def.name) {
-                Some((symbol, BodyMemory::Device)) if func_def.target == HirTarget::GpuOrHost => {
-                    codegen_ctx.codegen_gpu_fallback(func_def, symbol, &func_types)?
+            HirItem::Function(func_def)
+                if codegen_ctx.expanded_calls.contains_key(&func_def.name) => {}
+            HirItem::Function(func_def) => {
+                let host = external_symbol(&func_def.name, BodyMemory::Host);
+                match (
+                    external_symbol(&func_def.name, BodyMemory::Device),
+                    func_def.target,
+                ) {
+                    (Some(device), HirTarget::GpuOrHost) => {
+                        codegen_ctx.codegen_gpu_fallback(func_def, device, host, &func_types)?
+                    }
+                    (Some(device), HirTarget::FollowsOperands) => {
+                        codegen_ctx.codegen_follows_operands(func_def, device, host, &func_types)?
+                    }
+                    (Some(device), _) => {
+                        codegen_ctx.codegen_external_body(func_def, device, BodyMemory::Device)?
+                    }
+                    (None, _) => match host {
+                        Some(symbol) => {
+                            codegen_ctx.codegen_external_body(func_def, symbol, BodyMemory::Host)?
+                        }
+                        None => codegen_ctx.codegen_function(func_def, &func_types)?,
+                    },
                 }
-                Some((symbol, BodyMemory::Device))
-                    if func_def.target == HirTarget::FollowsOperands =>
-                {
-                    codegen_ctx.codegen_follows_operands(func_def, symbol, &func_types)?
-                }
-                Some((symbol, memory)) => {
-                    codegen_ctx.codegen_external_body(func_def, symbol, memory)?
-                }
-                None => codegen_ctx.codegen_function(func_def, &func_types)?,
-            },
+            }
             HirItem::Impl(impl_def) => {
                 codegen_ctx.codegen_impl(impl_def, &func_types)?;
             }
@@ -525,7 +556,7 @@ impl OptimizationLevelSetting {
 ///
 /// Split out of `emit_object_code` so `optimize_module` can be driven directly by the
 /// tests that assert on the IR the pipeline produces.
-fn host_target_machine(
+pub(crate) fn host_target_machine(
     optimization: OptimizationLevelSetting,
 ) -> CodegenResult<(
     inkwell::targets::TargetMachine,
