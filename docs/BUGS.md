@@ -5,40 +5,49 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-096: `@` and `einsum` on `f16` / `bf16` round after every product and every sum
+## BUG-098: `@derive(Clone)` refuses a struct with a field that owns a buffer
 
-- **Status**: open, confirmed
-- **Area**: `mlir-backend`; `Element::Half` in `guards.rs`, which `build_matmul` and
-  `build_einsum` share with the elementwise operators
-- **Severity**: minor. A wrong last bit or more on a half-precision product, never a crash
+- **Status**: open, confirmed. Narrowed: the derived `.clone()` used to copy such a field's
+  pointer, so the copy and the original shared one buffer, freed twice for a tensor, `Vec` or
+  `StringBuilder` field and read after release for a `string` one. That is now a compile error
+- **Area**: `semantic-analysis` (`is_derived_cloneable`) and `llvm-backend` (`StructClone` in
+  `codegen/expressions/methods.rs`)
+- **Severity**: minor. The compiler rejects, it does not miscompile
 
 **Minimal repro**
 
 ```neuro
+@derive(Clone)
+struct Named { name: string, id: i32 }
+
 func main() -> i32 {
-    val a: Tensor<bf16, [1, 3]> = [[1.0bf16, 1.0bf16, 1.0bf16]]
-    val b: Tensor<bf16, [3, 1]> = [[1.0bf16], [0.00390625bf16], [0.00390625bf16]]
-    val c = &a @ &b
-    println("{c[0, 0] as f32}")
-    return 0
+    val a = Named { name: "a" + "b", id: 1 }
+    val b = a.clone()
+    b.name.len() as i32
 }
 ```
 
-Expected: `1.0078125`. The language reference says `@` on `f16` and `bf16` accumulates in
-`f32` and rounds the result once, and `1 + 2^-8 + 2^-8` is exact in `f32` and in `bf16`.
-Observed: `1.0`. `einsum("ij,jk->ik", ...)` gives the same.
+Expected: exit 2. The language reference says `@derive` writes the impl a programmer would have
+written, field by field, so `name` is copied with its own `.clone()`. Observed:
 
-**Root cause**: confirmed in the code. A contraction's body is built from the element-wise
-rule for half precision, which widens both operands to `f32`, computes and rounds back after
-each operation. That rule is right for `+` and `*` on their own, but in a contraction it rounds
-the accumulator to `bf16` after every product, so `1 + 2^-8` falls back to `1` twice.
+```text
+struct 'Named' cannot derive `Clone`: field 'name' has type string, which owns a buffer that a
+derived `.clone()` cannot copy yet; build the copy in a method of your own
+```
 
-**Workaround**: copy each operand into an `f32` tensor element by element (`m[i, j] as f32`),
-take the product there, and narrow each element of the result with `as bf16`.
+A tensor, `Vec`, `StringBuilder`, an array of `string`, and a generic field instantiated with any
+of them are refused the same way.
 
-**Fix sketch**: give a half-precision contraction an `f32` accumulator, a `tensor.empty` of
-`f32` filled with zero, so its body widens each operand, multiplies, adds in `f32` and never
-narrows. One element-wise `arith.truncf` over the finished sum rounds it once.
+**Root cause**: confirmed in the code. The backend's derived clone loads the struct's bytes. That
+is a faithful copy only for fields that are `Copy` or are themselves structs cloned that way.
+
+**Workaround**: write a method that builds the copy, calling `.clone()` on each owning field.
+
+**Fix sketch**: generate the derived clone field by field: a `string` or tensor field through its
+own clone, a nested struct recursively, an array or tuple per element. A field type with no
+`.clone()` of its own (`Vec`, `StringBuilder`) stays refused. The copy's `string` positions must
+be armed, or the new buffers leak (see BUG-092). Regression tests: each field kind under a leak
+check, the copy outliving the original, and a generic struct instantiated with `string`.
 
 ## BUG-092: a struct returned from a function never releases the `string` buffers it holds
 
@@ -228,10 +237,10 @@ releases what they held before the call. Regression tests: the repro in a loop u
 check, a literal in the place (must not be freed), and a tensor field inside and outside a
 `pool`.
 
-## BUG-049: a `pool` refuses to store some values it could prove are heap memory
+## BUG-049: a `pool` refuses to store an `if` or `match` value whose arm declares a binding
 
 - **Status**: open, confirmed. Narrowed: a closure literal argument is admitted through its
-  captures
+  captures, and a builtin `.clone()` of a block-local value is admitted
 - **Area**: `semantic-analysis`; `carries_no_arena` in `type_checkers/pools.rs`
 - **Severity**: minor. Sound (the refusal never lets arena memory escape) but it rejects
   programs whose values never touch the arena
@@ -243,31 +252,31 @@ func main() -> i32 {
     val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
     mut out: Tensor<i32, [2, 2]> = [[0, 0], [0, 0]]
     pool scratch {
-        val local: Tensor<i32, [2, 2]> = [[5, 6], [7, 8]]
-        out = local.clone()   // refused
+        out = if a[0, 0] > 0 {
+            val k = 2
+            &a * k
+        } else {
+            a.clone()
+        }
     }
     out[1, 1]
 }
 ```
 
-Expected: exit 8. The language reference routes an allocation whose owner outlives the block
-to the heap, and a store into a binding that outlives the block is emitted with the arena
-switched off, so the clone is heap memory whatever its receiver holds. Observed: refused with
-"... outlives the pool". An `if` / `match` arm or a block that declares a binding of its own
-is refused the same way.
+Expected: exit 8. A store into a binding that outlives the block is emitted with the arena
+switched off, so either arm's value is heap memory. Observed: refused with "... outlives the
+pool". The same arm without its `val k` line compiles.
 
-**Root cause**: confirmed in the code. `carries_no_arena` enumerates the expression shapes it
-can prove and falls back to "may carry arena memory" for everything else. A method call on a
-block-local receiver is walked through the receiver, which is arena memory, although a builtin
-`.clone()` copies it out. An arm with bindings is walked before the value is checked, so its
-names do not resolve.
+**Root cause**: confirmed in the code. `carries_no_arena` walks an arm only when the arm is a
+bare tail expression, because the walk runs after the arm's scope is gone, so a name the arm
+declared would not resolve and would read as "not a binding".
 
-**Workaround**: bind the value inside the block and copy out a scalar, or build it before the
-block.
+**Workaround**: declare the binding before the `if`, or compute the value into a block-local
+binding and copy it out with `.clone()`.
 
-**Fix sketch**: admit a builtin `.clone()` under a routed emission whatever its receiver, since
-the copy is the routed allocation. An arm that declares bindings needs the walk to run after the
-value is checked, so that its names resolve.
+**Fix sketch**: record, while the arm is checked and its scope is still open, whether its tail
+carries no arena memory, and have `carries_no_arena` read that record instead of walking the
+arm again.
 
 ## BUG-038: a `string` passed by value to a closure, or returned by one, is released by nobody
 

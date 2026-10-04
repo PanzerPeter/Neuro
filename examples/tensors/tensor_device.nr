@@ -10,8 +10,8 @@
 // too: operators and `@`, compound assignment, reductions, sorts, slices, `.t()`, `einsum`,
 // the elementwise math methods, and `.map` / `.zip` / `.reduce` over a closure, as well as
 // reading or writing one element and `.clone()`. Integer operations keep the host's checks
-// there. An operation with no device form (`%` on tensors, say) aborts with a diagnostic
-// asking for `.to(Device::CPU)` first.
+// there. An operation with no device form (any operation on a `bf16` tensor, say) aborts with a
+// diagnostic asking for `.to(Device::CPU)` first.
 //
 // On a machine with several GPUs, `Device::GPU(1)` and up name the others, and a `@gpu`
 // call runs on the GPU its tensors are on. Like every program with a bare `@gpu`

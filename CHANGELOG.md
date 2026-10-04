@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.1] - 2026-10-04
+
+### Fixed
+
+- `@derive(Clone)` on a struct with a field that owns a buffer (a `string`, tensor, `Vec`,
+  `StringBuilder`, or an array of `string`) copied the field's pointer, so the clone and the
+  original shared one buffer: a tensor, `Vec` or `StringBuilder` was freed twice, and a `string`
+  was read after the original released it. Such a derive is now a compile error that names the
+  field. Cloning those fields one by one is tracked as BUG-098.
+- `@` and `einsum` on `f16` / `bf16` tensors rounded the running sum to the element type after
+  every step, so `1 + 2^-8 + 2^-8` in `bf16` gave `1.0`. A half-precision contraction now
+  accumulates in `f32` and rounds each result element once (BUG-096).
+- A `@gpu` body that used a scalar constant, such as `a * 2.0` or a `val` bound to a literal,
+  was refused as "cannot become a GPU kernel", while the same body with the scalar passed as a
+  parameter compiled. An `f32`, `f64` or integer constant now works like a parameter (BUG-097).
+- A `pool` refused `out = local.clone()` when `local` belonged to the block, although that copy
+  is made on the heap. A builtin `.clone()` stored past the block is now accepted. An `if` or
+  `match` arm that declares a binding is still refused (BUG-049).
+
+### Changed
+
+- A half-precision `@` or `einsum` on the CPU now uses the register-blocked, vectorized
+  schedule that `f32` products use.
+- A float `%` on GPU tensors runs on the GPU and gives the same bits as on the host, through
+  the GPU vendor's device math library. Without that library it stays on the host, as the
+  elementwise math functions do.
+
 ## [5.6.0] - 2026-10-04
 
 ### Changed

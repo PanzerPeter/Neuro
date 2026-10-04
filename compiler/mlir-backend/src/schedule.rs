@@ -83,10 +83,7 @@ pub(crate) fn tag<'c>(
 /// where the naive nest is as good or the block would not vectorize.
 fn plan(side: Side, (extents, parallel): (&[u64], usize), element: &HirType) -> Option<Schedule> {
     let (result, contracted) = extents.split_at_checked(parallel)?;
-    // A half-precision body widens its accumulator before adding and narrows the sum, a
-    // chain the vectorizer does not recognize as a reduction.
-    if result.is_empty() || contracted.is_empty() || matches!(element, HirType::F16 | HirType::BF16)
-    {
+    if result.is_empty() || contracted.is_empty() {
         return None;
     }
     let block = match side {
@@ -350,8 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn half_precision_and_contractions_without_a_reduction_are_not_blocked() {
-        assert_eq!(plan(Side::Host, (&[64, 64, 9], 2), &HirType::BF16), None);
+    fn contractions_without_a_reduction_are_not_blocked() {
         assert_eq!(plan(Side::Host, (&[64, 64], 2), &HirType::F32), None);
     }
 

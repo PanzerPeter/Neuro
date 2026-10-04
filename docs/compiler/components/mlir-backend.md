@@ -231,8 +231,9 @@ and never splits an element's sum, so a scheduled product has exactly the bits o
 on the host and on a GPU. That rules out tensor-core MMA and a vendor BLAS, which both split the
 contracted extent or fuse the multiply into the add.
 
-A body with integer overflow checks (the `-O0` tier), a half-precision element, and an `einsum`
-operand that repeats a letter are left as the naive nest.
+A half-precision contraction widens its operands to `f32`, contracts there and rounds each result
+element once, so it is scheduled as an `f32` one. A body with integer overflow checks (the `-O0`
+tier) and an `einsum` operand that repeats a letter are left as the naive nest.
 
 ## MLIR to LLVM IR
 
@@ -341,9 +342,9 @@ looping over its lane's run positions, and the seed and fold then reduce the lan
 order every backend shares, which puts a whole-tensor `.sum()` on thousands of threads. A GPU body
 also lowers elementwise math, slices, permutations and `einsum`, as the host does. A slice
 position is a literal, or a parameter the call site has already checked: a GPU body cannot stop
-the program. A body over a half-precision or `bool` tensor, or with a float `%`, stays off the
-GPU: NVPTX does not compute `%` as C's exact `fmod` does, and the other two have no device kernel
-checked against them.
+the program. A body over a half-precision or `bool` tensor stays off the GPU: neither has a device
+kernel checked against it. A float `%` calls the device math library's exact `fmod`, as the
+math functions below do, rather than the hardware's divide-based `frem`.
 
 A math function becomes a call into the GPU vendor's device math library (libdevice on NVIDIA,
 ocml on AMD), which the kernels can link only when the CUDA toolkit or ROCm is found while

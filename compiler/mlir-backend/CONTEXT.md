@@ -36,9 +36,10 @@ caches.
   `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which the caller defines. It also
   admits every `FollowsOperands` function (a tensor operation lowering outlined out of host code)
   the same way, but leniently: one it cannot lower keeps its host body alone and is no error. A
-  body over a half-precision or `bool` tensor, or with a float `%`, is kept off the GPU
-  (`exact_on_gpu`): NVPTX's `frem` is not C's exact `fmod`, and the other two have no device
-  kernel checked against them. A `@gpu` body with one is refused as before. One
+  body over a half-precision or `bool` tensor is kept off the GPU (`exact_on_gpu`): neither has
+  a device kernel checked against it. A float `%` counts as a math call (`math_functions`): the
+  vendor conversion turns `arith.remf` into the device library's exact `fmod`, so it needs that
+  library exactly as `exp` does. A `@gpu` body with one is refused as before. One
   whose body is a compound assignment or a `.map` / `.zip` / `.reduce` becomes a per-thread
   launcher instead (`kernel/body/traversal.rs`), as leniently. It
   lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
@@ -334,7 +335,9 @@ so an operand of lower rank supplies the innermost axes and its map simply omits
 result dimensions. An extent of 1 against a larger result extent is stretched: that axis maps
 to the constant `0`, so the operand is read at index 0 at every point the result axis covers. A
 scalar operand of the element type has no index space at all and maps to `()`, which is how
-`linalg.generic` hands one value to every point. The destination always keeps the identity map;
+`linalg.generic` hands one value to every point. A scalar operand is a parameter or, in a `@gpu`
+body (lowered whole, without the outliner that makes host constants parameters), an `f32`, `f64`
+or integer literal, which becomes an `arith.constant`. The destination always keeps the identity map;
 that is what makes the operation element-wise rather than a gather. Any other mismatch (an
 extent neither equal nor 1, an operand outranking the result, or a different element type) is
 a shape error the frontend owns, so it answers `Ok(None)` rather than being lowered wrongly.
@@ -365,8 +368,9 @@ appears in no operand of the destination, so a `?` anywhere answers `Ok(None)`.
 
 **Contractions are scheduled (`schedule.rs`).** `build_matmul` and `build_einsum` tag their
 contracting generic with tile sizes (`neuro.tiles`, `neuro.peel`, `neuro.vectorize`) when its body
-carries no integer check, its element is not half precision (the vectorizer does not see a reduction
-through the widening) and no `einsum` operand repeats a letter. `lower_for_link` and
+carries no integer check and no `einsum` operand repeats a letter. A half-precision contraction is
+built over its operands widened to `f32` (`cast_elements`), accumulates in `f32` and narrows each
+result element once at the end, so it is tagged as the `f32` contraction it is. `lower_for_link` and
 `lower_for_gpu` call `schedule::apply` on the module they lower, before bufferization: it reads the
 distinct tags back with a walk, writes one transform-dialect script and runs it through
 `mlirTransformApplyNamedSequence` (melior wraps no interpreter). On the host the result axes tile

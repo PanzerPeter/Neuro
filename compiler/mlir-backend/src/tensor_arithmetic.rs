@@ -24,6 +24,7 @@ use melior::{
     },
 };
 use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirSortKind, HirStmt, HirType};
+use shared_types::Literal;
 
 /// How many region arguments `linalg.generic` passes an element-wise binary body:
 /// one per operand, the destination's included.
@@ -314,8 +315,54 @@ pub(crate) fn build_expression<'c, 'a>(
         HirExprKind::Binary { .. } => {
             build_elementwise(context, location, block, expression, scope, lowering)
         }
+        // Host code reaches this path through the outliner, which passes a scalar constant
+        // as a parameter, but a `@gpu` body is lowered whole: `a * 2.0` there must lower as
+        // `a * s` does for a scalar parameter `s`.
+        HirExprKind::Literal(literal) => {
+            scalar_constant(context, location, block, literal, &expression.ty)
+        }
         _ => Ok(None),
     }
+}
+
+/// A scalar constant of an `f32`, `f64` or integer type, the operand a scalar broadcast reads.
+/// A half-precision one is left to the LLVM backend, which rounds it as a scalar's own value.
+fn scalar_constant<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    literal: &Literal,
+    ty: &HirType,
+) -> Result<Option<Value<'c, 'a>>, MlirError> {
+    let element_type = map_type(context, ty)?;
+    let attribute: Attribute<'c> = match (literal, ty) {
+        (Literal::Float(value, _), HirType::F32 | HirType::F64) => {
+            FloatAttribute::new(context, element_type, *value).into()
+        }
+        (Literal::Integer(value, _), HirType::F32 | HirType::F64) => {
+            FloatAttribute::new(context, element_type, *value as f64).into()
+        }
+        // The low 64 bits are the constant's two's-complement pattern at every width,
+        // `u64` values past `i64::MAX` included.
+        (
+            Literal::Integer(value, _),
+            HirType::I8
+            | HirType::I16
+            | HirType::I32
+            | HirType::I64
+            | HirType::U8
+            | HirType::U16
+            | HirType::U32
+            | HirType::U64,
+        ) => IntegerAttribute::new(element_type, *value as i64).into(),
+        _ => return Ok(None),
+    };
+    Ok(Some(
+        block
+            .append_operation(arith::constant(context, attribute, location))
+            .result(0)?
+            .into(),
+    ))
 }
 
 /// Lower `a OP b` over two tensors into `tensor.empty` plus a `linalg.generic`.
@@ -409,9 +456,14 @@ fn build_matmul<'c, 'a>(
     let HirExprKind::Binary { left, right, .. } = &expression.kind else {
         return Ok(None);
     };
-    let Some((element, result_shape)) = tensor_parts(&expression.ty) else {
+    let Some((narrow, result_shape)) = tensor_parts(&expression.ty) else {
         return Ok(None);
     };
+    // A half-precision product accumulates in `f32` and is rounded once at the end, so
+    // its operands are widened and the whole contraction runs as an `f32` one.
+    let wide = HirType::F32;
+    let half = half_precision(narrow);
+    let element = if half { &wide } else { narrow };
     let Some(kind) = arithmetic(BinaryOp::MatMul, element) else {
         return Ok(None);
     };
@@ -430,8 +482,28 @@ fn build_matmul<'c, 'a>(
     let Some(rhs) = build_expression(context, location, block, right, scope, lowering)? else {
         return Ok(None);
     };
+    let (lhs, rhs) = match half {
+        true => (
+            cast_elements(
+                context,
+                location,
+                block,
+                lhs,
+                (narrow, &with_element(&left.ty, &wide)),
+            )?,
+            cast_elements(
+                context,
+                location,
+                block,
+                rhs,
+                (narrow, &with_element(&right.ty, &wide)),
+            )?,
+        ),
+        false => (lhs, rhs),
+    };
+    let computed = with_element(&expression.ty, element);
 
-    let tensor_type = map_type(context, &expression.ty)?;
+    let tensor_type = map_type(context, &computed)?;
     let element_type = map_type(context, element)?;
     let rank = result_shape.len();
 
@@ -505,7 +577,13 @@ fn build_matmul<'c, 'a>(
         );
     }
 
-    Ok(Some(block.append_operation(contraction).result(0)?.into()))
+    let product = block.append_operation(contraction).result(0)?.into();
+    match half {
+        true => {
+            cast_elements(context, location, block, product, (element, &expression.ty)).map(Some)
+        }
+        false => Ok(Some(product)),
+    }
 }
 
 /// `[rows, columns, contracted]`, the loop extents of a static matrix product.

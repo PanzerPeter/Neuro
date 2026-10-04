@@ -127,6 +127,48 @@ func main() -> i32 {
     assert_ran(&output, 0, "2395.5 29.0 13.125\n");
 }
 
+/// A float `%` on device tensors is the host's exact `fmod`, through the vendor's device math
+/// library. The quotients here are far past what a divide, truncate and subtract can recover,
+/// which is how the GPU's own `frem` computes it. Without the library the operation stays on the
+/// host and refuses the device operand at the `%`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_float_remainder_on_the_device_is_the_hosts_fmod() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    val a: Tensor<f32, [4]> = [1e30, -3.4e38, 16777217.0, 7.5]
+    val b: Tensor<f32, [4]> = [3.0, 0.7, 0.1, -2.0]
+    val c: Tensor<f64, [3]> = [1e300, -7.25, 123456789.5]
+    val d: Tensor<f64, [3]> = [0.3, 2.0, -0.001]
+    val ga = a.clone().to(Device::GPU(0))
+    val gb = b.clone().to(Device::GPU(0))
+    val gc = c.clone().to(Device::GPU(0))
+    val gd = d.clone().to(Device::GPU(0))
+    val r = (&ga % &gb).to(Device::CPU)
+    val s = (&gc % &gd).to(Device::CPU)
+    mut wrong = 0
+    for i in 0..4 {
+        if r[i] != a[i] % b[i] || 1.0f32 / r[i] != 1.0f32 / (a[i] % b[i]) { wrong += 1 }
+    }
+    for i in 0..3 {
+        if s[i] != c[i] % d[i] { wrong += 1 }
+    }
+    println("{r[3]} {s[1]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "fmod.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.starts_with(ON_DEVICE) && stderr.contains("fmod.nr:11:") {
+        return;
+    }
+    assert_ran(&output, 0, "1.5 -1.25\n");
+}
+
 /// A run longer than the 4096 reduction lanes folds in lanes on the device, one GPU thread
 /// per lane, in the order the host's lanes take: whole-tensor and axis reductions over long
 /// runs (along the last axis and across rows) match the host bit for bit. The values are

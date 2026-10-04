@@ -169,6 +169,16 @@ impl TypeChecker {
                         InterpPart::Formatted { expr, .. } => self.carries_no_arena(expr, emission),
                     })
             }
+            // A builtin `.clone()` copies its receiver into an allocation of its own, and a
+            // routed emission makes that allocation on the heap, so whatever the receiver
+            // holds stays behind in the block.
+            Expr::Call { func, args, .. }
+                if emission == Emission::Routed
+                    && args.is_empty()
+                    && self.is_builtin_clone(func) =>
+            {
+                true
+            }
             // A callee's allocations are emitted while its own body is generated, with
             // the backend's pool depth back at zero, so they come from libc however deep
             // inside a pool the call sits. The result is therefore heap memory unless the
@@ -276,6 +286,18 @@ impl TypeChecker {
             return true;
         }
         emission == Emission::Routed && !self.dispatches_dynamically(func)
+    }
+
+    /// Whether `func` is `.clone()` on a receiver whose `clone` the compiler provides. Only
+    /// when no `impl` in the program declares a `clone`: a user's one may take `self` by
+    /// value and hand the receiver itself back.
+    fn is_builtin_clone(&self, func: &Expr) -> bool {
+        matches!(func, Expr::FieldAccess { field, .. } if field.name == "clone")
+            && !self.dispatches_dynamically(func)
+            && !self
+                .impl_methods
+                .values()
+                .any(|methods| methods.contains_key("clone"))
     }
 
     /// Whether `func` reaches its body through a trait object's vtable.

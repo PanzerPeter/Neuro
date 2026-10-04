@@ -111,7 +111,7 @@ fn off_linux_a_gpu_function_is_a_compile_error() {
 #[test]
 fn a_body_that_cannot_become_a_kernel_is_a_compile_error() {
     let test = CompileTest::new();
-    let text = "@gpu\nfunc add(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> {\n    a % b\n}\n@gpu\nfunc total(a: &Tensor<f32, [4]>) -> f32 {\n    a.sum()\n}\nfunc main() -> i32 { return 0 }\n";
+    let text = "@gpu\nfunc add(a: Tensor<bf16, [4]>, b: Tensor<bf16, [4]>) -> Tensor<bf16, [4]> {\n    a + b\n}\n@gpu\nfunc total(a: &Tensor<f32, [4]>) -> f32 {\n    a.sum()\n}\nfunc main() -> i32 { return 0 }\n";
     let source = test.write_source("not_a_kernel.nr", text);
     let compiled = test
         .compile(&source)
@@ -270,6 +270,69 @@ func main() -> i32 {
         String::from_utf8_lossy(&output.stdout),
         "4.0 4.0 1 3 0.5 0 2 1\n"
     );
+}
+
+/// A scalar constant in a `@gpu` body broadcasts as a scalar parameter does. The body is
+/// lowered whole, without the outliner that turns host code's constants into parameters,
+/// so a literal operand (or a `val` bound to one) used to refuse the whole function.
+#[cfg(target_os = "linux")]
+#[test]
+fn regression_a_gpu_body_scalar_constant_broadcasts_like_a_parameter() {
+    const SOURCE: &str = r#"
+@gpu
+func literal(a: &Tensor<f32, [6, 4]>) -> Tensor<f32, [6, 4]> {
+    a * 2.5f32 + 1.0
+}
+
+@gpu
+func bound(a: &Tensor<f32, [6, 4]>) -> Tensor<f32, [6, 4]> {
+    val s = 2.5f32
+    val t = a * s
+    t + 1.0f32
+}
+
+@gpu
+func parameter(a: &Tensor<f32, [6, 4]>, s: f32, o: f32) -> Tensor<f32, [6, 4]> {
+    a * s + o
+}
+
+@gpu
+func widest(a: &Tensor<u64, [4]>) -> Tensor<u64, [4]> {
+    a + 18446744073709551614u64
+}
+
+func main() -> i32 {
+    mut a: Tensor<f32, [6, 4]> = Tensor::zeros()
+    for i in 0..6 {
+        for k in 0..4 { a[i, k] = (i * 4 + k) as f32 * 0.37f32 }
+    }
+    val x = literal(&a)
+    val y = bound(&a)
+    val z = parameter(&a, 2.5f32, 1.0f32)
+    mut wrong = 0
+    for i in 0..6 {
+        for k in 0..4 {
+            if x[i, k] != z[i, k] || y[i, k] != z[i, k] { wrong += 1 }
+        }
+    }
+    val u: Tensor<u64, [4]> = Tensor::ones()
+    if widest(&u)[3] != 18446744073709551615u64 { wrong += 100 }
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("constants.nr", SOURCE))
+        .expect("a body with scalar constants lowers to kernels");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        assert_aborted_at_startup(&output);
+        return;
+    }
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
 }
 
 #[cfg(target_os = "linux")]

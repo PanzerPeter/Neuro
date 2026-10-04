@@ -403,8 +403,8 @@ func main() -> i32 {
     );
 }
 
-/// A half-precision operand contracts like any float one, each product and sum computed in
-/// `f32` and rounded back.
+/// A half-precision operand contracts like any float one, accumulating in `f32` and rounded
+/// back once.
 #[test]
 fn a_half_precision_contraction_computes() {
     let test = crate::compile_harness::CompileTest::new();
@@ -419,4 +419,29 @@ func main() -> i32 {
         .compile_and_run("einsum_bf16.nr", source)
         .expect("compile/run failed");
     assert_eq!(exit, 22);
+}
+
+/// BUG-096: a half-precision contraction accumulates in `f32` and rounds each result element
+/// once. `1 + 2^-8 + 2^-8` is exact in `bf16`, but rounding the running sum to `bf16` after
+/// each add loses both small terms. `@`, the same `einsum` and a full contraction must agree.
+#[test]
+fn regression_half_precision_contraction_rounds_once() {
+    let source = r#"
+func main() -> i32 {
+    val a: Tensor<bf16, [1, 3]> = [[1.0bf16, 1.0bf16, 1.0bf16]]
+    val b: Tensor<bf16, [3, 1]> = [[1.0bf16], [0.00390625bf16], [0.00390625bf16]]
+    val h: Tensor<f16, [1, 3]> = [[1.0f16, 1.0f16, 1.0f16]]
+    val k: Tensor<f16, [3, 1]> = [[1.0f16], [0.00048828125f16], [0.00048828125f16]]
+    val c = &a @ &b
+    val e = einsum("ij,jk->ik", &a, &b)
+    val f = einsum("ij,jk->", &a, &b)
+    val g = &h @ &k
+    if c[0, 0] as f32 != 1.0078125f32 { return 1 }
+    if e[0, 0] as f32 != 1.0078125f32 { return 2 }
+    if f as f32 != 1.0078125f32 { return 3 }
+    if g[0, 0] as f32 != 1.0009765625f32 { return 4 }
+    0
+}
+"#;
+    assert_eq!(run_program("half_contraction.nr", source), 0);
 }

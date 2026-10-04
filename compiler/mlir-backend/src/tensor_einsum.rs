@@ -18,8 +18,8 @@ use crate::{
     lower::map_type,
     schedule,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, empty_tensor, fill_block, generic_op,
-        indexing_maps, iterator_types, tensor_parts,
+        Generic, OperandAxes, build_expression, cast_elements, empty_tensor, fill_block,
+        generic_op, half_precision, indexing_maps, iterator_types, tensor_parts, with_element,
     },
     tensor_reduce::{append, apply, yield_value},
 };
@@ -55,9 +55,14 @@ pub(crate) fn build_einsum<'c, 'a>(
     else {
         return Ok(None);
     };
-    let Some((element, result_shape)) = tensor_parts(result) else {
+    let Some((narrow, result_shape)) = tensor_parts(result) else {
         return Ok(None);
     };
+    // A half-precision contraction accumulates in `f32` in the same order and is rounded once
+    // at the end, so its operands are widened and it runs as an `f32` one.
+    let wide = HirType::F32;
+    let half = half_precision(narrow);
+    let element = if half { &wide } else { narrow };
     let boxed = output.is_empty();
     let Some(kind) = Element::computed(element) else {
         return Ok(None);
@@ -95,7 +100,7 @@ pub(crate) fn build_einsum<'c, 'a>(
     let mut maps = Vec::with_capacity(operands.len() + 1);
     let mut values = Vec::with_capacity(operands.len());
     for (operand, subscript) in operands.iter().zip(inputs) {
-        if tensor_parts(&operand.ty).map(|(e, _)| e) != Some(element) {
+        if tensor_parts(&operand.ty).map(|(e, _)| e) != Some(narrow) {
             return Ok(None);
         }
         let Some(axes) = subscript
@@ -111,12 +116,22 @@ pub(crate) fn build_einsum<'c, 'a>(
         else {
             return Ok(None);
         };
-        values.push(value);
+        values.push(match half {
+            true => cast_elements(
+                context,
+                location,
+                block,
+                value,
+                (narrow, &with_element(&operand.ty, &wide)),
+            )?,
+            false => value,
+        });
     }
     let written: OperandAxes = Some((0..result_shape.len()).map(Some).collect());
     maps.push(written.clone());
 
-    let tensor_type = map_type(context, result)?;
+    let computed = with_element(result, element);
+    let tensor_type = map_type(context, &computed)?;
     let element_type = map_type(context, element)?;
     let zero = match kind {
         Element::Float | Element::Half => FloatAttribute::new(context, element_type, 0.0).into(),
@@ -184,7 +199,11 @@ pub(crate) fn build_einsum<'c, 'a>(
         );
     }
 
-    Ok(Some(block.append_operation(contraction).result(0)?.into()))
+    let total = block.append_operation(contraction).result(0)?.into();
+    match half {
+        true => cast_elements(context, location, block, total, (element, result)).map(Some),
+        false => Ok(Some(total)),
+    }
 }
 
 /// The body over `(operand elements..., accumulator)`: the elements multiplied left to

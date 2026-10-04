@@ -526,7 +526,11 @@ repeat is `DuplicateDerive`. Nothing is silently ignored. Pass 1b checks every f
 struct is itself Copy (`CopyDeriveNonCopyField`) and every field of a `Debug` / `PartialEq` struct
 is renderable / comparable by the derived rules (`DeriveFieldUnsupported`,
 `is_debug_renderable` / `is_derived_comparable`: a scalar, `string`, or another struct carrying the
-same derive, since the generated code reaches inside a field no other way). A generic template's
+same derive, since the generated code reaches inside a field no other way). A `Clone` struct that is
+not `Copy` gets the same check through `is_derived_cloneable`: the backend's derived clone copies
+the struct's bytes, so a field must be `Copy`, a `Clone` struct, or an array, tuple or newtype of
+those. A field that owns a buffer (`string`, a tensor, a collection, `StringBuilder`) would end up
+shared by the original and the copy, so it is refused. A generic template's
 fields are type parameters, which no derive rule can judge, so the check runs again per
 monomorphized instance in `instantiate_generic_struct`. Copy implies Clone.
 
@@ -1267,6 +1271,12 @@ the value holds no arena memory:
   function / method found through `impl_methods`) is always provable: its body is emitted with
   the backend's pool depth back at zero, so what it allocates comes from libc. The operand walk
   is what rules out its handing back arena memory it was given;
+- under `Emission::Routed`, a nullary `.clone()` whose receiver's `clone` is the builtin one
+  (`is_builtin_clone`: no `impl` in the program declares a `clone`, and no vtable), whatever the
+  receiver holds. The copy is the routed allocation. A tensor or `string` clone allocates through
+  the depth-aware allocator, and a derived struct clone copies bytes that `is_derived_cloneable`
+  has already limited to pointerless fields. A user `clone(self)` could hand its receiver back,
+  so one anywhere in the program turns the rule off;
 - a struct or tuple literal whose every field (and `..base`) passes: the aggregate allocates
   nothing of its own. An array literal likewise, but under `Emission::Routed` only, because it
   may be a tensor literal, which allocates its buffer where it is written;

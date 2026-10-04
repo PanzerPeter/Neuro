@@ -154,7 +154,10 @@ impl TypeChecker {
     ) {
         let debug = self.debug_structs.contains(registered);
         let partial_eq = self.partial_eq_structs.contains(registered);
-        if !debug && !partial_eq {
+        // `Copy` reports its own fields, and every `Copy` field is cloned by the copy.
+        let clone =
+            self.clone_structs.contains(registered) && !self.copy_structs.contains(registered);
+        if !debug && !partial_eq && !clone {
             return;
         }
         // Collect offenders first to avoid borrowing `self` mutably while iterating fields.
@@ -177,6 +180,15 @@ impl TypeChecker {
                         field_name.clone(),
                         field_ty.clone(),
                         reason.to_string(),
+                        span,
+                    ));
+                }
+                if clone && !self.is_derived_cloneable(field_ty) {
+                    offenders.push((
+                        CLONE_TRAIT,
+                        field_name.clone(),
+                        field_ty.clone(),
+                        "owns a buffer that a derived `.clone()` cannot copy yet; build the copy in a method of your own".to_string(),
                         span,
                     ));
                 }

@@ -710,6 +710,25 @@ impl TypeChecker {
     /// A hand-written `impl PartialEq` does NOT qualify: the derived comparison is
     /// emitted inline over the fields and never calls a method, so a nested struct must
     /// carry the derive too.
+    /// Whether a derived `.clone()` copies a field of type `ty` faithfully. The backend's
+    /// derived clone copies the struct's bytes, which duplicates a `Copy` value and a struct
+    /// that is itself cloned that way, but would leave a buffer-owning field shared by the
+    /// original and the copy, freed twice or read after its owner released it.
+    pub(crate) fn is_derived_cloneable(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(name) => self.clone_structs.contains(name),
+            // A template defers to its instances, which are validated where they are made.
+            Type::Generic(_) | Type::Unknown => true,
+            Type::Newtype(name) => self
+                .lookup_newtype_inner(name)
+                .cloned()
+                .is_some_and(|inner| self.is_derived_cloneable(&inner)),
+            Type::Array { element, .. } => self.is_derived_cloneable(element),
+            Type::Tuple(elements) => elements.iter().all(|e| self.is_derived_cloneable(e)),
+            other => self.is_type_copy(other),
+        }
+    }
+
     pub(crate) fn is_derived_comparable(&self, ty: &Type) -> bool {
         match ty {
             Type::Struct(name) => self.partial_eq_structs.contains(name),

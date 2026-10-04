@@ -87,7 +87,7 @@ pub enum GuardKind {
 }
 
 /// One check in a linked body. A body that fails it lowers its status word to a key whose
-/// low [`SITE_BITS`] are the check's position in the symbol's guard list, counted from 1.
+/// low `SITE_BITS` are the check's position in the symbol's guard list, counted from 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Guard {
     pub kind: GuardKind,

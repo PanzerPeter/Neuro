@@ -379,3 +379,59 @@ func main() -> i32 {
 
     assert_eq!(output.status.code(), Some(6));
 }
+
+/// A derived `.clone()` copies the struct's bytes, so a field that owns a buffer came out
+/// shared between the original and the copy: a tensor, `Vec` or `StringBuilder` field was
+/// freed twice, and a `string` field was read after the original released it. Every such
+/// field is now refused, and the copyable fields keep the derive.
+#[test]
+fn regression_derived_clone_refuses_a_field_that_owns_a_buffer() {
+    for (field, tag) in [
+        ("string", "clone_string"),
+        ("Tensor<i32, [4]>", "clone_tensor"),
+        ("Vec<i32>", "clone_vec"),
+        ("StringBuilder", "clone_builder"),
+        ("[string; 2]", "clone_string_array"),
+    ] {
+        let source = format!(
+            "@derive(Clone)\nstruct S {{ f: {field}, n: i32 }}\nfunc main() -> i32 {{ 0 }}\n"
+        );
+        let err = check_error(&source, tag);
+        assert!(
+            err.contains("struct 'S' cannot derive `Clone`: field 'f'"),
+            "{field}: {err}"
+        );
+    }
+
+    let generic = check_error(
+        "@derive(Clone)\nstruct W<T> { v: T }\nfunc main() -> i32 {\n    val w = W { v: \"a\" + \"b\" }\n    val c = w.clone()\n    0\n}\n",
+        "clone_generic_string",
+    );
+    assert!(
+        generic.contains("struct 'W' cannot derive `Clone`: field 'v'"),
+        "{generic}"
+    );
+
+    let output = run_program(
+        r#"
+@derive(Copy, Clone)
+struct P { x: i32, y: i32 }
+
+@derive(Clone)
+struct Pair { a: P, b: [P; 2], n: (i32, f64) }
+
+@derive(Clone)
+struct W<T> { v: T }
+
+func main() -> i32 {
+    val p = Pair { a: P { x: 1, y: 2 }, b: [P { x: 3, y: 4 }, P { x: 5, y: 6 }], n: (7, 0.5) }
+    val q = p.clone()
+    val w = W { v: 8 }
+    val u = w.clone()
+    q.a.x + q.b[1].y + q.n.0 + u.v
+}
+"#,
+        "clone_copyable_fields",
+    );
+    assert_eq!(output.status.code(), Some(22));
+}

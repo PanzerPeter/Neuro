@@ -419,9 +419,12 @@ Rules:
   them; `string` and the collections are not; a struct field is `Copy` only when its type also
   derives `Copy`. Anything else is a compile error that names the offending field.
 - `Copy` implies `Clone`.
-- `@derive(Clone)` (or `Copy`) enables `struct.clone()`, an explicit deep copy that returns a
-  fresh value without moving the receiver. A user-defined `clone` method in an `impl` block
-  shadows the builtin.
+- `@derive(Clone)` (or `Copy`) enables `struct.clone()`, an explicit copy that returns a fresh
+  value without moving the receiver. A user-defined `clone` method in an `impl` block shadows
+  the builtin. The derived copy does not yet clone a field that owns a buffer (`string`, a
+  tensor, a collection, `StringBuilder`, or an array of them), so such a field makes the derive
+  a `DeriveFieldUnsupported` error ([BUG-098](../BUGS.md)); write a method that clones each
+  field instead.
 - `@derive(Debug)` gives the struct its `{value:?}` rendering: the struct's name followed by
   each field in declaration order, e.g. `Point { x: 1, y: 2 }`. A field-less struct renders as
   its bare name. Every field must itself be renderable (a scalar, `string`, `char`, `bool`, or

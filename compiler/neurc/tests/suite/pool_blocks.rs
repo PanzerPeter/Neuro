@@ -1118,3 +1118,55 @@ func main() -> i32 {
         .expect_err("a capture of a block-local borrow must keep the store refused");
     assert!(err.contains("outlives the pool"), "got: {err}");
 }
+
+/// BUG-049: a builtin `.clone()` of a block-local value stored past a `pool` was refused,
+/// though a routed store emits the copy on the heap. A second pool that reuses the arena
+/// must leave the copies intact.
+#[test]
+fn regression_bug_049_builtin_clone_of_a_pool_local_stores_past_the_pool() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut out: Tensor<i32, [64]> = Tensor::zeros()
+    mut s = "x"
+    pool first {
+        val local = Tensor::<i32, [64]>::ones() * 7
+        out = local.clone()
+        val t = "ab" + "cd"
+        s = t.clone()
+    }
+    pool second {
+        val other = Tensor::<i32, [64]>::ones() * 9
+        val t2 = "zz" + "zz"
+        println("{other[0]} {t2}")
+    }
+    if s != "abcd" { return 1 }
+    out.sum() / 64
+}
+"#;
+    assert_eq!(test.compile_and_run("pool_clone_store.nr", source), Ok(7));
+}
+
+/// A user method named `clone` may hand its receiver back, so it keeps the store refused.
+#[test]
+fn a_user_clone_of_a_pool_local_is_still_refused() {
+    let test = CompileTest::new();
+    let source = r#"
+struct S { t: Tensor<i32, [2]> }
+impl S {
+    func clone(self) -> S { self }
+}
+func main() -> i32 {
+    mut out = S { t: [0, 0] }
+    pool p {
+        val local = S { t: [5, 6] }
+        out = local.clone()
+    }
+    out.t[0]
+}
+"#;
+    let err = test
+        .check("pool_user_clone.nr", source)
+        .expect_err("a user `clone` may return the arena value itself");
+    assert!(err.contains("outlives the pool"), "got: {err}");
+}

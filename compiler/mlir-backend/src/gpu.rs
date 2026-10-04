@@ -11,16 +11,13 @@ use crate::{
 
 use std::cell::OnceCell;
 
-use ast_types::BinaryOp;
 use melior::{
     Context,
     ir::{BlockLike, Module, attribute::StringAttribute, operation::OperationLike},
     pass::PassManager,
     utility::parse_pass_pipeline,
 };
-use neuro_hir::{
-    HirExpr, HirExprKind, HirFunction, HirItem, HirProgram, HirStmt, HirTarget, HirType,
-};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
 use shared_types::Span;
 
 /// The GPU a set of kernels is compiled for, and the chip that fixes its ISA.
@@ -351,7 +348,9 @@ pub(crate) fn device_math(context: &Context, target: &GpuTarget, format: &str) -
     !object.contains(".extern") && !object.contains("__ocml_")
 }
 
-/// The functions of `functions` whose definition in `module` calls a math function.
+/// The functions of `functions` whose definition in `module` calls into the vendor's device
+/// math library: a math function, or a float `%`, which the conversion turns into its exact
+/// `fmod` (`__nv_fmodf`, `__ocml_fmod_f32`) rather than a division the hardware rounds.
 fn math_functions(module: &Module<'_>, functions: &[(String, String)]) -> Vec<String> {
     let mut calling = Vec::new();
     let mut next = module.body().first_operation();
@@ -362,7 +361,10 @@ fn math_functions(module: &Module<'_>, functions: &[(String, String)]) -> Vec<St
             .and_then(|name| StringAttribute::try_from(name).ok())
             .map(|name| name.value().to_string());
         if let Some(symbol) = symbol
-            && operation.to_string().contains("math.")
+            && {
+                let text = operation.to_string();
+                text.contains("math.") || text.contains("arith.remf")
+            }
             && let Some((function, _)) = functions.iter().find(|(_, linked)| *linked == symbol)
         {
             calling.push(function.clone());
@@ -403,8 +405,7 @@ fn runs_on_gpu(function: &HirFunction) -> bool {
 }
 
 /// Whether a GPU computes `function` with the host's bits: no half-precision tensor, whose
-/// conversions not every chip has, no `bool` tensor, and no float `%`, which a GPU computes in
-/// fewer steps than the host's `fmod`.
+/// conversions not every chip has, and no `bool` tensor.
 fn exact_on_gpu(function: &HirFunction) -> bool {
     let half = |ty: &HirType| {
         matches!(
@@ -416,50 +417,6 @@ fn exact_on_gpu(function: &HirFunction) -> bool {
     !std::iter::once(&function.return_type)
         .chain(function.params.iter().map(|param| &param.ty))
         .any(half)
-        && !function.body.iter().any(|statement| match statement {
-            HirStmt::VarDecl {
-                init: Some(value), ..
-            }
-            | HirStmt::Return {
-                value: Some(value), ..
-            }
-            | HirStmt::Expr(value) => float_remainder(value),
-            _ => false,
-        })
-}
-
-/// Whether `expr` takes a float `%` anywhere in the operations a GPU body lowers.
-fn float_remainder(expr: &HirExpr) -> bool {
-    match &expr.kind {
-        HirExprKind::Binary { op, left, right } => {
-            (*op == BinaryOp::Modulo
-                && matches!(
-                    read_type(&expr.ty),
-                    HirType::Tensor { element, .. } if matches!(**element, HirType::F32 | HirType::F64)
-                ))
-                || float_remainder(left)
-                || float_remainder(right)
-        }
-        HirExprKind::Reference { operand, .. }
-        | HirExprKind::TensorReduce {
-            receiver: operand, ..
-        }
-        | HirExprKind::TensorSort {
-            receiver: operand, ..
-        }
-        | HirExprKind::TensorShapeCast {
-            receiver: operand, ..
-        }
-        | HirExprKind::TensorIndex {
-            object: operand, ..
-        }
-        | HirExprKind::Math { operand, .. } => float_remainder(operand),
-        HirExprKind::TensorLiteral { elements }
-        | HirExprKind::TensorEinsum {
-            operands: elements, ..
-        } => elements.iter().any(float_remainder),
-        _ => false,
-    }
 }
 
 /// Every `@gpu` function missing from `lowered`, with where it is declared.
