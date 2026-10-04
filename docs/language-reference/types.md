@@ -329,7 +329,7 @@ An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated
 
 ## String Type
 
-`string` and the growable `String` buffer have their own page: see
+`string` and the growable `StringBuilder` buffer have their own page: see
 [Strings](strings.md).
 
 ## Struct Types
@@ -1556,7 +1556,7 @@ equally; the map only needs that much.
 
 ### Current limits
 
-- A collection element must be `Copy` or `string`, so a `Vec` of `String` builders
+- A collection element must be `Copy` or `string`, so a `Vec` of `StringBuilder`s
   or of non-`Copy` structs is rejected where an array of them is accepted. There is no
   capacity control (`with_capacity`, `shrink_to_fit`), `insert` does not return the
   displaced value, and `keys()` builds a `Vec` rather than an iterator.
@@ -1569,7 +1569,7 @@ equally; the map only needs that much.
 
 ## References
 
-- [Strings](strings.md): the `string` slice and the growable `String` buffer
+- [Strings](strings.md): the `string` slice and the growable `StringBuilder` buffer
 - [Tensors](tensors.md): `Tensor<T, [dims]>` and its shape system
 - [Structs](structs.md): `impl` blocks, methods, derives
 - [Variables](variables.md): variable declaration and usage

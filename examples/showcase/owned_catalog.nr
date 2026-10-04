@@ -142,7 +142,7 @@ func main() -> i32 {
 
     // A builder fed from collection reads, to show the copies are ordinary
     // owned strings once they leave the slot.
-    mut report = String::new()
+    mut report = StringBuilder::new()
     report.push_str(first_name(&names))
     report.push_str(";")
     report.push_str(names[1])

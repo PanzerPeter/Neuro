@@ -302,7 +302,7 @@ the `len` contract). The frontend types the result as owned `String` even when a
 The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
 cannot be read off a value at runtime. It is decided at compile time instead, by
 `produces_owned_string` (`drops/owned_strings.rs`): an expression owns its buffer only if it is an
-`InterpString`, a `+` yielding `string`, `String::to_string`, a `string.clone()`, or a call to a function
+`InterpString`, a `+` yielding `string`, `StringBuilder::to_string`, a `string.clone()`, or a call to a function
 `codegen/string_ownership.rs` proved allocates on every return path. Everything else (a literal,
 a variable, a `slice`) answers `false` and is never freed. The asymmetry is deliberate: a missed
 `true` leaks a buffer, a wrong `true` hands `.rodata` to `free`.
@@ -1371,7 +1371,7 @@ non-null base, so the check folds away.
 
 The two libc pairs stay distinct through the wrappers, since `free` cannot release an
 over-aligned block on Windows. `realloc` is NOT wrapped and needs no arena path: the only
-buffers it grows (a `Vec`'s and a `String` builder's) are produced by `realloc` from a null
+buffers it grows (a `Vec`'s and a `StringBuilder`'s) are produced by `realloc` from a null
 pointer, so they never come from the arena at all. A map's table and the `Vec` that `keys()`
 returns take libc `malloc` directly for the same pair of reasons: the table belongs to the map,
 which may outlive the block that grows it (BUG-045), and the key `Vec` will be grown by `realloc`,
@@ -1405,12 +1405,12 @@ release. The sweep dispatches `bulk_release` per registered instance. Between ca
 device is GPU 0; a call on another GPU restores that GPU's arena before it returns.
 
 **Known limits**: the chunk is reserved once and never released, an allocation that does not fit
-falls back to the heap (correct, not fast), and `Vec` / `String` buffers and map tables stay off
+falls back to the heap (correct, not fast), and `Vec` / `StringBuilder` buffers and map tables stay off
 the arena for the reasons above. Registration follows bindings, so a `PoolAware` temporary is never
 registered.
 
 ## Collections ABI
-`Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `String` share one by-value header:
+`Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and `StringBuilder` share one by-value header:
 `{ ptr buffer, i64 len, i64 cap, i64 used }` (`TypeMapper::collection_header_type`), held in the
 owner's alloca, with all elements in a single heap buffer. `len` counts live elements/entries,
 `cap` the allocated slots, and `used` the *occupied* slots (live + tombstoned) that the hash map's
@@ -1427,7 +1427,7 @@ Buffer layouts, per kind:
 - **`BTreeMap<K, V>`**: `{ K key, V value }` slots kept sorted by key: binary search to look up,
   `memmove` the tail to insert or erase. That gives the ordered iteration the type promises; a
   multi-way tree would change only the insert/erase constant, not this ABI.
-- **`String`**: a byte run; `len` and `cap` are byte counts and `used` stays zero. It carries no
+- **`StringBuilder`**: a byte run; `len` and `cap` are byte counts and `used` stays zero. It carries no
   type arguments, so one instantiation serves every program. `push_str` reserves through
   `__neuro_string_reserve(header, extra)`: capacity becomes `max(cap * 2, len + extra, 8)`, so one
   large append is a single `realloc` rather than a chain of doublings, then `memcpy`s the
@@ -1457,10 +1457,10 @@ collection is not freed twice. An unnamed collection *temporary* (`for k in m.ke
 registered the same way under a synthetic `__`-containing name that no source binding can collide
 with; without that, the only route to map iteration would leak. A collection read out of a place
 another binding holds (`b.items.len()`) is not such a temporary: the copy aliases the holder's
-buffer, which the holder's own drop releases, so `reads_a_held_place` suppresses the registration. This is also what frees a `String`
-builder's buffer, since it is registered as an ordinary collection. **A `string` inside a
+buffer, which the holder's own drop releases, so `reads_a_held_place` suppresses the registration. This is also what frees a `StringBuilder`'s
+buffer, since it is registered as an ordinary collection. **A `string` inside a
 collection is not freed**, and neither is the heap `string` that `+`, interpolation, or
-`String::to_string` produces; both ride with the heap-string work.
+`StringBuilder::to_string` produces; both ride with the heap-string work.
 
 A tensor binding is registered the same way, with `DropTarget::TensorBuffer`: the binding's storage
 holds the DLPack handle, so scope exit loads it and calls the handle's own `deleter` under the same

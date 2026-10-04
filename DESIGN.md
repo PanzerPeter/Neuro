@@ -29,7 +29,7 @@ Neuro uses an ownership and borrow-checker model similar to Rust's. Garbage coll
 - A GC would make it harder to reason about memory layout, which matters for MLIR lowering and GPU memory management.
 - Ownership makes memory behavior auditable at the type level. That matters for a language meant to give you confidence in what your model is doing.
 
-Move-by-default, borrows (`&T` / `&mut T`), deterministic `Drop` (scope-exit destructors), the owning collections and the growable `String` builder are all in place, and each frees its buffer at scope exit. What still leaks in the alpha is a heap `string` in a storing position whose owner the compiler cannot prove; the [memory model](docs/language-reference/memory-model.md#what-still-leaks) lists those positions.
+Move-by-default, borrows (`&T` / `&mut T`), deterministic `Drop` (scope-exit destructors), the owning collections and the growable `StringBuilder` are all in place, and each frees its buffer at scope exit. What still leaks in the alpha is a heap `string` in a storing position whose owner the compiler cannot prove; the [memory model](docs/language-reference/memory-model.md#what-still-leaks) lists those positions.
 
 ### 4. Zero-cost abstractions
 

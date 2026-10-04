@@ -643,13 +643,12 @@ compiler bug, not a diagnostic.
   `Vec` / `HashMap` / `BTreeMap` generic application to `HirType::Collection` rather than
   monomorphizing a nominal instance (a user-declared type of that name still shadows it), and
   indexing, an index place, and `for`-in resolve a `Vec` element alongside an array's.
-- **`String`**: `collection_kind` recognizes the name and the `nullary_collection` helper lets
+- **`StringBuilder`**: `collection_kind` recognizes the name and the `nullary_collection` helper lets
   `resolve_type` accept it as a complete type, checked **after** the struct/enum/newtype arms so a
   user declaration shadows it. `lower_collection_new` builds a nullary kind's type itself instead
   of requiring an annotated target; `lower_collection_method` adds `push_str` (`string` parameter)
   and `to_string` (`string` result). `mangle_type` uses `HirCollectionKind::mangle_tag()`, so
-  `String` mangles as `strbuf` (which the primitive `string` cannot collide with) and yields the
-  bare tag when there are no arguments.
+  `StringBuilder` mangles as `strbuf` and yields the bare tag when there are no arguments.
 - **`.slice(range)` / `.char_slice(range)`**: `lower_builtin_method` gives both the same
   `&string` result type and lowers the range argument unchanged. The two differ only in the unit
   their indices count (bytes vs. code points), which is settled in the backend, so this slice does

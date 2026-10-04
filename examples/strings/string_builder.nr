@@ -1,19 +1,19 @@
-// Neuro Programming Language - Growable strings (`String`)
+// Neuro Programming Language - Growable strings (`StringBuilder`)
 // Demonstrates the mutable text buffer that `string` deliberately is not.
 //
 // `string` is immutable, so building text with `s = s + piece` in a loop
-// reallocates and recopies everything accumulated so far on every step. `String`
+// reallocates and recopies everything accumulated so far on every step. `StringBuilder`
 // is the growable counterpart: one owned heap buffer that appends in amortized
 // O(1), the same relationship `Vec<T>` has to `[T; N]`.
 //
-// Surface: `String::new()`, `.push_str(text)`, `.len()`, `.clear()`, and
+// Surface: `StringBuilder::new()`, `.push_str(text)`, `.len()`, `.clear()`, and
 // `.to_string()`, which copies the accumulated bytes back out as an ordinary
 // immutable `string`. The buffer is freed when its owner leaves scope.
 
 func main() -> i32 {
-    // No annotation is needed: `String` takes no type arguments, so there is
+    // No annotation is needed: `StringBuilder` takes no type arguments, so there is
     // nothing to infer.
-    mut report = String::new()
+    mut report = StringBuilder::new()
 
     report.push_str("run")
     report.push_str(": ")

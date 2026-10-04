@@ -1985,7 +1985,7 @@ fn a_string_moved_into_a_literal_position_is_owned_by_the_holder() {
     );
 }
 
-/// `String::to_string` copies the builder's bytes into a buffer of their own on every
+/// `StringBuilder::to_string` copies the builder's bytes into a buffer of their own on every
 /// call, so a binding initialized from it owns that buffer and releases it at scope
 /// exit, exactly as one initialized from `+` does. A user `to_string` on a struct is
 /// not the builder's and must not be mistaken for it.
@@ -1993,7 +1993,7 @@ fn a_string_moved_into_a_literal_position_is_owned_by_the_holder() {
 fn the_builder_copy_out_is_an_owned_string_and_a_user_method_is_not() {
     let owned = r#"
         func main() -> i32 {
-            mut b = String::new()
+            mut b = StringBuilder::new()
             b.push_str("text")
             val s = b.to_string()
             return s.len() as i32

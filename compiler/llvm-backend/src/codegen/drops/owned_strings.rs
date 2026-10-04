@@ -41,7 +41,7 @@ pub(super) fn builds_its_own_buffer(expr: &HirExpr) -> bool {
     )
 }
 
-/// The `String` builder method that copies its bytes out into an owned `string`.
+/// The `StringBuilder` builder method that copies its bytes out into an owned `string`.
 /// Matched by name here the way the builder type itself is matched by name.
 pub(super) const TO_OWNED_METHOD: &str = "to_string";
 
@@ -90,10 +90,10 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::Binary {
                 op: BinaryOp::Add, ..
             } => matches!(Type::from_hir(&expr.ty), Type::String),
-            // `String::to_string` is `codegen_string_to_owned`, which copies the
+            // `StringBuilder::to_string` is `codegen_string_to_owned`, which copies the
             // builder's live bytes into a buffer of their own on every call. It reaches
             // here as the `FieldAccess` callee a method call lowers to; a program that
-            // declares its own `String` shadows the builder, and its receiver is then a
+            // declares its own `StringBuilder` shadows the builder, and its receiver is then a
             // `Type::Struct` that this arm does not match.
             HirExprKind::Call { callee, args } => match &callee.kind {
                 HirExprKind::Path { type_name, member } => self
@@ -111,7 +111,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         && matches!(
                             receiver.referent(),
                             Type::Collection {
-                                kind: CollectionKind::String,
+                                kind: CollectionKind::StringBuilder,
                                 ..
                             }
                         );
@@ -150,7 +150,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         matches!(
             Type::from_hir(&object.ty).referent(),
-            Type::Collection { kind, .. } if !matches!(kind, CollectionKind::String)
+            Type::Collection { kind, .. } if !matches!(kind, CollectionKind::StringBuilder)
         )
     }
 

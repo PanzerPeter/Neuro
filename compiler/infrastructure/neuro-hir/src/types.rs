@@ -130,7 +130,7 @@ pub enum HirType {
         names: AxisNames,
     },
     /// A heap-backed standard collection: `Vec<T>` (one argument),
-    /// `HashMap<K, V>` / `BTreeMap<K, V>` (two), or `String` (none). Backends lower
+    /// `HashMap<K, V>` / `BTreeMap<K, V>` (two), or `StringBuilder` (none). Backends lower
     /// every kind to the same `{ buffer pointer, length, capacity }` header and read
     /// `kind` to pick the buffer layout.
     Collection {
@@ -148,9 +148,9 @@ pub enum HirCollectionKind {
     HashMap,
     /// Key-ordered map `BTreeMap<K, V>`.
     BTreeMap,
-    /// Growable UTF-8 text buffer `String`; its buffer is a byte run, so it carries
-    /// no type arguments.
-    String,
+    /// Growable UTF-8 text buffer `StringBuilder`; its buffer is a byte run, so it
+    /// carries no type arguments.
+    StringBuilder,
 }
 
 impl HirCollectionKind {
@@ -160,27 +160,27 @@ impl HirCollectionKind {
             HirCollectionKind::Vec => "Vec",
             HirCollectionKind::HashMap => "HashMap",
             HirCollectionKind::BTreeMap => "BTreeMap",
-            HirCollectionKind::String => "String",
+            HirCollectionKind::StringBuilder => "StringBuilder",
         }
     }
 
     /// How many type arguments the collection carries.
     pub fn arity(self) -> usize {
         match self {
-            HirCollectionKind::String => 0,
+            HirCollectionKind::StringBuilder => 0,
             HirCollectionKind::Vec => 1,
             HirCollectionKind::HashMap | HirCollectionKind::BTreeMap => 2,
         }
     }
 
-    /// A symbol-safe tag for mangled instance names. `String` uses `strbuf` rather than
-    /// the lowercased surface name, which would collide with the primitive `string`.
+    /// A symbol-safe tag for mangled instance names. `StringBuilder` abbreviates to
+    /// `strbuf`.
     pub fn mangle_tag(self) -> &'static str {
         match self {
             HirCollectionKind::Vec => "vec",
             HirCollectionKind::HashMap => "hashmap",
             HirCollectionKind::BTreeMap => "btreemap",
-            HirCollectionKind::String => "strbuf",
+            HirCollectionKind::StringBuilder => "strbuf",
         }
     }
 }

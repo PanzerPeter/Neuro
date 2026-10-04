@@ -1,10 +1,10 @@
 // Showcase: a run transcript assembled in a single growable buffer.
 //
-// Integration example combining the growable `String` with the features that
+// Integration example combining the growable `StringBuilder` with the features that
 // feed it:
 //   `Vec<T>` + `for x in v` · struct + `impl` methods (`&self` and a consuming
 //   `self`) · enum with a payload + `match` · string interpolation with the
-//   format mini-language (:>W, :.N, :+d) · `&mut String` parameters ·
+//   format mini-language (:>W, :.N, :+d) · `&mut StringBuilder` parameters ·
 //   `@derive(Copy, Clone)`.
 //
 // The point of the buffer is the loop: each event appends its rendered line to
@@ -54,9 +54,9 @@ func label(severity: Severity) -> string {
     }
 }
 
-// Appending through a `&mut String` keeps the caller's one buffer: the borrow
+// Appending through a `&mut StringBuilder` keeps the caller's one buffer: the borrow
 // writes into the original allocation rather than returning a new string.
-func append_event(out: &mut String, event: Event) {
+func append_event(out: &mut StringBuilder, event: Event) {
     out.push_str(event.render())
     out.push_str(" ")
     out.push_str(label(event.severity()))
@@ -88,7 +88,7 @@ func main() -> i32 {
     events.push(Event { code: 108, load: 63.0 })
     events.push(Event { code: 4095, load: 91.25 })
 
-    mut transcript = String::new()
+    mut transcript = StringBuilder::new()
     for event in events {
         append_event(&mut transcript, event)
     }

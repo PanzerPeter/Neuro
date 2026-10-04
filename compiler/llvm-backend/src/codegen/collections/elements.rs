@@ -33,7 +33,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// `malloc(0)` may hand back null, which would make an empty copy indistinguishable
     /// from a failed allocation, so an empty string still takes a byte, the same spare
-    /// byte `String::to_string` reserves.
+    /// byte `StringBuilder::to_string` reserves.
     pub(crate) fn copy_string_bytes(
         &mut self,
         value: BasicValueEnum<'ctx>,
@@ -146,8 +146,8 @@ impl<'ctx> CodegenContext<'ctx> {
             CollectionKind::HashMap | CollectionKind::BTreeMap => {
                 self.emit_map_string_release(kind, header, &args)
             }
-            // A `String`'s buffer is a byte run, so it has no slot that owns anything.
-            CollectionKind::String => Ok(()),
+            // A `StringBuilder`'s buffer is a byte run, so it has no slot that owns anything.
+            CollectionKind::StringBuilder => Ok(()),
         }
     }
 
@@ -213,7 +213,7 @@ impl<'ctx> CodegenContext<'ctx> {
 /// Whether any slot of this instantiation holds a `string` the collection owns.
 pub(super) fn holds_string_slot(kind: CollectionKind, args: &[Type]) -> bool {
     match kind {
-        CollectionKind::String => false,
+        CollectionKind::StringBuilder => false,
         _ => args.iter().any(|arg| matches!(arg, Type::String)),
     }
 }

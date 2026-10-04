@@ -107,7 +107,7 @@ pub(crate) enum CollectionKind {
     Vec,
     HashMap,
     BTreeMap,
-    String,
+    StringBuilder,
 }
 
 impl CollectionKind {
@@ -116,7 +116,7 @@ impl CollectionKind {
             neuro_hir::HirCollectionKind::Vec => CollectionKind::Vec,
             neuro_hir::HirCollectionKind::HashMap => CollectionKind::HashMap,
             neuro_hir::HirCollectionKind::BTreeMap => CollectionKind::BTreeMap,
-            neuro_hir::HirCollectionKind::String => CollectionKind::String,
+            neuro_hir::HirCollectionKind::StringBuilder => CollectionKind::StringBuilder,
         }
     }
 
@@ -126,7 +126,7 @@ impl CollectionKind {
             CollectionKind::Vec => "vec",
             CollectionKind::HashMap => "hmap",
             CollectionKind::BTreeMap => "bmap",
-            CollectionKind::String => "sbuf",
+            CollectionKind::StringBuilder => "sbuf",
         }
     }
 }

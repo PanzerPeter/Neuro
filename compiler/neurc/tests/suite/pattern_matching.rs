@@ -189,7 +189,7 @@ func main() -> i32 { first_hit(100) }
 fn regression_valueless_return_as_match_arm_body_parses() {
     let test = CompileTest::new();
     let source = r#"
-func note(out: &mut String, n: i32) {
+func note(out: &mut StringBuilder, n: i32) {
     match n {
         0 => return,
         _ => out.push_str("x")
@@ -197,7 +197,7 @@ func note(out: &mut String, n: i32) {
 }
 
 func main() -> i32 {
-    mut s = String::new()
+    mut s = StringBuilder::new()
     note(&mut s, 0)
     note(&mut s, 1)
     note(&mut s, 2)

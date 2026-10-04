@@ -1148,7 +1148,7 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   and index bindings.
 
 ### Collections
-`Type::Collection { kind, args }` with `CollectionKind::{Vec, HashMap, BTreeMap, String}` is a
+`Type::Collection { kind, args }` with `CollectionKind::{Vec, HashMap, BTreeMap, StringBuilder}` is a
 compiler-known nominal type, never `Copy` and always move-tracked.
 `type_checkers/collections.rs` owns the rules:
 
@@ -1168,10 +1168,10 @@ compiler-known nominal type, never `Copy` and always move-tracked.
   Comparable` (ordered).
 - Indexing, index assignment, and `for`-in accept a `Vec` alongside an array.
 
-`String` is a fourth, **nullary** kind (`arity() == 0`), so `Collection { kind: String, args: [] }`
+`StringBuilder` is a fourth, **nullary** kind (`arity() == 0`), so `Collection { kind: StringBuilder, args: [] }`
 reuses every existing collection rule with no new `Type` variant. The bare name resolves as a
 complete type in `resolution.rs`: the "collection needs type arguments" arm applies only to
-`arity() > 0`, so a user-declared `struct String` still shadows it, and `check_collection_new`
+`arity() > 0`, so a user-declared `struct StringBuilder` still shadows it, and `check_collection_new`
 returns the type directly rather than demanding an annotation. `ParamSlot::Text` (accepting
 `string` or an immutable `&string`, and not moving it: the latitude `+` gives its operands) and
 `ResultShape::OwnedString` back `push_str` and `to_string`; `len` / `clear` fall out of the

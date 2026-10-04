@@ -196,7 +196,7 @@ pub enum Type {
         shape: Vec<TensorAxis>,
     },
     /// A heap-backed standard collection: `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`,
-    /// or the growable text buffer `String`. These are library types rather than
+    /// or the growable text buffer `StringBuilder`. These are library types rather than
     /// language primitives, but
     /// the compiler knows them by name because the language has no allocator surface
     /// to build them from. They own a heap buffer, so they are never `Copy`: assignment
@@ -217,9 +217,10 @@ pub enum CollectionKind {
     HashMap,
     /// Key-ordered map `BTreeMap<K, V>`; keys are `Comparable` (a total order).
     BTreeMap,
-    /// Growable UTF-8 text buffer `String`: the mutable counterpart to the immutable
-    /// `string`. It takes no type arguments, so its bare name is already a complete type.
-    String,
+    /// Growable UTF-8 text buffer `StringBuilder`: the mutable counterpart to the
+    /// immutable `string`. It takes no type arguments, so its bare name is already a
+    /// complete type.
+    StringBuilder,
 }
 
 impl CollectionKind {
@@ -229,7 +230,7 @@ impl CollectionKind {
             CollectionKind::Vec => "Vec",
             CollectionKind::HashMap => "HashMap",
             CollectionKind::BTreeMap => "BTreeMap",
-            CollectionKind::String => "String",
+            CollectionKind::StringBuilder => "StringBuilder",
         }
     }
 
@@ -240,7 +241,7 @@ impl CollectionKind {
             "Vec" => Some(CollectionKind::Vec),
             "HashMap" => Some(CollectionKind::HashMap),
             "BTreeMap" => Some(CollectionKind::BTreeMap),
-            "String" => Some(CollectionKind::String),
+            "StringBuilder" => Some(CollectionKind::StringBuilder),
             _ => None,
         }
     }
@@ -248,7 +249,7 @@ impl CollectionKind {
     /// How many type arguments the collection takes.
     pub(crate) fn arity(self) -> usize {
         match self {
-            CollectionKind::String => 0,
+            CollectionKind::StringBuilder => 0,
             CollectionKind::Vec => 1,
             CollectionKind::HashMap | CollectionKind::BTreeMap => 2,
         }
@@ -595,7 +596,7 @@ impl fmt::Display for Type {
             }
             Type::Collection { kind, args } => {
                 write!(f, "{}", kind.name())?;
-                // A nullary collection's bare name is the whole type; `String<>` is not
+                // A nullary collection's bare name is the whole type; `StringBuilder<>` is not
                 // something a program could have written.
                 if args.is_empty() {
                     return Ok(());

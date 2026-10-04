@@ -35,7 +35,7 @@ Design goals:
 | Page | Covers |
 |---|---|
 | [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, borrows, type inference |
-| [Strings](language-reference/strings.md) | The `string` slice type and its escape sequences, the growable `String` buffer, interpolation, triple-quoted literals, codepoint iteration |
+| [Strings](language-reference/strings.md) | The `string` slice type and its escape sequences, the growable `StringBuilder` buffer, interpolation, triple-quoted literals, codepoint iteration |
 | [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic shapes, devices |
 | [Automatic Differentiation](language-reference/autodiff.md) | `@grad` on functions and methods, `wrt:` selection of parameters and receiver fields, the derivative it generates, `.backward()` / `.grad()` / `.zero_grad()` and the borrows they end, second derivatives with `order: 2` and `.hessian()`, the `.detach()` and `@no_grad` fences, its signature rules, which constructs a differentiated body may use, and how the derivative follows branches, loops, calls, function values and elementwise math |
 | [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |

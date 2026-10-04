@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-10-04
+
+### Changed
+
+- **Breaking:** the growable text buffer is now `StringBuilder`. Write `StringBuilder::new()`,
+  `: StringBuilder` and `&mut StringBuilder` where you used to write `String`; the methods
+  (`.push_str`, `.len`, `.clear`, `.to_string`) and their behavior are unchanged. `String` is no
+  longer a built-in name, so `String::new()` reports an unknown type, and a program can declare
+  its own `struct String`.
+
 ## [5.5.0] - 2026-10-03
 
 ### Changed

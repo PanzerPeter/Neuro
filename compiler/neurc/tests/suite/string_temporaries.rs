@@ -1,5 +1,5 @@
 // End-to-end tests for the release of anonymous heap `string`s: the owned buffer a
-// `+`, an interpolation, or `String::to_string` allocates in an expression that binds
+// `+`, an interpolation, or `StringBuilder::to_string` allocates in an expression that binds
 // it to nothing.
 //
 // A leak has no exit code, so each program below runs its leaking shape a few hundred
@@ -89,7 +89,7 @@ func main() -> i32 {{
     mut n: u64 = 0
     while i < {LEAK_ROUNDS} {{
         n = n + (a + a).len()
-        mut b = String::new()
+        mut b = StringBuilder::new()
         b.push_str(a + a)
         n = n + b.len()
         i = i + 1
@@ -131,7 +131,7 @@ func main() -> i32 {{
     assert_eq!(exit, 0);
 }
 
-/// `String::to_string` allocates on every call, so the `string` it hands back is owned
+/// `StringBuilder::to_string` allocates on every call, so the `string` it hands back is owned
 /// by whatever takes it: a binding releases it at scope exit, and a consumer that
 /// discards it releases it there.
 #[test]
@@ -143,7 +143,7 @@ func main() -> i32 {{
     mut i: u32 = 0
     mut n: u64 = 0
     while i < {LEAK_ROUNDS} {{
-        mut b = String::new()
+        mut b = StringBuilder::new()
         b.push_str("{PAYLOAD}")
         val s = b.to_string()
         n = n + s.len()
@@ -210,7 +210,7 @@ func main() -> i32 {
     if s != t {
         return 92
     }
-    mut b = String::new()
+    mut b = StringBuilder::new()
     b.push_str(s)
     b.push_str(t)
     b.len() as i32

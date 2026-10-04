@@ -91,7 +91,7 @@ impl Lowerer {
                     }
                 }
                 // A nullary collection's bare name is a complete type. It is checked
-                // after the user-declaration arms above, so a program's own `String`
+                // after the user-declaration arms above, so a program's own `StringBuilder`
                 // shadows the standard one exactly as it does for the prelude enums.
                 name if crate::collections::nullary_collection(name).is_some() => {
                     let kind = crate::collections::nullary_collection(name).ok_or_else(|| {

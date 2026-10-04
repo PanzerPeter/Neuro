@@ -2,7 +2,7 @@
 //
 // Integration example combining the features that feed a printing loop:
 //   struct + `@derive(Copy, Clone)` + `impl` methods (`&self`) · `Vec<T>` +
-//   `for x in v` · the growable `String` + `push_str` · string interpolation
+//   `for x in v` · the growable `StringBuilder` + `push_str` · string interpolation
 //   with the format mini-language (:>W, :.N) · `while` loop · `%` and `as`.
 //
 // The point of this example is the volume. `println` copies its bytes into a
@@ -51,7 +51,7 @@ func main() -> i32 {
 
     // One string larger than the output buffer, assembled in a single growable
     // allocation rather than by re-concatenating a longer string each pass.
-    mut banner = String::new()
+    mut banner = StringBuilder::new()
     mut row: i32 = 0
     while row < 160 {
         banner.push_str("[{row:>3}] shift block filler row\n")

@@ -1,5 +1,5 @@
 //! The standard collections `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, and the
-//! growable text buffer `String`.
+//! growable text buffer `StringBuilder`.
 //!
 //! They are specified as library types, but the language exposes no allocator and no
 //! raw pointers, so nothing in `.nr` source could implement them: the compiler knows
@@ -7,7 +7,7 @@
 //! still ordinary type checking: a collection type is a nominal type with type
 //! arguments, its operations are builtin methods, and it obeys move-by-default.
 //!
-//! `String` joins the family because it is the same machine: one growable heap buffer
+//! `StringBuilder` joins the family because it is the same machine: one growable heap buffer
 //! behind an owning header. Its element type is fixed (UTF-8 bytes) rather than a type
 //! argument, so it is the one nullary kind.
 
@@ -30,7 +30,7 @@ pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
 pub(crate) const HASH_METHOD: &str = "hash";
 
 impl TypeChecker {
-    /// Resolve a `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `String` annotation,
+    /// Resolve a `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `StringBuilder` annotation,
     /// validating the argument count and each element/key type. Returns `None` after
     /// recording a diagnostic when the application is ill-formed.
     pub(crate) fn resolve_collection(
@@ -135,7 +135,7 @@ impl TypeChecker {
         match kind {
             CollectionKind::HashMap => required.push(HASHABLE_TRAIT),
             CollectionKind::BTreeMap => required.push("Comparable"),
-            CollectionKind::Vec | CollectionKind::String => {}
+            CollectionKind::Vec | CollectionKind::StringBuilder => {}
         }
         for trait_name in required {
             if !self.trait_impls_contains(trait_name, &name) {
@@ -148,7 +148,7 @@ impl TypeChecker {
         Some(())
     }
 
-    /// Type-check `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `String::new()`.
+    /// Type-check `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `StringBuilder::new()`.
     ///
     /// The element types come from the expected type: an empty collection carries no
     /// value to infer from, so the binding must be annotated. A nullary kind has nothing
@@ -302,7 +302,7 @@ enum ParamSlot {
     Key,
     /// The collection's element/value type: the last type argument.
     Value,
-    /// Borrowed UTF-8 text: a `string` or an immutable `&string` (`String::push_str`).
+    /// Borrowed UTF-8 text: a `string` or an immutable `&string` (`StringBuilder::push_str`).
     Text,
 }
 
@@ -327,7 +327,7 @@ enum ResultShape {
     OptionValue,
     /// A freshly built `Vec<K>` of the map's keys.
     KeyVec,
-    /// A freshly allocated owned immutable `string` (`String::to_string`).
+    /// A freshly allocated owned immutable `string` (`StringBuilder::to_string`).
     OwnedString,
 }
 
@@ -406,12 +406,12 @@ fn collection_method(kind: CollectionKind, method: &str) -> Option<MethodSpec> {
             result: ResultShape::Bool,
             mutating: true,
         },
-        (CollectionKind::String, "push_str") => MethodSpec {
+        (CollectionKind::StringBuilder, "push_str") => MethodSpec {
             params: &[ParamSlot::Text],
             result: ResultShape::Unit,
             mutating: true,
         },
-        (CollectionKind::String, "to_string") => MethodSpec {
+        (CollectionKind::StringBuilder, "to_string") => MethodSpec {
             params: &[],
             result: ResultShape::OwnedString,
             mutating: false,
@@ -580,7 +580,7 @@ mod tests {
         let errs = errors(
             r#"
             func main() -> i32 {
-                mut b = String::new()
+                mut b = StringBuilder::new()
                 b.push_str("hi")
                 val n: u64 = b.len()
                 return 0
@@ -595,7 +595,7 @@ mod tests {
         let errs = errors(
             r#"
             func main() -> i32 {
-                mut b: String = String::new()
+                mut b: StringBuilder = StringBuilder::new()
                 val piece: string = "text"
                 b.push_str(&piece)
                 b.push_str(piece)
@@ -612,7 +612,7 @@ mod tests {
         let errs = errors(
             r#"
             func main() -> i32 {
-                mut b = String::new()
+                mut b = StringBuilder::new()
                 b.push_str("a")
                 val out: string = b.to_string() + "!"
                 return 0
@@ -627,7 +627,7 @@ mod tests {
         let errs = errors(
             r#"
             func main() -> i32 {
-                mut b: String<i32> = String::new()
+                mut b: StringBuilder<i32> = StringBuilder::new()
                 return 0
             }
             "#,
@@ -643,7 +643,7 @@ mod tests {
         let errs = errors(
             r#"
             func main() -> i32 {
-                val b = String::new()
+                val b = StringBuilder::new()
                 b.push_str("x")
                 return 0
             }
@@ -656,18 +656,37 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_string_type_shadows_the_builder() {
+    fn a_declared_string_builder_type_shadows_the_builder() {
         let errs = errors(
             r#"
             @derive(Copy, Clone)
-            struct String { n: i32 }
+            struct StringBuilder { n: i32 }
             func main() -> i32 {
-                val s: String = String { n: 1 }
+                val s: StringBuilder = StringBuilder { n: 1 }
                 return s.n
             }
             "#,
         );
         assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    #[test]
+    fn the_retired_builder_name_is_not_a_type() {
+        let errs = errors(
+            r#"
+            func fill(b: &mut String) {}
+            func main() -> i32 {
+                mut b = String::new()
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("unknown type name 'String'"))
+                && errs.iter().any(|e| e.contains("unknown type 'String'")),
+            "expected the annotation and the constructor both rejected, got {errs:?}"
+        );
     }
 
     #[test]

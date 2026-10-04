@@ -21,7 +21,7 @@ not what each one does.
 | --------------- | -------------- | --------- |
 | `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
-| `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `String` | [Strings](../docs/language-reference/strings.md) |
+| `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `StringBuilder` | [Strings](../docs/language-reference/strings.md) |
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes, `@gpu` kernels, hand-written `@kernel` functions and their `partition` write form, device transfer with `.to` and the operations that then run on the device | [Tensors](../docs/language-reference/tensors.md) |
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
@@ -126,7 +126,7 @@ One line each. The program's own header comment is the full description.
 - [`held_destruction.nr`](showcase/held_destruction.nr): a value held in a struct field, an array or tuple element, an enum payload or a newtype, destroyed with its holder and exactly once when one element is given up first
 - [`inventory_ledger.nr`](showcase/inventory_ledger.nr): the standard collections carrying an inventory ledger
 - [`job_queue.nr`](showcase/job_queue.nr): `val-else` early exit carrying a small job queue
-- [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `String`, finished by a consuming `self` method
+- [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `StringBuilder`, finished by a consuming `self` method
 - [`logistic_fit.nr`](showcase/logistic_fit.nr): logistic regression trained by `.backward()`, its sigmoid built from `.tanh()`, its likelihood from `.log()` and its elastic-net penalty from `.abs()` and `.pow(2.0)`, with `@` and broadcast arithmetic, a struct recording the run, and `.sqrt()` / `.exp()` in the report
 - [`model_shapes.nr`](showcase/model_shapes.nr): a network's layer stack declared with real tensor parameters
 - [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`

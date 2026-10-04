@@ -215,17 +215,16 @@ and the transparent `HirExprKind::NewtypeConstruct { name, value }` / `NewtypeAc
 lower straight through, so backends erase the wrapper entirely.
 
 **Collections are a type, not a family of nodes.** `HirType::Collection { kind, args }` with
-`HirCollectionKind::{Vec, HashMap, BTreeMap, String}` (Display renders `Vec<i32>`), plus
+`HirCollectionKind::{Vec, HashMap, BTreeMap, StringBuilder}` (Display renders `Vec<i32>`), plus
 `HirExprKind::CollectionNew`: the typed mirror of `Vec::new()` and its siblings, whose `ty` is
 the collection being built. Collection *methods* need no node: they reach backends as an
 ordinary `Call` with a `FieldAccess` callee whose `ty` carries the call's resolved result (the
 `Option<T>` a fallible reader returns, the `Vec<K>` `keys()` builds).
 
-`String` is the one **nullary** kind: its buffer is a byte run, so it carries no type
-arguments and needs no new `HirType` variant: `Collection { kind: String, args: [] }` is the
+`StringBuilder` is the one **nullary** kind: its buffer is a byte run, so it carries no type
+arguments and needs no new `HirType` variant: `Collection { kind: StringBuilder, args: [] }` is the
 whole representation. `HirCollectionKind::arity()` (0/1/2) and `mangle_tag()` serve that;
-`String`'s tag is `strbuf` rather than the lowercased surface name, which would collide with
-the primitive `string` in a mangled instance name.
+`StringBuilder`'s tag is the short `strbuf`.
 
 **Tuples and array rests** are the typed mirrors of their AST nodes: `HirType::Tuple(Vec<HirType>)`
 (Display `(T1, T2, ...)`) with `HirExprKind::TupleLiteral` / `TupleIndex`, and

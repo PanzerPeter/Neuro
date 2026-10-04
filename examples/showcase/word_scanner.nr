@@ -3,7 +3,7 @@
 // Cumulative integration example combining:
 //   `.char_indices()` byte offsets and `.chars()` codepoint walks
 //   · zero-copy `.slice(range)` views cut at those offsets
-//   · the growable `String` buffer and `.to_string()`
+//   · the growable `StringBuilder` buffer and `.to_string()`
 //   · a heap-backed `Vec<string>` that frees at scope exit
 //   · a struct with `&self` methods and an associated function
 //   · `.enumerate()` over a `Vec` head and a `.filter(p)` adapter over the scalars
@@ -26,7 +26,7 @@ impl Token {
     // Built from a borrowed view, so the scanner never allocates while it walks; the
     // owned copy is made once, here, when the token is kept.
     func of(view: &string) -> Token {
-        mut buffer = String::new()
+        mut buffer = StringBuilder::new()
         buffer.push_str(view)
         mut count = 0
         for c in view.chars() {

@@ -1,6 +1,6 @@
 # Strings
 
-Neuro has two text types: the immutable `string` slice, and the growable `String` buffer.
+Neuro has two text types: the immutable `string` slice, and the growable `StringBuilder` buffer.
 The pair mirrors `[T; N]` / `Vec<T>`, and for the same reason.
 
 ## String Type
@@ -30,7 +30,7 @@ program; they are **not** heap-allocated, so a program that only reads literals 
 **Concatenation** (`a + b`) is the first runtime heap-backed string: it `malloc`s a fresh buffer
 and copies both operands' bytes in, yielding a new owned `string`. Both literal and heap-backed
 forms share the same `{ ptr, i64 }` ABI, so consumers cannot tell them apart. An anonymous heap
-`string` (the result of `+`, of interpolation, or of `String::to_string`) is owned by no binding
+`string` (the result of `+`, of interpolation, or of `StringBuilder::to_string`) is owned by no binding
 the drop machinery tracks, so it is released at the consumer that reads it instead: a `+` or `==`
 operand, a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolation hole,
 or a statement whose value nothing reads. One STORED into a position that outlives the
@@ -39,7 +39,7 @@ function's return value, and an argument to a parameter the callee only reads. A
 is different again: it owns a copy of the bytes rather than the operand's buffer, an element read
 copies back out, and the collection releases its slots when it is destroyed; see the
 [memory model](memory-model.md). A
-[`String`](#growable-strings-string) builder is different: it *is* a tracked binding, so its
+[`StringBuilder`](#growable-strings-stringbuilder) is different: it *is* a tracked binding, so its
 buffer is freed at scope exit.
 
 The pointer addresses a NUL-terminated byte sequence so it doubles as a valid C string for
@@ -149,44 +149,44 @@ returns an iterator. It appears only in a `for` head, it binds a pair there (nev
 variable), and it takes no `.enumerate()` and no adapters: it already carries a position of its
 own. Where a chain is wanted, walk `.chars()` instead.
 
-## Growable Strings (`String`)
+## Growable Strings (`StringBuilder`)
 
 `string` is immutable, which makes it cheap to pass, slice, and share, but wrong for text that is
 *assembled*. Writing `s = s + piece` in a loop allocates a new buffer and recopies everything
 accumulated so far on every step, so building an n-piece string costs O(n²) bytes copied.
 
-`String` is the growable counterpart: an owned, mutable, heap-backed UTF-8 buffer that appends in
+`StringBuilder` is the growable counterpart: an owned, mutable, heap-backed UTF-8 buffer that appends in
 amortized O(1). The pair mirrors `[T; N]` / `Vec<T>` exactly, and for the same reason.
 
 ```neuro
-mut report = String::new()          // no annotation needed: `String` takes no type arguments
+mut report = StringBuilder::new()       // no annotation needed: it takes no type arguments
 report.push_str("run: ")
-report.push_str(name)               // `name` is read, not moved
+report.push_str(name)                   // `name` is read, not moved
 report.push_str(" ok")
 
 val line: string = report.to_string()   // finished text, immutable from here
 ```
 
-`String` is a **compiler-known library type**, not a keyword and not a language primitive: the
+`StringBuilder` is a **compiler-known library type**, not a keyword and not a language primitive: the
 same status `Vec<T>` has. The language exposes no allocator and no raw pointers, so nothing in
-`.nr` source could implement it. A program that declares its own `String` shadows this one.
+`.nr` source could implement it. A program that declares its own `StringBuilder` shadows this one.
 
-| | `string` | `String` |
+| | `string` | `StringBuilder` |
 |---|---|---|
 | Contents | immutable | mutable, appendable |
 | Representation | `{ ptr, i64 }` fat pointer, by value | `{ buffer, len, cap }` header owning the buffer |
 | Grows | never | amortized O(1) per append |
 | Role | the text a program passes around | the buffer a program builds text in |
 
-### `String` Methods
+### `StringBuilder` Methods
 
-**`String::new() -> String`**: an empty builder. Allocates nothing until the first append, so an
+**`StringBuilder::new() -> StringBuilder`**: an empty builder. Allocates nothing until the first append, so an
 unused builder costs no heap traffic. It takes no type arguments, so unlike `Vec::new()` it needs
 no annotation to be inferred.
 
 **`.push_str(text)`**: appends the bytes of a `string` or an immutable `&string`. The argument is
 **read, not moved** (the same latitude a `+` operand or a map lookup key gets), so the caller's
-binding stays usable afterwards. It mutates, so it needs a `mut` binding or a `&mut String`.
+binding stays usable afterwards. It mutates, so it needs a `mut` binding or a `&mut StringBuilder`.
 
 **`.len() -> u64`**: the byte length, read from the header in O(1). Bytes, not characters, for the
 same reason `string.len()` is.
@@ -203,12 +203,12 @@ allocation at the end of a build, not one per append.
 
 ### Ownership
 
-`String` owns a heap buffer, so it follows the ordinary rules with no exceptions: it is never
-`Copy`, assignment and argument passing **move** it, `&String` / `&mut String` borrow it, and the
+`StringBuilder` owns a heap buffer, so it follows the ordinary rules with no exceptions: it is never
+`Copy`, assignment and argument passing **move** it, `&StringBuilder` / `&mut StringBuilder` borrow it, and the
 buffer is freed when the owner leaves scope.
 
 ```neuro
-mut buf = String::new()
+mut buf = StringBuilder::new()
 buf.push_str("a")
 val moved = buf          // buf is MOVED
 // buf.push_str("b")     // COMPILE ERROR: use of moved value 'buf'
@@ -216,10 +216,10 @@ val moved = buf          // buf is MOVED
 
 ### Limitations
 
-- No `.push(char)`, `String::with_capacity(n)`, `String::from(s)`, or `.is_empty()`.
+- No `.push(char)`, `StringBuilder::with_capacity(n)`, `StringBuilder::from(s)`, or `.is_empty()`.
 - No borrowed `.as_str()`; use `.to_string()`.
-- A `String` cannot be a collection element or a map key.
-- `String` is not an interpolation hole or a `+` operand: call `.to_string()` first.
+- A `StringBuilder` cannot be a collection element or a map key.
+- `StringBuilder` is not an interpolation hole or a `+` operand: call `.to_string()` first.
 
 
 ## References

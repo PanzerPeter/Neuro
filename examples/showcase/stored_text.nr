@@ -3,7 +3,7 @@
 // Integration example combining the release of an owned string a holder stores
 // with the features that put it there:
 //   struct + `impl` methods · `[T; N]` arrays + `for x in &a` · tuples ·
-//   place expressions (`self.total += n`, `entry.label = ...`) · `String`
+//   place expressions (`self.total += n`, `entry.label = ...`) · `StringBuilder`
 //   builder + `push_str` · string interpolation · `&string` parameters.
 //
 // The sibling program `transient_text.nr` covers the other half: a buffer no
@@ -117,7 +117,7 @@ func main() -> i32 {
 
     // The same shapes feeding a builder, to show the stored buffers and the
     // transient ones coexist.
-    mut report = String::new()
+    mut report = StringBuilder::new()
     report.push_str(tagged(&kind, 1))
     report.push_str(";")
     report.push_str(tagged(&kind, 2))

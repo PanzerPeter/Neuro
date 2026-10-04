@@ -59,7 +59,7 @@ types/tuples.nr                     62
 types/type_aliases.nr               17
 types/underscore_separators.nr      0
 
-# --- strings: the `string` slice and the growable `String` buffer -----------
+# --- strings: the `string` slice and the growable `StringBuilder` -----------
 strings/char.nr                  65
 strings/string_builder.nr        27
 strings/string_char_slice.nr     19

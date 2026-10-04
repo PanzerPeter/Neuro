@@ -1,7 +1,7 @@
-// End-to-end tests for the growable text buffer `String`: construction without an
+// End-to-end tests for the growable text buffer `StringBuilder`: construction without an
 // annotation, appending owned and borrowed text, byte length, buffer-retaining `clear`,
-// the copy back out to an immutable `string`, ownership (move + scope-exit free), and
-// growth well past the initial capacity.
+// the copy back out to an immutable `string`, ownership (move + scope-exit free),
+// growth well past the initial capacity, and the retired name `String`.
 use crate::compile_harness::CompileTest;
 
 #[test]
@@ -9,7 +9,7 @@ fn builds_text_and_copies_it_out() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    mut b = String::new()
+    mut b = StringBuilder::new()
     b.push_str("Hello")
     b.push_str(", ")
     b.push_str("world!")
@@ -31,7 +31,7 @@ fn push_str_accepts_a_borrow_without_consuming_it() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    mut b: String = String::new()
+    mut b: StringBuilder = StringBuilder::new()
     val piece: string = "abcd"
     b.push_str(&piece)
     b.push_str(piece)
@@ -50,7 +50,7 @@ fn clear_resets_the_length_and_the_buffer_refills() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    mut b = String::new()
+    mut b = StringBuilder::new()
     b.push_str("discard me")
     b.clear()
     if b.len() != 0 {
@@ -74,7 +74,7 @@ fn empty_builder_produces_an_empty_string() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    val b = String::new()
+    val b = StringBuilder::new()
     val out: string = b.to_string()
     if out != "" {
         return 91
@@ -93,7 +93,7 @@ fn grows_far_past_the_initial_capacity() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    mut b = String::new()
+    mut b = StringBuilder::new()
     mut i = 0
     while i < 500 {
         b.push_str("0123456789")
@@ -119,14 +119,14 @@ func main() -> i32 {
 fn a_builder_is_mutated_through_a_mutable_borrow() {
     let test = CompileTest::new();
     let source = r#"
-func tag(buf: &mut String, name: string) {
+func tag(buf: &mut StringBuilder, name: string) {
     buf.push_str("[")
     buf.push_str(name)
     buf.push_str("]")
 }
 
 func main() -> i32 {
-    mut b = String::new()
+    mut b = StringBuilder::new()
     tag(&mut b, "ok")
     tag(&mut b, "done")
     if b.to_string() != "[ok][done]" {
@@ -146,7 +146,7 @@ fn a_builder_moves_on_assignment() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    mut b = String::new()
+    mut b = StringBuilder::new()
     b.push_str("moved")
     mut other = b
     other.push_str("!")
@@ -164,7 +164,7 @@ fn a_moved_builder_is_rejected() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    mut b = String::new()
+    mut b = StringBuilder::new()
     val other = b
     b.push_str("x")
     0
@@ -189,7 +189,7 @@ fn builders_reused_in_a_loop_do_not_grow_the_heap() {
     let test = CompileTest::new();
     let source = r#"
 func build(rounds: i32) -> u64 {
-    mut b = String::new()
+    mut b = StringBuilder::new()
     mut i = 0
     while i < rounds {
         b.push_str("0123456789abcdef")
@@ -213,6 +213,45 @@ func main() -> i32 {
 "#;
     let exit = test
         .compile_and_run("string_reuse.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 5);
+}
+
+#[test]
+fn the_retired_name_string_is_rejected() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut b = String::new()
+    b.push_str("x")
+    0
+}
+"#;
+    let path = test.write_source("string_retired_name.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("`String` no longer names the builder");
+    assert!(
+        err.contains("unknown type 'String'"),
+        "expected an unknown-type diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn a_user_struct_named_string_is_an_ordinary_struct() {
+    let test = CompileTest::new();
+    let source = r#"
+struct String { n: i32 }
+
+func main() -> i32 {
+    val s = String { n: 3 }
+    mut b = StringBuilder::new()
+    b.push_str("ab")
+    s.n + b.len() as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("string_user_struct.nr", source)
         .expect("compile/run failed");
     assert_eq!(exit, 5);
 }

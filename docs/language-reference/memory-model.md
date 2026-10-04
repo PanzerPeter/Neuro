@@ -14,7 +14,7 @@ for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `poo
 |---|---|
 | Stack values (`Copy` primitives, structs of them, fixed arrays, tuples) | On return from the enclosing frame |
 | String literals | Never allocated: they live in `.rodata` for the life of the program |
-| `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `String`, `Tensor<T, [..]>` | Deterministic `Drop` at scope exit |
+| `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`, `StringBuilder`, `Tensor<T, [..]>` | Deterministic `Drop` at scope exit |
 | A binding that is reassigned | The displaced value is destroyed at the assignment, before the new one is stored |
 | Owners held inside a destroyed value | A struct field, array or tuple element, enum payload or newtype inner value goes back with the value that holds it |
 | A value moved out of a position | Destroyed on the path it moved to, never twice |
@@ -24,7 +24,7 @@ for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `poo
 | A heap `string` passed by value to a parameter the callee only reads | At the call it was built for |
 | A `string` in a collection slot | By the collection, which owns a copy of the bytes rather than the operand's buffer |
 
-An anonymous heap `string` (what `+`, interpolation and `String::to_string` produce) belongs to
+An anonymous heap `string` (what `+`, interpolation and `StringBuilder::to_string` produce) belongs to
 no binding, so it is released at the consumer that reads and discards it: a `+` or `==` operand,
 a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolation hole, or a
 statement whose value nothing reads. A loop that formats output holds a flat heap rather than a

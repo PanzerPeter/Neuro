@@ -1,5 +1,5 @@
 //! Lowering for the standard collections `Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>`,
-//! and the growable text buffer `String`.
+//! and the growable text buffer `StringBuilder`.
 //!
 //! The type checker has already validated element/key types and method arity, so this
 //! only re-derives the resolved types the HIR must carry. The method table is
@@ -23,7 +23,7 @@ pub(crate) fn collection_kind(name: &str) -> Option<HirCollectionKind> {
         "Vec" => Some(HirCollectionKind::Vec),
         "HashMap" => Some(HirCollectionKind::HashMap),
         "BTreeMap" => Some(HirCollectionKind::BTreeMap),
-        "String" => Some(HirCollectionKind::String),
+        "StringBuilder" => Some(HirCollectionKind::StringBuilder),
         _ => None,
     }
 }
@@ -32,13 +32,13 @@ pub(crate) fn collection_kind(name: &str) -> Option<HirCollectionKind> {
 /// already a complete type annotation.
 pub(crate) fn nullary_collection(name: &str) -> Option<HirCollectionKind> {
     match collection_kind(name) {
-        Some(HirCollectionKind::String) => Some(HirCollectionKind::String),
+        Some(HirCollectionKind::StringBuilder) => Some(HirCollectionKind::StringBuilder),
         _ => None,
     }
 }
 
 impl Lowerer {
-    /// Lower `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `String::new()`. The
+    /// Lower `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `StringBuilder::new()`. The
     /// collection's element types come from the annotated target, which the checker
     /// required; a nullary kind has none to carry, so it builds its own type.
     pub(crate) fn lower_collection_new(
@@ -100,8 +100,10 @@ impl Lowerer {
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "remove") => {
                 (vec![key], HirType::Bool)
             }
-            (HirCollectionKind::String, "push_str") => (vec![HirType::String], HirType::Void),
-            (HirCollectionKind::String, "to_string") => (vec![], HirType::String),
+            (HirCollectionKind::StringBuilder, "push_str") => {
+                (vec![HirType::String], HirType::Void)
+            }
+            (HirCollectionKind::StringBuilder, "to_string") => (vec![], HirType::String),
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "keys") => (
                 vec![],
                 HirType::Collection {

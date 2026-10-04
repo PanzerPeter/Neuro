@@ -23,7 +23,7 @@ use neuro_hir::{
     HirType,
 };
 
-/// The `String` builder method that copies its bytes out into an owned `string`, and
+/// The `StringBuilder` builder method that copies its bytes out into an owned `string`, and
 /// the `string` methods that read their receiver without retaining it.
 const TO_OWNED_METHOD: &str = "to_string";
 /// `string.clone()`, which copies the bytes into a buffer of their own.
@@ -421,7 +421,7 @@ fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
                 {
                     return producers.contains(&format!("{}__{}", type_name, field));
                 }
-                // `String::to_string` copies the builder's bytes into a buffer of their
+                // `StringBuilder::to_string` copies the builder's bytes into a buffer of their
                 // own. The receiver's type is what identifies it: a user type that
                 // declares its own `to_string` may return a `.rodata` literal, and reading
                 // that as an allocation would hand `.rodata` to `free`.
@@ -445,11 +445,11 @@ fn indexes_a_collection(ty: &HirType) -> bool {
     }
 }
 
-/// Whether `ty` is the `String` builder, through a borrow of it or directly.
+/// Whether `ty` is the `StringBuilder` builder, through a borrow of it or directly.
 fn is_builder(ty: &HirType) -> bool {
     match ty {
         HirType::Reference { inner, .. } => is_builder(inner),
-        HirType::Collection { kind, .. } => matches!(kind, HirCollectionKind::String),
+        HirType::Collection { kind, .. } => matches!(kind, HirCollectionKind::StringBuilder),
         _ => false,
     }
 }

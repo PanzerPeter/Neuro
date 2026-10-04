@@ -120,7 +120,7 @@ impl TypeChecker {
                 "string" => Some(Type::String),
                 "void" => Some(Type::Void),
                 // A collection's bare name is not a type, exactly like a generic
-                // struct's: `Vec` alone says nothing about what it holds. `String` is the
+                // struct's: `Vec` alone says nothing about what it holds. `StringBuilder` is the
                 // exception: it takes no arguments, so its bare name is already complete.
                 name if CollectionKind::from_name(name).is_some_and(|k| k.arity() == 0)
                     && !self.generic_scope.contains(name)

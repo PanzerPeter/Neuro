@@ -1,4 +1,4 @@
-// `String`: the growable UTF-8 text buffer.
+// `StringBuilder`: the growable UTF-8 text buffer.
 //
 // The buffer is a plain byte run of `cap` bytes holding `len` live ones, a `Vec<u8>`
 // under a text surface, so `len()` and `clear()` are the shared collection operations
@@ -32,7 +32,9 @@ impl<'ctx> CodegenContext<'ctx> {
         args: &[HirExpr],
     ) -> CodegenResult<()> {
         let text_expr = args.first().ok_or_else(|| {
-            CodegenError::InternalError("String::push_str reached codegen without text".into())
+            CodegenError::InternalError(
+                "StringBuilder::push_str reached codegen without text".into(),
+            )
         })?;
         let text = self.codegen_expr(text_expr)?;
         let (src, extra) = self.split_string_fatptr(text)?;
