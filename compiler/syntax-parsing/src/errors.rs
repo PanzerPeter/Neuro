@@ -38,7 +38,7 @@ pub enum ParseError {
     CyclicTypeAlias { name: String, span: Span },
 
     #[error(
-        "enum '{name}' may not declare lifetime parameters; enum payloads are restricted to scalar types, so a borrowed payload has nothing to annotate"
+        "enum '{name}' may not declare lifetime parameters yet; write the payload's reference without one"
     )]
     EnumLifetimeParam { name: String, span: Span },
 

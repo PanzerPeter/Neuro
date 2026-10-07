@@ -151,11 +151,10 @@ func main() -> i32 {
 "#;
 
     let source_path = test.write_source("loop_value_mismatch.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "value-breaks with disagreeing types must be a compile error"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("value-breaks with disagreeing types must be a compile error");
+    assert!(err.contains("expected i32, found string"), "{err}");
 }
 
 /// An annotation's type reaches the value of a `break`, so a literal written there

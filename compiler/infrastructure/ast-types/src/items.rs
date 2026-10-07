@@ -288,9 +288,8 @@ pub struct ConstDef {
 /// The data a single enum variant carries.
 ///
 /// A variant is one of three shapes: a bare tag, a positional tuple of payload
-/// types, or a set of named fields. The payload types are restricted to scalar
-/// `Copy` primitives by semantic analysis (a documented Phase-1E limitation); the
-/// AST itself imposes no restriction.
+/// types, or a set of named fields. The AST imposes no restriction on the payload
+/// types; semantic analysis checks them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VariantPayload {
     /// A bare variant with no data: `Red`.

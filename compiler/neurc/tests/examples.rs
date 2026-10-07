@@ -134,7 +134,8 @@ fn parse_manifest(path: &Path) -> BTreeMap<String, Expectation> {
 /// Compile `examples/<rel>` to a temp binary, returning its path or an error.
 fn compile_example(examples_dir: &Path, rel: &str) -> Result<PathBuf, String> {
     let src = examples_dir.join(rel);
-    let out = std::env::temp_dir().join(format!("neuro_example_{}", rel.replace(['/', '.'], "_")));
+    let out = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("neuro_example_{}", rel.replace(['/', '.'], "_")));
 
     let output = Command::new(neurc_path())
         .arg("compile")

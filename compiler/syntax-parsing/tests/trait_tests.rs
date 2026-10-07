@@ -144,10 +144,10 @@ trait Iterator {
     type Item = i32
 }
 "#;
-    assert!(
-        parse(source).is_err(),
-        "`type Item = i32` is the impl's binding, not a trait declaration"
-    );
+    let err = parse(source)
+        .expect_err("`type Item = i32` is the impl's binding, not a trait declaration")
+        .to_string();
+    assert!(err.contains("a trait declares `type Name`"), "{err}");
 }
 
 #[test]
@@ -158,7 +158,13 @@ impl Point {
     func me(&self) -> Self { Point { x: 1 } }
 }
 "#;
-    assert!(parse(source).is_err(), "bare `Self` should be rejected");
+    let err = parse(source)
+        .expect_err("bare `Self` should be rejected")
+        .to_string();
+    assert!(
+        err.contains("bare `Self` is not a type annotation"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -252,8 +258,13 @@ trait Source {
 
 func head<T: Source<i32>>(src: &T) -> i32 { 0 }
 "#;
+    let err = parse(source)
+        .expect_err(
+            "only `Assoc = T` entries constrain a bound; a positional argument names nothing",
+        )
+        .to_string();
     assert!(
-        parse(source).is_err(),
-        "only `Assoc = T` entries constrain a bound; a positional argument names nothing"
+        err.contains("expected '=' after an associated type name"),
+        "{err}"
     );
 }

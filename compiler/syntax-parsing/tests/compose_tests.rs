@@ -86,7 +86,13 @@ fn a_chain_may_break_the_line_before_the_operator() {
 fn a_spaced_pair_of_angle_brackets_is_not_the_operator() {
     // `a > > b` is a comparison followed by a stray `>`, and must not be read as
     // composition: adjacency is what makes the pair one operator.
-    assert!(parse_expr("a > > b").is_err());
+    let err = parse_expr("a > > b")
+        .expect_err("should be rejected")
+        .to_string();
+    assert!(
+        err.contains("unexpected token Greater, expected expression"),
+        "{err}"
+    );
 }
 
 #[test]

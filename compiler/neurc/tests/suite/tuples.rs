@@ -111,11 +111,10 @@ func main() -> i32 {
     x.0
 }
 "#;
-    let result = test.compile(&test.write_source("tuple_grouping.nr", source));
-    assert!(
-        result.is_err(),
-        "expected `.0` on a grouped scalar to be a type error"
-    );
+    let err = test
+        .compile(&test.write_source("tuple_grouping.nr", source))
+        .expect_err("expected `.0` on a grouped scalar to be a type error");
+    assert!(err.contains("cannot index a value of type i32"), "{err}");
 }
 
 #[test]
@@ -139,11 +138,10 @@ func main() -> i32 {
     0
 }
 "#;
-    let result = test.compile(&test.write_source("tuple_double_move.nr", moved));
-    assert!(
-        result.is_err(),
-        "expected the same binding in two tuple slots to be a double move"
-    );
+    let err = test
+        .compile(&test.write_source("tuple_double_move.nr", moved))
+        .expect_err("expected the same binding in two tuple slots to be a double move");
+    assert!(err.contains("use of moved value 's'"), "{err}");
 }
 
 #[test]
@@ -155,9 +153,8 @@ func main() -> i32 {
     t.5
 }
 "#;
-    let result = test.compile(&test.write_source("tuple_oob.nr", source));
-    assert!(
-        result.is_err(),
-        "expected an out-of-range tuple index to be rejected"
-    );
+    let err = test
+        .compile(&test.write_source("tuple_oob.nr", source))
+        .expect_err("expected an out-of-range tuple index to be rejected");
+    assert!(err.contains("tuple index 5 is out of range"), "{err}");
 }

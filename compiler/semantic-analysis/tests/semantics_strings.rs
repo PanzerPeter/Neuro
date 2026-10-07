@@ -92,6 +92,13 @@ fn type_check_string_mismatch_with_bool() {
         result.is_err(),
         "Returning bool when string expected should fail"
     );
+    let errors = result.unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. })),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -105,6 +112,13 @@ fn type_check_string_variable_type_mismatch() {
     assert!(
         result.is_err(),
         "Returning string when i32 expected should fail"
+    );
+    let errors = result.unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ReturnTypeMismatch { .. })),
+        "{errors:?}"
     );
 }
 

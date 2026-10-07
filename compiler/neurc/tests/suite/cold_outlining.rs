@@ -18,7 +18,7 @@ fn neurc_path() -> PathBuf {
 
 /// Compile `source` at the given optimization level, returning the executable path.
 fn compile_source(source: &str, tag: &str, optimization: &str) -> PathBuf {
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join(format!("neuro_outline_{tag}.nr"));
     let exe = dir.join(format!("neuro_outline_{tag}"));
     std::fs::write(&src, source).expect("write source");

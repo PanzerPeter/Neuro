@@ -131,6 +131,35 @@ fn derived_partial_eq_requires_comparable_fields() {
     );
 }
 
+/// A nested struct without `Clone` owns nothing; it lacks the derive, and the diagnostic
+/// says so instead of blaming a buffer. A field that does own one keeps that reason.
+#[test]
+fn derived_clone_names_the_missing_derive_on_a_nested_struct() {
+    let errors = semantic_errors(
+        r#"
+        struct Q { x: i32 }
+        @derive(Clone)
+        struct P { q: Q, s: string }
+        func main() -> i32 { return 0 }
+        "#,
+    );
+    let reason_of = |field: &str| {
+        errors.iter().find_map(|e| match e {
+            TypeError::DeriveFieldUnsupported {
+                trait_name,
+                field_name,
+                reason,
+                ..
+            } if trait_name == "Clone" && field_name == field => Some(reason.clone()),
+            _ => None,
+        })
+    };
+    let nested = reason_of("q").unwrap_or_else(|| panic!("no Clone error on 'q': {errors:?}"));
+    assert!(nested.contains("give it `@derive(Clone)` too"), "{nested}");
+    let owning = reason_of("s").unwrap_or_else(|| panic!("no Clone error on 's': {errors:?}"));
+    assert!(owning.contains("owns a buffer"), "{owning}");
+}
+
 #[test]
 fn derived_debug_renders_under_the_debug_specifier() {
     let errors = semantic_errors(

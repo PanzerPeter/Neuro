@@ -5,6 +5,44 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-099: a struct or enum returned from a function may hold a borrow of its locals
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; `check_returned_reference` in `type_checkers/statements/returns.rs`
+- **Severity**: major. A silent use after free: the program compiles and reads released memory
+
+**Minimal repro**
+
+```neuro
+struct H { r: &string }
+
+func make() -> H {
+    val s = "he" + "llo"
+    H { r: &s }
+}
+
+func main() -> i32 {
+    val h = make()
+    h.r.len() as i32
+}
+```
+
+Expected: a compile error, as for `func make() -> &string { ... &s }`, which is refused with
+"cannot return a reference to 's'". Observed: it compiles, `s` is released when `make` returns,
+and `h.r` reads the freed buffer. An enum payload (`enum E { A(&string) }`, returning `E::A(&s)`)
+escapes the same way.
+
+**Root cause**: confirmed in the code. `check_returned_reference` runs only when the declared
+return type is itself a reference, so a reference carried inside a returned struct, enum or tuple
+is never checked against the function's locals.
+
+**Workaround**: borrow only from parameters when building a struct or enum to return.
+
+**Fix sketch**: run the check whenever the return type contains a reference, walking struct
+literal fields, enum constructor arguments and tuple elements down to each `&place`. Regression
+tests: the repro above, its enum and tuple forms, and a struct borrowing a parameter, which must
+keep compiling.
+
 ## BUG-098: `@derive(Clone)` refuses a struct with a field that owns a buffer
 
 - **Status**: open, confirmed. Narrowed: the derived `.clone()` used to copy such a field's

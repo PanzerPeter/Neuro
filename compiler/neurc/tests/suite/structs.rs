@@ -200,11 +200,10 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("wrong_field_type.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "wrong field type should cause a compile error"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("wrong field type should cause a compile error");
+    assert!(err.contains("expected f64, found bool"), "{err}");
 }
 
 // ── Multiple structs in one file ──────────────────────────────────────────────

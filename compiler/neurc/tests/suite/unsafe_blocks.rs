@@ -64,8 +64,11 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("unsafe_reserved.nr", source);
+    let err = test
+        .compile(&source_path)
+        .expect_err("using `unsafe` as an identifier must fail to compile");
     assert!(
-        test.compile(&source_path).is_err(),
-        "using `unsafe` as an identifier must fail to compile"
+        err.contains("unexpected token Unsafe, expected variable name"),
+        "{err}"
     );
 }

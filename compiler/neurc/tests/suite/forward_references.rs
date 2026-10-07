@@ -100,8 +100,8 @@ func dup() -> i32 { 2 }
 func main() -> i32 { dup() }
 "#;
     let source_path = test.write_source("forward_duplicate.nr", source);
-    assert!(
-        test.compile(&source_path).is_err(),
-        "a duplicate function definition must not compile"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("a duplicate function definition must not compile");
+    assert!(err.contains("function 'dup' already defined"), "{err}");
 }

@@ -136,11 +136,10 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("wrapping_on_string.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "expected compilation to fail for wrapping_add on a string receiver"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("expected compilation to fail for wrapping_add on a string receiver");
+    assert!(err.contains("has no method 'wrapping_add'"), "{err}");
 }
 
 #[test]
@@ -258,9 +257,8 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("checked_on_float.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "expected compilation to fail for checked_add on a float receiver"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("expected compilation to fail for checked_add on a float receiver");
+    assert!(err.contains("has no method 'checked_add'"), "{err}");
 }

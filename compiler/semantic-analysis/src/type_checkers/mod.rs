@@ -704,12 +704,6 @@ impl TypeChecker {
         }
     }
 
-    /// Whether a derived `==` can compare `ty`, and so whether a `@derive(PartialEq)`
-    /// struct may hold it as a field.
-    ///
-    /// A hand-written `impl PartialEq` does NOT qualify: the derived comparison is
-    /// emitted inline over the fields and never calls a method, so a nested struct must
-    /// carry the derive too.
     /// Whether a derived `.clone()` copies a field of type `ty` faithfully. The backend's
     /// derived clone copies the struct's bytes, which duplicates a `Copy` value and a struct
     /// that is itself cloned that way, but would leave a buffer-owning field shared by the
@@ -729,6 +723,12 @@ impl TypeChecker {
         }
     }
 
+    /// Whether a derived `==` can compare `ty`, and so whether a `@derive(PartialEq)`
+    /// struct may hold it as a field.
+    ///
+    /// A hand-written `impl PartialEq` does NOT qualify: the derived comparison is
+    /// emitted inline over the fields and never calls a method, so a nested struct must
+    /// carry the derive too.
     pub(crate) fn is_derived_comparable(&self, ty: &Type) -> bool {
         match ty {
             Type::Struct(name) => self.partial_eq_structs.contains(name),

@@ -184,11 +184,18 @@ impl TypeChecker {
                     ));
                 }
                 if clone && !self.is_derived_cloneable(field_ty) {
+                    // A struct that derives `Clone` is never an offender here: if it owns a
+                    // buffer, its own derive is the one refused.
+                    let reason = if derivable {
+                        "has no `.clone()`; give it `@derive(Clone)` too"
+                    } else {
+                        "owns a buffer that a derived `.clone()` cannot copy yet; build the copy in a method of your own"
+                    };
                     offenders.push((
                         CLONE_TRAIT,
                         field_name.clone(),
                         field_ty.clone(),
-                        "owns a buffer that a derived `.clone()` cannot copy yet; build the copy in a method of your own".to_string(),
+                        reason.to_string(),
                         span,
                     ));
                 }

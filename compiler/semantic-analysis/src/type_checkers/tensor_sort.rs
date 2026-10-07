@@ -2,9 +2,10 @@
 //
 // Reached from the builtin-method arm of `check_call_expr`. All three order one axis of
 // the receiver and differ only in what they hand back: the reordered elements, the
-// ordering itself, or the leading `k` of both. The argument list always arrives complete
-// and in declaration order — `axis` then `descending`, or `k` then `axis` — because the
-// argument-binding pass fills an omitted one from the default the specification gives.
+// ordering itself, or the leading `k` of both. The argument list arrives in declaration
+// order — `axis` then `descending`, or `k` then `axis` — because the argument-binding
+// pass fills an omitted one from the default the specification gives. An all-positional
+// call is the exception: binding leaves it as written, so its count is checked here.
 //
 // Every argument is read as syntax rather than as a value, the way a reduction's axis is:
 // an axis may be a dimension NAME that no value scope declares, and `k` and `descending`
@@ -75,6 +76,15 @@ impl TypeChecker {
 
         if method == TOPK_METHOD {
             return self.check_topk(element, shape, args, call_span);
+        }
+        // An all-positional call is left unbound, so a surplus reaches here uncounted.
+        if args.len() > 2 {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 2,
+                found: args.len(),
+                span: call_span,
+            });
+            return Type::Unknown;
         }
         let Some(axis) = self.sort_axis(shape, args.first(), method, call_span) else {
             return Type::Unknown;

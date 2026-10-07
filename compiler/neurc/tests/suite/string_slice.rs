@@ -138,6 +138,7 @@ func main() -> i32 {
         !success,
         "comparing &string with i32 must be a type error; got: {stderr}"
     );
+    assert!(stderr.contains("expected &string, found i32"), "{stderr}");
 }
 
 #[test]
@@ -156,6 +157,7 @@ func main() -> i32 {
         !success,
         "comparing &i32 with i32 must remain a type error; got: {stderr}"
     );
+    assert!(stderr.contains("expected &i32, found i32"), "{stderr}");
 }
 
 // --- string.slice(range) ------------------------------------------
@@ -287,6 +289,7 @@ func main() -> i32 {
         !success,
         "slice with a non-range argument must be a type error; got: {stderr}"
     );
+    assert!(stderr.contains("expects a range argument"), "{stderr}");
 }
 
 #[test]
@@ -301,6 +304,10 @@ func main() -> i32 {
     assert!(
         !success,
         "a range expression outside .slice() must be a type error; got: {stderr}"
+    );
+    assert!(
+        stderr.contains("is only valid as the argument to `.slice()`"),
+        "{stderr}"
     );
 }
 
@@ -542,6 +549,7 @@ func main() -> i32 {
         !success,
         "char_slice with a non-range argument must be a type error; got: {stderr}"
     );
+    assert!(stderr.contains("expects a range argument"), "{stderr}");
 }
 
 #[test]

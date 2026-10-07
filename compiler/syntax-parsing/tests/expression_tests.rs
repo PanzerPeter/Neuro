@@ -549,8 +549,10 @@ fn test_parse_unsafe_block_multiple_stmts() {
 #[test]
 fn test_unsafe_is_reserved_keyword() {
     // `unsafe` must not be usable as an identifier.
-    let result = parse_expr("unsafe + 1");
-    assert!(result.is_err());
+    let err = parse_expr("unsafe + 1")
+        .expect_err("should be rejected")
+        .to_string();
+    assert!(err.contains("expected '{' after 'unsafe'"), "{err}");
 }
 
 #[test]

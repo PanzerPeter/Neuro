@@ -147,9 +147,12 @@ fn regression_one_past_the_bound_is_still_rejected() {
     ] {
         let test = CompileTest::new();
         let source_path = test.write_source(&format!("{name}.nr"), source);
+        let err = test
+            .compile(&source_path)
+            .expect_err(&format!("{name} compiled but is out of range for its type"));
         assert!(
-            test.compile(&source_path).is_err(),
-            "{name} compiled but is out of range for its type"
+            err.contains("out of range for type") || err.contains("is unsigned"),
+            "{name}: {err}"
         );
     }
 }

@@ -85,10 +85,12 @@ func main() -> i32 {
 }
 "#,
     );
-    // compile() returns Err when the compiler exits non-zero
+    let err = test
+        .compile(&source_path)
+        .expect_err("expected range error for 300u8");
     assert!(
-        test.compile(&source_path).is_err(),
-        "expected range error for 300u8"
+        err.contains("integer literal 300 out of range for type u8"),
+        "{err}"
     );
 }
 

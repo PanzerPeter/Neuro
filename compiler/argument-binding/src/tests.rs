@@ -686,10 +686,19 @@ fn topk_requires_its_width_to_be_named() {
 
 #[test]
 fn a_builtin_with_defaults_still_rejects_a_surplus_argument() {
+    // Both parameters filled, then one more. The label is what brings the call here: an
+    // all-positional call is left to the type checker, and a named argument ahead of a
+    // positional is refused as `PositionalAfterNamed` before the count is reached.
     let mut items = builtin_program(
         "argsort",
-        vec![named("axis", 0), positional(1), positional(2)],
+        vec![positional(0), positional(1), named("descending", 2)],
     );
     let errors = bind_arguments(&mut items).expect_err("expected a rejection");
-    assert!(!errors.is_empty(), "a surplus argument was accepted");
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [ArgumentError::ArgumentCountMismatch { .. }]
+        ),
+        "{errors:?}"
+    );
 }

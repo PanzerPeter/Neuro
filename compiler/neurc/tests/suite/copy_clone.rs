@@ -83,10 +83,14 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let (success, _stderr) = check_source(source);
+    let (success, stderr) = check_source(source);
     assert!(
         !success,
         "calling .clone() on a struct without @derive(Clone) must fail"
+    );
+    assert!(
+        stderr.contains("struct 'Point' has no method 'clone'"),
+        "{stderr}"
     );
 }
 

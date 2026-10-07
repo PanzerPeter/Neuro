@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.2] - 2026-10-07
+
+### Fixed
+
+- `.sort` and `.argsort` called with a third positional argument, as in `v.sort(0, true, 5)`,
+  compiled and ignored it. That is now an argument-count error.
+- `@derive(Clone)` on a struct holding another struct that has no `Clone` said the field "owns a
+  buffer". It now says that struct needs `@derive(Clone)` too, as `Debug` and `PartialEq` do.
+- The error for lifetime parameters on an enum said payloads are limited to scalar types, which
+  has not been true for a while.
+
+### Tests
+
+- Rejection tests check which diagnostic they get, not only that compilation failed. One of them,
+  the surplus-argument case in `argument-binding`, was passing on an unrelated error and never
+  reached the code it was named for.
+- Removed two tests that duplicated a neighbour line for line.
+- The end-to-end helpers that compile to fixed file names write under Cargo's per-workspace test
+  directory instead of the system temp directory, so two checkouts testing at once no longer
+  overwrite each other's binaries and nothing piles up in `/tmp`.
+- Filed BUG-099: a struct or enum returned from a function can carry a borrow of the function's
+  own locals.
+
 ## [5.6.1] - 2026-10-04
 
 ### Fixed

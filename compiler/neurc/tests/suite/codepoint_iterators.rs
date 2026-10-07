@@ -289,6 +289,10 @@ func main() -> i32 {
         !success,
         "a pair head needs a position-yielding iterable; got: {stderr}"
     );
+    assert!(
+        stderr.contains("iterates a position-yielding head"),
+        "{stderr}"
+    );
 }
 
 /// `.char_indices()` yields both halves, so a single binding cannot take them.
@@ -303,6 +307,7 @@ func main() -> i32 {
 "#,
     );
     assert!(!success, "char_indices binds a pair; got: {stderr}");
+    assert!(stderr.contains("bind both with a pair pattern"), "{stderr}");
 }
 
 /// The head already carries a position, so decorating it would leave two sources for
@@ -321,6 +326,7 @@ func main() -> i32 {
         !success,
         "char_indices takes no .enumerate(); got: {stderr}"
     );
+    assert!(stderr.contains("is a complete `for` head"), "{stderr}");
 }
 
 /// The decode step behind the prelude's iterator is not part of the language: a program
@@ -339,4 +345,5 @@ func main() -> i32 {
         !success,
         "__char_at belongs to the prelude alone; got: {stderr}"
     );
+    assert!(stderr.contains("has no method '__char_at'"), "{stderr}");
 }

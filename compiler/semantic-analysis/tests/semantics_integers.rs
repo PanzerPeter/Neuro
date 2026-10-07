@@ -127,4 +127,11 @@ fn error_unsigned_with_float() {
     let items = syntax_parsing::parse(source).unwrap();
     let result = type_check(&items);
     assert!(result.is_err(), "u32 + f32 should fail type check");
+    let errors = result.unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
+        "{errors:?}"
+    );
 }

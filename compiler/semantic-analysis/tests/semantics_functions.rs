@@ -73,24 +73,3 @@ fn type_check_variable_shadowing() {
     let result = type_check(&items);
     assert!(result.is_ok());
 }
-
-#[test]
-fn type_check_milestone_program() {
-    let source = r#"
-        func add(a: i32, b: i32) -> i32 {
-            return a + b
-        }
-
-        func main() -> i32 {
-            val result: i32 = add(5, 3)
-            return result
-        }
-    "#;
-    let items = syntax_parsing::parse(source).unwrap();
-    let result = type_check(&items);
-    assert!(
-        result.is_ok(),
-        "Milestone program should type check successfully, got: {:?}",
-        result
-    );
-}

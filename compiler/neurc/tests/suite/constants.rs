@@ -128,11 +128,10 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("const_non_const_rhs.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "const with function-call RHS should be rejected"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("const with function-call RHS should be rejected");
+    assert!(err.contains("constant expression required"), "{err}");
 }
 
 // ── AC5: Duplicate const is rejected ─────────────────────────────────────────
@@ -149,8 +148,10 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("duplicate_module_const.nr", source);
-    let result = test.compile(&source_path);
-    assert!(result.is_err(), "duplicate module const should be rejected");
+    let err = test
+        .compile(&source_path)
+        .expect_err("duplicate module const should be rejected");
+    assert!(err.contains("constant 'X' already defined"), "{err}");
 }
 
 // ── Bool-typed const folding ──────────────────────────────────
@@ -233,11 +234,10 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("duplicate_func_const.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "duplicate function-body const should be rejected"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("duplicate function-body const should be rejected");
+    assert!(err.contains("constant 'Y' already defined"), "{err}");
 }
 
 // ── BUG-022: an overflowing const initializer is rejected, not wrapped ────────

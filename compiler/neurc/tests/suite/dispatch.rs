@@ -224,9 +224,12 @@ func measure(s: dyn Shape) -> i32 { s.area() }
 func main() -> i32 { 0 }
 "#;
     let path = test.write_source("dyn_unsized.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("an unsized `dyn Trait` outside a reference must be rejected");
     assert!(
-        test.compile(&path).is_err(),
-        "an unsized `dyn Trait` outside a reference must be rejected"
+        err.contains("is unsized and must appear behind a reference"),
+        "{err}"
     );
 }
 
@@ -245,10 +248,10 @@ func use_it(m: &dyn Maker) -> i32 { 0 }
 func main() -> i32 { 0 }
 "#;
     let path = test.write_source("dyn_not_object_safe.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "a trait with a receiverless method must not be usable as `dyn`"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("a trait with a receiverless method must not be usable as `dyn`");
+    assert!(err.contains("trait 'Maker' is not object-safe"), "{err}");
 }
 
 /// Object safety: a method consuming `self` by value cannot go behind a trait object:
@@ -273,10 +276,10 @@ func use_it(c: &dyn Consume) -> i32 { 0 }
 func main() -> i32 { 0 }
 "#;
     let path = test.write_source("dyn_owned_self.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "a trait whose method consumes `self` must not be usable as `dyn`"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("a trait whose method consumes `self` must not be usable as `dyn`");
+    assert!(err.contains("trait 'Consume' is not object-safe"), "{err}");
 }
 
 /// A concrete type that does not implement the trait cannot be coerced into its
@@ -300,10 +303,10 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("dyn_non_implementor.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "a type with no matching impl must not coerce to the trait object"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("a type with no matching impl must not coerce to the trait object");
+    assert!(err.contains("expected &dyn Shape, found &Blob"), "{err}");
 }
 
 /// Return-position `impl Trait` resolves transparently to the body's concrete type, so
@@ -324,9 +327,12 @@ func make() -> impl Shape { Blob { n: 1 } }
 func main() -> i32 { 0 }
 "#;
     let path = test.write_source("impl_return_bad.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("an `impl Trait` return whose concrete type lacks the impl must be rejected");
     assert!(
-        test.compile(&path).is_err(),
-        "an `impl Trait` return whose concrete type lacks the impl must be rejected"
+        err.contains("resolves to `Blob`, which does not implement 'Shape'"),
+        "{err}"
     );
 }
 
@@ -345,9 +351,12 @@ struct Holder { s: impl Shape }
 func main() -> i32 { 0 }
 "#;
     let path = test.write_source("impl_trait_in_field.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("`impl Trait` in a struct field must be rejected");
     assert!(
-        test.compile(&path).is_err(),
-        "`impl Trait` in a struct field must be rejected"
+        err.contains("is only allowed in a function parameter"),
+        "{err}"
     );
 }
 

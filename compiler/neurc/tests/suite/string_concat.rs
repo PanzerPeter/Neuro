@@ -127,6 +127,11 @@ func main() -> i32 {
 "#;
 
     // Only `+` joins strings; `-` must fail type-checking.
-    let result = test.compile_and_run("concat_bad_minus.nr", source);
-    assert!(result.is_err(), "expected `string - string` to be rejected");
+    let err = test
+        .compile_and_run("concat_bad_minus.nr", source)
+        .expect_err("expected `string - string` to be rejected");
+    assert!(
+        err.contains("cannot apply binary operator - to types string and string"),
+        "{err}"
+    );
 }

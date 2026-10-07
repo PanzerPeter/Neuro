@@ -82,9 +82,12 @@ fn test_array_destructure_rejects_elements_after_rest() {
             val [a, ..rest, b] = arr
         }
     "#;
+    let err = parse(source)
+        .expect_err("an element after a `..` rest pattern must be a parse error")
+        .to_string();
     assert!(
-        parse(source).is_err(),
-        "an element after a `..` rest pattern must be a parse error"
+        err.contains("no elements after a `..` rest pattern"),
+        "{err}"
     );
 }
 
@@ -95,10 +98,10 @@ fn test_array_destructure_rejects_two_rests() {
             val [a, .., ..] = arr
         }
     "#;
-    assert!(
-        parse(source).is_err(),
-        "more than one `..` rest pattern must be a parse error"
-    );
+    let err = parse(source)
+        .expect_err("more than one `..` rest pattern must be a parse error")
+        .to_string();
+    assert!(err.contains("at most one `..` rest pattern"), "{err}");
 }
 
 #[test]

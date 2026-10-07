@@ -19,7 +19,7 @@ fn neurc_path() -> std::path::PathBuf {
 
 /// Compile `source` at `-O0`, returning the executable path.
 fn compile_source(source: &str, tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join(format!("neuro_panic_{tag}.nr"));
     let exe = dir.join(format!("neuro_panic_{tag}"));
     std::fs::write(&src, source).expect("write source");
@@ -202,7 +202,8 @@ func main() -> i32 {
 "#,
         "shared_stream",
     );
-    let log = std::env::temp_dir().join("neuro_panic_shared_stream.log");
+    let log =
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("neuro_panic_shared_stream.log");
     let file = std::fs::File::create(&log).expect("create log");
     let status = Command::new(&exe)
         .stdout(file.try_clone().expect("clone log handle"))

@@ -85,10 +85,10 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(
-        test.compile(&source_path).is_err(),
-        "expected type mismatch for f32 binding initialized with f64 literal"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("expected type mismatch for f32 binding initialized with f64 literal");
+    assert!(err.contains("expected f32, found f64"), "{err}");
 }
 
 #[test]

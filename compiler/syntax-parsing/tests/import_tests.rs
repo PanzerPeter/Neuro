@@ -66,7 +66,13 @@ fn parses_a_variant_import() {
 
 #[test]
 fn an_empty_import_list_is_rejected() {
-    assert!(parse("import math::{}\n").is_err());
+    let err = parse("import math::{}\n")
+        .expect_err("should be rejected")
+        .to_string();
+    assert!(
+        err.contains("expected at least one name inside an import list"),
+        "{err}"
+    );
 }
 
 #[test]

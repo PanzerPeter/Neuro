@@ -1110,7 +1110,12 @@ func loss(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
 }
 "#,
     );
-    let _ = item_function(&program, "__loss__rev");
+    let rev = item_function(&program, "__loss__rev");
+    assert!(
+        all_stmts(&rev.body)
+            .iter()
+            .any(|stmt| matches!(stmt, HirStmt::While { .. }))
+    );
 }
 
 /// The adjoint of an element read at a run-time position is an element store, which the

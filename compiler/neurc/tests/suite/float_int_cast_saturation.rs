@@ -23,7 +23,7 @@ fn neurc_path() -> PathBuf {
 
 /// Compile `source` at optimization level `opt` and return its exit code.
 fn compile_and_run(source: &str, tag: &str, opt: &str) -> i32 {
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join(format!("neuro_f2i_{tag}_{opt}.nr"));
     let exe = dir.join(format!("neuro_f2i_{tag}_{opt}"));
     std::fs::write(&src, source).expect("write source");

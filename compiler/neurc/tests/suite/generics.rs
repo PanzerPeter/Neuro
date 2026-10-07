@@ -113,9 +113,12 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("generic_no_bound.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("arithmetic on an unbounded generic parameter must be rejected");
     assert!(
-        test.compile(&path).is_err(),
-        "arithmetic on an unbounded generic parameter must be rejected"
+        err.contains("cannot apply binary operator + to types T and T"),
+        "{err}"
     );
 }
 
@@ -209,8 +212,11 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("generic_capture.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("a closure capturing an abstract-typed binding must be rejected");
     assert!(
-        test.compile(&path).is_err(),
-        "a closure capturing an abstract-typed binding must be rejected"
+        err.contains("closure captures 'v' of non-Copy type T"),
+        "{err}"
     );
 }

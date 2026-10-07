@@ -123,10 +123,12 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let result = test.compile_and_run("half_no_arith.nr", source);
+    let err = test
+        .compile_and_run("half_no_arith.nr", source)
+        .expect_err("half-precision arithmetic must be a compile error");
     assert!(
-        result.is_err(),
-        "half-precision arithmetic must be a compile error, got {result:?}"
+        err.contains("is not defined on half-precision type f16"),
+        "{err}"
     );
 }
 

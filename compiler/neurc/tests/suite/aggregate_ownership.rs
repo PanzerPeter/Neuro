@@ -100,10 +100,10 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("agg_same_element.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "one element may be given away once, not twice"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("one element may be given away once, not twice");
+    assert!(err.contains("use of moved value 'pair'"), "{err}");
 }
 
 #[test]
@@ -121,10 +121,10 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("agg_runtime_index.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "a move through a runtime index must take the whole binding"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("a move through a runtime index must take the whole binding");
+    assert!(err.contains("use of moved value 'names'"), "{err}");
 }
 
 #[test]

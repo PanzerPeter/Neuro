@@ -378,6 +378,22 @@ func main() -> i32 {
     );
 }
 
+/// An all-positional call reaches the checker unbound, so a third argument to `.sort` or
+/// `.argsort` was ignored rather than counted.
+#[test]
+fn regression_a_surplus_positional_argument_is_rejected() {
+    for method in ["sort", "argsort"] {
+        let source = format!(
+            "func main() -> i32 {{\n    val v: Tensor<i32, [3]> = [3, 1, 2]\n    val r = v.{method}(0, true, 5)\n    return 0\n}}\n"
+        );
+        let errors = rejection(&format!("tensor_{method}_surplus.nr"), &source);
+        assert!(
+            errors.contains("expected 2, found 3"),
+            "{method}: the diagnostic counts the arguments: {errors}"
+        );
+    }
+}
+
 /// Runs long enough for the sort's own algorithm to matter: a host integer run of 256 or
 /// more sorts by radix, and anything else by merging. Each program checks itself and
 /// answers 0, or the number of the first rule it found broken: ascending, descending,

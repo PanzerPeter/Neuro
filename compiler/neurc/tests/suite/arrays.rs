@@ -131,7 +131,7 @@ func main() -> i32 {
 fn out_of_bounds_index_panics_in_debug_build() {
     // A debug build (`-O0`) bounds-checks every index and aborts with
     // a located diagnostic on an out-of-range access.
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join("neuro_array_oob.nr");
     let exe = dir.join("neuro_array_oob");
     std::fs::write(

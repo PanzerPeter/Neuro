@@ -155,8 +155,13 @@ fn rejects_a_val_else_without_an_else_branch() {
             val Option::Some(v) = load()
         }
     "#,
+    )
+    .expect_err("a `val-else` pattern requires an `else`")
+    .to_string();
+    assert!(
+        err.contains("expected 'else' after a `val-else` scrutinee"),
+        "{err}"
     );
-    assert!(err.is_err(), "a `val-else` pattern requires an `else`");
 }
 
 #[test]

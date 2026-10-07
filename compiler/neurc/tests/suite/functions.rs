@@ -67,26 +67,6 @@ func main() -> i32 {
     assert_eq!(exit_code, 60, "Expected exit code 60");
 }
 
-#[test]
-fn test_milestone_program() {
-    let test = CompileTest::new();
-    let source = r#"
-func add(a: i32, b: i32) -> i32 {
-    return a + b
-}
-
-func main() -> i32 {
-    val result: i32 = add(5, 3)
-    return result
-}
-"#;
-
-    let exit_code = test
-        .compile_and_run("milestone.nr", source)
-        .expect("Compilation or execution failed");
-    assert_eq!(exit_code, 8, "Expected exit code 8");
-}
-
 /// A plain function name is an ordinary value of its function type: it may be passed to
 /// a function-typed parameter, bound, and called through the binding. It was refused
 /// everywhere but the `|>` target and the `>>` operands.

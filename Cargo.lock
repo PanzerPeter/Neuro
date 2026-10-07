@@ -84,7 +84,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "argument-binding"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "ast-types"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "shared-types",
 ]
@@ -477,7 +477,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hir-lowering"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "neuro-hir",
@@ -554,7 +554,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lexical-analysis"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "logos",
  "serde_json",
@@ -586,7 +586,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "llvm-backend"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "criterion",
@@ -691,7 +691,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mlir-backend"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "hir-lowering",
@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "module-resolution"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -725,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "neurc"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "anyhow",
  "argument-binding",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "neuro-hir"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -1003,7 +1003,7 @@ dependencies = [
 
 [[package]]
 name = "semantic-analysis"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "shared-types",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "shared-types"
-version = "5.6.1"
+version = "5.6.2"
 
 [[package]]
 name = "shlex"
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "syntax-parsing"
-version = "5.6.1"
+version = "5.6.2"
 dependencies = [
  "ast-types",
  "lexical-analysis",

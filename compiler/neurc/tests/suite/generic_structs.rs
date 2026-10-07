@@ -143,10 +143,10 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("gstruct_context_mismatch.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "an i32 field value under a W<i64> annotation must be rejected"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("an i32 field value under a W<i64> annotation must be rejected");
+    assert!(err.contains("expected W<i64>, found W<i32>"), "{err}");
 }
 
 #[test]
@@ -167,9 +167,12 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("gstruct_bare.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("a generic struct used without type arguments must be rejected");
     assert!(
-        test.compile(&path).is_err(),
-        "a generic struct used without type arguments must be rejected"
+        err.contains("generic struct 'Box' requires type arguments"),
+        "{err}"
     );
 }
 

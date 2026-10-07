@@ -530,7 +530,8 @@ same derive, since the generated code reaches inside a field no other way). A `C
 not `Copy` gets the same check through `is_derived_cloneable`: the backend's derived clone copies
 the struct's bytes, so a field must be `Copy`, a `Clone` struct, or an array, tuple or newtype of
 those. A field that owns a buffer (`string`, a tensor, a collection, `StringBuilder`) would end up
-shared by the original and the copy, so it is refused. A generic template's
+shared by the original and the copy, so it is refused. A struct field without `Clone` is refused
+with the "derive it too" remedy instead, as for `Debug` and `PartialEq`. A generic template's
 fields are type parameters, which no derive rule can judge, so the check runs again per
 monomorphized instance in `instantiate_generic_struct`. Copy implies Clone.
 
@@ -1067,8 +1068,9 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   and accepts `&Tensor<T, S>`. `.sort` answers the receiver's own type, `.argsort` the same
   shape at `i32`, and `.topk` a `(values, indices)` tuple whose selected axis is `k` long and
   unnamed, a truncated axis no longer being the thing its name documented. The arguments
-  arrive complete and in declaration order because `argument-binding` fills an omitted one
-  from its default, and all of them are read as syntax rather than as values: an axis may be
+  arrive in declaration order because `argument-binding` fills an omitted one from its
+  default. An all-positional call is left as written, so `.sort` / `.argsort` count their own
+  arguments (`ArgumentCountMismatch` past two). All of them are read as syntax rather than as values: an axis may be
   a dimension NAME, and `k:` and `descending:` decide the result's shape and the comparator
   before any element exists (`TensorSortArgNotConstant`). The element must be an integer or
   `f32`/`f64` (`TensorSortElementType`); a rank-0 receiver has no axis to order

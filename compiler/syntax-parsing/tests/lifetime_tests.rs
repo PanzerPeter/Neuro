@@ -76,10 +76,10 @@ fn test_parse_lifetimes_mixed_with_type_params() {
 #[test]
 fn test_duplicate_lifetime_is_rejected() {
     let source = "func f<'a, 'a>(a: &'a string) -> i32 { 0 }";
-    assert!(
-        parse(source).is_err(),
-        "duplicate lifetime must be rejected"
-    );
+    let err = parse(source)
+        .expect_err("duplicate lifetime must be rejected")
+        .to_string();
+    assert!(err.contains("duplicate parameter name ''a'"), "{err}");
 }
 
 #[test]

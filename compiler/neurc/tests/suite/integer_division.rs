@@ -22,7 +22,7 @@ fn neurc_path() -> PathBuf {
 /// result. Every divisor below is read out of a `mut` binding so that constant folding
 /// cannot answer the question before the guard is reached.
 fn compile_and_run(source: &str, tag: &str, opt: &str) -> Output {
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join(format!("neuro_division_{tag}_{opt}.nr"));
     let exe = dir.join(format!("neuro_division_{tag}_{opt}"));
     std::fs::write(&src, source).expect("write source");

@@ -240,7 +240,7 @@ func main() -> i32 {
 /// Compile `source` at `-O0` under `name`, run it, and return the standard error
 /// of a run that must abort. Panics if it compiles badly or exits cleanly.
 fn run_expecting_abort(name: &str, source: &str) -> String {
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join(format!("{name}.nr"));
     let exe = dir.join(name);
     std::fs::write(&src, source).expect("write source");

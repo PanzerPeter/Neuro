@@ -135,11 +135,10 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("shorthand_undefined.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "shorthand referencing an undefined name should fail"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("shorthand referencing an undefined name should fail");
+    assert!(err.contains("undefined variable 'y'"), "{err}");
 }
 
 #[test]
@@ -163,11 +162,10 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("update_wrong_base.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "functional-update base of the wrong struct type should fail"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("functional-update base of the wrong struct type should fail");
+    assert!(err.contains("expected Point, found Other"), "{err}");
 }
 
 #[test]

@@ -19,7 +19,7 @@ fn neurc_path() -> PathBuf {
 
 /// Compile and run `source`, returning the process output.
 fn run_program(source: &str, tag: &str) -> Output {
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join(format!("neuro_derive_{tag}.nr"));
     let exe = dir.join(format!("neuro_derive_{tag}"));
     std::fs::write(&src, source).expect("write source");
@@ -45,7 +45,7 @@ fn run_program(source: &str, tag: &str) -> Output {
 
 /// Type-check `source`, returning the compiler's combined diagnostics on rejection.
 fn check_error(source: &str, tag: &str) -> String {
-    let dir = std::env::temp_dir();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     let src = dir.join(format!("neuro_derive_{tag}.nr"));
     std::fs::write(&src, source).expect("write source");
 

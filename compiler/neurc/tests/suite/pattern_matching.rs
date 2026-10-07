@@ -131,10 +131,12 @@ func f(e: E) -> i32 {
 }
 func main() -> i32 { f(E::A) }
 "#;
-    let result = test.compile_and_run("match_nonexhaustive.nr", source);
+    let err = test
+        .compile_and_run("match_nonexhaustive.nr", source)
+        .expect_err("a non-exhaustive match must fail to compile");
     assert!(
-        result.is_err(),
-        "a non-exhaustive match must fail to compile"
+        err.contains("non-exhaustive match: unhandled variant(s): C"),
+        "{err}"
     );
 }
 

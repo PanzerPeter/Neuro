@@ -77,8 +77,8 @@ func f<'a>(a: &'b string) -> i32 { 0 }
 func main() -> i32 { return 0 }
 "#;
     let path = test.write_source("lifetime_undeclared.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "an undeclared lifetime must be a compile error"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("an undeclared lifetime must be a compile error");
+    assert!(err.contains("undeclared lifetime `'b`"), "{err}");
 }

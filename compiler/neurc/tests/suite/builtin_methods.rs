@@ -161,9 +161,8 @@ func main() -> i32 {
 "#;
 
     let source_path = test.write_source("string_unknown_method.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "expected compilation to fail for an unknown builtin method"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("expected compilation to fail for an unknown builtin method");
+    assert!(err.contains("has no method 'capacity'"), "{err}");
 }

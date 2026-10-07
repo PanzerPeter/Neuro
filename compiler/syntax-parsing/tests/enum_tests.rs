@@ -103,6 +103,8 @@ fn plain_enum_has_no_generic_parameters() {
 
 #[test]
 fn generic_enum_rejects_a_lifetime_parameter() {
-    // Payloads are scalars this phase, so there is nothing a lifetime could annotate.
-    assert!(parse("enum Holder<'a, T> { One(T) }").is_err());
+    let err = parse("enum Holder<'a, T> { One(T) }")
+        .expect_err("should be rejected")
+        .to_string();
+    assert!(err.contains("may not declare lifetime parameters"), "{err}");
 }

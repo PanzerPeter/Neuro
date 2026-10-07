@@ -149,8 +149,13 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("bitwise_float_error.nr", source);
-    let result = test.compile(&source_path);
-    assert!(result.is_err(), "Expected type error for bitwise op on f32");
+    let err = test
+        .compile(&source_path)
+        .expect_err("Expected type error for bitwise op on f32");
+    assert!(
+        err.contains("cannot apply binary operator & to types f32 and f32"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -164,9 +169,8 @@ func main() -> i32 {
 }
 "#;
     let source_path = test.write_source("bitnot_float_error.nr", source);
-    let result = test.compile(&source_path);
-    assert!(
-        result.is_err(),
-        "Expected type error for bitwise NOT on f64"
-    );
+    let err = test
+        .compile(&source_path)
+        .expect_err("Expected type error for bitwise NOT on f64");
+    assert!(err.contains("cannot apply operator ~ to type f64"), "{err}");
 }

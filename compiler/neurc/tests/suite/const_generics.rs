@@ -106,10 +106,10 @@ func main() -> i32 {
 }
 "#;
     let path = test.write_source("where_bad.nr", source);
-    assert!(
-        test.compile(&path).is_err(),
-        "a violated `where` predicate must be rejected"
-    );
+    let err = test
+        .compile(&path)
+        .expect_err("a violated `where` predicate must be rejected");
+    assert!(err.contains("`where` predicate is not satisfied"), "{err}");
 }
 
 #[test]

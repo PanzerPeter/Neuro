@@ -491,8 +491,11 @@ fn test_dangling_attribute_at_eof_is_rejected() {
     let source = r#"
         @derive(Copy)
     "#;
+    let err = parse(source)
+        .expect_err("an attribute followed by neither func nor struct should be a parse error")
+        .to_string();
     assert!(
-        parse(source).is_err(),
-        "an attribute followed by neither func nor struct should be a parse error"
+        err.contains("expected function or struct definition after attribute"),
+        "{err}"
     );
 }
