@@ -5,6 +5,91 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-104: a `pool` refuses `out = local + "x"` and `out = "{local}!"` for a block-local `local`
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; `carries_no_arena` in `type_checkers/pools.rs`
+- **Severity**: minor. A valid program is refused; nothing unsound is emitted
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    mut text = ""
+    pool {
+        val s = "a" + "b"
+        text = s + "x"
+    }
+    text.len() as i32
+}
+```
+
+Expected: it compiles and returns 3. The store's owner, `text`, outlives the block, so the
+concatenation is routed to the heap, as it is for `text = "a" + "b"` and for `text = s.clone()`.
+Observed: "'text' outlives this 'pool' block". `text = "{s}!"` is refused the same way.
+
+**Root cause**: confirmed in the code. The `Binary` and `InterpString` arms of `carries_no_arena`
+require every operand to carry no arena memory, because the walk runs before the value is type
+checked and cannot tell a `string` `+`, which always copies, from a user operator that may return
+an operand. A block-local `s` fails that test.
+
+**Workaround**: copy the operand first, `text = s.clone() + "x"`, or build the text outside the
+pool.
+
+**Fix sketch**: admit a `+` whose operands are both `string` (owned or `&string`) and an
+interpolation that has at least one text part, since both build a fresh buffer from copies. An
+interpolation that is a single hole and nothing else must stay walked. Regression tests: the
+repro, the interpolation form, and a user `Add` returning its left operand, which must stay
+refused.
+
+## BUG-103: an owned `string` chosen by a branch with a literal arm, or bound from any branch, leaks
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; `produces_owned_string` in `codegen/drops/owned_strings.rs` and the
+  return summary in `codegen/string_ownership.rs`
+- **Severity**: major. One buffer leaks per evaluation, so the leak grows with a loop
+
+**Minimal repro**
+
+```neuro
+func label(k: i32) -> string {
+    match k {
+        0 => "info",
+        _ => "warn {k}",
+    }
+}
+
+func main() -> i32 {
+    mut i = 1
+    mut t: u64 = 0
+    while i < 6 {
+        val a = label(i)
+        val b = if i == 0 { "z {i}" } else { "n {i}" }
+        t = t + a.len() + b.len()
+        i = i + 1
+    }
+    t as i32
+}
+```
+
+Expected: every buffer `label` and the `if` allocate is released when `a` and `b` go out of scope.
+Observed: under LeakSanitizer both leak one buffer per iteration. `examples/showcase/status_report.nr`,
+`config_manifest.nr` and `log_builder.nr` leak this way.
+
+**Root cause**: confirmed in the code. A `string` is released only when the expression that made
+it is known to allocate. A function counts as allocating only if every return path does, so one
+literal arm makes all of its results unowned. A local binding never counts an `if` or `match` value
+as allocating, even when every arm does; a function whose tail is such a `match` is recognised,
+so the same branch moved into a function is released.
+
+**Workaround**: write the literal arm as `"info".clone()`, and move a branch that builds a string
+into a function of its own.
+
+**Fix sketch**: let `produces_owned_string` answer for an `if` with an `else` and for a `match`
+when every arm's value is owned, and copy a literal arm to the heap when another arm of the same
+branch allocates, so every path owns its result. Regression tests: the repro under LeakSanitizer,
+and a branch of literals only, which must still never reach `free`.
+
 ## BUG-099: a struct or enum returned from a function may hold a borrow of its locals
 
 - **Status**: open, confirmed

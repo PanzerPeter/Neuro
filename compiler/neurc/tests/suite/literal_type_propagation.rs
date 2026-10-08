@@ -212,3 +212,46 @@ func main() -> i32 {
         .expect("`0..v.len()` and `0..=wide` type the literal start by the end");
     assert_eq!(code, 43);
 }
+
+#[test]
+fn test_bug_100_a_literal_left_of_a_scalar_takes_its_type() {
+    // `0.5 * x` means `x * 0.5`: the literal takes the type of the scalar beside it, of
+    // its own kind, on either side of an arithmetic, bitwise or comparison operator.
+    let source = r#"
+func main() -> i32 {
+    val x: f32 = 0.3
+    val n: i64 = 5000000000
+    val u: u8 = 200
+    if 0.1 * x != x * 0.1 { return 1 }
+    if 1.0 - x != -(x - 1.0) { return 2 }
+    if 3 * n != n * 3 { return 3 }
+    if 255 - u != 55 { return 4 }
+    if !(0.25 < x) { return 5 }
+    if (0xF0 & u) != 192 { return 6 }
+    val y = 2.5 * x + 1.0
+    val z: f32 = x * 2.5 + 1.0
+    if y != z { return 7 }
+    42
+}
+"#;
+    let code = CompileTest::new()
+        .compile_and_run("literal_left_of_scalar.nr", source)
+        .expect("a literal on the left takes the other operand's type");
+    assert_eq!(code, 42);
+
+    // Only within its own kind, and the type still bounds the literal.
+    let cases = [
+        ("val x: f32 = 2.0\n    val y = 2 * x", "type mismatch"),
+        (
+            "val u: u8 = 3\n    val y = 300 * u",
+            "out of range for type u8",
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!("func main() -> i32 {{\n    {body}\n    0\n}}");
+        let error = CompileTest::new()
+            .check("literal_left_rejected.nr", &source)
+            .expect_err("the literal cannot take that type");
+        assert!(error.contains(expected), "got: {error}");
+    }
+}

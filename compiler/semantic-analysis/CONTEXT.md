@@ -799,7 +799,11 @@ same check for return-position `impl Trait<Assoc = U>`.
   right operand by the left tensor's element, and `scalar_broadcast_expectation` does the same
   in reverse for a literal written to the left of a tensor BINDING, which is the one place a
   syntactic lookahead is used (a speculative `check_expr` would record the discarded attempt's
-  diagnostics). A scalar beside anything else still needs its suffix.
+  diagnostics). A bare literal left of anything else is re-typed once the right operand is
+  known: as the element beside a tensor (`0.5 * make()`), and as the right operand's own type
+  beside a scalar of its kind (`0.5 * x` with `x: f32`, `3 * n` with `n: i64`;
+  `literal_follows_right_operand`, which leaves out `<<` and never turns an integer literal
+  into a float). `hir-lowering` repeats the rule, or the literal would lower at its default.
 - **`@` is the one tensor operator that is not element-wise.** `matmul_shape` (same file) is
   reached instead of the broadcast join and contracts rather than stretches: two rank-2 operands
   whose inner axes agree give `[M, K] @ [K, N]` -> `[M, N]`, taking the left operand's row axis
@@ -1273,12 +1277,13 @@ the value holds no arena memory:
   function / method found through `impl_methods`) is always provable: its body is emitted with
   the backend's pool depth back at zero, so what it allocates comes from libc. The operand walk
   is what rules out its handing back arena memory it was given;
-- under `Emission::Routed`, a nullary `.clone()` whose receiver's `clone` is the builtin one
-  (`is_builtin_clone`: no `impl` in the program declares a `clone`, and no vtable), whatever the
-  receiver holds. The copy is the routed allocation. A tensor or `string` clone allocates through
-  the depth-aware allocator, and a derived struct clone copies bytes that `is_derived_cloneable`
-  has already limited to pointerless fields. A user `clone(self)` could hand its receiver back,
-  so one anywhere in the program turns the rule off;
+- under `Emission::Routed`, a nullary `.clone()` or `.to_string()` that is the builtin one
+  (`is_builtin_copy`: no `impl` in the program declares a method of that name, and no vtable),
+  whatever the receiver holds. The copy is the routed allocation. A tensor or `string` clone and
+  `StringBuilder::to_string` allocate through the depth-aware allocator, and a derived struct
+  clone copies bytes that `is_derived_cloneable` has already limited to pointerless fields. A
+  user `clone(self)` or `to_string(self)` could hand its receiver back, so one anywhere in the
+  program turns the rule off for that name;
 - a struct or tuple literal whose every field (and `..base`) passes: the aggregate allocates
   nothing of its own. An array literal likewise, but under `Emission::Routed` only, because it
   may be a tensor literal, which allocates its buffer where it is written;

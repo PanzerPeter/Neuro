@@ -476,6 +476,24 @@ mod tests {
     }
 
     #[test]
+    fn regression_bug_102_rejected_annotation_does_not_ask_for_an_annotation() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                mut v: Vec<StringBuilder> = Vec::new()
+                return 0
+            }
+            "#,
+        );
+        assert_eq!(
+            errs.len(),
+            1,
+            "expected only the element error, got {errs:?}"
+        );
+        assert!(errs[0].contains("cannot be stored"), "got {errs:?}");
+    }
+
+    #[test]
     fn push_on_immutable_vec_is_rejected() {
         let errs = errors(
             r#"

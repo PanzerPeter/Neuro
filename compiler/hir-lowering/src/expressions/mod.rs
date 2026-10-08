@@ -174,13 +174,18 @@ impl Lowerer {
                     .unwrap_or_else(|| left.ty.clone());
                 let right_hir = self.lower_expr(right, Some(&right_expected))?;
                 // Mirrors the checker: a bare literal beside a tensor the lookahead could
-                // not see is the scalar broadcast, and takes the element type now.
-                let left = match coercion::tensor_element(&right_hir.ty) {
-                    Some(element) if left_expected.is_none() && is_bare_literal(left_src) => {
-                        let element = element.clone();
-                        self.lower_expr(left_src, Some(&element))?
-                    }
-                    _ => left,
+                // not see is the scalar broadcast, and takes the element type now; beside
+                // a scalar of its own kind it takes that scalar's type.
+                let retyped = coercion::tensor_element(&right_hir.ty)
+                    .cloned()
+                    .or_else(|| {
+                        literal_follows_right_operand(*op, &left.ty, &right_hir.ty)
+                            .then(|| right_hir.ty.clone())
+                    })
+                    .filter(|_| left_expected.is_none() && is_bare_literal(left_src));
+                let left = match retyped {
+                    Some(target) => self.lower_expr(left_src, Some(&target))?,
+                    None => left,
                 };
                 let right = right_hir;
                 // `@derive(PartialEq)` equality: no method to dispatch to, so the node
@@ -777,6 +782,17 @@ fn keeps_operand_type(op: ast_types::BinaryOp) -> bool {
             | BinaryOp::BitXor
             | BinaryOp::Shl
     )
+}
+
+/// Mirrors the checker: whether an unsuffixed literal on the left of `op`, lowered at its
+/// default `left`, takes the scalar type `right` beside it. Two integers or two full
+/// floats only, and never across `<<`, whose result is the left operand's type.
+fn literal_follows_right_operand(op: ast_types::BinaryOp, left: &HirType, right: &HirType) -> bool {
+    let same_kind = (is_integer(left) && is_integer(right))
+        || (crate::is_full_float(left) && crate::is_full_float(right));
+    let symmetric =
+        (keeps_operand_type(op) && op != ast_types::BinaryOp::Shl) || op.is_comparison();
+    same_kind && symmetric && left != right
 }
 
 /// Whether `expr` is arithmetic over numeric literals alone (`200 + 50`, `-(1 << 3)`):

@@ -540,7 +540,8 @@ compiler bug, not a diagnostic.
   operands, so failing here is a compiler bug rather than a diagnostic. `tensor_element` types
   a scalar operand by the tensor's element on both sides, including the compound-assignment
   right-hand side, or a bare literal would lower as the default `f64` and emit a mixed-width
-  instruction. `@` takes `matmul_shape` in the same file instead of the broadcast join: it
+  instruction. A bare literal left of a scalar of its own kind takes that scalar's type the same
+  way (`literal_follows_right_operand`, the checker's rule repeated). `@` takes `matmul_shape` in the same file instead of the broadcast join: it
   contracts the operands' inner axis, so `[M, K] @ [K, N]` carries `[M, N]` with the left
   operand's row name and the right operand's column name. A scalar operand is
   `UnsupportedOperand` there rather than falling through to the element-wise arm, which would

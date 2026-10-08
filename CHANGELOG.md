@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.3] - 2026-10-08
+
+### Fixed
+
+- A literal on the left of a scalar of another numeric type, as in `0.5 * x` with `x: f32` or
+  `3 * n` with `n: i64`, was typed as `f64` or `i32` and refused, while `x * 0.5` compiled. The
+  literal now takes the other operand's type, on either side of an arithmetic, bitwise or
+  comparison operator. An integer literal still never becomes a float (BUG-100).
+- A `pool` refused `out = b.to_string()` for a `StringBuilder` built inside the block, though
+  the copy is made on the heap, as it is for `.clone()`. It is now accepted (BUG-101).
+- A rejected collection annotation, such as `mut v: Vec<StringBuilder> = Vec::new()`, also
+  reported "cannot infer the element type ... annotate the binding". Only the element error is
+  reported now (BUG-102).
+
+### Tests
+
+- Filed BUG-103: a `string` chosen by an `if` or `match` with a literal arm, or bound from any
+  `if` or `match`, is never released.
+- Filed BUG-104: a `pool` refuses `out = local + "x"` and `out = "{local}!"` when `local`
+  belongs to the block.
+
 ## [5.6.2] - 2026-10-07
 
 ### Fixed

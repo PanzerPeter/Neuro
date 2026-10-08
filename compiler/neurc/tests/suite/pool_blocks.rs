@@ -1147,6 +1147,62 @@ func main() -> i32 {
     assert_eq!(test.compile_and_run("pool_clone_store.nr", source), Ok(7));
 }
 
+/// BUG-101: `StringBuilder::to_string` copies the builder's bytes the way a builtin
+/// `.clone()` does, so its result stored past a `pool` is routed to the heap, not refused.
+/// A second pool that reuses the arena must leave the copy intact.
+#[test]
+fn regression_bug_101_builder_to_string_of_a_pool_local_stores_past_the_pool() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut text = "x"
+    pool first {
+        mut b = StringBuilder::new()
+        b.push_str("ab")
+        b.push_str("cd")
+        text = b.to_string()
+    }
+    pool second {
+        mut c = StringBuilder::new()
+        c.push_str("zzzz")
+        val t2 = c.to_string() + "zz"
+        println(t2)
+    }
+    if text != "abcd" { return 1 }
+    text.len() as i32
+}
+"#;
+    assert_eq!(
+        test.compile_and_run("pool_builder_to_string.nr", source),
+        Ok(4)
+    );
+}
+
+/// A user method named `to_string` may hand back a field of its receiver, so it keeps the
+/// store refused, as a user `clone` does.
+#[test]
+fn a_user_to_string_of_a_pool_local_is_still_refused() {
+    let test = CompileTest::new();
+    let source = r#"
+struct S { s: string }
+impl S {
+    func to_string(self) -> string { self.s }
+}
+func main() -> i32 {
+    mut out = ""
+    pool p {
+        val local = S { s: "ab" + "cd" }
+        out = local.to_string()
+    }
+    out.len() as i32
+}
+"#;
+    let err = test
+        .check("pool_user_to_string.nr", source)
+        .expect_err("a user `to_string` may return the arena value itself");
+    assert!(err.contains("outlives"), "got: {err}");
+}
+
 /// A user method named `clone` may hand its receiver back, so it keeps the store refused.
 #[test]
 fn a_user_clone_of_a_pool_local_is_still_refused() {

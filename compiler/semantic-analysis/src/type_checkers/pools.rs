@@ -39,6 +39,10 @@ use super::{PoolContext, TypeChecker};
 /// prelude and matched here by name, the way `Drop` is.
 const POOL_AWARE_TRAIT: &str = "PoolAware";
 
+/// The builtin methods that copy their receiver's bytes into a fresh allocation:
+/// `.clone()`, and `StringBuilder::to_string`, which the language defines as a copy.
+const BUILTIN_COPY_METHODS: [&str; 2] = ["clone", "to_string"];
+
 /// Where the backend emits a value, which is what decides whether an allocation the
 /// value makes for itself can come from the arena.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -169,13 +173,13 @@ impl TypeChecker {
                         InterpPart::Formatted { expr, .. } => self.carries_no_arena(expr, emission),
                     })
             }
-            // A builtin `.clone()` copies its receiver into an allocation of its own, and a
-            // routed emission makes that allocation on the heap, so whatever the receiver
-            // holds stays behind in the block.
+            // A builtin `.clone()` or `.to_string()` copies its receiver into an allocation
+            // of its own, and a routed emission makes that allocation on the heap, so
+            // whatever the receiver holds stays behind in the block.
             Expr::Call { func, args, .. }
                 if emission == Emission::Routed
                     && args.is_empty()
-                    && self.is_builtin_clone(func) =>
+                    && self.is_builtin_copy(func) =>
             {
                 true
             }
@@ -288,16 +292,20 @@ impl TypeChecker {
         emission == Emission::Routed && !self.dispatches_dynamically(func)
     }
 
-    /// Whether `func` is `.clone()` on a receiver whose `clone` the compiler provides. Only
-    /// when no `impl` in the program declares a `clone`: a user's one may take `self` by
-    /// value and hand the receiver itself back.
-    fn is_builtin_clone(&self, func: &Expr) -> bool {
-        matches!(func, Expr::FieldAccess { field, .. } if field.name == "clone")
+    /// Whether `func` is one of [`BUILTIN_COPY_METHODS`] on a receiver whose method the
+    /// compiler provides. Only when no `impl` in the program declares a method of that
+    /// name: a user's one may take `self` by value and hand the receiver itself back.
+    fn is_builtin_copy(&self, func: &Expr) -> bool {
+        let Expr::FieldAccess { field, .. } = func else {
+            return false;
+        };
+        let method = field.name.as_str();
+        BUILTIN_COPY_METHODS.contains(&method)
             && !self.dispatches_dynamically(func)
             && !self
                 .impl_methods
                 .values()
-                .any(|methods| methods.contains_key("clone"))
+                .any(|methods| methods.contains_key(method))
     }
 
     /// Whether `func` reaches its body through a trait object's vtable.

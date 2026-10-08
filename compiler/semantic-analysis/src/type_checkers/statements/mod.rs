@@ -248,6 +248,15 @@ impl TypeChecker {
                     None
                 };
                 let init_errored = self.errors.len() > errors_before;
+                // An annotation that failed to resolve was reported already. The
+                // `::new()` it was written to type then has nothing to infer from and
+                // would ask for an annotation the binding visibly has.
+                if ty.is_some() && declared_ty.is_none() {
+                    let reported = self.errors.split_off(errors_before);
+                    self.errors.extend(reported.into_iter().filter(|error| {
+                        !matches!(error, TypeError::CollectionTypeNotInferable { .. })
+                    }));
+                }
 
                 let final_ty = match (declared_ty, init_ty) {
                     (Some(decl), Some(init)) => {

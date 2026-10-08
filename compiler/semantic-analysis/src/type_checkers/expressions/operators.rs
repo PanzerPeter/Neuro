@@ -83,14 +83,17 @@ impl TypeChecker {
         // type before the tensor was known; it is the scalar broadcast all the same, so
         // it is re-typed as the element now. Only an unsuffixed literal qualifies,
         // because re-checking one has no effect beyond its type.
-        if left_expectation.is_none()
-            && left_was_clean
-            && is_bare_literal(left)
-            && let Some(element) = Self::tensor_element_expectation(&right_ty)
-        {
-            left_ty = self
-                .check_expr(left, Some(&element))
-                .unwrap_or(Type::Unknown);
+        // A scalar on the right is the same case: `0.5 * x` with `x: f32` means what
+        // `x * 0.5` means, so the literal takes the other operand's type of its own kind.
+        if left_expectation.is_none() && left_was_clean && is_bare_literal(left) {
+            let retyped = Self::tensor_element_expectation(&right_ty).or_else(|| {
+                literal_follows_right_operand(*op, &left_ty, &right_ty).then(|| right_ty.clone())
+            });
+            if let Some(target) = retyped {
+                left_ty = self
+                    .check_expr(left, Some(&target))
+                    .unwrap_or(Type::Unknown);
+            }
         }
 
         // If either operand is Unknown (error), propagate Unknown
@@ -690,6 +693,17 @@ fn keeps_operand_type(op: BinaryOp) -> bool {
             | BinaryOp::BitXor
             | BinaryOp::Shl
     )
+}
+
+/// Whether an unsuffixed literal on the left of `op`, typed at its default `left`, takes
+/// the scalar type `right` of the operand beside it. Only between two integer or two full
+/// float types: an integer literal never becomes a float. `<<` is left out because its
+/// result is the left operand's type, which the shift amount does not decide.
+fn literal_follows_right_operand(op: BinaryOp, left: &Type, right: &Type) -> bool {
+    let same_kind =
+        (left.is_integer() && right.is_integer()) || (left.is_float() && right.is_float());
+    let symmetric = (keeps_operand_type(op) && op != BinaryOp::Shl) || op.is_comparison();
+    same_kind && symmetric && left != right
 }
 
 /// Whether `expr` is arithmetic over numeric literals alone (`200 + 50`, `-(1 << 3)`):
