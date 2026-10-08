@@ -1,5 +1,7 @@
 mean of 5 samples         = 12
 after the scoped &mut     = 24
 read through the borrow   = 48
+samples in [5, 12]        = 3
+mean doubled via & &      = 24
 label length              = 7
 label moved, now owned    = samples

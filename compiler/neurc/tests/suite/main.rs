@@ -105,6 +105,7 @@ mod pool_blocks;
 mod print_builtins;
 mod range_rev;
 mod range_step;
+mod reading_through_borrows;
 mod return_paths;
 mod returned_reference;
 mod shape_generics;

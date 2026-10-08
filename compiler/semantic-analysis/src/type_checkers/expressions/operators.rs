@@ -68,16 +68,21 @@ impl TypeChecker {
                 .filter(|_| keeps_operand_type(*op) && is_literal_arithmetic(left))
                 .cloned()
         });
+        // A borrowed operand is read through: `x + 1` with `x: &i32` is `i32` arithmetic,
+        // and `x` stays borrowed. Applied before anything compares the two types, so the
+        // literal rules below see the referent.
         let errors_before_left = self.errors.len();
         let mut left_ty = self
             .check_expr(left, left_expectation.as_ref())
-            .unwrap_or(Type::Unknown);
+            .unwrap_or(Type::Unknown)
+            .auto_deref();
         let left_was_clean = self.errors.len() == errors_before_left;
         let right_expectation =
             Self::tensor_element_expectation(&left_ty).unwrap_or_else(|| left_ty.clone());
         let right_ty = self
             .check_expr(right, Some(&right_expectation))
-            .unwrap_or(Type::Unknown);
+            .unwrap_or(Type::Unknown)
+            .auto_deref();
         // The lookahead above sees a tensor on the right only when it is a binding.
         // Anywhere else (`0.5 * make()`), a bare literal on the left took its default
         // type before the tensor was known; it is the scalar broadcast all the same, so
@@ -509,7 +514,8 @@ impl TypeChecker {
 
         let operand_ty = self
             .check_expr(operand, expected_operand)
-            .unwrap_or(Type::Unknown);
+            .unwrap_or(Type::Unknown)
+            .auto_deref();
 
         if matches!(operand_ty, Type::Unknown) {
             return Some(Type::Unknown);

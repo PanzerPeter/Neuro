@@ -229,14 +229,20 @@ false `UninitializedVariable`. A statement-level `if` / `else if` / `while` cond
   `Type::DynObject`.
 - `Type::Reference { inner, mutable }` (Display `&T` / `&mut T`) is compatible only when
   **mutability and referent both match**: there is no `&mut T` → `&T` coercion. References are
-  always `Copy` and never move-tracked. Method-call and field-access resolution auto-deref via
-  `referent()`, so `r.len()` / `r.field` / `r.method()` work through a borrow.
+  always `Copy` and never move-tracked. Field access auto-derefs one layer via `referent()`.
+- `Type::auto_deref` is how a built-in operator operand and a method receiver read a borrow:
+  a borrowed scalar (`is_scalar`: numbers, `bool`, `char`) is read through every `&` / `&mut`,
+  and any other borrow collapses to one `&`, mutable only if every layer was. `check_binary_expr`
+  and `check_unary_expr` apply it to each operand as it is checked, so the literal rules see
+  the referent (`2 * r` with `r: &i64` is `i64`); the method-call arm applies it to `obj_ty`,
+  so `r.abs()` on a `&f64` and `rr.get()` on a `&&P` resolve. A binding, a cast or an argument
+  still sees the borrow as its own type.
 - `Type::Slice(element)` and `Type::DynObject` are the two **unsized** types: valid only as a
   reference referent, and carrying the language's only two implicit conversions (see Slices,
   below, and Traits).
 - `Type::peel_string_ref` normalizes `&string` → `string`, one layer, string only. It is what
   makes an owned `string` and a `&string` slice interchangeable for `==`, `!=`, and `+`, while
-  `&i32 == i32` and `i32 == &string` stay type errors.
+  `i32 == &string` stays a type error.
 - `+` on two strings yields a new owned `Type::String`. Any other arithmetic op on a string, or
   mixing a string with a non-string, is `InvalidBinaryOperator`. Comparison and `+` operands are
   **not consuming positions**, so they borrow to read and never move.
@@ -330,8 +336,8 @@ a wrong count):
   type;
 - `f32`/`f64`.`is_nan()` (nullary) returns `bool`. Gated on `Type::is_float`, which admits the
   full-precision floats only: `f16`/`bf16` fall through to `MethodNotFound`, having no scalar
-  arithmetic that could produce a NaN. Like the integer intrinsics it matches on `recv` rather
-  than the referent, so a `&f64` receiver needs an explicit deref;
+  arithmetic that could produce a NaN. A borrowed receiver reaches it already read through by
+  `auto_deref`, as it reaches the integer intrinsics;
 - `checked_{add,sub,mul}` take the same argument but return `Option<T>` over the receiver,
   instantiated through the shared `option_of` (`collections.rs`) so the overflow-reporting
   intrinsics and the fallible collection readers materialize the same prelude enum instance. A

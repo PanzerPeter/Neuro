@@ -398,10 +398,36 @@ impl Type {
         }
     }
 
+    /// The type a built-in operator or a method call reads `self` as. A borrow of a
+    /// scalar is read as the scalar, through any number of `&` / `&mut`; a borrow of
+    /// anything else collapses to one reference, mutable only if every layer was, since
+    /// operators and receivers already accept a single `&T` there.
+    pub(crate) fn auto_deref(&self) -> Type {
+        let Type::Reference { inner, mutable } = self else {
+            return self.clone();
+        };
+        match inner.auto_deref() {
+            Type::Reference {
+                inner,
+                mutable: inner_mutable,
+            } => Type::Reference {
+                inner,
+                mutable: *mutable && inner_mutable,
+            },
+            peeled if peeled.is_scalar() => peeled,
+            _ => self.clone(),
+        }
+    }
+
+    /// A number, `bool` or `char`: the values a built-in operator reads in one load.
+    pub(crate) fn is_scalar(&self) -> bool {
+        self.is_numeric() || self.is_half_float() || self.is_bool() || self.is_char()
+    }
+
     /// Normalize a string operand for equality: a `&string` slice and an owned
     /// `string` compare the same UTF-8 bytes, so a single string reference
-    /// is peeled to `string`. Other `&T` are left intact: reading them through
-    /// `==` needs the deref operator (`*`).
+    /// is peeled to `string`. Other `&T` are left intact; a scalar borrow has already
+    /// been read through by [`Type::auto_deref`].
     pub(crate) fn peel_string_ref(&self) -> Type {
         match self {
             Type::Reference { inner, .. } if matches!(**inner, Type::String) => Type::String,
@@ -828,14 +854,31 @@ mod tests {
                 .is_compatible_with(&Type::String.peel_string_ref())
         );
 
-        // Non-string references are left intact: reading them through `==` needs
-        // the deref operator (`*`), so `&i32` stays incompatible.
+        // Non-string references are left intact; `auto_deref` is what reads a scalar.
         let ref_i32 = ref_to(Type::I32);
         assert_eq!(ref_i32.peel_string_ref(), ref_i32);
         assert!(
             !ref_i32
                 .peel_string_ref()
                 .is_compatible_with(&Type::I32.peel_string_ref())
+        );
+    }
+
+    #[test]
+    fn auto_deref_reads_scalars_and_collapses_other_borrows() {
+        assert_eq!(ref_to(Type::I32).auto_deref(), Type::I32);
+        assert_eq!(mut_ref_to(ref_to(Type::Char)).auto_deref(), Type::Char);
+        assert_eq!(Type::F64.auto_deref(), Type::F64);
+        let point = Type::Struct("P".to_string());
+        assert_eq!(ref_to(point.clone()).auto_deref(), ref_to(point.clone()));
+        assert_eq!(
+            mut_ref_to(mut_ref_to(point.clone())).auto_deref(),
+            mut_ref_to(point.clone())
+        );
+        // A `&mut` behind a shared borrow is not writable through it.
+        assert_eq!(
+            ref_to(mut_ref_to(point.clone())).auto_deref(),
+            ref_to(point)
         );
     }
 

@@ -808,7 +808,10 @@ is what `HirPlace::Deref` lowers to.
 `string_receiver_struct`, `StructClone`, `codegen_method_call`, and `get_struct_ptr_and_type` load
 through the pointer when they see one; an owned receiver is already a value. There is no context
 state for ref-ness: it is read from `variable_types` (a `&Struct` alloca holds a `ptr`) and from
-the lowered value kind.
+the lowered value kind. `held_place_ptr` keeps the same rule for a `Deref` that yields a
+thin borrow (`*rr` with `rr: &&P`, which HIR auto-deref emits for a nested receiver): one load
+reaches the place, exactly as for a borrow-typed binding. `codegen_field_access` loads the
+struct through a non-binding object that evaluates to a pointer.
 
 Unit-returning calls are valid in statement position: `codegen_call` / `codegen_method_call`
 return an `Option` (`None` = void), and the shared `codegen_call_dispatch` is wrapped with a

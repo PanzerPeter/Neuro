@@ -1,6 +1,8 @@
 # Operators
 
-Operators perform operations on values (operands).
+Operators perform operations on values (operands). Every built-in operator also takes a
+borrowed operand (`&T` or `&mut T`) and reads through it; see
+[Reading through a borrow](types.md#reading-through-a-borrow).
 
 ## Arithmetic Operators
 

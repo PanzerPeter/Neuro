@@ -720,9 +720,12 @@ func main() -> i32 {
 - Borrowing **does not move** the borrowed value; that is the whole point of a reference.
   A non-`Copy` value such as `string` stays usable after being borrowed.
 - `&T` is itself `Copy`: passing or re-borrowing a reference duplicates the pointer.
-- Method and field access **auto-deref** through a borrow: `r.len()` / `r.clone()` on a
-  `&string`, and `r.field` / `r.method()` on a `&Struct`, behave as if applied to the
-  referent.
+- A method call **auto-derefs** its receiver through any number of `&` and `&mut`:
+  `r.len()` on a `&string`, `r.method()` on a `&Struct` or a `& &Struct`, and `r.abs()` on a
+  `&f64` behave as if applied to the referent. Field access reads through one borrow
+  (`r.field` on a `&Struct`).
+- Every built-in operator reads a borrowed operand: see
+  [Reading through a borrow](#reading-through-a-borrow).
 - Only a **place** (a `val`/`mut`/parameter binding) can be borrowed. Borrowing a
   temporary (a literal or a call result) or a `const` (an inlined value, not a memory location) is a `CannotBorrowValue` error.
 
@@ -735,9 +738,26 @@ impl Point {
 func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through it
 ```
 
-Integer intrinsics (`r.wrapping_add(..)`) do not auto-deref: read through `*r` first. A
-returned `&T` is checked against what it points into; see
+A returned `&T` is checked against what it points into; see
 [Lifetimes](#lifetimes-returned-references).
+
+#### Reading through a borrow
+
+Arithmetic, comparison, bitwise and logical operators accept a borrowed operand wherever they
+accept an owned one, and so do `+` and `==` on strings, every tensor operator, compound
+assignment and string interpolation. The result is what the owned operands would give, and the
+operand stays borrowed. A bare literal next to a borrowed operand takes the referent's type.
+
+```neuro
+func clamp_add(x: &i64, step: &mut i64) -> i64 {
+    if x > 100 { return x - 1 }
+    *step += 1
+    2 * x + step.saturating_mul(2)   // i64 arithmetic; x and step are only read
+}
+```
+
+Anywhere else a borrow keeps its own type: `val y = *x` copies the referent out,
+`val y = x` copies the borrow, `x as i64` is an error, and a write still goes through `*r = v`.
 
 ### References, Mutable Borrows (`&mut T`)
 

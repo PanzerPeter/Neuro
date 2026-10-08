@@ -1,7 +1,8 @@
 // Borrow discipline: what a live borrow forbids, and how code is written around it.
 //
 // Combines structs with `&mut self` / `&self` methods, arrays and `for` loops, and
-// string interpolation with the borrowee rules of the memory model:
+// string interpolation with the borrowee rules of the memory model, and with reading
+// through a borrow, where operators and method calls need no `*`:
 //
 //   * while a `&mut` of a place is live, the place may not be read, written, or
 //     moved through its own name — every access goes through the borrow;
@@ -9,7 +10,7 @@
 //     because the borrow would be left pointing at storage the binding gave away.
 //
 // A borrow held by a binding lives until that binding leaves scope, so the usual
-// shape is to confine the borrow to a block, or to read back through it with `*`.
+// shape is to confine the borrow to a block, or to read back through it.
 
 struct Accumulator {
     total: i32,
@@ -39,6 +40,17 @@ func scale(n: &mut i32, factor: i32) {
     *n = *n * factor
 }
 
+// Comparisons read through the borrows, so this is written as it would be over owned
+// values.
+func in_band(x: &i32, lo: &i32, hi: &i32) -> bool {
+    x >= lo && x <= hi
+}
+
+// A method call reads its receiver through both borrows.
+func doubled_mean(acc: & &Accumulator) -> i32 {
+    acc.mean() * 2
+}
+
 func main() -> i32 {
     mut acc: Accumulator = Accumulator::new()
     val samples: [i32; 5] = [3, 9, 12, 6, 30]
@@ -59,8 +71,20 @@ func main() -> i32 {
 
     // While a `&mut` IS live, the value is read back through the borrow.
     val view: &mut i32 = &mut running
-    val doubled: i32 = *view + *view
+    val doubled: i32 = view + view
     println("read through the borrow   = {doubled}")
+
+    val lo: i32 = 5
+    val hi: i32 = 12
+    mut in_range: i32 = 0
+    for sample in samples {
+        if in_band(&sample, &lo, &hi) {
+            in_range += 1
+        }
+    }
+    println("samples in [{lo}, {hi}]        = {in_range}")
+    val acc_view: &Accumulator = &acc
+    println("mean doubled via & &      = {doubled_mean(&acc_view)}")
 
     // A `string` cannot be moved out from under a live borrow, so the borrow is
     // taken, used, and finished inside its own block before the move.

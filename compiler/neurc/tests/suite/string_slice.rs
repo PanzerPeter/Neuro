@@ -142,22 +142,17 @@ func main() -> i32 {
 }
 
 #[test]
-fn comparing_int_slice_with_int_is_rejected() {
-    // Reference-peeling is limited to string: `&i32 == i32` still needs the deref
-    // operator, which has not landed, so this stays a type error.
+fn comparing_int_borrow_with_int_reads_the_referent() {
+    // Every borrow is read through by a built-in operator, not only `&string`.
     let source = r#"
 func main() -> i32 {
     val n: i32 = 5
-    val bad: bool = (&n == n)
+    val same: bool = (&n == n)
     return 0
 }
 "#;
     let (success, stderr) = check_source(source);
-    assert!(
-        !success,
-        "comparing &i32 with i32 must remain a type error; got: {stderr}"
-    );
-    assert!(stderr.contains("expected &i32, found i32"), "{stderr}");
+    assert!(success, "&i32 == i32 compares the referent; got: {stderr}");
 }
 
 // --- string.slice(range) ------------------------------------------

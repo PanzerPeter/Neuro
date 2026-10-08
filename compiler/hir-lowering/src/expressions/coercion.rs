@@ -53,6 +53,30 @@ pub(super) fn apply_unsizing_coercion(expr: HirExpr, expected: Option<&HirType>)
     }
 }
 
+/// Read an operator operand or a method receiver through its borrows, mirroring the
+/// checker's `Type::auto_deref`: a borrowed scalar is loaded through every `&`, and any
+/// other borrow is peeled down to the one `&` operators and receivers already take.
+pub(crate) fn auto_deref(mut expr: HirExpr) -> HirExpr {
+    while let HirType::Reference { inner, .. } = &expr.ty
+        && (matches!(**inner, HirType::Reference { .. }) || is_scalar(inner))
+    {
+        let (ty, span) = ((**inner).clone(), expr.span);
+        let kind = HirExprKind::Deref {
+            operand: Box::new(expr),
+        };
+        expr = HirExpr::new(kind, ty, span);
+    }
+    expr
+}
+
+/// A number, `bool` or `char`: the values a built-in operator reads in one load.
+fn is_scalar(ty: &HirType) -> bool {
+    matches!(
+        ty,
+        HirType::Bool | HirType::Char | HirType::F16 | HirType::BF16
+    ) || is_numeric(ty)
+}
+
 /// The resolved type of a literal under an optional contextual `expected` type,
 /// mirroring the checker's literal inference (suffix wins; else the expected type
 /// when it fits the literal's family; else the default `i32` / `f64`).

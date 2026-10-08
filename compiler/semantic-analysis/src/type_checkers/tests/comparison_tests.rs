@@ -226,7 +226,8 @@ fn equality_on_a_struct_with_partial_eq_is_accepted() {
 }
 
 /// Aggregates have no built-in equality either, and the same missing rejection crashed the
-/// backend for arrays, tuples, enums and non-string references.
+/// backend for arrays, tuples, enums and borrows of them. A borrowed scalar compares its
+/// referent instead.
 #[test]
 fn equality_on_an_aggregate_is_rejected() {
     for (name, program) in [
@@ -244,7 +245,7 @@ fn equality_on_an_aggregate_is_rejected() {
         ),
         (
             "reference",
-            "func main() -> i32 { val x = 1\nval y = 2\nval a = &x\nval b = &y\nif a == b { return 1 }\nreturn 0 }",
+            "func main() -> i32 { val x = [1, 2]\nval a = &x\nval b = &x\nif a == b { return 1 }\nreturn 0 }",
         ),
     ] {
         let errors = semantic_errors(program);

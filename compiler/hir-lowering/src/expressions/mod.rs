@@ -153,7 +153,8 @@ impl Lowerer {
                         .cloned()
                 });
                 let left_src = left;
-                let left = self.lower_expr(left, left_expected.as_ref())?;
+                // Mirrors the checker: a borrowed operand is read through.
+                let left = coercion::auto_deref(self.lower_expr(left, left_expected.as_ref())?);
                 // Operator-trait dispatch on a user type: desugar `a OP b` into the
                 // impl method call `a.op(b)`. The checker validated the impl, so a lookup
                 // hit means the call resolves.
@@ -172,7 +173,8 @@ impl Lowerer {
                 let right_expected = coercion::tensor_element(&left.ty)
                     .cloned()
                     .unwrap_or_else(|| left.ty.clone());
-                let right_hir = self.lower_expr(right, Some(&right_expected))?;
+                let right_hir =
+                    coercion::auto_deref(self.lower_expr(right, Some(&right_expected))?);
                 // Mirrors the checker: a bare literal beside a tensor the lookahead could
                 // not see is the scalar broadcast, and takes the element type now; beside
                 // a scalar of its own kind it takes that scalar's type.
@@ -225,7 +227,7 @@ impl Lowerer {
                     UnaryOp::Not => None,
                     UnaryOp::BitNot => expected.filter(|t| is_integer(t)),
                 };
-                let operand = self.lower_expr(operand, operand_expected)?;
+                let operand = coercion::auto_deref(self.lower_expr(operand, operand_expected)?);
                 // Operator-trait dispatch: `-a` → `a.neg()`, `~a` → `a.not()`.
                 if let HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } =
                     operand.ty.referent()

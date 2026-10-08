@@ -536,7 +536,12 @@ impl TypeChecker {
                 if let Some(ty) = self.check_kernel_partition(object, field, args, *span) {
                     return Some(ty);
                 }
-                let obj_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+                // The receiver is read through every borrow: `r.abs()` on a `&f64` is
+                // `abs` on the `f64`, and `rr.get()` on a `&&P` dispatches on `&P`.
+                let obj_ty = self
+                    .check_expr(object, None)
+                    .unwrap_or(Type::Unknown)
+                    .auto_deref();
                 if matches!(obj_ty, Type::Unknown) {
                     return Some(Type::Unknown);
                 }
@@ -625,10 +630,9 @@ impl TypeChecker {
                     }
                     _ => {
                         // Builtin (non-struct) receivers dispatch a fixed,
-                        // compiler-known set of intrinsic methods. The original
-                        // (possibly `&T`) type is passed so `resolve_builtin_method`
-                        // can auto-deref `&string` but keep integer intrinsics
-                        // value-only.
+                        // compiler-known set of intrinsic methods. A scalar receiver
+                        // arrives read through its borrows; a `&string`, `&Vec` or
+                        // `&Tensor` keeps its one `&`, which some intrinsics refuse.
                         if let Some(ret) = self.resolve_collection_method(
                             &obj_ty,
                             object,

@@ -146,7 +146,15 @@ impl<'ctx> CodegenContext<'ctx> {
         let idx = self.struct_field_index(struct_name, field_name)?;
 
         if !matches!(object.kind, HirExprKind::Variable(_)) {
-            let aggregate = self.codegen_expr(object)?;
+            let aggregate = match self.codegen_expr(object)? {
+                // A borrow that is not a binding (`(*rr).x` with `rr: &&P`) evaluates to
+                // the struct's address.
+                BasicValueEnum::PointerValue(ptr) => {
+                    let llvm_ty = self.nominal_llvm_type(struct_name)?;
+                    self.builder.build_load(llvm_ty, ptr, "deref.struct")?
+                }
+                other => other,
+            };
             let BasicValueEnum::StructValue(struct_val) = aggregate else {
                 return Err(CodegenError::InternalError(format!(
                     "field access on a non-aggregate value of struct '{}'",
@@ -391,7 +399,19 @@ impl<'ctx> CodegenContext<'ctx> {
             }
 
             HirExprKind::Deref { operand } => {
-                Ok(Some(self.codegen_expr(operand)?.into_pointer_value()))
+                let slot = self.codegen_expr(operand)?.into_pointer_value();
+                // `*rr` with `rr: &&P` is a slot holding a borrow. Like a borrow-typed
+                // binding above, it names the place that borrow points to, so one load
+                // reaches it; a fat borrow (`&string`, `&[T]`) is held by value instead.
+                let ty = Type::from_hir(&expr.ty);
+                if matches!(ty, Type::Reference { .. })
+                    && self.type_mapper.map_type(&ty)?.is_pointer_type()
+                {
+                    let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
+                    let loaded = self.builder.build_load(ptr_ty, slot, "place.deref")?;
+                    return Ok(Some(loaded.into_pointer_value()));
+                }
+                Ok(Some(slot))
             }
 
             _ => Ok(None),

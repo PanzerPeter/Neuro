@@ -5,7 +5,8 @@
 // its binding afterward. The borrow expression `&x` references the place `x`.
 //
 // Borrowing never moves the borrowed value, and `&T` is itself Copy.
-// Method and field access auto-deref through the borrow.
+// Method and field access auto-deref through the borrow, and every built-in
+// operator reads a borrowed operand as it reads an owned one.
 
 struct Point {
     x: i64,
@@ -33,6 +34,11 @@ func read_sum(p: &Point) -> i64 {
     p.sum()
 }
 
+// Compare and subtract through the borrows: no `*` is needed to read them.
+func gap(a: &i64, b: &i64) -> i64 {
+    if a > b { a - b } else { b - a }
+}
+
 func main() -> i32 {
     val msg: string = "Neuro"
     val n: u64 = describe(&msg)   // borrow: msg is NOT moved
@@ -42,15 +48,17 @@ func main() -> i32 {
     val px: i64 = read_x(&pt)     // 3
     val ps: i64 = read_sum(&pt)   // 7
     val direct: i64 = pt.sum()    // pt still usable after being borrowed
+    val g: i64 = gap(&px, &ps)    // 4
 
     println("describe(&msg)      = {n}")
     println("msg.len() after      = {again}   (borrowing never consumes)")
     println("read_x(&pt)          = {px}")
     println("read_sum(&pt)        = {ps}")
     println("pt.sum() after       = {direct}   (pt still usable)")
+    println("gap(&px, &ps)        = {g}")
 
-    // n (5) + again (5) + px (3) + ps (7) + direct (7) = 27, minus 27 → 0.
-    val balance = (n as i32) + (again as i32) + (px as i32) + (ps as i32) + (direct as i32) - 27
+    // n (5) + again (5) + px (3) + ps (7) + direct (7) + g (4) = 31, minus 31 → 0.
+    val balance = (n as i32) + (again as i32) + (px as i32) + (ps as i32) + (direct as i32) + (g as i32) - 31
     println("balance              = {balance}")
     return balance
 }

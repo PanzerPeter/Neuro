@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.7.0] - 2026-10-08
+
+### Added
+
+- Built-in operators read through a borrow. With `x: &i32` or `x: &mut i32`, `x + 1`, `x > 0`,
+  `-x`, `x & mask`, `flag && x > 0` and `total += x` work as they do on an `i32`, and `x` stays
+  borrowed. This covers every arithmetic, comparison, bitwise, shift and logical operator on
+  numbers, `bool` and `char`, through any number of `&`. A bare literal next to a borrowed
+  operand takes the referent's type, so `2 * x` with `x: &i64` is `i64` arithmetic.
+- A method call reads its receiver through any number of `&` and `&mut`: `r.abs()`,
+  `r.to_checked::<u8>()` and `r.wrapping_add(1)` work on a borrowed number, and `c.get()` works
+  on a `& &Counter`. A `&mut self` method cannot be called through a `& &mut` borrow.
+- A borrow is still its own type everywhere else: `val y: i32 = r` and `r as i64` are errors.
+
+### Fixed
+
+- Through a nested mutable borrow (`c: &mut &mut Counter`), `(*c).n = 9` and `(*c).bump()`
+  wrote into the borrow's own storage instead of the struct, so the caller saw no change. Both
+  now write the struct. Reading `(*c).n` through a `& &Counter` no longer stops the compiler with
+  an internal error.
+
 ## [5.6.3] - 2026-10-08
 
 ### Fixed

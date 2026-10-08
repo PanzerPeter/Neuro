@@ -266,6 +266,12 @@ tensor literal in a `break` is typed as a tensor in both slices instead of as a 
 ### Desugars this slice owns
 Each produces existing HIR nodes, so no backend learns the construct exists.
 
+- **Reading through a borrow** (`expressions/coercion.rs`, `auto_deref`). Each operand of a
+  built-in binary or unary operator, and every method receiver, is wrapped in `Deref` nodes
+  mirroring the checker's `Type::auto_deref`: a borrowed scalar is loaded through every layer,
+  any other borrow is peeled to one `&`. Applied before the literal re-typing, so `2 * r` with
+  `r: &i64` types its literal `i64`, and before operator-trait dispatch, which reads the
+  referent anyway.
 - **`?` error propagation** (`expressions/try_op.rs`). `operand?` becomes a
   `HirExprKind::Match`: arm 0 tests the `Some`/`Ok` tag and yields payload slot 0 as `__try_N`
   (off `try_counter`); arm 1 is a `Wildcard` whose body is a `Block` holding a single
