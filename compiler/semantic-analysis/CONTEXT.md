@@ -508,6 +508,11 @@ same suppression for `Expr::ArrayRest`, whose `exact` node is an arity assertion
 the leading projections have already taken. And a loop body's `moves_since` compares part maps,
 not just the whole span, so a partial move a second iteration would repeat is still reported.
 
+A `match` does the same for transient borrows (`transient_borrows` / `set_transient_borrows`):
+each arm starts from the counts the scrutinee left, so `1 => v.push(1), _ => v.push(2)` is not a
+conflict between arms that never both run, and past the `match` each binding keeps the largest
+count any arm took, since the rest of the statement may still overlap it.
+
 Each arm of an `if` (statement or expression) or a `match` snapshots and restores move state,
 so a move in one arm is not seen by its siblings. Past the region, `SymbolTable::join_moves` adds
 back the moves of every arm that falls through (one `stmts_diverge` / `expr_diverges` does not
@@ -588,9 +593,15 @@ name means the outer binding again. A `val` / `mut` may reuse a name its block a
 (`define_pending` opens an implicit scope that `pop_scope` closes with the block), and the new
 binding is held under `__pending_<name>` until its initializer's moves and borrows are recorded,
 so `val x = x` moves and `val x = &x` borrows the binding it shadows. A block, `if` or `match`
-initializer whose type carries a reference has its value-yielding tails walked
-(`tail_borrow_targets`, through block bindings, destructured parts and call arguments), and the
-new binding holds each borrow found, as it would for the same borrow written directly.
+value, a bare binding or a closure whose type carries a reference or a function value
+(`hold_carried_borrows`, run for a `val` / `mut` initializer and for a whole-binding store alike)
+has its value-yielding tails walked (`tail_borrow_targets`, through block bindings, destructured
+parts, call arguments and a closure's captures), and the holder takes each borrow found, as it
+would for the same borrow written directly. A name the walk cannot follow to a block declaration
+is a live binding the value copies, and the holder inherits every borrow that binding holds
+(`inherit_borrows`). Without the store half, `r = rm` or `g = |x| rm.push(x)` from an inner
+block left the outer holder pointing at `v` once `rm` died, and `val w = v` compiled and freed
+the buffer twice.
 
 A `&mut` binding passed bare to a call is a reborrow, not a borrow expression, so the counts
 never see it. `check_reborrow_exclusivity` (in `expressions/calls.rs`, run by every call path)
@@ -624,8 +635,9 @@ whole scope, so code reads back through the borrow or confines it to a block. Pe
 come from a direct `&place` / `&mut place` initializer, a `.slice` view, and a call that returns a
 reference (`hold_returned_borrows`): a reference-typed binding initialized or reassigned from a
 call holds every `&place` / `&mut place` argument of that call and its borrowed receiver, since a
-body may return any of its reference parameters. A borrow reaching a binding through any other
-compound expression (an `if`, a block) is still missed.
+body may return any of its reference parameters. Blocks, branches, copies and closures are
+followed by `hold_carried_borrows` above; a struct or enum value holding a borrow is not
+(BUG-099).
 
 **Returned-reference outlives** (lifetime elision; `declarations/` + `statements/returns.rs`). A
 function or method whose declared return type is a `Type::Reference` must not return a reference
@@ -859,7 +871,11 @@ block body requires an explicit return type and is checked like a function body
 parameters with one name are `VariableAlreadyDefined` at the second, as in a function's list. Capture
 analysis (a free-variable walk) rejects capturing a non-Copy enclosing local
 (`ClosureCapturesNonCopy`) or assigning to a captured variable (`ClosureAssignsCapture`); module
-constants and functions are referenced directly, not captured. The body is checked with
+constants and functions are referenced directly, not captured. The walk is scoped (`FreeVars`
+keeps one set per block, arm, loop body, `val`-`else` branch and inner closure), mirroring
+`hir-lowering`'s capture walk so the two agree: a name the body binds hides an enclosing one
+only after the binding and inside its scope, so a read before a shadowing `val`, in a sibling
+arm, or outside an inner closure that binds the name is a capture. The body is checked with
 `current_function_return_type` redirected to the closure's return type, so an early `return` binds
 to the closure, and with `loop_stack` emptied for the same reason: an enclosing loop is not a
 `break` target from inside a closure, so one written there is `BreakOutsideLoop`. Both are restored
@@ -1293,12 +1309,20 @@ the value holds no arena memory:
 - a struct or tuple literal whose every field (and `..base`) passes: the aggregate allocates
   nothing of its own. An array literal likewise, but under `Emission::Routed` only, because it
   may be a tensor literal, which allocates its buffer where it is written;
-- an `if` with an `else`, or a `match` whose scrutinee passes, when every arm is a bare tail
-  expression that passes. The walk runs BEFORE the value is checked (`check_place_store` asks
-  first), so a name an arm declares is unknown and would read as "not a binding"; an arm that
-  declares anything (`tail_only` fails) is refused rather than guessed at. A `match` arm's
-  pattern bindings are unknown for the same reason, and are sound to admit only because they
-  are parts of a scrutinee already proven.
+- a block whose statements are all `val` / `mut` declarations with initializers that pass, and
+  whose tail passes (`block_carries_no_arena`); an `if` with an `else` whose every arm is such a
+  block; a `match` whose scrutinee and every arm body pass. Argument binding writes a reordered
+  named call as exactly such a block of temporaries. The walk may run before the value is
+  checked (`check_place_store` asks first) or after its scope is gone, so a name the block
+  declares can be unknown and read as "not a binding"; that is sound only because its
+  initializer was just proven, and any statement but a declaration (which could change what a
+  name holds) refuses the block. A `match` arm's pattern bindings are unknown for the same
+  reason, and are sound to admit because they are parts of a scrutinee already proven;
+- under `Emission::Routed`, a `+` whose left operand is a `string` or `&string`
+  (`is_string_operand`: a literal, an interpolation, a binding of that type, or another such
+  `+`), whatever the right operand is: dispatch reads the left operand, so this is the builtin
+  concatenation, which copies both operands into its buffer (BUG-104). An interpolation with
+  at least one text part likewise copies every rendering; a lone hole is walked.
 
 Everything else is arena memory by assumption. The walk takes an `Emission` because provenance
 depends on where the backend puts the value, and the two call sites want different answers.
@@ -1314,7 +1338,15 @@ does exactly that: `store_outside_pool` in `llvm-backend` emits the whole statem
 `pool_depth` at zero. A builtin's inlined allocation then lands on libc too, so it becomes
 provable, and so do `a + b` and `"row {n}"`, which allocate one fresh buffer at the point they
 are written. What routing cannot do is move a buffer allocated EARLIER, which is why the operand
-walk still runs: `out = local` and `out = local + "c"` stay refused where `local` is the block's.
+walk still runs: `out = local` and `out = echo(local)` stay refused where `local` is the block's.
+
+The backend routes a store unless its root is a binding of the innermost block, and a reference
+the block declares may still point outside it. `check_pool_store` therefore takes
+`through_reference` (`reached_through_reference`): a store like `r.t = v` rooted at such a
+reference is read under `Emission::InPlace`, because that is where the backend emits it. The
+retention rule has the same gap and the same answer: `outliving_root` counts a receiver or `&mut`
+argument reached through a `&mut` (`reaches_through_mut`) as outliving, however recently the
+reference was made. Both had compiled and left an arena tensor in the borrowed place.
 
 Dynamic dispatch is the one exclusion neither emission rescues, and the language rule names it: behind a
 vtable the implementation is not known until runtime and neither is what it allocates.

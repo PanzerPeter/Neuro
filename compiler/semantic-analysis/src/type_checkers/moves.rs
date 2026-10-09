@@ -1270,7 +1270,10 @@ mod tests {
         // its borrow is over even though the statement is not.
         let errs = errors(
             r#"
-            func bump(n: &mut i32) -> i32 { *n = *n + 1  return *n }
+            func bump(n: &mut i32) -> i32 {
+                *n = *n + 1
+                return *n
+            }
             func combine(a: i32, b: i32) -> i32 { a + b }
             func main() -> i32 {
                 mut n: i32 = 1

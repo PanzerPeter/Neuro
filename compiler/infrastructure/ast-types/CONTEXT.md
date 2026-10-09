@@ -159,9 +159,10 @@ walkers.
   a method against, and an adapter that returned a value would need a generic `Option<T>` payload
   the enum surface cannot express yet. Every walker over `Stmt` must visit `callee`, which is an
   ordinary expression evaluated once in the scope *enclosing* the loop.
-- `Expr::Unsafe { stmts, span }` is structurally identical to `Expr::Block`. The distinct node
-  exists so a later phase can attach the `@kernel` aliasing relaxation to it; it carries no
-  special semantics today.
+- `Expr::Unsafe { stmts, span }` is structurally identical to `Expr::Block` and lowers like
+  one. The distinct node exists for the one rule it carries, which semantic analysis
+  enforces: a raw element read or write of a `@kernel` output handle is accepted only inside
+  it.
 - **`Type::Named` is the catch-all, deliberately.** A bare type-parameter reference, an enum
   annotation, and a newtype annotation are all plain `Type::Named`: later passes resolve the name
   against the generics in scope, the enum table, or the newtype table. Only a generic *application*
@@ -206,8 +207,9 @@ walkers.
   `StructDef`: `args` are the bare identifiers (`@derive(Copy, Clone)`), `named` the
   `AttributeNamedArg { label, value: Expr, span }` pairs (`@grad(wrt: [w, self.head.w])`). A
   value is an ordinary expression; which shapes mean anything is the reading pass's rule.
-  Unknown names are accepted so the surface stays forward-compatible; semantics are interpreted
-  by later passes (`@derive`, `@allow(...)`, `@grad`, and eventually `@gpu`).
+  The parser accepts any name. Semantic analysis holds the fixed set some pass acts on
+  (`@derive`, `@allow(...)`, `@grad`, `@gpu`, `@kernel`, ...) and rejects every other, so a
+  misspelled attribute is an error rather than a silent no-op.
 - **Const generics.** `GenericParamKind` (`Type` / `Const`) on `GenericParam`, `ArraySize`
   (`Literal` / `Const`) on `Type::Array`, `TensorExtent` (`Literal` / `Param` / `Dynamic`) inside each
   `TensorDim` of `Type::Tensor.shape`, `GenericArg` (`Type` / `Const`) in `Type::Generic.args`,

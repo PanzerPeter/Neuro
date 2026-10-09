@@ -168,7 +168,7 @@ impl Parser {
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{' to open a module block")?;
 
-        let items = self.parse_item_list(alias_decls, Nesting::Block)?;
+        let items = self.nested(|p| p.parse_item_list(alias_decls, Nesting::Block))?;
 
         let close = self.consume(TokenKind::RightBrace, "'}' to close the module block")?;
         Ok(ModuleDef {

@@ -322,7 +322,7 @@ included, is in [Operators: Operator Precedence](operators.md#operator-precedenc
 a + b * c         // Parsed as: a + (b * c)
 a & b + c         // Parsed as: a & (b + c)   (arithmetic before bitwise)
 a | b & c         // Parsed as: a | (b & c)   (AND before OR)
-a < b == c < d    // Parsed as: (a < b) == (c < d)
+x & mask == 0     // Parsed as: (x & mask) == 0   (bitwise before comparison)
 !a && b           // Parsed as: (!a) && b
 a || b && c       // Parsed as: a || (b && c)
 n as f64 + 1.0    // Parsed as: (n as f64) + 1.0

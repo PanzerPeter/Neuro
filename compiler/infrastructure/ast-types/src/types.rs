@@ -72,7 +72,8 @@ pub struct TensorDim {
 /// Type AST nodes
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    /// Named type (e.g., i32, f64, String, bool)
+    /// Named type: a primitive (`i32`, `string`, `bool`, ...), a struct, enum, or
+    /// newtype name, or a type parameter. Later passes resolve which.
     Named(Identifier),
 
     /// Borrow (reference) type: a non-owning reference to a value of
@@ -149,10 +150,11 @@ pub enum Type {
         span: Span,
     },
 
-    /// Statically shaped tensor `Tensor<T, [d0, d1, ...]>`.
+    /// Shaped tensor `Tensor<T, [d0, d1, ...]>`.
     ///
-    /// Every extent is known at compile time and is part of the type, so
-    /// `Tensor<f32, [2, 2]>` and `Tensor<f32, [3, 3]>` are distinct types. An empty
+    /// A static extent is part of the type, so `Tensor<f32, [2, 2]>` and
+    /// `Tensor<f32, [3, 3]>` are distinct types; a [`TensorExtent::Dynamic`] `?` axis
+    /// is known only at run time. An empty
     /// `shape` is the rank-0 scalar tensor `Tensor<T, []>`. `span` covers the type name
     /// through the closing `>`. An extent may be a [`TensorExtent::Param`] inside a generic
     /// definition, in which case monomorphization makes it concrete.

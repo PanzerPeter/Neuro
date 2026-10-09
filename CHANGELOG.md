@@ -9,6 +9,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.7.1] - 2026-10-09
+
+### Changed
+
+- `&`, `^` and `|` bind tighter than the comparisons, and `==`/`!=` share one level with
+  `<`/`>`/`<=`/`>=`, as the precedence table specifies. `x & 3 == 2` is `(x & 3) == 2` instead
+  of a type error, and `a == b < c` is refused as a comparison chain.
+- A shift by an amount outside `0..bits`, or by a negative amount, follows the overflow rule: it
+  panics with `shift overflow` at `-O0` and masks the amount to `amount & (bits - 1)` from `-O1`
+  up. It was undefined and printed garbage. A constant shift outside the width is refused.
+- An ordinary `"..."` literal ends on its line. An unclosed one is reported where it opens instead
+  of running on to the next `"` in the file.
+- Two statements on one line are a parse error. `val x = 5 6` used to bind `5`, and a malformed
+  literal such as `0b102` silently became `2`.
+- `neurc compile -o` naming a source file of the program is refused instead of overwriting it.
+
+### Fixed
+
+- Closure capture follows scopes. A read of an outer local before a shadowing `val`, in a sibling
+  `match` arm, outside an inner closure that binds the name, or only as an assignment index, is a
+  capture. Lowering used to fail with "undefined variable" or read a same-named constant, and the
+  checker let a non-`Copy` value be captured that way.
+- A closure or reference carried out of the block that made its borrow (through the block's value,
+  an assignment, or a copy) keeps its borrowee borrowed. These programs used to double-free.
+- A `pool` refuses a store or a call that reaches arena memory into a place behind a `&mut` the
+  block itself declared (`r.t = ...`, `r.set(x)`, `put(r, x)`, `w.push(x)`). These used to
+  segfault.
+- A `pool` accepts `out = local + "x"` and `out = "row {local}"` (BUG-104), and a block, `if` or
+  `match` arm that declares bindings, including a reordered named call (BUG-049).
+- `match` arms no longer see each other's transient `&mut` borrows, so
+  `1 => v.push(1), _ => v.push(2)` compiles.
+- A local or parameter shadows a module constant of the same name; the constant was read instead.
+  A `const` declared in a function body ends with its block instead of leaking into later
+  functions, which also crashed the compiler on a same-named `f64` closure capture.
+- An inclusive range ending at its type's maximum (`250u8..=255u8`, `..=i32::MAX`, and their
+  `.rev()` forms) stops after its last value instead of looping forever.
+- A checked integer tensor operation inside a loop no longer grows the stack each iteration and
+  crashes after about a million passes.
+- Imports: an imported name used as a path head resolves through its import, so after
+  `import geometry::{Counter}` the call `Counter::make()` no longer runs a function from an
+  unrelated sibling `Counter.nr`, and `import ./utils::{io}` or `import ./utils as u` reaches the
+  child module. An `as` rename of a type or trait applies in struct literals, `impl` blocks, trait
+  bounds and `impl Trait` / `dyn Trait`. `import Shape::{Circle}` of a local enum ignores a
+  sibling `Shape.nr`.
+- Named arguments: an effectful receiver index (`arr[next()].m(b: f(), a: g())`) is evaluated
+  before the arguments, a labelled call inside that index is bound, and a reordered call passing
+  `&mut x` to a `&T` parameter reborrows as the positional form does.
+- Type aliases expand inside another alias's target, a turbofish, an impl's type arguments and
+  `type Output`, a const-parameter type, and a bound's `<Assoc = T>`. A cycle through a compound
+  target is refused, and a generic parameter shadows an alias of the same name.
+- Deeply nested `if`/`for`/`while`, types, patterns, destructures and `module` blocks report
+  "maximum nesting depth" instead of overflowing the stack, and a 5000-operand chain such as
+  `1 + 1 + ...` compiles instead of crashing the compiler.
+- An `if` value with no `else` no longer absorbs a following line that starts with `-`, `(` or `[`.
+- A `u64` exclusive range pattern ending at 2^63 or above, and an overflowing constant tensor slice
+  bound, no longer crash the compiler.
+- A `\x` escape with a sign (`"\x+1"`) is an invalid escape instead of decoding to U+0001, and a
+  block string ending in a lone `\` reports an invalid escape instead of an unterminated string.
+- Diagnostics: a named-argument error shows its file, line, column and a caret. An end-of-input
+  parse error points at the end of the last line, a lexical error inside an interpolation hole at
+  its real position, and a diagnostic on an `if`, loop or function underlines through its `}`.
+
+### Performance
+
+- A host tensor reduction along an outer axis (`m.sum(axis: 0)`) reads its tensor row by row,
+  about 15x faster on a 2048 x 2048 `f32`, with bit-identical results.
+- Resolving type aliases is linear in their number; a 1000-alias chain took over a second.
+- The lexer skips its per-character offset table for string literals with no escape or brace,
+  and reads numeric literals without an allocation when they hold no `_`.
+- The string-ownership pre-pass walks assignment places in place instead of cloning each one.
+- The examples test compiles and runs the examples in parallel.
+
+### Removed
+
+- The unused `Token::as_str` from the lexer.
+
+### Tests
+
+- Several suite assertions pin the exact rejection message instead of matching any error.
+- Filed BUG-105 (a literal argument to a generic call ignores its concrete parameter type),
+  BUG-106 (two generic instances can receive the same symbol name) and BUG-107 (a `string` a
+  function returns from its parameter leaks when passed straight to a call).
+
 ## [5.7.0] - 2026-10-08
 
 ### Added

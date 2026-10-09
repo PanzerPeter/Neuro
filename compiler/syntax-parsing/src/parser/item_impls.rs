@@ -9,7 +9,6 @@ use crate::errors::{ParseError, ParseResult};
 use ast_types::{ImplDef, TraitDef, TraitMethod};
 
 use super::Parser;
-use super::statements::stmt_span;
 
 /// What a trait's `type` item must look like, for the diagnostic that rejects a binding
 /// where a declaration belongs.
@@ -245,11 +244,7 @@ impl Parser {
             None
         };
 
-        let end_span = default_body
-            .as_ref()
-            .and_then(|b| b.last())
-            .map(stmt_span)
-            .unwrap_or(start.span);
+        let end_span = self.previous_span(start.span);
         Ok(TraitMethod {
             name,
             self_param,

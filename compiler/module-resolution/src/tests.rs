@@ -1077,3 +1077,154 @@ fn a_module_that_kept_the_prelude_still_gets_it_beside_one_that_did_not() {
         other => panic!("expected a resolved enum pattern, got {:?}", other),
     }
 }
+
+#[test]
+fn a_name_an_import_binds_does_not_load_a_same_named_sibling_file() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "utils/mod.nr", "export func helper\n");
+    write(dir.path(), "utils/io.nr", "export func read\n");
+    // An unrelated program beside the root: loading it would collide on `main`.
+    write(dir.path(), "io.nr", "func main\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import ./utils::{io}\nfunc main\ncall io::read\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(program.modules.len(), 3);
+    assert_eq!(first_callee(&program).as_deref(), Some("read"));
+}
+
+#[test]
+fn an_aliased_module_reaches_its_own_children() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "utils/mod.nr", "export func helper\n");
+    write(dir.path(), "utils/io.nr", "export func read\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import ./utils as u\nfunc main\ncall u::io::read\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(first_callee(&program).as_deref(), Some("read"));
+}
+
+#[test]
+fn an_imported_type_heads_a_path_over_a_same_named_file() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "geometry.nr", "export enum Counter\n");
+    // A file named after the import's bound name must not re-point `C::make`.
+    write(dir.path(), "C.nr", "export func make\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import geometry::{Counter as C}\nfunc main\ncall C::make\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(program.modules.len(), 2);
+    assert_eq!(first_callee(&program).as_deref(), Some("Counter::make"));
+}
+
+#[test]
+fn a_renamed_import_reaches_impl_bound_and_struct_literal_positions() {
+    use ast_types::{GenericParam, GenericParamKind, ImplDef, TraitBound};
+
+    let dir = TempDir::new().expect("temp dir");
+    write(
+        dir.path(),
+        "shapes.nr",
+        "export enum Point\nexport enum Shape\n",
+    );
+    let root = write(dir.path(), "main.nr", "");
+
+    // `impl Sh for Pt { }` and `func make<T: Sh>() { Pt { } }`, after the two renames.
+    let imports = "import shapes::{Point as Pt, Shape as Sh}\n";
+    let parse = |source: &str, path: &str| -> Result<Vec<Item>, String> {
+        if path != "main.nr" {
+            return stub_parse(source);
+        }
+        let mut items = stub_parse(imports)?;
+        items.push(Item::Impl(ImplDef {
+            module: 0,
+            trait_name: Some(ident("Sh")),
+            type_name: ident("Pt"),
+            generics: Vec::new(),
+            lifetimes: Vec::new(),
+            type_args: Vec::new(),
+            where_predicates: Vec::new(),
+            assoc_types: Vec::new(),
+            methods: Vec::new(),
+            span: Span::new(0, 0),
+        }));
+        let literal = Stmt::Expr(Expr::StructLiteral {
+            name: ident("Pt"),
+            fields: Vec::new(),
+            base: None,
+            span: Span::new(0, 0),
+        });
+        let Item::Function(mut make) = function("make", false, vec![literal]) else {
+            unreachable!("function() builds a function")
+        };
+        make.generics.push(GenericParam {
+            name: ident("T"),
+            kind: GenericParamKind::Type,
+            bounds: vec![TraitBound {
+                trait_name: ident("Sh"),
+                assoc_bindings: Vec::new(),
+            }],
+            span: Span::new(0, 0),
+        });
+        items.push(Item::Function(make));
+        Ok(items)
+    };
+
+    let program = resolve_program(&root, &parse, &[]).expect("resolution succeeds");
+
+    let mut seen = Vec::new();
+    for item in &program.items {
+        match item {
+            Item::Impl(def) => {
+                seen.push(def.type_name.name.clone());
+                seen.extend(def.trait_name.iter().map(|t| t.name.clone()));
+            }
+            Item::Function(def) if def.name.name == "make" => {
+                seen.push(def.generics[0].bounds[0].trait_name.name.clone());
+                if let [Stmt::Expr(Expr::StructLiteral { name, .. })] = def.body.as_slice() {
+                    seen.push(name.name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(seen, ["Point", "Shape", "Shape", "Point"]);
+}
+
+#[test]
+fn a_variant_import_of_a_local_enum_ignores_a_same_named_file() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "Shape.nr", "export func Circle\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "enum Shape\nimport Shape::{Circle}\nfunc main\npatbare Circle\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+
+    assert_eq!(program.modules.len(), 1);
+    match first_pattern(&program) {
+        Some(Pattern::Enum {
+            enum_name, variant, ..
+        }) => assert_eq!(
+            (enum_name.name.as_str(), variant.name.as_str()),
+            ("Shape", "Circle")
+        ),
+        other => panic!("expected the local enum's variant, got {:?}", other),
+    }
+}

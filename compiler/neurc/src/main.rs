@@ -134,11 +134,34 @@ enum Commands {
     },
 }
 
+/// Stack for the thread that runs the pipeline. The parser caps nesting, but a long
+/// left-leaning chain (`1 + 1 + ...`, `a.b.c...`) parses in a loop and is then walked
+/// recursively by every later pass, which overflowed the 8 MiB main stack at about
+/// 5000 operands. The reservation is virtual; only the pages a program touches are used.
+// ponytail: a bigger stack moves the ceiling (about 160k operands), iterative walkers remove it.
+const PIPELINE_STACK_BYTES: usize = 256 << 20;
+
 fn main() {
     env_logger::init();
 
     let cli = Cli::parse();
 
+    let pipeline = std::thread::Builder::new()
+        .name("neurc".to_string())
+        .stack_size(PIPELINE_STACK_BYTES)
+        .spawn(move || drive(cli));
+    match pipeline.map(|handle| handle.join()) {
+        Ok(Ok(())) => {}
+        // The panic message is already on stderr; 101 is Rust's own panic status.
+        Ok(Err(_)) => process::exit(101),
+        Err(e) => {
+            eprintln!("Error: failed to start the compiler thread: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn drive(cli: Cli) {
     match cli.command {
         Commands::Compile {
             input,
@@ -244,6 +267,8 @@ fn validate_source_file(path: &Path) -> Result<()> {
 struct LoadedProgram {
     items: Vec<syntax_parsing::Item>,
     module_count: usize,
+    /// The file each module was read from, root first.
+    files: Vec<PathBuf>,
 }
 
 /// Expand `input` and every module it reaches into one program, and give it the prelude.
@@ -274,6 +299,7 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     })?;
 
     let module_count = program.modules.len();
+    let files = program.modules.iter().map(|m| m.file.clone()).collect();
     // The merged namespace is flat, so the prelude's declarations are either in the program
     // or absent from all of it; `@no_prelude` on the root file is what decides.
     let mut items = if program.no_prelude {
@@ -286,9 +312,13 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     // prelude and every module are in one list, and before type checking, which is what
     // lets every later pass see an ordinary positional call.
     argument_binding::bind_arguments(&mut items).map_err(|errors| {
-        eprintln!("Argument errors found:");
-        for (i, error) in errors.iter().enumerate() {
-            eprintln!("  {}. {}", i + 1, error);
+        let source = single_module_source(input, module_count);
+        eprintln!("Argument errors found in {:?}:", input);
+        for error in &errors {
+            eprintln!(
+                "{}\n",
+                render_diagnostic(input, source.as_deref(), &error.to_string(), error.span())
+            );
         }
         anyhow::anyhow!("{} argument error(s) found", errors.len())
     })?;
@@ -296,17 +326,25 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     Ok(LoadedProgram {
         items,
         module_count,
+        files,
     })
 }
 
 /// Render a syntax or lexical error the way a type error is rendered. An input that
 /// ended early is pointed at its end; an error with no location keeps its message alone.
 fn render_parse_error(path: &str, source: &str, error: &syntax_parsing::ParseError) -> String {
+    // The end of input is shown just past the last visible character: placed after a
+    // trailing newline, the caret would sit on a line no editor shows.
+    let end = source.trim_end().len();
     let span = match error {
-        syntax_parsing::ParseError::UnexpectedEof { .. } => {
-            Some(Span::new(source.len(), source.len()))
-        }
-        other => other.span(),
+        syntax_parsing::ParseError::UnexpectedEof { .. } => Some(Span::new(end, end)),
+        other => other.span().map(|span| {
+            if span.start > end {
+                Span::new(end, end)
+            } else {
+                span
+            }
+        }),
     };
     match span {
         Some(span) => render_diagnostic(Path::new(path), Some(source), &error.to_string(), span),
@@ -429,6 +467,7 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     let LoadedProgram {
         items: ast,
         module_count,
+        ..
     } = load_program(path)?;
 
     match semantic_analysis::type_check(&ast) {
@@ -518,8 +557,24 @@ fn compile_file(
     let LoadedProgram {
         items: ast,
         module_count,
+        files,
     } = load_program(input)?;
     log::debug!("Resolved {} module(s)", module_count);
+
+    // Writing the artifact over one of the program's own files would destroy the source,
+    // the invocation C compilers refuse. An output path that does not exist yet names no
+    // source, so only one that resolves to a file already there is compared.
+    if let Some(out) = output
+        && let Ok(resolved) = fs::canonicalize(out)
+        && files
+            .iter()
+            .any(|file| fs::canonicalize(file).is_ok_and(|file| file == resolved))
+    {
+        anyhow::bail!(
+            "the output path {} is a source file of this program; writing it would overwrite the source",
+            out.display()
+        );
+    }
 
     log::debug!("Type checking...");
     let warnings = semantic_analysis::type_check(&ast)

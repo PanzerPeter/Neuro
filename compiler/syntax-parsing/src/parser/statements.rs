@@ -248,7 +248,37 @@ impl Parser {
     /// projection per leaf), so it is spliced in here rather than forcing the
     /// single-`Stmt` shape of [`Parser::parse_stmt`].
     pub(crate) fn parse_stmt_into(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {
-        self.at_statement_level(|p| p.parse_stmt_into_here(out))
+        self.nested(|p| p.at_statement_level(|p| p.parse_stmt_into_here(out)))?;
+        self.expect_statement_end()
+    }
+
+    /// A statement ends at a newline, the `}` closing its block, or the end of input.
+    /// Anything else on the same line is a second expression the statement never
+    /// read: without this, `val x = 5 6` bound 5 and parsed `6` as its own statement.
+    /// A newline already consumed counts too, since `if c { }` with no `else` skips
+    /// the line break while looking for one.
+    fn expect_statement_end(&self) -> ParseResult<()> {
+        let ended_on_newline = self
+            .current
+            .checked_sub(1)
+            .and_then(|i| self.tokens.get(i))
+            .is_some_and(|t| matches!(t.kind, TokenKind::Newline));
+        match self.peek() {
+            Some(token)
+                if !ended_on_newline
+                    && !matches!(
+                        token.kind,
+                        TokenKind::Newline | TokenKind::RightBrace | TokenKind::Eof
+                    ) =>
+            {
+                Err(ParseError::UnexpectedToken {
+                    found: token.kind.clone(),
+                    expected: "a newline or '}' to end the statement".to_string(),
+                    span: token.span,
+                })
+            }
+            _ => Ok(()),
+        }
     }
 
     fn parse_stmt_into_here(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {

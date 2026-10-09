@@ -702,3 +702,168 @@ fn a_builtin_with_defaults_still_rejects_a_surplus_argument() {
         "{errors:?}"
     );
 }
+
+/// `main` calling `arr[<index>].step(b: effect(), a: x)`, a reordered method call whose
+/// receiver is an indexed place.
+fn indexed_receiver_program(index: Expr, extra: Vec<Item>) -> Vec<Item> {
+    let receiver = Expr::Index {
+        object: Box::new(Expr::Identifier(ident("arr"))),
+        index: Box::new(index),
+        span: span(),
+    };
+    let mut items = extra;
+    items.push(impl_block(
+        "Counter",
+        vec![method(
+            "step",
+            Some(SelfParam::Ref),
+            vec![implicit("a"), implicit("b")],
+        )],
+    ));
+    items.push(func(
+        "main",
+        Vec::new(),
+        vec![Stmt::Expr(call(
+            Expr::FieldAccess {
+                object: Box::new(receiver),
+                field: ident("step"),
+                span: span(),
+            },
+            vec![
+                (Some(ident("b")), effect()),
+                (Some(ident("a")), Expr::Identifier(ident("x"))),
+            ],
+        ))],
+    ));
+    items
+}
+
+#[test]
+fn a_receiver_index_with_effects_runs_before_the_hoisted_arguments() {
+    // `arr[effect()].step(b: effect(), a: x)` evaluates the receiver, index included,
+    // before any argument, as the positional form does. The index is hoisted first.
+    let mut items = indexed_receiver_program(effect(), Vec::new());
+    bind_arguments(&mut items).expect("binding failed");
+    let stmts = hoisted_block(&items);
+    let names: Vec<String> = stmts
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::VarDecl { name, .. } => Some(name.name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "__nrecv0".to_string(),
+            "__narg0".to_string(),
+            "__narg1".to_string()
+        ],
+        "the receiver's index is bound ahead of the arguments: {stmts:?}"
+    );
+    let Some(Stmt::Expr(Expr::Call { func, .. })) = stmts.last() else {
+        panic!("the block must end in the bound call: {stmts:?}");
+    };
+    let Expr::FieldAccess { object, .. } = func.as_ref() else {
+        panic!("expected a method callee: {func:?}");
+    };
+    assert!(
+        matches!(object.as_ref(), Expr::Index { index, .. }
+            if matches!(index.as_ref(), Expr::Identifier(id) if id.name == "__nrecv0")),
+        "the receiver indexes through its temporary: {object:?}"
+    );
+}
+
+#[test]
+fn a_call_in_a_hoisted_receiver_index_is_bound_too() {
+    // The walk does not revisit the hoisted call itself, so a labelled call inside its
+    // receiver must reach a temporary's initializer to be bound at all.
+    let inner = call(
+        Expr::Identifier(ident("inner")),
+        vec![named("q", 2), named("p", 1)],
+    );
+    let mut items = indexed_receiver_program(
+        inner,
+        vec![func(
+            "inner",
+            vec![implicit("p"), implicit("q")],
+            Vec::new(),
+        )],
+    );
+    bind_arguments(&mut items).expect("binding failed");
+    let stmts = hoisted_block(&items);
+    let Some(Stmt::VarDecl {
+        init: Some(Expr::Call {
+            args, arg_labels, ..
+        }),
+        ..
+    }) = stmts.first()
+    else {
+        panic!("expected the index call in the first temporary: {stmts:?}");
+    };
+    assert!(arg_labels.is_empty(), "a label survived binding");
+    let values: Vec<i128> = args
+        .iter()
+        .map(|a| match a {
+            Expr::Literal(Literal::Integer(v, _), _) => *v,
+            other => panic!("expected an integer, found {other:?}"),
+        })
+        .collect();
+    assert_eq!(values, vec![1, 2]);
+}
+
+/// `name: &i32`.
+fn shared_ref(name: &str) -> Parameter {
+    Parameter {
+        label: ParamLabel::Implicit,
+        name: ident(name),
+        ty: Type::Reference {
+            inner: Box::new(Type::Named(ident("i32"))),
+            mutable: false,
+            lifetime: None,
+            span: span(),
+        },
+        span: span(),
+    }
+}
+
+fn reference(name: &str, mutable: bool) -> Expr {
+    Expr::Reference {
+        operand: Box::new(Expr::Identifier(ident(name))),
+        mutable,
+        span: span(),
+    }
+}
+
+/// The type annotations of a hoisting block's temporaries, in order.
+fn temporary_types(stmts: &[Stmt]) -> Vec<Option<Type>> {
+    stmts
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::VarDecl { ty, .. } => Some(ty.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_shared_reference_parameter_annotates_only_a_shared_borrow() {
+    // An argument position reborrows `&mut i32` as `&i32` and a `val` annotation does
+    // not, so `target(b: &mut y, a: &x)` must leave `&mut y`'s temporary unannotated.
+    // The shared `&x` keeps the parameter's type, which is what it would be checked as.
+    let mut items = program_with_args(
+        vec![shared_ref("a"), shared_ref("b")],
+        vec![
+            (Some(ident("b")), reference("y", true)),
+            (Some(ident("a")), reference("x", false)),
+        ],
+    );
+    bind_arguments(&mut items).expect("binding failed");
+    let types = temporary_types(&hoisted_block(&items));
+    assert_eq!(types.len(), 2, "{types:?}");
+    assert_eq!(types[0], None, "the `&mut` argument is left to inference");
+    assert!(
+        matches!(types[1], Some(Type::Reference { mutable: false, .. })),
+        "the shared borrow keeps `&i32`: {types:?}"
+    );
+}

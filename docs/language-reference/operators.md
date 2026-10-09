@@ -283,6 +283,7 @@ val r: i32 = a << 4   // 1 * 2^4 = 16
 ```
 
 **Returns**: same type as operands
+**Overflow**: an amount outside `0..bits` panics in debug builds and is masked to `amount & (bits - 1)` in release ones, for `.shr(n)` too. See [integer overflow](types.md#integer-overflow).
 **Note**: Right shift is exposed as the `.shr(n)` method, not an operator (`ashr` for signed receivers, `lshr` for unsigned). See [types.md](types.md#integer-methods).
 
 ### Bitwise NOT (`~`)
@@ -609,19 +610,18 @@ From highest to lowest, matching the parser's Pratt ladder:
 
 | Level | Operators | Associativity | Example |
 |-------|-----------|---------------|---------|
-| 19 (highest) | `.` | L-to-R | `p.x` |
-| 18 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
-| 17 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
-| 16 | `as` | L-to-R | `n as f64` |
-| 15 | `@` | L-to-R | `w @ x` |
-| 14 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
-| 13 | `+`, `-` | L-to-R | `a + b`, `x - y` |
-| 12 | `<<` | L-to-R | `a << 4` |
-| 11 | `<`, `>`, `<=`, `>=` | L-to-R | `x < y` |
-| 10 | `==`, `!=` | L-to-R | `x == y` |
-| 9 | `&` | L-to-R | `a & mask` |
-| 8 | `^` | L-to-R | `a ^ b` |
-| 7 | `\|` | L-to-R | `a \| b` |
+| 18 (highest) | `.` | L-to-R | `p.x` |
+| 17 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
+| 16 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
+| 15 | `as` | L-to-R | `n as f64` |
+| 14 | `@` | L-to-R | `w @ x` |
+| 13 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
+| 12 | `+`, `-` | L-to-R | `a + b`, `x - y` |
+| 11 | `<<` | L-to-R | `a << 4` |
+| 10 | `&` | L-to-R | `a & mask` |
+| 9 | `^` | L-to-R | `a ^ b` |
+| 8 | `\|` | L-to-R | `a \| b` |
+| 7 | `<`, `>`, `<=`, `>=`, `==`, `!=` | none (no chaining) | `x < y`, `x == y` |
 | 6 | `&&` | L-to-R | `a && b` |
 | 5 | `\|\|` | L-to-R | `a \|\| b` |
 | 4 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
@@ -629,7 +629,8 @@ From highest to lowest, matching the parser's Pratt ladder:
 | 2 | `>>` | L-to-R | `f >> g >> h` applies `f` first |
 | 1 (lowest) | `\|>` | L-to-R | `x \|> f \|> g` parses as `g(f(x))` |
 
-Comparison binds tighter than equality: `x < y == z` parses as `(x < y) == z`. `>>` composes
+The six comparisons share one level and do not chain: `a < b < c` and `a == b < c` are errors,
+write `a < b && b < c`. `&`, `^` and `|` bind tighter, so `x & 3 == 2` is `(x & 3) == 2`. `>>` composes
 functions rather than shifting bits; right shift is the `.shr(n)` method.
 
 ### Precedence Examples
@@ -637,7 +638,7 @@ functions rather than shifting bits; right shift is the `.shr(n)` method.
 ```neuro
 a + b * c       // Same as: a + (b * c)
 a * b + c       // Same as: (a * b) + c
-a < b == c < d  // Same as: (a < b) == (c < d)
+x & mask == 0   // Same as: (x & mask) == 0
 w @ x + b       // Same as: (w @ x) + b
 w @ x * s       // Same as: (w @ x) * s
 !a && b         // Same as: (!a) && b

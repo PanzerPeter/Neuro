@@ -439,6 +439,18 @@ fn regression_bug_079_a_parse_error_renders_source_location() {
             "func main() -> i32 {\n    val x = 1 +",
             "eof.nr:2:16",
         ),
+        // A file ending in a newline is pointed at the end of its last line, not at the
+        // empty line after it, which no editor shows.
+        (
+            "eof_newline.nr",
+            "func main() -> i32 {\n    val x = 1 +\n",
+            "eof_newline.nr:2:16",
+        ),
+        (
+            "eof_brace.nr",
+            "func main() -> i32 {\n    val x = 1\n\n",
+            "eof_brace.nr:2:14",
+        ),
     ] {
         let source_path = write_source(&temp_dir, name, source);
         let output = Command::new(neurc_path())
@@ -454,4 +466,92 @@ fn regression_bug_079_a_parse_error_renders_source_location() {
         );
         assert!(stderr.contains('^'), "Expected a caret, got: {stderr}");
     }
+}
+
+/// A named-argument error is located like a type error: file, line, column and a caret.
+/// It used to print as a bare numbered list naming only the callee.
+#[test]
+fn an_argument_error_renders_source_location() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source = "func f(a: i32) -> i32 {\n    a\n}\n\nfunc main() -> i32 {\n    f(nope: 1)\n}\n";
+    let source_path = write_source(&temp_dir, "labels.nr", source);
+
+    for command in ["check", "compile"] {
+        let output = Command::new(neurc_path())
+            .arg(command)
+            .arg(&source_path)
+            .output()
+            .expect("Failed to execute neurc");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{command} must fail");
+        assert!(
+            stderr.contains("'f' has no parameter named 'nope'"),
+            "{command}: expected the argument error, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("labels.nr:6:"),
+            "{command}: expected a file:line:column location, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("    f(nope: 1)") && stderr.contains('^'),
+            "{command}: expected the source line and a caret, got: {stderr}"
+        );
+    }
+}
+
+/// `-o` naming the input would replace the program with its own executable or object
+/// file. The compile is refused before anything is written, and the source survives.
+#[test]
+fn compile_refuses_an_output_path_that_is_its_source() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source = "func main() -> i32 {\n    return 0\n}\n";
+    let source_path = write_source(&temp_dir, "keep.nr", source);
+
+    for emit in ["exe", "obj", "llvm-ir"] {
+        let output = Command::new(neurc_path())
+            .arg("compile")
+            .arg(&source_path)
+            .arg("--emit")
+            .arg(emit)
+            .arg("-o")
+            .arg(&source_path)
+            .output()
+            .expect("Failed to execute neurc compile");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "--emit {emit} must fail");
+        assert!(
+            stderr.contains("would overwrite the source"),
+            "--emit {emit}: expected the overwrite refusal, got: {stderr}"
+        );
+        assert_eq!(
+            fs::read_to_string(&source_path).expect("the source must still be readable"),
+            source,
+            "--emit {emit} overwrote the source"
+        );
+    }
+}
+
+/// A long left-leaning chain parses in a loop but is walked recursively by every
+/// later pass. At about 5000 operands that overflowed the 8 MiB main stack and
+/// aborted the compiler; the pipeline now runs on a thread with room for it.
+#[test]
+fn a_long_operator_chain_compiles_without_overflowing_the_stack() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source = format!(
+        "func main() -> i32 {{\n    return 0{} - 5000\n}}\n",
+        " + 1".repeat(5000)
+    );
+    let source_path = write_source(&temp_dir, "long_chain.nr", &source);
+
+    let output = Command::new(neurc_path())
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neurc check");
+
+    assert!(
+        output.status.success(),
+        "a 5000-operand chain must type-check: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

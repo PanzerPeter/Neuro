@@ -27,6 +27,10 @@ const SELF_ASSOC_FORM: &str = "`Self::` followed by an associated type name; bar
 impl Parser {
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
+        self.nested(Self::parse_type_here)
+    }
+
+    fn parse_type_here(&mut self) -> ParseResult<Type> {
         // Bracketed sequence type: `[T; N]` is a fixed-size array, `[T]` an unsized
         // slice. They share a prefix, so the `;` (or its absence before `]`) selects.
         if self.check(&TokenKind::LeftBracket) {

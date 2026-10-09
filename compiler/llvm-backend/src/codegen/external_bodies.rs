@@ -195,8 +195,10 @@ impl<'ctx> CodegenContext<'ctx> {
             false => {
                 let status_ty = status_type();
                 let i64_type = self.context.i64_type();
-                // All ones, above every key, which a failed check lowers.
-                let slot = self.builder.build_alloca(i64_type, "external.status")?;
+                // All ones, above every key, which a failed check lowers. The slot sits
+                // in the entry block: an expanded call is emitted where it is written,
+                // and a slot allocated inside a loop body grows the frame per iteration.
+                let slot = self.entry_alloca(i64_type, "external.status")?;
                 self.builder.build_store(slot, i64_type.const_all_ones())?;
                 let data = match staging.as_mut() {
                     Some(staging) => {

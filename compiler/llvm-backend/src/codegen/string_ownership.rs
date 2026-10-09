@@ -19,8 +19,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::Type;
 use neuro_hir::{
-    HirCollectionKind, HirExpr, HirExprKind, HirInterpPart, HirItem, HirStmt, HirTensorAxis,
-    HirType,
+    HirCollectionKind, HirExpr, HirExprKind, HirInterpPart, HirItem, HirPlace, HirStmt,
+    HirTensorAxis, HirType,
 };
 
 /// The `StringBuilder` builder method that copies its bytes out into an owned `string`, and
@@ -534,7 +534,6 @@ struct Param<'a> {
 /// position that is known to copy the bytes out, and every unrecognised position is a
 /// retention. That is what makes an unhandled HIR shape leak rather than dangle.
 fn stmt_retains(stmt: &HirStmt, name: &Param) -> bool {
-    let span = shared_types::Span::new(0, 0);
     match stmt {
         HirStmt::Expr(expr) => retains(expr, name),
         HirStmt::VarDecl { init, .. } => init.as_ref().is_some_and(|e| retains(e, name)),
@@ -545,7 +544,7 @@ fn stmt_retains(stmt: &HirStmt, name: &Param) -> bool {
         }
         HirStmt::Assign { place, value, .. }
         | HirStmt::TensorCompoundAssign { place, value, .. } => {
-            mentions(&place.to_expr(span), name.name) || retains(value, name)
+            place_mentions(place, name.name) || retains(value, name)
         }
         HirStmt::If {
             condition,
@@ -700,6 +699,41 @@ fn mentions(expr: &HirExpr, name: &str) -> bool {
     found
 }
 
+/// Whether `place` names `name` anywhere: as its root binding, or in an expression
+/// it is built from.
+fn place_mentions(place: &HirPlace, name: &str) -> bool {
+    let mut found = matches!(place, HirPlace::Var { name: root, .. } if root == name);
+    walk_place(place, &mut |e| {
+        if matches!(&e.kind, HirExprKind::Variable(other) if other == name) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Apply `visit` to every expression a place is built from. The place itself is storage
+/// rather than an expression, so it is not visited; walking it in place, instead of
+/// through `HirPlace::to_expr`, spares a deep clone of its base on every assignment.
+fn walk_place(place: &HirPlace, visit: &mut impl FnMut(&HirExpr)) {
+    match place {
+        HirPlace::Var { .. } => {}
+        HirPlace::Field { object, .. } => walk(object, visit),
+        HirPlace::Index { object, index, .. } => {
+            walk(object, visit);
+            walk(index, visit);
+        }
+        HirPlace::TensorIndex { object, axes, .. } => {
+            walk(object, visit);
+            for axis in axes {
+                if let HirTensorAxis::Position(position) = axis {
+                    walk(position, visit);
+                }
+            }
+        }
+        HirPlace::Deref { pointer, .. } => walk(pointer, visit),
+    }
+}
+
 /// Apply `visit` to `expr` and every expression under it, statements included.
 fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
     visit(expr);
@@ -843,7 +877,6 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
 }
 
 fn walk_stmts(stmts: &[HirStmt], visit: &mut impl FnMut(&HirExpr)) {
-    let span = shared_types::Span::new(0, 0);
     for stmt in stmts {
         match stmt {
             HirStmt::VarDecl { init, .. } => {
@@ -851,12 +884,9 @@ fn walk_stmts(stmts: &[HirStmt], visit: &mut impl FnMut(&HirExpr)) {
                     walk(init, visit);
                 }
             }
-            HirStmt::Assign { place, value, .. } => {
-                walk(&place.to_expr(span), visit);
-                walk(value, visit);
-            }
-            HirStmt::TensorCompoundAssign { place, value, .. } => {
-                walk(&place.to_expr(span), visit);
+            HirStmt::Assign { place, value, .. }
+            | HirStmt::TensorCompoundAssign { place, value, .. } => {
+                walk_place(place, visit);
                 walk(value, visit);
             }
             HirStmt::Return { value, .. } | HirStmt::Break { value, .. } => {

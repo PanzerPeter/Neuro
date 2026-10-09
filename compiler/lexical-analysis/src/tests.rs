@@ -1052,3 +1052,50 @@ fn empty_string_still_lexes_next_to_block_strings() {
     assert_eq!(plain_string(&result[0].kind), "");
     assert_eq!(plain_string(&result[1].kind), "a");
 }
+
+/// `u8::from_str_radix` accepts a leading `+`, so `\x+1` used to decode as U+0001.
+/// The escape takes exactly two hex digits.
+#[test]
+fn regression_byte_escape_rejects_a_sign() {
+    let err = tokenize(r#""\x+1""#).expect_err("a signed byte escape must not lex");
+    match err {
+        LexError::InvalidEscape { escape, .. } => assert_eq!(escape, "\\x+1"),
+        other => panic!("expected InvalidEscape, got {other:?}"),
+    }
+}
+
+/// A block string's last content line ending in `\` leaves the escape with nothing
+/// to apply to once the delimiter's newline is dropped. The literal is terminated, so
+/// the diagnosis is the escape, not an unterminated string.
+#[test]
+fn regression_trailing_backslash_in_block_string_is_an_invalid_escape() {
+    let err = tokenize("\"\"\"\n    a\\\n    \"\"\"").expect_err("a dangling escape must not lex");
+    match err {
+        LexError::InvalidEscape { escape, .. } => assert_eq!(escape, "\\"),
+        other => panic!("expected InvalidEscape, got {other:?}"),
+    }
+}
+
+/// Only a triple-quoted string spans lines. An ordinary literal left open used to run
+/// on to the next `"` in the file, silently swallowing the lines between.
+#[test]
+fn regression_ordinary_string_does_not_span_lines() {
+    let err = tokenize("val a = \"abc\nval b = \"x\"").expect_err("an open literal must not lex");
+    match err {
+        LexError::UnterminatedString { span } => assert_eq!((span.start, span.end), (8, 12)),
+        other => panic!("expected UnterminatedString, got {other:?}"),
+    }
+}
+
+/// The plain-literal fast path must still reject a lone `}` and decode escapes, and a
+/// literal with neither stays its own text.
+#[test]
+fn plain_literal_fast_path_matches_the_decoder() {
+    let result = tokenize(r#""caf\u{E9} {x}" "café" "a\tb""#).expect("literals lex");
+    assert!(matches!(
+        result[0].kind,
+        TokenKind::String(StringValue::Interp(_))
+    ));
+    assert_eq!(plain_string(&result[1].kind), "café");
+    assert_eq!(plain_string(&result[2].kind), "a\tb");
+}

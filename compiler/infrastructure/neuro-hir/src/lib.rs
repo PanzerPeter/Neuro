@@ -2,9 +2,8 @@
 //!
 //! Infrastructure crate defining the **typed HIR**: the stable, backend-agnostic
 //! contract between the frontend (parser + type checker) and every backend. Both
-//! `llvm-backend` (scalar / control-flow path) and `mlir-backend` (tensor / AD /
-//! GPU path, Phase 3+) are intended to lower from this HIR rather than consuming
-//! the AST directly.
+//! `llvm-backend` (scalar / control-flow path) and `mlir-backend` (tensor / GPU
+//! path) lower from this HIR rather than from the AST.
 //!
 //! # Relationship to the AST
 //!
@@ -19,9 +18,8 @@
 //!   dropped, since tree structure already encodes grouping.
 //!
 //! This crate is pure data with no business logic, following the same VSA
-//! infrastructure pattern as [`ast_types`]. The AST → HIR lowering and the
-//! backend migration onto HIR are separate, later pipeline steps; this crate is
-//! only the shared type contract they exchange.
+//! infrastructure pattern as [`ast_types`]. `hir-lowering` produces it and the
+//! backends consume it; this crate is only the shared type contract they exchange.
 
 pub mod expressions;
 pub mod items;

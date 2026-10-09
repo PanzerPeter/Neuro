@@ -255,6 +255,10 @@ impl Parser {
     /// Parse one element of a destructuring pattern: a nested tuple/array/struct
     /// pattern, the `_` wildcard, or a binding name.
     pub(super) fn parse_pattern_element(&mut self) -> ParseResult<DestructurePattern> {
+        self.nested(Self::parse_pattern_element_here)
+    }
+
+    fn parse_pattern_element_here(&mut self) -> ParseResult<DestructurePattern> {
         if self.check(&TokenKind::LeftParen) {
             return self.parse_tuple_pattern();
         }

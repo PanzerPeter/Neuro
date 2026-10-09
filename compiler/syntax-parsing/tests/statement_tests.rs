@@ -704,3 +704,63 @@ fn test_bug_069_a_trailing_operator_or_an_open_delimiter_still_continues() {
     let parenthesized = "func f(a: i32, b: i32) {\n    val t = (a\n        - b\n        * 2)\n    g(a,\n        b\n        - 1)\n}\n";
     assert_eq!(first_fn_body_len(parenthesized), 2);
 }
+
+fn stmt_span(stmt: &Stmt) -> shared_types::Span {
+    match stmt {
+        Stmt::VarDecl { span, .. }
+        | Stmt::ValElse { span, .. }
+        | Stmt::Const { span, .. }
+        | Stmt::Assign { span, .. }
+        | Stmt::Return { span, .. }
+        | Stmt::If { span, .. }
+        | Stmt::While { span, .. }
+        | Stmt::ForRange { span, .. }
+        | Stmt::ForEach { span, .. }
+        | Stmt::Break { span, .. }
+        | Stmt::Continue { span, .. } => *span,
+        Stmt::Expr(e) => e.span(),
+    }
+}
+
+/// The source text a statement's span covers, for every statement of the first
+/// function body, plus the function's own.
+fn body_spans(source: &str) -> (String, Vec<String>) {
+    let items = parse(source).expect("parse failed");
+    let Some(Item::Function(func)) = items.first() else {
+        panic!("no function found");
+    };
+    let text = |span: shared_types::Span| source[span.start..span.end].to_string();
+    (
+        text(func.span),
+        func.body.iter().map(|s| text(stmt_span(s))).collect(),
+    )
+}
+
+#[test]
+fn test_block_statement_spans_reach_the_closing_brace() {
+    // A block-bodied construct ended its span at its last statement, so a diagnostic
+    // underlining one stopped short of the `}` and an empty one covered the keyword only.
+    let source = "func main() {\n    if c { a } else { b }\n    while c { a }\n    for i in 0..3 { a }\n    loop { break }\n    val x = if c { 1 } else { 2 }\n    if c { }\n}";
+    let (func, stmts) = body_spans(source);
+    assert_eq!(func, source);
+    assert_eq!(
+        stmts,
+        [
+            "if c { a } else { b }",
+            "while c { a }",
+            "for i in 0..3 { a }",
+            "loop { break }",
+            "val x = if c { 1 } else { 2 }",
+            "if c { }",
+        ]
+    );
+}
+
+#[test]
+fn test_if_expression_without_else_keeps_the_newline_that_ends_it() {
+    // An `if` value with no `else` skipped the newlines after its block looking for
+    // one, so a following line opening with `-` was folded in as a subtraction.
+    let source = "func main() -> i32 {\n    val u = if c { n = 2 }\n    -n\n}";
+    let (_, stmts) = body_spans(source);
+    assert_eq!(stmts, ["val u = if c { n = 2 }", "-n"]);
+}

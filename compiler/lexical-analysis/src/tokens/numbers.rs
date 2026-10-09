@@ -1,15 +1,27 @@
 //! Decoding numeric and character literals: each radix, the integer and float type
 //! suffixes, and `char` escapes.
 
+use std::borrow::Cow;
+
 use shared_types::{FloatSuffix, IntSuffix, Span};
 
 use crate::errors::LexError;
 
 use super::{FloatSuffixToken, IntegerSuffixToken, TokenKind};
 
+/// The digits of a literal with its `_` separators removed. Borrows when there are
+/// none, so the common literal parses without an allocation.
+fn strip_separators(digits: &str) -> Cow<'_, str> {
+    if digits.contains('_') {
+        Cow::Owned(digits.replace('_', ""))
+    } else {
+        Cow::Borrowed(digits)
+    }
+}
+
 /// Helper function to parse float literals
 pub(super) fn parse_float(lex: &mut logos::Lexer<TokenKind>) -> Result<f64, LexError> {
-    let slice = lex.slice().replace('_', "");
+    let slice = strip_separators(lex.slice());
     slice.parse::<f64>().map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -18,7 +30,7 @@ pub(super) fn parse_float(lex: &mut logos::Lexer<TokenKind>) -> Result<f64, LexE
 
 /// Helper function to parse decimal integer literals
 pub(super) fn parse_decimal(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
-    let slice = lex.slice().replace('_', "");
+    let slice = strip_separators(lex.slice());
     slice.parse::<u64>().map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -27,7 +39,7 @@ pub(super) fn parse_decimal(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, Le
 
 /// Helper function to parse binary integer literals
 pub(super) fn parse_binary(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
-    let slice = lex.slice()[2..].replace('_', ""); // Skip "0b" prefix
+    let slice = strip_separators(&lex.slice()[2..]); // Skip "0b" prefix
     u64::from_str_radix(&slice, 2).map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -36,7 +48,7 @@ pub(super) fn parse_binary(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, Lex
 
 /// Helper function to parse octal integer literals
 pub(super) fn parse_octal(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
-    let slice = lex.slice()[2..].replace('_', ""); // Skip "0o" prefix
+    let slice = strip_separators(&lex.slice()[2..]); // Skip "0o" prefix
     u64::from_str_radix(&slice, 8).map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -45,7 +57,7 @@ pub(super) fn parse_octal(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexE
 
 /// Helper function to parse hexadecimal integer literals
 pub(super) fn parse_hex(lex: &mut logos::Lexer<TokenKind>) -> Result<u64, LexError> {
-    let slice = lex.slice()[2..].replace('_', ""); // Skip "0x" prefix
+    let slice = strip_separators(&lex.slice()[2..]); // Skip "0x" prefix
     u64::from_str_radix(&slice, 16).map_err(|_| LexError::InvalidNumber {
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -118,7 +130,7 @@ pub(super) fn parse_decimal_suffix(
 ) -> Result<IntegerSuffixToken, LexError> {
     let raw = lex.slice();
     let suffix_start = raw.find(|c: char| c.is_alphabetic()).unwrap_or(raw.len());
-    let digits = raw[..suffix_start].replace('_', "");
+    let digits = strip_separators(&raw[..suffix_start]);
     let value = digits.parse::<u64>().map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -137,7 +149,7 @@ pub(super) fn parse_binary_suffix(
         .find(|c: char| c.is_alphabetic())
         .map(|i| i + 2)
         .unwrap_or(raw.len());
-    let digits = raw[2..suffix_start].replace('_', "");
+    let digits = strip_separators(&raw[2..suffix_start]);
     let value = u64::from_str_radix(&digits, 2).map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -156,7 +168,7 @@ pub(super) fn parse_octal_suffix(
         .find(|c: char| c.is_alphabetic())
         .map(|i| i + 2)
         .unwrap_or(raw.len());
-    let digits = raw[2..suffix_start].replace('_', "");
+    let digits = strip_separators(&raw[2..suffix_start]);
     let value = u64::from_str_radix(&digits, 8).map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),
@@ -197,8 +209,7 @@ pub(super) fn parse_fractional_float_suffix(
     };
     // Safety: the regex only admits the four recognized suffixes.
     let (digits, suffix) = split_float_suffix(raw).ok_or_else(invalid)?;
-    let value = digits
-        .replace('_', "")
+    let value = strip_separators(digits)
         .parse::<f64>()
         .map_err(|_| invalid())?;
     Ok(FloatSuffixToken { value, suffix })
@@ -214,7 +225,7 @@ pub(super) fn parse_hex_suffix(
         .find(|c: char| c.is_alphabetic() && !matches!(c, 'a'..='f' | 'A'..='F'))
         .map(|i| i + 2)
         .unwrap_or(raw.len());
-    let digits = raw[2..suffix_start].replace('_', "");
+    let digits = strip_separators(&raw[2..suffix_start]);
     let value = u64::from_str_radix(&digits, 16).map_err(|_| LexError::InvalidNumber {
         text: raw.to_string(),
         span: Span::new(lex.span().start, lex.span().end),

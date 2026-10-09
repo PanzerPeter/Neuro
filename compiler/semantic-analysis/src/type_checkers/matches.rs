@@ -65,6 +65,11 @@ impl TypeChecker {
         // that falls through, mirroring `if`.
         let move_snapshot = self.symbols.snapshot_moves();
         let mut fell_through = Vec::new();
+        // A transient borrow an arm takes ends with the arm as far as its siblings are
+        // concerned: only one arm runs. Past the `match` the statement still holds what
+        // the most borrowing arm took.
+        let borrow_snapshot = self.symbols.transient_borrows();
+        let mut arm_borrows = borrow_snapshot.clone();
 
         // The body-type hint: the caller's expected type if any, else the first arm's
         // type once known, so `_ => 0` infers to a sibling arm's integer width.
@@ -73,7 +78,9 @@ impl TypeChecker {
         let mut takes_owner = false;
         for arm in arms {
             self.symbols.restore_moves(&move_snapshot);
+            self.symbols.set_transient_borrows(&borrow_snapshot);
             let (arm_ty, binds_owner) = self.check_arm(arm, &pattern_ty, hint.as_ref());
+            arm_borrows.extend(self.symbols.transient_borrows());
             if !expr_diverges(&arm.body) {
                 fell_through.push(self.symbols.snapshot_moves());
             }
@@ -85,6 +92,7 @@ impl TypeChecker {
         }
         self.symbols.restore_moves(&move_snapshot);
         self.symbols.join_moves(&fell_through);
+        self.symbols.set_transient_borrows(&arm_borrows);
         if takes_owner {
             self.take_from_scrutinee(scrutinee, &written_ty, span);
         }

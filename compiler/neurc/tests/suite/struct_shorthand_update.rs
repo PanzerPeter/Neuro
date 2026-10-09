@@ -191,7 +191,7 @@ func main() -> i32 {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("missing") || err.contains("MissingStructField"),
+        err.contains("missing field 'y' in struct literal for 'Point'"),
         "error should mention missing field, got: {}",
         err
     );

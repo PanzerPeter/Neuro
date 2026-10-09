@@ -8,13 +8,16 @@
 // name is reported by the existing semantic `UnknownTypeName` check against the
 // real type, with the diagnostic pointing at the alias *use* site.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 use lexical_analysis::TokenKind;
-use shared_types::Identifier;
+use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
-use ast_types::{Expr, InterpPart, Item, Place, Stmt, TensorIndexArg, Type};
+use ast_types::{
+    Expr, GenericParam, GenericParamKind, InterpPart, Item, Place, Stmt, TensorIndexArg, Type,
+};
 
 use super::Parser;
 
@@ -77,8 +80,7 @@ pub(crate) fn expand_type_aliases(
         return Ok(());
     }
 
-    let mut direct: HashMap<String, Type> = HashMap::new();
-    let mut spans: HashMap<String, shared_types::Span> = HashMap::new();
+    let mut direct: HashMap<&str, (&Type, Span)> = HashMap::new();
     for decl in &decls {
         if BUILTIN_TYPE_NAMES.contains(&decl.name.name.as_str()) {
             return Err(ParseError::TypeAliasShadowsBuiltin {
@@ -86,20 +88,21 @@ pub(crate) fn expand_type_aliases(
                 span: decl.name.span,
             });
         }
-        if direct.contains_key(&decl.name.name) {
+        if direct
+            .insert(&decl.name.name, (&decl.target, decl.name.span))
+            .is_some()
+        {
             return Err(ParseError::DuplicateTypeAlias {
                 name: decl.name.name.clone(),
                 span: decl.name.span,
             });
         }
-        direct.insert(decl.name.name.clone(), decl.target.clone());
-        spans.insert(decl.name.name.clone(), decl.name.span);
     }
 
+    // Declaration order, so a program with two cycles always reports the same one.
     let mut resolved: HashMap<String, Type> = HashMap::new();
-    for (name, span) in &spans {
-        let ultimate = resolve_alias(name, *span, &direct)?;
-        resolved.insert(name.clone(), ultimate);
+    for decl in &decls {
+        resolve_alias(&decl.name.name, &direct, &mut resolved)?;
     }
 
     for item in items.iter_mut() {
@@ -108,37 +111,112 @@ pub(crate) fn expand_type_aliases(
     Ok(())
 }
 
-/// Follow an alias chain to its ultimate non-alias target. A name that revisits
-/// itself is a cycle, reported against the chain's starting alias.
+/// Resolve `start` and every alias its target mentions into `resolved`, each one
+/// fully expanded: an alias inside a target (`type Pair = (Elem, Elem)`) is
+/// substituted as well, not only an alias that is the whole target.
+///
+/// A depth-first walk with an explicit stack, so a long alias chain costs no call
+/// depth. An alias reached again while it is still being expanded names an infinite
+/// type and is reported as the cycle.
 fn resolve_alias(
     start: &str,
-    start_span: shared_types::Span,
-    direct: &HashMap<String, Type>,
-) -> ParseResult<Type> {
-    let mut current = start.to_string();
-    let mut visited: Vec<String> = Vec::new();
-    loop {
-        if visited.iter().any(|v| v == &current) {
-            return Err(ParseError::CyclicTypeAlias {
-                name: start.to_string(),
-                span: start_span,
-            });
+    direct: &HashMap<&str, (&Type, Span)>,
+    resolved: &mut HashMap<String, Type>,
+) -> ParseResult<()> {
+    let mut in_progress: HashSet<&str> = HashSet::new();
+    let mut stack: Vec<(&str, bool)> = vec![(start, false)];
+    while let Some((name, references_done)) = stack.pop() {
+        if resolved.contains_key(name) {
+            continue;
         }
-        visited.push(current.clone());
-
-        match direct.get(&current) {
-            Some(Type::Named(ident)) if direct.contains_key(&ident.name) => {
-                current = ident.name.clone();
+        let Some(&(target, _)) = direct.get(name) else {
+            continue;
+        };
+        if references_done {
+            in_progress.remove(name);
+            let mut expanded = target.clone();
+            rewrite_type(&mut expanded, resolved);
+            resolved.insert(name.to_string(), expanded);
+            continue;
+        }
+        in_progress.insert(name);
+        stack.push((name, true));
+        let mut references = Vec::new();
+        type_names(target, &mut references);
+        for reference in references {
+            let Some((&key, &(_, span))) = direct.get_key_value(reference) else {
+                continue;
+            };
+            if in_progress.contains(key) {
+                return Err(ParseError::CyclicTypeAlias {
+                    name: key.to_string(),
+                    span,
+                });
             }
-            Some(other) => return Ok(other.clone()),
-            // `current` is always an alias key on entry and is only reassigned to
-            // another alias key, so this arm is unreachable; resolve to the name
-            // itself as a terminal type rather than panicking.
-            None => {
-                return Ok(Type::Named(Identifier {
-                    name: current,
-                    span: start_span,
-                }));
+            if !resolved.contains_key(key) {
+                stack.push((key, false));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every name `ty` mentions in the positions [`rewrite_type`] substitutes.
+fn type_names<'a>(ty: &'a Type, out: &mut Vec<&'a str>) {
+    match ty {
+        Type::Named(ident) => out.push(&ident.name),
+        Type::Reference { inner, .. } => type_names(inner, out),
+        Type::Array { element, .. } | Type::Slice { element, .. } => type_names(element, out),
+        Type::Tuple { elements, .. } => {
+            for element in elements {
+                type_names(element, out);
+            }
+        }
+        Type::Generic { args, .. } => {
+            for arg in args {
+                if let ast_types::GenericArg::Type(inner) = arg {
+                    type_names(inner, out);
+                }
+            }
+        }
+        Type::Tensor { element_type, .. } => type_names(element_type, out),
+        Type::Function { params, ret, .. } => {
+            for param in params {
+                type_names(param, out);
+            }
+            type_names(ret, out);
+        }
+        Type::ImplTrait { .. } | Type::DynTrait { .. } => {}
+    }
+}
+
+/// The aliases in force inside an item declaring `generics`: a generic parameter
+/// shadows an alias of the same name, as an inner name shadows an outer one.
+fn without_shadowed<'a>(
+    resolved: &'a HashMap<String, Type>,
+    generics: &[GenericParam],
+) -> Cow<'a, HashMap<String, Type>> {
+    if generics.iter().any(|g| resolved.contains_key(&g.name.name)) {
+        let mut visible = resolved.clone();
+        for generic in generics {
+            visible.remove(&generic.name.name);
+        }
+        Cow::Owned(visible)
+    } else {
+        Cow::Borrowed(resolved)
+    }
+}
+
+/// Rewrite the types a generic parameter list carries: a const parameter's type and
+/// the `<Assoc = T>` bindings of each bound.
+fn rewrite_generics(generics: &mut [GenericParam], resolved: &HashMap<String, Type>) {
+    for generic in generics {
+        if let GenericParamKind::Const(ty) = &mut generic.kind {
+            rewrite_type(ty, resolved);
+        }
+        for bound in &mut generic.bounds {
+            for (_, ty) in &mut bound.assoc_bindings {
+                rewrite_type(ty, resolved);
             }
         }
     }
@@ -188,6 +266,11 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
 fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
     match item {
         Item::Function(func) => {
+            let resolved = &*without_shadowed(resolved, &func.generics);
+            rewrite_generics(&mut func.generics, resolved);
+            for predicate in &mut func.where_predicates {
+                rewrite_expr(predicate, resolved);
+            }
             for param in &mut func.params {
                 rewrite_type(&mut param.ty, resolved);
             }
@@ -197,11 +280,18 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
             rewrite_block(&mut func.body, resolved);
         }
         Item::Struct(def) => {
+            let resolved = &*without_shadowed(resolved, &def.generics);
+            rewrite_generics(&mut def.generics, resolved);
+            for predicate in &mut def.where_predicates {
+                rewrite_expr(predicate, resolved);
+            }
             for field in &mut def.fields {
                 rewrite_type(&mut field.ty, resolved);
             }
         }
         Item::Enum(def) => {
+            let resolved = &*without_shadowed(resolved, &def.generics);
+            rewrite_generics(&mut def.generics, resolved);
             for variant in &mut def.variants {
                 match &mut variant.payload {
                     ast_types::VariantPayload::Unit => {}
@@ -219,6 +309,17 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
             }
         }
         Item::Impl(def) => {
+            let resolved = &*without_shadowed(resolved, &def.generics);
+            rewrite_generics(&mut def.generics, resolved);
+            for ty in &mut def.type_args {
+                rewrite_type(ty, resolved);
+            }
+            for predicate in &mut def.where_predicates {
+                rewrite_expr(predicate, resolved);
+            }
+            for (_, ty) in &mut def.assoc_types {
+                rewrite_type(ty, resolved);
+            }
             for method in &mut def.methods {
                 for param in &mut method.params {
                     rewrite_type(&mut param.ty, resolved);
@@ -233,9 +334,9 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
             rewrite_type(&mut def.ty, resolved);
             rewrite_expr(&mut def.value, resolved);
         }
-        // A trait's method signatures may reference aliased types; default
-        // bodies are expanded when the defaults are injected into impls, which run
-        // after this pass, so only the signatures are rewritten here.
+        // A trait's method signatures may reference aliased types. Default bodies
+        // were already copied into the impls that omit them, which are rewritten on
+        // their own, and nothing downstream reads the trait's copy.
         Item::Trait(def) => {
             for method in &mut def.methods {
                 for param in &mut method.params {
@@ -352,8 +453,18 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             rewrite_expr(left, resolved);
             rewrite_expr(right, resolved);
         }
-        Expr::Call { func, args, .. } => {
+        Expr::Call {
+            func,
+            type_args,
+            args,
+            ..
+        } => {
             rewrite_expr(func, resolved);
+            for arg in type_args.iter_mut() {
+                if let ast_types::GenericArg::Type(ty) = arg {
+                    rewrite_type(ty, resolved);
+                }
+            }
             for arg in args.iter_mut() {
                 rewrite_expr(arg, resolved);
             }
@@ -607,5 +718,148 @@ mod tests {
         let src = "type A = B\ntype B = A\nfunc main() -> i32 { return 0 }";
         let err = parse(src).expect_err("cycle rejected");
         assert!(matches!(err, ParseError::CyclicTypeAlias { .. }));
+    }
+
+    fn function<'a>(items: &'a [Item], name: &str) -> &'a ast_types::FunctionDef {
+        items
+            .iter()
+            .find_map(|i| match i {
+                Item::Function(f) if f.name.name == name => Some(f),
+                _ => None,
+            })
+            .expect("function present")
+    }
+
+    /// The names inside a tuple type, in order.
+    fn tuple_names(ty: &Type) -> Vec<&str> {
+        let Type::Tuple { elements, .. } = ty else {
+            panic!("expected a tuple type, found {ty:?}");
+        };
+        elements.iter().map(named).collect()
+    }
+
+    #[test]
+    fn alias_inside_an_alias_target_expands_in_either_order() {
+        // `type Pair = (Elem, Elem)` used to substitute the tuple with `Elem` still in
+        // it, so the checker reported `Elem` as an unknown type.
+        for src in [
+            "type Elem = i32\ntype Pair = (Elem, Elem)\nfunc f(p: Pair) {}",
+            "type Pair = (Elem, Elem)\ntype Elem = i32\nfunc f(p: Pair) {}",
+            "type Pair = (Inner, i32)\ntype Inner = Elem\ntype Elem = i32\nfunc f(p: Pair) {}",
+        ] {
+            let items = parse(src).expect("parses");
+            assert_eq!(
+                tuple_names(&function(&items, "f").params[0].ty),
+                ["i32", "i32"],
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn cycle_through_a_compound_target_is_rejected() {
+        for src in [
+            "type A = (B, i32)\ntype B = (A, i32)\nfunc main() {}",
+            "type L = Vec<L>\nfunc main() {}",
+            "type R = &R\nfunc main() {}",
+        ] {
+            let err = parse(src).expect_err("an infinite type is rejected");
+            assert!(
+                matches!(err, ParseError::CyclicTypeAlias { .. }),
+                "{src}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn cycle_is_reported_against_an_alias_on_the_cycle() {
+        // `Start` only leads into the cycle; the diagnostic names a member of it.
+        let src = "type Start = B\ntype B = C\ntype C = B\nfunc main() {}";
+        let err = parse(src).expect_err("cycle rejected");
+        let ParseError::CyclicTypeAlias { name, .. } = err else {
+            panic!("expected a cycle error, found {err:?}");
+        };
+        assert!(name == "B" || name == "C", "{name}");
+    }
+
+    #[test]
+    fn long_alias_chain_resolves() {
+        // Each alias used to re-walk the whole chain behind it with a linear visited
+        // scan, cubic in the chain length.
+        let n = 3000;
+        let mut src: String = (0..n)
+            .map(|i| format!("type T{i} = T{}\n", i + 1))
+            .collect();
+        src.push_str(&format!("type T{n} = i32\nfunc f(x: T0) {{}}"));
+        let items = parse(&src).expect("parses");
+        assert_eq!(named(&function(&items, "f").params[0].ty), "i32");
+    }
+
+    #[test]
+    fn alias_expands_in_turbofish_and_generic_positions() {
+        let src = "type Num = i32\ntype Len = u32\n\
+            func f<const N: Len, T: Source<Item = Num>>(x: T) where N > (0 as Len) {\n\
+                val y = id::<Num>(1)\n\
+            }";
+        let items = parse(src).expect("parses");
+        let func = function(&items, "f");
+        let ast_types::GenericParamKind::Const(len) = &func.generics[0].kind else {
+            panic!("expected a const parameter");
+        };
+        assert_eq!(named(len), "u32");
+        assert_eq!(
+            named(&func.generics[1].bounds[0].assoc_bindings[0].1),
+            "i32"
+        );
+        let ast_types::Expr::Binary { right, .. } = &func.where_predicates[0] else {
+            panic!("expected a comparison predicate");
+        };
+        let ast_types::Expr::Paren(cast, _) = &**right else {
+            panic!("expected a parenthesized cast");
+        };
+        let ast_types::Expr::Cast { target_type, .. } = &**cast else {
+            panic!("expected a cast");
+        };
+        assert_eq!(named(target_type), "u32");
+        let Stmt::VarDecl {
+            init: Some(ast_types::Expr::Call { type_args, .. }),
+            ..
+        } = &func.body[0]
+        else {
+            panic!("expected a turbofish call");
+        };
+        let ast_types::GenericArg::Type(arg) = &type_args[0] else {
+            panic!("expected a type argument");
+        };
+        assert_eq!(named(arg), "i32");
+    }
+
+    #[test]
+    fn alias_expands_in_impl_bindings_and_type_arguments() {
+        let src = "type Num = i32\nimpl Add for Wrap<Num> {\n    type Output = Num\n}";
+        let items = parse(src).expect("parses");
+        let Item::Impl(imp) = &items[0] else {
+            panic!("expected an impl");
+        };
+        assert_eq!(named(&imp.type_args[0]), "i32");
+        assert_eq!(named(&imp.assoc_types[0].1), "i32");
+    }
+
+    #[test]
+    fn generic_parameter_shadows_an_alias_of_the_same_name() {
+        let src = "type T = bool\n\
+            func id<T>(x: T) -> T { x }\n\
+            struct Boxed<T> { v: T }\n\
+            func plain(x: T) {}";
+        let items = parse(src).expect("parses");
+        let id = function(&items, "id");
+        assert_eq!(named(&id.params[0].ty), "T");
+        assert_eq!(named(id.return_type.as_ref().expect("return type")), "T");
+        let Some(Item::Struct(boxed)) = items.get(1) else {
+            panic!("expected the struct");
+        };
+        assert_eq!(named(&boxed.fields[0].ty), "T");
+        // Outside the generic item the alias still applies.
+        assert_eq!(named(&function(&items, "plain").params[0].ty), "bool");
     }
 }

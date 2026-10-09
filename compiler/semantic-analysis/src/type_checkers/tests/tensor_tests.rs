@@ -1847,3 +1847,23 @@ func main() -> i32 {
         .collect();
     assert_eq!(ops, ["+", "+="], "got {errors:?}");
 }
+
+/// Folding a bound past `i128` used to panic the checker on overflow; a bound that does
+/// not fold is refused like a run-time one.
+#[test]
+fn an_overflowing_constant_slice_bound_is_refused_without_a_panic() {
+    for bound in [
+        "(18446744073709551615 * 18446744073709551615 * 18446744073709551615)..2",
+        // Folds to exactly `i128::MAX`, so only the inclusive end's `+ 1` overflows.
+        "0..=(9223372036854775808 * 18446744073709551615 + 9223372036854775807)",
+    ] {
+        let errors = semantic_errors(&format!(
+            "func main() -> i32 {{
+    val m: Tensor<i32, [4]> = [1, 2, 3, 4]
+    val s = m[{bound}]
+    return 0
+}}"
+        ));
+        assert!(!errors.is_empty(), "{bound}: expected a refusal");
+    }
+}

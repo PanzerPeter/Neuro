@@ -115,15 +115,36 @@ impl ModuleGraph {
         let mut items = std::mem::take(&mut self.modules[id].items);
         let declared_types = std::mem::take(&mut self.modules[id].declared_types);
         let mut chains: Vec<Vec<String>> = Vec::new();
+        // Each name an import binds, mapped to the path it was imported along. A qualified
+        // name headed by one is loaded along that path: the rewriting pass reads such a
+        // head through the import, so a same-named file beside this module is not what it
+        // names and must not be dragged into the build.
+        let mut bound: HashMap<String, Vec<String>> = HashMap::new();
         for import in &self.modules[id].imports {
             let path: Vec<String> = import.path.iter().map(|s| s.name.clone()).collect();
-            // A `{...}` entry may name a child module rather than an item
-            // (`import ./utils::{io}`), so each one extends the path it is loaded along.
-            if let ast_types::ImportSelection::List(names) = &import.selection {
-                for entry in names {
-                    let mut deeper = path.clone();
-                    deeper.push(entry.name.name.clone());
-                    chains.push(deeper);
+            match &import.selection {
+                ast_types::ImportSelection::Module => {
+                    if let Some(last) = path.last() {
+                        bound.entry(last.clone()).or_insert_with(|| path.clone());
+                    }
+                }
+                ast_types::ImportSelection::Alias(alias) => {
+                    bound
+                        .entry(alias.name.clone())
+                        .or_insert_with(|| path.clone());
+                }
+                // A `{...}` entry may name a child module rather than an item
+                // (`import ./utils::{io}`), so each one extends the path it is loaded along.
+                ast_types::ImportSelection::List(names) => {
+                    for entry in names {
+                        let mut deeper = path.clone();
+                        deeper.push(entry.name.name.clone());
+                        let name = entry.alias.as_ref().unwrap_or(&entry.name);
+                        bound
+                            .entry(name.name.clone())
+                            .or_insert_with(|| deeper.clone());
+                        chains.push(deeper);
+                    }
                 }
             }
             chains.push(path);
@@ -137,13 +158,24 @@ impl ModuleGraph {
             if declared_types.contains(&chain[0]) {
                 return Ok(());
             }
-            if !chains.iter().any(|seen| seen == chain) {
-                chains.push(chain.to_vec());
+            let chain = match bound.get(&chain[0]) {
+                Some(target) => target.iter().chain(&chain[1..]).cloned().collect(),
+                None => chain.to_vec(),
+            };
+            if !chains.contains(&chain) {
+                chains.push(chain);
             }
             Ok(())
         };
         // The collector never fails; only the rewriting pass reports on what it finds.
         let _ = walk_items(&mut items, &mut collect);
+        // A locally declared type wins over a same-named file here too: the head of
+        // `import Shape::{Circle}` is this module's enum, never a `Shape.nr` beside it.
+        chains.retain(|chain| {
+            !chain
+                .first()
+                .is_some_and(|head| declared_types.contains(head))
+        });
         self.modules[id].items = items;
         self.modules[id].declared_types = declared_types;
         chains

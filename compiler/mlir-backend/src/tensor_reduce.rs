@@ -28,11 +28,12 @@
 
 use crate::{
     errors::MlirError,
-    guards::{At, Element, Lowering},
+    guards::{At, Element, Lowering, Side},
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, cast_elements, empty_tensor, fill_block,
-        generic_op, half_precision, indexing_maps, iterator_types, tensor_parts, with_element,
+        generic_op, half_precision, indexing_maps, iterator_types, iterators, tensor_parts,
+        with_element,
     },
     tensor_layout::linalg_index,
     tensor_sort::precedes,
@@ -164,6 +165,24 @@ pub(crate) fn build_reduce<'c, 'a>(
         fill_block(location, element_type)?,
     )?;
 
+    // The host's loops nest in index-space order, so there the fold keeps the source's own
+    // axis order: reducing an outer axis then reads the source row by row, its inner loop over
+    // independent accumulators, rather than down a column per result element. Each element
+    // still folds its run in run order, so the bits do not change. A GPU keeps the result's
+    // axes first, its threads.
+    let (walk, written, reduced): (OperandAxes, OperandAxes, Vec<bool>) =
+        match (lowering.side, layout.axis) {
+            (Side::Host, Some(axis)) => (
+                Some((0..layout.space).map(Some).collect()),
+                Some((0..layout.space).filter(|&d| d != axis).map(Some).collect()),
+                (0..layout.space).map(|d| d == axis).collect(),
+            ),
+            _ => (
+                Some(layout.walk.clone()),
+                result_axes.clone(),
+                (0..layout.space).map(|d| d >= parallel).collect(),
+            ),
+        };
     let folded = apply(
         context,
         location,
@@ -171,12 +190,8 @@ pub(crate) fn build_reduce<'c, 'a>(
         Generic {
             inputs: &[source],
             destination: seeded,
-            indexing_maps: indexing_maps(
-                context,
-                layout.space,
-                &[&Some(layout.walk.clone()), &result_axes],
-            )?,
-            iterators: iterator_types(context, layout.space, layout.space - parallel)?,
+            indexing_maps: indexing_maps(context, layout.space, &[&walk, &written])?,
+            iterators: iterators(context, &reduced)?,
         },
         tensor_type,
         fold_block(context, location, element_type, &fold)?,
@@ -229,6 +244,8 @@ struct ReduceLayout {
     /// Each source axis read over the result's index space when taking a run's first
     /// element: the result axis it matches, or element 0 of a reduced axis.
     first: Vec<Option<usize>>,
+    /// The reduced source axis, `None` for a whole-tensor reduction.
+    axis: Option<usize>,
     /// How many elements one run folds, which a mean divides by.
     length: usize,
     /// Where a run's elements sit, for folding a long run in lanes.
@@ -275,6 +292,7 @@ impl ReduceLayout {
                 result_rank: 1,
                 walk: (1..=rank).map(Some).collect(),
                 first: vec![None; rank],
+                axis: None,
                 length: extents.iter().product(),
                 lanes: Some(Run {
                     extents: extents.clone(),
@@ -298,6 +316,7 @@ impl ReduceLayout {
                 .map(|i| Some(result_axis(i).unwrap_or(rank - 1)))
                 .collect(),
             first: (0..rank).map(result_axis).collect(),
+            axis: Some(axis),
             length: extents[axis],
             lanes: Some(Run {
                 extents: extents.clone(),
@@ -723,6 +742,33 @@ mod tests {
         .expect("a float sum lowers");
         assert_eq!(launches(&bodies.llvm_ir), 2, "{}", bodies.llvm_ir);
         assert_eq!(launches(&float.llvm_ir), 3, "{}", float.llvm_ir);
+    }
+
+    #[test]
+    fn a_host_fold_walks_its_source_in_row_major_order() {
+        // Reducing an outer axis on the host keeps the source's axis order, so the loops read
+        // it row by row and the inner one runs over independent accumulators. A GPU fold keeps
+        // the result's axes first, one thread per result element.
+        let program = program("    val r = g.sum(0)");
+        let fold = |side| {
+            let context = crate::context::new_context();
+            let (module, _) = crate::lower::build_linkable_module(
+                &context,
+                &program,
+                (crate::Overflow::Checked, side),
+                &|function| function.target == HirTarget::FollowsOperands,
+            )
+            .expect("the body builds");
+            module.as_operation().to_string()
+        };
+        let host = fold(crate::guards::Side::Host);
+        assert!(
+            host.contains("affine_map<(d0, d1) -> (d1)>")
+                && host.contains(r#"["reduction", "parallel"]"#),
+            "{host}"
+        );
+        let device = fold(crate::guards::Side::Device);
+        assert!(device.contains(r#"["parallel", "reduction"]"#), "{device}");
     }
 
     #[test]

@@ -152,6 +152,11 @@ object path would have given the backend.
 **Exit codes**:
 - 0: Compilation successful
 - 1: Compilation failed
+- 2: the command line itself was rejected (an unknown flag, `-O4`, a `--gpu-arch` with
+  neither prefix), before any file was read. This holds for every command
+
+`-o` may not name a source file of the program being compiled: `neurc` refuses rather than
+overwrite it with the executable, object or IR.
 
 ### run
 
@@ -164,6 +169,7 @@ neurc run <file.nr> [options]
 
 **Options**:
 - `-O, --optimization <0-3>`: optimization level (default: `0`); see [Optimization](#optimization)
+- `--gpu-arch <CHIP>`: as for `compile`; see [Choosing a GPU](#choosing-a-gpu)
 
 The executable is written to a temporary directory and removed once the program exits, so
 `run` never leaves a binary beside the source. Use `compile` when you want to keep one.
@@ -210,19 +216,16 @@ RUST_LOG=info neurc compile program.nr    # Standard output
 RUST_LOG=debug neurc compile program.nr   # Detailed diagnostics
 ```
 
-### LLVM_SYS_231_PREFIX
+### LLVM_SYS_231_PREFIX, MLIR_SYS_230_PREFIX, TABLEGEN_230_PREFIX
 
-Path to the LLVM 23 installation (required to build the compiler):
+Building the compiler needs all three, each pointing at the one prefix that holds LLVM 23
+and MLIR 23:
 
 ```bash
-# Arch / CachyOS
-export LLVM_SYS_231_PREFIX=/usr
-
-# Ubuntu / Debian
-export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23
-
-# macOS (Homebrew)
-export LLVM_SYS_231_PREFIX=$(brew --prefix llvm)
+prefix=/opt/llvm-mlir-23                  # Arch / CachyOS (source build)
+prefix=/usr/lib/llvm-23                   # Ubuntu / Debian (apt.llvm.org)
+prefix=$(brew --prefix llvm)              # macOS
+export LLVM_SYS_231_PREFIX=$prefix MLIR_SYS_230_PREFIX=$prefix TABLEGEN_230_PREFIX=$prefix
 ```
 
 See the [Installation Guide](../getting-started/installation.md) for full setup.
@@ -366,8 +369,8 @@ itself is noticeably slower. For the speed of the programs it produces, see the
 
 `neurc compile` supports optimization levels `-O0` through `-O3`.
 
-- `-O0`: fastest compile, no optimization
-- `-O1`: basic optimization
+- `-O0`: fastest compile, no optimization. A debug build: integer overflow panics
+- `-O1`: basic optimization. From here up, integer overflow wraps
 - `-O2`: balanced optimization (the usual choice for a release build)
 - `-O3`: maximum optimization
 
@@ -443,8 +446,10 @@ echo "Build complete!"
     wget https://apt.llvm.org/llvm.sh
     chmod +x llvm.sh
     sudo ./llvm.sh 23
-    sudo apt-get install -y llvm-23-dev libpolly-23-dev libzstd-dev zlib1g-dev
-    echo "LLVM_SYS_231_PREFIX=/usr/lib/llvm-23" >> "$GITHUB_ENV"
+    sudo apt-get install -y llvm-23-dev libmlir-23-dev mlir-23-tools libpolly-23-dev libzstd-dev zlib1g-dev
+    for var in LLVM_SYS_231_PREFIX MLIR_SYS_230_PREFIX TABLEGEN_230_PREFIX; do
+      echo "$var=/usr/lib/llvm-23" >> "$GITHUB_ENV"
+    done
 
 - name: Build Neuro compiler
   run: cargo build --release -p neurc

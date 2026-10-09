@@ -60,7 +60,9 @@ Reads and rewrites the AST it is handed; touches no files.
   otherwise lose that. The annotation is dropped when it would not mean the same thing at a
   call site: a type parameter of the callee, `Self`, `impl Trait`, `dyn Trait`, `&[T]`, a
   function type; the last three because an argument reaches them through a coercion an
-  argument position applies and a binding does not. A `Tensor<T, [d0, ...]>` whose extents are all
+  argument position applies and a binding does not. A `&T` parameter is restated only over a
+  shared `&x` argument, for the same reason: a call reborrows `&mut T` as `&T`, a binding
+  does not. A `Tensor<T, [d0, ...]>` whose extents are all
   literals is *kept*: restating it at a call site names the same type, dimension names included,
   since a name is checked only against another name. One with a shape
   parameter's extent is dropped for the same reason a `T` is: the name is the callee's own. It is dropped for every method signature
@@ -72,7 +74,10 @@ Reads and rewrites the AST it is handed; touches no files.
   (`make().m(b: …, a: …)`) would invert that pair to fix the argument pair.
   `callee_allows_hoisting` therefore takes an identifier, a `Type::member` path, and a method
   on a *place* receiver (a place resolves to an address, so when it is read is not
-  observable) and leaves anything else permuted in place.
+  observable) and leaves anything else permuted in place. An index the place computes
+  (`arr[next()].m(...)`) is the exception: it is bound to a `__nrecv` temporary ahead of the
+  arguments, so it still runs first, and the walk reaches any call inside it through that
+  temporary's initializer.
 - **The walk is told what binding did.** `CallFn` answers `Bound::InPlace` or
   `Bound::Hoisted`; on the latter `walk_expr` descends only into the temporaries'
   initializers, since the trailing call is already bound. Visiting that call again would

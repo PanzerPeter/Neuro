@@ -152,6 +152,16 @@ pub(crate) fn pending_key(name: &str) -> String {
     format!("__pending_{name}")
 }
 
+/// One binding's transient borrow counts, captured so alternative paths (the arms of a
+/// `match`) can each start from the same state.
+#[derive(Debug, Clone)]
+pub(crate) struct TransientBorrow {
+    scope: usize,
+    name: String,
+    shared: u32,
+    exclusive: u32,
+}
+
 /// Symbol table with lexical scoping support
 #[derive(Debug)]
 pub(crate) struct SymbolTable {
@@ -366,6 +376,34 @@ impl SymbolTable {
         }
     }
 
+    /// Make `holder` hold every borrow `source` holds. A copy of a reference, or a
+    /// closure over one, keeps the borrowee frozen for as long as it lives, which may be
+    /// longer than `source` does.
+    pub(crate) fn inherit_borrows(&mut self, holder: &str, source: &str) {
+        let Some(held) = self.lookup(source).map(|info| info.borrows.clone()) else {
+            return;
+        };
+        if held.is_empty() || self.lookup(holder).is_none() {
+            return;
+        }
+        for prov in &held {
+            let target = self
+                .scopes
+                .get_mut(prov.scope)
+                .and_then(|scope| scope.get_mut(&prov.place));
+            if let Some(info) = target {
+                if prov.exclusive {
+                    info.exclusive_persistent = info.exclusive_persistent.saturating_add(1);
+                } else {
+                    info.shared_persistent = info.shared_persistent.saturating_add(1);
+                }
+            }
+        }
+        if let Some(info) = self.lookup_mut(holder) {
+            info.borrows.extend(held);
+        }
+    }
+
     /// Record where `holder`, a `@grad` call's result, stands against its `.backward()`.
     pub(crate) fn set_grad_loss(&mut self, holder: &str, state: GradLoss) {
         if let Some(info) = self.lookup_mut(holder) {
@@ -425,6 +463,43 @@ impl SymbolTable {
             for info in scope.values_mut() {
                 info.shared_transient = 0;
                 info.exclusive_transient = 0;
+            }
+        }
+    }
+
+    /// Every live transient borrow, as the scope index and name it counts against plus
+    /// its `(shared, exclusive)` counts.
+    pub(crate) fn transient_borrows(&self) -> Vec<TransientBorrow> {
+        self.scopes
+            .iter()
+            .enumerate()
+            .flat_map(|(scope, bindings)| {
+                bindings
+                    .iter()
+                    .filter(|(_, info)| info.shared_transient > 0 || info.exclusive_transient > 0)
+                    .map(move |(name, info)| TransientBorrow {
+                        scope,
+                        name: name.clone(),
+                        shared: info.shared_transient,
+                        exclusive: info.exclusive_transient,
+                    })
+            })
+            .collect()
+    }
+
+    /// Replace every transient borrow with `borrows`. A binding listed more than once
+    /// takes the largest count any entry gives it, so a set gathered from several
+    /// alternative paths holds what the worst of them holds.
+    pub(crate) fn set_transient_borrows(&mut self, borrows: &[TransientBorrow]) {
+        self.clear_transient_borrows();
+        for borrow in borrows {
+            let target = self
+                .scopes
+                .get_mut(borrow.scope)
+                .and_then(|scope| scope.get_mut(&borrow.name));
+            if let Some(info) = target {
+                info.shared_transient = info.shared_transient.max(borrow.shared);
+                info.exclusive_transient = info.exclusive_transient.max(borrow.exclusive);
             }
         }
     }

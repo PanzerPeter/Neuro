@@ -67,3 +67,28 @@ func main() -> i32 { area(Shape::Unit) + classify(1) }
     // Wildcard catch-all.
     assert!(matches!(arms[2].tests[0], HirMatchTest::Wildcard));
 }
+
+#[test]
+fn an_exclusive_range_ending_past_i64_max_keeps_its_bits() {
+    use neuro_hir::HirMatchTest;
+
+    // `2^63` truncates to `i64::MIN`; the inclusive end one below it is `i64::MAX`, the
+    // same bits a `u64` scrutinee compares against `2^63 - 1`.
+    let program = lower(
+        "func classify(x: u64) -> i32 { return match x { 0..9223372036854775808 => 1, _ => 2, } }
+         func main() -> i32 { classify(5) }",
+    );
+    let HirStmt::Return { value: Some(m), .. } = &function_body(&program, "classify")[0] else {
+        panic!("classify should return its match");
+    };
+    let HirExprKind::Match { arms, .. } = &m.kind else {
+        panic!("expected a match expression");
+    };
+    assert!(matches!(
+        arms[0].tests[0],
+        HirMatchTest::IntRange {
+            lo: 0,
+            hi: i64::MAX
+        }
+    ));
+}

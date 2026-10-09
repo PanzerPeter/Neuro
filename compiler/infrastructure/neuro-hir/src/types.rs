@@ -51,9 +51,9 @@ impl PartialEq for AxisNames {
 /// reaches the HIR has type-checked successfully, so the HIR contract is
 /// allowed to assume well-typedness.
 ///
-/// The variant set mirrors the resolved types the semantic analyzer produces
-/// today. Composite future types (generics) are intentionally absent until the
-/// language gains them.
+/// The variant set mirrors the resolved types the semantic analyzer produces.
+/// There is no generic variant: `hir-lowering` monomorphizes every template into
+/// concrete items, so a backend only ever sees concrete types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirType {
     I8,

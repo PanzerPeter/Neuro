@@ -17,7 +17,9 @@ pub enum ParseError {
     #[error("unexpected end of file, expected {expected}")]
     UnexpectedEof { expected: String },
 
-    #[error("maximum expression nesting depth ({0}) exceeded - possible infinite recursion")]
+    #[error(
+        "maximum nesting depth ({0}) exceeded: an expression, block, type or pattern is nested too deeply"
+    )]
     MaxDepthExceeded(usize),
 
     #[error("duplicate parameter name '{name}' in function definition")]

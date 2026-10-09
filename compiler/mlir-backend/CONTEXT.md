@@ -203,7 +203,10 @@ where a 16-bit total stops growing. A rank-0 result (a rank-1 axis reduction) ha
 axis and so stays off a GPU. The index space is the result's axes
 (`parallel`, so one GPU thread per result element) followed by the reduced ones (`reduction`, a
 sequential loop inside the thread), which folds each run in the source's order, as the LLVM
-backend does, so the two give the same bits. A run longer than `neuro_hir::REDUCE_LANES` folds in
+backend does, so the two give the same bits. On the host, whose loops nest in index-space
+order, an axis reduction's index space keeps the source's own axis order instead, so reducing an
+outer axis reads the source row by row over independent accumulators rather than down a column
+per result element; each run still folds in run order. A run longer than `neuro_hir::REDUCE_LANES` folds in
 the language's lane order instead: `build_lanes` writes a partials tensor of the result's axes
 and a lane axis with one all-parallel `linalg.generic`, whose body runs an `scf.for` over the
 lane's run positions (`lane + k * REDUCE_LANES`, read with `tensor.extract`, the lane's own first

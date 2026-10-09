@@ -1,7 +1,7 @@
 // Interpolated string literals: turning the lexer's text/hole chunks into an
 // `Expr::InterpString` whose holes carry fully parsed expressions.
 
-use lexical_analysis::{InterpChunk, TokenKind, tokenize};
+use lexical_analysis::{InterpChunk, LexError, TokenKind, tokenize};
 use shared_types::{FormatAlign, FormatKind, FormatSpec, Span};
 
 use crate::errors::{ParseError, ParseResult};
@@ -39,7 +39,7 @@ fn parse_hole(source: &str, span: Span) -> ParseResult<InterpPart> {
         return Err(ParseError::EmptyInterpolationHole { span });
     }
 
-    let mut tokens = tokenize(source)?;
+    let mut tokens = tokenize(source).map_err(|error| shift_lex_error(error, span.start))?;
     for token in &mut tokens {
         token.span = Span::new(token.span.start + span.start, token.span.end + span.start);
     }
@@ -80,6 +80,50 @@ fn parse_hole(source: &str, span: Span) -> ParseResult<InterpPart> {
         spec,
         span,
     })
+}
+
+/// Move a lexical error found inside a hole from the hole's own coordinates onto the
+/// file's, the same shift [`parse_hole`] applies to the hole's tokens.
+fn shift_lex_error(error: LexError, offset: usize) -> LexError {
+    let shift = |span: Span| Span::new(span.start + offset, span.end + offset);
+    match error {
+        LexError::UnexpectedChar { character, span } => LexError::UnexpectedChar {
+            character,
+            span: shift(span),
+        },
+        LexError::UnterminatedString { span } => LexError::UnterminatedString { span: shift(span) },
+        LexError::InvalidNumber { text, span } => LexError::InvalidNumber {
+            text,
+            span: shift(span),
+        },
+        LexError::InvalidEscape { escape, span } => LexError::InvalidEscape {
+            escape,
+            span: shift(span),
+        },
+        LexError::InvalidCharLiteral { literal, span } => LexError::InvalidCharLiteral {
+            literal,
+            span: shift(span),
+        },
+        LexError::UnterminatedBlockComment { span } => {
+            LexError::UnterminatedBlockComment { span: shift(span) }
+        }
+        LexError::UnterminatedInterpolation { span } => {
+            LexError::UnterminatedInterpolation { span: shift(span) }
+        }
+        LexError::UnterminatedTripleQuotedString { span } => {
+            LexError::UnterminatedTripleQuotedString { span: shift(span) }
+        }
+        LexError::TripleQuoteClosingNotOnOwnLine { span } => {
+            LexError::TripleQuoteClosingNotOnOwnLine { span: shift(span) }
+        }
+        LexError::TripleQuoteUnderIndented { indent, span } => LexError::TripleQuoteUnderIndented {
+            indent,
+            span: shift(span),
+        },
+        LexError::UnescapedClosingBrace { span } => {
+            LexError::UnescapedClosingBrace { span: shift(span) }
+        }
+    }
 }
 
 /// Parse the `spec` half of `{expr:spec}` per the language's specifier table.

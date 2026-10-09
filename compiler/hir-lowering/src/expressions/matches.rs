@@ -130,7 +130,13 @@ impl Lowerer {
                 let lo = literal_scalar(start)?;
                 let hi_raw = literal_scalar(end)?;
                 // Normalize an exclusive `a..b` to the inclusive `a..=b-1` codegen uses.
-                let hi = if *inclusive { hi_raw } else { hi_raw - 1 };
+                // The bounds are the low 64 bits of the literal, so a `u64` end of `2^63`
+                // arrives as `i64::MIN`, and the step down must wrap to keep the bits.
+                let hi = if *inclusive {
+                    hi_raw
+                } else {
+                    hi_raw.wrapping_sub(1)
+                };
                 Ok(HirMatchTest::IntRange { lo, hi })
             }
             ast_types::Pattern::Enum {

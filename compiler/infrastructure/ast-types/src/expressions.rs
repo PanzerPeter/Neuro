@@ -126,11 +126,10 @@ pub enum Expr {
     },
     /// Unsafe block expression: `unsafe { stmts; trailing_expr }`.
     ///
-    /// Phase 1.7 groundwork: the keyword is reserved and the block parses, but
-    /// `unsafe` carries no special semantics yet: it is inert outside `@kernel`
-    /// bodies (which do not exist until Phase 5). It type-checks and lowers
-    /// exactly like a bare [`Expr::Block`]; the distinct node lets later phases
-    /// attach the kernel-aliasing relaxation without reparsing.
+    /// It type-checks and lowers exactly like a bare [`Expr::Block`]. Its one rule
+    /// lives in semantic analysis: a raw element read or write of a `@kernel` output
+    /// handle is accepted only inside it, because the compiler cannot prove such an
+    /// access disjoint across threads and the block marks where the programmer does.
     Unsafe {
         stmts: Vec<Stmt>,
         span: Span,
@@ -167,7 +166,7 @@ pub enum Expr {
     /// Range expression `start..end` (exclusive) or `start..=end` (inclusive).
     ///
     /// Ranges are not a first-class value type: this node is only valid as the
-    /// argument to `string.slice`. `for`-range loops carry their bounds
+    /// argument to `.slice` / `.char_slice`. `for`-range loops carry their bounds
     /// directly on [`Stmt::ForRange`] and never produce this node.
     Range {
         start: Box<Expr>,
@@ -181,9 +180,9 @@ pub enum Expr {
         elements: Vec<Expr>,
         span: Span,
     },
-    /// Array indexing `object[index]`. `object` evaluates to an array (or a
-    /// borrow of one); `index` is an integer. Out-of-bounds access panics in debug
-    /// builds.
+    /// Single-argument indexing `object[index]` of an array, slice, `Vec`, or
+    /// `HashMap` (or a borrow of one). A sequence index is bounds-checked in every
+    /// build: an out-of-range one panics.
     Index {
         object: Box<Expr>,
         index: Box<Expr>,
@@ -256,7 +255,7 @@ pub enum Expr {
     /// The chain is flattened by the parser, so `functions` is never shorter than two
     /// and the node holds no sub-expressions: composition takes *named* functions, never
     /// an arbitrary function-valued expression. That is also why the operands are
-    /// [`Identifier`]s rather than boxed [`Expr`]s — a walker over expressions has
+    /// [`Identifier`]s rather than boxed [`Expr`]s: a walker over expressions has
     /// nothing here to descend into.
     Compose {
         functions: Vec<Identifier>,
@@ -300,9 +299,9 @@ pub enum InterpPart {
 }
 
 /// One parameter of a closure literal: a binding name and an optional type
-/// annotation. In the current phase the annotation is required (parameter-type
-/// inference is deferred), but the field is optional so the parser can surface a
-/// precise diagnostic rather than a parse failure.
+/// annotation. An unannotated parameter takes the type the expected function type
+/// fixes at that position; where there is no expected type, semantic analysis
+/// rejects it with a diagnostic asking for the annotation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClosureParam {
     pub name: Identifier,
@@ -324,9 +323,9 @@ pub struct MatchArm {
 
 /// A `match` arm pattern.
 ///
-/// Payload sub-patterns of an enum variant are restricted to bindings and wildcards
-/// (a documented Phase-1E limit, mirroring enums' scalar-only payloads); a literal in
-/// a payload position is expressed with a guard instead.
+/// Payload sub-patterns of an enum variant are restricted to bindings and wildcards,
+/// which semantic analysis enforces; a literal in a payload position is expressed
+/// with a guard instead.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     /// `_`: matches anything, binds nothing.

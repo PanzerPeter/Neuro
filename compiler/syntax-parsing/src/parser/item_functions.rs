@@ -14,7 +14,6 @@ use ast_types::{
 
 use super::Parser;
 use super::items::desugar_impl_trait_params;
-use super::statements::stmt_span;
 
 /// The external label that suppresses a call-site name entirely (`_ value: f32`).
 const WILDCARD_LABEL: &str = "_";
@@ -86,7 +85,7 @@ impl Parser {
 
         let body = self.parse_block()?;
 
-        let end_span = body.last().map(stmt_span).unwrap_or(start.span);
+        let end_span = self.previous_span(start.span);
 
         Ok(FunctionDef {
             name,
@@ -484,7 +483,7 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_block()?;
 
-        let end_span = body.last().map(stmt_span).unwrap_or(start.span);
+        let end_span = self.previous_span(start.span);
 
         Ok(MethodDef {
             name,

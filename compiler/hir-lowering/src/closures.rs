@@ -8,9 +8,7 @@
 
 use std::collections::HashSet;
 
-use ast_types::{
-    ClosureParam, EnumPatternPayload, Expr, InterpPart, Pattern, Stmt, TensorIndexArg,
-};
+use ast_types::{ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
 use neuro_hir::{
     HirCapture, HirClosure, HirExpr, HirExprKind, HirItem, HirParam, HirStmt, HirType,
 };
@@ -228,38 +226,65 @@ impl Lowerer {
     }
 
     /// Compute the ordered, de-duplicated capture list: free variables of the body
-    /// (excluding names bound inside it or by the parameters) that resolve to an
-    /// enclosing local binding, paired with that binding's type.
+    /// (names no scope of the closure binds at the point they are read) that resolve
+    /// to an enclosing local binding, paired with that binding's type.
     fn collect_captures(&self, params: &[ClosureParam], body: &Expr) -> Vec<HirCapture> {
         let mut walk = FreeVars::default();
-        collect_expr(body, &mut walk);
-        for p in params {
-            walk.bound.insert(p.name.name.clone());
-        }
+        walk.scoped(|fv| {
+            for p in params {
+                fv.bind(&p.name.name);
+            }
+            collect_expr(body, fv);
+        });
         let mut captures = Vec::new();
         let mut seen = HashSet::new();
-        for name in &walk.reads {
-            if walk.bound.contains(name) || !seen.insert(name.clone()) {
+        for name in walk.reads {
+            if seen.contains(&name) {
                 continue;
             }
-            if let Some(ty) = self.lookup_local(name) {
+            if let Some(ty) = self.lookup_local(&name) {
                 captures.push(HirCapture {
                     name: name.clone(),
                     ty,
                 });
             }
+            seen.insert(name);
         }
         captures
     }
 }
 
-/// A closure body's free-variable footprint: names bound inside the body and the
-/// identifiers it reads, in first-seen order. A flat `bound` over-approximation is
-/// sound for exclusion: a read of a locally-bound name is never a capture.
+/// A closure body's free-variable footprint: the identifiers it reads that no scope
+/// of the body binds at the point of the read, in first-seen order. The scopes follow
+/// the lowering's own, so a name the body binds hides an enclosing one only where the
+/// lowered body would resolve it to the inner binding: a read before the binding, in
+/// a sibling arm, or outside an inner closure binding it as a parameter is a capture.
 #[derive(Default)]
 struct FreeVars {
-    bound: HashSet<String>,
+    /// Names bound inside the body, one set per open scope, innermost last.
+    scopes: Vec<HashSet<String>>,
     reads: Vec<String>,
+}
+
+impl FreeVars {
+    fn read(&mut self, name: &str) {
+        if !self.scopes.iter().any(|scope| scope.contains(name)) {
+            self.reads.push(name.to_string());
+        }
+    }
+
+    fn bind(&mut self, name: &str) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string());
+        }
+    }
+
+    /// Run `walk` inside a fresh scope, whose bindings end with it.
+    fn scoped(&mut self, walk: impl FnOnce(&mut Self)) {
+        self.scopes.push(HashSet::new());
+        walk(self);
+        self.scopes.pop();
+    }
 }
 
 fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
@@ -268,12 +293,10 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             if let Some(init) = init {
                 collect_expr(init, fv);
             }
-            fv.bound.insert(name.name.clone());
+            fv.bind(&name.name);
         }
         Stmt::Assign { place, value, .. } => {
-            if let Some(root) = place.root() {
-                fv.reads.push(root.name.clone());
-            }
+            collect_place(place, fv);
             collect_expr(value, fv);
         }
         Stmt::Return { value, .. } => {
@@ -322,11 +345,7 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             for adapter in adapters {
                 collect_expr(&adapter.callee, fv);
             }
-            if let Some(index) = index {
-                fv.bound.insert(index.name.clone());
-            }
-            fv.bound.insert(iterator.name.clone());
-            collect_block(body, fv);
+            collect_loop_body(index.as_ref(), iterator, body, fv);
         }
         Stmt::ForEach {
             index,
@@ -340,11 +359,7 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             for adapter in adapters {
                 collect_expr(&adapter.callee, fv);
             }
-            if let Some(index) = index {
-                fv.bound.insert(index.name.clone());
-            }
-            fv.bound.insert(iterator.name.clone());
-            collect_block(body, fv);
+            collect_loop_body(index.as_ref(), iterator, body, fv);
         }
         Stmt::Break { value, .. } => {
             if let Some(value) = value {
@@ -360,25 +375,84 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             ..
         } => {
             collect_expr(value, fv);
-            if let Some(binding) = else_binding {
-                fv.bound.insert(binding.name.clone());
-            }
-            collect_block(else_block, fv);
+            fv.scoped(|fv| {
+                if let Some(binding) = else_binding {
+                    fv.bind(&binding.name);
+                }
+                collect_block(else_block, fv);
+            });
+            // The pattern's bindings belong to the enclosing scope, after the `else`.
             for name in pattern.binding_names() {
-                fv.bound.insert(name);
+                fv.bind(&name);
             }
         }
         Stmt::Const { name, value, .. } => {
             collect_expr(value, fv);
-            fv.bound.insert(name.name.clone());
+            fv.bind(&name.name);
         }
         Stmt::Expr(expr) => collect_expr(expr, fv),
     }
 }
 
+/// A block's statements, in a scope of their own.
 fn collect_block(stmts: &[Stmt], fv: &mut FreeVars) {
-    for stmt in stmts {
-        collect_stmt(stmt, fv);
+    fv.scoped(|fv| {
+        for stmt in stmts {
+            collect_stmt(stmt, fv);
+        }
+    });
+}
+
+/// A `for` body, with the loop's position and element bindings in scope.
+fn collect_loop_body(
+    index: Option<&Identifier>,
+    iterator: &Identifier,
+    body: &[Stmt],
+    fv: &mut FreeVars,
+) {
+    fv.scoped(|fv| {
+        if let Some(index) = index {
+            fv.bind(&index.name);
+        }
+        fv.bind(&iterator.name);
+        collect_block(body, fv);
+    });
+}
+
+/// Every name an assignment target reads: its root and any index on the way to it.
+fn collect_place(place: &Place, fv: &mut FreeVars) {
+    match place {
+        Place::Var(ident) => fv.read(&ident.name),
+        Place::Field { object, .. } => collect_expr(object, fv),
+        Place::Index { object, index, .. } => {
+            collect_expr(object, fv);
+            collect_expr(index, fv);
+        }
+        Place::TensorIndex {
+            object, indices, ..
+        } => {
+            collect_expr(object, fv);
+            collect_tensor_indices(indices, fv);
+        }
+        Place::Deref { pointer, .. } => collect_expr(pointer, fv),
+    }
+}
+
+fn collect_tensor_indices(indices: &[TensorIndexArg], fv: &mut FreeVars) {
+    for index in indices {
+        match index {
+            TensorIndexArg::Position(expr) => collect_expr(expr, fv),
+            TensorIndexArg::Range {
+                start, end, step, ..
+            } => {
+                collect_expr(start, fv);
+                collect_expr(end, fv);
+                if let Some(step) = step {
+                    collect_expr(step, fv);
+                }
+            }
+            TensorIndexArg::FullAxis(_) => {}
+        }
     }
 }
 
@@ -387,7 +461,7 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
         // A composition names functions, and a function is referenced directly rather
         // than captured.
         Expr::Literal(_, _) | Expr::Path { .. } | Expr::Compose { .. } => {}
-        Expr::Identifier(ident) => fv.reads.push(ident.name.clone()),
+        Expr::Identifier(ident) => fv.read(&ident.name),
         Expr::Binary { left, right, .. } => {
             collect_expr(left, fv);
             collect_expr(right, fv);
@@ -440,10 +514,10 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
                 collect_block(block, fv);
             }
         }
-        Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } | Expr::Pool { stmts, .. } => {
-            collect_block(stmts, fv)
-        }
-        Expr::Loop { body, .. } => collect_block(body, fv),
+        Expr::Block { stmts, .. }
+        | Expr::Unsafe { stmts, .. }
+        | Expr::Pool { stmts, .. }
+        | Expr::Loop { body: stmts, .. } => collect_block(stmts, fv),
         Expr::Reference { operand, .. } => collect_expr(operand, fv),
         Expr::Deref { operand, .. } => collect_expr(operand, fv),
         Expr::Range { start, end, .. } => {
@@ -463,21 +537,7 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
             object, indices, ..
         } => {
             collect_expr(object, fv);
-            for index in indices {
-                match index {
-                    TensorIndexArg::Position(expr) => collect_expr(expr, fv),
-                    TensorIndexArg::Range {
-                        start, end, step, ..
-                    } => {
-                        collect_expr(start, fv);
-                        collect_expr(end, fv);
-                        if let Some(step) = step {
-                            collect_expr(step, fv);
-                        }
-                    }
-                    TensorIndexArg::FullAxis(_) => {}
-                }
-            }
+            collect_tensor_indices(indices, fv);
         }
         Expr::TupleIndex { object, .. } => collect_expr(object, fv),
         Expr::ArrayRest { array, .. } => collect_expr(array, fv),
@@ -486,42 +546,24 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
         } => {
             collect_expr(scrutinee, fv);
             for arm in arms {
-                for pattern in &arm.patterns {
-                    collect_pattern_bindings(pattern, fv);
-                }
-                if let Some(guard) = &arm.guard {
-                    collect_expr(guard, fv);
-                }
-                collect_expr(&arm.body, fv);
+                fv.scoped(|fv| {
+                    for pattern in &arm.patterns {
+                        for name in pattern.binding_names() {
+                            fv.bind(&name);
+                        }
+                    }
+                    if let Some(guard) = &arm.guard {
+                        collect_expr(guard, fv);
+                    }
+                    collect_expr(&arm.body, fv);
+                });
             }
         }
-        Expr::Closure { params, body, .. } => {
+        Expr::Closure { params, body, .. } => fv.scoped(|fv| {
             for p in params {
-                fv.bound.insert(p.name.name.clone());
+                fv.bind(&p.name.name);
             }
             collect_expr(body, fv);
-        }
-    }
-}
-
-fn collect_pattern_bindings(pattern: &Pattern, fv: &mut FreeVars) {
-    match pattern {
-        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range { .. } => {}
-        Pattern::Binding(ident) => {
-            fv.bound.insert(ident.name.clone());
-        }
-        Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => match payload {
-            EnumPatternPayload::Unit => {}
-            EnumPatternPayload::Tuple(patterns) => {
-                for p in patterns {
-                    collect_pattern_bindings(p, fv);
-                }
-            }
-            EnumPatternPayload::Struct(fields) => {
-                for f in fields {
-                    collect_pattern_bindings(&f.pattern, fv);
-                }
-            }
-        },
+        }),
     }
 }

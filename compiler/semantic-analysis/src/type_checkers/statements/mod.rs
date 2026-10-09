@@ -47,11 +47,16 @@ pub(crate) fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
 /// that produces its value. A tail naming a binding the block declared is followed to that
 /// binding's initializer. Without this the borrow ended with the block that took it, while
 /// the value carrying it lived on in the binding, and its borrowee could be freed under it.
+///
+/// A name the walk cannot follow to a declaration, and every name a closure tail reads,
+/// lands in `live`: the value copies whatever that binding holds, a reference or a closure
+/// over one, so its borrows are the caller's to inherit.
 fn tail_borrow_targets<'a>(
     expr: &'a Expr,
     blocks: &mut Vec<&'a [Stmt]>,
     followed: &mut Vec<&'a str>,
     out: &mut Vec<(String, bool)>,
+    live: &mut Vec<String>,
 ) {
     let mut expr = expr;
     while let Expr::Paren(inner, _) = expr {
@@ -62,7 +67,7 @@ fn tail_borrow_targets<'a>(
         return;
     }
     match expr {
-        Expr::Block { stmts, .. } => block_tail_borrow_targets(stmts, blocks, followed, out),
+        Expr::Block { stmts, .. } => block_tail_borrow_targets(stmts, blocks, followed, out, live),
         Expr::If {
             then_block,
             else_if_blocks,
@@ -73,22 +78,22 @@ fn tail_borrow_targets<'a>(
                 .chain(else_if_blocks.iter().map(|(_, block)| block))
                 .chain(else_block.iter());
             for block in branches {
-                block_tail_borrow_targets(block, blocks, followed, out);
+                block_tail_borrow_targets(block, blocks, followed, out, live);
             }
         }
         Expr::Match { arms, .. } => {
             for arm in arms {
-                tail_borrow_targets(&arm.body, blocks, followed, out);
+                tail_borrow_targets(&arm.body, blocks, followed, out, live);
             }
         }
         // A part of a value carries that value's borrows: a destructuring `val (a, b) = e`
         // reaches its parts through a generated binding and `.0` / `.1`.
         Expr::TupleIndex { object, .. } | Expr::FieldAccess { object, .. } => {
-            tail_borrow_targets(object, blocks, followed, out);
+            tail_borrow_targets(object, blocks, followed, out, live);
         }
         Expr::TupleLiteral { elements, .. } => {
             for element in elements {
-                tail_borrow_targets(element, blocks, followed, out);
+                tail_borrow_targets(element, blocks, followed, out, live);
             }
         }
         // A returned reference borrows one of the call's borrowed inputs (lifetime
@@ -101,23 +106,45 @@ fn tail_borrow_targets<'a>(
                 out.push((root, false));
             }
         }
-        Expr::Identifier(id) if !followed.contains(&id.name.as_str()) => {
-            let init = blocks.iter().rev().find_map(|stmts| {
-                stmts.iter().rev().find_map(|stmt| match stmt {
-                    Stmt::VarDecl {
-                        name,
-                        init: Some(init),
-                        ..
-                    } if name.name == id.name => Some(init),
-                    _ => None,
-                })
-            });
-            if let Some(init) = init {
-                followed.push(&id.name);
-                tail_borrow_targets(init, blocks, followed, out);
+        Expr::Identifier(id) => follow_binding(&id.name, blocks, followed, out, live),
+        // A closure carries the borrows of what it captures.
+        Expr::Closure { params, body, .. } => {
+            for name in super::closures::closure_reads(params, body) {
+                follow_binding(&name, blocks, followed, out, live);
             }
         }
         _ => {}
+    }
+}
+
+/// Follow a name a tail yields to the block declaration that bound it, or hand it to
+/// `live` when no walked block declares it.
+fn follow_binding<'a>(
+    name: &str,
+    blocks: &mut Vec<&'a [Stmt]>,
+    followed: &mut Vec<&'a str>,
+    out: &mut Vec<(String, bool)>,
+    live: &mut Vec<String>,
+) {
+    if followed.contains(&name) {
+        return;
+    }
+    let decl = blocks.iter().rev().copied().find_map(|stmts: &'a [Stmt]| {
+        stmts.iter().rev().find_map(|stmt| match stmt {
+            Stmt::VarDecl {
+                name: declared,
+                init: Some(init),
+                ..
+            } if declared.name == name => Some((declared.name.as_str(), init)),
+            _ => None,
+        })
+    });
+    match decl {
+        Some((declared, init)) => {
+            followed.push(declared);
+            tail_borrow_targets(init, blocks, followed, out, live);
+        }
+        None => live.push(name.to_string()),
     }
 }
 
@@ -136,10 +163,11 @@ fn block_tail_borrow_targets<'a>(
     blocks: &mut Vec<&'a [Stmt]>,
     followed: &mut Vec<&'a str>,
     out: &mut Vec<(String, bool)>,
+    live: &mut Vec<String>,
 ) {
     blocks.push(stmts);
     if let Some(Stmt::Expr(tail)) = stmts.last() {
-        tail_borrow_targets(tail, blocks, followed, out);
+        tail_borrow_targets(tail, blocks, followed, out, live);
     }
     blocks.pop();
 }
@@ -165,6 +193,44 @@ impl TypeChecker {
     /// `&mut place` argument is a candidate, and so is a borrowed receiver. Without this
     /// the borrow reached the binding attached to nothing, and the borrowee rules let the
     /// source be moved or freed while the reference still read it.
+    /// Make `holder` hold the borrows a block, `if` or `match` value, a copied binding,
+    /// or a closure carries into it. Each is a way for a reference to outlive the
+    /// binding that took it: the block's binding dies with the block, and an inner
+    /// reference copied (or captured) into an outer binding dies before it.
+    pub(super) fn hold_carried_borrows(&mut self, holder: &str, value: &Expr, ty: &Type) {
+        if !carries_borrow(ty) && !self.holds_function_value(ty) {
+            return;
+        }
+        let mut value = value;
+        while let Expr::Paren(inner, _) = value {
+            value = inner;
+        }
+        if !matches!(
+            value,
+            Expr::Block { .. }
+                | Expr::If { .. }
+                | Expr::Match { .. }
+                | Expr::Identifier(_)
+                | Expr::Closure { .. }
+        ) {
+            return;
+        }
+        let (mut targets, mut live) = (Vec::new(), Vec::new());
+        tail_borrow_targets(
+            value,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut targets,
+            &mut live,
+        );
+        for (place, exclusive) in targets {
+            self.symbols.attach_borrow(holder, &place, exclusive);
+        }
+        for name in live {
+            self.symbols.inherit_borrows(holder, &name);
+        }
+    }
+
     pub(crate) fn hold_returned_borrows(&mut self, holder: &str, init: &Expr, ty: &Type) {
         if !matches!(ty, Type::Reference { .. }) {
             return;
@@ -329,28 +395,8 @@ impl TypeChecker {
                     // the binding leaves scope.
                     if let Some((place, exclusive)) = borrow_target_of(init_expr) {
                         self.symbols.attach_borrow(&holder, &place, exclusive);
-                    } else {
-                        let mut targets = Vec::new();
-                        let yields_a_borrow = self
-                            .symbols
-                            .lookup(&holder)
-                            .is_some_and(|symbol| carries_borrow(&symbol.ty));
-                        if yields_a_borrow
-                            && matches!(
-                                init_expr,
-                                Expr::Block { .. } | Expr::If { .. } | Expr::Match { .. }
-                            )
-                        {
-                            tail_borrow_targets(
-                                init_expr,
-                                &mut Vec::new(),
-                                &mut Vec::new(),
-                                &mut targets,
-                            );
-                        }
-                        for (place, exclusive) in targets {
-                            self.symbols.attach_borrow(&holder, &place, exclusive);
-                        }
+                    } else if let Some(ty) = self.symbols.lookup(&holder).map(|s| s.ty.clone()) {
+                        self.hold_carried_borrows(&holder, init_expr, &ty);
                     }
                     if let Some(place) = view_root {
                         self.symbols.attach_borrow(&holder, &place, false);

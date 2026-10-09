@@ -94,6 +94,10 @@ impl Parser {
     /// Parse a single pattern: a wildcard, binding, literal, range, or enum
     /// variant pattern.
     pub(super) fn parse_pattern(&mut self) -> ParseResult<Pattern> {
+        self.nested(Self::parse_pattern_here)
+    }
+
+    fn parse_pattern_here(&mut self) -> ParseResult<Pattern> {
         self.skip_newlines();
         let token = self.peek().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "pattern".to_string(),

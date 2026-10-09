@@ -7,6 +7,7 @@ Provide the lightweight, zero-business-logic data structures used universally ac
 - Type: Library (no entry function: pure data)
 - Public types: `Span`, `Identifier`, `Literal`, `IntSuffix`, `FloatSuffix`, `FormatSpec`,
   `FormatAlign`, `FormatKind`
+- Constants: `MAX_FORMAT_WIDTH`, `MAX_FORMAT_PRECISION`
 
 ## Shared Kernel
 None. This is the lowest-level crate in the workspace.

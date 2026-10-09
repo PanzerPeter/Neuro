@@ -866,3 +866,52 @@ fn test_cast_binds_tighter_than_matmul() {
         other => panic!("expected the cast on the right operand, got {:?}", other),
     }
 }
+
+/// The operator at the root of `source`, and the operator at the root of its left
+/// operand.
+fn root_and_left_ops(source: &str) -> (BinaryOp, BinaryOp) {
+    let Expr::Binary { op, left, .. } = parse_expr(source).expect("parses") else {
+        panic!("{source}: expected a binary expression");
+    };
+    let Expr::Binary { op: left_op, .. } = *left else {
+        panic!("{source}: expected a binary left operand");
+    };
+    (op, left_op)
+}
+
+#[test]
+fn test_bitwise_operators_bind_tighter_than_comparisons() {
+    // Appendix B rows 8 to 11: `&`, `^` and `|` sit above the comparisons, so a masked
+    // value can be compared without parentheses.
+    assert_eq!(
+        root_and_left_ops("x & 3 == 2"),
+        (BinaryOp::Equal, BinaryOp::BitAnd)
+    );
+    assert_eq!(
+        root_and_left_ops("x | 1 < y"),
+        (BinaryOp::Less, BinaryOp::BitOr)
+    );
+    assert_eq!(
+        root_and_left_ops("x ^ y != 0"),
+        (BinaryOp::NotEqual, BinaryOp::BitXor)
+    );
+    // `|` is still looser than `^`, which is looser than `&`.
+    assert_eq!(
+        root_and_left_ops("a & b ^ c | d"),
+        (BinaryOp::BitOr, BinaryOp::BitXor)
+    );
+}
+
+#[test]
+fn test_equality_and_ordering_share_one_level() {
+    // One row in Appendix B: `a == b < c` reads left to right as a chain, which the
+    // checker rejects, instead of quietly comparing `a` against `b < c`.
+    assert_eq!(
+        root_and_left_ops("a == b < c"),
+        (BinaryOp::Less, BinaryOp::Equal)
+    );
+    assert_eq!(
+        root_and_left_ops("a < b == c"),
+        (BinaryOp::Equal, BinaryOp::Less)
+    );
+}

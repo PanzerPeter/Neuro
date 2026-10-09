@@ -260,7 +260,7 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(stride)
     }
 
-    /// Leave a stepped loop when no further value fits in the range.
+    /// Leave a stepped or inclusive loop when no further value fits in the range.
     ///
     /// Adding the stride first and comparing after is wrong near the top of the type:
     /// `(0u8..255).step(10)` would wrap from 250 back to 4 and never exit. The distance
@@ -457,10 +457,13 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_load(start_val.get_type(), induction_alloca, "for.cur")?
             .into_int_value();
-        if let Some(stride) = stride {
-            self.exit_when_stride_overshoots(current_iter, end_int, stride, inclusive, exit_bb)?;
-        }
         let increment = stride.unwrap_or_else(|| current_iter.get_type().const_int(1, false));
+        // An inclusive range may end at its type's maximum, which has no successor:
+        // `i + 1` wraps to the minimum, `i <= end` admits it, and the loop never leaves.
+        // A unit stride is checked the same way as a stepped one, so `end` itself exits.
+        if stride.is_some() || inclusive {
+            self.exit_when_stride_overshoots(current_iter, end_int, increment, inclusive, exit_bb)?;
+        }
         let next_iter = self
             .builder
             .build_int_add(current_iter, increment, "for.next")

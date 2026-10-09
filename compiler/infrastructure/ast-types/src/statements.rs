@@ -33,8 +33,8 @@ pub struct LoopAdapter {
 /// A place is rooted at a binding and reached through any number of field
 /// accesses, one index, or a dereference. The base of each form is kept as an
 /// [`Expr`] rather than a nested `Place` because the base is *read* on the way to
-/// the location — `self.inner.data[i] = v` loads `self`, projects `inner`, and only
-/// the last step is a write — so every stage already has the machinery for it.
+/// the location (`self.inner.data[i] = v` loads `self`, projects `inner`, and only
+/// the last step is a write), so every stage already has the machinery for it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Place {
     /// A binding: `x`.
@@ -247,8 +247,8 @@ pub enum Stmt {
     /// Break out of the nearest enclosing loop, or out of the loop named by
     /// `label` when present (`break outer`).
     ///
-    /// `value` carries the loop-expression result for a value-producing `break v`
-    /// The targeted `loop` evaluates to it. Only `loop` accepts a value;
+    /// `value` carries the loop-expression result for a value-producing `break v`:
+    /// the targeted `loop` evaluates to it. Only `loop` accepts a value;
     /// `while`/`for` always yield unit, so a value here targeting them is rejected
     /// in semantic analysis. `None` is a plain `break` / `break label`.
     Break {

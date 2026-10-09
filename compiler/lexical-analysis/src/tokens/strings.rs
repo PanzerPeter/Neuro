@@ -23,6 +23,11 @@ pub(super) fn decode_string_literal(
     let base = lex.span().start;
     let whole = Span::new(base, base + raw.len());
     let content = &raw[1..raw.len() - 1]; // Strip quotes
+    // Most literals hold no escape and no brace, and decode to their own text: skip
+    // building the per-character offset table the chunk decoder needs.
+    if !content.contains(['\\', '{', '}']) {
+        return Ok(StringValue::Plain(content.to_string()));
+    }
     let content_base = base + 1;
     let indexed: Vec<(usize, char)> = content
         .char_indices()
@@ -187,8 +192,11 @@ pub(super) fn decode_chunks(
         let (abs_off, ch) = indexed[i];
 
         if ch == '\\' {
+            // Only a block string can end on a `\`: its last line's newline belongs to
+            // the closing delimiter and was dropped. The regex keeps an ordinary
+            // literal from ever getting here.
             let Some((_, esc)) = indexed.get(i + 1).copied() else {
-                return Err(LexError::UnterminatedString { span: whole });
+                return Err(invalid_escape("\\".to_string()));
             };
             match esc {
                 'n' => {
@@ -231,8 +239,11 @@ pub(super) fn decode_chunks(
                     let Some(hex) = hex.filter(|h| h.len() == 2) else {
                         return Err(invalid_escape("\\x".to_string()));
                     };
+                    // `from_str_radix` alone would take a sign (`\x+1`).
                     let code = u8::from_str_radix(&hex, 16)
-                        .map_err(|_| invalid_escape(format!("\\x{}", hex)))?;
+                        .ok()
+                        .filter(|_| hex.chars().all(|c| c.is_ascii_hexdigit()))
+                        .ok_or_else(|| invalid_escape(format!("\\x{}", hex)))?;
                     text.push(code as char);
                     i += 4;
                 }

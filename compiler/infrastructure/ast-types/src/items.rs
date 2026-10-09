@@ -87,7 +87,7 @@ pub struct FunctionDef {
     /// boolean expression over the function's const parameters, evaluated at every
     /// instantiation against the concrete values; a violated predicate is an error at
     /// the offending call. Trait bounds in a `where` clause are folded into the
-    /// matching parameter's `bounds` instead (they are unenforced this phase).
+    /// matching parameter's `bounds` instead.
     pub where_predicates: Vec<Expr>,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
@@ -96,12 +96,12 @@ pub struct FunctionDef {
     pub span: Span,
 }
 
-/// A single `@name(arg1, arg2, label: value)` attribute attached to a function or method.
+/// A single `@name(arg1, arg2, label: value)` attribute attached to a function, method,
+/// or struct.
 ///
-/// The semantics of an attribute are interpreted by later passes (e.g. the
-/// `@allow(prefer_loop_over_while_true)` lint suppression in semantic analysis).
-/// Unknown attributes are accepted by the parser to keep the surface forward
-/// compatible with future passes such as `@gpu` and `@no_prelude`.
+/// The parser accepts any name. Semantic analysis holds the fixed set some pass acts on
+/// (`@derive`, `@allow`, `@grad`, `@gpu`, `@kernel`, ...) and rejects every other, so a
+/// misspelled attribute is an error rather than a silent no-op.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     pub name: Identifier,
@@ -197,7 +197,7 @@ pub struct StructDef {
     pub where_predicates: Vec<Expr>,
     pub fields: Vec<FieldDef>,
     /// `@derive(...)` attributes attached to the struct (e.g. `@derive(Copy, Clone)`).
-    /// Interpreted by semantic analysis to determine Copy/Clone-ness.
+    /// Interpreted by semantic analysis, which decides what each derive generates.
     pub attributes: Vec<Attribute>,
     pub span: Span,
 }
@@ -232,12 +232,13 @@ pub struct MethodDef {
     pub span: Span,
 }
 
-/// An `impl` block associating methods with a named struct type.
+/// An `impl` block associating methods with a named struct or enum type.
 ///
 /// `trait_name` is `Some` for a trait implementation (`impl Drawable for T`) and
-/// `None` for a plain inherent block (`impl T`). `Drop` is a compiler-known lang-item
-/// Any other trait name must resolve to a user `trait` declaration,
-/// against which semantic analysis checks the impl for conformance.
+/// `None` for a plain inherent block (`impl T`). `Drop`, `Hashable` and the operator
+/// traits are compiler-known lang-items. Any other trait name must resolve to a
+/// `trait` declaration, against which semantic analysis checks the impl for
+/// conformance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplDef {
     /// The module this block was loaded from. See [`FunctionDef::module`]. An `impl`
@@ -359,10 +360,11 @@ pub struct TraitMethod {
 
 /// A `trait` declaration: a set of method signatures defining shared behavior.
 ///
-/// Traits are fully monomorphized and erased: there is no vtable and no runtime trait
-/// object this phase (`dyn` dispatch is). A trait produces no code on its own;
-/// each `impl Trait for Type` block lowers to ordinary inherent methods, and any default
-/// method the implementor omits is copied in as a concrete method.
+/// A trait produces no code on its own: each `impl Trait for Type` block lowers to
+/// ordinary inherent methods, and any default method the implementor omits is copied in
+/// as a concrete method. Static dispatch is monomorphized and erased; `&dyn Trait`
+/// dispatch goes through a vtable whose slot order is the trait's method declaration
+/// order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitDef {
     pub name: Identifier,

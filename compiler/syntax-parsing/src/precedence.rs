@@ -10,11 +10,10 @@ pub(crate) enum Precedence {
     NullCoalesce, // ?? (Appendix B row 14: looser than ||, tighter than range)
     LogicalOr,    // ||
     LogicalAnd,   // &&
-    BitwiseOr,    // |
+    Comparison,   // < > <= >= == != (Appendix B row 11: one row, no chaining)
+    BitwiseOr,    // | (Appendix B rows 8-10: bitwise binds tighter than comparison)
     BitwiseXor,   // ^
     BitwiseAnd,   // &
-    Equality,     // == !=
-    Comparison,   // < > <= >=
     Shift,        // <<
     Sum,          // + -
     Product,      // * / %

@@ -27,6 +27,17 @@ fn int_type_range(ty: &Type) -> Option<(i128, i128)> {
     })
 }
 
+/// The bit width of an integer type, which bounds a shift amount.
+fn int_type_bits(ty: &Type) -> Option<u32> {
+    Some(match ty {
+        Type::I8 | Type::U8 => 8,
+        Type::I16 | Type::U16 => 16,
+        Type::I32 | Type::U32 => 32,
+        Type::I64 | Type::U64 => 64,
+        _ => return None,
+    })
+}
+
 /// Truncate `f` toward zero into `ty`, clamping to the type's bounds and mapping NaN
 /// to zero, the same total function `llvm.fpto{s,u}i.sat` computes at run time. Rust's
 /// float-to-integer `as` is defined as exactly that saturating conversion.
@@ -281,16 +292,17 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Generate code for an identifier (variable reference).
     ///
-    /// Checks `const_values` first so a local variable can shadow a same-named constant.
+    /// A local or parameter is resolved before `const_values`, so it shadows a module
+    /// constant of the same name as the checker resolves it. A body-level `const` that
+    /// shadows a local unbinds the local for its scope (`bind_const`).
     pub(crate) fn codegen_identifier(&self, name: &str) -> CodegenResult<BasicValueEnum<'ctx>> {
-        if let Some(val) = self.const_values.get(name) {
-            return Ok(*val);
-        }
-
-        let ptr = self
-            .variables
-            .get(name)
-            .ok_or_else(|| CodegenError::UndefinedVariable(name.to_string()))?;
+        let Some(ptr) = self.variables.get(name) else {
+            return self
+                .const_values
+                .get(name)
+                .copied()
+                .ok_or_else(|| CodegenError::UndefinedVariable(name.to_string()));
+        };
 
         let var_type = self.variable_types.get(name).ok_or_else(|| {
             CodegenError::InternalError(format!("missing type for variable {}", name))
@@ -390,16 +402,22 @@ impl<'ctx> CodegenContext<'ctx> {
                         BinaryOp::GreaterEqual => Ok(FoldedConst::Bool(a >= b)),
                         BinaryOp::And => Ok(FoldedConst::Bool(a != 0 && b != 0)),
                         BinaryOp::Or => Ok(FoldedConst::Bool(a != 0 || b != 0)),
-                        // Bitwise operators and `<<` have no overflow rule at run time:
-                        // bits shifted out are discarded. Truncating to the node's type
-                        // reproduces that instead of keeping the wider `i128` result.
+                        // Bitwise operators have no overflow rule at run time, and the
+                        // bits an in-range `<<` shifts out are discarded. Truncating to
+                        // the node's type reproduces that instead of keeping the wider
+                        // `i128` result.
                         BinaryOp::BitAnd => Ok(FoldedConst::Int(truncate_int_to(a & b, &ty))),
                         BinaryOp::BitOr => Ok(FoldedConst::Int(truncate_int_to(a | b, &ty))),
                         BinaryOp::BitXor => Ok(FoldedConst::Int(truncate_int_to(a ^ b, &ty))),
-                        BinaryOp::Shl => Ok(FoldedConst::Int(truncate_int_to(
-                            a.wrapping_shl(b as u32),
-                            &ty,
-                        ))),
+                        // An amount outside the type's width is an overflow: the debug
+                        // tier panics and the release tier masks, so like an overflowing
+                        // `+` it has no one value to fold to and is refused.
+                        BinaryOp::Shl => match int_type_bits(&ty) {
+                            Some(bits) if (0..i128::from(bits)).contains(&b) => {
+                                Ok(FoldedConst::Int(truncate_int_to(a << b, &ty)))
+                            }
+                            _ => checked_arith(None, &ty, "<<"),
+                        },
                         BinaryOp::MatMul => Err(CodegenError::InternalError(
                             "operator '@' is not valid in const expressions".into(),
                         )),

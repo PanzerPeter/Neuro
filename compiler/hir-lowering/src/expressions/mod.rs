@@ -766,8 +766,6 @@ impl Lowerer {
     }
 }
 
-/// An unsuffixed numeric literal, possibly negated or parenthesised, as the checker's
-/// operator rule recognizes it: lowering it again has no effect beyond its type.
 /// Whether `op`'s result has its operands' type, so a type expected of the result is
 /// the type expected of each operand.
 fn keeps_operand_type(op: ast_types::BinaryOp) -> bool {
@@ -815,6 +813,8 @@ fn is_literal_arithmetic(expr: &Expr) -> bool {
     }
 }
 
+/// An unsuffixed numeric literal, possibly negated or parenthesised, as the checker's
+/// operator rule recognizes it: lowering it again has no effect beyond its type.
 fn is_bare_literal(expr: &Expr) -> bool {
     match expr {
         Expr::Literal(Literal::Integer(_, None) | Literal::Float(_, None), _) => true,

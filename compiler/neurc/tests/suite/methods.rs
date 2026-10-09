@@ -201,7 +201,7 @@ func main() -> i32 {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("mutably borrow") || err.contains("CannotBorrowMutably"),
+        err.contains("cannot mutably borrow 'c'"),
         "error should mention the receiver is not mutable, got: {}",
         err
     );
@@ -238,7 +238,7 @@ func main() -> i32 {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("already borrowed") || err.contains("borrow 'c' as mutable"),
+        err.contains("cannot borrow 'c' as mutable: it is already borrowed"),
         "error should mention the exclusivity conflict, got: {}",
         err
     );
@@ -386,7 +386,7 @@ func main() -> i32 {
     assert!(result.is_err(), "calling unknown method should fail");
     let err = result.unwrap_err();
     assert!(
-        err.contains("nonexistent") || err.contains("MethodNotFound") || err.contains("method"),
+        err.contains("struct 'Point' has no method 'nonexistent'"),
         "error should mention the missing method, got: {}",
         err
     );

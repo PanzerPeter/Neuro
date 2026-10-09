@@ -12,7 +12,6 @@ use crate::precedence::Precedence;
 use ast_types::{Expr, LoopAdapter, LoopAdapterKind, Stmt};
 
 use super::Parser;
-use super::statements::stmt_span;
 
 impl Parser {
     /// Parse an if/else statement
@@ -23,6 +22,7 @@ impl Parser {
         self.skip_newlines();
 
         let then_block = self.parse_block()?;
+        let mut end_span = self.previous_span(start_span);
         self.skip_newlines();
 
         let mut else_if_blocks = Vec::new();
@@ -41,21 +41,15 @@ impl Parser {
                 self.skip_newlines();
 
                 let else_if_block = self.parse_block()?;
+                end_span = self.previous_span(start_span);
                 else_if_blocks.push((else_if_condition, else_if_block));
                 self.skip_newlines();
             } else {
                 else_block = Some(self.parse_block()?);
+                end_span = self.previous_span(start_span);
                 break;
             }
         }
-
-        let end_span = else_block
-            .as_ref()
-            .and_then(|stmts| stmts.last())
-            .or_else(|| else_if_blocks.last().and_then(|(_, stmts)| stmts.last()))
-            .or_else(|| then_block.last())
-            .map(stmt_span)
-            .unwrap_or(start_span);
 
         Ok(Stmt::If {
             condition,
@@ -79,7 +73,7 @@ impl Parser {
 
         let body = self.parse_labeled_block(label.as_ref())?;
 
-        let end_span = body.last().map(stmt_span).unwrap_or(condition.span());
+        let end_span = self.previous_span(condition.span());
 
         Ok(Stmt::While {
             label,
@@ -103,7 +97,7 @@ impl Parser {
 
         let body = self.parse_labeled_block(label.as_ref())?;
 
-        let end_span = body.last().map(stmt_span).unwrap_or(start_span);
+        let end_span = self.previous_span(start_span);
 
         Ok(Stmt::Expr(Expr::Loop {
             label,
@@ -189,7 +183,7 @@ impl Parser {
             };
             Self::check_head_agrees(&index, pair_head, iterable.span())?;
             let body = self.parse_labeled_block(label.as_ref())?;
-            let end_span = body.last().map(stmt_span).unwrap_or(iterable.span());
+            let end_span = self.previous_span(iterable.span());
             let span = start_span.merge(end_span);
 
             // A parenthesised range is the only way to write `(0..n).enumerate()`,
@@ -238,7 +232,7 @@ impl Parser {
 
         let body = self.parse_labeled_block(label.as_ref())?;
 
-        let end_span = body.last().map(stmt_span).unwrap_or(end.span());
+        let end_span = self.previous_span(end.span());
 
         Ok(Stmt::ForRange {
             label,

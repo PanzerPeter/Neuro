@@ -81,6 +81,10 @@ literals, so a `\u{...}` payload's brace does not close the hole. A `"` inside a
 supported (the quote ends the string token) and surfaces as
 `LexError::UnterminatedInterpolation`.
 
+An ordinary literal ends on its line: neither string regex admits a raw newline, so an unclosed
+`"` is reported as `UnterminatedString` on its own line instead of running on to the next `"`
+in the file. Only a block string spans lines.
+
 A triple-quoted (block) string `"""…"""` produces the same `TokenKind::String` payload as an
 ordinary literal, so nothing downstream distinguishes the two forms. It is declared as a bare
 `#[token("\"\"\"")]` whose callback scans and `bump`s the body itself: logos has no non-greedy

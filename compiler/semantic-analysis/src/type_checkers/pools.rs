@@ -26,8 +26,8 @@
 
 use std::collections::HashSet;
 
-use ast_types::{Expr, InterpPart, Stmt};
-use shared_types::Span;
+use ast_types::{BinaryOp, Expr, InterpPart, Stmt};
+use shared_types::{Literal, Span};
 
 use crate::errors::TypeError;
 use crate::types::Type;
@@ -78,14 +78,23 @@ impl TypeChecker {
         let _ = self.pool_stack.pop();
     }
 
-    /// Reject storing `value`, of type `ty`, into the binding `name` when `name` was
-    /// declared before the innermost open pool and the value may carry arena memory.
-    /// Inert outside a pool.
-    pub(crate) fn check_pool_store(&mut self, name: &str, ty: &Type, value: &Expr, span: Span) {
+    /// Reject storing `value`, of type `ty`, into a place rooted at the binding `name`
+    /// when the place may outlive the innermost open pool and the value may carry arena
+    /// memory. That is a binding declared before the pool, or, when `through_reference`
+    /// says the place is reached through a reference, one the pool declares. Inert
+    /// outside a pool.
+    pub(crate) fn check_pool_store(
+        &mut self,
+        name: &str,
+        ty: &Type,
+        value: &Expr,
+        span: Span,
+        through_reference: bool,
+    ) {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
-        if self.pool_safe(ty) || self.carries_no_arena(value, Emission::Routed) {
+        if self.pool_safe(ty) {
             return;
         }
         // A name the symbol table does not know is already an undefined-variable
@@ -93,10 +102,19 @@ impl TypeChecker {
         let Some(depth) = self.symbols.defining_depth(name) else {
             return;
         };
-        if depth >= pool.scope_floor {
+        // The backend routes a store unless its root is one of the innermost block's own
+        // bindings. A reference the block declares may still point at a place outliving
+        // it, and that store is emitted where it is written, inside the arena.
+        let (emission, place) = if depth < pool.scope_floor {
+            (Emission::Routed, format!("'{name}'"))
+        } else if through_reference {
+            (Emission::InPlace, format!("the place behind '{name}'"))
+        } else {
+            return;
+        };
+        if self.carries_no_arena(value, emission) {
             return;
         }
-        let place = format!("'{name}'");
         let pool = pool.pool.clone();
         self.record_error(TypeError::PoolStoreEscapes {
             place,
@@ -158,20 +176,30 @@ impl TypeChecker {
             // An operator that allocates does so inline at the point it is written, so
             // only a routed emission puts its buffer on the heap. Either way it can still
             // carry an operand's arena memory out, which the walk below rules out.
-            Expr::Binary { left, right, .. } => {
+            // A `string` `+` is the exception: it copies both operands into its buffer and
+            // keeps neither. Operator dispatch reads the left operand, so a `string` there
+            // rules out a user `Add` that could hand an operand back.
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 emission == Emission::Routed
-                    && self.carries_no_arena(left, emission)
-                    && self.carries_no_arena(right, emission)
+                    && ((*op == BinaryOp::Add && self.is_string_operand(left))
+                        || (self.carries_no_arena(left, emission)
+                            && self.carries_no_arena(right, emission)))
             }
             // Interpolation builds one fresh buffer, on the same terms as the operator
-            // above: routed, that buffer is heap memory, and each hole is walked because
-            // a formatter is free to hand back its operand rather than a copy of it.
+            // above: routed, that buffer is heap memory. Text around the holes means the
+            // buffer is a copy of every rendering; a lone hole is walked, because a
+            // formatter is free to hand back its operand rather than a copy of it.
             Expr::InterpString { parts, .. } => {
                 emission == Emission::Routed
-                    && parts.iter().all(|part| match part {
-                        InterpPart::Text(_) => true,
-                        InterpPart::Formatted { expr, .. } => self.carries_no_arena(expr, emission),
-                    })
+                    && (parts.iter().any(|part| matches!(part, InterpPart::Text(_)))
+                        || parts.iter().all(|part| match part {
+                            InterpPart::Text(_) => true,
+                            InterpPart::Formatted { expr, .. } => {
+                                self.carries_no_arena(expr, emission)
+                            }
+                        }))
             }
             // A builtin `.clone()` or `.to_string()` copies its receiver into an allocation
             // of its own, and a routed emission makes that allocation on the heap, so
@@ -216,9 +244,7 @@ impl TypeChecker {
                         .iter()
                         .all(|element| self.carries_no_arena(element, emission))
             }
-            // A branch yields one of its arms' values. The walk runs before the value is
-            // checked, so a name an arm declares is unknown here and would read as "not a
-            // binding"; an arm is therefore walked only when it is a bare tail expression.
+            // A branch yields one of its arms' values.
             Expr::If {
                 then_block,
                 else_if_blocks,
@@ -227,24 +253,55 @@ impl TypeChecker {
             } => [then_block, else_block]
                 .into_iter()
                 .chain(else_if_blocks.iter().map(|(_, block)| block))
-                .all(|block| {
-                    tail_only(block).is_some_and(|tail| self.carries_no_arena(tail, emission))
-                }),
+                .all(|block| self.block_carries_no_arena(block, emission)),
             // An arm's pattern bindings are parts of the scrutinee, so once the scrutinee
-            // is proven off the arena, a binding the arm reads (unknown here, for the
-            // reason above) is too.
+            // is proven off the arena, a binding the arm reads is too.
             Expr::Match {
                 scrutinee, arms, ..
             } => {
                 self.carries_no_arena(scrutinee, emission)
-                    && arms.iter().all(|arm| {
-                        let body = match arm.body.as_ref() {
-                            Expr::Block { stmts, .. } => tail_only(stmts),
-                            other => Some(other),
-                        };
-                        body.is_some_and(|body| self.carries_no_arena(body, emission))
-                    })
+                    && arms
+                        .iter()
+                        .all(|arm| self.carries_no_arena(&arm.body, emission))
             }
+            Expr::Block { stmts, .. } => self.block_carries_no_arena(stmts, emission),
+            _ => false,
+        }
+    }
+
+    /// Whether a block's value is proven off the arena: a tail that passes, after
+    /// declarations whose initializers all pass. Argument binding produces this shape for
+    /// a reordered named call, and an arm of a branch is often one.
+    ///
+    /// The walk may run after the block's scope is gone, so a name the block declares can
+    /// be unknown here and would read as "not a binding". That is sound only because each
+    /// such name was bound to an initializer the walk has just proven; any statement but a
+    /// declaration could change what a name holds, so a block with one is refused.
+    fn block_carries_no_arena(&self, stmts: &[Stmt], emission: Emission) -> bool {
+        let Some((Stmt::Expr(tail), decls)) = stmts.split_last() else {
+            return false;
+        };
+        decls.iter().all(|stmt| {
+            matches!(stmt, Stmt::VarDecl { init: Some(init), .. }
+                if self.carries_no_arena(init, emission))
+        }) && self.carries_no_arena(tail, emission)
+    }
+
+    /// Whether `expr` is a `string` (or `&string`) operand, read from the source and the
+    /// symbol table alone: the walk may run before the expression has been checked.
+    fn is_string_operand(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Literal(Literal::String(_), _) | Expr::InterpString { .. } => true,
+            Expr::Identifier(id) => self
+                .symbols
+                .lookup(&id.name)
+                .is_some_and(|symbol| matches!(symbol.ty.referent(), Type::String)),
+            Expr::Paren(inner, _) => self.is_string_operand(inner),
+            Expr::Binary {
+                op: BinaryOp::Add,
+                left,
+                ..
+            } => self.is_string_operand(left),
             _ => false,
         }
     }
@@ -502,7 +559,22 @@ impl TypeChecker {
             .symbols
             .lookup(name)
             .is_none_or(|symbol| !self.pool_safe(symbol.ty.referent()));
-        (holds_pointers && self.declared_before_pools(name)).then(|| format!("'{name}'"))
+        // A `&mut` the block declares reaches whatever it borrows, which may predate
+        // every open pool however recently the reference itself was made.
+        let reaches_out = self.declared_before_pools(name) || self.reaches_through_mut(place);
+        (holds_pointers && reaches_out).then(|| format!("'{name}'"))
+    }
+
+    /// Whether the place `expr` names (or borrows, for `&place` / `&mut place`) is
+    /// reached through a mutable reference.
+    fn reaches_through_mut(&self, expr: &Expr) -> bool {
+        let place = match expr {
+            Expr::Reference { operand, .. } => operand,
+            Expr::Paren(inner, _) => return self.reaches_through_mut(inner),
+            other => other,
+        };
+        self.projection_type(place)
+            .is_some_and(|ty| self.nearest_reference(place, &ty) == Some(true))
     }
 
     /// The receiver a method call passes as `self`, which the operand walk must clear
@@ -722,15 +794,6 @@ fn callee_label(func: &Expr) -> String {
         _ => return "the callee".to_string(),
     };
     format!("'{name}'")
-}
-
-/// The tail expression of a block that declares nothing: the only block whose names are
-/// all resolvable before the block itself has been checked.
-fn tail_only(block: &[Stmt]) -> Option<&Expr> {
-    match block {
-        [Stmt::Expr(tail)] => Some(tail),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

@@ -19,13 +19,15 @@ use crate::codegen::context::{CodegenContext, DropTarget};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-/// A binding's saved prior state in the three name maps, restored when the arm's
-/// blocks are done so bindings do not leak to sibling arms or shadow the outer scope.
+/// A binding's saved prior state in the name maps, restored when the arm's blocks are
+/// done so bindings do not leak to sibling arms or shadow the outer scope. `constant` is
+/// what the name meant in `const_values`, which a body-level `const` shadows.
 pub(crate) struct SavedBinding<'ctx> {
     name: String,
     ptr: Option<PointerValue<'ctx>>,
     ty: Option<BasicTypeEnum<'ctx>>,
     sem: Option<Type>,
+    constant: Option<BasicValueEnum<'ctx>>,
 }
 
 /// Who releases what an arm's bindings take out of the scrutinee.
@@ -380,6 +382,25 @@ impl<'ctx> CodegenContext<'ctx> {
             ptr: self.variables.insert(name.to_string(), alloca),
             ty: self.variable_types.insert(name.to_string(), llvm_ty),
             sem: self.type_env.insert(name.to_string(), sem),
+            constant: self.const_values.get(name).copied(),
+        }
+    }
+
+    /// Bind a body-level `const`, handing back what the name meant before. A local of
+    /// the same name is unbound for the constant's scope: identifiers resolve locals
+    /// first, so leaving it in place would let the outer local win over the newer const.
+    pub(crate) fn bind_const(
+        &mut self,
+        name: &str,
+        value: BasicValueEnum<'ctx>,
+        sem: Type,
+    ) -> SavedBinding<'ctx> {
+        SavedBinding {
+            name: name.to_string(),
+            ptr: self.variables.remove(name),
+            ty: self.variable_types.remove(name),
+            sem: self.type_env.insert(name.to_string(), sem),
+            constant: self.const_values.insert(name.to_string(), value),
         }
     }
 
@@ -397,6 +418,10 @@ impl<'ctx> CodegenContext<'ctx> {
             match s.sem {
                 Some(prev) => self.type_env.insert(s.name.clone(), prev),
                 None => self.type_env.remove(&s.name),
+            };
+            match s.constant {
+                Some(prev) => self.const_values.insert(s.name.clone(), prev),
+                None => self.const_values.remove(&s.name),
             };
         }
     }

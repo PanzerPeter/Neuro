@@ -33,7 +33,7 @@ pub(crate) fn constant_stride(step: &Expr) -> Option<i128> {
             op: UnaryOp::Negate,
             operand,
             ..
-        } => eval_literal_int(operand).map(|value| -value),
+        } => eval_literal_int(operand).and_then(i128::checked_neg),
         Expr::Paren(inner, _) => constant_stride(inner),
         other => eval_literal_int(other),
     }

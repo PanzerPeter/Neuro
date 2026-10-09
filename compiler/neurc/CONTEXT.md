@@ -69,6 +69,11 @@ program's exit code is what the shell sees and a `run` leaves no artifact in the
 itself: the banner belongs to `compile`, and printing it under `run` would inject a compiler
 line into the program's own stdout.
 
+`compile_file` refuses an `-o` path that resolves to one of the program's own source files
+(`LoadedProgram.files`, every module's file) before anything is written, whatever `--emit`
+says: the link or the object write would otherwise replace the program with its own output.
+A path that does not exist yet names no source and is not compared.
+
 `compile_file` then checks the lowered HIR for a function named `main` **before** writing an
 object file. Without that check the pipeline ran to completion and handed a `main`-less object
 to the system linker, so the user saw `undefined reference to 'main'` naming the C runtime's
@@ -189,7 +194,12 @@ line, the column, the offending line and a caret run under the span. A `TypeErro
 span and gets a `note: moved here` under the error, rendered by the same helper.
 
 `render_parse_error` does the same for a syntax or lexical error through `ParseError::span()`.
-`UnexpectedEof` has no span of its own and is pointed at the end of the file.
+`UnexpectedEof` has no span of its own and is pointed at the end of the file: just past its last
+visible character, so a trailing newline does not move the caret onto a line no editor shows. A
+span the parser places after that point (the end-of-input token) is moved back to it the same way.
+
+`load_program` renders a named-argument error through `ArgumentError::span()` the same way, under
+an `Argument errors found in` header.
 
 `report_lowering_error` renders a lowering failure. `LoweringError::NotDifferentiable`, the
 derivative transform's refusal of a construct in a `@grad` body, carries a span and goes through
@@ -204,6 +214,11 @@ merged modules (see the panic-location note below), so a span raised by an impor
 resolved against the root file would point confidently at the wrong line.
 
 ### Remaining pipeline facts
+`main` parses the command line, then runs the pipeline on a thread with a 256 MiB stack
+(`PIPELINE_STACK_BYTES`). The parser caps nesting, but a long left-leaning chain such as
+`1 + 1 + ...` parses in a loop and is then walked recursively by every later pass, which
+overflowed the 8 MiB main stack at about 5000 operands. A panic on that thread exits with 101.
+
 Lint warnings from `type_check` are forwarded to stderr by `print_warnings` in both entry
 points. Warnings never cause a non-zero exit: they are informational and may be silenced with
 `@allow(...)` on the enclosing function.

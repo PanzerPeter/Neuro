@@ -227,7 +227,7 @@ pub enum TokenKind {
         decode_string_literal,
         priority = 2
     )]
-    #[regex(r#""([^"\\]|\\.)*""#, decode_string_literal, priority = 1)]
+    #[regex(r#""([^"\\\n]|\\.)*""#, decode_string_literal, priority = 1)]
     String(StringValue),
 
     // Character literals: a single Unicode scalar value between single
@@ -389,100 +389,6 @@ impl Token {
     pub fn new(kind: TokenKind, span: Span) -> Self {
         Self { kind, span }
     }
-
-    /// Returns the text representation of this token for display purposes
-    pub fn as_str(&self) -> &str {
-        match &self.kind {
-            TokenKind::Func => "func",
-            TokenKind::Val => "val",
-            TokenKind::Mut => "mut",
-            TokenKind::Const => "const",
-            TokenKind::As => "as",
-            TokenKind::If => "if",
-            TokenKind::Else => "else",
-            TokenKind::Return => "return",
-            TokenKind::True => "true",
-            TokenKind::False => "false",
-            TokenKind::While => "while",
-            TokenKind::Loop => "loop",
-            TokenKind::For => "for",
-            TokenKind::In => "in",
-            TokenKind::Break => "break",
-            TokenKind::Continue => "continue",
-            TokenKind::Struct => "struct",
-            TokenKind::Enum => "enum",
-            TokenKind::Impl => "impl",
-            TokenKind::Trait => "trait",
-            TokenKind::Dyn => "dyn",
-            TokenKind::Import => "import",
-            TokenKind::Export => "export",
-            TokenKind::Module => "module",
-            TokenKind::Match => "match",
-            TokenKind::Where => "where",
-            TokenKind::Type => "type",
-            TokenKind::Newtype => "newtype",
-            TokenKind::Unsafe => "unsafe",
-            TokenKind::Pool => "pool",
-            TokenKind::Move => "move",
-            TokenKind::SelfLower => "self",
-            TokenKind::SelfUpper => "Self",
-            TokenKind::Identifier(s) => s,
-            TokenKind::Integer(_) => "<integer>",
-            TokenKind::IntegerSuffix(_) => "<integer>",
-            TokenKind::Float(_) => "<float>",
-            TokenKind::FloatSuffix(_) => "<float>",
-            TokenKind::String(_) => "<string>",
-            TokenKind::Char(_) => "<char>",
-            TokenKind::Lifetime(_) => "<lifetime>",
-            TokenKind::Plus => "+",
-            TokenKind::Minus => "-",
-            TokenKind::Star => "*",
-            TokenKind::Slash => "/",
-            TokenKind::Percent => "%",
-            TokenKind::PlusEqual => "+=",
-            TokenKind::MinusEqual => "-=",
-            TokenKind::StarEqual => "*=",
-            TokenKind::SlashEqual => "/=",
-            TokenKind::PercentEqual => "%=",
-            TokenKind::EqualEqual => "==",
-            TokenKind::NotEqual => "!=",
-            TokenKind::LessEqual => "<=",
-            TokenKind::GreaterEqual => ">=",
-            TokenKind::Less => "<",
-            TokenKind::Greater => ">",
-            TokenKind::LeftShift => "<<",
-            TokenKind::AmpAmp => "&&",
-            TokenKind::Amp => "&",
-            TokenKind::PipePipe => "||",
-            TokenKind::PipeGreater => "|>",
-            TokenKind::Pipe => "|",
-            TokenKind::Caret => "^",
-            TokenKind::Tilde => "~",
-            TokenKind::Bang => "!",
-            TokenKind::Equal => "=",
-            TokenKind::At => "@",
-            TokenKind::Arrow => "->",
-            TokenKind::FatArrow => "=>",
-            TokenKind::ColonColon => "::",
-            TokenKind::Dot => ".",
-            TokenKind::DotDot => "..",
-            TokenKind::DotDotEqual => "..=",
-            TokenKind::QuestionQuestion => "??",
-            TokenKind::Question => "?",
-            TokenKind::LeftParen => "(",
-            TokenKind::RightParen => ")",
-            TokenKind::LeftBrace => "{",
-            TokenKind::RightBrace => "}",
-            TokenKind::LeftBracket => "[",
-            TokenKind::RightBracket => "]",
-            TokenKind::Comma => ",",
-            TokenKind::Colon => ":",
-            TokenKind::Semicolon => ";",
-            TokenKind::Newline => "<newline>",
-            TokenKind::Eof => "<eof>",
-            TokenKind::_LineComment | TokenKind::_BlockComment => unreachable!(),
-        }
-    }
 }
 
 // Literal parsing helper functions (tightly coupled to TokenKind)
@@ -533,7 +439,3 @@ fn lex_nested_block_comment(
         span: Span::new(open, lex.source().len()),
     })
 }
-
-// ── Suffixed integer helpers ──────────────────────────────────────────────────
-
-// ── Suffixed float helpers ────────────────────────────────────────────────────

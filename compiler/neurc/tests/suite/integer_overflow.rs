@@ -215,3 +215,75 @@ fn a_negation_overflow_says_what_failed_and_where() {
         "a negation overflow must name itself and its source location, got:\n{stderr}"
     );
 }
+
+/// A shift by at least its operand's width, or by a negative amount, is an overflow.
+/// LLVM leaves such a shift undefined, so the amount used to reach `shl` / `lshr`
+/// unchecked and the result depended on the optimization level and the target: garbage
+/// at `-O2`, and even at `-O0` once the amount was a constant. The amounts come through a
+/// call so neither tier sees them as literals.
+fn shift_source(shift: &str) -> String {
+    format!(
+        r#"
+func amount_i32(n: i32) -> i32 {{ n }}
+func amount_u8(n: u8) -> u8 {{ n }}
+
+func main() -> i32 {{
+    {shift}
+}}
+"#
+    )
+}
+
+#[test]
+fn an_oversized_left_shift_panics_in_debug() {
+    let exe = compile_source(&shift_source("return 1 << amount_i32(40)"), "shl_dbg", "0");
+    let stderr = stderr_of(&exe);
+    assert!(
+        stderr.contains("panic: shift overflow at"),
+        "a shift by the full width must panic, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn an_oversized_right_shift_panics_in_debug() {
+    let source = shift_source("return 200u8.shr(amount_u8(8)) as i32");
+    let exe = compile_source(&source, "shr_dbg", "0");
+    let stderr = stderr_of(&exe);
+    assert!(
+        stderr.contains("panic: shift overflow at"),
+        "a shift by the full width must panic, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn a_negative_shift_amount_panics_in_debug() {
+    let exe = compile_source(&shift_source("return 5 << amount_i32(-31)"), "shl_neg", "0");
+    let status = run(&exe);
+    assert!(
+        trapped(status),
+        "expected debug build to abort, but it exited with {:?}",
+        status.code()
+    );
+}
+
+#[test]
+fn an_oversized_shift_masks_its_amount_in_release() {
+    // 40 & 31 = 8, 9 & 7 = 1 and -31 & 31 = 1: 256 + 100 + 10.
+    let source = shift_source(
+        "val sum = (1 << amount_i32(40)) + (200u8.shr(amount_u8(9)) as i32) + (5 << amount_i32(-31))
+    return sum - 256",
+    );
+    let exe = compile_source(&source, "shift_rel", "2");
+    let status = run(&exe);
+    assert_eq!(exit_low_byte(status), Some(110));
+}
+
+#[test]
+fn an_in_range_shift_is_unchanged_on_both_tiers() {
+    let source = shift_source("return (3 << amount_i32(5)) + (200u8.shr(amount_u8(3)) as i32)");
+    for (opt, tag) in [("0", "shift_ok_dbg"), ("2", "shift_ok_rel")] {
+        let exe = compile_source(&source, tag, opt);
+        // 96 + 25.
+        assert_eq!(exit_low_byte(run(&exe)), Some(121), "at -O{opt}");
+    }
+}

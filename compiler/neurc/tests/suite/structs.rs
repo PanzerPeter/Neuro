@@ -117,7 +117,7 @@ func main() -> i32 {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("immutable") || err.contains("AssignToImmutableField"),
+        err.contains("cannot assign to field 'x' of immutable binding 'p'"),
         "error should mention immutability, got: {}",
         err
     );
@@ -147,7 +147,7 @@ func main() -> i32 {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("missing") || err.contains("MissingStructField"),
+        err.contains("missing field 'y' in struct literal for 'Point'"),
         "error should mention missing field, got: {}",
         err
     );
@@ -177,7 +177,7 @@ func main() -> i32 {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("unknown") || err.contains("UnknownField") || err.contains("no field"),
+        err.contains("struct 'Point' has no field 'z'"),
         "error should mention unknown field, got: {}",
         err
     );

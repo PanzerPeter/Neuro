@@ -402,10 +402,17 @@ fn bind_from_item(
 }
 
 /// Consume as many leading segments as name modules, returning the deepest module reached
-/// and how many segments it took.
+/// and how many segments it took. A head the importing module declares as a type names
+/// that type, not a same-named file, so it consumes nothing.
 fn walk_path(graph: &ModuleGraph, from: usize, segments: &[&str]) -> (Option<usize>, usize) {
     let mut module = None;
     let mut consumed = 0;
+    if segments
+        .first()
+        .is_some_and(|head| graph.declares_type(from, head))
+    {
+        return (module, consumed);
+    }
     for segment in segments {
         match graph.resolve_segment(from, module, segment) {
             Some(id) => {

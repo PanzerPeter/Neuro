@@ -417,8 +417,9 @@ impl Parser {
             TokenKind::Pipe => Precedence::BitwiseOr,
             TokenKind::Caret => Precedence::BitwiseXor,
             TokenKind::Amp => Precedence::BitwiseAnd,
-            TokenKind::EqualEqual | TokenKind::NotEqual => Precedence::Equality,
-            TokenKind::Less
+            TokenKind::EqualEqual
+            | TokenKind::NotEqual
+            | TokenKind::Less
             | TokenKind::Greater
             | TokenKind::LessEqual
             | TokenKind::GreaterEqual => Precedence::Comparison,

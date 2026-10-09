@@ -490,9 +490,9 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
 (`expressions/methods.rs`).
 
 - `string.len()` → `extractvalue` field 1 (O(1) stored byte length, `u64`, no conversion).
-- `string.clone()` → the receiver's own fat-pointer value: strings are immutable and
-  `.rodata`-backed, so a `{ ptr, len }` copy is observationally deep. Must duplicate the buffer
-  once heap strings land.
+- `string.clone()` → `copy_string_bytes`: a fresh `malloc`'d copy of the receiver's bytes,
+  so the clone is an owned producer (see Heap-string ownership) and never aliases a buffer
+  another owner releases. An owned receiver is released once copied.
 - `string.slice(a..b)` / `.slice(a..=b)` → `codegen_string_slice`, computing a
   `(ptr+start, end-start)` fat pointer (`end` = `b+1` for `..=`). Runtime bounds
   (`0 <= start <= end <= len`) and UTF-8 codepoint-boundary checks at both endpoints route through
@@ -556,7 +556,7 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   on any integer receiver to its own type and lower in `codegen_int_intrinsic`. Both operands are
   coerced to the receiver int via `coerce_if_needed` (an argument literal may arrive widened to
   i32). Wrapping → plain `add`/`sub`/`mul`, no `nsw`/`nuw`, never trapping. `.shr` → `ashr`
-  (signed) / `lshr` (unsigned). `saturating_add`/`sub` → `llvm.{s,u}{add,sub}.sat`;
+  (signed) / `lshr` (unsigned), its amount through `shift_amount` (see Integer Overflow ABI). `saturating_add`/`sub` → `llvm.{s,u}{add,sub}.sat`;
   `saturating_mul` has no direct intrinsic and becomes `{s,u}mul.with.overflow` + `select`
   (unsigned → MAX; signed → MIN on differing operand signs, else MAX).
 - `.is_nan()` → `codegen_is_nan`: `fcmp uno x, x` on the receiver value, yielding the `i1` a
@@ -583,8 +583,12 @@ fallback for a non-numeric resolved type.
 
 Module-level consts emit as `@NAME = internal constant TYPE VALUE` globals before any function
 definitions, and their LLVM value is also stored in `CodegenContext.const_values` so body
-references resolve without loading from the global. Body-level consts fold in Rust and store the
-`BasicValueEnum` in `const_values` for the function scope (no `alloca`, purely compile-time).
+references resolve without loading from the global. Body-level consts fold in Rust and bind the
+`BasicValueEnum` through `bind_const` (no `alloca`, purely compile-time), which records what the
+name meant in the enclosing scope's frame exactly as a `val` does, so the constant ends with its
+block. `codegen_identifier` resolves a local or parameter before `const_values`, matching the
+checker: a local shadows a module constant, and a body constant shadowing a local unbinds the
+local for its scope.
 
 Folding uses a pure-Rust `FoldedConst { Int(i64), Float(f64), Bool(bool), Str(String) }` rather
 than inkwell's const-arithmetic API (inconsistent across versions): all arithmetic happens in Rust
@@ -974,6 +978,10 @@ keeps the same mirror, so its binding is `last - j * n`. A stepped slice axis ma
 coordinate `c` to `c * step` along its walk, reflected about the range's last position when it
 is also reversed.
 
+An unstepped inclusive range takes the same exit with a stride of one, so it leaves on `end`
+itself before adding. `250u8..=255u8` otherwise stepped 255 to 0, which `i <= 255` admits, and
+never exited; an exclusive range needs no such check, since its condition already stops short.
+
 ## Integer Overflow ABI
 Integer `+` / `-` / `*` and unary `-` honor the overflow rule, keyed off
 `OptimizationLevelSetting`:
@@ -986,7 +994,14 @@ Integer `+` / `-` / `*` and unary `-` honor the overflow rule, keyed off
   `build_int_add/sub/mul` (two's-complement wrap).
 
 Signedness picks the `s`/`u` variant via `TypeMapper::is_unsigned_int`. Bitwise ops
-(`build_and`/`or`/`xor`/`left_shift`, `build_not` for `BitNot`) and floats are unaffected.
+(`build_and`/`or`/`xor`, `build_not` for `BitNot`) and floats are unaffected.
+
+A shift (`<<`, `.shr(n)`) whose amount is outside `0..width` (a signed negative amount reads as
+a huge unsigned one) is an overflow under the same rule: `shift_amount` (`binary.rs`) guards it
+with `panic: shift overflow` at `-O0` and masks it to `amount & (width - 1)` above, so LLVM's
+`shl` / `lshr` / `ashr` never sees an amount it would turn into poison. The mask folds away
+wherever the amount is provably in range. A constant `<<` folds only for an amount inside
+the width; any other is `ConstOverflow`, as an overflowing `+` in a constant is.
 
 Unary `-` on an integer is `0 - x` and overflows exactly where that subtraction does (at a
 signed type's `MIN`, and at every nonzero value of an unsigned type), so `codegen_unary` builds
@@ -1461,9 +1476,9 @@ registered the same way under a synthetic `__`-containing name that no source bi
 with; without that, the only route to map iteration would leak. A collection read out of a place
 another binding holds (`b.items.len()`) is not such a temporary: the copy aliases the holder's
 buffer, which the holder's own drop releases, so `reads_a_held_place` suppresses the registration. This is also what frees a `StringBuilder`'s
-buffer, since it is registered as an ordinary collection. **A `string` inside a
-collection is not freed**, and neither is the heap `string` that `+`, interpolation, or
-`StringBuilder::to_string` produces; both ride with the heap-string work.
+buffer, since it is registered as an ordinary collection. A `string` slot is released by the
+collection's per-instantiation drop helper (see the collection-slot bullet under Heap-string
+ownership).
 
 A tensor binding is registered the same way, with `DropTarget::TensorBuffer`: the binding's storage
 holds the DLPack handle, so scope exit loads it and calls the handle's own `deleter` under the same
@@ -1491,9 +1506,3 @@ re-emit these libcalls.
 target-specific datalayout/triple/attributes and marked `weak_odr`) and was exhaustively verified
 against clang's native `_Float16` / `__bf16`. Regenerate via that command if LLVM's IR syntax
 changes.
-
-## Future: MLIR Integration
-When tensor ops land, `melior` (Rust MLIR bindings, same LLVM 23 / MLIR 23 install) joins inkwell.
-Lowering: AST → HIR → MLIR dialects (linalg/tensor/func/arith) → Enzyme MLIR AD pass → GPU dialects
-(nvgpu/rocdl) or the `llvm` dialect → inkwell for final LLVM IR. inkwell stays the terminal
-emission layer in all paths.

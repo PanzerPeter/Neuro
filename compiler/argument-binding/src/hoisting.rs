@@ -15,6 +15,9 @@ use crate::signatures::Signature;
 /// symbols, so a program cannot collide with one by accident.
 const TEMP_PREFIX: &str = "__narg";
 
+/// The prefix of a hoisted receiver index temporary: see [`hoist_receiver_indices`].
+const RECEIVER_PREFIX: &str = "__nrecv";
+
 /// Whether binding `args` in `order` would evaluate two effect-carrying arguments in an
 /// order the program can tell apart from the one it wrote.
 ///
@@ -52,7 +55,9 @@ fn is_inert(expr: &Expr) -> bool {
 /// receiver *is* evaluated, and it runs before the arguments do: hoisting them ahead of
 /// an expression receiver would invert that pair to fix the argument pair, so a call with
 /// one keeps the binding it has today. A place receiver (`obj.m(...)`, `a.b.m(...)`)
-/// resolves to an address rather than a value, so nothing observable happens to it.
+/// resolves to an address rather than a value, so nothing observable happens to it,
+/// once `hoist` has bound any index it computes (`arr[next()].m(...)`) ahead of the
+/// arguments.
 pub(crate) fn callee_allows_hoisting(func: &Expr) -> bool {
     match func {
         Expr::Identifier(_) | Expr::Path { .. } => true,
@@ -103,11 +108,14 @@ pub(crate) fn hoist(call: &mut Expr, order: &[usize], sig: &Signature) {
         slot_of_source[source] = slot;
     }
 
-    let func = func.clone();
+    let mut func = func.clone();
     let type_args = type_args.clone();
     arg_labels.clear();
 
     let mut stmts: Vec<Stmt> = Vec::with_capacity(args.len() + 1);
+    if let Expr::FieldAccess { object, .. } = func.as_mut() {
+        hoist_receiver_indices(object, &mut stmts);
+    }
     let mut bound: Vec<Option<Expr>> = Vec::with_capacity(args.len());
     for (source, arg) in args.drain(..).enumerate() {
         if is_inert(&arg) {
@@ -117,7 +125,7 @@ pub(crate) fn hoist(call: &mut Expr, order: &[usize], sig: &Signature) {
         let arg_span = arg.span();
         let name = temp_name(source, arg_span);
         stmts.push(Stmt::VarDecl {
-            ty: annotation(sig, slot_of_source[source]),
+            ty: annotation(sig, slot_of_source[source], &arg),
             init: Some(arg),
             mutable: false,
             span: arg_span,
@@ -147,6 +155,44 @@ pub(crate) fn hoist(call: &mut Expr, order: &[usize], sig: &Signature) {
     };
 }
 
+/// Bind each index a place receiver computes to a temporary, in the order the receiver
+/// evaluates them, and index through the temporary instead.
+///
+/// The receiver runs before the arguments, so an index with an effect
+/// (`arr[next()].m(b: f(), a: g())`) must too. Left in the trailing call it would run
+/// after every hoisted argument, and the walk, which does not revisit that call, would
+/// never bind a labelled call inside it. An inert index and a variable read stay put:
+/// the index is an integer, and reading one is not an effect.
+fn hoist_receiver_indices(place: &mut Expr, stmts: &mut Vec<Stmt>) {
+    match place {
+        Expr::Paren(inner, _) => hoist_receiver_indices(inner, stmts),
+        Expr::FieldAccess { object, .. } | Expr::TupleIndex { object, .. } => {
+            hoist_receiver_indices(object, stmts);
+        }
+        Expr::Deref { operand, .. } => hoist_receiver_indices(operand, stmts),
+        Expr::Index { object, index, .. } => {
+            hoist_receiver_indices(object, stmts);
+            if is_inert(index) || matches!(index.as_ref(), Expr::Identifier(_)) {
+                return;
+            }
+            let span = index.span();
+            let name = Identifier {
+                name: format!("{RECEIVER_PREFIX}{}", stmts.len()),
+                span,
+            };
+            let init = std::mem::replace(index.as_mut(), Expr::Identifier(name.clone()));
+            stmts.push(Stmt::VarDecl {
+                ty: None,
+                init: Some(init),
+                mutable: false,
+                span,
+                name,
+            });
+        }
+        _ => {}
+    }
+}
+
 /// The name of the temporary holding the argument written at `source`.
 fn temp_name(source: usize, span: Span) -> Identifier {
     Identifier {
@@ -164,6 +210,14 @@ fn temp_name(source: usize, span: Span) -> Identifier {
 /// the annotation gives it back. It is copied only when it names types a call site can
 /// see: a type parameter of the callee, `Self`, or an `impl Trait` bound means nothing
 /// here, and the temporary is left to inference.
-fn annotation(sig: &Signature, slot: usize) -> Option<Type> {
-    sig.params.get(slot).and_then(|p| p.ty.clone())
+///
+/// A shared reference parameter is restated only over a shared borrow (`&x`). An
+/// argument position reborrows a `&mut T` as the `&T` it expects and a binding does
+/// not, so any other argument, `&mut x` or a variable holding one, is left to inference
+/// and the call applies the reborrow as it does for the positional form.
+fn annotation(sig: &Signature, slot: usize, arg: &Expr) -> Option<Type> {
+    let ty = sig.params.get(slot)?.ty.as_ref()?;
+    let shared_param = matches!(ty, Type::Reference { mutable: false, .. });
+    let shared_borrow = matches!(arg, Expr::Reference { mutable: false, .. });
+    (!shared_param || shared_borrow).then(|| ty.clone())
 }

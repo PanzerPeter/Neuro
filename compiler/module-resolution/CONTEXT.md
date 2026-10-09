@@ -54,7 +54,12 @@ Reads `.nr` files from disk; writes nothing.
   resolvable in a later round is not reported on an earlier one.
 - **A locally declared type wins over a same-named file.** `Point::new` keeps meaning the
   associated function even when a `Point.nr` sits next door, so adding a file can never
-  silently re-point an existing path.
+  silently re-point an existing path. The same holds for the head of a variant import
+  (`import Shape::{Circle}` of a local `enum Shape`) and for a name an import binds: after
+  `import geometry::{Counter as C}`, `C::make` is `Counter::make`, and after
+  `import ./utils::{io}`, `io::read` is loaded and resolved along `utils::io`. Discovery
+  substitutes the import's path for such a head, so a same-named file beside the module
+  is never loaded on its account.
 - **Descent stops, it does not fail.** A segment naming no module ends the descent and the
   remainder is left for the type checker: that is how `Point::new` and `Option::Some`
   survive this pass untouched. Only a path of three or more segments whose head resolves
@@ -128,8 +133,10 @@ Reads `.nr` files from disk; writes nothing.
   struct literal here.
 - **One walk, two passes.** `walk.rs` visits every place a qualified or imported name can
   be written: including bare identifiers, `match` / `val-else` patterns (both of which
-  imports made significant), and the holes of an interpolated string literal, whose
-  expressions are ordinary code and may name imported items; discovery and rewriting are
+  imports made significant), the holes of an interpolated string literal, whose
+  expressions are ordinary code and may name imported items, and every name that can only
+  be a type or a trait (a struct literal's, an `impl` block's type and trait, a trait bound,
+  `impl` / `dyn` types), so an `as` rename reaches each; discovery and rewriting are
   the same traversal with different callbacks, so a new position cannot be handled by one
   and forgotten by the other. The composition operator's names are the one position that
   is not an `Expr`: `Expr::Compose` holds bare `Identifier`s, so the walk offers each as the

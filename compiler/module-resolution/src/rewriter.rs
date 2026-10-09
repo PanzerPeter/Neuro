@@ -100,9 +100,15 @@ fn resolve_qualified(
 ) -> Result<(), ModuleError> {
     let chain = &segments[..segments.len() - 1];
 
+    // A head this module declares as a type, or imported as an item, starts a type path,
+    // so no same-named file beside the module can re-point it.
+    let head = &chain[0];
+    let local_type = graph.declares_type(from, head);
+    let imported_item = scope.rename(head).filter(|_| !local_type);
+
     let mut module = None;
     let mut consumed = 0;
-    if !graph.declares_type(from, &chain[0]) {
+    if !local_type && imported_item.is_none() {
         // An `as` alias renames the head only; the rest of the chain descends as usual.
         if let Some(id) = scope.module(&chain[0]) {
             module = Some(id);
@@ -130,6 +136,10 @@ fn resolve_qualified(
                 from: graph.display(from).to_string(),
                 head: segments[0].clone(),
             });
+        }
+        // `Pt::new` after `import geometry::{Point as Pt}` names `Point::new`.
+        if let Some(item) = imported_item {
+            rename_head(site, item);
         }
         return Ok(());
     };
@@ -275,6 +285,17 @@ fn rewrite_bare(site: Site<'_>, item: &str) {
             *expr = replacement;
         }
         Site::Pattern(_) => {}
+    }
+}
+
+/// Replace the type half of a bare `Type::member` path with the item an import bound.
+fn rename_head(site: Site<'_>, item: &str) {
+    if let Site::Expr(expr) = site {
+        match expr {
+            Expr::Path { type_name, .. } => type_name.name = item.to_string(),
+            Expr::EnumStructLiteral { enum_name, .. } => enum_name.name = item.to_string(),
+            _ => {}
+        }
     }
 }
 

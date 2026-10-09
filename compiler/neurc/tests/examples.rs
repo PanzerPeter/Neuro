@@ -236,8 +236,8 @@ fn quote_lines(text: &str) -> String {
 enum GpuOutcome {
     /// Nothing more to check (it type-checked, or aborted for want of a GPU), or why not.
     Settled(Result<(), String>),
-    /// A GPU ran it: hold it to its pins like any other example.
-    RanOnGpu,
+    /// A GPU ran the executable at this path: hold it to its pins like any other example.
+    RanOnGpu(PathBuf),
 }
 
 /// Off Linux a `gpu` example cannot compile, so it must at least type-check. On Linux it is
@@ -268,7 +268,7 @@ fn gpu_example_outcome(examples_dir: &Path, rel: &str) -> GpuOutcome {
     };
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.starts_with(NO_GPU_PANIC) {
-        return GpuOutcome::RanOnGpu;
+        return GpuOutcome::RanOnGpu(exe);
     }
     GpuOutcome::Settled(
         match output.stdout.is_empty() && output.status.code() != Some(0) {
@@ -280,64 +280,79 @@ fn gpu_example_outcome(examples_dir: &Path, rel: &str) -> GpuOutcome {
     )
 }
 
+/// Compile and run one registered example, returning what disagreed with its pins.
+fn check_example(examples_dir: &Path, rel: &str, expectation: Expectation) -> Result<(), String> {
+    let (expected_code, built) = match expectation {
+        Expectation::Module => return Ok(()),
+        Expectation::Exit(code) => (code, None),
+        Expectation::Gpu(code) => match gpu_example_outcome(examples_dir, rel) {
+            GpuOutcome::Settled(settled) => return settled,
+            GpuOutcome::RanOnGpu(exe) => (code, Some(exe)),
+        },
+    };
+    let expected_text = expected_stdout(examples_dir, rel)?;
+    let exe = match built {
+        Some(exe) => exe,
+        None => compile_example(examples_dir, rel)?,
+    };
+    let (code, stdout) = run_example(&exe)?;
+    let mut problems = Vec::new();
+    if code != expected_code {
+        problems.push(format!("exit code {code}, expected {expected_code}"));
+    }
+    if stdout != expected_text {
+        problems.push(describe_stdout_mismatch(rel, &expected_text, &stdout));
+    }
+    match problems.is_empty() {
+        true => Ok(()),
+        false => Err(problems.join(&format!("\n  {rel}: "))),
+    }
+}
+
 #[test]
 fn all_examples_compile_run_and_match_manifest() {
     let examples_dir = workspace_root().join("examples");
     let manifest = parse_manifest(&examples_dir.join("expected.txt"));
     let discovered = collect_by_extension(&examples_dir, "nr");
 
-    let mut failures: Vec<String> = Vec::new();
-
-    // Every discovered example must be registered and behave as registered.
-    for rel in &discovered {
-        let Some(&expectation) = manifest.get(rel) else {
-            failures.push(format!(
-                "{rel}: present on disk but missing from examples/expected.txt \
-                 (add a line: `{rel}  <exit-code>`)"
-            ));
-            continue;
-        };
-        let expected_code = match expectation {
-            Expectation::Module => continue,
-            Expectation::Exit(code) => code,
-            Expectation::Gpu(code) => match gpu_example_outcome(&examples_dir, rel) {
-                GpuOutcome::Settled(Ok(())) => continue,
-                GpuOutcome::Settled(Err(e)) => {
-                    failures.push(format!("{rel}: {e}"));
-                    continue;
+    // Every example is its own compile and run, so they are spread over the machine's
+    // cores; each result lands in the example's own slot, so the report keeps the
+    // discovery order whichever finished first.
+    let results: Vec<std::sync::OnceLock<Result<(), String>>> = discovered
+        .iter()
+        .map(|_| std::sync::OnceLock::new())
+        .collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(rel) = discovered.get(i) else { break };
+                    // Every discovered example must be registered and behave as registered.
+                    let result = match manifest.get(rel) {
+                        Some(&expectation) => check_example(&examples_dir, rel, expectation),
+                        None => Err(format!(
+                            "present on disk but missing from examples/expected.txt \
+                             (add a line: `{rel}  <exit-code>`)"
+                        )),
+                    };
+                    let _ = results[i].set(result);
                 }
-                GpuOutcome::RanOnGpu => code,
-            },
-        };
-        let expected_text = match expected_stdout(&examples_dir, rel) {
-            Ok(text) => text,
-            Err(e) => {
-                failures.push(format!("{rel}: {e}"));
-                continue;
-            }
-        };
-        let exe = match compile_example(&examples_dir, rel) {
-            Ok(exe) => exe,
-            Err(e) => {
-                failures.push(format!("{rel}: {e}"));
-                continue;
-            }
-        };
-        match run_example(&exe) {
-            Ok((code, stdout)) => {
-                if code != expected_code {
-                    failures.push(format!("{rel}: exit code {code}, expected {expected_code}"));
-                }
-                if stdout != expected_text {
-                    failures.push(format!(
-                        "{rel}: {}",
-                        describe_stdout_mismatch(rel, &expected_text, &stdout)
-                    ));
-                }
-            }
-            Err(e) => failures.push(format!("{rel}: {e}")),
+            });
         }
-    }
+    });
+
+    let mut failures: Vec<String> = discovered
+        .iter()
+        .zip(results)
+        .filter_map(|(rel, result)| match result.into_inner() {
+            Some(Ok(())) => None,
+            Some(Err(e)) => Some(format!("{rel}: {e}")),
+            None => Some(format!("{rel}: never checked")),
+        })
+        .collect();
 
     // Every manifest entry must correspond to a real file.
     for rel in manifest.keys() {

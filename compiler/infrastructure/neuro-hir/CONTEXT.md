@@ -12,7 +12,9 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
   `HirMatchTest`, `HirMathOp`, `HirReduceOp`, `HirSortKind`, `HirTensorApply`, `HirTensorAxis`,
   `HirType`, `HirCollectionKind`, `AxisNames`
 - Pure functions over those types: `static_shape`, `extent_display`,
-  `HirTarget::has_gpu_body` and `HirTarget::requires_gpu`
+  `HirTarget::{has_gpu_body, requires_gpu, outlined}`, `HirType::referent`,
+  `HirPlace::{to_expr, ty}`, `HirCollectionKind::{name, arity, mangle_tag}`,
+  `AxisNames::{position_of, declared}`
 - Constant: `REDUCE_LANES`, the lane width that fixes a long float reduction's order for
   every backend, so the host and a GPU fold a sum identically
 
@@ -30,8 +32,8 @@ it the *typed* contract:
 
 1. **Every expression carries its resolved type.** `HirExpr` is `{ kind, ty, span }` and `ty` is
    a fully resolved `HirType`. `HirType` has **no `Unknown` variant**. Reaching the HIR implies
-   the program type-checked. Its variant set mirrors what the semantic analyzer produces today;
-   no generic variants until the language gains them (No Speculative Generality).
+   the program type-checked. Its variant set mirrors what the semantic analyzer produces,
+   with no generic variant: `hir-lowering` monomorphizes every template first (see below).
    `HirType::Tensor { element, shape, names }` carries `Tensor<T, [d0, ...]>`. An axis's
    extent is `Option<usize>`, and `None` is the `?` of a dynamic shape: a backend may
    move, store and release such a tensor, since a value is a DLPack handle, but every

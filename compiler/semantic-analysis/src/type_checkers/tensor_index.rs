@@ -197,11 +197,18 @@ impl TypeChecker {
             return None;
         };
         // An inclusive range names its last position, so it stops one further on.
-        let last = if inclusive { end_value + 1 } else { end_value };
+        let last = if inclusive {
+            end_value.saturating_add(1)
+        } else {
+            end_value
+        };
         // A shape parameter's axis has no extent to stop at until the instantiation, so
-        // only the range's own well-formedness is checked there.
+        // only the range's own well-formedness is checked there, which includes a kept
+        // extent no `usize` can hold.
         let past_extent = matches!(extent, ArrayLen::Fixed(e) if last > *e as i128);
-        if start_value < 0 || last < start_value || past_extent {
+        let kept = usize::try_from(last.saturating_sub(start_value)).ok();
+        let Some(kept) = kept.filter(|_| start_value >= 0 && last >= start_value && !past_extent)
+        else {
             self.record_error(TypeError::TensorSliceOutOfRange {
                 start: start_value,
                 end: last,
@@ -210,10 +217,8 @@ impl TypeChecker {
                 span,
             });
             return None;
-        }
-        Some(ResolvedAxis::Kept(ArrayLen::Fixed(
-            (last - start_value) as usize,
-        )))
+        };
+        Some(ResolvedAxis::Kept(ArrayLen::Fixed(kept)))
     }
 
     /// Check the multi-axis index expression itself: the receiver must be a tensor, or

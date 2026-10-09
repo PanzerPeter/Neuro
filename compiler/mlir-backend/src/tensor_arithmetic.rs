@@ -1075,10 +1075,21 @@ pub(crate) fn iterator_types<'c>(
     rank: usize,
     reductions: usize,
 ) -> Result<Attribute<'c>, MlirError> {
-    let iterators = (0..rank)
-        .map(|axis| match axis < rank - reductions {
-            true => "#linalg.iterator_type<parallel>",
-            false => "#linalg.iterator_type<reduction>",
+    let reduced: Vec<bool> = (0..rank).map(|axis| axis >= rank - reductions).collect();
+    iterators(context, &reduced)
+}
+
+/// One iterator per axis of the index space, `reduction` where `reduced` holds and
+/// `parallel` elsewhere.
+pub(crate) fn iterators<'c>(
+    context: &'c Context,
+    reduced: &[bool],
+) -> Result<Attribute<'c>, MlirError> {
+    let iterators = reduced
+        .iter()
+        .map(|reduced| match reduced {
+            false => "#linalg.iterator_type<parallel>",
+            true => "#linalg.iterator_type<reduction>",
         })
         .collect::<Vec<_>>()
         .join(", ");

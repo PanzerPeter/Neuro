@@ -151,14 +151,37 @@ fn fold(expr: &Expr) -> Option<i128> {
             let left = fold(left)?;
             let right = fold(right)?;
             match op {
-                BinaryOp::Add => Some(left + right),
-                BinaryOp::Subtract => Some(left - right),
-                BinaryOp::Multiply => Some(left * right),
-                BinaryOp::Divide if right != 0 => Some(left / right),
-                BinaryOp::Modulo if right != 0 => Some(left % right),
+                // Checked: an overflowing bound folds to nothing, refused as no constant.
+                BinaryOp::Add => left.checked_add(right),
+                BinaryOp::Subtract => left.checked_sub(right),
+                BinaryOp::Multiply => left.checked_mul(right),
+                BinaryOp::Divide => left.checked_div(right),
+                BinaryOp::Modulo => left.checked_rem(right),
                 _ => None,
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::const_int;
+    use ast_types::{BinaryOp, Expr};
+    use shared_types::{Literal, Span};
+
+    fn literal(value: i128) -> Expr {
+        Expr::Literal(Literal::Integer(value, None), Span::new(0, 0))
+    }
+
+    #[test]
+    fn an_overflowing_slice_bound_is_refused_not_folded() {
+        let product = Expr::Binary {
+            left: Box::new(literal(i128::MAX)),
+            op: BinaryOp::Multiply,
+            right: Box::new(literal(2)),
+            span: Span::new(0, 0),
+        };
+        assert!(const_int(&product).is_err());
     }
 }

@@ -5,42 +5,95 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-104: a `pool` refuses `out = local + "x"` and `out = "{local}!"` for a block-local `local`
+## BUG-107: a `string` a function returns from its parameter leaks when passed straight to a call
 
 - **Status**: open, confirmed
-- **Area**: `semantic-analysis`; `carries_no_arena` in `type_checkers/pools.rs`
+- **Area**: `llvm-backend`; the call-boundary summary in `codegen/string_ownership.rs` (suspected)
+- **Severity**: minor. A leak of one buffer per call; output is correct
+
+**Minimal repro**
+
+```neuro
+func s(v: string) -> string {
+    return v
+}
+func cat(first: string, second: string) -> string { return "{first}{second}" }
+func main() -> i32 {
+    for i in 0..3 {
+        val s1: string = "x{i}"
+        val s2: string = cat(s("y{i}"), s1)
+        println(s2)
+    }
+    return 0
+}
+```
+
+Expected: every buffer is released. Observed: under LeakSanitizer, 4 bytes leak in 2 allocations.
+Binding the call first, `val t = s("y{i}")` then `cat(t, s1)`, does not leak.
+
+**Root cause**: not yet confirmed. The value `s` returns is its own by-value parameter, and
+neither the caller nor `cat` releases it when it arrives as a call argument rather than a binding.
+
+**Workaround**: bind the inner call's result to a `val` before passing it.
+
+## BUG-106: two generic instances can receive the same symbol name
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering`; `mangle_type` and `mangle_instance` in `src/lib.rs`
+- **Severity**: major. The compiler stops with an LLVM verification error on a valid program
+
+**Minimal repro**
+
+```neuro
+struct tup2_i32_i32 { a: i32 }
+func size<T>(x: T) -> T { x }
+func main() -> i32 {
+    val a = size(tup2_i32_i32 { a: 7 })
+    val b = size((1, 2))
+    a.a
+}
+```
+
+Expected: it compiles and returns 7. Observed: "Call parameter type does not match function
+signature" on `size_g_tup2_i32_i32`, because the tuple `(i32, i32)` and the struct named
+`tup2_i32_i32` mangle to the same token.
+
+**Root cause**: confirmed in the code. A type's mangled token is its spelling joined with `_`, so
+an `_` inside a type name (`Pair<A_B, C>` against `Pair<A, B_C>`), a struct named like a built-in
+token (`ref_i32`), or two function types (every one mangles to `fn`) collide.
+
+**Workaround**: avoid `_` in type names used as generic arguments.
+
+**Fix sketch**: length-prefix each nominal token (`3Foo`), and give function types their parameter
+and return tokens. The backend splits mangled names on `__`, so that convention must survive.
+
+## BUG-105: a literal argument to a generic call ignores its concrete parameter type
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` `check_generic_call` in `type_checkers/calls.rs`, and
+  `hir-lowering` `lower_generic_call`
 - **Severity**: minor. A valid program is refused; nothing unsound is emitted
 
 **Minimal repro**
 
 ```neuro
+func gen<T>(first: T, second: i64) -> T { first }
 func main() -> i32 {
-    mut text = ""
-    pool {
-        val s = "a" + "b"
-        text = s + "x"
-    }
-    text.len() as i32
+    val x: i32 = gen(1, 5)
+    x
 }
 ```
 
-Expected: it compiles and returns 3. The store's owner, `text`, outlives the block, so the
-concatenation is routed to the heap, as it is for `text = "a" + "b"` and for `text = s.clone()`.
-Observed: "'text' outlives this 'pool' block". `text = "{s}!"` is refused the same way.
+Expected: it compiles and returns 1. `second` is a concrete `i64`, and a literal passed to a
+concrete parameter takes its type, as in a non-generic call. Observed: "expected i64, found i32"
+on `5`.
 
-**Root cause**: confirmed in the code. The `Binary` and `InterpString` arms of `carries_no_arena`
-require every operand to carry no arena memory, because the walk runs before the value is type
-checked and cannot tell a `string` `+`, which always copies, from a user operator that may return
-an operand. A block-local `s` fails that test.
+**Root cause**: confirmed in the code. `check_generic_call` checks every argument with no expected
+type. Passing the parameter type for a scalar parameter fixes the checker, but `lower_generic_call`
+also lowers the literal untyped, so the checker change alone produces an LLVM verification error.
+Both slices must change together.
 
-**Workaround**: copy the operand first, `text = s.clone() + "x"`, or build the text outside the
-pool.
-
-**Fix sketch**: admit a `+` whose operands are both `string` (owned or `&string`) and an
-interpolation that has at least one text part, since both build a fresh buffer from copies. An
-interpolation that is a single hole and nothing else must stay walked. Regression tests: the
-repro, the interpolation form, and a user `Add` returning its left operand, which must stay
-refused.
+**Workaround**: suffix the literal, `gen(1, 5i64)`.
 
 ## BUG-103: an owned `string` chosen by a branch with a literal arm, or bound from any branch, leaks
 
@@ -89,6 +142,12 @@ into a function of its own.
 when every arm's value is owned, and copy a literal arm to the heap when another arm of the same
 branch allocates, so every path owns its result. Regression tests: the repro under LeakSanitizer,
 and a branch of literals only, which must still never reach `free`.
+
+**A block value leaks the same way.** `val s2: string = { val t = s1; cat(t, s("y")) }` in a loop
+leaks under LeakSanitizer, while the same statements written without the block do not. A
+named-argument call that reorders its arguments is lowered to such a block, so
+`cat(second: s1, first: s("y"))` leaks too. The likely root is the same: a block's tail value is
+not counted as allocating.
 
 ## BUG-099: a struct or enum returned from a function may hold a borrow of its locals
 
@@ -359,47 +418,6 @@ of a `&mut` parameter, or have the callee report which positions it wrote so the
 releases what they held before the call. Regression tests: the repro in a loop under a leak
 check, a literal in the place (must not be freed), and a tensor field inside and outside a
 `pool`.
-
-## BUG-049: a `pool` refuses to store an `if` or `match` value whose arm declares a binding
-
-- **Status**: open, confirmed. Narrowed: a closure literal argument is admitted through its
-  captures, and a builtin `.clone()` of a block-local value is admitted
-- **Area**: `semantic-analysis`; `carries_no_arena` in `type_checkers/pools.rs`
-- **Severity**: minor. Sound (the refusal never lets arena memory escape) but it rejects
-  programs whose values never touch the arena
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
-    mut out: Tensor<i32, [2, 2]> = [[0, 0], [0, 0]]
-    pool scratch {
-        out = if a[0, 0] > 0 {
-            val k = 2
-            &a * k
-        } else {
-            a.clone()
-        }
-    }
-    out[1, 1]
-}
-```
-
-Expected: exit 8. A store into a binding that outlives the block is emitted with the arena
-switched off, so either arm's value is heap memory. Observed: refused with "... outlives the
-pool". The same arm without its `val k` line compiles.
-
-**Root cause**: confirmed in the code. `carries_no_arena` walks an arm only when the arm is a
-bare tail expression, because the walk runs after the arm's scope is gone, so a name the arm
-declared would not resolve and would read as "not a binding".
-
-**Workaround**: declare the binding before the `if`, or compute the value into a block-local
-binding and copy it out with `.clone()`.
-
-**Fix sketch**: record, while the arm is checked and its scope is still open, whether its tail
-carries no arena memory, and have `carries_no_arena` read that record instead of walking the
-arm again.
 
 ## BUG-038: a `string` passed by value to a closure, or returned by one, is released by nobody
 

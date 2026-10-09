@@ -634,3 +634,104 @@ func main() -> i32 {
     );
     assert!(errors.is_empty(), "got {errors:?}");
 }
+
+/// Only one arm of a `match` runs, so a `&mut` one arm takes for its call does not
+/// conflict with the same borrow in a sibling arm.
+#[test]
+fn sibling_match_arms_may_each_borrow_mutably() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    val k = 1
+    match k {
+        1 => v.push(1),
+        _ => v.push(2),
+    }
+    v.len() as i32
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+/// What an arm borrows still counts for the rest of the statement past the `match`.
+#[test]
+fn an_arm_borrow_still_conflicts_later_in_the_statement() {
+    let errors = semantic_errors(
+        r#"
+func pair(a: &mut i32, b: &i32) -> i32 { *b }
+func main() -> i32 {
+    mut v = 1
+    mut w = 2
+    val k = 1
+    val r = pair(match k { 1 => &mut v, _ => &mut w }, &v)
+    r
+}
+"#,
+    );
+    assert!(
+        errors.iter().any(is_borrow_conflict),
+        "the first arm's &mut v is live beside &v; got {errors:?}"
+    );
+}
+
+/// A reference copied, or captured by a closure, into a binding that outlives the
+/// reference it came from keeps the borrowee frozen. Each of these compiled and then
+/// freed `v`'s buffer twice: the move handed it to `w` while the escaped borrow still
+/// grew it.
+#[test]
+fn a_borrow_carried_past_its_reference_still_freezes_the_borrowee() {
+    for (name, body) in [
+        (
+            "closure from a block",
+            "val g = {\n val rm = &mut v\n |x: i32| -> i32 {\n rm.push(x)\n 0\n }\n }\n val w = v",
+        ),
+        (
+            "closure assigned outward",
+            "mut g = |x: i32| -> i32 { x }\n {\n val rm = &mut v\n g = |x: i32| -> i32 {\n rm.push(x)\n 0\n }\n }\n val w = v",
+        ),
+        (
+            "reference assigned outward",
+            "mut other: Vec<i32> = Vec::new()\n mut r = &mut other\n {\n val rm = &mut v\n r = rm\n }\n val w = v",
+        ),
+        (
+            "block assigned outward",
+            "mut other: Vec<i32> = Vec::new()\n mut r = &mut other\n r = {\n &mut v\n }\n val w = v",
+        ),
+    ] {
+        let errors = semantic_errors(&format!(
+            "func main() -> i32 {{
+    mut v: Vec<i32> = Vec::new()
+    {body}
+    0
+}}"
+        ));
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                TypeError::CannotUseWhileMutablyBorrowed { .. }
+                    | TypeError::CannotMoveWhileBorrowed { .. }
+            )),
+            "{name}: 'v' is still borrowed; got {errors:?}"
+        );
+    }
+}
+
+/// A shared borrow carried the same way still lets the borrowee be read.
+#[test]
+fn a_shared_borrow_carried_by_a_closure_allows_reads() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val t = [1, 2, 3]
+    val g = {
+        val r = &t
+        |i: u64| -> i32 { r[i] }
+    }
+    g(0) + t[1]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}

@@ -102,13 +102,15 @@ func main() -> i32 {
 
 The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check covers `+`, `-`, `*`, unary `-`, and the one overflowing division, `MIN / -1` (and the matching `MIN % -1`).
 
+A shift is an overflow when its amount is outside `0..bits` of the shifted type, a negative signed amount included. `<<` and `.shr(n)` then panic with `shift overflow` in a debug build, and a release build masks the amount to `amount & (bits - 1)`, so `1 << 40` on an `i32` is `1 << 8`.
+
 A `const` initializer is folded by the compiler, so it never reaches either tier. Rather than pick one and make the choice observable in a value, an initializer whose arithmetic overflows its declared type is a compile error:
 
 ```neuro
 const C: u8 = 200u8 + 100u8   // error: constant expression overflows u8
 ```
 
-Write the value you mean, or widen the type. The bitwise operators `&`, `|`, `^`, `~` and `<<` have no overflow rule to begin with and fold exactly as they evaluate at run time, and an explicit `as` cast still narrows: `300 as u8` is `44` in a `const` just as it is in a function body.
+Write the value you mean, or widen the type. The bitwise operators `&`, `|`, `^` and `~` have no overflow rule to begin with and fold exactly as they evaluate at run time, a `<<` folds when its amount is inside `0..bits` and is a compile error otherwise, and an explicit `as` cast still narrows: `300 as u8` is `44` in a `const` just as it is in a function body.
 
 Unary negation is `0 - x`, so it overflows wherever that subtraction does: at a signed type's `MIN`, and at every nonzero value of an unsigned type.
 

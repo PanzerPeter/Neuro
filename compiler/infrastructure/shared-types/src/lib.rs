@@ -137,8 +137,7 @@ pub enum FormatKind {
     /// No kind letter: Display-style default per type.
     #[default]
     Default,
-    /// `?`: debug rendering. Scalars only this phase; aggregate support awaits
-    /// `@derive(Debug)`.
+    /// `?`: debug rendering, of a scalar or of a `@derive(Debug)` struct.
     Debug,
     /// `.N`: fixed-point, N decimal places (floats).
     Fixed,

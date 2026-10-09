@@ -57,16 +57,17 @@ func main() -> i32 {
     val a: i32 = -10
     val b: i32 = 5
     val result: i32 = a + b
-    return result
+    if result == -5 { return 7 }
+    return 1
 }
 "#;
 
     let exit_code = test
         .compile_and_run("negative.nr", source)
         .expect("Compilation or execution failed");
-    // Exit-code handling for negative returns is platform-dependent.
-    // This test verifies successful execution rather than a specific wrapped value.
-    assert!(exit_code != 0, "Program should have executed");
+    // A negative exit status is platform-dependent, so the program compares the value
+    // itself and reports the outcome as a small positive code.
+    assert_eq!(exit_code, 7, "-10 + 5 must be -5");
 }
 
 #[test]

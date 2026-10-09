@@ -59,19 +59,18 @@ The parser is a **Pratt parser** (precedence climbing). The ladder, loosest firs
 | 4 | `??` (null-coalescing) | Right |
 | 5 | `\|\|` | Left |
 | 6 | `&&` | Left |
-| 7 | `\|` (bitwise or) | Left |
-| 8 | `^` | Left |
-| 9 | `&` (bitwise and) | Left |
-| 10 | `==`, `!=` | Left |
-| 11 | `<`, `>`, `<=`, `>=` | Left |
-| 12 | `<<` | Left |
-| 13 | `+`, `-` | Left |
-| 14 | `*`, `/`, `%` | Left |
-| 15 | `@` (matrix multiplication) | Left |
-| 16 | `as` (cast) | Left |
-| 17 | `-`, `!`, `~` (unary) | Right |
-| 18 | call `f(...)`, index `a[i]`, `?`, turbofish `::<...>` | Left |
-| 19 (tightest) | `.` (field / method access) | Left |
+| 7 | `<`, `>`, `<=`, `>=`, `==`, `!=` (comparison) | Left, but a chain is rejected by the checker |
+| 8 | `\|` (bitwise or) | Left |
+| 9 | `^` | Left |
+| 10 | `&` (bitwise and) | Left |
+| 11 | `<<` | Left |
+| 12 | `+`, `-` | Left |
+| 13 | `*`, `/`, `%` | Left |
+| 14 | `@` (matrix multiplication) | Left |
+| 15 | `as` (cast) | Left |
+| 16 | `-`, `!`, `~` (unary) | Right |
+| 17 | call `f(...)`, index `a[i]`, `?`, turbofish `::<...>` | Left |
+| 18 (tightest) | `.` (field / method access) | Left |
 
 `>>` composes functions rather than shifting bits: right shift is the `.shr(n)` method. It is
 not a token, but two adjacent `>`, so a nested generic type still closes with two ordinary
@@ -86,7 +85,8 @@ is therefore a statement boundary, alongside one beginning with `(`, `[` or `*`,
 
 ```neuro
 a + b * c       // a + (b * c)
-a < b == c < d  // (a < b) == (c < d)
+x & 3 == 2      // (x & 3) == 2
+a < b == c      // (a < b) == c: a comparison chain, which the checker rejects
 !a && b         // (!a) && b
 f(x)? + 1       // (f(x)?) + 1
 ```
@@ -95,13 +95,15 @@ f(x)? + 1       // (f(x)?) + 1
 continue (it ends with a binary operator, a comma, or an opening delimiter) or the expression
 is inside an unclosed `(`, `[`, or `{`. The decision belongs to the line that ended, so a line
 *starting* with `(`, `[`, or `*` opens a new statement rather than continuing the one above as
-a call, an index, or a multiplication.
+a call, an index, or a multiplication. Nothing may follow a complete statement on its own line
+but the `}` closing its block: `val x = 5 6` is a parse error, not a binding of `5`.
 
 ## Errors
 
 `ParseError` (see [`errors.rs`](../../../compiler/syntax-parsing/src/errors.rs)) covers the
 token-level failures (`UnexpectedToken`, `UnexpectedEof`, a wrapped `LexError`, and
-`MaxDepthExceeded`, which stops runaway nesting rather than overflowing the stack) plus the
+`MaxDepthExceeded`, which stops runaway nesting of expressions, statements, types, patterns
+and module blocks, counted together, rather than overflowing the stack) plus the
 grammar rules that are cheapest to enforce while parsing: `DuplicateParameter`,
 `DuplicateTypeAlias`, `TypeAliasShadowsBuiltin`, `CyclicTypeAlias`, `EnumLifetimeParam`,
 `ExportNotAllowed`, and `MisplacedNoPrelude`. Each carries the span of the offending token,

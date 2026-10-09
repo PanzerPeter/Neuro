@@ -163,7 +163,7 @@ func main() -> i32 {
     let (success, stderr) = check_source(source);
     assert!(!success, "&i32 should not satisfy a &mut i32 parameter");
     assert!(
-        stderr.contains("mismatch") || stderr.contains("&mut i32"),
+        stderr.contains("expected &mut i32, found &i32"),
         "expected a type-mismatch diagnostic, got: {stderr}"
     );
 }

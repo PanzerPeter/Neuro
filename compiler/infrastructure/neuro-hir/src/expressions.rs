@@ -97,8 +97,9 @@ pub enum HirExprKind {
         label: Option<String>,
         body: Vec<HirStmt>,
     },
-    /// `unsafe { ... }` block. Inert outside `@kernel` bodies; the distinct
-    /// node preserves the boundary for later phases.
+    /// `unsafe { ... }` block. Lowers exactly like [`HirExprKind::Block`]: the one rule
+    /// it carries (raw element access to a `@kernel` output) is enforced before
+    /// lowering, so no backend reads the boundary.
     Unsafe {
         stmts: Vec<HirStmt>,
     },
@@ -152,8 +153,8 @@ pub enum HirExprKind {
     SliceCoerce {
         value: Box<HirExpr>,
     },
-    /// Range `start..end` / `start..=end`. Only valid as a `string.slice` or
-    /// sequence `.slice` argument; never produced for `for`-range loops.
+    /// Range `start..end` / `start..=end`. Only valid as a `.slice` / `.char_slice`
+    /// argument; never produced for `for`-range loops.
     Range {
         start: Box<HirExpr>,
         end: Box<HirExpr>,
@@ -368,7 +369,7 @@ pub enum HirExprKind {
         arms: Vec<HirMatchArm>,
     },
     /// Construction of an empty standard collection: `Vec::new()`,
-    /// `HashMap::new()`, `BTreeMap::new()`. The expression's `ty` is the
+    /// `HashMap::new()`, `BTreeMap::new()`, `StringBuilder::new()`. The expression's `ty` is the
     /// [`HirType::Collection`] being built; backends emit a zero-capacity header with
     /// no allocation (the first insertion allocates).
     CollectionNew,

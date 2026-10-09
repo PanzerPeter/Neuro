@@ -12,6 +12,9 @@ use crate::types::Type;
 
 /// The diagnostic a debug-build arithmetic overflow panics with.
 const OVERFLOW_PANIC: &str = "integer overflow";
+/// The diagnostic a debug-build shift by at least its operand's width (or by a negative
+/// amount) panics with.
+const SHIFT_OVERFLOW_PANIC: &str = "shift overflow";
 /// The diagnostic a zero divisor panics with, for `/` and for `%`.
 const DIVIDE_BY_ZERO_PANIC: &str = "division by zero";
 const REMAINDER_BY_ZERO_PANIC: &str = "remainder by zero";
@@ -266,6 +269,36 @@ impl<'ctx> CodegenContext<'ctx> {
             crate::BodyGuardKind::RemainderByZero => REMAINDER_BY_ZERO_PANIC,
         };
         self.codegen_guard_or_panic(ok, message, offset)
+    }
+
+    /// The amount a shift by `amount` applies, which the overflow rule decides.
+    ///
+    /// LLVM's `shl` / `lshr` / `ashr` by at least the operand's width is poison, so the
+    /// amount never reaches one unchecked. An amount outside `0..width` is an overflow:
+    /// the debug tier panics, exactly as for `+`, and the release tier wraps it to
+    /// `amount & (width - 1)`. A signed negative amount reads as a huge unsigned one, so
+    /// one compare covers both. The mask is a single `and`, which folds away wherever the
+    /// amount is provably in range.
+    pub(crate) fn shift_amount(
+        &mut self,
+        amount: IntValue<'ctx>,
+        offset: usize,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let int_ty = amount.get_type();
+        let width = u64::from(int_ty.get_bit_width());
+        if self.overflow_checks {
+            let in_range = self.builder.build_int_compare(
+                IntPredicate::ULT,
+                amount,
+                int_ty.const_int(width, false),
+                "shift.ok",
+            )?;
+            self.codegen_guard_or_panic(in_range, SHIFT_OVERFLOW_PANIC, offset)?;
+            return Ok(amount);
+        }
+        Ok(self
+            .builder
+            .build_and(amount, int_ty.const_int(width - 1, false), "shift.amt")?)
     }
 
     /// Emit integer `+`, `-`, or `*`.
@@ -861,10 +894,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 .builder
                 .build_xor(lhs.into_int_value(), rhs.into_int_value(), "xortmp")?
                 .into()),
-            BinaryOp::Shl => Ok(self
-                .builder
-                .build_left_shift(lhs.into_int_value(), rhs.into_int_value(), "shltmp")?
-                .into()),
+            BinaryOp::Shl => {
+                let amount = self.shift_amount(rhs.into_int_value(), offset)?;
+                Ok(self
+                    .builder
+                    .build_left_shift(lhs.into_int_value(), amount, "shltmp")?
+                    .into())
+            }
             // `@` is defined on tensors only, and a tensor operand never reaches this
             // scalar path: the guard above rejects it before the dispatch.
             BinaryOp::MatMul => Err(CodegenError::InvalidOperandType {

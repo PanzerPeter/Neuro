@@ -3,6 +3,7 @@
 use lexical_analysis::{Token, TokenKind};
 
 use crate::errors::{ParseError, ParseResult};
+use shared_types::Span;
 
 mod expr_index;
 mod expr_infix;
@@ -25,11 +26,16 @@ mod stmt_val_else;
 mod type_aliases;
 mod types;
 
+/// Maximum nesting depth, across every recursive production, to prevent stack overflow.
+const MAX_NESTING_DEPTH: usize = 256;
+
 /// Parser for Neuro source code
 pub(crate) struct Parser {
     pub(super) tokens: Vec<Token>,
     pub(super) current: usize,
-    pub(super) expr_depth: usize,
+    /// How many nested expressions, statements, types, patterns and module blocks
+    /// enclose the current position. See [`Parser::nested`].
+    pub(super) nesting_depth: usize,
     /// When true, an identifier followed by `{` is NOT parsed as a struct literal.
     /// Set to true inside if/while/for conditions to prevent consuming the block's `{`.
     /// Cleared again inside a delimiter pair: see [`Parser::inside_delimiters`].
@@ -59,7 +65,7 @@ impl Parser {
         Self {
             tokens,
             current: 0,
-            expr_depth: 0,
+            nesting_depth: 0,
             no_struct_lit: false,
             delimiter_depth: 0,
             active_labels: Vec::new(),
@@ -92,6 +98,15 @@ impl Parser {
         } else {
             None
         }
+    }
+
+    /// The span of the token consumed last, `fallback` when nothing has been. After a
+    /// block this is its closing `}`, which is where a block-bodied construct ends.
+    pub(super) fn previous_span(&self, fallback: Span) -> Span {
+        self.current
+            .checked_sub(1)
+            .and_then(|i| self.tokens.get(i))
+            .map_or(fallback, |t| t.span)
     }
 
     /// Check if the current token matches the given kind
@@ -176,6 +191,26 @@ impl Parser {
         let saved = std::mem::replace(&mut self.delimiter_depth, 0);
         let result = f(self);
         self.delimiter_depth = saved;
+        result
+    }
+
+    /// Parse `f` one nesting level deeper, failing with
+    /// [`ParseError::MaxDepthExceeded`] past [`MAX_NESTING_DEPTH`].
+    ///
+    /// Every recursive production goes through here: expressions, statements, types,
+    /// patterns and module blocks each recurse on their own, so a limit on expressions
+    /// alone left `if` nesting, `Vec<Vec<...>>` and `Some(Some(...))` free to overflow
+    /// the stack. One counter covers them all because they nest inside one another.
+    pub(super) fn nested<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> ParseResult<T>,
+    ) -> ParseResult<T> {
+        if self.nesting_depth >= MAX_NESTING_DEPTH {
+            return Err(ParseError::MaxDepthExceeded(MAX_NESTING_DEPTH));
+        }
+        self.nesting_depth += 1;
+        let result = f(self);
+        self.nesting_depth -= 1;
         result
     }
 

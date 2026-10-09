@@ -276,7 +276,7 @@ impl TypeChecker {
     /// The type of one link of a place's object chain, read from the symbol table and
     /// the declarations alone. `check_expr` would type it too, but it records moves and
     /// borrows, and the chain has already been checked once as the place's object.
-    pub(super) fn projection_type(&self, expr: &Expr) -> Option<Type> {
+    pub(crate) fn projection_type(&self, expr: &Expr) -> Option<Type> {
         match expr {
             Expr::Identifier(ident) => self.symbols.lookup(&ident.name).map(|s| s.ty.clone()),
             Expr::Paren(inner, _) => self.projection_type(inner),
@@ -362,7 +362,8 @@ impl TypeChecker {
             _ => {
                 if let Some(root) = place.root() {
                     let root = root.name.clone();
-                    self.check_pool_store(&root, place_ty, value, span);
+                    let through_reference = self.reached_through_reference(place);
+                    self.check_pool_store(&root, place_ty, value, span, through_reference);
                 }
             }
         }
@@ -514,12 +515,14 @@ impl TypeChecker {
         self.record_move(value);
         self.symbols.clear_moved(&target.name);
 
-        self.check_pool_store(&target.name, &value_ty, value, span);
+        self.check_pool_store(&target.name, &value_ty, value, span, false);
 
         // A direct `&place` / `&mut place` RHS makes the target hold a new
         // persistent borrow of that place.
         if let Some((place, exclusive)) = borrow_target_of(value) {
             self.symbols.attach_borrow(&target.name, &place, exclusive);
+        } else {
+            self.hold_carried_borrows(&target.name, value, &value_ty);
         }
         if let Some(place) = gradient_view_root(value, &value_ty) {
             self.symbols.attach_borrow(&target.name, &place, false);

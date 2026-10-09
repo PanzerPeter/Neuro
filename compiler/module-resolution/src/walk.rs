@@ -5,8 +5,8 @@
 //! grammar nobody re-checked.
 
 use ast_types::{
-    ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParamKind, InterpPart, Item,
-    MatchArm, MethodDef, Pattern, Place, Stmt, TensorIndexArg, Type, VariantPayload,
+    ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParam, GenericParamKind, InterpPart,
+    Item, MatchArm, MethodDef, Pattern, Place, Stmt, TensorIndexArg, Type, VariantPayload,
 };
 use shared_types::Identifier;
 
@@ -18,7 +18,8 @@ pub(crate) enum Site<'a> {
     /// whole because resolving the name can change which node it is: `geometry::Point { x: 1.0 }`
     /// parses as a struct-variant construction and resolves to a plain struct literal.
     Expr(&'a mut Expr),
-    /// The name of a `Type::Named` or `Type::Generic`.
+    /// A name that can only be a type or a trait: a `Type::Named` / `Type::Generic`, a
+    /// struct literal's, an `impl` block's type and trait, a trait bound, `impl` / `dyn`.
     TypeName(&'a mut Identifier),
     /// A `match` / `val-else` pattern that names a variant: qualified, imported, or (for a
     /// payload-less variant) still indistinguishable from a binding.
@@ -39,11 +40,7 @@ pub(crate) fn walk_items(items: &mut [Item], f: SiteFn) -> Result<(), ModuleErro
 fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
     match item {
         Item::Function(def) => {
-            for param in &mut def.generics {
-                if let GenericParamKind::Const(ty) = &mut param.kind {
-                    walk_type(ty, f)?;
-                }
-            }
+            walk_generics(&mut def.generics, f)?;
             for predicate in &mut def.where_predicates {
                 walk_expr(predicate, f)?;
             }
@@ -56,11 +53,7 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
             walk_stmts(&mut def.body, f)
         }
         Item::Struct(def) => {
-            for param in &mut def.generics {
-                if let GenericParamKind::Const(ty) = &mut param.kind {
-                    walk_type(ty, f)?;
-                }
-            }
+            walk_generics(&mut def.generics, f)?;
             for predicate in &mut def.where_predicates {
                 walk_expr(predicate, f)?;
             }
@@ -70,11 +63,7 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
             Ok(())
         }
         Item::Enum(def) => {
-            for param in &mut def.generics {
-                if let GenericParamKind::Const(ty) = &mut param.kind {
-                    walk_type(ty, f)?;
-                }
-            }
+            walk_generics(&mut def.generics, f)?;
             for variant in &mut def.variants {
                 match &mut variant.payload {
                     VariantPayload::Unit => {}
@@ -107,10 +96,12 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
             Ok(())
         }
         Item::Impl(def) => {
-            for param in &mut def.generics {
-                if let GenericParamKind::Const(ty) = &mut param.kind {
-                    walk_type(ty, f)?;
-                }
+            walk_generics(&mut def.generics, f)?;
+            // The block's own type and trait are names an import may have renamed:
+            // `impl Pt` after `import geometry::{Point as Pt}` extends `Point`.
+            f(Site::TypeName(&mut def.type_name))?;
+            if let Some(trait_name) = &mut def.trait_name {
+                f(Site::TypeName(trait_name))?;
             }
             for ty in &mut def.type_args {
                 walk_type(ty, f)?;
@@ -138,6 +129,22 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
         // to be walked.
         Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => Ok(()),
     }
+}
+
+/// Walk a `<...>` list: a const parameter's type, and every trait a bound names.
+fn walk_generics(params: &mut [GenericParam], f: SiteFn) -> Result<(), ModuleError> {
+    for param in params {
+        if let GenericParamKind::Const(ty) = &mut param.kind {
+            walk_type(ty, f)?;
+        }
+        for bound in &mut param.bounds {
+            f(Site::TypeName(&mut bound.trait_name))?;
+            for (_, ty) in &mut bound.assoc_bindings {
+                walk_type(ty, f)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn walk_method(method: &mut MethodDef, f: SiteFn) -> Result<(), ModuleError> {
@@ -177,8 +184,19 @@ fn walk_type(ty: &mut Type, f: SiteFn) -> Result<(), ModuleError> {
             walk_type(ret, f)
         }
         Type::Tensor { element_type, .. } => walk_type(element_type, f),
-        // A trait name is not a value namespace, and `impl mod::Trait` does not parse.
-        Type::ImplTrait { .. } | Type::DynTrait { .. } => Ok(()),
+        // `impl mod::Trait` does not parse, but a bare trait name may be an imported one.
+        Type::ImplTrait {
+            trait_name,
+            assoc_bindings,
+            ..
+        } => {
+            f(Site::TypeName(trait_name))?;
+            for (_, ty) in assoc_bindings {
+                walk_type(ty, f)?;
+            }
+            Ok(())
+        }
+        Type::DynTrait { trait_name, .. } => f(Site::TypeName(trait_name)),
     }
 }
 
@@ -329,11 +347,15 @@ fn walk_place(place: &mut Place, f: SiteFn) -> Result<(), ModuleError> {
 fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
     // The callback runs before the descent: it may replace this node, and the replacement's
     // children still need walking.
-    if matches!(
-        expr,
-        Expr::Path { .. } | Expr::EnumStructLiteral { .. } | Expr::Identifier(_)
-    ) {
-        f(Site::Expr(expr))?;
+    // A struct literal written as one is visited by its name alone; one the callback
+    // produced from a qualified `geometry::Point { .. }` is already resolved, and is not
+    // offered twice.
+    match expr {
+        Expr::Path { .. } | Expr::EnumStructLiteral { .. } | Expr::Identifier(_) => {
+            f(Site::Expr(expr))?
+        }
+        Expr::StructLiteral { name, .. } => f(Site::TypeName(name))?,
+        _ => {}
     }
 
     match expr {

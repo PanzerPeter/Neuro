@@ -68,12 +68,13 @@ fn eval_const_int(expr: &Expr, subst: &HashMap<String, Type>) -> Option<i128> {
         } => {
             let l = eval_const_int(left, subst)?;
             let r = eval_const_int(right, subst)?;
+            // A fold past `i128` names no extent any tensor has, so it is not a constant.
             match op {
-                BinaryOp::Add => Some(l + r),
-                BinaryOp::Subtract => Some(l - r),
-                BinaryOp::Multiply => Some(l * r),
-                BinaryOp::Divide if r != 0 => Some(l / r),
-                BinaryOp::Modulo if r != 0 => Some(l % r),
+                BinaryOp::Add => l.checked_add(r),
+                BinaryOp::Subtract => l.checked_sub(r),
+                BinaryOp::Multiply => l.checked_mul(r),
+                BinaryOp::Divide => l.checked_div(r),
+                BinaryOp::Modulo => l.checked_rem(r),
                 _ => None,
             }
         }

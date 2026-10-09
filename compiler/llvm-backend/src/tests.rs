@@ -450,6 +450,33 @@ fn a_reduction_releases_an_unbound_receiver() {
     assert!(release > fold);
 }
 
+/// A checked body's status word is a stack slot of the caller's frame. An expanded call
+/// sits wherever it is written, so a slot allocated there was a fresh one per loop
+/// iteration, and an integer tensor division in a long enough loop overflowed the stack.
+#[test]
+fn an_expanded_checked_call_allocates_its_status_word_once() {
+    let source = r#"
+        func main() -> i32 {
+            val a: Tensor<i32, [4]> = [1, 2, 3, 4]
+            mut i = 0
+            mut s = 0
+            while i < 10 {
+                val q = &a / &a
+                s = s + q[0]
+                i = i + 1
+            }
+            s
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O2);
+    let body = function_body(&ir, "main");
+    let entry = body.split("\n\n").next().unwrap_or(body);
+    assert!(
+        entry.contains("%external.status = alloca"),
+        "the status word must be allocated in the entry block:\n{body}"
+    );
+}
+
 /// A receiver that IS a binding keeps its single release at scope exit: releasing it at
 /// the reduction as well would free the buffer twice.
 #[test]
@@ -1133,6 +1160,138 @@ fn optimization_levels_run_an_ir_pipeline() {
         "-O0 must hand the IR to instruction selection untouched:\n{}",
         unoptimized
     );
+}
+
+/// An inclusive range ending at its type's maximum has no successor: stepping past
+/// `255u8` wraps to `0`, which `i <= 255` admits again, so the loop never left. A loop
+/// that terminates folds to its trip count at `-O2`; one that does not keeps its back edge.
+#[test]
+fn an_inclusive_range_ending_at_the_type_maximum_terminates() {
+    let source = r#"
+        func count() -> u32 {
+            mut n: u32 = 0
+            for i in 250u8..=255u8 { n = n + 1 }
+            for i in (2147483645..=2147483647).rev() { n = n + 1 }
+            n
+        }
+
+        func main() -> i32 {
+            count() as i32
+        }
+    "#;
+
+    let ir = optimized_ir(source, OptimizationLevelSetting::O2);
+    let body = function_body(&ir, "count");
+    assert!(
+        body.contains("ret i32 9"),
+        "both loops must stop after their last value:\n{}",
+        body
+    );
+}
+
+/// A local or a parameter shadows a module constant of the same name, as it does in the
+/// checker: resolving the constant first read `1000` where the program names its local.
+#[test]
+fn a_local_shadows_a_module_constant() {
+    let source = r#"
+        const x: i32 = 1000
+
+        func param(x: i32) -> i32 {
+            x
+        }
+
+        func main() -> i32 {
+            val x = 100
+            x + param(7)
+        }
+    "#;
+
+    let ir = optimized_ir(source, OptimizationLevelSetting::O2);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("ret i32 107"),
+        "the local and the parameter must win over the constant:\n{}",
+        body
+    );
+}
+
+/// A constant declared in a function body is that body's alone: it once stayed in the
+/// module-wide table, so a closure later reading a same-named `f64` capture got the
+/// `i32` constant and codegen panicked asking it for a float. Inside a body, a nested
+/// block's constant shadows an outer local only until the block closes.
+#[test]
+fn a_body_constant_is_scoped_to_its_block() {
+    let source = r#"
+        func a() -> i32 {
+            const K: i32 = 3
+            K
+        }
+
+        func nested() -> i32 {
+            val K = 7
+            mut r = 0
+            {
+                const K: i32 = 3
+                r = K
+            }
+            r * 10 + K
+        }
+
+        func main() -> i32 {
+            val K = 2.5
+            val f = |t: f64| -> f64 { t + K }
+            (f(1.0) as i32) + a() + nested()
+        }
+    "#;
+
+    let ir = optimized_ir(source, OptimizationLevelSetting::O2);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("ret i32 43"),
+        "each constant must resolve only inside its own block:\n{}",
+        body
+    );
+}
+
+/// A constant `<<` folds when its amount is inside the operand's width, and is refused
+/// like an overflowing `+` when it is not: the debug tier would panic and the release
+/// tier mask, so it has no one value. The fold used to mask by `i128`'s 128 bits instead,
+/// so `1 << 40` folded to `0` while the same shift at run time was undefined.
+#[test]
+fn a_constant_shift_is_bounded_by_its_operand_width() {
+    let fold = |source: &str| {
+        let hir = lower(source);
+        let context = LLVMContext::create();
+        build_module(
+            &context,
+            &hir,
+            OptimizationLevelSetting::O0,
+            source,
+            "const_shift.nr",
+            &[],
+            GpuVendor::Nvidia,
+        )
+        .map(|ctx| ctx.module.print_to_string().to_string())
+    };
+
+    let ir = fold("const K: i32 = 1 << 31\nconst M: u8 = 255u8 << 7\nfunc main() -> i32 { K }")
+        .expect("in-range constant shifts fold");
+    assert!(
+        ir.contains("@K = internal constant i32 -2147483648"),
+        "{ir}"
+    );
+    assert!(ir.contains("@M = internal constant i8 -128"), "{ir}");
+
+    for amount in ["32", "40", "130"] {
+        let source = format!("const K: i32 = 1 << {amount}\nfunc main() -> i32 {{ K }}");
+        assert!(
+            matches!(
+                fold(&source),
+                Err(CodegenError::ConstOverflow { op: "<<", .. })
+            ),
+            "`1 << {amount}` on i32 must be refused"
+        );
+    }
 }
 
 #[test]

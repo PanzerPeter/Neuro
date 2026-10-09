@@ -377,7 +377,11 @@ impl<'ctx> CodegenContext<'ctx> {
             BuiltinMethod::WrappingAdd => self.builder.build_int_add(lhs, rhs, "wrap.add")?,
             BuiltinMethod::WrappingSub => self.builder.build_int_sub(lhs, rhs, "wrap.sub")?,
             BuiltinMethod::WrappingMul => self.builder.build_int_mul(lhs, rhs, "wrap.mul")?,
-            BuiltinMethod::Shr => self.builder.build_right_shift(lhs, rhs, !unsigned, "shr")?,
+            BuiltinMethod::Shr => {
+                let amount = self.shift_amount(rhs, receiver.span.start)?;
+                self.builder
+                    .build_right_shift(lhs, amount, !unsigned, "shr")?
+            }
             BuiltinMethod::SaturatingAdd | BuiltinMethod::SaturatingSub => {
                 let intrinsic_name = match (kind, unsigned) {
                     (BuiltinMethod::SaturatingAdd, false) => "llvm.sadd.sat",

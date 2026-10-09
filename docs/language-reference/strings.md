@@ -21,7 +21,8 @@ operator concatenates two strings into a new owned `string`.
 | `\u{N...}` | the Unicode scalar value written in hex between the braces |
 
 Any other character after `\` is a lexical error. Triple-quoted block strings take the same
-escapes.
+escapes. An ordinary `"..."` literal must close on the line it opens; text that spans lines
+is written as a triple-quoted block string or with `\n`.
 
 ### Storage and the `len` Guarantee
 

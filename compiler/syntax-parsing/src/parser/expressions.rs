@@ -7,27 +7,15 @@ use crate::precedence::Precedence;
 use ast_types::{ClosureParam, Expr, Stmt};
 
 use super::Parser;
-use super::statements::stmt_span;
 
 /// A parsed call argument list: the argument expressions, plus the call-site names of
 /// any named arguments, empty when the call named none.
 type CallArguments = (Vec<Expr>, Vec<Option<Identifier>>);
 
-/// Maximum expression nesting depth to prevent stack overflow
-const MAX_EXPR_DEPTH: usize = 256;
-
 impl Parser {
     /// Parse an expression with the given precedence
     pub fn parse_expr(&mut self, precedence: Precedence) -> ParseResult<Expr> {
-        if self.expr_depth >= MAX_EXPR_DEPTH {
-            return Err(ParseError::MaxDepthExceeded(MAX_EXPR_DEPTH));
-        }
-
-        self.expr_depth += 1;
-        let result = self.parse_expr_inner(precedence);
-        self.expr_depth -= 1;
-
-        result
+        self.nested(|p| p.parse_expr_inner(precedence))
     }
 
     /// Inner expression parsing implementation
@@ -173,7 +161,8 @@ impl Parser {
         self.skip_newlines();
 
         let then_block = self.parse_block()?;
-        self.skip_newlines();
+        let mut end_span = self.previous_span(start_span);
+        self.skip_newlines_before_else();
 
         let mut else_if_blocks: Vec<(Expr, Vec<Stmt>)> = Vec::new();
         let mut else_block: Option<Vec<Stmt>> = None;
@@ -188,21 +177,15 @@ impl Parser {
                 let elif_cond = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
                 self.skip_newlines();
                 let elif_block = self.parse_block()?;
+                end_span = self.previous_span(start_span);
                 else_if_blocks.push((elif_cond, elif_block));
-                self.skip_newlines();
+                self.skip_newlines_before_else();
             } else {
                 else_block = Some(self.parse_block()?);
+                end_span = self.previous_span(start_span);
                 break;
             }
         }
-
-        let end_span = else_block
-            .as_ref()
-            .and_then(|s| s.last())
-            .or_else(|| else_if_blocks.last().and_then(|(_, s)| s.last()))
-            .or_else(|| then_block.last())
-            .map(stmt_span)
-            .unwrap_or(start_span);
 
         Ok(Expr::If {
             condition: Box::new(condition),
@@ -211,6 +194,15 @@ impl Parser {
             else_block,
             span: start_span.merge(end_span),
         })
+    }
+
+    /// Skip the newlines between an `if` block and an `else` on a later line, and
+    /// only then: with no `else` to find, the newline is what ends the expression, and
+    /// skipping it let a following `-x` or `(...)` line continue it as an operand.
+    fn skip_newlines_before_else(&mut self) {
+        if matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::Else)) {
+            self.skip_newlines();
+        }
     }
 
     /// Parse a block expression. The `{` has already been consumed; `start_span` is its span.
@@ -235,7 +227,7 @@ impl Parser {
     pub(super) fn parse_loop_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
         self.skip_newlines();
         let body = self.parse_block()?;
-        let end_span = body.last().map(stmt_span).unwrap_or(start_span);
+        let end_span = self.previous_span(start_span);
         Ok(Expr::Loop {
             label: None,
             body,
@@ -262,7 +254,7 @@ impl Parser {
         self.active_labels.pop();
         let body = body?;
 
-        let end_span = body.last().map(stmt_span).unwrap_or(start_span);
+        let end_span = self.previous_span(start_span);
         Ok(Expr::Loop {
             label: Some(label),
             body,

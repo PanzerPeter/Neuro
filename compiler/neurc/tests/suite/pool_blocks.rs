@@ -279,8 +279,7 @@ func main() -> i32 {
 
 #[test]
 fn a_container_or_branch_holding_the_blocks_allocation_is_rejected() {
-    // The widened walk still refuses a leaf the block allocated, an arm that declares
-    // a name (which the walk cannot see before the arm is checked), and a `match` whose
+    // The widened walk still refuses a leaf the block allocated and a `match` whose
     // scrutinee is the block's own memory.
     let test = CompileTest::new();
     for (name, body) in [
@@ -289,10 +288,6 @@ fn a_container_or_branch_holding_the_blocks_allocation_is_rejected() {
         (
             "pool_match_local.nr",
             "s = match o { Some(x) => x, None => \"\" }",
-        ),
-        (
-            "pool_if_declares.nr",
-            "s = if c {\n            val t = \"t\"\n            t\n        } else { \"b\" }",
         ),
     ] {
         let source = format!(
@@ -317,6 +312,30 @@ func main() -> i32 {{
             .expect_err("arena memory must not cross the block");
         assert!(error.contains("outlives"), "{name}: {error}");
     }
+}
+
+#[test]
+fn an_arm_of_proven_declarations_survives_the_pool() {
+    // An arm that declares a name is arena-free when every declaration's initializer is
+    // (BUG-049). Reading `s` after the closing brace proves it was routed to the heap.
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut s: string = "none"
+    val c = true
+    pool {
+        s = if c {
+            val t = "t"
+            t
+        } else { "b" }
+    }
+    s.len() as i32 + 7
+}
+"#;
+    let code = test
+        .compile_and_run("pool_if_declares.nr", source)
+        .expect("an arm of proven declarations must cross the block");
+    assert_eq!(code, 8);
 }
 
 #[test]

@@ -604,8 +604,12 @@ impl<'ctx> CodegenContext<'ctx> {
             } => {
                 let declared_sem = Type::from_hir(ty);
                 let val = self.codegen_const_expr_typed(value, &declared_sem)?;
-                self.const_values.insert(name.clone(), val);
-                self.type_env.insert(name.clone(), declared_sem);
+                // Scoped like a binding: a body's constant must not outlive its block,
+                // or it would answer for a same-named local of a later function.
+                let shadowed = self.bind_const(name, val, declared_sem);
+                if let Some(scope) = self.name_scopes.last_mut() {
+                    scope.push(shadowed);
+                }
                 Ok(())
             }
 

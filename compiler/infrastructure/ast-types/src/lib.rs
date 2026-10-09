@@ -1,6 +1,7 @@
 //! Abstract Syntax Tree type definitions. Pure data structures with no business
-//! logic, living in infrastructure so syntax-parsing (constructs), semantic-analysis
-//! (checks), and llvm-backend (lowers) can share them without cross-slice deps.
+//! logic, living in infrastructure so syntax-parsing (constructs), module-resolution and
+//! argument-binding (rewrite), semantic-analysis (checks), and hir-lowering (lowers) can
+//! share them without cross-slice deps.
 
 pub mod expressions;
 pub mod items;

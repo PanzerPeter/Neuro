@@ -101,8 +101,10 @@ func main() -> i32 {
     );
 }
 
+/// `string` `+` copies both operands into a buffer of its own, so a routed store keeps
+/// none of the block's arena memory even when an operand is the block's (BUG-104).
 #[test]
-fn building_from_the_blocks_own_allocation_is_rejected_too() {
+fn concatenating_the_blocks_own_allocation_into_an_outer_binding_is_allowed() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -110,21 +112,21 @@ func main() -> i32 {
     pool {
         val local = "a" + "b"
         out = local + "c"
+        out = "c" + local + local
     }
     0
 }
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
-        "the routed buffer would still carry the operand's arena memory; got {errors:?}"
+        errors.is_empty(),
+        "a string concatenation copies its operands into a routed buffer; got {errors:?}"
     );
 }
 
+/// Interpolation with text around its holes builds one fresh buffer from copies.
 #[test]
-fn interpolating_an_arena_binding_into_an_outer_binding_is_rejected() {
+fn interpolating_an_arena_binding_into_an_outer_binding_is_allowed() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -138,10 +140,62 @@ func main() -> i32 {
 "#,
     );
     assert!(
+        errors.is_empty(),
+        "the rendered text is copied into a routed buffer; got {errors:?}"
+    );
+}
+
+/// A lone hole is still walked: nothing but the hole's own rendering is in it.
+#[test]
+fn a_lone_hole_over_an_arena_binding_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut out: string = ""
+    pool {
+        val local = "a" + "b"
+        out = "{local}"
+    }
+    0
+}
+"#,
+    );
+    assert!(
         errors
             .iter()
             .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
-        "a hole reading arena memory is not proven off the arena; got {errors:?}"
+        "a lone hole is not proven to copy; got {errors:?}"
+    );
+}
+
+/// A user `Add` may hand its left operand back, so only a `string` left operand is the
+/// copying concatenation.
+#[test]
+fn a_user_operator_over_an_arena_binding_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+@derive(Copy)
+struct Text { s: &string }
+impl Add for Text {
+    type Output = Text
+    func add(self, other: Text) -> Text { self }
+}
+func main() -> i32 {
+    val empty = ""
+    mut out = Text { s: &empty }
+    pool {
+        val local = "a" + "b"
+        out = Text { s: &local } + Text { s: &empty }
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
+        "a user operator may return its arena operand; got {errors:?}"
     );
 }
 
@@ -310,4 +364,170 @@ func main() -> i32 {
             .any(|e| matches!(e, TypeError::UndefinedVariable { .. })),
         "a pool-local binding must not outlive the block; got {errors:?}"
     );
+}
+
+/// A reference the block declares may point at a place that outlives it, and the
+/// backend emits a store through it at the point it is written, inside the arena.
+#[test]
+fn a_store_through_a_reference_the_block_declares_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+struct Holder { t: Tensor<f32, [4]> }
+func main() -> i32 {
+    mut h = Holder { t: Tensor::<f32, [4]>::zeros() }
+    pool {
+        val r = &mut h
+        r.t = Tensor::<f32, [4]>::ones()
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
+        "the referent outlives the block; got {errors:?}"
+    );
+}
+
+/// What the block's own reference stores is still accepted when nothing in it can hold
+/// arena memory.
+#[test]
+fn a_literal_or_scalar_through_a_reference_the_block_declares_is_allowed() {
+    let errors = semantic_errors(
+        r#"
+struct Holder { name: string, n: i32 }
+func main() -> i32 {
+    mut h = Holder { name: "", n: 0 }
+    pool {
+        val r = &mut h
+        r.name = "fixed"
+        r.n = 3
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "nothing here is the arena's; got {errors:?}"
+    );
+}
+
+/// A `&mut` the block declares is a channel back to whatever it borrows, for a callee as
+/// much as for a store the block writes.
+#[test]
+fn a_callee_reached_through_a_reference_the_block_declares_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+struct Holder { t: Tensor<f32, [4]> }
+impl Holder {
+    func set(&mut self, n: Tensor<f32, [4]>) { self.t = n }
+}
+func put(dst: &mut Tensor<f32, [4]>, v: Tensor<f32, [4]>) { *dst = v }
+func main() -> i32 {
+    mut h = Holder { t: Tensor::<f32, [4]>::zeros() }
+    mut g = Tensor::<f32, [4]>::zeros()
+    mut v: Vec<string> = Vec::new()
+    pool {
+        val r = &mut h
+        r.set(Tensor::<f32, [4]>::ones())
+        val q = &mut g
+        put(q, Tensor::<f32, [4]>::ones())
+        val w = &mut v
+        w.push("a" + "b")
+    }
+    0
+}
+"#,
+    );
+    let retained = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::PoolValueRetainedByCallee { .. }))
+        .count();
+    assert_eq!(retained, 3, "every channel is caught; got {errors:?}");
+}
+
+/// Argument binding rewrites a reordered named call into a block of temporaries ahead
+/// of the call; each temporary stands for an initializer the walk proves.
+#[test]
+fn a_block_of_proven_declarations_into_an_outer_binding_is_allowed() {
+    let errors = semantic_errors(
+        r#"
+func a() -> string { "a" + "1" }
+func b() -> string { "b" + "2" }
+func mk(first: string, second: string) -> string { first + second }
+func main() -> i32 {
+    mut out = ""
+    pool p {
+        out = {
+            val t0 = b()
+            val t1 = a()
+            mk(t1, t0)
+        }
+        out = {
+            val t = "x" + "y"
+            t
+        }
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "every temporary is proven; got {errors:?}"
+    );
+}
+
+/// An arm that declares a binding is walked the same way (BUG-049).
+#[test]
+fn a_branch_whose_arm_declares_a_binding_is_allowed() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    mut out: Tensor<i32, [2, 2]> = [[0, 0], [0, 0]]
+    pool scratch {
+        out = if a[0, 0] > 0 {
+            val k = 2
+            &a * k
+        } else {
+            a.clone()
+        }
+    }
+    out[1, 1]
+}
+"#,
+    );
+    assert!(errors.is_empty(), "both arms are routed; got {errors:?}");
+}
+
+/// A declaration bound to the block's arena memory, or any statement that is not a
+/// declaration, keeps the block refused.
+#[test]
+fn a_block_over_arena_memory_is_rejected() {
+    for body in [
+        "out = {\n val t = local\n t\n }",
+        "out = if true {\n val t = local\n t\n } else { \"\" }",
+        "out = {\n mut t = \"\"\n t = local\n t\n }",
+    ] {
+        let errors = semantic_errors(&format!(
+            "func main() -> i32 {{
+    mut out = \"\"
+    pool {{
+        val local = \"a\" + \"b\"
+        {body}
+    }}
+    0
+}}"
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
+            "{body}: the block hands arena memory out; got {errors:?}"
+        );
+    }
 }

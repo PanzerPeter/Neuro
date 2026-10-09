@@ -58,8 +58,13 @@ no types.
 - **Type aliases**: collected separately from `items`, then `expand_type_aliases`
   (`parser/type_aliases.rs`) resolves alias chains (rejecting cycles, duplicates, and built-in
   shadows) and substitutes every aliased annotation across items/statements/expressions,
-  preserving the use-site span. Scope is type-annotation positions only (var / const / param /
-  return / field / cast); an alias as a value constructor or path name is out of scope. An
+  preserving the use-site span. An alias inside another alias's target (`type Pair = (Elem,
+  Elem)`) is expanded too, by a memoized depth-first walk that reports a cycle through any
+  type position (`type L = Vec<L>`) against an alias on the cycle. Scope is type-annotation
+  positions only (var / const / param / return / field / cast / turbofish argument / impl type
+  argument and `type Output = T` binding / const-parameter type / bound `<Assoc = T>` binding);
+  an alias as a value constructor or path name is out of scope. A generic parameter shadows an
+  alias of the same name inside the item that declares it. An
   unknown target hits the existing `UnknownTypeName` check downstream.
 - **Trait default methods**: `inject_trait_defaults` copies each trait's defaults into the
   `impl Trait for Type` blocks that omit them, never replacing a method the implementor wrote.
@@ -114,6 +119,13 @@ the tuple-index parse, so it needs no expression grammar of its own.
   where a `{` cannot be a body block. Both restore the previous value on the error path too, so
   nesting composes: `if check(Point { x: 1 }) && flag { }` reads the literal inside the argument
   list and the trailing brace as the body.
+- **A statement ends at a newline, its block's `}`, or end of input.** `parse_stmt_into` checks
+  what follows (`expect_statement_end`), so `val x = 5 6` is an `UnexpectedToken` rather than a
+  binding of `5` followed by a stray statement `6`; a malformed literal the lexer splits
+  (`0b102`) is caught the same way. A newline already consumed counts, because an `if` with no
+  `else` skips the line break while looking for one. An `if` in *expression* position skips
+  newlines after a block only when an `else` follows (`skip_newlines_before_else`), so the
+  boundary rule below still applies to the line after it.
 - **Statement boundaries.** `parse_expr_inner` treats a newline followed by `(`, `[`, `*`, `-`,
   `&`, `|` or `@` as a statement boundary: each can also begin an expression. `-`, `&` and `|`
   joined the set with BUG-069, before which a tail `-x` folded into the line above as a
@@ -355,7 +367,23 @@ written and resolves nothing: matching a label to a parameter needs the callee, 
   in statement position needs no case in `parse_stmt`: it falls through to expression parsing, as
   `unsafe` does.
 
+### Nesting limit
+`Parser::nested` is the one depth counter: `parse_expr`, `parse_stmt_into`, `parse_type`,
+`parse_pattern`, the destructure `parse_pattern_element` and a `module` block's item list each
+enter it, and nesting past 256 levels of them combined is `ParseError::MaxDepthExceeded`. Each
+recurses on its own, so a limit on expressions alone let `if` nesting, `Vec<Vec<...>>` or
+`Some(Some(...))` overflow the stack. A new recursive production goes through it too.
+
+### Spans of block-bodied constructs
+A function, method, trait method, `if`, `while`, `for` and `loop` span ends at the token
+consumed last (`Parser::previous_span`), which after a body is its closing `}`; ending at the
+last statement left a diagnostic one brace short and an empty body covering the keyword only.
+
 ### Precedence table facts worth knowing
+The comparisons `< > <= >= == !=` share one level (`Precedence::Comparison`), and `|`, `^`, `&`
+sit above it (Appendix B rows 8 to 11), so `x & 3 == 2` is `(x & 3) == 2` and `a == b < c`
+reads as the chain `(a == b) < c` that semantic analysis rejects.
+
 `?` maps to `Precedence::Call`: postfix, binding as tightly as a call or index, so `f(x)? + 1`
 adds to the unwrapped payload and `parse(s)?.field` reads a field of it. No new level was needed.
 `??` sits at `Precedence::NullCoalesce`, between `Lowest` and `LogicalOr`, and gets its

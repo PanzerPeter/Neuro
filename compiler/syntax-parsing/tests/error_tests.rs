@@ -307,7 +307,59 @@ fn test_error_max_depth_exceeded() {
         expr = format!("({})", expr);
     }
     let err = expr_error(&expr);
-    assert!(err.contains("maximum expression nesting depth"), "{err}");
+    assert!(err.contains("maximum nesting depth"), "{err}");
+}
+
+/// Parse `source` on a thread with the 8 MiB stack `neurc`'s main thread has, so a
+/// nesting form the depth limit misses shows up as a stack overflow (the test binary
+/// aborts) rather than passing on a larger stack or failing on the harness's smaller one.
+fn parse_error_on_main_sized_stack(source: String) -> String {
+    std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(move || parse_error(&source))
+        .expect("thread spawns")
+        .join()
+        .expect("parse returns")
+}
+
+#[test]
+fn test_error_max_depth_covers_every_nesting_form() {
+    // Statements, types, patterns and module blocks recurse without passing through
+    // the expression parser, so each needs the same limit; before it they overflowed
+    // the stack a few hundred levels in.
+    let n = 2000;
+    let cases = [
+        format!(
+            "func main() {{ {}{} }}",
+            "if true { ".repeat(n),
+            "}".repeat(n)
+        ),
+        format!(
+            "func main() {{ {}{} }}",
+            "for i in 0..1 { ".repeat(n),
+            "}".repeat(n)
+        ),
+        format!("func f(x: {}i32{}) {{}}", "[".repeat(n), "]".repeat(n)),
+        format!("func f(x: {}i32{}) {{}}", "Vec<".repeat(n), ">".repeat(n)),
+        format!("func f(x: {}i32) {{}}", "& ".repeat(n)),
+        format!("func f(x: {}i32) {{}}", "() -> ".repeat(n)),
+        format!(
+            "func main() {{ match x {{ {}1{} => 1 }} }}",
+            "Some(".repeat(n),
+            ")".repeat(n)
+        ),
+        format!(
+            "func main() {{ val {}a, b{} = x }}",
+            "(".repeat(n),
+            ")".repeat(n)
+        ),
+        format!("{}{}", "module a { ".repeat(n), "}".repeat(n)),
+    ];
+    for source in cases {
+        let head: String = source.chars().take(24).collect();
+        let err = parse_error_on_main_sized_stack(source);
+        assert!(err.contains("maximum nesting depth"), "{head}: {err}");
+    }
 }
 
 #[test]
@@ -353,4 +405,49 @@ fn test_error_semicolon_after_return() {
     "#;
     let err = parse_error(source);
     assert!(err.contains("unexpected token Semicolon"), "{err}");
+}
+
+#[test]
+fn test_error_expression_juxtaposed_on_one_line() {
+    // A statement ends at a newline or a closing brace. Two expressions side by side
+    // used to parse as two statements, so `val x = 5 6` bound 5 and dropped the 6, and
+    // a malformed literal the lexer splits (`0b102` lexes as `0b10` then `2`) bound
+    // its first half.
+    for source in [
+        "func main() -> i32 {\n    val x = 5 6\n    return x\n}",
+        "func main() -> i32 {\n    val x = 0b102\n    return x\n}",
+        "func main() -> i32 {\n    return 1 2\n}",
+        "func main() {\n    f() g()\n}",
+    ] {
+        let err = parse_error(source);
+        assert!(
+            err.contains("expected a newline or '}' to end the statement"),
+            "{source}: {err}"
+        );
+    }
+}
+
+#[test]
+fn test_statements_that_share_a_line_with_their_block_still_parse() {
+    for source in [
+        "func main() -> i32 { val x = 1\n return x }",
+        "func main() -> i32 { if true { return 1 } else { return 2 } }",
+        "func main() -> i32 {\n    if true { val a = 1 }\n    return 0\n}",
+        "func main() -> i32 {\n    val y = { val a = 1\n a }\n    return y\n}",
+        "func main() -> i32 {\n    match 1 { 1 => return 2, _ => return 3 }\n}",
+        "func main() -> i32 {\n    val Some(v) = o else { return 0 }\n    return v\n}",
+        "func main() -> i32 {\n    for i in 0..3 { }\n    loop { break }\n    return 0\n}",
+    ] {
+        parse(source).unwrap_or_else(|e| panic!("{source}: {e}"));
+    }
+}
+
+#[test]
+fn test_lex_error_inside_an_interpolation_hole_points_at_the_file() {
+    // A hole is re-lexed on its own, so the lexer reports an offset into the hole; the
+    // parser has to shift it onto the file the way it shifts the hole's tokens.
+    let source = "func main() {\n    print(\"{1 \u{20ac} 2}\")\n}";
+    let err = parse(source).expect_err("the euro sign is not a token");
+    let at = source.find('\u{20ac}').expect("source holds the character");
+    assert_eq!(err.span().map(|s| s.start), Some(at), "{err}");
 }
