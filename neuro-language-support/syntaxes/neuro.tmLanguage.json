@@ -450,12 +450,12 @@
         {
           "comment": "Compiler-known collections and the types the prelude (`compiler/neurc/src/prelude.nr`) declares in every program.",
           "name": "support.type.neuro",
-          "match": "\\b(Vec|HashMap|BTreeMap|Option|Result|OrderedF32|OrderedF64)\\b"
+          "match": "\\b(Vec|HashMap|BTreeMap|Tensor|Option|Result|OrderedF32|OrderedF64|Chars|Device|PoolHandle)\\b"
         },
         {
           "comment": "Lang-item traits the compiler recognises by name.",
           "name": "support.type.trait.neuro",
-          "match": "\\b(Copy|Clone|Drop|PartialEq|Comparable|Hashable)\\b"
+          "match": "\\b(Copy|Clone|Drop|PartialEq|Comparable|Hashable|Debug|Add|Sub|Mul|Div|Neg|Iterator|IntoIterator|PoolAware)\\b"
         }
       ]
     },
@@ -474,7 +474,7 @@
     },
     "builtin_functions": {
       "name": "support.function.builtin.neuro",
-      "match": "\\b(panic|assert|unreachable)\\b(?=\\s*\\()"
+      "match": "\\b(print|println|panic|assert|unreachable)\\b(?=\\s*\\()"
     },
     "screaming_constants": {
       "comment": "`const MAX_RETRIES` and friends. Two characters minimum, so a single-letter generic parameter (`T`, `N`) falls through to `#pascal_types` instead.",

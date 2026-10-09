@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.7.2] - 2026-10-09
+
+### Changed
+
+- The editor TextMate grammar scopes `print` and `println` as builtins, `Tensor` and the
+  prelude's `Chars`, `Device` and `PoolHandle` as library types, and the operator, `Debug`,
+  iterator and `PoolAware` traits the compiler recognises by name. The extension is 1.2.0.
+
 ## [5.7.1] - 2026-10-09
 
 ### Changed
