@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.10.1] - 2026-10-10
+
+### Fixed
+
+- The `nested_generics` string test normalizes CRLF line endings, so it passes on Windows.
+
 ## [5.10.0] - 2026-10-10
 
 ### Added

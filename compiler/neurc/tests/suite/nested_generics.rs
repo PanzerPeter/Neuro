@@ -64,7 +64,10 @@ func main() -> i32 {
         .output()
         .expect("run executable");
     assert_eq!(run.status.code(), Some(0));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "hi\n");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        "hi\n"
+    );
 }
 
 #[test]
