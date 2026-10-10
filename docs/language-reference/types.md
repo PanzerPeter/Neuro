@@ -7,7 +7,7 @@ expression already carries the type the checker resolved for it.
 ## Current Status
 
 - Implemented: primitive types (integers, floats, booleans, `char`)
-- Implemented: half-precision scalars (`f16`, `bf16`) with a narrow storage/cast/compare contract
+- Implemented: half-precision scalars (`f16`, `bf16`) with the scalar surface `f32` has, each operation correctly rounded
 - Implemented: extended integer types (`i8`-`i64`, `u8`-`u64`)
 - Implemented: function types, void type, type aliases, newtypes
 - Implemented: contextual inference for numeric literals
@@ -171,7 +171,7 @@ happy path.
 | `f32` | 32-bit | ~7 decimal digits | ±1.18e-38 to ±3.40e38 |
 | `f64` | 64-bit | ~15 decimal digits | ±2.23e-308 to ±1.80e308 |
 
-`f16` is the IEEE-754 half float; `bf16` is bfloat16, which trades mantissa bits for an `f32`-sized exponent range. Both are full scalar primitives with a deliberately **narrow contract** (see [Half-Precision Types](#half-precision-types-f16--bf16) below).
+`f16` is the IEEE-754 half float; `bf16` is bfloat16, which trades mantissa bits for an `f32`-sized exponent range. Both are ordinary floats, computed through `f32` (see [Half-Precision Types](#half-precision-types-f16--bf16) below).
 
 **Examples**:
 
@@ -202,10 +202,12 @@ Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the
 
 | Method | Returns | Behavior |
 |--------|---------|----------|
-| `.is_nan()` | `bool` | `true` when the receiver is NaN, `false` for every other value including `Inf` and `-Inf`. Nullary; defined on `f32` and `f64` only. |
-| `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` | the receiver's type | The function of the receiver, IEEE 754 out of domain (`.log()` of `0.0` is `-inf`). Nullary; `f32` and `f64` only. Float tensors have them too, see [tensors](tensors.md#elementwise-math). |
+| `.is_nan()` | `bool` | `true` when the receiver is NaN, `false` for every other value including `Inf` and `-Inf`. Nullary. |
+| `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` | the receiver's type | The function of the receiver, IEEE 754 out of domain (`.log()` of `0.0` is `-inf`). Nullary. Float tensors have them too, see [tensors](tensors.md#elementwise-math). |
 | `.pow(p)` | the receiver's type | The receiver raised to `p`, a value of the receiver's type. |
 | `.to_checked::<T>()` | `Option<T>` | The receiver truncated toward zero as the integer type `T`, or `None` when the result does not fit `T` or the receiver is NaN. See [Type Conversion](#type-conversion). |
+
+Every float type has these methods, `f16` and `bf16` included.
 
 Floats follow IEEE 754 in full, so **every** comparison against NaN is false: `NaN == NaN`
 and `NaN != NaN` alike. That makes NaN undetectable with the comparison operators, and
@@ -223,41 +225,23 @@ val c: bool = nan == nan      // false: the equality operator cannot see it
 
 The result is an ordinary `bool`, so it composes with `!`, `&&`, and `||`. Like the integer
 intrinsics, `.is_nan()` needs a value receiver: read through a `&f64` with `*r` first.
-`f16` / `bf16` do not provide it: their scalar contract is storage and casts only, with no
-arithmetic that could produce a NaN (see below).
 
 ### Half-Precision Types (`f16` / `bf16`)
 
-Modern AI relies on half-precision for mixed-precision training, so `f16` and `bf16` are first-class scalar primitives. To avoid the cross-hardware inconsistency of half-precision ALUs, they carry a **narrow scalar contract**:
+`f16` and `bf16` are ordinary floats, the storage types of mixed-precision training. They have binding and `Copy`, `as` casts to and from every numeric type, arithmetic (`+ - * / %`, unary `-`, compound assignment), the six comparisons, the [float methods](#float-methods) and `.to_checked`. A literal takes its type from context (`val h: f16 = 0.5`, `h * 2.0`) or from a suffix (`1.5f16`, `0.02bf16`).
 
-| Operation | Supported? |
-|-----------|------------|
-| Binding, move/copy (`Copy`) | ✅ |
-| Equality (`==`, `!=`) | ✅ |
-| `as`-cast to/from any numeric type, and to/from each other | ✅ |
-| Suffixed literals (`1.5f16`, `0.02bf16`) | ✅ |
-| Arithmetic (`+`, `-`, `*`, `/`, `%`) | ❌ compile error |
-| Ordering (`<`, `>`, `<=`, `>=`) | ❌ compile error |
-
-Half-precision literals **must** carry their suffix; there is no contextual default, so `val x: f16 = 1.5` is an error. Write `1.5f16`.
-
-Scalar arithmetic is intentionally undefined: half-precision math is not portably specified across hardware. Compute in `f32` and cast back:
+**Each operation is correctly rounded to the operand type.** `a + b` on two `bf16` values computes in `f32` and rounds the answer to `bf16` once. `f32` carries more than twice either format's significand bits, so that one rounding gives exactly the IEEE 754 result for `+ - * /` and `.sqrt()`, on every target, whatever half-precision hardware it has. There is no excess precision: `a * b + c` rounds after `*` and again after `+`, at every optimization level.
 
 ```neuro
-func main() -> i32 {
-    val a: bf16 = 10.0bf16
-    val b: bf16 = 4.0bf16
-
-    // val bad = a + b            // compile error: arithmetic not defined on bf16
-    val sum: bf16 = (a as f32 + b as f32) as bf16   // 14.0
-
-    val h: f16 = 1.5f16
-    val same: bool = h == 1.5f16  // equality is allowed
-    return sum as i32             // 14
-}
+val one: bf16 = 1.0
+val step: bf16 = 0.00390625                  // 2^-8, half the gap above 1.0
+val stepwise = one + step + step             // 1.0: each addition is a tie, rounded to even
+val carried = (one as f32 + step as f32 + step as f32) as bf16   // 1.0078125
 ```
 
-As **tensor element types** (`Tensor<bf16, [...]>`) the restriction lifts entirely: elementwise operators (with a tensor or a half-precision scalar on the other side), compound assignment, matmul, `einsum`, reductions and the elementwise math methods are all defined. On the CPU each element is computed in `f32` and rounded back once, and a reduction accumulates in `f32`, so a long `bf16` sum does not stall where a 16-bit running total would. The split keeps half-precision where it pays off (bulk tensor compute) without committing the scalar layer to non-portable semantics.
+There is no implicit widening. An `f16` meets only `f16`, so `h + 1.0f32` and `h + 1` are type errors; a program that wants `f32` accumulation writes `as f32`, as `carried` does. A half value is not interpolated into a string yet: widen it with `as f32` to print it.
+
+As **tensor element types** (`Tensor<bf16, [...]>`) they have elementwise operators (with a tensor or a half-precision scalar on the other side), compound assignment, matmul, `einsum`, reductions, sorts, traversals and the elementwise math methods. On the CPU each element is computed in `f32` and rounded back once, and a reduction accumulates in `f32`, so a long `bf16` sum does not stall where a 16-bit running total would.
 
 ### Digit Separators
 
@@ -1206,7 +1190,8 @@ val checked = reading.to_checked::<u8>() ?? 0u8   // None, so 0
 val small = (2.9).to_checked::<i8>()              // Some(2)
 ```
 
-`.to_checked` takes an `f32` or `f64` value and exactly one integer type argument.
+`.to_checked` takes an `f16`, `bf16`, `f32` or `f64` value and exactly one integer type
+argument.
 
 A cast whose operand is a compile-time constant (a float literal, a `const`, or arithmetic
 over those) that the target cannot hold is reported as the warning

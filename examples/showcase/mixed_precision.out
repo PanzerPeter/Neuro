@@ -1,0 +1,10 @@
+bf16 weight after 1000 steps   = 1.0
+f32 master, narrowed once      = 2.953125
+param 0: grad 0.0, weight 1.0
+param 1: grad -0.03125, weight 1.0
+param 2: grad -0.0625, weight 1.0
+param 3: grad -0.09375, weight 1.0078125
+param 4: grad -0.125, weight 1.0078125
+param 5: grad -0.15625, weight 1.0078125
+top scores [1.875, 1.125] at [1, 3]
+master weight as a byte        = -1

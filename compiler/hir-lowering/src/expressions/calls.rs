@@ -12,7 +12,7 @@ use super::{
     CHAR_AT_METHOD, CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT,
     CLONE_METHOD, DEVICE_TYPE_NAME, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD, TENSOR_TO_METHOD,
 };
-use crate::{Lowerer, LoweringError, is_full_float, is_integer};
+use crate::{Lowerer, LoweringError, is_float, is_integer};
 
 /// The gradient slot's two surface accessors. `.backward()` is a statement the block
 /// lowering pairs with its `@grad` call, never an expression.
@@ -568,7 +568,7 @@ impl Lowerer {
         // Elementwise math reads a tensor receiver too, and takes a float scalar by value,
         // as the checker does.
         if let Some(op) = crate::elementwise_math::math_op(method)
-            && (matches!(recv.referent(), HirType::Tensor { .. }) || is_full_float(&recv))
+            && (matches!(recv.referent(), HirType::Tensor { .. }) || is_float(&recv))
         {
             return self.lower_elementwise_math(object, op, args, span);
         }
@@ -858,11 +858,8 @@ impl Lowerer {
                 Ok((self.lower_args(args, &[])?, HirType::U64))
             }
             // `float.is_nan()`: nullary, `bool`. A value receiver only, matching the
-            // integer intrinsics below, and full-precision only: `f16`/`bf16` have no
-            // scalar arithmetic contract to produce a NaN with.
-            (_, "is_nan") if is_full_float(recv) => {
-                Ok((self.lower_args(args, &[])?, HirType::Bool))
-            }
+            // integer intrinsics below.
+            (_, "is_nan") if is_float(recv) => Ok((self.lower_args(args, &[])?, HirType::Bool)),
             (
                 _,
                 "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"
@@ -873,7 +870,7 @@ impl Lowerer {
             }
             // `float.to_checked::<T>()`: nullary, `Option<T>` over the turbofish's integer
             // type, which the checker has already required.
-            (_, "to_checked") if is_full_float(recv) => {
+            (_, "to_checked") if is_float(recv) => {
                 let [ast_types::GenericArg::Type(target)] = type_args else {
                     return Err(LoweringError::Malformed {
                         detail: "`.to_checked` expects one type argument".to_string(),

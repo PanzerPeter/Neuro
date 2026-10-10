@@ -506,7 +506,7 @@ pub enum TypeError {
     TensorReduceEmpty { method: String, span: Span },
 
     #[error(
-        "`.{method}()` orders a tensor's elements, which requires an integer or `f32`/`f64` element type; this tensor holds {element}"
+        "`.{method}()` orders a tensor's elements, which requires an integer or float element type; this tensor holds {element}"
     )]
     TensorSortElementType {
         method: String,
@@ -660,7 +660,7 @@ pub enum TypeError {
     },
 
     #[error(
-        "`.{method}` builds a tensor out of what its function returns, which requires an integer or `f32`/`f64`; this one returns {found}"
+        "`.{method}` builds a tensor out of what its function returns, which requires an integer or a float; this one returns {found}"
     )]
     TensorApplyResultElement {
         method: String,
@@ -844,11 +844,6 @@ pub enum TypeError {
         type_name: String,
         span: Span,
     },
-
-    #[error(
-        "arithmetic operator {op} is not defined on half-precision type {ty}: compute in f32, e.g. `(a as f32 {op} b as f32)`"
-    )]
-    HalfFloatArithmetic { op: String, ty: Type, span: Span },
 
     #[error("return type mismatch: expected {expected}, found {found}")]
     ReturnTypeMismatch {
@@ -1632,7 +1627,6 @@ impl TypeError {
             | Self::UnconstrainedAssociatedType { span, .. }
             | Self::AssociatedTypeBoundMismatch { span, .. }
             | Self::MissingSupertraitImpl { span, .. }
-            | Self::HalfFloatArithmetic { span, .. }
             | Self::ReturnTypeMismatch { span, .. }
             | Self::MissingReturn { span, .. }
             | Self::UnknownTypeName { span, .. }

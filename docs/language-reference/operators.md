@@ -657,10 +657,11 @@ a * (b + c)     // Force addition before multiplication
 
 ### Numeric Operators
 
-`+`, `-`, `*`, `/` work with:
+`+`, `-`, `*`, `/`, `%` work with:
 - `i8`, `i16`, `i32`, `i64`
 - `u8`, `u16`, `u32`, `u64`
-- `f32`, `f64`
+- `f16`, `bf16`, `f32`, `f64` (a half-precision operation computes in `f32` and rounds
+  once, see [Half-Precision Types](types.md#half-precision-types-f16--bf16))
 
 Both operands must be the same type.
 
@@ -669,7 +670,7 @@ Both operands must be the same type.
 
 ### Integer-Only Operators
 
-`%`, `&`, `|`, `^`, `~`, `<<` work only with integer types:
+`&`, `|`, `^`, `~`, `<<` work only with integer types:
 - `i8`, `i16`, `i32`, `i64`
 - `u8`, `u16`, `u32`, `u64`
 
@@ -677,7 +678,7 @@ Both operands must be the same type.
 
 `==`, `!=`, `<`, `>`, `<=`, `>=` work with:
 - All numeric types (same type required)
-  - *Note:* Float comparison (`f32`, `f64`) utilizes native IEEE-754 ordered predicates. Comparisons involving `NaN` will naturally return `false`.
+  - *Note:* Float comparison (`f16`, `bf16`, `f32`, `f64`) uses IEEE-754 ordered predicates, so every comparison involving `NaN` returns `false`.
 - `bool` (only `==` and `!=`)
 - `char`, which has a built-in total order over its Unicode scalar values
 - `string` (only `==` and `!=`), byte-level equality via length check + `memcmp`

@@ -182,9 +182,8 @@ impl TypeChecker {
             }
             // IEEE-754 NaN test. Nullary, yields `bool`. Matched on `recv` (not the
             // referent) like the integer intrinsics below: reading a scalar through `&T`
-            // needs the deref operator. `is_float` covers `f32`/`f64` only; `f16`/`bf16`
-            // carry a storage-and-cast-only scalar contract.
-            (_, "is_nan") if recv.is_float() => {
+            // needs the deref operator.
+            (_, "is_nan") if recv.is_float() || recv.is_half_float() => {
                 if !args.is_empty() {
                     self.record_error(TypeError::ArgumentCountMismatch {
                         expected: 0,
@@ -208,7 +207,7 @@ impl TypeChecker {
             }
             // Checked float-to-integer conversion: `None` where `as` would saturate or map
             // NaN to zero. Value receiver only, like `is_nan`.
-            (_, TO_CHECKED_METHOD) if recv.is_float() => {
+            (_, TO_CHECKED_METHOD) if recv.is_float() || recv.is_half_float() => {
                 Some(self.check_to_checked(type_args, args, call_span))
             }
             // Overflow-reporting arithmetic. Same argument contract as the intrinsics
@@ -290,8 +289,7 @@ impl TypeChecker {
             }
             // Elementwise math reads the receiver for the same reason a reduction does: the
             // result is a fresh buffer of the receiver's shape, so `&Tensor<T, S>` is
-            // accepted and nothing is moved. Half-precision elements are included, because
-            // the scalar `f16` / `bf16` restriction does not reach inside a tensor operation.
+            // accepted and nothing is moved.
             (Type::Tensor { element, shape }, m)
                 if is_math_method(m) && (element.is_float() || element.is_half_float()) =>
             {
@@ -303,9 +301,8 @@ impl TypeChecker {
                 self.check_math_args(&element, m, args, call_span);
                 Some(referent)
             }
-            // On a scalar, a value receiver only, as with `is_nan`. `is_float` leaves out
-            // `f16` / `bf16`, whose scalar contract has no arithmetic to compute one in.
-            (_, m) if is_math_method(m) && recv.is_float() => {
+            // On a scalar, a value receiver only, as with `is_nan`.
+            (_, m) if is_math_method(m) && (recv.is_float() || recv.is_half_float()) => {
                 self.check_math_args(recv, m, args, call_span);
                 Some(recv.clone())
             }

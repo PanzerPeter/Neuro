@@ -1515,14 +1515,33 @@ func main() -> i32 {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
-/// Two half-precision SCALARS still have no arithmetic.
+/// A half-precision scalar has the operators `f32` has, and a bare literal beside one
+/// takes its type.
 #[test]
-fn a_half_precision_scalar_still_has_no_operator() {
+fn a_half_precision_scalar_has_arithmetic() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
     val a = 1.0f16
-    val b = a + a
+    val b: bf16 = 0.5
+    val c = -a + a * 2.0 - 0.5 * a
+    val d = b / b % 3.0
+    val e: bool = c < a && d >= b
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// No implicit widening: an `f16` and an `f32` do not combine.
+#[test]
+fn a_half_precision_scalar_does_not_mix_with_f32() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    val a = 1.0f16
+    val b = a + 1.0f32
     return 0
 }
 "#,
@@ -1530,7 +1549,7 @@ func main() -> i32 {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::HalfFloatArithmetic { .. })),
+            .any(|e| matches!(e, TypeError::Mismatch { .. })),
         "{errors:?}"
     );
 }

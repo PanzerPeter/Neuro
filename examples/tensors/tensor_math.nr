@@ -1,6 +1,6 @@
 // Elementwise math: `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)`
 //
-// The six are methods on an `f32` or `f64` scalar and on a tensor of any float element
+// The six are methods on every float scalar and on a tensor of any float element
 // type. On a tensor each applies element by element and hands back a fresh tensor of the
 // same shape; on a scalar it hands back that scalar type. `.pow(p)` takes its exponent as
 // a scalar of the element type. Nothing needs an import.
@@ -11,8 +11,8 @@
 // Out-of-domain inputs follow IEEE 754 and are not diagnosed: `.log()` of 0 is `-inf`,
 // and `.sqrt()` of a negative number is NaN.
 //
-// Half-precision tensors (`f16`, `bf16`) have the methods too; a half-precision SCALAR has
-// none, for the same reason it has no arithmetic operators.
+// Half-precision values (`f16`, `bf16`) have them as scalars and as tensor elements, each
+// computed in `f32` and rounded back once.
 //
 // In a `@grad` body every one of them is differentiated by its own rule, so a sigmoid or
 // a log-likelihood can be written directly (see `showcase/logistic_fit.nr`).

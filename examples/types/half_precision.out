@@ -1,8 +1,9 @@
-f16  1.5f16                 = 1.5
-bf16 2.0bf16                = 2.0
-f16 -> f32 + 2.5f32         = 4.0
-narrowed back to f16        = 4.0
-bf16 -> f16                 = 2.0
-scale(0.75f16) via f32      = 3.0
-f16 -> i32                  = 3
+f16 1.5                     = 1.5
+f16 1 / 3                   = 0.333251953125
+bf16 2.0.sqrt()             = 1.4140625
+bf16 1 + 2^-8 + 2^-8        = 1.0
+same sum carried in f32     = 1.0078125
+third < a && root > 1       = true
+scale(0.75) to_checked i32  = 3
+300.0f16 to_checked u8      = 0
 f16 is Copy (a == a_copy)   = true

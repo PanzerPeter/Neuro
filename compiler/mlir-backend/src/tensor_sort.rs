@@ -99,7 +99,7 @@ pub(crate) fn build_sort<'c, 'a>(
     let Some(extents) = shape.iter().copied().collect::<Option<Vec<usize>>>() else {
         return Ok(None);
     };
-    let Some(compared) = Element::of(element) else {
+    let Some(compared) = Element::computed(element) else {
         return Ok(None);
     };
     if *axis >= extents.len() {

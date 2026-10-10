@@ -178,6 +178,7 @@ showcase/inventory_ledger.nr         181
 showcase/job_queue.nr                139
 showcase/log_builder.nr              64
 showcase/logistic_fit.nr             6
+showcase/mixed_precision.nr          6
 showcase/model_shapes.nr             232
 showcase/mutable_borrows.nr          47
 showcase/named_axes.nr               70

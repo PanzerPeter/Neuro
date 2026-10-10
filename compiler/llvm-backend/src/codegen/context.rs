@@ -142,13 +142,9 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
         (Type::Tensor { .. }, "to") if !matches!(recv, Type::Reference { .. }) => {
             Some(BuiltinMethod::TensorTo)
         }
-        // `.is_nan()` needs a value receiver too, and is spelled out over `F32`/`F64`
-        // rather than `Type::is_float`: that backend predicate also admits `f16`/`bf16`,
-        // whose scalar contract is storage and casts only.
-        (_, "is_nan") if matches!(recv, Type::F32 | Type::F64) => Some(BuiltinMethod::IsNan),
-        (_, "to_checked") if matches!(recv, Type::F32 | Type::F64) => {
-            Some(BuiltinMethod::ToChecked)
-        }
+        // `.is_nan()` and `.to_checked()` need a value receiver too.
+        (_, "is_nan") if recv.is_float() => Some(BuiltinMethod::IsNan),
+        (_, "to_checked") if recv.is_float() => Some(BuiltinMethod::ToChecked),
         // Integer intrinsics require a value receiver (matched on `recv`, not the referent):
         // reading a scalar through `&T` needs the deref operator.
         (_, m) if recv.is_integer() => match m {
@@ -906,28 +902,23 @@ mod tests {
 
     #[test]
     fn to_checked_resolves_on_full_precision_float_values_only() {
-        for recv in [Type::F32, Type::F64] {
+        for recv in [Type::F16, Type::BF16, Type::F32, Type::F64] {
             assert!(matches!(
                 resolve_builtin_method(&recv, "to_checked"),
                 Some(BuiltinMethod::ToChecked)
             ));
         }
-        assert!(resolve_builtin_method(&Type::F16, "to_checked").is_none());
         assert!(resolve_builtin_method(&Type::I32, "to_checked").is_none());
     }
 
     #[test]
-    fn is_nan_resolves_on_full_precision_floats_only() {
-        assert!(matches!(
-            resolve_builtin_method(&Type::F32, "is_nan"),
-            Some(BuiltinMethod::IsNan)
-        ));
-        assert!(matches!(
-            resolve_builtin_method(&Type::F64, "is_nan"),
-            Some(BuiltinMethod::IsNan)
-        ));
-        assert!(resolve_builtin_method(&Type::F16, "is_nan").is_none());
-        assert!(resolve_builtin_method(&Type::BF16, "is_nan").is_none());
+    fn is_nan_resolves_on_floats_only() {
+        for recv in [Type::F16, Type::BF16, Type::F32, Type::F64] {
+            assert!(matches!(
+                resolve_builtin_method(&recv, "is_nan"),
+                Some(BuiltinMethod::IsNan)
+            ));
+        }
         assert!(resolve_builtin_method(&Type::I32, "is_nan").is_none());
         // A value receiver is required, as for the integer intrinsics.
         let borrowed = Type::Reference {

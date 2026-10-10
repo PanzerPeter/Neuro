@@ -148,7 +148,7 @@ impl Lowerer {
                 // type its context expects, as a lone literal does.
                 let left_expected = left_expected.or_else(|| {
                     expected
-                        .filter(|ty| is_integer(ty) || crate::is_full_float(ty))
+                        .filter(|ty| is_integer(ty) || crate::is_float(ty))
                         .filter(|_| keeps_operand_type(*op) && is_literal_arithmetic(left))
                         .cloned()
                 });
@@ -223,7 +223,7 @@ impl Lowerer {
 
             Expr::Unary { op, operand, span } => {
                 let operand_expected = match op {
-                    UnaryOp::Negate => expected.filter(|t| is_numeric(t)),
+                    UnaryOp::Negate => expected.filter(|t| is_numeric(t) || crate::is_float(t)),
                     UnaryOp::Not => None,
                     UnaryOp::BitNot => expected.filter(|t| is_integer(t)),
                 };
@@ -785,11 +785,11 @@ fn keeps_operand_type(op: ast_types::BinaryOp) -> bool {
 }
 
 /// Mirrors the checker: whether an unsuffixed literal on the left of `op`, lowered at its
-/// default `left`, takes the scalar type `right` beside it. Two integers or two full
-/// floats only, and never across `<<`, whose result is the left operand's type.
+/// default `left`, takes the scalar type `right` beside it. Two integers or two floats
+/// only, and never across `<<`, whose result is the left operand's type.
 fn literal_follows_right_operand(op: ast_types::BinaryOp, left: &HirType, right: &HirType) -> bool {
     let same_kind = (is_integer(left) && is_integer(right))
-        || (crate::is_full_float(left) && crate::is_full_float(right));
+        || (crate::is_float(left) && crate::is_float(right));
     let symmetric =
         (keeps_operand_type(op) && op != ast_types::BinaryOp::Shl) || op.is_comparison();
     same_kind && symmetric && left != right

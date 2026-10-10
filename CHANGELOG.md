@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.8.0] - 2026-10-10
+
+### Added
+
+- `f16` and `bf16` scalars have arithmetic (`+ - * / %`, unary `-`, compound assignment), the
+  six comparisons, `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)`, `.is_nan()`
+  and `.to_checked::<T>()`. Each operation computes in `f32` and rounds once to the operand
+  type, which is the correctly rounded result on every target; a chain rounds after every
+  step, at every optimization level. An `f16` still combines only with `f16`.
+- A float literal takes `f16` or `bf16` from context, as it takes `f32`: `val h: f16 = 0.5`,
+  `h * 2.0` and `0.5 * h` need no suffix.
+- `.sort()`, `.argsort()` and `.topk()` order `f16` and `bf16` tensors, and `.map`, `.zip` and
+  `.reduce` may answer a half type.
+- Example `showcase/mixed_precision.nr`: `bf16` updates that round back to their weight beside an
+  `f32` master copy that moves.
+
+### Changed
+
+- `types/half_precision.nr` shows half-precision arithmetic instead of the `f32` workaround.
+
 ## [5.7.2] - 2026-10-09
 
 ### Changed

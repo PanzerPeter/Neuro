@@ -83,15 +83,10 @@ impl TypeChecker {
 
     /// Infer the type of a float literal based on expected type
     pub(crate) fn infer_float_type(&self, expected: Option<&Type>) -> Type {
-        if let Some(exp_ty) = expected {
-            // If expected type is a float type, use it
-            if exp_ty.is_float() {
-                return exp_ty.clone();
-            }
+        match expected {
+            Some(exp_ty) if exp_ty.is_float() || exp_ty.is_half_float() => exp_ty.clone(),
+            _ => Type::F64,
         }
-
-        // Default to f64
-        Type::F64
     }
 
     /// Resolve the type for a suffix-annotated float literal. The suffix

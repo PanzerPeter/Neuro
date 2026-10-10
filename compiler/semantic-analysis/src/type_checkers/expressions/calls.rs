@@ -548,8 +548,8 @@ impl TypeChecker {
                 // No method declares type parameters, so a turbofish on one names nothing,
                 // exactly as it would on a non-generic free function. `.to_checked::<T>()`
                 // is the one builtin that reads its turbofish, as its target type.
-                let reads_turbofish =
-                    field.name == TO_CHECKED_METHOD && obj_ty.referent().is_float();
+                let reads_turbofish = field.name == TO_CHECKED_METHOD
+                    && (obj_ty.referent().is_float() || obj_ty.referent().is_half_float());
                 if !type_args.is_empty() && !reads_turbofish {
                     self.record_error(TypeError::TurbofishCountMismatch {
                         name: field.name.clone(),

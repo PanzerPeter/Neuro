@@ -801,8 +801,8 @@ leaves the ordered buffer where it was, so it is offered on `&Tensor<T, S>` too.
 
 `k:` and `descending:` must be constants, because the result's shape and the comparator are
 both settled before any element is read; `k` must lie between `1` and the sorted axis's
-extent. The element type must be an integer or `f32`/`f64`, the receiver must have at least
-one axis, and its shape must be numbers rather than shape parameters or `?`.
+extent. The element type must be an integer or a float, half precision included, the
+receiver must have at least one axis, and its shape must be numbers rather than shape parameters or `?`.
 
 ## Einstein notation
 
@@ -887,8 +887,8 @@ val total   = tensor.reduce(0.0, |acc: f32, x: f32| -> f32 { acc + x })
 
 `.map` is the one construct that changes what a tensor's buffer holds: the result's element
 type is the **function's return type**, not the receiver's, so `t.map(|x: i32| -> f64 { ... })`
-is how a tensor changes dtype elementwise. That type has to be an integer or `f32`/`f64`,
-since the answers go into a buffer.
+is how a tensor changes dtype elementwise. That type has to be an integer or a float
+(half precision included), since the answers go into a buffer.
 
 `.zip` walks two buffers at one index, so its operand carries the receiver's extents; the
 two need not hold the same element type, the function's parameters saying what each holds.
@@ -924,7 +924,8 @@ defined on two tensors, so a mask has to be written out by hand today.
 
 `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` and `.pow(p)` apply a function to every
 element and hand back a fresh tensor of the receiver's shape and element type. The same six
-are methods on an `f32` or `f64` scalar, where they hand back that scalar type. None needs an
+are methods on every float scalar, `f16` and `bf16` included, where they hand back that
+scalar type. None needs an
 import.
 
 ```neuro
@@ -940,8 +941,7 @@ val hypotenuse = (a * a + b * b).sqrt()
 
 `.pow` takes its exponent as a **scalar of the element type**, so an `f32` tensor takes an
 `f32` and a `bf16` one a `bf16` (`h.pow(0.5bf16)`). Any float element type has the methods,
-half precision included; a half-precision *scalar* has none, for the reason it has no
-arithmetic operators. An integer receiver, scalar or tensor, has none either.
+half precision included. An integer receiver, scalar or tensor, has none.
 
 Like a reduction, each method **reads** its receiver, so it is offered on `&Tensor<T, S>`
 and the receiver stays usable afterwards. Out-of-domain inputs follow IEEE 754 and are not

@@ -5,7 +5,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::Literal;
 
 use crate::types::{float_suffix_type, int_suffix_type};
-use crate::{LoweringError, is_full_float, is_integer, is_numeric, peels_to_string};
+use crate::{LoweringError, is_float, is_integer, is_numeric, peels_to_string};
 use ast_types::BinaryOp;
 
 /// Wrap a reference in whichever unsizing coercion the expected type calls for:
@@ -89,7 +89,7 @@ pub(super) fn literal_type(lit: &Literal, expected: Option<&HirType>) -> HirType
         },
         Literal::Float(_, Some(suffix)) => float_suffix_type(suffix),
         Literal::Float(_, None) => match expected {
-            Some(t) if is_full_float(t) => t.clone(),
+            Some(t) if is_float(t) => t.clone(),
             _ => HirType::F64,
         },
         Literal::Boolean(_) => HirType::Bool,

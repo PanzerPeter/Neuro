@@ -562,8 +562,7 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
 - `.is_nan()` → `codegen_is_nan`: `fcmp uno x, x` on the receiver value, yielding the `i1` a
   `bool` lowers to. The self-comparison IS the test (NaN is the only value unordered with
   itself), and it is why the check cannot be spelled in source, where `x != x` uses the ordered
-  predicate. Resolved for `F32`/`F64` spelled out rather than via this slice's `Type::is_float`,
-  which also admits `f16`/`bf16`.
+  predicate. Resolved on this slice's `Type::is_float`, the four float types.
 - `checked_{add,sub,mul}` → `codegen_checked_int_intrinsic`: `llvm.{s,u}{add,sub,mul}.with.overflow`
   via the shared `emit_with_overflow`, then `build_option_value` (`collections/mod.rs`) selects
   `Some(result)` / `None` on the negated overflow bit. Branchless: both variants are materialized
@@ -571,8 +570,9 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   the call's result type; nothing about `Option` is assumed here.
 - `.to_checked::<T>()` → `codegen_to_checked`: `T` is read from the result `Option`'s `Some`
   payload. `llvm.trunc`, then `fcmp oge lo` and `fcmp olt hi` with `lo` = `0` or `-2^(bits-1)`
-  and `hi` = `2^bits` or `2^(bits-1)`: both powers of two, so exact in every float format,
-  unlike `T::MAX`. Ordered compares reject NaN. The payload is the saturating cast
+  and `hi` = `2^bits` or `2^(bits-1)`: both powers of two, so exact in `f32` and `f64`,
+  unlike `T::MAX`. A half receiver is widened to `f32` first (exactly), because `2^16` is past
+  `f16`'s range. Ordered compares reject NaN. The payload is the saturating cast
   (`saturating_float_to_int`, shared with `as`), so no `poison` is ever built.
 
 ## Literals and Constants ABI
@@ -833,7 +833,11 @@ void-error in value position.
   run-time one agree. The intrinsic call lives in `saturating_float_to_int`, which
   `.to_checked` reuses for its payload.
 - **`f16` / `bf16`** lower to LLVM `half` / `bfloat`. Backend `is_float()` **includes** the halves,
-  so equality (`fcmp`) and `as`-casts route through the float instructions. The float→float cast
+  so `as`-casts route through the float instructions. A half operator in `codegen_binary`
+  `fpext`s both operands to `f32`, runs `codegen_scalar_binary` there, and `fptrunc`s an
+  arithmetic answer back: one rounding per operation, which is the correctly rounded half result
+  (`f32` has more than `2p + 2` significand bits for either format) and leaves no excess
+  precision to the next one. A comparison returns the widened compare, which is exact. The float→float cast
   and `coerce_if_needed` pick `fpext` / `fptrunc` by **bit width**, not a fixed F32/F64 pair; an
   f16↔bf16 cast (equal width, different format) routes through f32.
 

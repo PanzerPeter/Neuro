@@ -510,10 +510,9 @@ impl Type {
 
     /// Check if this is a full-precision floating-point type (`f32`/`f64`).
     ///
-    /// Deliberately excludes `f16`/`bf16`: half-precision has a narrow scalar
-    /// contract (no arithmetic), so it must not flow through the arithmetic and
-    /// contextual-inference paths gated on this predicate. Use
-    /// `Type::is_half_float` for the half-precision-only checks.
+    /// Deliberately excludes `f16`/`bf16`: they share the scalar surface but not every
+    /// float path (a gradient, string interpolation), so each site that admits them
+    /// names `Type::is_half_float` as well.
     pub fn is_float(&self) -> bool {
         matches!(self, Type::F32 | Type::F64)
     }

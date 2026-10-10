@@ -227,7 +227,9 @@ depends on that order.
 the stable order of every run (a tensor of run positions shaped like the source), then one
 all-parallel gather per output that reads through it: the element, or the position as
 `index_cast` to `i32`. `.topk` gathers only its `k` positions. Any stable sort under one
-comparator gives the same order, so the algorithm is never observable.
+comparator gives the same order, so the algorithm is never observable. The element kind is
+`Element::computed`, so a half-precision run sorts by merge sort, its keys compared with `cmpf`
+as they are (exact, nothing to widen).
 
 - *Merge sort, host and GPU.* Bottom-up, one all-parallel `linalg.generic` per doubling of the
   block width (`ceil(log2(extent))` of them, none for a run of one). Each point finds the run

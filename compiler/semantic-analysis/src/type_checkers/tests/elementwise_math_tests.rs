@@ -20,6 +20,10 @@ func main() -> i32 {
     val h: Tensor<bf16, [4]> = Tensor::<bf16, [4]>::ones()
     val ha: Tensor<bf16, [4]> = h.abs()
     val hp: Tensor<bf16, [4]> = h.pow(2.0bf16)
+    val g: f16 = 2.25
+    val gs: f16 = g.sqrt()
+    val gp: f16 = g.pow(0.5)
+    val gn: bool = g.is_nan()
     val d: Tensor<f64, []> = Tensor::scalar(b)
     val ds: Tensor<f64, []> = d.sqrt()
     return 0
@@ -56,12 +60,11 @@ func main() -> i32 {
     );
 }
 
-/// Integers and half-precision scalars have none of the methods.
+/// Integers have none of the methods, as scalars or as tensor elements.
 #[test]
-fn integer_and_half_scalar_receivers_have_no_math() {
+fn integer_receivers_have_no_math() {
     for (receiver, declaration) in [
         ("i", "val i: i32 = 4"),
-        ("h", "val h: f16 = 1.5f16"),
         ("n", "val n: Tensor<i32, [2]> = Tensor::<i32, [2]>::ones()"),
     ] {
         let errors = semantic_errors(&format!(

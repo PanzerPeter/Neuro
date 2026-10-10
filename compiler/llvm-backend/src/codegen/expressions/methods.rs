@@ -487,7 +487,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let int_type = self.type_mapper.map_type(&target)?.into_int_type();
         let unsigned = target.is_unsigned_int();
 
-        let value = self.codegen_expr(receiver)?.into_float_value();
+        let mut value = self.codegen_expr(receiver)?.into_float_value();
+        // A half value widens exactly, and the `f32` bounds below are ones the half formats
+        // cannot all spell (`2^16` is past `f16`'s largest finite value).
+        if matches!(
+            receiver.ty,
+            neuro_hir::HirType::F16 | neuro_hir::HirType::BF16
+        ) {
+            value = self
+                .builder
+                .build_float_ext(value, self.context.f32_type(), "chk.widen")?;
+        }
         let float_ty = value.get_type();
         let trunc = Intrinsic::find("llvm.trunc")
             .and_then(|i| i.get_declaration(&self.module, &[float_ty.into()]))

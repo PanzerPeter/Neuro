@@ -1,54 +1,59 @@
 // f16 / bf16 half-precision primitives
 //
-// `f16` (IEEE-754 half) and `bf16` (bfloat16) are first-class scalar primitives
-// with a deliberately narrow contract: binding, copy, `==`/`!=`, and `as`-cast
-// to/from any numeric type. They have NO scalar arithmetic: half-precision ALUs
-// are not portable, so the language directs you to compute in `f32` and cast back.
-// Their payoff is bulk tensor compute, where tensor arithmetic accepts them.
+// `f16` (IEEE-754 half) and `bf16` (bfloat16) are ordinary floating point: arithmetic,
+// the six comparisons, the math methods and `.to_checked`, like `f32`. Each operation
+// computes in `f32` and rounds its answer to the operand type once, so the result is the
+// correctly rounded one on every machine. A chain rounds after every step; nothing is
+// carried at a wider precision unless the program asks with `as f32`.
 //
-// Half-precision literals always carry their suffix: `1.5f16`, `0.02bf16`.
+// A literal takes its type from context (`val h: f16 = 0.5`, `h * 2.0`) or from its
+// suffix (`1.5f16`, `0.02bf16`). There is no implicit widening: an `f16` meets only `f16`.
 
 func scale(x: f16) -> f16 {
-    // Arithmetic happens in f32, then narrows back to f16.
-    return (x as f32 * 4.0f32) as f16
+    return x * 4.0
 }
 
 func main() -> i32 {
-    val a: f16 = 1.5f16
-    val b: bf16 = 2.0bf16
+    val a: f16 = 1.5
+    val b = 2.0bf16
 
     // f16/bf16 are Copy: the source binding stays valid after a bind.
     val a_copy = a
     val same: bool = a == a_copy
 
-    // The prescribed arithmetic workaround: widen to f32, compute, narrow back.
-    val widened: f32 = a as f32 + 2.5f32     // 4.0
-    val narrowed: f16 = widened as f16
+    // `1 + 2^-8` is a tie in bf16 and rounds to 1, so adding the step twice stays at 1.
+    // Summed in f32 and rounded at the end, the same two steps reach 1.0078125.
+    val step: bf16 = 0.00390625
+    val stepwise = 1.0bf16 + step + step
+    val accumulated = (1.0bf16 as f32 + step as f32 + step as f32) as bf16
 
-    // as-cast across formats and to integers.
-    val b_as_f16: f16 = b as f16
-    val three: f16 = scale(0.75f16)          // 0.75 * 4 = 3.0
-    val code: i32 = three as i32             // 3
+    val third = 1.0f16 / 3.0
+    val root = b.sqrt()
+    val three = scale(0.75)
+    val ordered = third < a && root > 1.0
 
-    // `f16` / `bf16` are not interpolatable: the narrow contract covers binding,
-    // copy, `==`, and `as`, and rendering is not on that list. Widen to `f32` to
-    // report one, exactly as you widen to compute with one.
-    val a_out: f32 = a as f32
-    val b_out: f32 = b as f32
-    val narrowed_out: f32 = narrowed as f32
-    val b_as_f16_out: f32 = b_as_f16 as f32
-    val three_out: f32 = three as f32
+    // `.to_checked` answers `None` where `as` would saturate.
+    val code = three.to_checked::<i32>() ?? 0
+    val too_big = 300.0f16.to_checked::<u8>() ?? 0
 
-    println("f16  1.5f16                 = {a_out}")
-    println("bf16 2.0bf16                = {b_out}")
-    println("f16 -> f32 + 2.5f32         = {widened}")
-    println("narrowed back to f16        = {narrowed_out}")
-    println("bf16 -> f16                 = {b_as_f16_out}")
-    println("scale(0.75f16) via f32      = {three_out}")
-    println("f16 -> i32                  = {code}")
+    // Rendering is not on the half surface yet: widen to `f32` to print one.
+    val a_out = a as f32
+    val third_out = third as f32
+    val root_out = root as f32
+    val stepwise_out = stepwise as f32
+    val accumulated_out = accumulated as f32
+
+    println("f16 1.5                     = {a_out}")
+    println("f16 1 / 3                   = {third_out}")
+    println("bf16 2.0.sqrt()             = {root_out}")
+    println("bf16 1 + 2^-8 + 2^-8        = {stepwise_out}")
+    println("same sum carried in f32     = {accumulated_out}")
+    println("third < a && root > 1       = {ordered}")
+    println("scale(0.75) to_checked i32  = {code}")
+    println("300.0f16 to_checked u8      = {too_big}")
     println("f16 is Copy (a == a_copy)   = {same}")
 
-    if same && narrowed == 4.0f16 && b_as_f16 == 2.0f16 {
+    if same && ordered && stepwise == 1.0 && too_big == 0 {
         return code        // 3 on success
     }
     return 1

@@ -467,10 +467,15 @@ pub(crate) fn is_integer(t: &HirType) -> bool {
     )
 }
 
-/// Whether `t` is a full-precision float (`f32`/`f64`). Half-precision is excluded,
-/// matching the checker's contextual-inference predicate.
+/// Whether `t` is a full-precision float (`f32`/`f64`). Half-precision is excluded: a
+/// gradient is taken only over these two.
 pub(crate) fn is_full_float(t: &HirType) -> bool {
     matches!(t, HirType::F32 | HirType::F64)
+}
+
+/// Whether `t` is any float with the scalar surface, half-precision included.
+pub(crate) fn is_float(t: &HirType) -> bool {
+    matches!(t, HirType::F16 | HirType::BF16) || is_full_float(t)
 }
 
 /// Whether `t` is a numeric type usable with `-` / arithmetic (integer or

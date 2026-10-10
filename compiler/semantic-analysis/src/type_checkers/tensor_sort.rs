@@ -47,7 +47,7 @@ impl TypeChecker {
         args: &[Expr],
         call_span: Span,
     ) -> Type {
-        if !element.is_integer() && !element.is_float() {
+        if !element.is_integer() && !element.is_float() && !element.is_half_float() {
             self.record_error(TypeError::TensorSortElementType {
                 method: method.to_string(),
                 element: element.clone(),

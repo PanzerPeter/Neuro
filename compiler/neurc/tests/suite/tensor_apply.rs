@@ -304,7 +304,7 @@ func main() -> i32 {
 "#;
     let diagnostics = rejection("apply_result_element.nr", source);
     assert!(
-        diagnostics.contains("requires an integer or `f32`/`f64`"),
+        diagnostics.contains("requires an integer or a float"),
         "unexpected diagnostics: {diagnostics}"
     );
 }

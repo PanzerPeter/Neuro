@@ -245,13 +245,8 @@ fn is_nan_wrong_arity_rejected() {
 
 #[test]
 fn is_nan_on_non_float_receiver_reports_method_not_found() {
-    // Integers cannot be NaN, and half-precision has no scalar arithmetic contract
-    // that could produce one; both fall through to the ordinary method lookup.
-    for decl in [
-        "val x: i32 = 1",
-        "val x: f16 = 1.5f16",
-        "val x: bf16 = 1.5bf16",
-    ] {
+    // Integers cannot be NaN, so the call falls through to the ordinary method lookup.
+    for decl in ["val x: i32 = 1", "val x: u8 = 1"] {
         let errors = semantic_errors(&format!(
             "func main() -> i32 {{
     {decl}

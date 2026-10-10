@@ -667,12 +667,12 @@ compiler bug, not a diagnostic.
 - **`__char_at(offset)`**: `lower_builtin_method` types the prelude's decode step as
   `HirType::Char` with a `u64` argument. The semantic pass has already refused it to every
   module but the prelude's, so no gate is repeated here.
-- **`.is_nan()`**: `lower_builtin_method` types it as `HirType::Bool` on a full-precision float
-  receiver (`is_full_float`, so `f16`/`bf16` are excluded), with no arguments to lower.
+- **`.is_nan()`**: `lower_builtin_method` types it as `HirType::Bool` on any float receiver
+  (`is_float`, half precision included), with no arguments to lower.
 - **`checked_{add,sub,mul}`**: `lower_builtin_method` types these on any integer receiver as
   `Option<T>` over that receiver, reusing `collections.rs`'s `option_of` so the instance is
   materialized as an ordinary `HirItem::Enum` exactly like `Vec::pop`'s.
-- **`.to_checked::<T>()`**: `lower_builtin_method` types it on a full-precision float receiver as
+- **`.to_checked::<T>()`**: `lower_builtin_method` types it on any float receiver as
   `Option<T>`, `T` resolved from the turbofish, which `lower_method_call` passes through for this
   one method. With `checked_*` these are the builtin intrinsics whose result is a monomorphized
   enum rather than a fixed type.

@@ -584,6 +584,39 @@ impl<'ctx> CodegenContext<'ctx> {
             });
         }
 
+        // A half-precision operator computes in `f32`, and arithmetic rounds its answer back
+        // once. `f32` has more than twice either half format's significand bits plus two, so
+        // that single rounding is the correctly rounded half result, on every target and
+        // with no excess precision carried into the next operation. Widening is exact, so
+        // a comparison of the widened pair is the comparison of the halves.
+        if matches!(left_ty, Type::F16 | Type::BF16) {
+            let f32_type = self.context.f32_type();
+            let (lhs, rhs) = (lhs.into_float_value(), rhs.into_float_value());
+            let narrow = lhs.get_type();
+            let lhs = self.builder.build_float_ext(lhs, f32_type, "half.lhs")?;
+            let rhs = self.builder.build_float_ext(rhs, f32_type, "half.rhs")?;
+            let result =
+                self.codegen_scalar_binary(op, lhs.into(), rhs.into(), &Type::F32, offset)?;
+            if op.is_comparison() {
+                return Ok(result);
+            }
+            return Ok(self
+                .builder
+                .build_float_trunc(result.into_float_value(), narrow, "half.round")?
+                .into());
+        }
+        self.codegen_scalar_binary(op, lhs, rhs, left_ty, offset)
+    }
+
+    /// One scalar operator on two operands already coerced to `left_ty`.
+    fn codegen_scalar_binary(
+        &mut self,
+        op: BinaryOp,
+        lhs: BasicValueEnum<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
+        left_ty: &Type,
+        offset: usize,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
         match op {
             // Arithmetic operators
             BinaryOp::Add => {

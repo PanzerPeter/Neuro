@@ -64,7 +64,7 @@ impl TypeChecker {
         // `val d: u8 = 200 + 50` both literals are `u8`.
         let left_expectation = self.scalar_broadcast_expectation(right).or_else(|| {
             expected
-                .filter(|ty| ty.is_integer() || ty.is_float())
+                .filter(|ty| ty.is_integer() || ty.is_float() || ty.is_half_float())
                 .filter(|_| keeps_operand_type(*op) && is_literal_arithmetic(left))
                 .cloned()
         });
@@ -167,21 +167,7 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                // Half-precision scalars have no arithmetic: point the
-                // programmer at the `f32` workaround rather than a generic error.
-                if let Some(half) = [&left_ty, &right_ty]
-                    .into_iter()
-                    .find(|t| t.is_half_float())
-                {
-                    self.record_error(TypeError::HalfFloatArithmetic {
-                        op: op.to_string(),
-                        ty: half.clone(),
-                        span: *span,
-                    });
-                    return Some(Type::Unknown);
-                }
-
-                if !left_ty.is_numeric() {
+                if !left_ty.is_numeric() && !left_ty.is_half_float() {
                     self.record_error(TypeError::InvalidBinaryOperator {
                         op: op.to_string(),
                         left: left_ty.clone(),
@@ -253,7 +239,7 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                if !left_ty.is_numeric() && !left_ty.is_char() {
+                if !left_ty.is_numeric() && !left_ty.is_half_float() && !left_ty.is_char() {
                     self.record_error(TypeError::InvalidBinaryOperator {
                         op: op.to_string(),
                         left: left_ty.clone(),
@@ -507,7 +493,7 @@ impl TypeChecker {
 
         // For unary operations, propagate expected type to operand if appropriate
         let expected_operand = match op {
-            UnaryOp::Negate => expected.filter(|t| t.is_numeric()),
+            UnaryOp::Negate => expected.filter(|t| t.is_numeric() || t.is_half_float()),
             UnaryOp::Not => None,
             UnaryOp::BitNot => expected.filter(|t| t.is_integer()),
         };
@@ -531,7 +517,7 @@ impl TypeChecker {
 
         match op {
             UnaryOp::Negate => {
-                if !operand_ty.is_numeric() {
+                if !operand_ty.is_numeric() && !operand_ty.is_half_float() {
                     self.record_error(TypeError::InvalidOperator {
                         op: op.to_string(),
                         ty: operand_ty,
@@ -702,12 +688,12 @@ fn keeps_operand_type(op: BinaryOp) -> bool {
 }
 
 /// Whether an unsuffixed literal on the left of `op`, typed at its default `left`, takes
-/// the scalar type `right` of the operand beside it. Only between two integer or two full
-/// float types: an integer literal never becomes a float. `<<` is left out because its
-/// result is the left operand's type, which the shift amount does not decide.
+/// the scalar type `right` of the operand beside it. Only between two integer or two float
+/// types: an integer literal never becomes a float. `<<` is left out because its result is
+/// the left operand's type, which the shift amount does not decide.
 fn literal_follows_right_operand(op: BinaryOp, left: &Type, right: &Type) -> bool {
-    let same_kind =
-        (left.is_integer() && right.is_integer()) || (left.is_float() && right.is_float());
+    let float = |ty: &Type| ty.is_float() || ty.is_half_float();
+    let same_kind = (left.is_integer() && right.is_integer()) || (float(left) && float(right));
     let symmetric = (keeps_operand_type(op) && op != BinaryOp::Shl) || op.is_comparison();
     same_kind && symmetric && left != right
 }

@@ -248,13 +248,14 @@ false `UninitializedVariable`. A statement-level `if` / `else if` / `while` cond
   **not consuming positions**, so they borrow to read and never move.
 - `char` is Copy; `is_valid_cast` permits char↔integer and char→char only (no float, no bool);
   ordering comparisons accept it alongside numerics on its built-in total order.
-- `f16` / `bf16` have a deliberately narrow contract: Copy, `==`/`!=` via the compatible-type
-  path, `as`-casts to and from any numeric type and to and from each other, but **no
-  arithmetic**. `+ - * / %` on a half operand is `TypeError::HalfFloatArithmetic` ("compute in
-  f32"), and `is_float()` deliberately still excludes them so arithmetic and inference paths skip
-  them.
-- Ordering comparisons (`< > <= >=`) are restricted to `is_numeric()` plus `char`, rejecting
-  struct/string/bool operands.
+- `f16` / `bf16` have the scalar surface `f32` has: Copy, `as`-casts to and from any numeric
+  type and each other, `+ - * / %`, unary `-`, the six comparisons, the math methods, `is_nan`
+  and `to_checked`, and contextual literal typing (`infer_float_type`,
+  `literal_follows_right_operand`). `is_float()` still means `f32` / `f64` only, because a
+  gradient (`grad.rs`) and interpolation stay full-precision; each site that admits a half
+  type also names `is_half_float()`.
+- Ordering comparisons (`< > <= >=`) are restricted to `is_numeric()`, the half floats and
+  `char`, rejecting struct/string/bool operands.
 - A comparison whose LHS is itself a comparison is `ComparisonChain` (all six operators).
 - Arrays (`Type::Array { element, size }`) and tuples (`Type::Tuple`) are compatible on equal
   shape with matching elements, and are `Copy` exactly when every element is. An element that is
@@ -334,15 +335,13 @@ a wrong count):
 - on any integer receiver, `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)`,
   each taking one same-typed argument (`check_unary_int_intrinsic_arg`) and returning the receiver
   type;
-- `f32`/`f64`.`is_nan()` (nullary) returns `bool`. Gated on `Type::is_float`, which admits the
-  full-precision floats only: `f16`/`bf16` fall through to `MethodNotFound`, having no scalar
-  arithmetic that could produce a NaN. A borrowed receiver reaches it already read through by
+- a float's `is_nan()` (nullary, any of the four float types) returns `bool`. A borrowed receiver reaches it already read through by
   `auto_deref`, as it reaches the integer intrinsics;
 - `checked_{add,sub,mul}` take the same argument but return `Option<T>` over the receiver,
   instantiated through the shared `option_of` (`collections.rs`) so the overflow-reporting
   intrinsics and the fallible collection readers materialize the same prelude enum instance. A
   program with no `Option` in scope gets `UnknownTypeName`.
-- `f32`/`f64`.`to_checked::<T>()` returns `Option<T>` through the same `option_of`. It is the one
+- a float's `to_checked::<T>()` returns `Option<T>` through the same `option_of`. It is the one
   builtin that reads the call's turbofish (`resolve_builtin_method` takes `type_args` for it):
   exactly one type argument, an integer (`ToCheckedTargetNotInteger` otherwise), and no value
   arguments. A value receiver only, as for `is_nan`.
@@ -841,9 +840,8 @@ same check for return-position `impl Trait<Assoc = U>`.
   through `+=`. The
   tensor path checks the operand **before** the target's mutability, which is the evaluation
   order the language specifies; requires the element to have arithmetic
-  (`TensorElementNotArithmetic` rejects `bool`; a half-precision element has tensor
-  arithmetic although its scalar has none, since BUG-073, as do the by-value operators,
-  a half scalar broadcast against a half tensor, and the reductions); and moves an owned operand, so a right-hand side that moved the target
+  (`TensorElementNotArithmetic` rejects `bool`; a half-precision element has it, as it has
+  the by-value operators, a half scalar broadcast against a half tensor, and the reductions); and moves an owned operand, so a right-hand side that moved the target
   itself (`w += w`) is `UseOfMovedValue`. The operand is accepted by
   `compound_assign_operand_fits` (`tensor_broadcast.rs`), which takes the by-value operator's
   broadcast rule with one asymmetry the in-place write forces: the join has to come back as the
@@ -1098,8 +1096,8 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   default. An all-positional call is left as written, so `.sort` / `.argsort` count their own
   arguments (`ArgumentCountMismatch` past two). All of them are read as syntax rather than as values: an axis may be
   a dimension NAME, and `k:` and `descending:` decide the result's shape and the comparator
-  before any element exists (`TensorSortArgNotConstant`). The element must be an integer or
-  `f32`/`f64` (`TensorSortElementType`); a rank-0 receiver has no axis to order
+  before any element exists (`TensorSortArgNotConstant`). The element must be an integer or a
+  float, half precision included (`TensorSortElementType`); a rank-0 receiver has no axis to order
   (`TensorSortRankZero`); an empty axis has no ordering (`TensorSortEmpty`); and `k` must lie
   in `1..=extent` (`TensorTopKOutOfRange`). Every extent must be a number here
   (`TensorShapeCastSymbolicExtent`, `TensorDynamicExtent`), because the result's shape and
@@ -1125,10 +1123,9 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
 - **Elementwise math, in `type_checkers/expressions/builtins.rs`.** `.exp()`, `.log()`,
   `.sqrt()`, `.tanh()`, `.abs()` and `.pow(p)` are two arms of `resolve_builtin_method`. On a
   tensor they match the REFERENT, as the reductions do, and only a float element (half
-  precision included: the scalar `f16` / `bf16` restriction does not reach inside a tensor
-  operation); the answer is the receiver's own tensor type and no move is recorded. On a
-  scalar they match `recv` and `is_float` (`f32` / `f64` values only, as `is_nan` does). Every
-  other receiver falls through to `MethodNotFound`, integers and half scalars among them.
+  precision included); the answer is the receiver's own tensor type and no move is recorded.
+  On a scalar they match `recv` and any float type, as `is_nan` does. Every other receiver
+  falls through to `MethodNotFound`, integers among them.
   `.pow` checks one exponent of the element type and the rest none, through
   `check_call_args`; the arguments are checked there rather than in a module of their own
   because that helper is private to `expressions`. Out-of-domain inputs are IEEE 754 values,
