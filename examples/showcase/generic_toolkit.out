@@ -12,4 +12,6 @@ Buffer<i32, 4> count/data  = 3, 2
 identity<Label> (non-Copy) = tensor
 identity<string>           = axis
 Guard destructors run      = 2
+wrap_first<i32> peeked     = 21
+wrap_first<bool> got Ok    = false
 total                      = 87

@@ -277,7 +277,9 @@ impl TypeChecker {
         // types.
         let enum_name = match scrut_ty {
             Type::Unknown => base,
-            Type::Enum(name) if name == base || self.enum_instance_base(name) == Some(base) => {
+            Type::Enum(name)
+                if name == base || self.enum_instance_base(name).as_deref() == Some(base) =>
+            {
                 name.as_str()
             }
             _ => {

@@ -22,7 +22,6 @@ use ast_types::Expr;
 use shared_types::Literal;
 
 pub(crate) use const_predicates::eval_const_predicate;
-use const_predicates::mentions_type_parameter;
 
 /// The builtin deep-copy method name shared by `string` and Clone-deriving structs.
 pub(crate) const CLONE_METHOD: &str = "clone";

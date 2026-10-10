@@ -360,7 +360,17 @@ annotations against the lowered arguments' types (`unify_ast_hir`), resolves the
 signature under a `type_subst` map (consulted by `resolve_type` for a parameter name), mangles a
 per-instance name, enqueues the instance if unseen, and emits a `Call` to the mangled name. A
 worklist drains after the ordinary items. The backend pre-declares all functions, so emission
-order is irrelevant.
+order is irrelevant. `unify_ast_hir` also binds through an instance: `Option<U>` against
+`Opt_g_i32` reads the instance's arguments (`instance_args`, from `struct_instances` /
+`enum_instance_args`) and unifies them pairwise. An associated function of a generic type
+(`Cell::new(42)`, `generic_assoc_fn`) infers the type's instance the same way, plus any turbofish,
+and calls that instance's function (`lower_generic_assoc_call`).
+
+Every function, struct and enum instance records its depth: one more than the body that requested
+it (`mono_depth`, set as each worklist item is emitted). Past `MAX_INSTANCE_DEPTH` the request is
+`InstantiationTooDeep`. A generic that calls itself with a type built from its own parameter
+(`grow(Option::Some(x))` inside `grow<T>`) needs a new instance per level, which the checker, seeing
+one template, cannot tell; without the limit lowering would never finish.
 
 Generic structs and impls work the same way, through `generic_structs` / `generic_impls` and
 `instantiate_generic_struct(base, args)`: called from `resolve_type` for a `Type::Generic`

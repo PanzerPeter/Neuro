@@ -11,6 +11,9 @@
 //   · non-`Copy` type arguments: a struct holding a `string`, moved by value
 //   · `Drop` destructors observed through a generic call boundary
 //   · if-expressions and implicit returns
+//   · generics at an enclosing parameter: `Option<T>` and `Result<Cell<T>, string>` in
+//     generic signatures, `Cell<T>` in its own impl, propagated with `?` and unwrapped
+//     with `??`
 //
 // Each generic template below (function, struct, or impl) is emitted once per
 // concrete type or const argument, so `T` and `N` cost nothing at runtime.
@@ -36,8 +39,18 @@ struct Cell<T> {
 }
 
 impl<T> Cell<T> {
+    // `Cell<T>` here is the instance the impl is for, so `Cell::new(7)` is a `Cell<i32>`:
+    // the call infers `T` from its argument.
+    func new(value: T) -> Cell<T> {
+        Cell { value: value }
+    }
+
     func get(self) -> T {
         self.value
+    }
+
+    func peek(self) -> Option<T> {
+        Option::Some(self.value)
     }
 }
 
@@ -98,6 +111,25 @@ func sum_all<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
     total
 }
 
+// `Option<T>` and `Result<T, string>` at the function's own parameter: each call infers
+// `T` through the instance it is handed.
+func first_of<T>(cond: bool, x: T) -> Option<T> {
+    if cond { Option::Some(x) } else { Option::None }
+}
+
+func checked<T>(o: Option<T>) -> Result<T, string> {
+    match o {
+        Option::Some(v) => Result::Ok(v),
+        Option::None => Result::Err("empty"),
+    }
+}
+
+// `?` hands an `Err` straight back; on `Ok` the value goes into a fresh `Cell<T>`.
+func wrap_first<T>(cond: bool, x: T) -> Result<Cell<T>, string> {
+    val v = checked(first_of(cond, x))?
+    Result::Ok(Cell::new(v))
+}
+
 // Non-generic helper: deconstructs an enum via pattern matching.
 func area(s: Shape) -> i32 {
     match s {
@@ -145,6 +177,17 @@ func main() -> i32 {
     }
     val destroyed = dropped                // -> 2
 
+    // Generics at the enclosing parameter. `wrap_first<i32>` builds a `Cell<i32>` whose
+    // `peek` gives back an `Option<i32>`; `wrap_first<bool>` stops at the `?`.
+    val kept_value = match wrap_first(true, 21) {
+        Result::Ok(c) => c.peek() ?? 0,
+        Result::Err(_) => 0,
+    }
+    val stopped = match wrap_first(false, true) {
+        Result::Ok(c) => c.get(),
+        Result::Err(_) => false,
+    }
+
     println("identity<i32>(10)          = {base}")
     println("choose<i32>(true, 10, 0)   = {pick}")
     println("second<f64, i32>(2.5, 4)   = {k}")
@@ -159,6 +202,8 @@ func main() -> i32 {
     println("identity<Label> (non-Copy) = {kept.text}")
     println("identity<string>           = {word}")
     println("Guard destructors run      = {destroyed}")
+    println("wrap_first<i32> peeked     = {kept_value}")
+    println("wrap_first<bool> got Ok    = {stopped}")
 
     // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 + 8 + 15 + 3 + 2 + 2 = 87
     val total = pick + base + k + t.0 + t.1 + a + cv + bonus + id2 + s + c + d + destroyed

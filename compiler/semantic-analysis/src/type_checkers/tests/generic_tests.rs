@@ -409,3 +409,66 @@ func main() -> i32 { 0 }",
         "the declared form is accepted; got {errors:?}"
     );
 }
+
+#[test]
+fn an_instance_at_the_impl_parameters_is_the_receiver_type() {
+    // `Cell<T>` written inside `impl<T> Cell<T>` and `self` are one type, so neither the
+    // return of `self` nor a `Self` result is a mismatch.
+    let errors = semantic_errors(
+        r#"
+struct Cell<T> { v: T }
+impl<T> Cell<T> {
+    func same(self) -> Cell<T> { self }
+    func again(self) -> Self { self.same() }
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn a_call_binds_a_parameter_through_an_instance_argument() {
+    // `Maybe<U>` against `Maybe<i32>` binds `U = i32`, so the result is an `i32` and
+    // not a `bool`.
+    let errors = semantic_errors(
+        r#"
+enum Maybe<T> { Just(T), Nothing }
+func get<U>(o: Maybe<U>, d: U) -> U {
+    match o {
+        Maybe::Just(v) => v,
+        Maybe::Nothing => d,
+    }
+}
+func main() -> i32 {
+    val n: i32 = get(Maybe::Just(1), 2)
+    val b: bool = get(Maybe::Just(1), 2)
+    n
+}
+"#,
+    );
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [TypeError::Mismatch { expected, found, .. }]
+                if expected.to_string() == "bool" && found.to_string() == "i32"
+        ),
+        "expected one bool/i32 mismatch, got {errors:?}"
+    );
+}
+
+#[test]
+fn a_struct_literal_infers_through_a_field_at_the_parameter() {
+    let errors = semantic_errors(
+        r#"
+struct Inner<T> { v: T }
+struct Outer<U> { i: Inner<U>, n: i32 }
+func main() -> i32 {
+    val o = Outer { i: Inner { v: true }, n: 2 }
+    val flag: bool = o.i.v
+    o.n
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}

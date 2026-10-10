@@ -4,7 +4,7 @@
 //! One of the declaration-kind modules under `declarations`; each adds methods
 //! to the same `impl TypeChecker` block.
 
-use super::{mangle_struct_instance, substitute_generic};
+use super::mangle_struct_instance;
 use crate::errors::TypeError;
 use crate::type_checkers::{EnumVariantInfo, TypeChecker, VariantForm};
 use crate::types::Type;
@@ -244,7 +244,7 @@ impl TypeChecker {
         for variant in &template_variants {
             let mut fields = Vec::with_capacity(variant.fields.len());
             for (name, ty) in &variant.fields {
-                let concrete = substitute_generic(ty, &subst);
+                let concrete = self.substitute_generic(ty, &subst, span);
                 let concrete =
                     if Self::is_sized_payload(&concrete) || matches!(concrete, Type::Unknown) {
                         concrete
@@ -264,7 +264,7 @@ impl TypeChecker {
         self.enum_defs.insert(mangled.clone(), variants);
         self.enum_instances
             .insert(mangled.clone(), (base.to_string(), args.to_vec()));
-        self.instantiate_impls_for(base, &mangled, args);
+        self.instantiate_impls_for(base, &mangled, args, span);
         Type::Enum(mangled)
     }
 

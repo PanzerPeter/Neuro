@@ -289,7 +289,7 @@ impl TypeChecker {
             });
             return Type::Unknown;
         }
-        self.instantiate_generic_enum(OPTION_ENUM, &[inner], span)
+        self.instantiate_generic(OPTION_ENUM, &[inner], span)
     }
 }
 

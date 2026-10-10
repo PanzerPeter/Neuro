@@ -8,7 +8,6 @@ use super::{DEBUG_TRAIT, DROP_METHOD, DROP_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
 use crate::type_checkers::TypeChecker;
 use crate::type_checkers::collections::{HASH_METHOD, HASHABLE_TRAIT};
-use crate::type_checkers::declarations::traits::names_self;
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
 use crate::type_checkers::val_else::stmts_diverge;
 use crate::types::Type;
@@ -114,10 +113,9 @@ impl TypeChecker {
         // declaration; `Drop` is validated separately above. An operator trait
         // is a compiler-known lang-item like `Drop`, so it is validated and its
         // operator dispatch recorded separately rather than against `self.traits`.
-        // The trait's signatures name `Self` for this block's type, spelled as the block's
-        // own signatures resolve it, so `Cell<T>` under the impl's parameters.
-        let declared_self = self.declared_self_type(def, &self_ty);
-        let saved_self = self.self_type.replace(declared_self);
+        // The trait's signatures name `Self` for this block's type. For a generic impl
+        // that is the template, which is also what `Cell<T>` under its parameters names.
+        let saved_self = self.self_type.replace(self_ty.clone());
         if let Some(t) = &def.trait_name {
             if t.name == DROP_TRAIT {
                 // handled above
@@ -133,41 +131,6 @@ impl TypeChecker {
         self.self_type = saved_self;
         self.self_assoc = saved_assoc;
         Some(())
-    }
-
-    /// Resolved only when the trait names `Self`: a generic instance under the impl's own
-    /// parameters is not yet a type (LIM-013), and a block whose trait never asks must not
-    /// be refused for it.
-    fn declared_self_type(&mut self, def: &ImplDef, target: &Type) -> Type {
-        let trait_names_self = def
-            .trait_name
-            .as_ref()
-            .and_then(|t| self.traits.get(&t.name))
-            .is_some_and(|info| {
-                info.methods.values().any(|sig| {
-                    sig.decl
-                        .params
-                        .iter()
-                        .map(|p| &p.ty)
-                        .chain(sig.decl.return_type.iter())
-                        .any(names_self)
-                })
-            });
-        if def.type_args.is_empty() || !trait_names_self {
-            return target.clone();
-        }
-        let written = ast_types::Type::Generic {
-            name: def.type_name.clone(),
-            args: def
-                .type_args
-                .iter()
-                .cloned()
-                .map(ast_types::GenericArg::Type)
-                .collect(),
-            span: def.type_name.span,
-        };
-        self.resolve_type(&written)
-            .unwrap_or_else(|| target.clone())
     }
 
     /// The receiver type an `impl` target names: a struct or an enum, generic templates

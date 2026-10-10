@@ -131,9 +131,10 @@ pub(crate) struct TypeChecker {
     /// Parameter name → its declared bounds. Lets a generic body dispatch
     /// a trait method on a bounded type parameter. Empty outside a generic definition.
     pub(crate) generic_bounds: HashMap<String, Vec<BoundInfo>>,
-    /// Mangled names of generic-struct instantiations already materialized into
-    /// `struct_defs` / `impl_methods`, so each instance is built exactly once.
-    instantiated_structs: HashSet<String>,
+    /// Generic-struct instance name → the template it came from and its type arguments,
+    /// recorded when the instance is materialized into `struct_defs` / `impl_methods`, so
+    /// each is built exactly once and a substitution can rebuild it with new arguments.
+    struct_instances: HashMap<String, (String, Vec<Type>)>,
     /// Type-parameter names in scope while checking a generic function's signature and
     /// body. A `Named` annotation matching one resolves to [`Type::Generic`] instead of
     /// erroring as an unknown type. Empty outside a generic function.
@@ -403,7 +404,7 @@ impl TypeChecker {
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
             generic_bounds: HashMap::new(),
-            instantiated_structs: HashSet::new(),
+            struct_instances: HashMap::new(),
             generic_scope: HashSet::new(),
             const_scope: HashMap::new(),
             lifetime_scope: HashSet::new(),
@@ -782,8 +783,61 @@ impl TypeChecker {
 
     /// The generic enum a monomorphized instance was built from, if `name` is an
     /// instance. A non-generic enum has no base.
-    pub(crate) fn enum_instance_base(&self, name: &str) -> Option<&str> {
-        self.enum_instances.get(name).map(|(base, _)| base.as_str())
+    pub(crate) fn enum_instance_base(&self, name: &str) -> Option<String> {
+        self.instance_parts(name)
+            .filter(|(base, _)| self.is_generic_enum(base))
+            .map(|(base, _)| base)
+    }
+
+    /// The generic struct or enum `name` is an instance of, with its type arguments.
+    ///
+    /// A template's own name is its instance under its own parameters: inside
+    /// `impl<T> Cell<T>` the receiver is the template, so `Cell<T>` written there must be
+    /// the same type, and a substitution of `T` rebuilds it like any other instance.
+    pub(crate) fn instance_parts(&self, name: &str) -> Option<(String, Vec<Type>)> {
+        if let Some(parts) = self
+            .enum_instances
+            .get(name)
+            .or_else(|| self.struct_instances.get(name))
+        {
+            return Some(parts.clone());
+        }
+        let generics = match self.generic_enums.get(name) {
+            Some(def) => &def.generics,
+            None => &self.generic_structs.get(name)?.generics,
+        };
+        let own = generics
+            .iter()
+            .map(|g| Type::Generic(g.name.name.clone()))
+            .collect();
+        Some((name.to_string(), own))
+    }
+
+    /// Instantiate the generic struct or enum `base` with `args`, which may name the type
+    /// parameters in scope. Arguments that are the template's own parameters give the
+    /// template itself (see [`Self::instance_parts`]).
+    pub(crate) fn instantiate_generic(
+        &mut self,
+        base: &str,
+        args: &[Type],
+        span: shared_types::Span,
+    ) -> Type {
+        let is_enum = self.is_generic_enum(base);
+        if self
+            .instance_parts(base)
+            .is_some_and(|(_, own)| own == args)
+        {
+            return if is_enum {
+                Type::Enum(base.to_string())
+            } else {
+                Type::Struct(base.to_string())
+            };
+        }
+        if is_enum {
+            self.instantiate_generic_enum(base, args, span)
+        } else {
+            self.instantiate_generic_struct(base, args, span)
+        }
     }
 
     /// The type arguments of the enclosing function's return type, when it is an
@@ -798,8 +852,8 @@ impl TypeChecker {
         let Some(Type::Enum(name)) = &self.current_function_return_type else {
             return None;
         };
-        let (instance_base, args) = self.enum_instances.get(name)?;
-        (instance_base == base).then(|| args.clone())
+        let (instance_base, args) = self.instance_parts(name)?;
+        (instance_base == base).then_some(args)
     }
 
     /// The concrete instance a construction or pattern written with a generic enum's
@@ -815,7 +869,7 @@ impl TypeChecker {
         let Some(Type::Enum(name)) = expected else {
             return None;
         };
-        (self.enum_instance_base(name) == Some(base)).then(|| name.clone())
+        (self.enum_instance_base(name).as_deref() == Some(base)).then(|| name.clone())
     }
 
     /// Look up a variant of an enum by name, returning its resolved info.

@@ -100,7 +100,21 @@ pub enum LoweringError {
     /// non-array). Carries a short description for diagnosis.
     #[error("malformed expression reached lowering: {detail}")]
     Malformed { detail: String },
+
+    /// A generic needs instances nested past [`MAX_INSTANCE_DEPTH`]: one that calls
+    /// itself with a type built from its own parameter (`grow(Option::Some(x))` inside
+    /// `grow<T>`) needs a new instance at every level, so the chain never closes. The
+    /// checker sees one template and cannot tell; this is where the chain shows.
+    #[error(
+        "instantiating '{name}' nests generic instances more than {limit} deep: a generic that calls itself with a type built from its own parameter needs a new instance at every level"
+    )]
+    InstantiationTooDeep { name: String, limit: u32 },
 }
+
+/// How many generic instances deep one instantiation chain may run before lowering
+/// reports it as unbounded. A real program's chain is its call depth through distinct
+/// generics; only a self-feeding one approaches this.
+const MAX_INSTANCE_DEPTH: u32 = 128;
 
 /// A resolved enum variant for lowering: its name and ordered payload fields. The
 /// optional name distinguishes a struct variant's field from a tuple variant's
@@ -215,9 +229,10 @@ struct Lowerer {
     /// Generic `impl` templates keyed by base struct name. Instantiating a
     /// generic struct also emits each matching impl's methods for the instance.
     generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
-    /// Mangled names of generic-struct instances already materialized (registered in
-    /// [`Self::structs`] and queued for emission), so each is produced exactly once.
-    instantiated_structs: HashSet<String>,
+    /// Generic-struct instance name → the template and arguments it was built with,
+    /// recorded once it is materialized (registered in [`Self::structs`] and queued for
+    /// emission), so each is produced exactly once.
+    struct_instances: HashMap<String, (String, Vec<MonoArg>)>,
     /// Generic-struct instances discovered but whose HIR items are not yet emitted.
     mono_struct_pending: Vec<MonoStruct>,
     /// Active type-parameter substitution while a monomorphized instance body is being
@@ -234,6 +249,9 @@ struct Lowerer {
     const_types: HashMap<String, HirType>,
     /// Monomorphization worklist: instances discovered but not yet lowered.
     mono_pending: Vec<MonoInstance>,
+    /// How many instances deep the body being lowered sits: 0 for an ordinary item, and
+    /// one more than its requester for an instance's body or methods.
+    mono_depth: u32,
     /// Mangled names already queued or emitted, so each instance is produced once.
     mono_seen: HashSet<String>,
     /// Concrete instance functions produced by monomorphization, appended to the
@@ -296,6 +314,7 @@ struct OpDispatch {
 /// arguments (in the template's type-parameter order), and the mangled instance name
 /// the call site refers to.
 struct MonoInstance {
+    depth: u32,
     mangled: String,
     fn_name: String,
     subst: HashMap<String, HirType>,
@@ -316,6 +335,7 @@ enum MonoArg {
 /// type-parameter substitution. Emission produces one `HirItem::Struct` plus one
 /// `HirItem::Impl` per matching generic impl.
 struct MonoStruct {
+    depth: u32,
     base: String,
     mangled: String,
     subst: HashMap<String, HirType>,
@@ -326,6 +346,7 @@ struct MonoStruct {
 /// instance name, and the substitutions its payload types resolve under. Emission
 /// produces one `HirItem::Enum` carrying fully concrete payloads.
 struct MonoEnum {
+    depth: u32,
     base: String,
     mangled: String,
     subst: HashMap<String, HirType>,
@@ -378,12 +399,13 @@ impl Lowerer {
             generic_templates: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
-            instantiated_structs: HashSet::new(),
+            struct_instances: HashMap::new(),
             mono_struct_pending: Vec::new(),
             type_subst: HashMap::new(),
             const_subst: HashMap::new(),
             const_types: HashMap::new(),
             mono_pending: Vec::new(),
+            mono_depth: 0,
             mono_seen: HashSet::new(),
             mono_items: Vec::new(),
             closure_items: Vec::new(),
@@ -495,82 +517,125 @@ fn peels_to_string(t: &HirType) -> bool {
     matches!(t.referent(), HirType::String)
 }
 
-/// Unify a generic template's parameter annotation against a concrete argument type,
-/// recording each type parameter's binding in `subst`. The program is already
-/// well-typed, so the structures always align; positions that mention no type
-/// parameter contribute no binding.
-fn unify_ast_hir(
-    param: &ast_types::Type,
-    arg: &HirType,
-    gnames: &HashSet<String>,
-    cnames: &HashSet<String>,
-    subst: &mut HashMap<String, HirType>,
-    const_subst: &mut HashMap<String, u64>,
-) {
-    match (param, arg) {
-        (ast_types::Type::Named(ident), _) if gnames.contains(&ident.name) => {
-            subst
-                .entry(ident.name.clone())
-                .or_insert_with(|| arg.clone());
-        }
-        (ast_types::Type::Reference { inner: pi, .. }, HirType::Reference { inner: ai, .. }) => {
-            unify_ast_hir(pi, ai, gnames, cnames, subst, const_subst)
-        }
-        (
-            ast_types::Type::Array {
-                element: pe,
-                size: psize,
-                ..
-            },
-            HirType::Array {
-                element: ae,
-                size: asize,
-            },
-        ) => {
-            // A const-parameter length binds that parameter to the argument's length.
-            if let ast_types::ArraySize::Const(id) = psize
-                && cnames.contains(&id.name)
-            {
-                const_subst.entry(id.name.clone()).or_insert(*asize as u64);
+impl Lowerer {
+    /// Unify a generic template's parameter annotation against a concrete argument type,
+    /// recording each type parameter's binding in `subst`. The program is already
+    /// well-typed, so the structures always align; positions that mention no type
+    /// parameter contribute no binding.
+    fn unify_ast_hir(
+        &self,
+        param: &ast_types::Type,
+        arg: &HirType,
+        gnames: &HashSet<String>,
+        cnames: &HashSet<String>,
+        subst: &mut HashMap<String, HirType>,
+        const_subst: &mut HashMap<String, u64>,
+    ) {
+        match (param, arg) {
+            (ast_types::Type::Named(ident), _) if gnames.contains(&ident.name) => {
+                subst
+                    .entry(ident.name.clone())
+                    .or_insert_with(|| arg.clone());
             }
-            unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
-        }
-        // A tensor parameter's shape binds every shape parameter it names to the
-        // argument's extent at that axis, which is what makes `matmul<M, N, K>` infer
-        // its three extents from two arguments.
-        (
-            ast_types::Type::Tensor {
-                element_type: pe,
-                shape: pshape,
-                ..
-            },
-            HirType::Tensor {
-                element: ae,
-                shape: ashape,
-                ..
-            },
-        ) if pshape.len() == ashape.len() => {
-            for (dim, extent) in pshape.iter().zip(ashape) {
-                // A `?` argument axis carries no value, so it binds no shape parameter;
-                // the checker has already refused the call that would need one.
-                let (ast_types::TensorExtent::Param(id), Some(extent)) = (&dim.extent, extent)
-                else {
-                    continue;
-                };
-                if cnames.contains(&id.name) {
-                    const_subst.entry(id.name.clone()).or_insert(*extent as u64);
+            (
+                ast_types::Type::Reference { inner: pi, .. },
+                HirType::Reference { inner: ai, .. },
+            ) => self.unify_ast_hir(pi, ai, gnames, cnames, subst, const_subst),
+            (
+                ast_types::Type::Array {
+                    element: pe,
+                    size: psize,
+                    ..
+                },
+                HirType::Array {
+                    element: ae,
+                    size: asize,
+                },
+            ) => {
+                // A const-parameter length binds that parameter to the argument's length.
+                if let ast_types::ArraySize::Const(id) = psize
+                    && cnames.contains(&id.name)
+                {
+                    const_subst.entry(id.name.clone()).or_insert(*asize as u64);
+                }
+                self.unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
+            }
+            // A tensor parameter's shape binds every shape parameter it names to the
+            // argument's extent at that axis, which is what makes `matmul<M, N, K>` infer
+            // its three extents from two arguments.
+            (
+                ast_types::Type::Tensor {
+                    element_type: pe,
+                    shape: pshape,
+                    ..
+                },
+                HirType::Tensor {
+                    element: ae,
+                    shape: ashape,
+                    ..
+                },
+            ) if pshape.len() == ashape.len() => {
+                for (dim, extent) in pshape.iter().zip(ashape) {
+                    // A `?` argument axis carries no value, so it binds no shape parameter;
+                    // the checker has already refused the call that would need one.
+                    let (ast_types::TensorExtent::Param(id), Some(extent)) = (&dim.extent, extent)
+                    else {
+                        continue;
+                    };
+                    if cnames.contains(&id.name) {
+                        const_subst.entry(id.name.clone()).or_insert(*extent as u64);
+                    }
+                }
+                self.unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
+            }
+            (ast_types::Type::Tuple { elements: pe, .. }, HirType::Tuple(ae))
+                if pe.len() == ae.len() =>
+            {
+                for (p, a) in pe.iter().zip(ae) {
+                    self.unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
                 }
             }
-            unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
-        }
-        (ast_types::Type::Tuple { elements: pe, .. }, HirType::Tuple(ae))
-            if pe.len() == ae.len() =>
-        {
-            for (p, a) in pe.iter().zip(ae) {
-                unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
+            // `Inner<U>` against the instance `Inner<i32>`: an instance carries its arguments,
+            // so the parameters its annotation names bind through them.
+            (
+                ast_types::Type::Generic { name, args, .. },
+                HirType::Struct(instance) | HirType::Enum(instance),
+            ) => {
+                let Some((base, built_with)) = self.instance_args(instance) else {
+                    return;
+                };
+                if base != name.name {
+                    return;
+                }
+                for (p, a) in args.iter().zip(built_with) {
+                    if let (ast_types::GenericArg::Type(p), MonoArg::Type(a)) = (p, a) {
+                        self.unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
+                    }
+                }
             }
+            _ => {}
         }
-        _ => {}
+    }
+
+    /// The depth a new instance requested by the body being lowered sits at.
+    fn next_instance_depth(&self, name: &str) -> Result<u32, LoweringError> {
+        let depth = self.mono_depth + 1;
+        if depth > MAX_INSTANCE_DEPTH {
+            return Err(LoweringError::InstantiationTooDeep {
+                name: name.to_string(),
+                limit: MAX_INSTANCE_DEPTH,
+            });
+        }
+        Ok(depth)
+    }
+
+    /// The template a struct or enum instance was built from, with its arguments.
+    fn instance_args(&self, instance: &str) -> Option<(&str, &[MonoArg])> {
+        if let Some((base, args)) = self.struct_instances.get(instance) {
+            return Some((base, args));
+        }
+        let base = self.enum_instance_base.get(instance)?;
+        Some((base, self.enum_instance_args.get(instance)?))
     }
 }
 

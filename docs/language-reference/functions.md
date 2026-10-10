@@ -851,6 +851,27 @@ func bad<T>(a: T, b: T) -> T {
 }
 ```
 
+**Generic types at a type parameter.** A generic struct or enum may take the function's own
+parameter as its argument, in the signature and in the body. A call infers `T` through the
+instance it is handed, so `unwrap_or(Option::Some(40), 0)` below is an `i32`:
+
+```neuro
+func first_some<T>(x: T) -> Option<T> {
+    Option::Some(x)
+}
+
+func unwrap_or<U>(o: Option<U>, d: U) -> U {
+    match o {
+        Option::Some(v) => v,
+        Option::None => d,
+    }
+}
+```
+
+`Option<T>` moves like the `T` it holds. A generic that calls itself with a type built from its
+own parameter (`grow(Option::Some(x))` inside `grow<T>`) would need a new instance at every level,
+so the compiler refuses it once the chain of instances passes a fixed depth.
+
 **Bounds.** A trait bound (`func f<T: Shape>(x: &T)`) is **enforced**: the bound's methods become
 callable on the type parameter inside the body, and a type argument that does not implement the
 trait is rejected at the call site.

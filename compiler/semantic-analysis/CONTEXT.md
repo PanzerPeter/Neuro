@@ -692,12 +692,26 @@ from `check_generic_struct_literal` after inferring the arguments from field val
 expected type names an instance of the same base, each field value is checked against that
 instance's concrete field type, so a literal under `W<i64>` is an `i64` as it is under
 `Option<i64>`) materializes
-a distinct nominal `Type::Struct("Base<args>")` with concrete fields (`substitute_generic`) and
-per-instance methods (`remap_method_type`) registered on demand, so downstream field access and
-method dispatch reuse the ordinary struct machinery. A type argument carries no `Copy`
-requirement: the instance holds the value and is move-tracked when what it holds is. Errors:
-`GenericArgCountMismatch`, `NotAGenericType`, `NestedGenericTypeArg`
-(a generic instantiated with an enclosing type parameter is deferred).
+a distinct nominal `Type::Struct("Base<args>")` with concrete fields and per-instance methods
+(both through `substitute_generic`) registered on demand, so downstream field access and method
+dispatch reuse the ordinary struct machinery. A type argument carries no `Copy` requirement: the
+instance holds the value and is move-tracked when what it holds is. Errors:
+`GenericArgCountMismatch`, `NotAGenericType`.
+
+**Instances at a type parameter.** An argument may name a parameter in scope: `Option<T>` in a
+generic function is an instance like any other, its payload `Generic("T")`. `instance_parts`
+answers which template and arguments a struct or enum name stands for, from `struct_instances` /
+`enum_instances`, and a template's base name counts as its instance at its own parameters.
+`instantiate_generic` is the one entry for every instantiation and returns the template itself for
+those arguments, so `Cell<T>` written in `impl<T> Cell<T>` (and `Self` there) is the type `self`
+already has. Three operations reach through instances by their arguments: `unify_generic`
+(`Option<U>` against `Option<i32>` binds `U`), `substitute_generic` (rebuilds `Option<T>` as
+`Option<i32>`, which is also how a generic impl's method signature becomes the instance's), and
+`mentions_type_parameter` (`Option<T>` is not concrete). All three are `TypeChecker` methods because
+the answer lives in the instance tables. A call `Cell::new(42)` to an associated function of a
+generic type infers the type's parameters as `check_generic_call` does, through
+`check_generic_call_with`; with nothing to infer from it is `GenericParamNotInferable`, and a
+turbofish answers it.
 
 **Enums.** `generic_enums` (base → template) and `enum_instances` (instance → base + arguments).
 Pass 0 predeclares every enum NAME; pass 1a resolves the variants, with a generic template's
@@ -764,8 +778,8 @@ methods into impls, so they check as ordinary methods.
 
 **`Self`.** The parser replaces `Self` inside every `impl`, so a `Type::Named` spelled `Self`
 reaching `resolve_type` is a trait's own or misplaced. `self_type` answers it: the implementing
-type while `register_impl` runs conformance (`declared_self_type`, so `Cell<T>` under a generic
-impl's parameters), and `Generic(T)` while `resolve_generic_trait_method` reads a signature
+type while `register_impl` runs conformance (for a generic impl that is the template, which is
+what `Cell<T>` under the impl's parameters names), and `Generic(T)` while `resolve_generic_trait_method` reads a signature
 through `T: Trait`. With `self_type` unset it is `SelfOutsideImpl`. `register_trait` treats a
 `Self` position like an associated-type one: left `Unknown`, with `resolved_per_use` set so every
 use re-resolves `TraitMethodSig.decl`. A method naming `Self` outside its receiver makes the

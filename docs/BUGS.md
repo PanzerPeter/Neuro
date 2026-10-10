@@ -5,6 +5,58 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-108: a type argument that misses a generic `impl`'s bound reaches lowering
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (generic struct and enum instantiation)
+- **Severity**: minor. The program is refused, but by lowering, with an internal message and
+  no source location
+
+The checker uses a bound on a generic `impl`'s parameter when it checks the impl's bodies, but
+never checks the bound against an instance's type arguments. A method called on an instance whose argument
+does not implement the bound type-checks, and lowering then fails to find the method.
+
+**Minimal repro**
+
+```neuro
+trait Show {
+    func show(&self) -> i32
+}
+
+struct Cell<T> {
+    v: T,
+}
+
+impl<T: Show> Cell<T> {
+    func get(&self) -> i32 {
+        self.v.show()
+    }
+}
+
+func main() -> i32 {
+    val c = Cell { v: 3 }
+    c.get()
+}
+```
+
+Expected: a type error at `c.get()` (or at the instance) saying `i32` does not implement
+`Show`. Observed:
+
+```text
+HIR lowering error: unresolved call target 'i32.show' during lowering
+```
+
+An associated function of the same impl (`Cell::make(3)`) is reached the same way.
+
+**Root cause**: `instantiate_impls_for` registers every method of every generic impl of the
+base on each instance without consulting the impl's bounds, and a method or associated call on
+an instance does not call `check_trait_bounds` the way a generic function call does.
+
+**Fix sketch**: resolve each generic impl's parameter bounds once, when the impl is
+registered, and check them against the instance's arguments at the method or associated call,
+with `check_trait_bounds`, so the error lands on the call. Checking at instantiation instead
+would refuse an instance that never calls the bounded methods, which Rust allows.
+
 ## BUG-107: a `string` a function returns from its parameter leaks when passed straight to a call
 
 - **Status**: open, confirmed
@@ -624,6 +676,11 @@ caller works, and the identical program over a type parameter (`func outer<T>(x:
 inner(x) }`) works, which is what isolates this to const parameters. Arrays hit it too: a
 `func delegate<const N: u32>(a: &[i32; N])` calling a `func sum_arr<const N: u32>` fails the
 same way.
+
+A const parameter named as a generic *type's* argument fails the same way. Inside
+`impl<T, const CAP: u32> Buffer<T, CAP>`, `Self` and `Buffer<T, CAP>` both report
+`unknown type name 'CAP'`, because a generic argument that is a bare name resolves as a type.
+Type parameters work in that position, so `Self` in `impl<T> Cell<T>` is fine.
 
 **Root cause**: two halves, both confirmed in the code.
 

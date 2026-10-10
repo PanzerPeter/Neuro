@@ -419,8 +419,8 @@ impl TypeChecker {
         // that shadows the prelude with a non-generic `Option` is its own base.
         let base = self
             .enum_instance_base(instance)
-            .unwrap_or(instance.as_str());
-        let variant = match base {
+            .unwrap_or_else(|| instance.clone());
+        let variant = match base.as_str() {
             OPTION_ENUM => OPTION_SUCCESS_VARIANT,
             RESULT_ENUM => RESULT_SUCCESS_VARIANT,
             _ => return None,

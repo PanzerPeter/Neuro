@@ -74,6 +74,14 @@ impl Lowerer {
                     })?;
                 self.lower_collection_new(kind, expected, span)
             }
+            Expr::Path {
+                type_name, member, ..
+            } if self
+                .generic_assoc_fn(&type_name.name, &member.name)
+                .is_some() =>
+            {
+                self.lower_generic_assoc_call(&type_name.name, &member.name, type_args, args, span)
+            }
             // `Enum::Variant(args)` is a tuple-variant construction when the
             // type names an enum; otherwise an associated-function call.
             // A registered `Enum__member` is an associated function; the checker made sure
@@ -320,7 +328,7 @@ impl Lowerer {
             lowered_args.push(self.lower_expr(arg, None)?);
         }
         for (param, larg) in template.params.iter().zip(lowered_args.iter()) {
-            crate::unify_ast_hir(
+            self.unify_ast_hir(
                 &param.ty,
                 &larg.ty,
                 &gnames,
@@ -353,8 +361,10 @@ impl Lowerer {
             self.grad_params.insert(mangled.clone(), grad);
         }
         if !self.mono_seen.contains(&mangled) {
+            let depth = self.next_instance_depth(name)?;
             self.mono_seen.insert(mangled.clone());
             self.mono_pending.push(crate::MonoInstance {
+                depth,
                 mangled: mangled.clone(),
                 fn_name: name.to_string(),
                 subst,
@@ -366,6 +376,106 @@ impl Lowerer {
             HirExprKind::Variable(mangled),
             HirType::Function {
                 params: param_tys,
+                ret: Box::new(ret.clone()),
+            },
+            span,
+        );
+        Ok(HirExpr::new(
+            HirExprKind::Call {
+                callee: Box::new(callee),
+                args: lowered_args,
+            },
+            ret,
+            span,
+        ))
+    }
+
+    /// The associated function `member` a generic `impl` of the template `base` declares.
+    fn generic_assoc_fn(&self, base: &str, member: &str) -> Option<&ast_types::MethodDef> {
+        self.generic_impls
+            .get(base)?
+            .iter()
+            .flat_map(|imp| &imp.methods)
+            .find(|m| m.name.name == member && m.self_param.is_none())
+    }
+
+    /// Lower `Cell::new(42)` on a generic type: the arguments (and any turbofish) infer the
+    /// instance, mirroring the checker, and the call goes to that instance's function.
+    fn lower_generic_assoc_call(
+        &mut self,
+        base: &str,
+        member: &str,
+        type_args: &[ast_types::GenericArg],
+        args: &[Expr],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let generics = self.template_generics(base);
+        let params: Vec<ast_types::Type> = self
+            .generic_assoc_fn(base, member)
+            .map(|m| m.params.iter().map(|p| p.ty.clone()).collect())
+            .unwrap_or_default();
+        let (gnames, cnames): (Vec<_>, Vec<_>) = generics
+            .iter()
+            .partition(|g| matches!(g.kind, ast_types::GenericParamKind::Type));
+        let gnames = gnames.iter().map(|g| g.name.name.clone()).collect();
+        let cnames = cnames.iter().map(|g| g.name.name.clone()).collect();
+
+        let mut subst = std::collections::HashMap::new();
+        let mut const_subst = std::collections::HashMap::new();
+        for (gp, arg) in generics.iter().zip(type_args) {
+            match arg {
+                ast_types::GenericArg::Const { value, .. } => {
+                    const_subst.insert(gp.name.name.clone(), *value as u64);
+                }
+                ast_types::GenericArg::Type(ty) => {
+                    subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+                }
+            }
+        }
+        let mut lowered_args = Vec::with_capacity(args.len());
+        for arg in args {
+            lowered_args.push(self.lower_expr(arg, None)?);
+        }
+        for (param, larg) in params.iter().zip(&lowered_args) {
+            self.unify_ast_hir(
+                param,
+                &larg.ty,
+                &gnames,
+                &cnames,
+                &mut subst,
+                &mut const_subst,
+            );
+        }
+
+        let mut instance_args = Vec::with_capacity(generics.len());
+        for gp in &generics {
+            let arg = match gp.kind {
+                ast_types::GenericParamKind::Type => {
+                    subst.get(&gp.name.name).cloned().map(crate::MonoArg::Type)
+                }
+                ast_types::GenericParamKind::Const(_) => const_subst
+                    .get(&gp.name.name)
+                    .copied()
+                    .map(crate::MonoArg::Const),
+            };
+            instance_args.push(arg.ok_or_else(|| LoweringError::UnresolvedType {
+                name: format!("{}::{} parameter '{}'", base, member, gp.name.name),
+            })?);
+        }
+        let instance = if self.is_generic_enum(base) {
+            self.instantiate_generic_enum(base, &instance_args)?
+        } else {
+            self.instantiate_generic_struct(base, &instance_args)?
+        };
+
+        let (params, ret) = self.assoc_signature(&instance, member)?;
+        let callee = HirExpr::new(
+            HirExprKind::Path {
+                type_name: instance,
+                member: member.to_string(),
+            },
+            HirType::Function {
+                params,
                 ret: Box::new(ret.clone()),
             },
             span,

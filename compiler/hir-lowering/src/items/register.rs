@@ -455,7 +455,7 @@ impl Lowerer {
     }
 
     /// The generic parameters of the struct or enum template named `base`.
-    pub(super) fn template_generics(&self, base: &str) -> Vec<ast_types::GenericParam> {
+    pub(crate) fn template_generics(&self, base: &str) -> Vec<ast_types::GenericParam> {
         if let Some(s) = self.generic_structs.get(base) {
             return s.generics.clone();
         }

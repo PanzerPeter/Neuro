@@ -6,7 +6,7 @@
 
 use super::{
     CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, DERIVE_ATTRIBUTE, IMPLEMENTED_DERIVES, PARTIAL_EQ_TRAIT,
-    PENDING_DERIVES, mangle_struct_instance, remap_method_type, substitute_generic,
+    PENDING_DERIVES, mangle_struct_instance,
 };
 use crate::errors::TypeError;
 use crate::type_checkers::TypeChecker;
@@ -357,7 +357,7 @@ impl TypeChecker {
                 .map(|(mangled, (_, args))| (mangled.clone(), args.clone()))
                 .collect();
             for (mangled, args) in existing {
-                self.instantiate_impls_for(&base, &mangled, &args);
+                self.instantiate_impls_for(&base, &mangled, &args, def.type_name.span);
             }
         }
     }
@@ -405,7 +405,9 @@ impl TypeChecker {
         }
 
         let mangled = mangle_struct_instance(base, args);
-        if self.instantiated_structs.insert(mangled.clone()) {
+        if !self.struct_instances.contains_key(&mangled) {
+            self.struct_instances
+                .insert(mangled.clone(), (base.to_string(), args.to_vec()));
             let mut subst: HashMap<String, Type> = HashMap::new();
             for (gp, arg) in template.generics.iter().zip(args.iter()) {
                 // Validate each argument's kind: a const parameter takes a `ConstValue`,
@@ -434,7 +436,7 @@ impl TypeChecker {
             let template_fields = self.struct_defs.get(base).cloned().unwrap_or_default();
             let concrete_fields: Vec<(String, Type)> = template_fields
                 .iter()
-                .map(|(n, t)| (n.clone(), substitute_generic(t, &subst)))
+                .map(|(n, t)| (n.clone(), self.substitute_generic(t, &subst, span)))
                 .collect();
             self.struct_defs.insert(mangled.clone(), concrete_fields);
 
@@ -463,7 +465,7 @@ impl TypeChecker {
             // judge; the concrete substitution is the first point at which it can.
             self.validate_derived_fields_of(&mangled, base, |_| span);
 
-            self.instantiate_impls_for(base, &mangled, args);
+            self.instantiate_impls_for(base, &mangled, args, span);
         }
 
         Type::Struct(mangled)
@@ -472,8 +474,14 @@ impl TypeChecker {
     /// Register the methods of every generic `impl` of `base` for the concrete
     /// instance `mangled`, substituting the impl's type parameters (mapped positionally
     /// from the impl's type arguments to the struct's concrete arguments) into each
-    /// method signature and renaming the receiver's base type to the instance.
-    pub(super) fn instantiate_impls_for(&mut self, base: &str, mangled: &str, args: &[Type]) {
+    /// method signature, which turns the receiver's template type into the instance.
+    pub(super) fn instantiate_impls_for(
+        &mut self,
+        base: &str,
+        mangled: &str,
+        args: &[Type],
+        span: Span,
+    ) {
         let impls = match self.generic_impls.get(base) {
             Some(v) => v.clone(),
             None => return,
@@ -496,7 +504,7 @@ impl TypeChecker {
                 let Some(sig) = self.functions.get(&base_key).cloned() else {
                     continue;
                 };
-                let inst_sig = remap_method_type(&sig, &impl_subst, base, mangled);
+                let inst_sig = self.substitute_generic(&sig, &impl_subst, span);
                 self.functions.insert(inst_key.clone(), inst_sig);
                 if self.mut_self_methods.contains(&base_key) {
                     self.mut_self_methods.insert(inst_key.clone());
@@ -518,10 +526,14 @@ impl TypeChecker {
                 continue;
             };
             let trait_name = trait_ident.name.clone();
-            if let Some(bindings) = self.impl_assoc.get(&(trait_name.clone(), base.to_string())) {
+            if let Some(bindings) = self
+                .impl_assoc
+                .get(&(trait_name.clone(), base.to_string()))
+                .cloned()
+            {
                 let concrete: HashMap<String, Type> = bindings
                     .iter()
-                    .map(|(n, t)| (n.clone(), substitute_generic(t, &impl_subst)))
+                    .map(|(n, t)| (n.clone(), self.substitute_generic(t, &impl_subst, span)))
                     .collect();
                 self.impl_assoc
                     .insert((trait_name.clone(), mangled.to_string()), concrete);

@@ -241,14 +241,17 @@ impl Lowerer {
         // turn enqueue generic-function instances.
         loop {
             if let Some(me) = self.mono_enum_pending.pop() {
+                self.mono_depth = me.depth;
                 self.emit_mono_enum(&me)?;
                 continue;
             }
             if let Some(ms) = self.mono_struct_pending.pop() {
+                self.mono_depth = ms.depth;
                 self.emit_mono_struct(&ms)?;
                 continue;
             }
             if let Some(instance) = self.mono_pending.pop() {
+                self.mono_depth = instance.depth;
                 let hir_fn = self.lower_mono_instance(&instance)?;
                 // A `@grad` template's derivative is derived per instance, where the
                 // shapes the reverse pass builds its gradients from are concrete.

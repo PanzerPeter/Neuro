@@ -48,7 +48,10 @@ impl Lowerer {
             }
         };
         let mangled = crate::mangle_struct_instance(base, args);
-        if self.instantiated_structs.insert(mangled.clone()) {
+        if !self.struct_instances.contains_key(&mangled) {
+            let depth = self.next_instance_depth(base)?;
+            self.struct_instances
+                .insert(mangled.clone(), (base.to_string(), args.to_vec()));
             let (subst, const_subst) = split_mono_args(&template.generics, args);
 
             let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
@@ -70,6 +73,7 @@ impl Lowerer {
 
             self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
             self.mono_struct_pending.push(crate::MonoStruct {
+                depth,
                 base: base.to_string(),
                 mangled: mangled.clone(),
                 subst,
@@ -269,6 +273,7 @@ impl Lowerer {
         };
         let mangled = crate::mangle_struct_instance(base, args);
         if !self.enums.contains_key(&mangled) {
+            let depth = self.next_instance_depth(base)?;
             let (subst, const_subst) = split_mono_args(&template.generics, args);
             let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
             let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
@@ -282,6 +287,7 @@ impl Lowerer {
                 .insert(mangled.clone(), args.to_vec());
             self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
             self.mono_enum_pending.push(crate::MonoEnum {
+                depth,
                 base: base.to_string(),
                 mangled: mangled.clone(),
                 subst,

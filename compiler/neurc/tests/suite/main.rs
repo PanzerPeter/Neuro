@@ -92,6 +92,7 @@ mod multi_gpu;
 mod mutable_borrows;
 mod named_arguments;
 mod nested_block_comments;
+mod nested_generics;
 mod newtype;
 mod null_coalesce;
 mod operator_traits;

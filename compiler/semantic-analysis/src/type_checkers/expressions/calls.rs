@@ -6,9 +6,9 @@
 use super::builtins::TO_CHECKED_METHOD;
 use super::{CLONE_METHOD, COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
 use crate::errors::TypeError;
-use crate::type_checkers::BoundInfo;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
+use crate::type_checkers::{BoundInfo, GenericFnSig};
 use crate::types::{CollectionKind, Type};
 use ast_types::{Expr, GenericArg};
 use shared_types::{Identifier, Span};
@@ -350,11 +350,6 @@ impl TypeChecker {
     /// Type-check a call to a generic function: infer each type parameter from
     /// the corresponding argument, validate arity and per-argument compatibility, and
     /// return the substituted return type.
-    ///
-    /// Type arguments are restricted to `Copy` types this phase: generic bodies are
-    /// checked abstractly (a bare `T` has no move semantics), which is sound precisely
-    /// when the concrete argument is `Copy`. Non-`Copy` generics await broader move
-    /// support. Bounds are not enforced (the trait system does not exist yet).
     pub(super) fn check_generic_call(
         &mut self,
         func_name: &str,
@@ -366,6 +361,20 @@ impl TypeChecker {
             Some(s) => s.clone(),
             None => return Type::Unknown,
         };
+        self.check_generic_call_with(func_name, &sig, type_args, args, span)
+    }
+
+    /// [`Self::check_generic_call`] against an explicit signature: an associated function
+    /// of a generic type is generic over the type's parameters without being a template
+    /// of its own.
+    fn check_generic_call_with(
+        &mut self,
+        func_name: &str,
+        sig: &GenericFnSig,
+        type_args: &[ast_types::GenericArg],
+        args: &[ast_types::Expr],
+        span: shared_types::Span,
+    ) -> Type {
         let args = &*self.borrow_kernel_inputs(func_name, args);
 
         if args.len() != sig.params.len() {
@@ -390,16 +399,14 @@ impl TypeChecker {
         for (arg, param) in args.iter().zip(sig.params.iter()) {
             let arg_ty =
                 shared_reborrow(self.check_expr(arg, None).unwrap_or(Type::Unknown), param);
-            if !matches!(arg_ty, Type::Unknown)
-                && !declarations::unify_generic(param, &arg_ty, &mut subst)
-            {
+            if !matches!(arg_ty, Type::Unknown) && !self.unify_generic(param, &arg_ty, &mut subst) {
                 // A closure is not passed to a generic higher-order function (the
                 // closures section of the language reference), and unification has no
                 // rule for a function type. Say so: the generic mismatch below would print
                 // two identical-looking types, `fn(i32) -> i32` against its template.
                 if matches!(param, Type::Function { .. })
                     && matches!(arg_ty, Type::Function { .. })
-                    && super::mentions_type_parameter(param)
+                    && self.mentions_type_parameter(param)
                 {
                     self.record_error(TypeError::FunctionToGenericHigherOrder {
                         callee: func_name.to_string(),
@@ -422,7 +429,7 @@ impl TypeChecker {
                         })
                     }
                     None => {
-                        let expected = declarations::substitute_generic(param, &subst);
+                        let expected = self.substitute_generic(param, &subst, arg.span());
                         self.record_type_mismatch(&expected, arg_ty, arg.span())
                     }
                 }
@@ -451,7 +458,7 @@ impl TypeChecker {
         // Value predicates (`where N > 0`) are checked against the concrete const values.
         self.check_where_predicates(&sig.where_predicates, &subst);
 
-        declarations::substitute_generic(&sig.ret, &subst)
+        self.substitute_generic(&sig.ret, &subst, span)
     }
 
     /// Bind explicit turbofish generic arguments into `subst`, positionally against
@@ -801,6 +808,23 @@ impl TypeChecker {
                     Type::Function { params, ret } => (params, *ret),
                     _ => return Some(Type::Unknown),
                 };
+
+                // `Cell::new(42)`: an associated function of a generic type is generic
+                // over the type's parameters, which the call infers like a generic
+                // function's, since lowering builds it on one instance of the type.
+                if let Some((_, own)) = self.instance_parts(&type_name.name) {
+                    let sig = GenericFnSig {
+                        param_names: own.iter().map(|g| g.to_string()).collect(),
+                        const_types: HashMap::new(),
+                        params: param_types,
+                        ret: return_type,
+                        where_predicates: Vec::new(),
+                        bounds: HashMap::new(),
+                    };
+                    return Some(
+                        self.check_generic_call_with(&mangled, &sig, type_args, args, *span),
+                    );
+                }
 
                 self.check_call_args(args, &param_types, *span);
 

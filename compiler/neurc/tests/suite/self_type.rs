@@ -78,9 +78,9 @@ func main() -> i32 {
 }
 
 #[test]
-fn self_in_a_generic_impl_is_the_written_instance_and_reports_as_one() {
-    // `Self` here is `Cell<T>`, a generic instantiated with the impl's own parameter,
-    // which is not yet supported; the diagnostic is that one, at the `Self`.
+fn self_in_a_generic_impl_is_the_instance_the_receiver_has() {
+    // `Self` here is `Cell<T>`, the type `self` already has, so returning `self` and
+    // building one with `Self { .. }` both type, per instance.
     let source = r#"
 struct Cell<T> { value: T }
 
@@ -88,15 +88,17 @@ impl<T> Cell<T> {
     func get(self) -> T { self.value }
 
     func same(self) -> Self { self }
+
+    func rewrap(self) -> Self { Self { value: self.value } }
 }
 
-func main() -> i32 { 0 }
+func main() -> i32 {
+    val c = Cell { value: 40 }
+    val d = Cell { value: true }
+    if d.same().get() { c.same().rewrap().get() + 2 } else { 0 }
+}
 "#;
-    let err = rejected("self_generic_impl.nr", source);
-    assert!(
-        err.contains("enclosing type parameter") && err.contains("-> Self"),
-        "the diagnostic should be the nested-generic one, anchored at `Self`; got: {err}"
-    );
+    assert_eq!(run("self_generic_impl.nr", source), 42);
 }
 
 const SCALABLE: &str = r#"

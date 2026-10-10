@@ -588,13 +588,9 @@ Include in bug reports:
 
 Features that are planned but not built yet are on the
 [Quick Roadmap](../../README.md#quick-roadmap). Each language reference page states the
-limits of the feature it covers. Two that surprise people most often:
-
-1. **A generic cannot be instantiated with an enclosing type parameter.** Inside
-   `func f<T>`, a type such as `Option<T>` is rejected with "nested generic type argument
-   is not yet supported". Concrete arguments (`Option<i32>`, `Box<string>`) work.
-2. **An interpolation hole cannot contain a string literal.** `"{"lit"}"` is a lexical
-   error; bind the string to a name first and interpolate the name.
+limits of the feature it covers. The one that surprises people most often: **an interpolation
+hole cannot contain a string literal.** `"{"lit"}"` is a lexical error; bind the string to a name
+first and interpolate the name.
 
 ## Common Warnings
 

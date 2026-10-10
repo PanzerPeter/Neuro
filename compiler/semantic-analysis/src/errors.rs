@@ -109,11 +109,6 @@ pub enum TypeError {
     #[error("type argument list applied to non-generic type '{name}'")]
     NotAGenericType { name: String, span: Span },
 
-    #[error(
-        "nested generic type argument is not yet supported: a generic type may not be instantiated with an enclosing type parameter in this phase"
-    )]
-    NestedGenericTypeArg { span: Span },
-
     #[error("variable '{name}' already defined in this scope")]
     VariableAlreadyDefined { name: String, span: Span },
 
@@ -1529,7 +1524,6 @@ impl TypeError {
             | Self::GenericEnumNotInferable { span, .. }
             | Self::GenericArgCountMismatch { span, .. }
             | Self::NotAGenericType { span, .. }
-            | Self::NestedGenericTypeArg { span, .. }
             | Self::VariableAlreadyDefined { span, .. }
             | Self::FunctionAlreadyDefined { span, .. }
             | Self::ArgumentCountMismatch { span, .. }

@@ -221,7 +221,7 @@ impl Lowerer {
             let mut payload = Vec::with_capacity(args.len());
             for (arg, (_, declared)) in args.iter().zip(template.iter()) {
                 let lowered = self.lower_expr(arg, None)?;
-                crate::unify_ast_hir(
+                self.unify_ast_hir(
                     declared,
                     &lowered.ty,
                     &gnames,
@@ -315,7 +315,7 @@ impl Lowerer {
                     ),
                 })?;
             let lowered = self.lower_expr(&provided.value, None)?;
-            crate::unify_ast_hir(
+            self.unify_ast_hir(
                 declared,
                 &lowered.ty,
                 &gnames,

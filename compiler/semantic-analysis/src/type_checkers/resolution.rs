@@ -297,19 +297,7 @@ impl TypeChecker {
                     });
                     return None;
                 }
-                // A type argument that is itself an unresolved type parameter means a
-                // nested generic instantiated with the enclosing parameter (e.g. a
-                // `Wrapper<T>` field inside a generic struct). Monomorphizing the outer
-                // type cannot substitute into an opaque nested instance, so this is a
-                // documented limitation deferred with broader generic support.
-                if resolved.iter().any(|t| matches!(t, Type::Generic(_))) {
-                    self.record_error(TypeError::NestedGenericTypeArg { span: *span });
-                    return None;
-                }
-                if self.is_generic_enum(&name.name) {
-                    return Some(self.instantiate_generic_enum(&name.name, &resolved, *span));
-                }
-                Some(self.instantiate_generic_struct(&name.name, &resolved, *span))
+                Some(self.instantiate_generic(&name.name, &resolved, *span))
             }
             // Closure / function type `(T1, ...) -> R`: the type of a callable value.
             ast_types::Type::Function { params, ret, .. } => {

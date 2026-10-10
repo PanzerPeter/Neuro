@@ -15,7 +15,7 @@ use super::{BoundInfo, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::{Attribute, Item};
-use shared_types::Identifier;
+use shared_types::{Identifier, Span};
 use std::collections::HashMap;
 
 /// Built-in type names a newtype may not shadow.
@@ -274,91 +274,136 @@ impl TypeChecker {
     }
 }
 
-/// Unify a (possibly generic) parameter type against a concrete argument type,
-/// recording each type parameter's binding in `subst`. Returns `false` when the
-/// structures do not align or a previously-bound parameter is contradicted, so the
-/// caller can report a type mismatch. A concrete leaf must match by the usual rules.
-pub(crate) fn unify_generic(param: &Type, arg: &Type, subst: &mut HashMap<String, Type>) -> bool {
-    match (param, arg) {
-        (Type::Generic(name), _) => match subst.get(name) {
-            Some(bound) => bound.is_compatible_with(arg),
-            None => {
-                subst.insert(name.clone(), arg.clone());
-                true
+impl TypeChecker {
+    /// Unify a (possibly generic) parameter type against a concrete argument type,
+    /// recording each type parameter's binding in `subst`. Returns `false` when the
+    /// structures do not align or a previously-bound parameter is contradicted, so the
+    /// caller can report a type mismatch. A concrete leaf must match by the usual rules.
+    pub(crate) fn unify_generic(
+        &self,
+        param: &Type,
+        arg: &Type,
+        subst: &mut HashMap<String, Type>,
+    ) -> bool {
+        match (param, arg) {
+            (Type::Generic(name), _) => match subst.get(name) {
+                Some(bound) => bound.is_compatible_with(arg),
+                None => {
+                    subst.insert(name.clone(), arg.clone());
+                    true
+                }
+            },
+            (
+                Type::Reference {
+                    inner: pi,
+                    mutable: pm,
+                },
+                Type::Reference {
+                    inner: ai,
+                    mutable: am,
+                },
+            ) => pm == am && self.unify_generic(pi, ai, subst),
+            (
+                Type::Array {
+                    element: pe,
+                    size: ps,
+                },
+                Type::Array {
+                    element: ae,
+                    size: asz,
+                },
+            ) => unify_array_len(ps, asz, subst) && self.unify_generic(pe, ae, subst),
+            (
+                Type::Tensor {
+                    element: pe,
+                    shape: pshape,
+                },
+                Type::Tensor {
+                    element: ae,
+                    shape: ashape,
+                },
+            ) => unify_tensor_shape(pshape, ashape, subst) && self.unify_generic(pe, ae, subst),
+            (Type::Tuple(pe), Type::Tuple(ae)) => {
+                pe.len() == ae.len()
+                    && pe
+                        .iter()
+                        .zip(ae)
+                        .all(|(p, a)| self.unify_generic(p, a, subst))
             }
-        },
-        (
-            Type::Reference {
-                inner: pi,
-                mutable: pm,
-            },
-            Type::Reference {
-                inner: ai,
-                mutable: am,
-            },
-        ) => pm == am && unify_generic(pi, ai, subst),
-        (
-            Type::Array {
-                element: pe,
-                size: ps,
-            },
-            Type::Array {
-                element: ae,
-                size: asz,
-            },
-        ) => unify_array_len(ps, asz, subst) && unify_generic(pe, ae, subst),
-        (
-            Type::Tensor {
-                element: pe,
-                shape: pshape,
-            },
-            Type::Tensor {
-                element: ae,
-                shape: ashape,
-            },
-        ) => unify_tensor_shape(pshape, ashape, subst) && unify_generic(pe, ae, subst),
-        (Type::Tuple(pe), Type::Tuple(ae)) => {
-            pe.len() == ae.len() && pe.iter().zip(ae).all(|(p, a)| unify_generic(p, a, subst))
+            // `Option<T>` against `Option<i32>`: two instances of one template unify
+            // through their arguments, since the names alone never match. The same name on
+            // both sides still binds: a caller's `Option<T>` hands the callee's `T` its own.
+            (Type::Struct(p), Type::Struct(a)) | (Type::Enum(p), Type::Enum(a)) => {
+                match (self.instance_parts(p), self.instance_parts(a)) {
+                    (Some((pbase, pargs)), Some((abase, aargs))) if pbase == abase => pargs
+                        .iter()
+                        .zip(&aargs)
+                        .all(|(p, a)| self.unify_generic(p, a, subst)),
+                    _ => param.is_compatible_with(arg),
+                }
+            }
+            // A concrete (non-generic) parameter position: fall back to ordinary compatibility.
+            _ => param.is_compatible_with(arg),
         }
-        // A concrete (non-generic) parameter position: fall back to ordinary compatibility.
-        _ => param.is_compatible_with(arg),
     }
-}
 
-/// Substitute every generic parameter in `ty` with its inferred concrete type from
-/// `subst`. An unbound parameter is left as-is (the caller reports the failure).
-pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Type {
-    match ty {
-        Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
-        Type::Reference { inner, mutable } => Type::Reference {
-            inner: Box::new(substitute_generic(inner, subst)),
-            mutable: *mutable,
-        },
-        Type::Array { element, size } => Type::Array {
-            element: Box::new(substitute_generic(element, subst)),
-            size: substitute_array_len(size, subst),
-        },
-        Type::Tensor { element, shape } => Type::Tensor {
-            element: Box::new(substitute_generic(element, subst)),
-            shape: shape
-                .iter()
-                .map(|axis| axis.with_extent(substitute_array_len(&axis.extent, subst)))
-                .collect(),
-        },
-        Type::Tuple(elements) => Type::Tuple(
-            elements
-                .iter()
-                .map(|e| substitute_generic(e, subst))
-                .collect(),
-        ),
-        Type::Function { params, ret } => Type::Function {
-            params: params
-                .iter()
-                .map(|p| substitute_generic(p, subst))
-                .collect(),
-            ret: Box::new(substitute_generic(ret, subst)),
-        },
-        other => other.clone(),
+    /// Substitute every generic parameter in `ty` with its inferred concrete type from
+    /// `subst`. An unbound parameter is left as-is (the caller reports the failure).
+    ///
+    /// An instance whose arguments name a parameter is rebuilt with the substituted
+    /// arguments, so `Option<T>` becomes `Option<i32>`; `span` is where a rebuilt
+    /// instance reports a type argument it cannot take.
+    pub(crate) fn substitute_generic(
+        &mut self,
+        ty: &Type,
+        subst: &HashMap<String, Type>,
+        span: Span,
+    ) -> Type {
+        match ty {
+            Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+            Type::Reference { inner, mutable } => Type::Reference {
+                inner: Box::new(self.substitute_generic(inner, subst, span)),
+                mutable: *mutable,
+            },
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(self.substitute_generic(element, subst, span)),
+                size: substitute_array_len(size, subst),
+            },
+            Type::Tensor { element, shape } => Type::Tensor {
+                element: Box::new(self.substitute_generic(element, subst, span)),
+                shape: shape
+                    .iter()
+                    .map(|axis| axis.with_extent(substitute_array_len(&axis.extent, subst)))
+                    .collect(),
+            },
+            Type::Tuple(elements) => Type::Tuple(
+                elements
+                    .iter()
+                    .map(|e| self.substitute_generic(e, subst, span))
+                    .collect(),
+            ),
+            Type::Function { params, ret } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| self.substitute_generic(p, subst, span))
+                    .collect(),
+                ret: Box::new(self.substitute_generic(ret, subst, span)),
+            },
+            Type::Struct(name) | Type::Enum(name) => {
+                let Some((base, args)) = self.instance_parts(name) else {
+                    return ty.clone();
+                };
+                let substituted: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.substitute_generic(a, subst, span))
+                    .collect();
+                if substituted == args {
+                    return ty.clone();
+                }
+                self.instantiate_generic(&base, &substituted, span)
+            }
+            other => other.clone(),
+        }
     }
 }
 
@@ -368,63 +413,6 @@ pub(crate) fn substitute_generic(ty: &Type, subst: &HashMap<String, Type>) -> Ty
 pub(super) fn mangle_struct_instance(base: &str, args: &[Type]) -> String {
     let parts: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     format!("{}<{}>", base, parts.join(", "))
-}
-
-/// Rewrite a monomorphized method's signature: substitute the impl's type parameters
-/// and rename the receiver's `Struct(base)` / `Enum(base)` to the concrete instance.
-pub(super) fn remap_method_type(
-    ty: &Type,
-    subst: &HashMap<String, Type>,
-    base: &str,
-    mangled: &str,
-) -> Type {
-    match ty {
-        Type::Function { params, ret } => Type::Function {
-            params: params
-                .iter()
-                .map(|p| remap_type(p, subst, base, mangled))
-                .collect(),
-            ret: Box::new(remap_type(ret, subst, base, mangled)),
-        },
-        other => remap_type(other, subst, base, mangled),
-    }
-}
-
-/// Substitute type parameters and rename the base struct to its concrete instance
-/// within a single type, recursing through references, arrays, and tuples.
-pub(super) fn remap_type(
-    ty: &Type,
-    subst: &HashMap<String, Type>,
-    base: &str,
-    mangled: &str,
-) -> Type {
-    match ty {
-        Type::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
-        Type::Struct(name) if name == base => Type::Struct(mangled.to_string()),
-        Type::Enum(name) if name == base => Type::Enum(mangled.to_string()),
-        Type::Reference { inner, mutable } => Type::Reference {
-            inner: Box::new(remap_type(inner, subst, base, mangled)),
-            mutable: *mutable,
-        },
-        Type::Array { element, size } => Type::Array {
-            element: Box::new(remap_type(element, subst, base, mangled)),
-            size: substitute_array_len(size, subst),
-        },
-        Type::Tensor { element, shape } => Type::Tensor {
-            element: Box::new(remap_type(element, subst, base, mangled)),
-            shape: shape
-                .iter()
-                .map(|axis| axis.with_extent(substitute_array_len(&axis.extent, subst)))
-                .collect(),
-        },
-        Type::Tuple(elements) => Type::Tuple(
-            elements
-                .iter()
-                .map(|e| remap_type(e, subst, base, mangled))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
 }
 
 /// Unify a template array length against an argument's. A const-parameter length

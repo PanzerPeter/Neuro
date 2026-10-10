@@ -63,7 +63,9 @@ impl TypeChecker {
         let Type::Enum(name) = declared_return else {
             return None;
         };
-        let return_base = self.enum_instance_base(name).unwrap_or(name.as_str());
+        let return_base = self
+            .enum_instance_base(name)
+            .unwrap_or_else(|| name.clone());
         (return_base == base).then(|| name.clone())
     }
 

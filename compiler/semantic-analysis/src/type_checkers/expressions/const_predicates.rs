@@ -1,5 +1,6 @@
 // Compile-time evaluation of `where`-clause predicates over const generic values.
 
+use crate::type_checkers::TypeChecker;
 use crate::types::{ArrayLen, Type};
 use ast_types::{BinaryOp, Expr};
 use shared_types::Literal;
@@ -82,19 +83,26 @@ fn eval_const_int(expr: &Expr, subst: &HashMap<String, Type>) -> Option<i128> {
     }
 }
 
-/// Whether a resolved type still mentions a generic type parameter, a const-parameter
-/// array length, or an unresolved const value, i.e. it is not fully concrete.
-pub(super) fn mentions_type_parameter(ty: &Type) -> bool {
-    match ty {
-        Type::Generic(_) | Type::ConstValue(_) => true,
-        Type::Reference { inner, .. } => mentions_type_parameter(inner),
-        Type::Array { element, size } => {
-            matches!(size, ArrayLen::Param(_)) || mentions_type_parameter(element)
+impl TypeChecker {
+    /// Whether a resolved type still mentions a generic type parameter, a const-parameter
+    /// array length, or an unresolved const value, i.e. it is not fully concrete. An
+    /// instance mentions one through its arguments: `Option<T>` is not concrete.
+    pub(super) fn mentions_type_parameter(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Generic(_) | Type::ConstValue(_) => true,
+            Type::Reference { inner, .. } => self.mentions_type_parameter(inner),
+            Type::Array { element, size } => {
+                matches!(size, ArrayLen::Param(_)) || self.mentions_type_parameter(element)
+            }
+            Type::Tuple(elements) => elements.iter().any(|e| self.mentions_type_parameter(e)),
+            Type::Function { params, ret } => {
+                params.iter().any(|p| self.mentions_type_parameter(p))
+                    || self.mentions_type_parameter(ret)
+            }
+            Type::Struct(name) | Type::Enum(name) => self
+                .instance_parts(name)
+                .is_some_and(|(_, args)| args.iter().any(|a| self.mentions_type_parameter(a))),
+            _ => false,
         }
-        Type::Tuple(elements) => elements.iter().any(mentions_type_parameter),
-        Type::Function { params, ret } => {
-            params.iter().any(mentions_type_parameter) || mentions_type_parameter(ret)
-        }
-        _ => false,
     }
 }

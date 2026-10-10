@@ -3,7 +3,7 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
-use super::{TypeChecker, declarations, mentions_type_parameter};
+use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{Expr, FieldInit};
@@ -100,17 +100,18 @@ impl TypeChecker {
                         .map(|(_, t)| t);
                     let expected_ctx = match instance_ty {
                         Some(concrete) => Some(concrete),
-                        None if mentions_type_parameter(&expected) => None,
+                        None if self.mentions_type_parameter(&expected) => None,
                         None => Some(&expected),
                     };
                     let actual = self
                         .check_expr(value, expected_ctx)
                         .unwrap_or(Type::Unknown);
                     if !matches!(actual, Type::Unknown)
-                        && !declarations::unify_generic(&expected, &actual, &mut subst)
+                        && !self.unify_generic(&expected, &actual, &mut subst)
                     {
+                        let expected = self.substitute_generic(&expected, &subst, value.span());
                         self.record_error(TypeError::Mismatch {
-                            expected: declarations::substitute_generic(&expected, &subst),
+                            expected,
                             found: actual,
                             span: value.span(),
                         });
@@ -150,7 +151,7 @@ impl TypeChecker {
             }
         }
 
-        let inst = self.instantiate_generic_struct(&name.name, &args, span);
+        let inst = self.instantiate_generic(&name.name, &args, span);
 
         // A `..base` source, when present, must be the same monomorphized instance.
         if let Some(base_expr) = base {

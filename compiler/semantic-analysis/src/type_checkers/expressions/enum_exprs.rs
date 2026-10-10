@@ -3,7 +3,7 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
-use super::{TypeChecker, VariantForm, declarations, mentions_type_parameter};
+use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{Expr, FieldInit};
@@ -51,7 +51,7 @@ impl TypeChecker {
                 }
             }
         }
-        Some(self.instantiate_generic_enum(base, &args, span))
+        Some(self.instantiate_generic(base, &args, span))
     }
 
     /// Type-check a bare path enum construction `E::V`: valid only for a
@@ -180,10 +180,10 @@ impl TypeChecker {
         let mut subst: HashMap<String, Type> = HashMap::new();
         let mut arg_tys: Vec<Option<Type>> = Vec::with_capacity(args.len());
         for (arg, declared) in args.iter().zip(field_tys.iter()) {
-            let ctx = (!mentions_type_parameter(declared)).then(|| declared.clone());
+            let ctx = (!self.mentions_type_parameter(declared)).then(|| declared.clone());
             let arg_ty = self.check_expr(arg, ctx.as_ref());
             if inferring && let Some(ty) = &arg_ty {
-                declarations::unify_generic(declared, ty, &mut subst);
+                self.unify_generic(declared, ty, &mut subst);
             }
             // The payload is a new owner: a place written here is moved into it.
             self.record_move(arg);
@@ -302,12 +302,12 @@ impl TypeChecker {
                 .map(|(_, t)| t.clone())
             {
                 Some(declared) => {
-                    let ctx = (!mentions_type_parameter(&declared)).then(|| declared.clone());
+                    let ctx = (!self.mentions_type_parameter(&declared)).then(|| declared.clone());
                     let actual = self.check_expr(value, ctx.as_ref());
                     self.record_move(value);
                     if let Some(actual) = actual {
                         if inferring {
-                            declarations::unify_generic(&declared, &actual, &mut subst);
+                            self.unify_generic(&declared, &actual, &mut subst);
                         }
                         provided.push((value, declared, actual));
                     }
@@ -349,7 +349,7 @@ impl TypeChecker {
         for (value, declared, actual) in &provided {
             // Under inference the declared type is a placeholder the argument bound, so
             // the concrete comparison is the substituted one.
-            let declared = declarations::substitute_generic(declared, &subst);
+            let declared = self.substitute_generic(declared, &subst, value.span());
             if !actual.is_compatible_with(&declared) {
                 self.record_error(TypeError::Mismatch {
                     expected: declared,

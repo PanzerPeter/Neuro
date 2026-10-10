@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.10.0] - 2026-10-10
+
+### Added
+
+- A generic type may take a type parameter in scope as its argument: `Option<T>` and
+  `Result<T, E>` in a generic function's signature and body, a `Wrapper<U>` field in a generic
+  struct, and `Cell<T>` in `impl<T> Cell<T>`, where it is the type `self` has. A call infers
+  through the instance it is handed, so an `Option<i32>` passed where `Option<U>` is declared
+  binds `U = i32`, and `?` and `??` work on these types as on concrete ones.
+- `Self` in a generic `impl` names the instance, in the impl's own signatures and in a trait's
+  that it implements (`-> Self`, `-> Option<Self>`).
+- An associated function of a generic type can be called: `Cell::new(42)` infers `T` from its
+  arguments, and `Bag::nothing::<i32>()` supplies it with a turbofish when nothing else can.
+- Example `showcase/generic_toolkit.nr` adds `Option<T>` and `Result<Cell<T>, string>` at a
+  function's own parameter, propagated with `?`.
+
+### Fixed
+
+- A generic that calls itself with a type built from its own parameter (`grow((x, 1))` inside
+  `grow<T>`) no longer hangs the compiler. It is refused once its chain of instances runs past a
+  fixed depth.
+
 ## [5.9.0] - 2026-10-10
 
 ### Added

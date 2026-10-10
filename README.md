@@ -168,7 +168,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Types and inference** | `i8` through `u64`, `f16` / `bf16` / `f32` / `f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
 | **Control flow** | `if` / `else if` / `else`, `while`, `loop`, range-`for`, labelled `break` / `continue`, block-as-value, `for` over any type implementing the prelude's iterator protocol |
 | **Functions** | Recursion, forward references, implicit returns, named arguments with external labels, higher-order functions, `\|>` pipelines, `>>` composition |
-| **Generics and traits** | Generic functions, structs and impls, const generics, `where` clauses, turbofish; required and default methods, `Self`, associated types, operator traits, `impl Trait` and `dyn Trait` dispatch. Fully monomorphized |
+| **Generics and traits** | Generic functions, structs and impls, nested at their own parameters (`Option<T>`), const generics, `where` clauses, turbofish; required and default methods, `Self`, associated types, operator traits, `impl Trait` and `dyn Trait` dispatch. Fully monomorphized |
 | **Closures** | `\|x: i32\| x * x`, `move` closures, `(T) -> R` function types, compiled to `{ fn_ptr, env_ptr }` with no heap allocation |
 | **Structs, enums, newtypes** | Fields, functional update `..base`, `impl` blocks and trait impls on structs, enums and newtypes with `&self` / `&mut self` / consuming receivers; unit, tuple and struct-field variants carrying any sized payload; `@derive(Copy, Clone, Debug, PartialEq)` |
 | **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, plus `val`-binding destructuring of structs and arrays |

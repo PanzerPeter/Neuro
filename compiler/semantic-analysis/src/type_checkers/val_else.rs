@@ -89,8 +89,8 @@ impl TypeChecker {
         // a program shadowing the prelude with its own enum is its own base.
         let base = self
             .enum_instance_base(instance)
-            .unwrap_or(instance.as_str());
-        match base {
+            .unwrap_or_else(|| instance.clone());
+        match base.as_str() {
             OPTION_ENUM => {
                 self.record_error(TypeError::ValElseBindingOnOption {
                     name: ident.name.clone(),

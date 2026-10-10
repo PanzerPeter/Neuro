@@ -123,7 +123,7 @@ impl Lowerer {
                 .map(|(_, t)| t.clone());
             let lowered = self.lower_expr(value, field_expected.as_ref())?;
             if let Some(ft) = &field_ast_ty {
-                crate::unify_ast_hir(
+                self.unify_ast_hir(
                     ft,
                     &lowered.ty,
                     &gnames,
@@ -181,7 +181,7 @@ impl Lowerer {
         let names_base = instance
             .strip_prefix(base)
             .is_some_and(|rest| rest.starts_with("_g_"));
-        if !names_base || !self.instantiated_structs.contains(instance) {
+        if !names_base || !self.struct_instances.contains_key(instance) {
             return None;
         }
         self.structs.get(instance).cloned()

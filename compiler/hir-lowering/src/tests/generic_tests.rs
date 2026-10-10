@@ -238,3 +238,53 @@ func main() -> i32 {
         "{targets:?}"
     );
 }
+
+#[test]
+fn a_field_at_the_parameter_monomorphizes_with_its_outer_instance() {
+    // `Outer<i32>` holds `Inner<U>` at `U = i32`, so both instances exist and the field
+    // has the inner one's concrete type.
+    let program = lower(
+        "struct Inner<T> { v: T }\n\
+         struct Outer<U> { i: Inner<U> }\n\
+         func main() -> i32 { val o = Outer { i: Inner { v: 1 } }\n 0 }",
+    );
+    let names = struct_names(&program);
+    assert!(names.iter().any(|n| n == "Inner_g_i32"), "{names:?}");
+    assert!(names.iter().any(|n| n == "Outer_g_i32"), "{names:?}");
+}
+
+#[test]
+fn an_associated_call_on_a_generic_type_calls_the_inferred_instance() {
+    let program = lower(
+        "struct Cell<T> { v: T }\n\
+         impl<T> Cell<T> { func new(v: T) -> Cell<T> { Cell { v: v } } }\n\
+         func main() -> i32 { val c = Cell::new(true)\n 0 }",
+    );
+    let body = function_body(&program, "main");
+    let init = binding_init(body, "c");
+    let HirExprKind::Call { callee, .. } = &init.kind else {
+        panic!("expected a call, got {:?}", init.kind);
+    };
+    let HirExprKind::Path { type_name, member } = &callee.kind else {
+        panic!("expected a path callee, got {:?}", callee.kind);
+    };
+    assert_eq!(
+        (type_name.as_str(), member.as_str()),
+        ("Cell_g_bool", "new")
+    );
+    assert_eq!(init.ty, HirType::Struct("Cell_g_bool".to_string()));
+}
+
+#[test]
+fn a_generic_feeding_itself_a_growing_type_stops_at_the_depth_limit() {
+    let ast = syntax_parsing::parse(
+        "func grow<T>(x: T, n: i32) -> i32 { if n == 0 { 0 } else { grow((x, 1), n - 1) } }\n\
+         func main() -> i32 { grow(1, 3) }",
+    )
+    .expect("parses");
+    let err = crate::lower_program(&ast).expect_err("an unbounded chain must not lower");
+    assert!(
+        matches!(err, crate::LoweringError::InstantiationTooDeep { .. }),
+        "{err:?}"
+    );
+}

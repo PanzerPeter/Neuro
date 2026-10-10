@@ -473,9 +473,30 @@ func main() -> i32 {
 **Restrictions.** Type arguments carry no `Copy` requirement: an instance *holds*
 the value, so `Wrapper<string>` owns the string it holds and moves with it (see
 [Types → Ownership of an element](types.md#ownership-of-an-element)). A generic struct is usable
-only *with* type arguments; its bare name is rejected. A generic instantiated with an enclosing type
-parameter (a `Wrapper<T>` field inside another generic struct) is rejected with
-`nested generic type argument is not yet supported`.
+only *with* type arguments; its bare name is rejected.
+
+**A generic at the enclosing parameter.** A field, an impl signature or a body may instantiate a
+generic with a parameter in scope: `struct Outer<U> { i: Inner<U> }` holds an `Inner<i32>` in an
+`Outer<i32>`. Inside `impl<T> Cell<T>`, both `Cell<T>` and `Self` are the type `self` has. An
+associated function of a generic type infers the instance from its arguments, so `Cell::new(42)`
+calls `new` on `Cell<i32>`; when the arguments do not mention the parameter, supply it with a
+turbofish (`Bag::nothing::<i32>()`).
+
+```neuro
+struct Cell<T> {
+    v: T,
+}
+
+impl<T> Cell<T> {
+    func new(v: T) -> Cell<T> {
+        Cell { v: v }
+    }
+
+    func maybe(self) -> Option<T> {
+        Option::Some(self.v)
+    }
+}
+```
 
 ### Const (value) parameters
 
