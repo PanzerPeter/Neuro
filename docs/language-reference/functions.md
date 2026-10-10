@@ -1013,13 +1013,15 @@ interface; use `impl Trait` (or a named bound) when each call site has one concr
 ### Object safety
 
 A trait is usable as `dyn` only if it is **object-safe**: every method must dispatch on a
-`&self` or `&mut self` receiver, so the vtable has a fixed layout. A method that consumes
-`self` by value, or one with no receiver at all, makes the trait unusable as a trait
-object (it remains fully usable through `impl Trait` and named bounds).
+`&self` or `&mut self` receiver and name `Self` nowhere else, so the vtable has a fixed
+layout. A method that consumes `self` by value, one with no receiver at all, or one that
+takes or returns `Self` makes the trait unusable as a trait object (it remains fully usable
+through `impl Trait` and named bounds).
 
 ```neuro
-trait Consume { func take(self) -> i32 }   // not object-safe: consumes self
-trait Maker   { func build() -> i32 }      // not object-safe: no receiver
+trait Consume { func take(self) -> i32 }        // not object-safe: consumes self
+trait Maker   { func build() -> i32 }           // not object-safe: no receiver
+trait Grow    { func grown(&self) -> Self }     // not object-safe: returns Self
 ```
 
 A trait declaring an associated type is also rejected as `dyn` today: the trait-object type

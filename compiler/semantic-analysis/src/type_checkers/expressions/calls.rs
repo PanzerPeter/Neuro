@@ -99,10 +99,11 @@ impl TypeChecker {
     /// Searches every trait named in the parameter's bounds; the first trait declaring a
     /// method of this name wins. Returns `None` when no bound trait declares it.
     ///
-    /// A signature naming an associated type is typed under the bound's
-    /// `Trait<Assoc = T>` constraints; the trait's declaration is re-resolved with them
-    /// in scope, exactly as an impl's own bindings resolve it. A bare bound constrains
-    /// nothing, so such a call is reported instead.
+    /// A signature naming `Self` or an associated type is re-resolved from the trait's
+    /// declaration, with `Self` standing for the parameter and each associated type for
+    /// the bound's `Trait<Assoc = T>` constraint, exactly as an impl's own bindings
+    /// resolve it. A bare bound constrains no associated type, so such a call is
+    /// reported instead.
     pub(super) fn resolve_generic_trait_method(
         &mut self,
         param: &str,
@@ -119,7 +120,7 @@ impl TypeChecker {
             else {
                 continue;
             };
-            if !sig.uses_assoc {
+            if !sig.resolved_per_use {
                 return Some((sig.params.clone(), sig.ret));
             }
             let mut named = Vec::new();
@@ -148,6 +149,7 @@ impl TypeChecker {
                 &mut self.self_assoc,
                 bound.assoc.iter().cloned().collect::<HashMap<_, _>>(),
             );
+            let saved_self = self.self_type.replace(Type::Generic(param.to_string()));
             let params: Vec<Type> = sig
                 .decl
                 .params
@@ -161,6 +163,7 @@ impl TypeChecker {
                 .map(|t| self.resolve_type(t).unwrap_or(Type::Unknown))
                 .unwrap_or(Type::Void);
             self.self_assoc = saved;
+            self.self_type = saved_self;
             return Some((params, ret));
         }
         None

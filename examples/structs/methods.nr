@@ -1,7 +1,8 @@
 // Methods example
 //
 // Demonstrates impl blocks, instance methods (&self), and
-// associated functions (TypeName::func) on structs.
+// associated functions (TypeName::func) on structs. Inside an impl,
+// `Self` names the type being extended, as `Rect` below writes it.
 //
 // Every method result is printed, so the associated function and both receivers
 // are visible in the output rather than only in the exit code.
@@ -30,8 +31,12 @@ struct Rect {
 }
 
 impl Rect {
-    func new(w: i32, h: i32) -> Rect {
-        Rect { width: w, height: h }
+    func new(w: i32, h: i32) -> Self {
+        Self { width: w, height: h }
+    }
+
+    func scaled(&self, k: i32) -> Self {
+        Self::new(self.width * k, self.height * k)
     }
 
     func area(&self) -> i32 {
@@ -59,6 +64,8 @@ func main() -> i32 {
     val p = r.perimeter()     // 26
     println("Rect::new(6, 7).area()      = {a}")
     println("               .perimeter() = {p}")
+    val big = r.scaled(2).area() // 168
+    println("Rect::new(6, 7).scaled(2).area() = {big}")
 
     return sum  // exits with 42
 }

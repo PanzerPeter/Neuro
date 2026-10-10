@@ -200,7 +200,7 @@ showcase/sample_audit.nr             177
 showcase/scan_guard.nr               160
 showcase/sensor_pipeline.nr          57
 showcase/sensor_windows.nr           85
-showcase/shape_traits.nr             161
+showcase/shape_traits.nr             209
 showcase/simulation.nr               2
 showcase/status_report.nr            34
 showcase/stored_text.nr              95

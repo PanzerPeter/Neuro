@@ -762,6 +762,16 @@ trait member (`NotATraitMethod`) with a matching signature (`TraitMethodSignatur
 `resolve_generic_trait_method`. Traits are otherwise fully erased: the parser injects default
 methods into impls, so they check as ordinary methods.
 
+**`Self`.** The parser replaces `Self` inside every `impl`, so a `Type::Named` spelled `Self`
+reaching `resolve_type` is a trait's own or misplaced. `self_type` answers it: the implementing
+type while `register_impl` runs conformance (`declared_self_type`, so `Cell<T>` under a generic
+impl's parameters), and `Generic(T)` while `resolve_generic_trait_method` reads a signature
+through `T: Trait`. With `self_type` unset it is `SelfOutsideImpl`. `register_trait` treats a
+`Self` position like an associated-type one: left `Unknown`, with `resolved_per_use` set so every
+use re-resolves `TraitMethodSig.decl`. A method naming `Self` outside its receiver makes the
+trait not object-safe (`trait_object_safety`): the vtable cannot know the erased type's size or
+which type a `&Self` argument is.
+
 **Associated types.** `TraitInfo.assoc_types` lists what a trait declares (`type Item`);
 `self_assoc` holds what the impl under check bound each one to, installed by `enter_impl_assoc`
 around both `register_impl` and `check_impl` and consulted by `resolve_type` for a

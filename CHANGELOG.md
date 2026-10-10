@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.9.0] - 2026-10-10
+
+### Added
+
+- `Self` is a type. Inside an `impl` it names the type being extended, anywhere that type's
+  name goes: parameter and return types, local annotations, `Self { .. }` struct literals,
+  `Self::new()` calls, and `Self::Variant` in expressions, `match` arms and `val ... else`.
+  Inside a `trait` it names the implementing type: an impl may write `Self` or its own name,
+  a default method naming `Self` means each implementor, and a call through a bound
+  `T: Trait` returns `T`. `Self` anywhere else is an error.
+- Example `showcase/shape_traits.nr` adds a trait whose methods return `Self`, called through
+  a `<T: Shape + Resizable>` bound.
+
+### Changed
+
+- A trait whose method takes or returns `Self` outside its receiver is not object-safe, and
+  `&dyn Trait` over it is refused.
+- `structs/methods.nr` builds its `Rect` through `Self`.
+
 ## [5.8.0] - 2026-10-10
 
 ### Added

@@ -108,6 +108,10 @@ pub(crate) struct TypeChecker {
     /// bound it to. Non-empty only while an `impl` block's signatures and method bodies
     /// are checked, which is exactly the region where `Self::Item` denotes a type.
     pub(crate) self_assoc: HashMap<String, Type>,
+    /// What a trait's `Self` denotes: the implementing type while an impl is checked
+    /// against the trait, and the bound parameter while a call through a bound reads a
+    /// signature. `None` elsewhere, where a `Self` is misplaced.
+    pub(crate) self_type: Option<Type>,
     /// Concrete `(trait name, implementing type name)` pairs that have an
     /// `impl Trait for Type` block. A generic bound `T: Trait` is satisfied at a
     /// call site exactly when the concrete type argument appears here.
@@ -264,10 +268,10 @@ pub(crate) struct OperatorDispatch {
 
 /// One resolved trait-method signature. `params` excludes the implicit `self`.
 /// `required` is true when the trait gave no default body: an implementor must provide
-/// one. Types are resolved in the trait's (non-generic) scope, where an associated-type
-/// position has no binding yet and therefore resolves to [`Type::Unknown`]; `decl` keeps
-/// the signature as written so conformance can re-resolve it against each impl's
-/// bindings, which is the only place `Self::Item` is a real type.
+/// one. Types are resolved in the trait's (non-generic) scope, where a position naming
+/// `Self` or an associated type has no answer yet and therefore resolves to
+/// [`Type::Unknown`]; `decl` keeps the signature as written so conformance can re-resolve
+/// it against each impl, which is the only place `Self` and `Self::Item` are real types.
 #[derive(Clone)]
 pub(crate) struct TraitMethodSig {
     pub(crate) self_param: Option<ast_types::SelfParam>,
@@ -275,9 +279,9 @@ pub(crate) struct TraitMethodSig {
     pub(crate) ret: Type,
     pub(crate) required: bool,
     pub(crate) decl: ast_types::TraitMethod,
-    /// Whether any position of `decl` names an associated type. A call through an erased
-    /// receiver (a bounded type parameter) cannot type such a signature.
-    pub(crate) uses_assoc: bool,
+    /// Whether any position of `decl` names `Self` or an associated type, so the
+    /// registered `params` / `ret` are placeholders and every use re-resolves `decl`.
+    pub(crate) resolved_per_use: bool,
 }
 
 /// A resolved enum variant: its name, construction form, and ordered payload
@@ -393,6 +397,7 @@ impl TypeChecker {
             trait_names: HashSet::new(),
             deferred_object_safety: Vec::new(),
             self_assoc: HashMap::new(),
+            self_type: None,
             trait_impls: HashSet::new(),
             impl_assoc: HashMap::new(),
             operator_binary_impls: HashMap::new(),

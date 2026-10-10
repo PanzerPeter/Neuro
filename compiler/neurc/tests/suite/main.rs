@@ -108,6 +108,7 @@ mod range_step;
 mod reading_through_borrows;
 mod return_paths;
 mod returned_reference;
+mod self_type;
 mod shape_generics;
 mod short_circuit_runtime;
 mod slices;

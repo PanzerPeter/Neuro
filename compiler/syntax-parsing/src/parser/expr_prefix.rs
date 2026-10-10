@@ -10,7 +10,7 @@ use crate::precedence::Precedence;
 
 use super::Parser;
 use super::interpolation::parse_interp_string;
-use super::types::TENSOR_TYPE_NAME;
+use super::types::{SELF_TYPE_NAME, TENSOR_TYPE_NAME};
 
 impl Parser {
     /// Parse a prefix expression (literals, identifiers, unary operators, parentheses)
@@ -19,7 +19,13 @@ impl Parser {
             expected: "expression".to_string(),
         })?;
 
-        match token.kind {
+        // `Self { .. }` and `Self::member` take every form a type name does, so `Self`
+        // enters the identifier arm under its own name for the `impl` desugar to replace.
+        let kind = match token.kind {
+            TokenKind::SelfUpper => TokenKind::Identifier(SELF_TYPE_NAME.to_string()),
+            kind => kind,
+        };
+        match kind {
             TokenKind::Integer(n) => {
                 Ok(Expr::Literal(Literal::Integer(n as i128, None), token.span))
             }
@@ -278,8 +284,8 @@ impl Parser {
             TokenKind::Pipe => self.parse_closure(false, token.span, false),
             TokenKind::PipePipe => self.parse_closure(false, token.span, true),
 
-            _ => Err(ParseError::UnexpectedToken {
-                found: token.kind,
+            found => Err(ParseError::UnexpectedToken {
+                found,
                 expected: "expression".to_string(),
                 span: token.span,
             }),

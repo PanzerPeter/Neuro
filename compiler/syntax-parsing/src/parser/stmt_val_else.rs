@@ -15,7 +15,7 @@ impl Parser {
     /// Two markers, both unambiguous without further lookahead, because a binding
     /// name after `val` is only ever followed by `:`, `=`, or a newline:
     ///
-    /// - `Name::`: the qualified head of a variant pattern.
+    /// - `Name::` or `Self::`: the qualified head of a variant pattern.
     /// - `Name(`  : the unqualified head, which an import (the prelude included)
     ///   brings into scope. Its payload is what settles the reading.
     ///
@@ -24,11 +24,14 @@ impl Parser {
     /// the same reason a bare `None` pattern cannot.
     pub(super) fn starts_val_else(&self) -> bool {
         let (first, second) = self.peek_two_after_keyword();
-        matches!(first, Some(TokenKind::Identifier(_)))
-            && matches!(
+        match first {
+            Some(TokenKind::Identifier(_)) => matches!(
                 second,
                 Some(TokenKind::ColonColon) | Some(TokenKind::LeftParen)
-            )
+            ),
+            Some(TokenKind::SelfUpper) => matches!(second, Some(TokenKind::ColonColon)),
+            _ => false,
+        }
     }
 
     /// Parse `PATTERN = value else |binding|? { ... }`. The `val` keyword is already

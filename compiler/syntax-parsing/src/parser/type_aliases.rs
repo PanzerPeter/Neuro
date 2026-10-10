@@ -16,10 +16,12 @@ use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
 use ast_types::{
-    Expr, GenericParam, GenericParamKind, InterpPart, Item, Place, Stmt, TensorIndexArg, Type,
+    EnumPatternPayload, Expr, GenericArg, GenericParam, GenericParamKind, ImplDef, InterpPart,
+    Item, Pattern, Place, Stmt, TensorIndexArg, Type,
 };
 
 use super::Parser;
+use super::types::SELF_TYPE_NAME;
 
 /// A parsed `type Name = Target` declaration awaiting expansion.
 pub(crate) struct TypeAliasDecl {
@@ -109,6 +111,85 @@ pub(crate) fn expand_type_aliases(
         rewrite_item(item, &resolved);
     }
     Ok(())
+}
+
+/// Replace `Self` inside every `impl` block with the type the block extends.
+///
+/// Within one block `Self` is an alias for that type, so this is alias expansion scoped
+/// to the block: type positions take the whole type (`Wrapper<T>` for
+/// `impl<T> Wrapper<T>`), and the struct-literal, path and pattern positions take its
+/// name. It runs after trait defaults are injected, so a default body naming `Self`
+/// reads as each implementor. A `Self` left anywhere else is the trait's own, or an
+/// error, and the type checker answers both.
+pub(crate) fn expand_self(items: &mut [Item]) {
+    for item in items.iter_mut() {
+        if let Item::Module(def) = item {
+            expand_self(&mut def.items);
+            continue;
+        }
+        let Item::Impl(def) = item else { continue };
+        let resolved = HashMap::from([(SELF_TYPE_NAME.to_string(), impl_self_type(def))]);
+        rewrite_item(item, &resolved);
+    }
+}
+
+fn impl_self_type(def: &ImplDef) -> Type {
+    if def.type_args.is_empty() {
+        return Type::Named(def.type_name.clone());
+    }
+    Type::Generic {
+        name: def.type_name.clone(),
+        args: def
+            .type_args
+            .iter()
+            .cloned()
+            .map(GenericArg::Type)
+            .collect(),
+        span: def.type_name.span,
+    }
+}
+
+/// Point a `Self` in a name position (a struct literal, a path, a pattern) at the
+/// extended type's name. Only [`expand_self`] binds `Self`, since an alias cannot be
+/// named after a keyword, so alias expansion passes every such name through.
+fn rename_self(name: &mut Identifier, resolved: &HashMap<String, Type>) {
+    if name.name != SELF_TYPE_NAME {
+        return;
+    }
+    if let Some(Type::Named(target) | Type::Generic { name: target, .. }) =
+        resolved.get(SELF_TYPE_NAME)
+    {
+        name.name = target.name.clone();
+    }
+}
+
+fn rename_self_in_pattern(pattern: &mut Pattern, resolved: &HashMap<String, Type>) {
+    let payload = match pattern {
+        Pattern::Enum {
+            enum_name, payload, ..
+        } => {
+            rename_self(enum_name, resolved);
+            payload
+        }
+        Pattern::UnqualifiedEnum { payload, .. } => payload,
+        Pattern::Wildcard(_)
+        | Pattern::Binding(_)
+        | Pattern::Literal(_, _)
+        | Pattern::Range { .. } => return,
+    };
+    match payload {
+        EnumPatternPayload::Unit => {}
+        EnumPatternPayload::Tuple(subs) => {
+            for sub in subs {
+                rename_self_in_pattern(sub, resolved);
+            }
+        }
+        EnumPatternPayload::Struct(fields) => {
+            for field in fields {
+                rename_self_in_pattern(&mut field.pattern, resolved);
+            }
+        }
+    }
 }
 
 /// Resolve `start` and every alias its target mentions into `resolved`, each one
@@ -229,8 +310,10 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
                 let use_span = ident.span;
                 *ty = target.clone();
                 // Keep the diagnostic anchored at the reference, not the alias decl.
-                if let Type::Named(new_ident) = ty {
-                    new_ident.span = use_span;
+                match ty {
+                    Type::Named(new_ident) => new_ident.span = use_span,
+                    Type::Generic { span, .. } => *span = use_span,
+                    _ => {}
                 }
             }
         }
@@ -428,8 +511,12 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
             rewrite_block(body, resolved);
         }
         Stmt::ValElse {
-            value, else_block, ..
+            pattern,
+            value,
+            else_block,
+            ..
         } => {
+            rename_self_in_pattern(pattern, resolved);
             rewrite_expr(value, resolved);
             rewrite_block(else_block, resolved);
         }
@@ -472,7 +559,10 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         Expr::Unary { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Try { operand, .. } => rewrite_expr(operand, resolved),
         Expr::Paren(inner, _) => rewrite_expr(inner, resolved),
-        Expr::StructLiteral { fields, base, .. } => {
+        Expr::StructLiteral {
+            name, fields, base, ..
+        } => {
+            rename_self(name, resolved);
             for field in fields.iter_mut() {
                 rewrite_expr(&mut field.value, resolved);
             }
@@ -488,7 +578,10 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
                 }
             }
         }
-        Expr::EnumStructLiteral { fields, .. } => {
+        Expr::EnumStructLiteral {
+            enum_name, fields, ..
+        } => {
+            rename_self(enum_name, resolved);
             for field in fields.iter_mut() {
                 rewrite_expr(&mut field.value, resolved);
             }
@@ -550,13 +643,15 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
         }
         Expr::TupleIndex { object, .. } => rewrite_expr(object, resolved),
         Expr::ArrayRest { array, .. } => rewrite_expr(array, resolved),
-        // Patterns carry no type annotations, so only the scrutinee, guards, and
-        // bodies can host an aliased cast target.
+        // Patterns carry no type annotations; only a `Self::Variant` head is renamed.
         Expr::Match {
             scrutinee, arms, ..
         } => {
             rewrite_expr(scrutinee, resolved);
             for arm in arms.iter_mut() {
+                for pattern in arm.patterns.iter_mut() {
+                    rename_self_in_pattern(pattern, resolved);
+                }
                 if let Some(guard) = &mut arm.guard {
                     rewrite_expr(guard, resolved);
                 }
@@ -576,7 +671,8 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
             rewrite_expr(body, resolved);
         }
-        Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } | Expr::Compose { .. } => {}
+        Expr::Path { type_name, .. } => rename_self(type_name, resolved),
+        Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Compose { .. } => {}
     }
 }
 

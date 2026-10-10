@@ -5,7 +5,7 @@
 
 use super::is_builtin_type_name;
 use crate::errors::TypeError;
-use crate::type_checkers::resolution::SELF_ASSOC_PREFIX;
+use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::{TraitInfo, TraitMethodSig, TypeChecker};
 use crate::types::Type;
 use ast_types::{ImplDef, TraitDef};
@@ -16,9 +16,8 @@ impl TypeChecker {
     /// Register a trait declaration's associated types and method signatures.
     ///
     /// Each signature is resolved in the trait's (non-generic) scope. A position naming
-    /// an associated type is left as [`Type::Unknown`] here rather than resolved: the
-    /// declaration says which member exists, and only an implementor's binding says what
-    /// it is. The signature as written is kept so conformance can resolve it per impl.
+    /// `Self` or an associated type is left as [`Type::Unknown`] here rather than resolved:
+    /// the declaration says which member exists, and only an implementor says what it is. The signature as written is kept so conformance can resolve it per impl.
     /// A duplicate trait name or method is rejected.
     pub(crate) fn register_trait(&mut self, def: &TraitDef) {
         if self.traits.contains_key(&def.name.name) || is_builtin_type_name(&def.name.name) {
@@ -33,8 +32,10 @@ impl TypeChecker {
         let mut methods: HashMap<String, TraitMethodSig> = HashMap::new();
         for m in &def.methods {
             let mut named = Vec::new();
+            let mut names_self_type = false;
             for ty in m.params.iter().map(|p| &p.ty).chain(m.return_type.iter()) {
                 collect_self_assoc(ty, &mut named);
+                names_self_type |= names_self(ty);
             }
             for assoc in &named {
                 if !declared.contains(&assoc.name) {
@@ -70,7 +71,7 @@ impl TypeChecker {
                     ret,
                     required: m.default_body.is_none(),
                     decl: m.clone(),
-                    uses_assoc: !named.is_empty(),
+                    resolved_per_use: names_self_type || !named.is_empty(),
                 },
             );
         }
@@ -84,13 +85,13 @@ impl TypeChecker {
         );
     }
 
-    /// Resolve one position of a trait's declared signature. An associated-type position
-    /// has no binding at the declaration, so it carries no information rather than a
-    /// wrong one; every other position resolves and reports as usual.
+    /// Resolve one position of a trait's declared signature. A `Self` or associated-type
+    /// position has no answer at the declaration, so it carries no information rather
+    /// than a wrong one; every other position resolves and reports as usual.
     fn resolve_trait_sig_type(&mut self, ty: &ast_types::Type) -> Type {
         let mut named = Vec::new();
         collect_self_assoc(ty, &mut named);
-        if !named.is_empty() {
+        if !named.is_empty() || names_self(ty) {
             return Type::Unknown;
         }
         self.resolve_type(ty).unwrap_or(Type::Unknown)
@@ -251,36 +252,50 @@ impl TypeChecker {
 /// Collect every associated-type path an annotation names, nested positions included:
 /// `Option<Self::Item>` names `Item` just as a bare `Self::Item` does.
 pub(crate) fn collect_self_assoc(ty: &ast_types::Type, out: &mut Vec<Identifier>) {
+    let mut names = Vec::new();
+    named_types(ty, &mut names);
+    out.extend(names.into_iter().filter_map(|ident| {
+        ident
+            .name
+            .strip_prefix(SELF_ASSOC_PREFIX)
+            .map(|assoc| Identifier {
+                name: assoc.to_string(),
+                span: ident.span,
+            })
+    }));
+}
+
+/// Whether an annotation names `Self` in any position, `&Self` and `Option<Self>` included.
+pub(crate) fn names_self(ty: &ast_types::Type) -> bool {
+    let mut names = Vec::new();
+    named_types(ty, &mut names);
+    names.iter().any(|ident| ident.name == SELF_TYPE_NAME)
+}
+
+fn named_types<'a>(ty: &'a ast_types::Type, out: &mut Vec<&'a Identifier>) {
     match ty {
-        ast_types::Type::Named(ident) => {
-            if let Some(assoc) = ident.name.strip_prefix(SELF_ASSOC_PREFIX) {
-                out.push(Identifier {
-                    name: assoc.to_string(),
-                    span: ident.span,
-                });
-            }
-        }
-        ast_types::Type::Reference { inner, .. } => collect_self_assoc(inner, out),
+        ast_types::Type::Named(ident) => out.push(ident),
+        ast_types::Type::Reference { inner, .. } => named_types(inner, out),
         ast_types::Type::Array { element, .. } | ast_types::Type::Slice { element, .. } => {
-            collect_self_assoc(element, out)
+            named_types(element, out)
         }
         ast_types::Type::Tuple { elements, .. } => {
             for element in elements {
-                collect_self_assoc(element, out);
+                named_types(element, out);
             }
         }
         ast_types::Type::Generic { args, .. } => {
             for arg in args {
                 if let ast_types::GenericArg::Type(inner) = arg {
-                    collect_self_assoc(inner, out);
+                    named_types(inner, out);
                 }
             }
         }
         ast_types::Type::Function { params, ret, .. } => {
             for param in params {
-                collect_self_assoc(param, out);
+                named_types(param, out);
             }
-            collect_self_assoc(ret, out);
+            named_types(ret, out);
         }
         ast_types::Type::ImplTrait { .. }
         | ast_types::Type::DynTrait { .. }

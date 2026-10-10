@@ -15,14 +15,14 @@ pub(super) type AssocBindings = (Vec<(Identifier, Type)>, Option<Span>);
 /// separately rather than widening [`GenericArg`] for a single type.
 pub(super) type ShapeArg = (Vec<TensorDim>, Span);
 
-/// The only form `Self` takes in a type annotation: bare `Self` is not one, because the
-/// implementing type is always nameable where an annotation is written.
 /// The one type name that accepts a `[...]` shape argument. It is a prelude name
 /// rather than a keyword, so the parser only claims it once a shape appears: a module
 /// that shadows `Tensor` with its own generic type keeps parsing as before.
 pub(super) const TENSOR_TYPE_NAME: &str = "Tensor";
 
-const SELF_ASSOC_FORM: &str = "`Self::` followed by an associated type name; bare `Self` is not a type annotation, name the type itself";
+/// The type name `Self` is spelled with in the AST. It stays a plain name until the
+/// `impl` desugar or the type checker says which type it stands for.
+pub(super) const SELF_TYPE_NAME: &str = "Self";
 
 impl Parser {
     /// Parse a type annotation
@@ -178,19 +178,19 @@ impl Parser {
             return Ok(Type::DynTrait { trait_name, span });
         }
 
-        // Associated-type path `Self::Item`. The qualifier rides in the name exactly as a
-        // module qualifier does, so no pass between here and the type checker (which is
-        // the first place an implementing type is known) needs a node of its own for it.
+        // `Self`, or the associated-type path `Self::Item`. The qualifier rides in the
+        // name exactly as a module qualifier does, so no pass between here and the type
+        // checker (which is the first place an implementing type is known) needs a node
+        // of its own for it.
         if self.check(&TokenKind::SelfUpper) {
             let kw = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'Self'".to_string(),
             })?;
             if !self.check(&TokenKind::ColonColon) {
-                return Err(ParseError::UnexpectedToken {
-                    found: TokenKind::SelfUpper,
-                    expected: SELF_ASSOC_FORM.to_string(),
+                return Ok(Type::Named(Identifier {
+                    name: SELF_TYPE_NAME.to_string(),
                     span: kw.span,
-                });
+                }));
             }
             self.advance(); // consume '::'
             let assoc = self.consume_identifier("associated type name after `Self::`")?;

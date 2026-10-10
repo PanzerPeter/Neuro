@@ -9,6 +9,7 @@ use ast_types::{EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
 
 use super::Parser;
 use super::statements::stmt_span;
+use super::types::SELF_TYPE_NAME;
 
 impl Parser {
     /// Parse a `match` expression. The `match` keyword is already consumed;
@@ -128,6 +129,24 @@ impl Parser {
                     });
                 }
                 Ok(Pattern::Binding(Identifier { name, span }))
+            }
+            // `Self::Variant`: only the qualified form, since a bare `Self` would read
+            // as a binding of that name.
+            TokenKind::SelfUpper => {
+                let span = token.span;
+                self.advance();
+                if !self.check(&TokenKind::ColonColon) {
+                    return Err(ParseError::UnexpectedToken {
+                        found: TokenKind::SelfUpper,
+                        expected: "`::Variant` after `Self` in a pattern".to_string(),
+                        span,
+                    });
+                }
+                let enum_name = Identifier {
+                    name: SELF_TYPE_NAME.to_string(),
+                    span,
+                };
+                self.parse_enum_pattern(enum_name)
             }
             _ => {
                 // A literal-headed pattern: a bare literal, or the start of a range.

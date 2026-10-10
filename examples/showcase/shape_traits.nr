@@ -7,6 +7,8 @@
 //   · trait-bounded generic function, monomorphized per type
 //   · `impl Trait` static dispatch in argument position
 //   · `dyn Trait` dynamic dispatch through a trait object
+//   · `Self` in a trait signature, a default method and impl bodies
+//   · a generic with two bounds, `<T: Shape + Resizable>`
 //   · structs + `&self` methods
 //   · fixed-size arrays with iteration
 //   · @derive(Copy) + if-expressions and implicit returns
@@ -17,6 +19,10 @@
 // instead produces a single runtime type: the reference carries a pointer to the
 // value plus a pointer to that type's method table, and the call jumps through the
 // table. That is what lets ONE `dyn` function serve shapes of different types.
+//
+// `Self` names whichever type implements a trait. A method returning it cannot sit
+// in a method table, because the caller of a `dyn` call would not know the size of
+// what comes back, so `Resizable` is used through bounds only.
 
 trait Shape {
     // Required: every shape must define its own area.
@@ -54,6 +60,32 @@ impl Shape for Rect {
     func is_big(&self) -> i32 {
         if self.area() > 30 { 1 } else { 0 }
     }
+}
+
+trait Resizable {
+    func grown(&self, by: i32) -> Self
+
+    // A default naming `Self` is copied into each impl, where it means that type.
+    func grown_twice(&self, by: i32) -> Self {
+        self.grown(by).grown(by)
+    }
+}
+
+impl Resizable for Square {
+    func grown(&self, by: i32) -> Self {
+        Self { side: self.side + by }
+    }
+}
+
+impl Resizable for Rect {
+    func grown(&self, by: i32) -> Self {
+        Self { width: self.width + by, height: self.height + by }
+    }
+}
+
+// Through the bound, `grown_twice` returns `T`, so `area()` resolves on the result.
+func area_gain<T: Shape + Resizable>(s: &T, by: i32) -> i32 {
+    s.grown_twice(by).area() - s.area()
 }
 
 // Trait-bounded generic: dispatches `area()` through the bound, monomorphized per T.
@@ -105,6 +137,10 @@ func main() -> i32 {
     val dyn_sum = dyn_area(&sq) + dyn_area(&r)   // 49
     val dyn_flags = dyn_flag(&sq) + dyn_flag(&r) // 1
 
+    // `Self` through two bounds: Square 5 -> 7 gains 49 - 25, Rect 4x6 -> 6x8
+    // gains 48 - 24.
+    val gain = area_gain(&sq, 1) + area_gain(&r, 1) // 48
+
     println("scaled_area(&Square, 2)  bound generic = {a}")
     println("scaled_area(&Rect, 1)    bound generic = {b}")
     println("is_big(): default + override           = {big}")
@@ -112,9 +148,10 @@ func main() -> i32 {
     println("describe(&impl Shape)    static        = {stat}")
     println("dyn_area over both       dynamic       = {dyn_sum}")
     println("dyn_flag over both       dynamic       = {dyn_flags}")
+    println("area_gain over both      Self type     = {gain}")
 
-    // 50 + 24 + 1 + 10 + 26 + 49 + 1 = 161
-    val total = a + b + big + acc + stat + dyn_sum + dyn_flags
+    // 50 + 24 + 1 + 10 + 26 + 49 + 1 + 48 = 209
+    val total = a + b + big + acc + stat + dyn_sum + dyn_flags + gain
     println("total                                  = {total}")
     total
 }

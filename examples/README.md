@@ -26,7 +26,7 @@ not what each one does.
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
-| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, derives | [Structs](../docs/language-reference/structs.md) |
+| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, `Self`, derives | [Structs](../docs/language-reference/structs.md) |
 | `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
 | `showcase/`     | Bigger programs proving many features work **together** | see the index below |
 
@@ -150,7 +150,7 @@ One line each. The program's own header comment is the full description.
 - [`scan_guard.nr`](showcase/scan_guard.nr): deterministic `Drop` and labeled loop exit together
 - [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` / `Result` over structs, methods, arrays and generics
 - [`sensor_windows.nr`](showcase/sensor_windows.nr): windowed sensor readings behind one slice signature
-- [`shape_traits.nr`](showcase/shape_traits.nr): trait declarations and both dispatch forms together
+- [`shape_traits.nr`](showcase/shape_traits.nr): trait declarations and both dispatch forms together, plus a trait whose methods return `Self`, called through a two-trait bound
 - [`simulation.nr`](showcase/simulation.nr): a tiny bit-flag state machine
 - [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings
 - [`stored_text.nr`](showcase/stored_text.nr): text stored into a struct field, an array or tuple element, a call's argument and a call's return value, each released by whoever stored it

@@ -9,7 +9,7 @@ use ast_types::{
 };
 
 use super::Parser;
-use super::type_aliases::{TypeAliasDecl, expand_type_aliases};
+use super::type_aliases::{TypeAliasDecl, expand_self, expand_type_aliases};
 
 /// Whether an item list runs to end of input or to the `}` of an inline `module` block.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -31,7 +31,7 @@ impl Parser {
     /// Type aliases are transparent and are resolved here: each declaration
     /// is collected, then every aliased type annotation in the remaining items is
     /// rewritten to its target type before the program is returned. No alias item
-    /// reaches semantic analysis or codegen.
+    /// reaches semantic analysis or codegen, and neither does a `Self` inside an `impl`.
     pub(crate) fn parse_program(&mut self) -> ParseResult<Vec<Item>> {
         let mut alias_decls: Vec<TypeAliasDecl> = Vec::new();
         let mut items = self.parse_item_list(&mut alias_decls, Nesting::File)?;
@@ -39,6 +39,7 @@ impl Parser {
         // Inject trait default methods before alias expansion so the copied bodies are
         // alias-expanded along with the rest of each impl.
         inject_trait_defaults(&mut items);
+        expand_self(&mut items);
         expand_type_aliases(&mut items, alias_decls)?;
         Ok(items)
     }

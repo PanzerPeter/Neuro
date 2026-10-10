@@ -280,6 +280,34 @@ func main() -> i32 {
 }
 ```
 
+### `Self`
+
+Inside an `impl` block, `Self` names the type being extended. It goes wherever that type's
+name goes: parameter and return types, local annotations, struct literals, `Self::func()`
+calls, and enum variants in expressions and patterns.
+
+```neuro
+enum Shape {
+    Square(i32),
+    Empty
+}
+
+impl Shape {
+    func unit() -> Self { Self::Square(1) }
+
+    func side(&self) -> i32 {
+        match self {
+            Self::Square(s) => s,
+            Self::Empty => 0
+        }
+    }
+}
+```
+
+In `impl<T> Cell<T>`, `Self` is `Cell<T>`. A generic type applied to the impl's own
+parameter is not supported yet, so there `Self` is refused just as `Cell<T>` is.
+`Self` outside an `impl` or a `trait` is an error.
+
 ## Destructors (`impl Drop`)
 
 A struct can define a destructor by implementing the built-in `Drop` trait. Its
@@ -509,6 +537,23 @@ impl Shape for Square {
 The compiler checks each trait impl for **conformance**: every required method must be
 present, each method's signature must match the trait's, and an impl may only contain
 methods the trait declares.
+
+Inside a trait, `Self` names whichever type implements it:
+
+```neuro
+trait Resizable {
+    func grown(&self, by: i32) -> Self
+}
+
+impl Resizable for Square {
+    func grown(&self, by: i32) -> Self { Self { side: self.side + by } }
+}
+```
+
+The impl may write `Self` or its own name (`-> Square`). A default method naming `Self`
+means each implementor in turn, and through a bound `T: Resizable`, `grown` returns `T`. A
+trait that names `Self` anywhere but the receiver cannot be used as `dyn Trait`
+([object safety](functions.md#object-safety)).
 
 ### Trait bounds on generics
 

@@ -70,6 +70,15 @@ no types.
   `impl Trait for Type` blocks that omit them, never replacing a method the implementor wrote.
   It runs *before* `expand_type_aliases`, so injected bodies are alias-expanded too. Downstream
   passes therefore see trait methods as ordinary inherent methods.
+- **`Self` inside an `impl`**: `expand_self` (`parser/type_aliases.rs`) runs between default
+  injection and alias expansion and treats `Self` as an alias scoped to one block. It reuses the
+  alias walker: type positions take the whole target (`Cell<T>` for `impl<T> Cell<T>`), and the
+  name positions an alias never touches (struct literal, `Self::member` path, struct-variant
+  literal, `Self::Variant` pattern) take the target's name. Running after injection is what lets
+  a trait default naming `Self` read as each implementor. `Self` reaches this pass as an ordinary
+  name: `parse_type` and `parse_prefix` spell the keyword `Self`, and `parse_pattern` accepts only
+  `Self::Variant`, since a bare `Self` there would read as a binding. A `Self` in a trait, or
+  anywhere outside an `impl`, survives for the type checker.
 - **Argument-position `impl Trait`**: `parse_function` rewrites each occurrence (including
   nested under `&`/`&mut`, arrays, and tuples) into a fresh anonymous generic parameter
   `__implN: Trait` appended to the function's `generics`. Static dispatch then reuses the
@@ -149,9 +158,8 @@ the tuple-index parse, so it needs no expression grammar of its own.
   into `TraitDef.assoc_types` and rejects `type Name = T` there, while `parse_impl_def` reads
   exactly the binding form into `ImplDef.assoc_types`: a trait that could supply a default
   would let an impl skip the binding the conformance check exists to demand. In type position
-  `parse_type` accepts only the `Self::Name` form and folds it into a `Type::Named` whose name
-  carries the qualifier; bare `Self` is rejected, since the implementing type is always
-  nameable where an annotation is written.
+  `parse_type` folds the `Self::Name` form into a `Type::Named` whose name carries the
+  qualifier, and a bare `Self` into a `Type::Named` spelled `Self`.
 - **Array type vs. slice type.** `[T; N]` and `[T]` share their opening bracket, so `parse_type`
   parses the element type first and then looks at what follows: a `]` closes an unsized
   `Type::Slice`, anything else must be the `;` of a sized `Type::Array`. Whether the slice is

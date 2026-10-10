@@ -17,16 +17,16 @@ impl Lowerer {
 
     /// Resolve one position of a trait's declared signature.
     ///
-    /// A trait declaration has no implementing type, so an associated-type position
-    /// (`Self::Item`) has nothing to resolve against and stands as `void` here. Nothing
-    /// reads it: this table types calls through `&dyn Trait`, and a trait declaring an
-    /// associated type is not object-safe. An impl's own signatures resolve normally,
-    /// through the binding its block installs.
+    /// A trait declaration has no implementing type, so a `Self` or associated-type
+    /// position (`Self::Item`) has nothing to resolve against and stands as `void` here.
+    /// Nothing reads it: this table types calls through `&dyn Trait`, and a trait naming
+    /// either is not object-safe. An impl's own signatures resolve normally: the parser
+    /// replaced their `Self`, and their `Self::Item` resolves through the block's binding.
     pub(crate) fn resolve_trait_sig_type(
         &mut self,
         ty: &ast_types::Type,
     ) -> Result<HirType, LoweringError> {
-        if names_self_assoc(ty) {
+        if names_self(ty) {
             return Ok(HirType::Void);
         }
         self.resolve_type(ty)
@@ -238,22 +238,22 @@ pub(crate) fn float_suffix_type(suffix: &FloatSuffix) -> HirType {
     }
 }
 
-/// Whether an annotation names an associated type in any position: `Option<Self::Item>`
-/// names one just as a bare `Self::Item` does.
-fn names_self_assoc(ty: &ast_types::Type) -> bool {
+/// Whether an annotation names `Self` or an associated type in any position:
+/// `Option<Self::Item>` and `&Self` name one just as a bare `Self::Item` or `Self` does.
+fn names_self(ty: &ast_types::Type) -> bool {
     match ty {
-        ast_types::Type::Named(ident) => ident.name.starts_with("Self::"),
-        ast_types::Type::Reference { inner, .. } => names_self_assoc(inner),
+        ast_types::Type::Named(ident) => ident.name == "Self" || ident.name.starts_with("Self::"),
+        ast_types::Type::Reference { inner, .. } => names_self(inner),
         ast_types::Type::Array { element, .. } | ast_types::Type::Slice { element, .. } => {
-            names_self_assoc(element)
+            names_self(element)
         }
-        ast_types::Type::Tuple { elements, .. } => elements.iter().any(names_self_assoc),
+        ast_types::Type::Tuple { elements, .. } => elements.iter().any(names_self),
         ast_types::Type::Generic { args, .. } => args.iter().any(|arg| match arg {
-            ast_types::GenericArg::Type(inner) => names_self_assoc(inner),
+            ast_types::GenericArg::Type(inner) => names_self(inner),
             ast_types::GenericArg::Const { .. } => false,
         }),
         ast_types::Type::Function { params, ret, .. } => {
-            params.iter().any(names_self_assoc) || names_self_assoc(ret)
+            params.iter().any(names_self) || names_self(ret)
         }
         ast_types::Type::ImplTrait { .. }
         | ast_types::Type::DynTrait { .. }

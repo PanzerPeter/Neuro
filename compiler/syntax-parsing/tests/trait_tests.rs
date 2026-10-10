@@ -151,20 +151,64 @@ trait Iterator {
 }
 
 #[test]
-fn bare_self_is_not_a_type_annotation() {
+fn self_inside_an_impl_becomes_the_extended_type_in_every_position() {
     let source = r#"
-struct Point { x: i32 }
-impl Point {
-    func me(&self) -> Self { Point { x: 1 } }
+enum Shape { Square(i32), Empty }
+impl Shape {
+    func unit() -> Self { Self::Square(1) }
+    func same(&self, other: &Self) -> bool {
+        match other {
+            Self::Square(_) => true,
+            Self::Empty => false
+        }
+    }
+}
+"#;
+    let items = parse(source).expect("`Self` inside an impl should parse");
+    let Item::Impl(imp) = &items[1] else {
+        panic!("expected an impl item");
+    };
+    let rendered = format!("{:?}", imp.methods);
+    assert!(
+        !rendered.contains("\"Self\""),
+        "a `Self` survived: {rendered}"
+    );
+    let Some(syntax_parsing::Type::Named(ret)) = &imp.methods[0].return_type else {
+        panic!("expected a named return type");
+    };
+    assert_eq!(ret.name, "Shape");
+    assert_eq!(&source[ret.span.start..ret.span.end], "Self");
+}
+
+#[test]
+fn self_in_a_trait_signature_is_left_for_the_type_checker() {
+    let source = r#"
+trait Scalable {
+    func scaled(&self, by: i32) -> Self
+}
+"#;
+    let items = parse(source).expect("`Self` in a trait should parse");
+    let Item::Trait(def) = &items[0] else {
+        panic!("expected a trait item");
+    };
+    let Some(syntax_parsing::Type::Named(ret)) = &def.methods[0].return_type else {
+        panic!("expected a named return type");
+    };
+    assert_eq!(ret.name, "Self");
+}
+
+#[test]
+fn a_bare_self_pattern_is_rejected() {
+    let source = r#"
+enum Shape { Empty }
+impl Shape {
+    func f(&self) -> i32 { match self { Self => 0 } }
 }
 "#;
     let err = parse(source)
-        .expect_err("bare `Self` should be rejected")
+        .expect_err("a bare `Self` pattern would read as a binding")
         .to_string();
-    assert!(
-        err.contains("bare `Self` is not a type annotation"),
-        "{err}"
-    );
+    assert!(err.contains("`::Variant` after `Self`"), "{err}");
 }
 
 #[test]

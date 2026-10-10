@@ -798,6 +798,11 @@ pub enum TypeError {
     )]
     UnboundAssociatedType { name: String, span: Span },
 
+    #[error(
+        "`Self` names a type only inside an `impl` block (the type it extends) or a `trait` (its implementing type)"
+    )]
+    SelfOutsideImpl { span: Span },
+
     #[error("trait '{trait_name}' declares no associated type '{name}'")]
     UnknownAssociatedType {
         trait_name: String,
@@ -1622,6 +1627,7 @@ impl TypeError {
             | Self::OperatorTraitRequiresCopy { span, .. }
             | Self::AssociatedTypeMismatch { span, .. }
             | Self::UnboundAssociatedType { span, .. }
+            | Self::SelfOutsideImpl { span }
             | Self::UnknownAssociatedType { span, .. }
             | Self::MissingAssociatedType { span, .. }
             | Self::UnconstrainedAssociatedType { span, .. }

@@ -1,12 +1,17 @@
 use ast_types::{ArraySize, GenericArg};
 
 use super::TypeChecker;
+use super::declarations::traits::names_self;
 use super::tensors::TENSOR_TYPE_NAME;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type};
 
 /// The qualifier an associated-type path carries in its name, as the parser spells it.
 pub(crate) const SELF_ASSOC_PREFIX: &str = "Self::";
+
+/// `Self` as the parser spells it. The parser has already replaced it inside every
+/// `impl`, so the one left here is a trait's own, or misplaced.
+pub(crate) const SELF_TYPE_NAME: &str = "Self";
 
 /// Whether `ty` may be a tensor's element type. A tensor buffer is a flat, densely
 /// packed run of fixed-width scalars, which is exactly the set below: `string`, an
@@ -98,6 +103,12 @@ impl TypeChecker {
                         span: ident.span,
                     });
                     None
+                }
+                SELF_TYPE_NAME => {
+                    if self.self_type.is_none() {
+                        self.record_error(TypeError::SelfOutsideImpl { span: ident.span });
+                    }
+                    self.self_type.clone()
                 }
                 // Signed integers
                 "i8" => Some(Type::I8),
@@ -420,9 +431,10 @@ impl TypeChecker {
     }
 
     /// Whether a trait is object-safe: every method must dispatch on a `&self`
-    /// or `&mut self` receiver, and the trait must declare no associated type. A method
-    /// with no receiver (associated function) or one that consumes `self` by value cannot
-    /// be placed behind a fixed-layout vtable. The associated-type clause is narrower: it
+    /// or `&mut self` receiver and name `Self` nowhere else, and the trait must declare no
+    /// associated type. A method with no receiver (associated function), one that
+    /// consumes `self` by value, or one whose signature needs the erased type's size or
+    /// identity cannot be placed behind a fixed-layout vtable. The associated-type clause is narrower: it
     /// holds only until a trait-object type can bind one (`&dyn Iterator<Item = u32>`),
     /// which is a Phase 5 item, so the reason it reports names the missing form.
     /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending member.
@@ -445,6 +457,19 @@ impl TypeChecker {
                 None => {
                     return Err(format!("method '{}' has no `self` receiver", name));
                 }
+            }
+            let decl = &sig.decl;
+            if decl
+                .params
+                .iter()
+                .map(|p| &p.ty)
+                .chain(decl.return_type.iter())
+                .any(names_self)
+            {
+                return Err(format!(
+                    "method '{}' names `Self` outside its receiver",
+                    name
+                ));
             }
         }
         Ok(())
