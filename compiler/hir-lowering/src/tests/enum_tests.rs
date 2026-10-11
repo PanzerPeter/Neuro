@@ -64,7 +64,7 @@ func main() -> i32 {
     names.sort();
     assert_eq!(
         names,
-        vec!["Opt_g_f64".to_string(), "Opt_g_i32".to_string()]
+        vec!["Opt$g_f64".to_string(), "Opt$g_i32".to_string()]
     );
     assert!(
         !names.contains(&"Opt".to_string()),
@@ -74,11 +74,11 @@ func main() -> i32 {
     let body = function_body(&program, "main");
     assert_eq!(
         binding_init(body, "a").ty,
-        HirType::Enum("Opt_g_i32".to_string())
+        HirType::Enum("Opt$g_i32".to_string())
     );
     assert_eq!(
         binding_init(body, "b").ty,
-        HirType::Enum("Opt_g_f64".to_string())
+        HirType::Enum("Opt$g_f64".to_string())
     );
 }
 
@@ -97,7 +97,7 @@ func main() -> i32 {
         .items
         .iter()
         .find_map(|item| match item {
-            HirItem::Enum(e) if e.name == "Opt_g_i64" => Some(e),
+            HirItem::Enum(e) if e.name == "Opt$g_i64" => Some(e),
             _ => None,
         })
         .expect("the i64 instance should be emitted");
@@ -169,13 +169,13 @@ func main() -> i32 {
     let body = function_body(&program, "main");
     assert_eq!(
         binding_init(body, "r").ty,
-        HirType::Enum("Option_g_u8".to_string())
+        HirType::Enum("Option$g_u8".to_string())
     );
     assert!(
         program
             .items
             .iter()
-            .any(|item| matches!(item, HirItem::Enum(e) if e.name == "Option_g_u8")),
+            .any(|item| matches!(item, HirItem::Enum(e) if e.name == "Option$g_u8")),
         "the Option<u8> instance should be emitted for the backend"
     );
 }
@@ -232,8 +232,8 @@ func main() -> i32 {
     assert!(
         program.items.iter().any(|item| matches!(
             item,
-            HirItem::Impl(imp) if imp.type_name == "Tree_g_i32"
-                && imp.self_type == HirType::Enum("Tree_g_i32".to_string())
+            HirItem::Impl(imp) if imp.type_name == "Tree$g_i32"
+                && imp.self_type == HirType::Enum("Tree$g_i32".to_string())
                 && imp.methods.iter().any(|m| m.name == "or")
         )),
         "the Tree<i32> instance must get its own impl"

@@ -211,7 +211,10 @@ fn build_module<'ctx>(
     external: &[ExternalBodies],
     gpu: GpuVendor,
 ) -> CodegenResult<CodegenContext<'ctx>> {
-    let items = &program.items;
+    // A `string` literal a function returns beside an allocation is copied, so every
+    // exit owns its buffer and the caller releases each one.
+    let promoted = codegen::string_ownership::promote_literal_exits(&program.items);
+    let items: &[HirItem] = promoted.as_deref().unwrap_or(&program.items);
     let external_symbol = |name: &str, memory: BodyMemory| {
         external
             .iter()

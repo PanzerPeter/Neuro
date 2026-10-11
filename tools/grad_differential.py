@@ -445,7 +445,7 @@ func element_product(w: &mut Tensor<f32, [2]>, scale: f32) -> Tensor<f32, []> {
     TensorCase(
         # A shape-generic `@grad` function is differentiated per instance; this is the
         # `[3]` one the caller below instantiates, under its mangled name.
-        "shape_generic_g_c3",
+        "shape_generic$g_c3",
         """
 @grad
 func shape_generic<N>(w: &mut Tensor<f32, [N]>, scale: f32) -> Tensor<f32, []> {
@@ -1719,7 +1719,7 @@ func power_and_magnitude(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     ),
     HessianCase(
         # A shape-generic `@grad(order: 2)` function, derived for its `[2]` instance.
-        "generic_cross_g_c2",
+        "generic_cross$g_c2",
         """
 @grad(order: 2)
 func generic_cross<N>(w: &mut Tensor<f32, [N]>) -> Tensor<f32, []> {
@@ -1742,7 +1742,7 @@ func instantiate_generic_cross(w: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
 
 
 def hessian_probe_name(case):
-    return f"probe_hessian_{case.name}"
+    return f"probe_hessian_{source_identifier(case.name)}"
 
 
 def element_coordinates(position, shape):
@@ -1922,7 +1922,13 @@ def constructor_source(shape):
 
 
 def probe_name(case):
-    return f"probe_{case.name}"
+    return f"probe_{source_identifier(case.name)}"
+
+
+def source_identifier(symbol):
+    """A case's symbol spelled as a Neuro name: an instance symbol carries `$`, which
+    no name can, so the probe written for it in source replaces it."""
+    return symbol.replace("$", "_")
 
 
 def probe_source(case):

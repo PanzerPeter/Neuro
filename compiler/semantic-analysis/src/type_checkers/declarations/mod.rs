@@ -81,7 +81,7 @@ impl TypeChecker {
     /// `__` joins a receiver to its method (`Point__translate`) in the flat function
     /// table, and the LLVM backend recovers the receiver by splitting a method symbol on
     /// it. Compiler-generated names are built to hold exactly one `__` (monomorphized
-    /// instances use a single-underscore `_g_` marker for that reason), but a user name
+    /// instances use a `$g` marker for that reason), but a user name
     /// carrying its own `__` would break the property from the other side: a method
     /// `a__b` on struct `S` and a method `b` on a struct named `S__a` produce the same
     /// symbol. Reserving the separator closes the collision instead of ranking one

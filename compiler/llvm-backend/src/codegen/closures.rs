@@ -10,7 +10,7 @@
 use inkwell::AddressSpace;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
-use neuro_hir::{HirCapture, HirClosure, HirExpr};
+use neuro_hir::{HirCapture, HirClosure, HirExpr, HirExprKind};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -174,15 +174,62 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let value = self.codegen_expr(callee)?;
         let target = self.split_function_value(value)?;
+        // A callee whose lifted body is known gets the plain-call treatment of its
+        // `string` arguments; any other function value may retain what it is passed.
+        let lifted = self.lifted_closure_name(callee);
+        let read_only = |ctx: &Self, index| {
+            lifted
+                .as_deref()
+                .is_some_and(|name| ctx.string_ownership.param_is_read_only(name, index))
+        };
+        let forwarded = lifted
+            .as_deref()
+            .and_then(|name| self.string_ownership.forwarded_param(name));
+        let mut forwarded_owner = None;
         let mut values = Vec::with_capacity(args.len());
-        for arg in args {
+        let mut forwarded_args = Vec::new();
+        for (index, arg) in args.iter().enumerate() {
             let value = self.codegen_expr(arg)?;
+            if forwarded == Some(index) {
+                forwarded_owner = Some(self.argument_string_owner(arg)?);
+            } else if let Some(name) = &lifted
+                && let Some(owner) = self.forwarded_argument_owner(name, index, arg)
+            {
+                forwarded_args.push((index, owner));
+            }
             // A closure argument is passed by copy (captures are Copy), so a by-value
-            // `Drop` place is still moved into the callee here.
-            self.mark_moved_for_drop(arg);
+            // `Drop` place is still moved into the callee here, unless the body only
+            // reads it and the caller's own scope stays its releaser.
+            if !read_only(self, index) {
+                self.mark_moved_for_drop(arg);
+            }
             values.push(value);
         }
-        self.call_function_value(&target, &values, &ret_ty)
+        let result = self.call_function_value(&target, &values, &ret_ty)?;
+        if let Some(name) = &lifted {
+            self.release_owned_arguments(name, args, &values)?;
+            self.release_forwarded_arguments(&forwarded_args, &values)?;
+            if let Some(owner) = forwarded_owner {
+                self.forwarded_string_owner = Some((name.clone(), owner));
+            }
+        }
+        Ok(result)
+    }
+
+    /// The generated name of the lifted body `callee` provably calls: a closure literal
+    /// called in place, or an immutable binding a closure literal initialized. `None`
+    /// for any other function value (a parameter, a field, a `mut` binding), whose body
+    /// is not known at the call.
+    pub(crate) fn lifted_closure_name(&self, callee: &HirExpr) -> Option<String> {
+        match &callee.kind {
+            HirExprKind::Closure { name, .. } => Some(name.clone()),
+            HirExprKind::Variable(name) => self
+                .variables
+                .get(name)
+                .and_then(|alloca| self.closure_bindings.get(alloca))
+                .cloned(),
+            _ => None,
+        }
     }
 
     /// Split an already-lowered function value into the halves a call needs.

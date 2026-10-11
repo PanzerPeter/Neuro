@@ -5,206 +5,11 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-108: a type argument that misses a generic `impl`'s bound reaches lowering
+## BUG-099: a struct returned through a binding may hold a borrow of its locals
 
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (generic struct and enum instantiation)
-- **Severity**: minor. The program is refused, but by lowering, with an internal message and
-  no source location
-
-The checker uses a bound on a generic `impl`'s parameter when it checks the impl's bodies, but
-never checks the bound against an instance's type arguments. A method called on an instance whose argument
-does not implement the bound type-checks, and lowering then fails to find the method.
-
-**Minimal repro**
-
-```neuro
-trait Show {
-    func show(&self) -> i32
-}
-
-struct Cell<T> {
-    v: T,
-}
-
-impl<T: Show> Cell<T> {
-    func get(&self) -> i32 {
-        self.v.show()
-    }
-}
-
-func main() -> i32 {
-    val c = Cell { v: 3 }
-    c.get()
-}
-```
-
-Expected: a type error at `c.get()` (or at the instance) saying `i32` does not implement
-`Show`. Observed:
-
-```text
-HIR lowering error: unresolved call target 'i32.show' during lowering
-```
-
-An associated function of the same impl (`Cell::make(3)`) is reached the same way.
-
-**Root cause**: `instantiate_impls_for` registers every method of every generic impl of the
-base on each instance without consulting the impl's bounds, and a method or associated call on
-an instance does not call `check_trait_bounds` the way a generic function call does.
-
-**Fix sketch**: resolve each generic impl's parameter bounds once, when the impl is
-registered, and check them against the instance's arguments at the method or associated call,
-with `check_trait_bounds`, so the error lands on the call. Checking at instantiation instead
-would refuse an instance that never calls the bounded methods, which Rust allows.
-
-## BUG-107: a `string` a function returns from its parameter leaks when passed straight to a call
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; the call-boundary summary in `codegen/string_ownership.rs` (suspected)
-- **Severity**: minor. A leak of one buffer per call; output is correct
-
-**Minimal repro**
-
-```neuro
-func s(v: string) -> string {
-    return v
-}
-func cat(first: string, second: string) -> string { return "{first}{second}" }
-func main() -> i32 {
-    for i in 0..3 {
-        val s1: string = "x{i}"
-        val s2: string = cat(s("y{i}"), s1)
-        println(s2)
-    }
-    return 0
-}
-```
-
-Expected: every buffer is released. Observed: under LeakSanitizer, 4 bytes leak in 2 allocations.
-Binding the call first, `val t = s("y{i}")` then `cat(t, s1)`, does not leak.
-
-**Root cause**: not yet confirmed. The value `s` returns is its own by-value parameter, and
-neither the caller nor `cat` releases it when it arrives as a call argument rather than a binding.
-
-**Workaround**: bind the inner call's result to a `val` before passing it.
-
-## BUG-106: two generic instances can receive the same symbol name
-
-- **Status**: open, confirmed
-- **Area**: `hir-lowering`; `mangle_type` and `mangle_instance` in `src/lib.rs`
-- **Severity**: major. The compiler stops with an LLVM verification error on a valid program
-
-**Minimal repro**
-
-```neuro
-struct tup2_i32_i32 { a: i32 }
-func size<T>(x: T) -> T { x }
-func main() -> i32 {
-    val a = size(tup2_i32_i32 { a: 7 })
-    val b = size((1, 2))
-    a.a
-}
-```
-
-Expected: it compiles and returns 7. Observed: "Call parameter type does not match function
-signature" on `size_g_tup2_i32_i32`, because the tuple `(i32, i32)` and the struct named
-`tup2_i32_i32` mangle to the same token.
-
-**Root cause**: confirmed in the code. A type's mangled token is its spelling joined with `_`, so
-an `_` inside a type name (`Pair<A_B, C>` against `Pair<A, B_C>`), a struct named like a built-in
-token (`ref_i32`), or two function types (every one mangles to `fn`) collide.
-
-**Workaround**: avoid `_` in type names used as generic arguments.
-
-**Fix sketch**: length-prefix each nominal token (`3Foo`), and give function types their parameter
-and return tokens. The backend splits mangled names on `__`, so that convention must survive.
-
-## BUG-105: a literal argument to a generic call ignores its concrete parameter type
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` `check_generic_call_with` in `type_checkers/expressions/calls.rs`,
-  and `hir-lowering` `lower_generic_call` and `instantiate_generic_method`
-- **Severity**: minor. A valid program is refused; nothing unsound is emitted
-
-**Minimal repro**
-
-```neuro
-func gen<T>(first: T, second: i64) -> T { first }
-func main() -> i32 {
-    val x: i32 = gen(1, 5)
-    x
-}
-```
-
-Expected: it compiles and returns 1. `second` is a concrete `i64`, and a literal passed to a
-concrete parameter takes its type, as in a non-generic call. Observed: "expected i64, found i32"
-on `5`. A turbofish does not help, on a function or a generic method: `b.pick::<i64>(3, 4)` reports
-the same on both literals.
-
-**Root cause**: confirmed in the code. `check_generic_call` checks every argument with no expected
-type. Passing the parameter type for a scalar parameter fixes the checker, but `lower_generic_call`
-also lowers the literal untyped, so the checker change alone produces an LLVM verification error.
-Both slices must change together.
-
-**Workaround**: suffix the literal, `gen(1, 5i64)`.
-
-## BUG-103: an owned `string` chosen by a branch with a literal arm, or bound from any branch, leaks
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; `produces_owned_string` in `codegen/drops/owned_strings.rs` and the
-  return summary in `codegen/string_ownership.rs`
-- **Severity**: major. One buffer leaks per evaluation, so the leak grows with a loop
-
-**Minimal repro**
-
-```neuro
-func label(k: i32) -> string {
-    match k {
-        0 => "info",
-        _ => "warn {k}",
-    }
-}
-
-func main() -> i32 {
-    mut i = 1
-    mut t: u64 = 0
-    while i < 6 {
-        val a = label(i)
-        val b = if i == 0 { "z {i}" } else { "n {i}" }
-        t = t + a.len() + b.len()
-        i = i + 1
-    }
-    t as i32
-}
-```
-
-Expected: every buffer `label` and the `if` allocate is released when `a` and `b` go out of scope.
-Observed: under LeakSanitizer both leak one buffer per iteration. `examples/showcase/status_report.nr`,
-`config_manifest.nr` and `log_builder.nr` leak this way.
-
-**Root cause**: confirmed in the code. A `string` is released only when the expression that made
-it is known to allocate. A function counts as allocating only if every return path does, so one
-literal arm makes all of its results unowned. A local binding never counts an `if` or `match` value
-as allocating, even when every arm does; a function whose tail is such a `match` is recognised,
-so the same branch moved into a function is released.
-
-**Workaround**: write the literal arm as `"info".clone()`, and move a branch that builds a string
-into a function of its own.
-
-**Fix sketch**: let `produces_owned_string` answer for an `if` with an `else` and for a `match`
-when every arm's value is owned, and copy a literal arm to the heap when another arm of the same
-branch allocates, so every path owns its result. Regression tests: the repro under LeakSanitizer,
-and a branch of literals only, which must still never reach `free`.
-
-**A block value leaks the same way.** `val s2: string = { val t = s1; cat(t, s("y")) }` in a loop
-leaks under LeakSanitizer, while the same statements written without the block do not. A
-named-argument call that reorders its arguments is lowered to such a block, so
-`cat(second: s1, first: s("y"))` leaks too. The likely root is the same: a block's tail value is
-not counted as allocating.
-
-## BUG-099: a struct or enum returned from a function may hold a borrow of its locals
-
-- **Status**: open, confirmed
+- **Status**: open, confirmed. Narrowed: a struct, enum or tuple literal, an enum variant
+  constructor or an array returned directly is now checked, field by field, and so is each arm of
+  a tail `if`; borrowing a local that way is the "cannot return a reference" error
 - **Area**: `semantic-analysis`; `check_returned_reference` in `type_checkers/statements/returns.rs`
 - **Severity**: major. A silent use after free: the program compiles and reads released memory
 
@@ -215,7 +20,8 @@ struct H { r: &string }
 
 func make() -> H {
     val s = "he" + "llo"
-    H { r: &s }
+    val h = H { r: &s }
+    h
 }
 
 func main() -> i32 {
@@ -224,21 +30,19 @@ func main() -> i32 {
 }
 ```
 
-Expected: a compile error, as for `func make() -> &string { ... &s }`, which is refused with
-"cannot return a reference to 's'". Observed: it compiles, `s` is released when `make` returns,
-and `h.r` reads the freed buffer. An enum payload (`enum E { A(&string) }`, returning `E::A(&s)`)
-escapes the same way.
+Expected: a compile error, as for `H { r: &s }` written as the tail. Observed: it compiles, `s` is
+released when `make` returns, and `h.r` reads the freed buffer.
 
-**Root cause**: confirmed in the code. `check_returned_reference` runs only when the declared
-return type is itself a reference, so a reference carried inside a returned struct, enum or tuple
-is never checked against the function's locals.
+**Root cause**: confirmed in the code. The check walks the returned expression down to each
+`&place`. A binding is a name at that point, and the borrow model records no borrow held inside a
+struct binding, so there is nothing to follow.
 
-**Workaround**: borrow only from parameters when building a struct or enum to return.
+**Workaround**: return the literal itself, or borrow only from parameters.
 
-**Fix sketch**: run the check whenever the return type contains a reference, walking struct
-literal fields, enum constructor arguments and tuple elements down to each `&place`. Regression
-tests: the repro above, its enum and tuple forms, and a struct borrowing a parameter, which must
-keep compiling.
+**Fix sketch**: track the borrows a struct or enum binding holds, which is the work of the
+"References in struct fields and enum payloads" roadmap item, and close this with it. Regression
+test: the repro above, its enum form, and a binding that borrows a parameter, which must keep
+compiling.
 
 ## BUG-098: `@derive(Clone)` refuses a struct with a field that owns a buffer
 
@@ -363,7 +167,8 @@ func main() -> i32 {
 Expected: exit 20, with every `label` buffer released once, by the callee that took ownership of
 the struct. Observed: exit 20, and AddressSanitizer's leak check reports every buffer as leaked.
 `examples/showcase/owned_catalog.nr` shows it: its `catalog.into_report()` is commented as
-taking the field's buffer with it, and that buffer leaks.
+taking the field's buffer with it, and that buffer leaks. The one leak left in `examples/showcase/log_builder.nr`
+is this shape too: a consuming `self` method moving a `string` field out.
 
 **Root cause**: confirmed in the code. At the call the caller clears the drop flags of the
 struct it moves, including the flags of its `string` fields. The callee registers the
@@ -471,93 +276,6 @@ of a `&mut` parameter, or have the callee report which positions it wrote so the
 releases what they held before the call. Regression tests: the repro in a loop under a leak
 check, a literal in the place (must not be freed), and a tensor field inside and outside a
 `pool`.
-
-## BUG-038: a `string` passed by value to a closure, or returned by one, is released by nobody
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; `codegen/closures.rs` and the call-boundary summary in
-  `codegen/string_ownership.rs`
-- **Severity**: major. An unbounded leak, one buffer per call, on the indirect call path.
-
-The whole-program summary that decides who releases a `string` argument is keyed by the name a
-call site resolves to, and it deliberately excludes any name a local binding has taken over,
-because such a call goes through the indirect path where the callee is a value rather than a
-declaration. A closure is always that shape. So no closure parameter is ever recorded as
-read-only, every by-value argument to one is treated as retained, the caller clears its own
-drop flag at the move, and the closure's frame, which has no drop entry for its parameters,
-takes nothing with it.
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val size = |z: string| -> u64 { z.len() }
-    mut i: u32 = 0
-    mut n: u64 = 0
-    while i < 200000 {
-        val s = "one" + "two"
-        n = n + size(s)
-        i = i + 1
-    }
-    if n != 1200000 { return 91 }
-    0
-}
-```
-
-Expected: the heap stays flat, as it does for the identical program written with a top-level
-`func size(s: string) -> u64`, whose argument the caller now releases. Observed: the arithmetic
-is right and the resident set climbs linearly: the loop above peaks near 7 MB resident,
-against under 2 MB for the `func` spelling. The pipeline spelling of the same call,
-`s |> (|z: string| -> u64 { z.len() })`, leaks identically: `|>` desugars to this call
-and adds nothing of its own.
-
-**Root cause**: confirmed in the code. `analyze` walks `HirItem` function bodies and keys both
-summaries by function name; `shadowed_names` then removes every name a local binding holds.
-A closure has no entry to begin with, so `param_is_read_only` answers `false` for it, which is
-the answer that means "the callee may have retained this".
-
-**The return half.** The return summary is keyed the same way, so an owned `string` a closure
-RETURNS is never recognised as the caller's either. Each call below leaks its result, while the
-same loop calling a top-level `func describe(n: i32) -> string { "total {n}" }` directly, or
-piping into it (`i |> describe`), releases every buffer:
-
-```neuro
-func describe(n: i32) -> string { "total {n}" }
-func keep(s: string) -> string { s + "" }
-
-func main() -> i32 {
-    val f = |n: i32| -> string { "total {n}" }
-    val twice = describe >> keep
-    mut i = 0
-    mut t: u64 = 0
-    while i < 10 {
-        val a = f(i)          // leaks
-        val b = i |> f        // leaks
-        val c = twice(i)      // leaks: a composition is a closure
-        t = t + a.len() + b.len() + c.len()
-        i = i + 1
-    }
-    if t != 210 { return 1 }
-    0
-}
-```
-
-**Workaround**: give the stage a top-level `func` instead of a closure where it takes or returns
-an owned `string`, or pass a borrow (`&string`), which is not a move and leaves the caller's flag
-alone.
-
-**Fix sketch**: the summary has to be keyed by something a closure has. Lowering gives each
-closure literal a generated name for its lifted body, so the cheap version is to record that
-body in the same walk under that name and have the indirect call path look it up when the
-callee is a binding whose initializer is a closure literal in scope. That covers the common
-case above and leaves a closure reached through a parameter or a struct field unprovable, which
-is the correct conservative answer for those. The same lookup answers the return half, once
-the lifted body is also entered in the return summary under its generated name. The reason this is filed rather than fixed: it
-widens the summary from "top-level functions" to "every lowered body", and the indirect call
-path in `codegen_call_dispatch` has to carry enough of the callee's identity to key on, which
-is a change to what that path passes rather than a new arm in it. Regression tests want the
-repro above, the `|>` spelling, a closure stored in a struct field (must stay conservative),
-and a closure that DOES retain its argument, which must keep the current transfer.
 
 ## BUG-033: `&` does not accept a field or an element, only a bare variable
 

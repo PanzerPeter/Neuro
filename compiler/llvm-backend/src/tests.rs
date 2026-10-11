@@ -2406,19 +2406,21 @@ fn a_call_that_allocates_on_every_path_hands_the_buffer_to_its_caller() {
             return s.len() as i32
         }
     "#;
+    // The `.rodata` path is copied, so every path hands over a buffer of its own and
+    // the caller releases whichever it got (BUG-103 left the allocated path leaking).
     assert_eq!(
         free_calls(
             &module_ir(one_borrowed_path, OptimizationLevelSetting::O0),
             "main"
         ),
-        0,
-        "one path returning `.rodata` disqualifies the function: freeing it would abort"
+        1,
+        "a literal return path is copied, so the caller owns every result"
     );
 }
 
 /// A tail `if`, `match` or block exits through each branch's tail, so a function whose
-/// every branch allocates is a producer like one whose every `return` does. One branch
-/// yielding a literal disqualifies it exactly as one literal `return` would.
+/// every branch allocates is a producer like one whose every `return` does. A branch
+/// yielding a literal is copied, exactly as a literal `return` is.
 #[test]
 fn a_branching_tail_allocates_when_every_branch_does() {
     let branches = [
@@ -2470,8 +2472,8 @@ fn a_branching_tail_allocates_when_every_branch_does() {
             &module_ir(one_literal, OptimizationLevelSetting::O0),
             "main"
         ),
-        0,
-        "a literal branch disqualifies the function: freeing it would abort"
+        1,
+        "a literal branch is copied, so the caller owns every result"
     );
 }
 
@@ -2902,4 +2904,73 @@ fn a_host_read_checks_the_tensor_is_on_the_host() {
     );
     assert!(ir.contains("this tensor lives on a GPU"), "{ir}");
     assert!(!ir.contains("__neuro_device_"), "{ir}");
+}
+
+/// A forwarder's result passed to a parameter the callee only reads is owned exactly when
+/// the forwarder's own argument was, so the caller releases it under that bit once the
+/// call returns (BUG-107 left it to nobody).
+#[test]
+fn regression_bug_107_a_forwarded_argument_is_released_under_its_owner_bit() {
+    let source = r#"
+        func s(v: string) -> string {
+            return v
+        }
+        func size(v: string) -> u64 { v.len() }
+        func main() -> i32 {
+            val n = size(s("y" + "z"))
+            return n as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    let call = body.find("call i64 @size").expect("the call is emitted");
+    assert!(
+        body[call..].contains("fwd.release"),
+        "the forwarded buffer is released after the call:\n{body}"
+    );
+}
+
+#[test]
+fn regression_bug_038_a_closure_binding_uses_its_lifted_body_summary() {
+    // A closure that only reads its `string` parameter leaves the argument to the caller,
+    // which releases it after the call, and one whose every exit allocates hands its
+    // result to the binding that takes it.
+    let reading = r#"
+        func main() -> i32 {
+            val size = |z: string| -> u64 { z.len() }
+            val make = |n: i32| -> string { "t {n}" }
+            val r = make(1)
+            val n = size("a" + "b")
+            return (n + r.len()) as i32
+        }
+    "#;
+    let ir = module_ir(reading, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    let call = body
+        .find("closure.call")
+        .expect("the closure call is emitted");
+    assert!(
+        body[call..].matches("call void @__neuro_release(").count() >= 2,
+        "the argument after the call and the returned buffer at scope exit:\n{body}"
+    );
+
+    // A closure that hands its argument back is a forwarder: the argument is not released
+    // after the call, and the binding that takes the result owns it under a drop flag.
+    let forwarding = r#"
+        func main() -> i32 {
+            val keep = |z: string| -> string { z }
+            val t = keep("a" + "b")
+            return t.len() as i32
+        }
+    "#;
+    let ir = module_ir(forwarding, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        !body.contains("%str.tmp.buf"),
+        "a forwarded argument is not released at the call:\n{body}"
+    );
+    assert!(
+        body.contains("call void @__neuro_release(ptr %str.drop.buf)"),
+        "the forwarded result is released by the binding that took it:\n{body}"
+    );
 }

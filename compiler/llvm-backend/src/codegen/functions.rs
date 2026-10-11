@@ -31,12 +31,15 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut forwarded_owner = None;
         let mut arg_values = Vec::new();
         let mut passed = Vec::new();
+        let mut forwarded_args = Vec::new();
         for (index, arg) in args.iter().enumerate() {
             let val = self.codegen_expr(arg)?;
             // The call hands this argument's buffer back, so what it yields is owned
             // exactly when the argument was; the move below is about to clear that.
             if forwarded == Some(index) {
                 forwarded_owner = Some(self.argument_string_owner(arg)?);
+            } else if let Some(owner) = self.forwarded_argument_owner(func_name, index, arg) {
+                forwarded_args.push((index, owner));
             }
             // A by-value argument moves an owned `Drop` place into the callee, which
             // now owns it; clearing the flag prevents a double drop here. A
@@ -61,6 +64,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
 
         self.release_owned_arguments(func_name, args, &passed)?;
+        self.release_forwarded_arguments(&forwarded_args, &passed)?;
         if let Some(owner) = forwarded_owner {
             self.forwarded_string_owner = Some((func_name.to_string(), owner));
         }
@@ -150,10 +154,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let forwarded = self.string_ownership.forwarded_param(mangled_name);
         let mut forwarded_owner = None;
         let mut passed = Vec::new();
+        let mut forwarded_args = Vec::new();
         for (index, arg) in args.iter().enumerate() {
             let val = self.codegen_expr(arg)?;
             if forwarded == Some(index) {
                 forwarded_owner = Some(self.argument_string_owner(arg)?);
+            } else if let Some(owner) = self.forwarded_argument_owner(mangled_name, index, arg) {
+                forwarded_args.push((index, owner));
             }
             // A by-value argument moves an owned `Drop` place into the callee; the
             // receiver's own ownership was settled above. A parameter the callee
@@ -175,6 +182,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
 
         self.release_owned_arguments(mangled_name, args, &passed)?;
+        self.release_forwarded_arguments(&forwarded_args, &passed)?;
         if let Some(owner) = forwarded_owner {
             self.forwarded_string_owner = Some((mangled_name.to_string(), owner));
         }

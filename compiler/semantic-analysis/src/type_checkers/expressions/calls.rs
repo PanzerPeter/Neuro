@@ -282,17 +282,7 @@ impl TypeChecker {
                 if !self.traits.contains_key(&bound.trait_name) {
                     continue;
                 }
-                let satisfied = match concrete {
-                    Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => self
-                        .trait_impls
-                        .contains(&(bound.trait_name.clone(), name.clone())),
-                    Type::Generic(name) => self
-                        .generic_bounds
-                        .get(name)
-                        .is_some_and(|b| b.iter().any(|o| o.trait_name == bound.trait_name)),
-                    _ => false,
-                };
-                if !satisfied {
+                if !self.satisfies_bound(concrete, &bound.trait_name) {
                     self.record_error(TypeError::TraitBoundNotSatisfied {
                         param: param.clone(),
                         ty: concrete.clone(),
@@ -303,6 +293,22 @@ impl TypeChecker {
                 }
                 self.check_assoc_bindings(bound, concrete, span);
             }
+        }
+    }
+
+    /// Whether `concrete` implements `trait_name`: a struct, enum or newtype through an
+    /// `impl`, a type parameter through a bound of its own. Nothing else implements a
+    /// user trait.
+    pub(crate) fn satisfies_bound(&self, concrete: &Type, trait_name: &str) -> bool {
+        match concrete {
+            Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => self
+                .trait_impls
+                .contains(&(trait_name.to_string(), name.clone())),
+            Type::Generic(name) => self
+                .generic_bounds
+                .get(name)
+                .is_some_and(|b| b.iter().any(|o| o.trait_name == trait_name)),
+            _ => false,
         }
     }
 
@@ -400,8 +406,19 @@ impl TypeChecker {
         );
 
         for (arg, param) in args.iter().zip(sig.params.iter()) {
-            let arg_ty =
-                shared_reborrow(self.check_expr(arg, None).unwrap_or(Type::Unknown), param);
+            // A scalar parameter, written as one or a type parameter the turbofish or an
+            // earlier argument has bound, types its argument as a non-generic call's does,
+            // so a literal there takes it. Lowering applies the same rule.
+            let expected = match param {
+                Type::Generic(name) => subst.get(name).cloned(),
+                other => Some(other.clone()),
+            }
+            .filter(Type::is_scalar);
+            let arg_ty = shared_reborrow(
+                self.check_expr(arg, expected.as_ref())
+                    .unwrap_or(Type::Unknown),
+                param,
+            );
             if !matches!(arg_ty, Type::Unknown) && !self.unify_generic(param, &arg_ty, &mut subst) {
                 // A closure is not passed to a generic higher-order function (the
                 // closures section of the language reference), and unification has no
@@ -464,6 +481,31 @@ impl TypeChecker {
         self.substitute_generic(&sig.ret, &subst, span)
     }
 
+    /// Check a method call on an instance of a generic type against the bounds the
+    /// method's `impl` puts on the type's parameters: `c.get()` on a `Cell<i32>` needs
+    /// `i32: Show` when the impl is `impl<T: Show> Cell<T>`.
+    fn check_impl_bounds(&mut self, receiver: &str, method: &str, span: Span) {
+        let Some((base, args)) = self.instance_parts(receiver) else {
+            return;
+        };
+        let Some(bounds) = self.impl_bounds.get(&format!("{base}__{method}")).cloned() else {
+            return;
+        };
+        let generics = match self.generic_enums.get(&base) {
+            Some(def) => &def.generics,
+            None => match self.generic_structs.get(&base) {
+                Some(def) => &def.generics,
+                None => return,
+            },
+        };
+        let subst: HashMap<String, Type> = generics
+            .iter()
+            .map(|g| g.name.name.clone())
+            .zip(args)
+            .collect();
+        self.check_trait_bounds(&bounds, &subst, span);
+    }
+
     /// The key of `method` on `receiver` when that method is generic.
     fn generic_method_key(&self, receiver: &Type, method: &str) -> Option<&String> {
         let (Type::Struct(name) | Type::Enum(name) | Type::Newtype(name)) = receiver.referent()
@@ -523,17 +565,24 @@ impl TypeChecker {
     }
 
     /// Evaluate every value predicate from a `where` clause against the concrete
-    /// const values in `subst`. A predicate that resolves to `false` is an error; one that
-    /// cannot be fully evaluated (still symbolic) is skipped; it is re-checked at the
-    /// concrete instantiation.
+    /// const values in `subst`. A predicate that resolves to `false` is an error, and so is
+    /// one whose arithmetic has no value (a zero divisor, an overflow); one that cannot be
+    /// fully evaluated (still symbolic) is skipped; it is re-checked at the concrete
+    /// instantiation.
     pub(crate) fn check_where_predicates(
         &mut self,
         predicates: &[ast_types::Expr],
         subst: &std::collections::HashMap<String, Type>,
     ) {
         for pred in predicates {
-            if let Some(false) = eval_const_predicate(pred, subst) {
-                self.record_error(TypeError::ConstPredicateViolated { span: pred.span() });
+            match eval_const_predicate(pred, subst) {
+                Ok(Some(false)) => {
+                    self.record_error(TypeError::ConstPredicateViolated { span: pred.span() });
+                }
+                Err((reason, span)) => {
+                    self.record_error(TypeError::ConstHasNoValue { reason, span });
+                }
+                Ok(_) => {}
             }
         }
     }
@@ -719,6 +768,8 @@ impl TypeChecker {
                     }
                 };
 
+                self.check_impl_bounds(&struct_name, &field.name, *span);
+
                 // Calling a `&mut self` method takes an exclusive borrow of the
                 // receiver for the call: the receiver must be a mutable
                 // place and must not already be borrowed.
@@ -859,6 +910,16 @@ impl TypeChecker {
                         sig.const_types = own.const_types;
                         sig.where_predicates = own.where_predicates;
                         sig.bounds = own.bounds;
+                    }
+                    // The impl's own bounds name the type's parameters, which this call
+                    // infers alongside the function's.
+                    if let Some(impl_bounds) = self.impl_bounds.get(&mangled) {
+                        for (param, bounds) in impl_bounds {
+                            sig.bounds
+                                .entry(param.clone())
+                                .or_default()
+                                .extend(bounds.iter().cloned());
+                        }
                     }
                     return Some(
                         self.check_generic_call_with(&callee, &sig, type_args, args, None, *span),

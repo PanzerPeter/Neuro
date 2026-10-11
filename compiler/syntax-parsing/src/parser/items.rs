@@ -151,6 +151,7 @@ impl Parser {
                     span: token.span,
                 });
             }
+            self.expect_line_end("a newline or '}' to end the item")?;
             self.skip_newlines();
         }
 

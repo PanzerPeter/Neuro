@@ -360,7 +360,8 @@ func example() -> i32 {
 
 ## Statement Boundaries
 
-There are no semicolons: a newline ends a statement. An expression continues onto the
+There are no semicolons: a newline ends a statement, and a top-level item too, so
+`struct A {} struct B {}` on one line is an error. An expression continues onto the
 next line only when the line that just ended asks it to: it ends with a binary
 operator, a comma, or an opening delimiter, or the expression is still inside an
 unclosed `(`, `[`, or `{`:

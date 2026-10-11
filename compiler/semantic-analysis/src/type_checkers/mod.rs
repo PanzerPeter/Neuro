@@ -97,6 +97,11 @@ pub(crate) struct TypeChecker {
     /// Generic `impl` templates keyed by base struct name: `impl<T> Wrapper<T>`.
     /// Instantiating a generic struct also instantiates each matching impl's methods.
     generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
+    /// The bounds a generic `impl` puts on its parameters (`impl<T: Show> Cell<T>`),
+    /// keyed by each of its methods' template key (`Cell__get`). An instance's
+    /// arguments are checked against them at a call, not at instantiation: an instance
+    /// that never calls a bounded method is fine, as in Rust.
+    impl_bounds: HashMap<String, HashMap<String, Vec<BoundInfo>>>,
     /// User-declared traits keyed by name: each carries its method signatures so
     /// `impl Trait for Type` conformance and generic-body trait-method dispatch resolve.
     traits: HashMap<String, TraitInfo>,
@@ -434,6 +439,7 @@ impl TypeChecker {
             grad_functions: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
+            impl_bounds: HashMap::new(),
             traits: HashMap::new(),
             trait_names: HashSet::new(),
             deferred_object_safety: Vec::new(),

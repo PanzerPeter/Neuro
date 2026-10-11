@@ -555,3 +555,40 @@ fn a_long_operator_chain_compiles_without_overflowing_the_stack() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn regression_lim_208_byte_order_mark_is_skipped() {
+    // A UTF-8 byte order mark is encoding metadata. The program compiles, and a
+    // diagnostic's column is counted from the text after the mark.
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let ok = write_source(
+        &temp_dir,
+        "bom_ok.nr",
+        "\u{feff}func main() -> i32 {\n    3\n}\n",
+    );
+    let exe = temp_dir.path().join("bom_ok");
+    let status = Command::new(neurc_path())
+        .arg("compile")
+        .arg(&ok)
+        .arg("-o")
+        .arg(&exe)
+        .status()
+        .expect("Failed to execute neurc");
+    assert!(status.success());
+    let code = Command::new(&exe).status().expect("run").code();
+    assert_eq!(code, Some(3));
+
+    let bad = write_source(
+        &temp_dir,
+        "bom_bad.nr",
+        "\u{feff}func main() -> i32 { true }\n",
+    );
+    let output = Command::new(neurc_path())
+        .arg("check")
+        .arg(&bad)
+        .output()
+        .expect("Failed to execute neurc check");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("bom_bad.nr:1:22"), "{stderr}");
+}

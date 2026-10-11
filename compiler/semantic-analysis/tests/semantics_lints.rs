@@ -223,3 +223,38 @@ fn lint_allow_attribute_suppresses_float_cast_out_of_range() {
     "#;
     assert_eq!(float_cast_warnings(source).len(), 1);
 }
+
+#[test]
+fn regression_lim_145_float_cast_warning_folds_casts_integer_consts_and_f32_steps() {
+    // Each saturates: 300 does not fit u8, an integer `const` reached through a cast is
+    // still a constant, and in `f32` the sum 2147483520 + 64 is a tie that rounds to 2^31.
+    for cast in [
+        "(300 as f64) as u8",
+        "(N as f64) as u8",
+        "((N * 2) as f32) as u8",
+        "(2147483520.0f32 + 64.0) as i32",
+        "(H as f64 + 1.0) as u8",
+    ] {
+        let source = format!(
+            "const N: i32 = 300\nconst H: f32 = 255.0\nfunc test() -> i64 {{\n    val v = {cast}\n    0\n}}"
+        );
+        let warnings = float_cast_warnings(&source);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "`{cast}` should warn once, got {warnings:?}"
+        );
+    }
+    for cast in [
+        "(200 as f64) as u8",
+        "(M as f32) as u8",
+        "(2147483520.0f32 + 63.0) as i32",
+    ] {
+        let source =
+            format!("const M: i64 = 7\nfunc test() -> i64 {{\n    val v = {cast}\n    0\n}}");
+        assert!(
+            float_cast_warnings(&source).is_empty(),
+            "`{cast}` should not warn"
+        );
+    }
+}

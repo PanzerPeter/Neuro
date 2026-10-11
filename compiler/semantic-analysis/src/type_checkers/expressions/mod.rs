@@ -108,12 +108,13 @@ impl TypeChecker {
                         Some(self.infer_integer_type(*value, expected, *span))
                     }
                 }
-                Literal::Float(_, suffix_opt) => {
-                    if let Some(suffix) = suffix_opt {
-                        Some(self.infer_suffixed_float_type(suffix))
-                    } else {
-                        Some(self.infer_float_type(expected))
-                    }
+                Literal::Float(value, suffix_opt) => {
+                    let ty = match suffix_opt {
+                        Some(suffix) => self.infer_suffixed_float_type(suffix),
+                        None => self.infer_float_type(expected),
+                    };
+                    self.check_float_range(*value, &ty, *span);
+                    Some(ty)
                 }
                 Literal::Boolean(_) => Some(Type::Bool),
                 Literal::Char(_) => Some(Type::Char), // Char literals have char type

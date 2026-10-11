@@ -11,6 +11,9 @@ use ast_types::{ImportDef, Item, ModuleDef, ModuleId};
 use crate::walk::{Site, walk_items};
 use crate::{ModuleError, ParseModule};
 
+/// U+FEFF, which some editors write at the start of a UTF-8 file.
+const BYTE_ORDER_MARK: char = '\u{feff}';
+
 /// A module that was loaded, as reported back to the driver.
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
@@ -261,7 +264,10 @@ impl ModuleGraph {
             path: display.clone(),
             message: e.to_string(),
         })?;
-        let items = parse_module(&source, &display).map_err(|message| ModuleError::Parse {
+        // Some Windows editors open a file with a byte order mark; it is encoding
+        // metadata, not source, and spans must index the text after it.
+        let source = source.strip_prefix(BYTE_ORDER_MARK).unwrap_or(&source);
+        let items = parse_module(source, &display).map_err(|message| ModuleError::Parse {
             path: display.clone(),
             message,
         })?;

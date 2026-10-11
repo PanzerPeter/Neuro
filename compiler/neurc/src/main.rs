@@ -10,6 +10,9 @@ use std::process::{self, Command};
 /// The entry point every compiled executable must define.
 const MAIN_FUNCTION: &str = "main";
 
+/// U+FEFF, which some editors write at the start of a UTF-8 file.
+const BYTE_ORDER_MARK: char = '\u{feff}';
+
 /// The chip `@gpu` kernels are compiled for unless `--gpu-arch` names another. NVIDIA
 /// kernels ship as PTX, which the CUDA driver compiles for the GPU it finds, so the floor
 /// is what matters: every GPU at or above it runs them, and element-wise arithmetic needs
@@ -518,7 +521,17 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
 /// The source text to resolve diagnostics against, or `None` when the program has
 /// more than one module or the file cannot be re-read.
 fn single_module_source(path: &Path, module_count: usize) -> Option<String> {
-    (module_count == 1).then(|| fs::read_to_string(path).ok())?
+    (module_count == 1).then(|| read_source(path).ok())?
+}
+
+/// Read a source file the way the module loader does: a leading UTF-8 byte order mark
+/// is not part of the program, so it is dropped before any span is measured.
+fn read_source(path: &Path) -> std::io::Result<String> {
+    let text = fs::read_to_string(path)?;
+    Ok(match text.strip_prefix(BYTE_ORDER_MARK) {
+        Some(rest) => rest.to_string(),
+        None => text,
+    })
 }
 
 /// Render lint warnings to stderr. Warnings never block compilation; they are
@@ -547,8 +560,8 @@ fn compile_file(
 ) -> Result<PathBuf> {
     validate_source_file(input)?;
 
-    let source = fs::read_to_string(input)
-        .context(format!("Failed to read source file: {}", input.display()))?;
+    let source =
+        read_source(input).context(format!("Failed to read source file: {}", input.display()))?;
 
     log::info!("Compiling {}", input.display());
     log::info!("Using optimization level -O{}", optimization);

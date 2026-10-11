@@ -428,6 +428,34 @@ fn test_error_expression_juxtaposed_on_one_line() {
 }
 
 #[test]
+fn regression_lim_207_two_items_on_one_line_are_refused() {
+    // Items obey the statement rule: one ends at a newline, the `}` closing a
+    // `module` block, or the end of input.
+    for source in [
+        "struct A {} struct B {}",
+        "func f() {} func g() {}",
+        "const X: i32 = 1 const Y: i32 = 2",
+        "module m { func f() {} func g() {} }",
+    ] {
+        let err = parse_error(source);
+        assert!(
+            err.contains("expected a newline or '}' to end the item"),
+            "{source}: {err}"
+        );
+    }
+    for source in [
+        "struct A {}\nstruct B {}",
+        "module m { func f() {} }",
+        "@derive(Copy, Clone) struct A { x: i32 }",
+    ] {
+        assert!(
+            syntax_parsing::parse(source).is_ok(),
+            "{source} must still parse"
+        );
+    }
+}
+
+#[test]
 fn test_statements_that_share_a_line_with_their_block_still_parse() {
     for source in [
         "func main() -> i32 { val x = 1\n return x }",

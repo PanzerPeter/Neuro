@@ -3,6 +3,13 @@ use crate::errors::TypeError;
 use crate::types::Type;
 use shared_types::{FloatSuffix, IntSuffix, Span};
 
+/// The smallest magnitude an `f16` literal rounds up to infinity from: its largest finite
+/// value, 65504, plus half a unit in the last place (32 / 2).
+const F16_OVERFLOW_AT: f64 = 65520.0;
+
+/// The same bound for `bf16`: `2^128 - 2^119`, its largest finite value plus half an ulp.
+const BF16_OVERFLOW_AT: f64 = 3.396_177_529_230_46e38;
+
 impl TypeChecker {
     /// Whether an integer literal's value fits the range of a target type.
     ///
@@ -78,6 +85,27 @@ impl TypeChecker {
         } else {
             self.record_error(TypeError::IntegerLiteralOutOfRange { value, ty, span });
             Type::Unknown
+        }
+    }
+
+    /// Refuse a float literal whose value rounds to infinity in its type, as an integer
+    /// literal that does not fit is refused: the programmer wrote a number, not `inf`.
+    /// The lexer parses every float literal as an `f64`, so one past `f64`'s range has
+    /// already become infinite; the narrower types round from that `f64`.
+    pub(crate) fn check_float_range(&mut self, value: f64, ty: &Type, span: Span) {
+        let magnitude = value.abs();
+        let overflows = match ty {
+            Type::F64 => magnitude.is_infinite(),
+            Type::F32 => (magnitude as f32).is_infinite(),
+            Type::F16 => magnitude >= F16_OVERFLOW_AT,
+            Type::BF16 => magnitude >= BF16_OVERFLOW_AT,
+            _ => false,
+        };
+        if overflows {
+            self.record_error(TypeError::FloatLiteralOutOfRange {
+                ty: ty.clone(),
+                span,
+            });
         }
     }
 

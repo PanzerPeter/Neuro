@@ -6,6 +6,7 @@
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::type_checkers::collections::OPTION_ENUM;
+use crate::type_checkers::literals::{float_suffix_to_type, suffix_to_type};
 use crate::types::Type;
 use crate::warnings::{Warning, WarningCode};
 use ast_types::{BinaryOp, Expr, UnaryOp};
@@ -593,7 +594,7 @@ impl TypeChecker {
         to: &Type,
         span: Span,
     ) {
-        let Some(value) = self.const_float_value(operand, 0) else {
+        let Some(value) = self.const_float_value(operand, from, 0) else {
             return;
         };
         // An `f32` constant is rounded to `f32` before the cast sees it, and that rounding
@@ -624,48 +625,182 @@ impl TypeChecker {
         });
     }
 
-    /// The value of a compile-time float expression: a float literal, a `const` naming
-    /// one, and negation, grouping and arithmetic over those. `None` for anything the
-    /// program decides at run time. `const_hops` counts the `const` names followed to
-    /// reach `expr`, so zero means the expression being cast itself.
-    fn const_float_value(&self, expr: &Expr, const_hops: u8) -> Option<f64> {
-        match expr {
-            Expr::Literal(Literal::Float(v, _), _) => Some(*v),
-            Expr::Paren(inner, _) => self.const_float_value(inner, const_hops),
+    /// The value of a compile-time float expression of type `ty`: a float literal, a
+    /// `const` naming one, a cast of a constant number to a float type, and negation,
+    /// grouping and arithmetic over those. Every step is rounded to `ty`, as the program
+    /// computes it, so an `f32` sum that rounds across a bound is seen to. `None` for
+    /// anything the program decides at run time. `const_hops` counts the `const` names
+    /// followed to reach `expr`, so zero means the expression being cast itself.
+    fn const_float_value(&self, expr: &Expr, ty: &Type, const_hops: u8) -> Option<f64> {
+        let value = match expr {
+            Expr::Literal(Literal::Float(v, Some(suffix)), _) => {
+                round_to_float(*v, &float_suffix_to_type(suffix))
+            }
+            Expr::Literal(Literal::Float(v, None), _) => *v,
+            Expr::Paren(inner, _) => self.const_float_value(inner, ty, const_hops)?,
             Expr::Unary {
                 op: UnaryOp::Negate,
                 operand,
                 ..
-            } => self.const_float_value(operand, const_hops).map(|v| -v),
+            } => -self.const_float_value(operand, ty, const_hops)?,
             Expr::Binary {
                 left, op, right, ..
             } => {
                 let (l, r) = (
-                    self.const_float_value(left, const_hops)?,
-                    self.const_float_value(right, const_hops)?,
+                    self.const_float_value(left, ty, const_hops)?,
+                    self.const_float_value(right, ty, const_hops)?,
                 );
                 match op {
-                    BinaryOp::Add => Some(l + r),
-                    BinaryOp::Subtract => Some(l - r),
-                    BinaryOp::Multiply => Some(l * r),
-                    BinaryOp::Divide => Some(l / r),
-                    BinaryOp::Modulo => Some(l % r),
-                    _ => None,
+                    BinaryOp::Add => l + r,
+                    BinaryOp::Subtract => l - r,
+                    BinaryOp::Multiply => l * r,
+                    BinaryOp::Divide => l / r,
+                    BinaryOp::Modulo => l % r,
+                    _ => return None,
                 }
+            }
+            Expr::Cast {
+                expr: operand,
+                target_type,
+                ..
+            } => {
+                let target = primitive_number(target_type).filter(Type::is_float)?;
+                self.const_number_value(operand, const_hops)
+                    .map(|v| round_to_float(v, &target))?
             }
             // A local shadows a `const` of the same name, but only in the expression
             // being cast: a `const` initializer sees module scope alone. A `const` cycle
             // is rejected elsewhere; the hop bound only keeps this walk finite.
             Expr::Identifier(ident)
-                if const_hops < 32
+                if const_hops < MAX_CONST_HOPS
                     && (const_hops > 0 || self.symbols.lookup(&ident.name).is_none()) =>
             {
                 let init = self.constant_values.get(&ident.name)?;
-                self.const_float_value(init, const_hops + 1)
+                self.const_float_value(init, ty, const_hops + 1)?
+            }
+            _ => return None,
+        };
+        Some(round_to_float(value, ty))
+    }
+
+    /// The value of the operand of a cast to a float type: a float constant at the type it
+    /// has, or an integer literal or integer `const`, which the cast converts exactly as
+    /// far as `f64` can hold it.
+    fn const_number_value(&self, expr: &Expr, const_hops: u8) -> Option<f64> {
+        match expr {
+            Expr::Literal(Literal::Integer(v, _), _) => Some(*v as f64),
+            Expr::Paren(inner, _) => self.const_number_value(inner, const_hops),
+            Expr::Identifier(ident)
+                if const_hops < MAX_CONST_HOPS
+                    && (const_hops > 0 || self.symbols.lookup(&ident.name).is_none()) =>
+            {
+                let ty = self.constants.get(&ident.name)?;
+                if ty.is_integer() {
+                    return self
+                        .fold_const_int(expr, ty, 0)
+                        .ok()
+                        .flatten()
+                        .map(|v| v as f64);
+                }
+                let init = self.constant_values.get(&ident.name)?;
+                self.const_float_value(init, ty, const_hops + 1)
+            }
+            _ => match self.const_int_type(expr) {
+                Some(ty) => self
+                    .fold_const_int(expr, &ty, 0)
+                    .ok()
+                    .flatten()
+                    .map(|v| v as f64),
+                None => {
+                    let ty = self.const_float_type(expr);
+                    self.const_float_value(expr, &ty, const_hops)
+                }
+            },
+        }
+    }
+
+    /// The integer type of a constant integer expression, read off a suffix or a `const`
+    /// it names; `i32` when it is integer arithmetic over unsuffixed literals alone, and
+    /// `None` when it is not integer arithmetic at all.
+    fn const_int_type(&self, expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::Literal(Literal::Integer(_, Some(suffix)), _) => Some(suffix_to_type(suffix)),
+            Expr::Literal(Literal::Integer(_, None), _) => Some(Type::I32),
+            Expr::Paren(inner, _) | Expr::Unary { operand: inner, .. } => {
+                self.const_int_type(inner)
+            }
+            Expr::Identifier(ident) => self
+                .constants
+                .get(&ident.name)
+                .filter(|ty| ty.is_integer())
+                .cloned(),
+            Expr::Binary { left, right, .. } => {
+                let (l, r) = (self.const_int_type(left)?, self.const_int_type(right)?);
+                // A bare literal takes the type of the operand beside it.
+                Some(if matches!(**left, Expr::Literal(..)) {
+                    r
+                } else {
+                    l
+                })
             }
             _ => None,
         }
     }
+
+    /// The float type a constant float expression is computed in, read off its suffix,
+    /// its cast or the `const` it names; an unsuffixed literal is `f64`.
+    fn const_float_type(&self, expr: &Expr) -> Type {
+        match expr {
+            Expr::Literal(Literal::Float(_, Some(suffix)), _) => float_suffix_to_type(suffix),
+            Expr::Paren(inner, _) | Expr::Unary { operand: inner, .. } => {
+                self.const_float_type(inner)
+            }
+            Expr::Binary { left, .. } => self.const_float_type(left),
+            Expr::Cast { target_type, .. } => primitive_number(target_type).unwrap_or(Type::F64),
+            Expr::Identifier(ident) => self
+                .constants
+                .get(&ident.name)
+                .filter(|ty| ty.is_float())
+                .cloned()
+                .unwrap_or(Type::F64),
+            _ => Type::F64,
+        }
+    }
+}
+
+/// How many `const` names a constant float walk follows. A `const` cycle is rejected
+/// elsewhere; the bound only keeps the walk finite.
+const MAX_CONST_HOPS: u8 = 32;
+
+/// `value` as the float type `ty` holds it: `f32` rounds, `f64` is exact. Half types are
+/// left in `f64`, since no constant they hold is near an integer type's bound.
+fn round_to_float(value: f64, ty: &Type) -> f64 {
+    match ty {
+        Type::F32 => value as f32 as f64,
+        _ => value,
+    }
+}
+
+/// The numeric primitive a cast names, or `None` for any other type.
+fn primitive_number(ty: &ast_types::Type) -> Option<Type> {
+    let ast_types::Type::Named(ident) = ty else {
+        return None;
+    };
+    Some(match ident.name.as_str() {
+        "i8" => Type::I8,
+        "i16" => Type::I16,
+        "i32" => Type::I32,
+        "i64" => Type::I64,
+        "u8" => Type::U8,
+        "u16" => Type::U16,
+        "u32" => Type::U32,
+        "u64" => Type::U64,
+        "f16" => Type::F16,
+        "bf16" => Type::BF16,
+        "f32" => Type::F32,
+        "f64" => Type::F64,
+        _ => return None,
+    })
 }
 
 /// An unsuffixed numeric literal, possibly negated or parenthesised: the one operand whose

@@ -337,6 +337,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// case every query answers `false` and nothing is emitted.
     pub(crate) string_ownership: StringOwnership,
 
+    /// The lifted body behind each immutable binding initialized with a closure literal,
+    /// keyed by the binding's storage. A call through that binding can then consult
+    /// [`Self::string_ownership`] under the body's generated name. Keyed by the alloca
+    /// rather than the name, so a shadowing binding never inherits another's entry.
+    pub(crate) closure_bindings: HashMap<PointerValue<'ctx>, String>,
+
     /// Names of structs implementing `PoolAware` (`impl PoolAware for T`). Inside a
     /// `pool` body a binding of such a type is registered with the arena instead of
     /// being dropped at its own scope exit. Empty for programs that declare no
@@ -451,6 +457,7 @@ impl<'ctx> CodegenContext<'ctx> {
             struct_defs: HashMap::new(),
             struct_written_names: HashMap::new(),
             string_ownership: StringOwnership::default(),
+            closure_bindings: HashMap::new(),
             const_values: HashMap::new(),
             overflow_checks: false,
             source: None,

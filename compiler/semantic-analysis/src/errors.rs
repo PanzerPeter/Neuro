@@ -916,6 +916,9 @@ pub enum TypeError {
     #[error("integer literal {value} out of range for type {ty}")]
     IntegerLiteralOutOfRange { value: i128, ty: Type, span: Span },
 
+    #[error("float literal out of range for type {ty}: its value rounds to infinity")]
+    FloatLiteralOutOfRange { ty: Type, span: Span },
+
     #[error(
         "literal -{magnitude} is negative and {ty} is unsigned: use a signed type, or `0{ty}.wrapping_sub({magnitude}{ty})` if the two's-complement wrap was intended"
     )]
@@ -1656,6 +1659,7 @@ impl TypeError {
             | Self::VoidBinding { span, .. }
             | Self::AssignToImmutable { span, .. }
             | Self::IntegerLiteralOutOfRange { span, .. }
+            | Self::FloatLiteralOutOfRange { span, .. }
             | Self::NegativeLiteralForUnsignedType { span, .. }
             | Self::BreakOutsideLoop { span, .. }
             | Self::ContinueOutsideLoop { span, .. }

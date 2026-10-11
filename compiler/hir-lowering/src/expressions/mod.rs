@@ -357,7 +357,9 @@ impl Lowerer {
                 if let Some(position) = self.grid_position(object, &field.name) {
                     return Ok(HirExpr::new(position, HirType::U32, *span));
                 }
-                let object = self.lower_expr(object, None)?;
+                // Peeled to one `&` like a method receiver, so `rr.x` on a `& &P` is the
+                // checker's read of `P`'s field.
+                let object = coercion::auto_deref(self.lower_expr(object, None)?);
                 let HirType::Struct(struct_name) = object.ty.referent().clone() else {
                     return Err(LoweringError::Malformed {
                         detail: format!("field access on non-struct type '{}'", object.ty),

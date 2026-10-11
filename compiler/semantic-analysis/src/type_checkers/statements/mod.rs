@@ -11,6 +11,7 @@ use super::{LoopContext, TypeChecker};
 mod loops;
 mod places;
 mod returns;
+pub(crate) use returns::tail_expr;
 
 /// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, or a
 /// `x.slice(range)` view into `x`), return that place's name and whether the borrow is
@@ -451,7 +452,10 @@ impl TypeChecker {
 
                     // A returned reference must outlive the call: reject a borrow of
                     // a function-local place.
-                    if matches!(expected_return, Some(Type::Reference { .. })) {
+                    if expected_return
+                        .as_ref()
+                        .is_some_and(|ty| self.type_holds_reference(ty))
+                    {
                         self.check_returned_reference(expr);
                     }
                 }

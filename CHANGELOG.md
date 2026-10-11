@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.11.1] - 2026-10-11
+
+### Changed
+
+- Two items on one line, as in `struct A {} struct B {}`, are a parse error. An item ends at a
+  newline, a `}` or the end of the file, as a statement already did.
+- A float literal that rounds to infinity in its type is an error instead of `inf`: `1e400`,
+  `1e39f32` and `70000.0f16` are refused, as an integer literal too large for its type is.
+- `&&` in a type or before an operand is two borrows: `x: &&i32` and `val rr = &&a` parse as
+  `& &i32` and `& &a` do.
+- A field read goes through any number of borrows, so `rr.x` works on `rr: & &P`. A field write
+  through `&mut &mut` is still refused.
+- A source file may start with a UTF-8 byte order mark, which the compiler skips.
+
+### Fixed
+
+- A `where` predicate whose constant arithmetic has no value (a division by zero, an overflow) is
+  reported at the call instead of being skipped. A constant `<<` past its type's width is refused
+  by the type checker with its location; the backend used to stop on it with none.
+- The out-of-range `as` warning sees more constants: a cast inside the constant, an integer
+  `const`, and `f32` arithmetic rounded at each step as the program computes it.
+- A type argument that misses a generic `impl`'s bound is a type error at the method or
+  associated call. It used to reach lowering and stop with an internal message (BUG-108).
+- A literal passed to a generic function's concrete scalar parameter, or to a type parameter
+  already bound, takes that parameter's type, as in a plain call (BUG-105).
+- Two generic instances can no longer get the same symbol name. Instances that differed only in
+  a function-typed argument failed LLVM verification, and a user function named like an
+  instance (`size_g_i32`) silently replaced `size<i32>` (BUG-106).
+- Returning a borrow of a local inside a struct, enum, tuple or array literal, or an enum variant
+  constructor, is the "cannot return a reference" error. It compiled, and the caller read freed
+  memory. Each arm of a tail `if` in a function returning `&T` is checked as well; those arms
+  were never checked. A struct binding that holds such a borrow, returned by name, is still
+  accepted (BUG-099).
+- An owned `string` chosen by an `if` or `match`, or returned on one path beside a literal on
+  another, is released. The literal path now returns a copy, so every path owns its result
+  (BUG-103). A function returning an immutable local `val` that holds a fresh buffer no longer
+  leaks it.
+- A `string` a function hands back from its parameter, passed straight to a parameter that only
+  reads it, is released after the call (BUG-107).
+- A `string` passed by value to a closure, or returned by one, is released. This covers a
+  closure called through an immutable binding, called in place or through `|>`, and a `>>`
+  composition (BUG-038). A function value reached through a parameter, a field or a `mut`
+  binding still leaks.
+
 ## [5.11.0] - 2026-10-11
 
 ### Added

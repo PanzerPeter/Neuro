@@ -1,10 +1,10 @@
 //! Evaluation of integer `const` initializers, so a constant that has no value is a
 //! diagnostic on its initializer rather than a failure in the backend's folder.
 //!
-//! Only the arithmetic that can fail is evaluated: `+`, `-`, `*`, `/`, `%` and unary
-//! `-` over integer literals and other integer constants of the same type. Anything
-//! else (a cast, a bitwise operator, a constant of another type) is left to the
-//! backend, which folds it without a failure mode.
+//! Only the arithmetic that can fail is evaluated: `+`, `-`, `*`, `/`, `%`, `<<` and
+//! unary `-` over integer literals and other integer constants of the same type.
+//! Anything else (a cast, a bitwise operator, a constant of another type) is left to
+//! the backend, which folds it without a failure mode.
 
 use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Literal, Span};
@@ -16,6 +16,34 @@ use crate::types::Type;
 /// How deep a chain of constants naming constants is followed. A cycle cannot reach
 /// here as a value, but a bound keeps the walk finite whatever the table holds.
 const MAX_CONST_DEPTH: u32 = 64;
+
+/// Check a constant `<< r` in `ty`. An amount outside the type's width has no one value
+/// (the debug tier panics, the release tier masks), so it is refused like an overflowing
+/// `+`. An in-range shift discards the bits it moves out, which the backend folds; its
+/// value is not evaluated further here.
+fn shift_left(r: i128, ty: &Type, span: Span) -> Result<Option<i128>, (String, Span)> {
+    let Some(bits) = integer_bits(ty) else {
+        return Ok(None);
+    };
+    if (0..bits).contains(&r) {
+        return Ok(None);
+    }
+    Err((
+        format!("`<<` shifts by {r}, outside the {bits} bits of {ty}"),
+        span,
+    ))
+}
+
+/// The bit width of an integer type, which bounds a shift amount.
+fn integer_bits(ty: &Type) -> Option<i128> {
+    Some(match ty {
+        Type::I8 | Type::U8 => 8,
+        Type::I16 | Type::U16 => 16,
+        Type::I32 | Type::U32 => 32,
+        Type::I64 | Type::U64 => 64,
+        _ => return None,
+    })
+}
 
 impl TypeChecker {
     /// Report an integer constant whose initializer overflows `ty` or divides by zero.
@@ -31,7 +59,7 @@ impl TypeChecker {
     /// The value of `expr` as a `ty` integer: `Ok(None)` when it is not one this pass
     /// evaluates, `Err` with the reason and the failing operation's span when it has
     /// no value at all.
-    fn fold_const_int(
+    pub(super) fn fold_const_int(
         &self,
         expr: &Expr,
         ty: &Type,
@@ -79,6 +107,9 @@ impl TypeChecker {
                     return Err(("it divides by zero".to_string(), *span));
                 }
                 let l = self.fold_const_int(left, ty, depth)?;
+                if *op == BinaryOp::Shl {
+                    return r.map_or(Ok(None), |r| shift_left(r, ty, *span));
+                }
                 let (Some(l), Some(r)) = (l, r) else {
                     return Ok(None);
                 };

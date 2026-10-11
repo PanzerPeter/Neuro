@@ -156,8 +156,10 @@ assignment now checks the target's borrows before its RHS, as `=` does.
   parenthesised `while (true)` deliberately not matched). Lints run independently of type errors.
   One warning is raised during checking instead, because it needs types:
   `float-cast-out-of-range`, from `check_cast_expr` when a float-to-integer `as` has a constant
-  operand (`const_float_value`: float literals, `const` names, negation, grouping and arithmetic)
-  whose truncation the target cannot hold, or NaN. A function or method body records the warning
+  operand (`const_float_value`: float literals, `const` names, casts of a constant number to a
+  float type, integer `const`s through `fold_const_int`, negation, grouping and arithmetic, each
+  step rounded to the type the program computes it in) whose truncation the target cannot hold,
+  or NaN. A function or method body records the warning
   count on entry and `drop_allowed_warnings` removes what its `@allow(...)` names on exit.
 
 ### Expressions are checked exactly once
@@ -646,7 +648,12 @@ plus `self` for an instance method. It is rebuilt per function/method and cleare
 `return` and trailing implicit return whose type is a reference, `check_returned_reference` walks
 the returned expression: a `&place` whose root place is local emits `ReturnsReferenceToLocal`; a
 returned reference *binding* is flagged when its `borrow_provenance` is local; `if`/`else` arms,
-bare and `unsafe` blocks, and `match` arm bodies are followed into their tails.
+bare and `unsafe` blocks, and `match` arm bodies are followed into their tails. The check also
+runs when the return type only *holds* a reference (`type_holds_reference`: a struct, enum, tuple
+or array with one inside), walking struct and enum literals, variant constructors
+(`is_variant_constructor`), tuples and arrays down to each `&place`. A trailing `if` used as the
+tail is reached through `tail_expr`, so each of its arms is checked. A struct binding returned by
+name is not followed: the borrow model records no borrow held inside one.
 `is_local_to_function` treats an absent name (a constant, an out-of-scope place) as non-local, so
 a valid program is never rejected.
 
@@ -685,6 +692,13 @@ type appends its own names after the type's, so one turbofish lists both. A meth
 reusing an impl parameter's name is `MethodGenericShadowsImpl`; one in a trait impl is
 `GenericMethodInTraitImpl`; `@grad` on one is `GradFormUnsupported`. `TurbofishCountMismatch`
 names the callee (it used to print the first parameter's name).
+
+A bounded generic `impl` (`impl<T: Show> Cell<T>`) records its bounds in `impl_bounds`. A method or
+associated call on an instance checks them (`check_impl_bounds`, `satisfies_bound`) and an
+associated call merges them into `sig.bounds`, so `c.get()` on a `Cell<i32>` is
+`TraitBoundNotSatisfied` at the call. An instance's trait conformance counts only the impls whose
+bounds it meets (`instance_meets_impl_bounds`). A literal argument whose parameter is a concrete
+scalar, or a type parameter already bound, is checked against that type, as in a plain call.
 
 **`Type::Generic` answers `false` to `is_type_copy` and `true` to `is_type_move_tracked`**, which
 is what makes checking the body once sound: a second read of a `T`-typed binding is
@@ -752,6 +766,9 @@ monomorphization. `check_generic_call` seeds turbofish arguments, infers const p
 array-argument lengths and tensor-argument extents (`unify_array_len`, `unify_tensor_shape`),
 enforces that every param is bound, and checks `where`
 predicates (`eval_const_predicate`); generic-struct instantiation does the same from field values.
+A predicate whose arithmetic has no value (a zero divisor, an overflow) is `ConstHasNoValue`
+rather than skipped; only a still-symbolic one waits for the concrete instance. A constant `<<`
+outside its type's width is refused by `const_eval`'s `shift_left` with the operator's span.
 Errors: `UnknownArrayLength`, `ConstPredicateViolated`, `TurbofishCountMismatch`,
 `TurbofishKindMismatch`, `ConstParamNotInteger`.
 

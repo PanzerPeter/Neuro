@@ -55,5 +55,5 @@ func main() -> i32 {
         })
         .expect("the instantiation should emit a mangled struct");
     assert_eq!(instance.written_name, "W");
-    assert!(instance.name.starts_with("W_g_"), "{}", instance.name);
+    assert!(instance.name.starts_with("W$g_"), "{}", instance.name);
 }

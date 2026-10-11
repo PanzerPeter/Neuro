@@ -107,7 +107,7 @@ func main() -> i32 {
 #[test]
 fn nested_borrows_are_read_through_by_an_operator() {
     let source = r#"
-func next(x: & &i32) -> i32 {
+func next(x: &&i32) -> i32 {
     return x + 1
 }
 
@@ -270,4 +270,29 @@ func main() -> i32 {
         diagnostics.contains("cannot apply binary operator +"),
         "{diagnostics}"
     );
+}
+
+#[test]
+fn regression_lim_206_a_field_is_read_through_every_borrow() {
+    // `rr.x` on a `&&P` reads `P`'s field, as `rr.get()` dispatches on `P`; the
+    // explicit `(*rr).x` is the same read.
+    let source = r#"
+struct In { v: i32 }
+struct P { x: i32, inner: In }
+
+func through(rr: &&P) -> i32 { rr.x + rr.inner.v }
+func explicit(rr: &&P) -> i32 { (*rr).x + (*rr).inner.v }
+
+func main() -> i32 {
+    val p = P { x: 4, inner: In { v: 7 } }
+    val r = &p
+    val rr = &r
+    if through(rr) != explicit(rr) { return 99 }
+    mut q = P { x: 10, inner: In { v: 1 } }
+    val m = &mut q
+    val rm = &m
+    through(rr) + rm.x + rm.inner.v + rr.x
+}
+"#;
+    assert_eq!(run(source), 26);
 }

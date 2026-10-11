@@ -99,6 +99,11 @@ impl<'ctx> CodegenContext<'ctx> {
             // (field / index assignment) that must recover a struct or array name, and
             // hands back whatever the name meant before. That goes into the enclosing
             // scope's frame so leaving the block puts the outer binding back.
+            if !mutable
+                && let Some(HirExprKind::Closure { name: lifted, .. }) = init.map(|e| &e.kind)
+            {
+                self.closure_bindings.insert(alloca, lifted.clone());
+            }
             let shadowed = self.bind_name(name, alloca, alloca_ty, target_sem.clone());
             if let Some(scope) = self.name_scopes.last_mut() {
                 scope.push(shadowed);

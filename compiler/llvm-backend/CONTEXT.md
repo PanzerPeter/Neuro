@@ -452,7 +452,8 @@ newtype receiver's storage comes from `held_place_ptr`. `codegen_method_call` re
 splitting the symbol on `__`, so the
 separator must appear **exactly once**. Two rules hold that: semantic analysis rejects a declared
 name containing `__` (`TypeError::ReservedNameSeparator`), and every monomorphized instance name
-uses a single-underscore `_g_` marker (`identity_g_i32`, `Pair_g_i32_f64`).
+uses a `$g` marker (`identity$g_i32`, `Pair$g_i32_f64`). `$` is no identifier character, so no
+declared name equals an instance's, and LLVM prints such a symbol quoted (`@"identity$g_i32"`).
 
 - `&self` and owned `self` take the struct **by value** as `param[0]`, named `self` in the
   alloca map. Callers load their stack var and pass the value. The two differ only in ownership:
@@ -1184,7 +1185,7 @@ A `@derive(Debug)` struct hole renders through `render_struct_debug`, which fram
 `struct_defs` as `Name { field: value, ... }` and renders each one under the same `FormatKind::
 Debug`, which is what quotes a nested `string` or `char` and recurses into a nested struct. The
 name comes from `struct_written_names` (`HirStruct::written_name`, set by `set_struct_written_names`
-beside `set_struct_defs`), so a monomorphized instance prints `Wrapper`, not `Wrapper_g_i32`. A
+beside `set_struct_defs`), so a monomorphized instance prints `Wrapper`, not `Wrapper$g_i32`. A
 field-less struct renders as its bare name. The pieces reuse the same `PieceOwner` bookkeeping the
 enclosing literal uses, so a nested rendering's scratch buffers are freed once copied out.
 
@@ -1197,6 +1198,16 @@ in the **defining frame**, snapshots each Copy capture, and pairs the closure fu
 it. `codegen_call_dispatch` routes a call whose callee is a local variable to
 `codegen_indirect_call`, which extracts both pointers and issues an indirect call with the
 environment as the hidden first argument.
+
+The `string` ownership summary reads each lifted closure body under its generated name, beside
+the functions. `codegen_var_decl` records, per alloca, the lifted name behind an immutable binding
+a closure literal initialized (`closure_bindings`), and `lifted_closure_name` resolves a callee
+through it, or directly for a literal called in place. A call it resolves gets the plain call's
+treatment: a read-only `string` argument stays the caller's and is released after the call, a
+closure whose every exit allocates is a producer for `produces_owned_string`, and a forwarding one
+leaves its argument's owner bit in `forwarded_string_owner` under the lifted name. A function value
+reached any other way (a parameter, a field, a `mut` binding) stays unresolved, so its arguments
+move and its result owns nothing. That leaks rather than frees a buffer something still holds.
 
 The closure environment is frame-local, so a closure that escapes its defining scope is out of
 scope this phase.

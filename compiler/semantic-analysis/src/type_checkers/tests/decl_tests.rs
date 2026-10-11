@@ -97,9 +97,9 @@ fn double_underscore_in_declared_names_is_rejected() {
 
 #[test]
 fn a_user_method_cannot_forge_a_generic_instance_symbol() {
-    // `Pair_g_i32` is the mangled name of `Pair<i32>`; a method `push` on it lowers to
-    // `Pair_g_i32__push`. A user method named `g_i32__push` on a struct `Pair` would
-    // lower to the identical symbol, and rejecting `__` in the method name closes it.
+    // An instance's name carries `$`, which no name can, so a method can no longer spell
+    // one. A `__` in a method name is still refused: `g_i32__push` on `Pair` would lower
+    // to `Pair__g_i32__push`, which the backend splits at the wrong `__`.
     let mut checker = TypeChecker::new();
     let items = vec![
         struct_item("Pair", &[("first", "i32")]),

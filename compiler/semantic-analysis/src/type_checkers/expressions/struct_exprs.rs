@@ -326,9 +326,9 @@ impl TypeChecker {
             return Some(Type::Unknown);
         }
 
-        // Auto-deref through an immutable borrow: `r.field` reads a field of the
-        // referent when `r: &Struct`.
-        let struct_name = match obj_ty.referent() {
+        // A field is read through every borrow, as a method receiver is: `r.field` on
+        // `r: &Struct` and on `rr: & &Struct` both read the referent's field.
+        let struct_name = match obj_ty.auto_deref().referent() {
             Type::Struct(n) => n.clone(),
             other => {
                 self.record_error(TypeError::UnknownField {

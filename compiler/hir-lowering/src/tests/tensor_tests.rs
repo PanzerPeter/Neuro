@@ -434,7 +434,7 @@ func main() -> i32 {
     let mut shapes = Vec::new();
     for item in &program.items {
         if let HirItem::Function(f) = item {
-            if !f.name.starts_with("first_g") {
+            if !f.name.starts_with("first$g") {
                 continue;
             }
             let HirType::Reference { inner, .. } = &f.params[0].ty else {

@@ -95,3 +95,57 @@ fn test_struct_and_impl_lifetime_params_parse() {
         other => panic!("expected impl item, got {other:?}"),
     }
 }
+
+#[test]
+fn regression_lim_205_amp_amp_is_two_borrows_in_a_type() {
+    // `&&` lexes as logical-and; in a type it can only mean `& &`, and the second
+    // `&` takes the lifetime and `mut`.
+    let source = "func f<'a>(a: &&'a mut i32) -> i32 { 0 }";
+    let items = parse(source).expect("should parse");
+    let Item::Function(func) = &items[0] else {
+        panic!("expected function item");
+    };
+    let Type::Reference {
+        inner,
+        mutable: false,
+        lifetime: None,
+        span,
+    } = &func.params[0].ty
+    else {
+        panic!(
+            "expected an outer shared borrow, got {:?}",
+            func.params[0].ty
+        );
+    };
+    assert_eq!(&source[span.start..span.end], "&&'a mut i32");
+    let Type::Reference {
+        mutable: true,
+        lifetime: Some(lt),
+        span: inner_span,
+        ..
+    } = inner.as_ref()
+    else {
+        panic!("expected an inner `&'a mut`, got {inner:?}");
+    };
+    assert_eq!(lt.name, "a");
+    assert_eq!(&source[inner_span.start..inner_span.end], "&'a mut i32");
+}
+
+#[test]
+fn regression_lim_205_amp_amp_is_two_borrows_in_prefix_position() {
+    use syntax_parsing::{Expr, parse_expr};
+    let Expr::Reference {
+        operand,
+        mutable: false,
+        ..
+    } = parse_expr("&&mut x").expect("should parse")
+    else {
+        panic!("expected an outer shared borrow");
+    };
+    assert!(matches!(*operand, Expr::Reference { mutable: true, .. }));
+    // Infix `&&` is still logical-and.
+    assert!(matches!(
+        parse_expr("a && b").expect("should parse"),
+        Expr::Binary { .. }
+    ));
+}

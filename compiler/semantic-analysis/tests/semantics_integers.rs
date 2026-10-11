@@ -135,3 +135,52 @@ fn error_unsigned_with_float() {
         "{errors:?}"
     );
 }
+
+fn float_range_errors(source: &str) -> Vec<(semantic_analysis::Type, shared_types::Span)> {
+    let items = syntax_parsing::parse(source).unwrap();
+    match type_check(&items) {
+        Ok(_) => Vec::new(),
+        Err(errors) => errors
+            .into_iter()
+            .filter_map(|e| match e {
+                TypeError::FloatLiteralOutOfRange { ty, span } => Some((ty, span)),
+                _ => None,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn regression_lim_209_float_literal_rounding_to_infinity_is_refused() {
+    use semantic_analysis::Type;
+    for (source, literal, ty) in [
+        ("func f() -> f64 { 1e400 }", "1e400", Type::F64),
+        ("func f() -> f32 { 1e39f32 }", "1e39f32", Type::F32),
+        ("func f() -> f32 { 1e39 }", "1e39", Type::F32),
+        ("func f() -> f16 { 65520.0 }", "65520.0", Type::F16),
+        ("func f() -> bf16 { 3.4e38bf16 }", "3.4e38bf16", Type::BF16),
+        ("func f() -> f64 { -1e400 }", "1e400", Type::F64),
+    ] {
+        let errors = float_range_errors(source);
+        assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+        assert_eq!(errors[0].0, ty, "{source}");
+        assert_eq!(
+            &source[errors[0].1.start..errors[0].1.end],
+            literal,
+            "{source}"
+        );
+    }
+    for source in [
+        "func f() -> f64 { 1.7e308 }",
+        "func f() -> f32 { 3.4e38 }",
+        "func f() -> f16 { 65504.0 }",
+        "func f() -> f16 { 65519.0 }",
+        "func f() -> bf16 { 3.38e38 }",
+        "func f() -> f32 { 1e-50 }",
+    ] {
+        assert!(
+            float_range_errors(source).is_empty(),
+            "{source} must type-check"
+        );
+    }
+}

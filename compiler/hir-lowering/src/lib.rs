@@ -101,7 +101,7 @@ pub enum LoweringError {
     #[error("malformed expression reached lowering: {detail}")]
     Malformed { detail: String },
 
-    /// A generic needs instances nested past [`MAX_INSTANCE_DEPTH`]: one that calls
+    /// A generic needs instances nested past `MAX_INSTANCE_DEPTH`: one that calls
     /// itself with a type built from its own parameter (`grow(Option::Some(x))` inside
     /// `grow<T>`) needs a new instance at every level, so the chain never closes. The
     /// checker sees one template and cannot tell; this is where the chain shows.
@@ -723,9 +723,13 @@ fn resolve_array_size(
     }
 }
 
+/// Separates a template's name from its type arguments in an instance's name. `$` is
+/// no identifier character, so no name a program declares can equal an instance's:
+/// with `_g` a function the program named `size_g_i32` took the symbol of `size<i32>`.
+const INSTANCE_MARKER: &str = "$g";
+
 /// The mangled symbol name of a monomorphized function instance: the template name, the
-/// `_g_` instance marker, and each type argument's mangled form in declaration order.
-/// The result is a valid symbol (alphanumerics and `_` only).
+/// [`INSTANCE_MARKER`], and each type argument's mangled form in declaration order.
 ///
 /// The marker deliberately avoids `__`, which is reserved workspace-wide as the
 /// receiver/method separator; codegen recovers a method's receiver struct by splitting
@@ -737,7 +741,7 @@ fn mangle_instance(
     subst: &HashMap<String, HirType>,
     const_subst: &HashMap<String, u64>,
 ) -> String {
-    let mut out = format!("{}_g", name);
+    let mut out = format!("{}{}", name, INSTANCE_MARKER);
     for gp in generics {
         let arg = match &gp.kind {
             ast_types::GenericParamKind::Const(_) => const_subst
@@ -756,6 +760,14 @@ fn mangle_instance(
 }
 
 /// A symbol-safe token for a concrete type, used to build monomorphized instance names.
+///
+/// Two different types must never share a token, or two instances would share a symbol.
+/// Every token is therefore self-delimiting: a built-in type starts with its own fixed
+/// spelling, a name a program chose (a struct, enum, newtype or trait) is prefixed with
+/// its length, which no built-in spelling starts with since a name cannot start with a
+/// digit, and a function type spells its parameter count, parameters and result. So
+/// `struct tup2_i32_i32` (`12tup2_i32_i32`) is not the tuple `(i32, i32)` (`tup2_i32_i32`),
+/// and `Pair<A_B, C>` is not `Pair<A, B_C>`.
 fn mangle_type(ty: &HirType) -> String {
     match ty {
         HirType::I8 => "i8".to_string(),
@@ -774,9 +786,9 @@ fn mangle_type(ty: &HirType) -> String {
         HirType::Char => "char".to_string(),
         HirType::String => "string".to_string(),
         HirType::Void => "void".to_string(),
-        HirType::Struct(n) => n.clone(),
-        HirType::Enum(n) => n.clone(),
-        HirType::Newtype { name, .. } => name.clone(),
+        HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } => {
+            format!("{}{}", name.len(), name)
+        }
         HirType::Reference { inner, mutable } => {
             format!(
                 "{}ref_{}",
@@ -794,8 +806,16 @@ fn mangle_type(ty: &HirType) -> String {
             let parts: Vec<String> = elements.iter().map(mangle_type).collect();
             format!("tup{}_{}", elements.len(), parts.join("_"))
         }
-        HirType::DynObject(name) => format!("dyn_{}", name),
-        HirType::Function { .. } => "fn".to_string(),
+        HirType::DynObject(name) => format!("dyn{}{}", name.len(), name),
+        HirType::Function { params, ret } => {
+            let parts: Vec<String> = params.iter().map(mangle_type).collect();
+            let mut token = format!("fn{}", params.len());
+            for part in parts.iter().chain(std::iter::once(&mangle_type(ret))) {
+                token.push('_');
+                token.push_str(part);
+            }
+            token
+        }
         HirType::Collection { kind, args } if args.is_empty() => kind.mangle_tag().to_string(),
         HirType::Collection { kind, args } => {
             let parts: Vec<String> = args.iter().map(mangle_type).collect();
@@ -805,7 +825,7 @@ fn mangle_type(ty: &HirType) -> String {
 }
 
 /// The mangled symbol name of a monomorphized generic-struct instance: the base
-/// name, a `_g_` marker, and each type argument's mangled form.
+/// name, the [`INSTANCE_MARKER`], and each type argument's mangled form.
 ///
 /// Like [`mangle_instance`], this never contains `__`: codegen recovers a method's
 /// receiver struct by splitting the method symbol on `__`, so a struct name with `__`
@@ -820,5 +840,5 @@ fn mangle_struct_instance(base: &str, args: &[MonoArg]) -> String {
             MonoArg::Const(v) => format!("c{}", v),
         })
         .collect();
-    format!("{}_g_{}", base, parts.join("_"))
+    format!("{}{}_{}", base, INSTANCE_MARKER, parts.join("_"))
 }

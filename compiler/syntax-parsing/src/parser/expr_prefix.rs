@@ -190,6 +190,28 @@ impl Parser {
                 })
             }
 
+            // `&&place` lexes as one logical-and token, which cannot begin an
+            // expression, so in prefix position it is two borrows: `& &place`. A `mut`
+            // after it belongs to the inner one, `&&mut x` being `&(&mut x)`.
+            TokenKind::AmpAmp => {
+                let (outer, second) = super::types::split_amp_amp(token.span);
+                let mutable = self.check(&TokenKind::Mut);
+                if mutable {
+                    self.advance(); // consume 'mut'
+                }
+                let operand = self.parse_expr(Precedence::Unary)?;
+                let inner = Expr::Reference {
+                    span: second.merge(operand.span()),
+                    operand: Box::new(operand),
+                    mutable,
+                };
+                Ok(Expr::Reference {
+                    span: outer.merge(inner.span()),
+                    operand: Box::new(inner),
+                    mutable: false,
+                })
+            }
+
             // Dereference `*operand`. In prefix position `*` reads through a
             // reference; as an infix operator it is multiplication, handled in
             // `parse_infix`.

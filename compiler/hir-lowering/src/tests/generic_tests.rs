@@ -15,7 +15,7 @@ fn generic_struct_monomorphizes_per_type_argument() {
         !names.iter().any(|n| n == "Pair"),
         "the generic template must not survive into the HIR: {names:?}"
     );
-    let instances = names.iter().filter(|n| n.starts_with("Pair_g")).count();
+    let instances = names.iter().filter(|n| n.starts_with("Pair$g")).count();
     assert_eq!(
         instances, 2,
         "one struct instance per distinct type-argument set: {names:?}"
@@ -40,7 +40,7 @@ fn generic_struct_literal_type_is_the_concrete_instance() {
         panic!("expected a struct type, got {:?}", init.ty);
     };
     assert!(
-        name.starts_with("Wrapper_g") && name.contains("i32"),
+        name.starts_with("Wrapper$g") && name.contains("i32"),
         "literal should carry the monomorphized instance type, got {name}"
     );
 }
@@ -79,7 +79,7 @@ fn generic_function_monomorphizes_per_type_argument() {
         "the generic template must not survive into the HIR: {:?}",
         names
     );
-    let instances = names.iter().filter(|n| n.starts_with("identity_g")).count();
+    let instances = names.iter().filter(|n| n.starts_with("identity$g")).count();
     assert_eq!(
         instances, 2,
         "one instance per distinct type argument: {:?}",
@@ -102,7 +102,7 @@ fn repeated_instantiation_is_emitted_once() {
     );
     let instances = function_names(&program)
         .iter()
-        .filter(|n| n.starts_with("identity_g"))
+        .filter(|n| n.starts_with("identity$g"))
         .count();
     assert_eq!(instances, 1);
 }
@@ -249,8 +249,8 @@ fn a_field_at_the_parameter_monomorphizes_with_its_outer_instance() {
          func main() -> i32 { val o = Outer { i: Inner { v: 1 } }\n 0 }",
     );
     let names = struct_names(&program);
-    assert!(names.iter().any(|n| n == "Inner_g_i32"), "{names:?}");
-    assert!(names.iter().any(|n| n == "Outer_g_i32"), "{names:?}");
+    assert!(names.iter().any(|n| n == "Inner$g_i32"), "{names:?}");
+    assert!(names.iter().any(|n| n == "Outer$g_i32"), "{names:?}");
 }
 
 #[test]
@@ -270,9 +270,9 @@ fn an_associated_call_on_a_generic_type_calls_the_inferred_instance() {
     };
     assert_eq!(
         (type_name.as_str(), member.as_str()),
-        ("Cell_g_bool", "new")
+        ("Cell$g_bool", "new")
     );
-    assert_eq!(init.ty, HirType::Struct("Cell_g_bool".to_string()));
+    assert_eq!(init.ty, HirType::Struct("Cell$g_bool".to_string()));
 }
 
 #[test]
@@ -315,7 +315,7 @@ fn generic_method_monomorphizes_per_type_argument() {
     );
     let mut names = impl_method_names(&program, "B");
     names.sort();
-    assert_eq!(names, vec!["get", "pick__g_f64", "pick__g_i32"]);
+    assert_eq!(names, vec!["get", "pick$g_f64", "pick$g_i32"]);
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn generic_method_of_a_generic_impl_is_instanced_per_receiver_instance() {
         .items
         .iter()
         .filter_map(|item| match item {
-            HirItem::Impl(block) if block.type_name.starts_with("Cell_g") => Some(block),
+            HirItem::Impl(block) if block.type_name.starts_with("Cell$g") => Some(block),
             _ => None,
         })
         .flat_map(|block| {
@@ -341,10 +341,7 @@ fn generic_method_of_a_generic_impl_is_instanced_per_receiver_instance() {
         })
         .collect();
     instances.sort();
-    let expected = [
-        ("Cell_g_bool", "with__g_i32"),
-        ("Cell_g_i32", "with__g_f64"),
-    ];
+    let expected = [("Cell$g_bool", "with$g_i32"), ("Cell$g_i32", "with$g_f64")];
     let expected: Vec<(String, String)> = expected
         .iter()
         .map(|(t, m)| (t.to_string(), m.to_string()))

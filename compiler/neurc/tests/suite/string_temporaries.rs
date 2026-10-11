@@ -538,3 +538,191 @@ func main() -> i32 {{
         .expect("compile/run failed");
     assert_eq!(exit, 0);
 }
+
+#[test]
+fn regression_bug_103_a_string_chosen_by_a_branch_is_released_once() {
+    // Each `string` below is owned by the binding that takes it and released once:
+    // a function with a literal arm beside an allocating one (the literal is copied), a
+    // binding of an `if` or `match` whose every arm allocates, a block's value, a
+    // reordered named call, and a method. A literal-only branch is never freed. The
+    // leaks are LeakSanitizer's to see; what is asserted here is the arithmetic and a
+    // clean exit, which a double free would not give.
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "owned_branches.nr",
+            r#"
+struct Tag { k: i32 }
+impl Tag {
+    func name(&self) -> string { if self.k == 0 { "zero" } else { "tag {self.k}" } }
+}
+func label(k: i32) -> string {
+    match k {
+        0 => "info",
+        _ => "warn {k}",
+    }
+}
+func pick(flag: bool, a: string, b: string) -> string {
+    if flag { return "none" }
+    return a + b
+}
+func lits(k: i32) -> string { if k == 0 { "a" } else { "bb" } }
+func cat(first: string, second: string) -> string { return "{first}{second}" }
+func s(v: string) -> string { return v }
+func main() -> i32 {
+    mut t: u64 = 0
+    for i in 0..3 {
+        val a = label(i)
+        val b = if i == 0 { "z {i}" } else { "n {i}" }
+        val c = match i { 0 => "x", 1 => "yy", _ => "zzz" }
+        val d = lits(i)
+        val e = pick(i == 1, "p", "q{i}")
+        val s1: string = "x{i}"
+        val f: string = {
+            val u = s1
+            cat(u, "y")
+        }
+        val g = Tag { k: i }.name()
+        val h = cat(second: "w{i}", first: "v")
+        t = t + a.len() + b.len() + c.len() + d.len() + e.len() + f.len() + g.len() + h.len()
+    }
+    t as i32
+}
+"#,
+        )
+        .expect("should compile and run");
+    assert_eq!(exit, 78);
+}
+
+#[test]
+fn regression_bug_103_an_owned_branch_value_moves_on_and_a_returned_val_is_owned() {
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "owned_branch_moves.nr",
+            r#"
+func keep(s: string) -> string { s }
+func size(s: string) -> u64 { s.len() }
+func build(c: bool, i: i32) -> string {
+    val b = if c { "a{i}" } else { "bb{i}" }
+    b
+}
+func main() -> i32 {
+    mut v: Vec<string> = Vec::new()
+    mut t: u64 = 0
+    for i in 0..2 {
+        val b = if i == 0 { "x{i}" } else { "yy{i}" }
+        val k = keep(b)
+        t = t + k.len()
+        val m = match i { 0 => "m{i}", _ => "mm{i}" }
+        t = t + size(m)
+        v.push(if i == 0 { "p{i}" } else { "q{i}" })
+        mut r = if i == 1 { "r{i}" } else { "rr{i}" }
+        r = build(i == 0, i)
+        t = t + r.len()
+    }
+    t = t + v[0].len() + v[1].len()
+    t as i32 + 16
+}
+"#,
+        )
+        .expect("should compile and run");
+    assert_eq!(exit, 35);
+    let exit = test
+        .compile_and_run(
+            "return_binding.nr",
+            r#"
+func build(i: i32) -> string {
+    val b = "ab{i}"
+    b
+}
+func main() -> i32 {
+    mut t: u64 = 0
+    for i in 0..3 { t = t + build(i).len() }
+    t as i32
+}
+"#,
+        )
+        .expect("should compile and run");
+    assert_eq!(exit, 9);
+}
+
+#[test]
+fn regression_bug_107_a_forwarded_string_passed_to_a_reading_parameter_is_released() {
+    // `s` hands back the `string` it was given. Its result, passed straight on to a
+    // parameter that only reads it, is released after the call when the buffer was
+    // owned, and left alone when it was a literal. Functions and methods alike.
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "forwarded_args.nr",
+            r#"
+struct Box1 { n: i32 }
+impl Box1 {
+    func pass(&self, v: string) -> string { v }
+    func size(&self, v: string) -> u64 { v.len() }
+}
+func s(v: string) -> string {
+    return v
+}
+func cat(first: string, second: string) -> string { return "{first}{second}" }
+func size(v: string) -> u64 { v.len() }
+func main() -> i32 {
+    val b = Box1 { n: 1 }
+    mut t: u64 = 0
+    for i in 0..3 {
+        val s1: string = "x{i}"
+        val owned = "o{i}"
+        val lit = "lit"
+        val a = cat(s("y{i}"), s1)
+        val c = cat(s("k"), s(owned))
+        val d = size(s(lit)) + size(s("q{i}"))
+        val e = b.size(b.pass("m{i}")) + b.size(s("r"))
+        t = t + a.len() + c.len() + d + e
+    }
+    t as i32
+}
+"#,
+        )
+        .expect("should compile and run");
+    assert_eq!(exit, 45);
+}
+
+#[test]
+fn regression_bug_038_a_closure_call_releases_what_it_reads_and_returns() {
+    // A closure called through its binding, in place, or through `|>` that only reads
+    // its argument leaves it to the caller, an owned result belongs to whoever takes it,
+    // and a forwarded one is owned when its argument was. Without these releases the loop
+    // leaks a buffer per call.
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+func main() -> i32 {{
+    val width = |z: string| -> u64 {{ z.len() }}
+    val twice = |z: string| -> string {{ z + z }}
+    val keep = |z: string| -> string {{ z }}
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        val s = a + a
+        n = n + width(s)
+        n = n + (a + a |> width)
+        n = n + (|z: string| -> u64 {{ z.len() }})(a + a)
+        val t = twice(a.clone())
+        n = n + t.len()
+        val k = keep(a + a)
+        n = n + k.len()
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * WIDTH * 10
+    );
+    let exit = test
+        .compile_and_run("closure_release.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}

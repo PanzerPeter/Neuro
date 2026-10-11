@@ -246,6 +246,12 @@ impl Lowerer {
         let self_type = self.impl_target_type(mangled)?;
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, generics, subst);
+            // The checker refuses every call that would reach a method of an impl whose
+            // bounds this instance misses, so the impl is not emitted for it: its bodies
+            // call trait methods the argument does not have.
+            if !self.instance_meets_impl_bounds(imp, &impl_subst) {
+                continue;
+            }
             let mut methods = Vec::new();
             // A generic method's instances are emitted per call, from its own worklist.
             for method in imp.methods.iter().filter(|m| m.generics.is_empty()) {
@@ -268,6 +274,32 @@ impl Lowerer {
             }));
         }
         Ok(())
+    }
+
+    /// Whether every argument of an instance implements the traits its impl bounds the
+    /// parameter by. Only declared traits count, as in the checker.
+    fn instance_meets_impl_bounds(
+        &self,
+        imp: &ImplDef,
+        impl_subst: &std::collections::HashMap<String, HirType>,
+    ) -> bool {
+        imp.generics.iter().all(|param| {
+            let Some(concrete) = impl_subst.get(&param.name.name) else {
+                return true;
+            };
+            param.bounds.iter().all(|bound| {
+                let trait_name = &bound.trait_name.name;
+                !self.traits.contains_key(trait_name)
+                    || match concrete {
+                        HirType::Struct(name)
+                        | HirType::Enum(name)
+                        | HirType::Newtype { name, .. } => self
+                            .trait_impls
+                            .contains(&(trait_name.clone(), name.clone())),
+                        _ => false,
+                    }
+            })
+        })
     }
 
     /// Materialize a monomorphized generic-enum instance: register its concrete
@@ -357,6 +389,56 @@ impl Lowerer {
     /// parameters come from the turbofish, then from unifying its parameter annotations
     /// against the lowered arguments. Queues the instance once and returns its method
     /// name within the type, with its visible (non-`self`) parameter types and return type.
+    /// Bind explicit turbofish arguments to `generics`, positionally.
+    pub(crate) fn seed_turbofish(
+        &mut self,
+        generics: &[ast_types::GenericParam],
+        type_args: &[ast_types::GenericArg],
+        subst: &mut std::collections::HashMap<String, HirType>,
+        const_subst: &mut std::collections::HashMap<String, u64>,
+    ) -> Result<(), LoweringError> {
+        for (gp, arg) in generics.iter().zip(type_args) {
+            match arg {
+                ast_types::GenericArg::Const { value, .. } => {
+                    const_subst.insert(gp.name.name.clone(), *value as u64);
+                }
+                ast_types::GenericArg::Type(ty) => {
+                    subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Lower the arguments of a call to the generic method `key` against what its
+    /// instance already fixes (the impl's parameters) and what the turbofish names.
+    pub(crate) fn lower_generic_method_args(
+        &mut self,
+        key: &str,
+        type_args: &[ast_types::GenericArg],
+        args: &[ast_types::Expr],
+    ) -> Result<Vec<neuro_hir::HirExpr>, LoweringError> {
+        let template = self.generic_methods.get(key).cloned().ok_or_else(|| {
+            LoweringError::UnresolvedCall {
+                target: key.to_string(),
+            }
+        })?;
+        let def = &template.def;
+        let (gnames, cnames) = generic_name_sets(&def.generics);
+        let mut subst = template.subst.clone();
+        let mut const_subst = template.const_subst.clone();
+        self.seed_turbofish(&def.generics, type_args, &mut subst, &mut const_subst)?;
+        let params: Vec<&ast_types::Type> = def.params.iter().map(|p| &p.ty).collect();
+        self.lower_generic_args(
+            &params,
+            args,
+            &gnames,
+            &cnames,
+            &mut subst,
+            &mut const_subst,
+        )
+    }
+
     pub(crate) fn instantiate_generic_method(
         &mut self,
         key: &str,
@@ -369,25 +451,10 @@ impl Lowerer {
             }
         })?;
         let def = &template.def;
-        let (gnames, cnames): (Vec<_>, Vec<_>) = def
-            .generics
-            .iter()
-            .partition(|g| matches!(g.kind, ast_types::GenericParamKind::Type));
-        let gnames = gnames.iter().map(|g| g.name.name.clone()).collect();
-        let cnames = cnames.iter().map(|g| g.name.name.clone()).collect();
-
+        let (gnames, cnames) = generic_name_sets(&def.generics);
         let mut subst = template.subst.clone();
         let mut const_subst = template.const_subst.clone();
-        for (gp, arg) in def.generics.iter().zip(type_args) {
-            match arg {
-                ast_types::GenericArg::Const { value, .. } => {
-                    const_subst.insert(gp.name.name.clone(), *value as u64);
-                }
-                ast_types::GenericArg::Type(ty) => {
-                    subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
-                }
-            }
-        }
+        self.seed_turbofish(&def.generics, type_args, &mut subst, &mut const_subst)?;
         for (param, larg) in def.params.iter().zip(lowered_args) {
             self.unify_ast_hir(
                 &param.ty,
@@ -408,14 +475,9 @@ impl Lowerer {
             });
         }
 
-        // `__` cannot appear in a user's method name, so the instance never collides with
-        // a method the type declares.
-        let name = crate::mangle_instance(
-            &format!("{}_", def.name.name),
-            &def.generics,
-            &subst,
-            &const_subst,
-        );
+        // The instance marker holds a character no name can, so the instance never
+        // collides with a method the type declares.
+        let name = crate::mangle_instance(&def.name.name, &def.generics, &subst, &const_subst);
         let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
         let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
         let signature = self.method_signature(&template.self_type, def);
@@ -527,4 +589,20 @@ impl Lowerer {
             span: template.span,
         })
     }
+}
+
+/// The names of `generics` split by kind: type parameters, then const parameters.
+pub(crate) fn generic_name_sets(
+    generics: &[ast_types::GenericParam],
+) -> (
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+) {
+    let (types, consts): (Vec<_>, Vec<_>) = generics
+        .iter()
+        .partition(|g| matches!(g.kind, ast_types::GenericParamKind::Type));
+    (
+        types.iter().map(|g| g.name.name.clone()).collect(),
+        consts.iter().map(|g| g.name.name.clone()).collect(),
+    )
 }

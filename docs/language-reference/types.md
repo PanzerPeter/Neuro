@@ -198,6 +198,9 @@ val d = 1.5e-5f64     // fractional + exponent with suffix
 
 Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the literal; no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
 
+A float literal that rounds to infinity in its type is an error: `1e400`, `1e39f32` and
+`70000.0f16` are refused, as an integer literal too large for its type is.
+
 #### Float Methods
 
 | Method | Returns | Behavior |
@@ -708,8 +711,9 @@ func main() -> i32 {
 - `&T` is itself `Copy`: passing or re-borrowing a reference duplicates the pointer.
 - A method call **auto-derefs** its receiver through any number of `&` and `&mut`:
   `r.len()` on a `&string`, `r.method()` on a `&Struct` or a `& &Struct`, and `r.abs()` on a
-  `&f64` behave as if applied to the referent. Field access reads through one borrow
-  (`r.field` on a `&Struct`).
+  `&f64` behave as if applied to the referent. A field read does too (`r.field` on a
+  `&Struct` or a `& &Struct`); a field write goes through one `&mut`.
+- `&&T` is a borrow of a borrow, the same type as `& &T`, and `&&x` borrows `&x`.
 - Every built-in operator reads a borrowed operand: see
   [Reading through a borrow](#reading-through-a-borrow).
 - Only a **place** (a `val`/`mut`/parameter binding) can be borrowed. Borrowing a

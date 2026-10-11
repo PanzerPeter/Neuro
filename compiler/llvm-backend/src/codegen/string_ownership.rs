@@ -157,6 +157,226 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
     }
 }
 
+/// The program with a `.clone()` around every constant `string` a function returns
+/// beside an allocation, or `None` when no function mixes the two.
+///
+/// A function counts as handing its caller a buffer only when every exit allocates, so one
+/// `"info"` arm beside a `"warn {k}"` arm made every result unowned, and the allocated
+/// ones leaked. Copying the constant (a literal, or a call to a function returning only
+/// literals) costs one allocation on that path and makes every path own its result,
+/// which the summary then sees. A function returning only constants is left alone: it
+/// never allocates and its results never reach `free`.
+pub(crate) fn promote_literal_exits(items: &[HirItem]) -> Option<Vec<HirItem>> {
+    let bodies = string_returning_bodies(items);
+    let shadowed = shadowed_names(items);
+    // Functions every exit of which is a literal, or a call to another such function:
+    // what they return is always `.rodata`, so a copy of it is as safe as a literal's.
+    let mut constant: HashSet<String> = HashSet::new();
+    loop {
+        let grown: Vec<String> = bodies
+            .iter()
+            .filter(|(name, _)| !constant.contains(name) && !shadowed.contains(name))
+            .filter(|(_, exits)| {
+                !exits.is_empty() && exits.iter().all(|exit| is_constant_string(exit, &constant))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        if grown.is_empty() {
+            break;
+        }
+        constant.extend(grown);
+    }
+    let mut producers: HashSet<String> = HashSet::new();
+    loop {
+        let grown: Vec<String> = bodies
+            .iter()
+            .filter(|(name, _)| !producers.contains(name) && !shadowed.contains(name))
+            .filter(|(_, exits)| {
+                exits.iter().any(|exit| allocates(exit, &producers))
+                    && exits.iter().all(|exit| {
+                        is_constant_string(exit, &constant) || allocates(exit, &producers)
+                    })
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        if grown.is_empty() {
+            break;
+        }
+        producers.extend(grown);
+    }
+    let promoted: HashSet<String> = bodies
+        .iter()
+        .filter(|(name, exits)| {
+            producers.contains(name) && exits.iter().any(|exit| is_constant_string(exit, &constant))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    if promoted.is_empty() {
+        return None;
+    }
+    let mut items = items.to_vec();
+    let mut copy = |exit: &mut HirExpr| copy_if_constant(exit, &constant);
+    for item in &mut items {
+        match item {
+            HirItem::Function(func) if promoted.contains(&func.name) => {
+                copy_constant_exits(&mut func.body, &mut copy);
+            }
+            HirItem::Closure(closure) if promoted.contains(&closure.name) => {
+                copy_constant_exits(&mut closure.body, &mut copy);
+            }
+            HirItem::Impl(impl_def) => {
+                let type_name = impl_def.type_name.clone();
+                for method in &mut impl_def.methods {
+                    if promoted.contains(&format!("{}__{}", type_name, method.name)) {
+                        copy_constant_exits(&mut method.body, &mut copy);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(items)
+}
+
+/// Whether `expr` is always a `.rodata` string: a literal, or a call to a function that
+/// returns only those.
+fn is_constant_string(expr: &HirExpr, constant: &HashSet<String>) -> bool {
+    match &expr.kind {
+        HirExprKind::Literal(shared_types::Literal::String(_)) => true,
+        HirExprKind::Call { callee, .. } => {
+            callee_key(callee).is_some_and(|key| constant.contains(&key))
+        }
+        _ => false,
+    }
+}
+
+/// The name a call to `callee` is summarized under: a function, an associated function
+/// or a method on a user type, keyed as [`allocates`] keys them.
+fn callee_key(callee: &HirExpr) -> Option<String> {
+    match &callee.kind {
+        HirExprKind::Variable(name) => Some(name.clone()),
+        HirExprKind::Path { type_name, member } => Some(format!("{}__{}", type_name, member)),
+        HirExprKind::FieldAccess { object, field } => match object.ty.referent() {
+            HirType::Struct(type_name) | HirType::Enum(type_name) => {
+                Some(format!("{}__{}", type_name, field))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Wrap each constant exit of `body` in `.clone()`, visiting exactly the exits
+/// [`string_returning_bodies`] enumerates: statement-level `return`s and the tail's
+/// branch tails.
+fn copy_constant_exits(body: &mut [HirStmt], copy: &mut dyn FnMut(&mut HirExpr)) {
+    for_each_return_mut(body, copy);
+    block_tail_mut(body, copy);
+}
+
+fn copy_if_constant(expr: &mut HirExpr, constant: &HashSet<String>) {
+    if !is_constant_string(expr, constant) {
+        return;
+    }
+    let value = expr.clone();
+    let callee = HirExpr::new(
+        HirExprKind::FieldAccess {
+            object: Box::new(value),
+            field: CLONE_METHOD.to_string(),
+        },
+        expr.ty.clone(),
+        expr.span,
+    );
+    *expr = HirExpr::new(
+        HirExprKind::Call {
+            callee: Box::new(callee),
+            args: Vec::new(),
+        },
+        expr.ty.clone(),
+        expr.span,
+    );
+}
+
+/// [`collect_returns`], visiting each returned value mutably.
+fn for_each_return_mut(stmts: &mut [HirStmt], visit: &mut dyn FnMut(&mut HirExpr)) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Return {
+                value: Some(value), ..
+            } => visit(value),
+            HirStmt::If {
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => {
+                for_each_return_mut(then_block, visit);
+                for (_, block) in else_if_blocks {
+                    for_each_return_mut(block, visit);
+                }
+                if let Some(block) = else_block {
+                    for_each_return_mut(block, visit);
+                }
+            }
+            HirStmt::While { body, .. }
+            | HirStmt::ForRange { body, .. }
+            | HirStmt::ForEach { body, .. } => for_each_return_mut(body, visit),
+            HirStmt::ValElse { else_block, .. } => for_each_return_mut(else_block, visit),
+            _ => {}
+        }
+    }
+}
+
+/// [`tail_exits`], visiting each branch tail mutably.
+fn for_each_tail_mut(tail: &mut HirExpr, visit: &mut dyn FnMut(&mut HirExpr)) {
+    match &mut tail.kind {
+        HirExprKind::If {
+            then_block,
+            else_if_blocks,
+            else_block: Some(else_block),
+            ..
+        } => {
+            block_tail_mut(then_block, visit);
+            for (_, block) in else_if_blocks {
+                block_tail_mut(block, visit);
+            }
+            block_tail_mut(else_block, visit);
+        }
+        HirExprKind::Match { arms, .. } => {
+            for arm in arms {
+                for_each_tail_mut(&mut arm.body, visit);
+            }
+        }
+        HirExprKind::Block { stmts } => block_tail_mut(stmts, visit),
+        _ => visit(tail),
+    }
+}
+
+/// [`block_tail_exits`], visiting each exit mutably.
+fn block_tail_mut(stmts: &mut [HirStmt], visit: &mut dyn FnMut(&mut HirExpr)) {
+    let Some((HirStmt::Expr(tail), earlier)) = stmts.split_last_mut() else {
+        return;
+    };
+    if let HirExprKind::Variable(name) = &tail.kind
+        && local_initializer(earlier, name).is_some()
+    {
+        let name = name.clone();
+        let init = earlier.iter_mut().rev().find_map(|stmt| match stmt {
+            HirStmt::VarDecl {
+                name: declared,
+                init,
+                ..
+            } if *declared == name => init.as_mut(),
+            _ => None,
+        });
+        if let Some(init) = init {
+            for_each_tail_mut(init, visit);
+        }
+        return;
+    }
+    for_each_tail_mut(tail, visit);
+}
+
 /// The index of the `string` parameter `exit` hands back unchanged: a read of it, or a
 /// call to a known forwarder whose forwarded argument is one.
 fn forwarded_by(
@@ -247,6 +467,18 @@ fn callables(items: &[HirItem]) -> Vec<Callable<'_>> {
                     ));
                 }
             }
+            // A closure's lifted body, keyed by its generated name, which an indirect call
+            // through a binding the literal initialized resolves to. Its environment
+            // pointer is not in the parameter list, and captures are copies, never params.
+            HirItem::Closure(closure) => out.push((
+                closure.name.clone(),
+                closure
+                    .params
+                    .iter()
+                    .map(|p| (p.name.as_str(), &p.ty))
+                    .collect(),
+                closure.body.as_slice(),
+            )),
             _ => {}
         }
     }
@@ -276,6 +508,9 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
                     method.body.as_slice(),
                 )
             })),
+            HirItem::Closure(closure) => {
+                returning.push((closure.name.clone(), &closure.return_type, &closure.body))
+            }
             _ => {}
         }
     }
@@ -290,9 +525,7 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
             continue;
         }
         collect_returns(body, &mut exits);
-        if let Some(HirStmt::Expr(tail)) = body.last()
-            && !tail_exits(tail, &mut exits)
-        {
+        if matches!(body.last(), Some(HirStmt::Expr(_))) && !block_tail_exits(body, &mut exits) {
             exits.clear();
         }
         out.push((name, exits));
@@ -303,11 +536,7 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
 /// The values a tail expression leaves through: itself, or for an `if` with an `else`, a
 /// `match` or a block, each branch's own tail. `false` when a branch ends in anything
 /// but an expression, whose value this cannot name.
-fn tail_exits<'a>(tail: &'a HirExpr, out: &mut Vec<&'a HirExpr>) -> bool {
-    let block_tail = |stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>| match stmts.last() {
-        Some(HirStmt::Expr(value)) => tail_exits(value, out),
-        _ => false,
-    };
+pub(crate) fn tail_exits<'a>(tail: &'a HirExpr, out: &mut Vec<&'a HirExpr>) -> bool {
     match &tail.kind {
         HirExprKind::If {
             then_block,
@@ -315,19 +544,51 @@ fn tail_exits<'a>(tail: &'a HirExpr, out: &mut Vec<&'a HirExpr>) -> bool {
             else_block: Some(else_block),
             ..
         } => {
-            block_tail(then_block, out)
+            block_tail_exits(then_block, out)
                 && else_if_blocks
                     .iter()
-                    .all(|(_, block)| block_tail(block, out))
-                && block_tail(else_block, out)
+                    .all(|(_, block)| block_tail_exits(block, out))
+                && block_tail_exits(else_block, out)
         }
         HirExprKind::Match { arms, .. } => arms.iter().all(|arm| tail_exits(&arm.body, out)),
-        HirExprKind::Block { stmts } => block_tail(stmts, out),
+        HirExprKind::Block { stmts } => block_tail_exits(stmts, out),
         _ => {
             out.push(tail);
             true
         }
     }
+}
+
+/// The values a statement list leaves through its tail. A tail naming an immutable `val`
+/// the same list declares hands on that `val`'s value, moved out of it, so it is read as
+/// the initializer: `val b = "ab{i}"` then `b` leaves through the interpolation.
+fn block_tail_exits<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) -> bool {
+    let Some((HirStmt::Expr(tail), earlier)) = stmts.split_last() else {
+        return false;
+    };
+    if let HirExprKind::Variable(name) = &tail.kind
+        && let Some(init) = local_initializer(earlier, name)
+    {
+        return tail_exits(init, out);
+    }
+    tail_exits(tail, out)
+}
+
+/// The initializer of the binding `name` names after `stmts`, when the last declaration
+/// of it there is an immutable `val`. A `mut` binding may hold anything by then, and a
+/// name a later `val ... else` or `const` binds is not the `val`'s.
+fn local_initializer<'a>(stmts: &'a [HirStmt], name: &str) -> Option<&'a HirExpr> {
+    stmts.iter().rev().find_map(|stmt| match stmt {
+        HirStmt::VarDecl {
+            name: declared,
+            init,
+            mutable,
+            ..
+        } if declared == name => Some(if *mutable { None } else { init.as_ref() }),
+        HirStmt::ValElse { bindings, .. } if bindings.iter().any(|b| b.name == name) => Some(None),
+        HirStmt::Const { name: declared, .. } if declared == name => Some(None),
+        _ => None,
+    })?
 }
 
 /// Every `return value` in a statement list, including the nested blocks control can
@@ -401,6 +662,15 @@ fn returns_inside_expressions(body: &[HirStmt]) -> bool {
 fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
     match &expr.kind {
         HirExprKind::InterpString { .. } => true,
+        HirExprKind::If {
+            else_block: Some(_),
+            ..
+        }
+        | HirExprKind::Match { .. }
+        | HirExprKind::Block { .. } => {
+            let mut tails = Vec::new();
+            tail_exits(expr, &mut tails) && tails.iter().all(|tail| allocates(tail, producers))
+        }
         HirExprKind::NewtypeConstruct { value, .. } => allocates(value, producers),
         // A collection copies a `string` out of its slot, so the read owns the copy.
         HirExprKind::Index { object, .. } => {
@@ -947,5 +1217,58 @@ fn walk_stmts(stmts: &[HirStmt], visit: &mut impl FnMut(&HirExpr)) {
             HirStmt::Expr(expr) => walk(expr, visit),
             HirStmt::Continue { .. } => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The summary of `source`, after the literal-copy pre-pass `build_module` runs.
+    fn summary(source: &str) -> StringOwnership {
+        let ast = syntax_parsing::parse(source).expect("parsing failed");
+        let hir = hir_lowering::lower_program(&ast).expect("lowering failed");
+        let promoted = promote_literal_exits(&hir.items);
+        analyze(promoted.as_deref().unwrap_or(&hir.items))
+    }
+
+    #[test]
+    fn regression_bug_103_a_literal_beside_an_allocation_is_copied() {
+        let owned = summary(
+            "func label(k: i32) -> string {\n    match k {\n        0 => \"info\",\n        _ => \"warn {k}\",\n    }\n}\nfunc pick(f: bool, a: string) -> string {\n    if f { return \"none\" }\n    return a + \"x\"\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(owned.returns_owned("label"));
+        assert!(owned.returns_owned("pick"));
+    }
+
+    #[test]
+    fn regression_bug_103_a_call_returning_only_literals_is_copied_like_one() {
+        let owned = summary(
+            "func flag(on: bool) -> string {\n    if on { return \"on\" }\n    return \"off\"\n}\nfunc describe(k: i32) -> string {\n    match k {\n        0 => flag(true),\n        _ => \"n {k}\",\n    }\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(owned.returns_owned("describe"));
+        // A function of constants alone allocates nothing, so its results never reach
+        // `free`.
+        assert!(!owned.returns_owned("flag"));
+    }
+
+    #[test]
+    fn regression_bug_103_a_function_returning_only_literals_is_left_alone() {
+        let source = "func lits(k: i32) -> string { if k == 0 { \"a\" } else { \"bb\" } }\nfunc main() -> i32 { 0 }\n";
+        let ast = syntax_parsing::parse(source).expect("parsing failed");
+        let hir = hir_lowering::lower_program(&ast).expect("lowering failed");
+        assert!(promote_literal_exits(&hir.items).is_none());
+        assert!(!analyze(&hir.items).returns_owned("lits"));
+    }
+
+    #[test]
+    fn a_tail_naming_an_immutable_local_val_returns_its_initializer() {
+        let owned = summary(
+            "func build(i: i32) -> string {\n    val b = \"ab{i}\"\n    b\n}\nfunc branch(c: bool, i: i32) -> string {\n    val b = if c { \"a{i}\" } else { \"bb{i}\" }\n    b\n}\nfunc reassigned(i: i32) -> string {\n    mut b = \"ab{i}\"\n    b = \"lit\"\n    b\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(owned.returns_owned("build"));
+        assert!(owned.returns_owned("branch"));
+        // A `mut` binding may hold a literal by the time the tail reads it.
+        assert!(!owned.returns_owned("reassigned"));
     }
 }

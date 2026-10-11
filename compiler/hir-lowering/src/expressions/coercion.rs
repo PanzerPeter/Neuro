@@ -70,7 +70,7 @@ pub(crate) fn auto_deref(mut expr: HirExpr) -> HirExpr {
 }
 
 /// A number, `bool` or `char`: the values a built-in operator reads in one load.
-fn is_scalar(ty: &HirType) -> bool {
+pub(crate) fn is_scalar(ty: &HirType) -> bool {
     matches!(
         ty,
         HirType::Bool | HirType::Char | HirType::F16 | HirType::BF16

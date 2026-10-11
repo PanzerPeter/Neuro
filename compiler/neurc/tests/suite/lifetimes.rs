@@ -82,3 +82,87 @@ func main() -> i32 { return 0 }
         .expect_err("an undeclared lifetime must be a compile error");
     assert!(err.contains("undeclared lifetime `'b`"), "{err}");
 }
+
+#[test]
+fn regression_bug_099_a_returned_aggregate_may_not_borrow_a_local() {
+    // A borrow carried out inside a struct, an enum payload, a tuple or an `Option`
+    // dangles exactly as a bare `&s` does, and so does one in each arm of a tail `if`.
+    let test = CompileTest::new();
+    let err = test
+        .check(
+            "aggregate_borrow.nr",
+            r#"
+struct H { r: &string }
+enum E { A(&string), B }
+struct Outer { h: H, n: i32 }
+func mk_struct() -> H {
+    val s = "he" + "llo"
+    H { r: &s }
+}
+func mk_enum() -> E {
+    val s = "he" + "llo"
+    E::A(&s)
+}
+func mk_tuple() -> (&string, i32) {
+    val s = "he" + "llo"
+    return (&s, 1)
+}
+func mk_nested(flag: bool) -> Outer {
+    val s = "x" + "y"
+    if flag { Outer { h: H { r: &s }, n: 1 } } else { Outer { h: H { r: &s }, n: 2 } }
+}
+func mk_option() -> Option<&string> {
+    val s = "x" + "y"
+    Option::Some(&s)
+}
+func main() -> i32 { 0 }
+"#,
+        )
+        .expect_err("borrows of locals must not be returned");
+    assert_eq!(
+        err.matches("cannot return a reference to 's'").count(),
+        6,
+        "{err}"
+    );
+    let err = test
+        .check(
+            "if_tail_borrow.nr",
+            r#"
+func f(c: bool) -> &string {
+    val s = "a" + "b"
+    if c { &s } else { &s }
+}
+func main() -> i32 { 0 }
+"#,
+        )
+        .expect_err("borrows of locals must not be returned");
+    assert_eq!(
+        err.matches("cannot return a reference to 's'").count(),
+        2,
+        "{err}"
+    );
+}
+
+#[test]
+fn regression_bug_099_a_returned_aggregate_may_borrow_a_parameter() {
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "aggregate_param_borrow.nr",
+            r#"
+struct H { r: &string }
+enum E { A(&string), B }
+func mk(s: &string) -> H { H { r: s } }
+func mk2(s: &string) -> E { E::A(s) }
+func mk3(s: &string) -> (&string, i32) { (s, 4) }
+func main() -> i32 {
+    val t = "abc"
+    val h = mk(&t)
+    val n = match mk2(&t) { E::A(r) => r.len(), E::B => 0 }
+    val p = mk3(&t)
+    (h.r.len() + n) as i32 + p.1 - 1
+}
+"#,
+        )
+        .expect("should compile and run");
+    assert_eq!(exit, 9);
+}

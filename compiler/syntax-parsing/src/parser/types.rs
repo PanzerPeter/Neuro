@@ -125,28 +125,21 @@ impl Parser {
             let amp = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'&'".to_string(),
             })?;
-            let lifetime =
-                if let Some(TokenKind::Lifetime(name)) = self.peek().map(|t| t.kind.clone()) {
-                    let lt_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
-                        expected: "lifetime".to_string(),
-                    })?;
-                    Some(Identifier {
-                        name,
-                        span: lt_token.span,
-                    })
-                } else {
-                    None
-                };
-            let mutable = self.check(&TokenKind::Mut);
-            if mutable {
-                self.advance(); // consume 'mut'
-            }
-            let inner = self.parse_type()?;
-            let span = amp.span.merge(inner.span());
+            return self.parse_reference_type_tail(amp.span);
+        }
+        // `&&T` lexes as one logical-and token. In a type it can only be two borrows,
+        // `& &T`, so the token is split: the second `&` takes the lifetime and `mut`.
+        if self.check(&TokenKind::AmpAmp) {
+            let amps = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
+                expected: "'&&'".to_string(),
+            })?;
+            let (outer, second) = split_amp_amp(amps.span);
+            let inner = self.parse_reference_type_tail(second)?;
+            let span = outer.merge(inner.span());
             return Ok(Type::Reference {
                 inner: Box::new(inner),
-                mutable,
-                lifetime,
+                mutable: false,
+                lifetime: None,
                 span,
             });
         }
@@ -513,6 +506,43 @@ impl Parser {
             span,
         })
     }
+}
+
+impl Parser {
+    /// Parse what follows a type's `&`: an optional lifetime, an optional `mut`, then the
+    /// referent, which is parsed recursively so the `&` distributes over whatever follows.
+    fn parse_reference_type_tail(&mut self, amp: Span) -> ParseResult<Type> {
+        let lifetime = if let Some(TokenKind::Lifetime(name)) = self.peek().map(|t| t.kind.clone())
+        {
+            let lt_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
+                expected: "lifetime".to_string(),
+            })?;
+            Some(Identifier {
+                name,
+                span: lt_token.span,
+            })
+        } else {
+            None
+        };
+        let mutable = self.check(&TokenKind::Mut);
+        if mutable {
+            self.advance(); // consume 'mut'
+        }
+        let inner = self.parse_type()?;
+        let span = amp.merge(inner.span());
+        Ok(Type::Reference {
+            inner: Box::new(inner),
+            mutable,
+            lifetime,
+            span,
+        })
+    }
+}
+
+/// The spans of the two `&`s a `&&` token stands for, one byte each.
+pub(super) fn split_amp_amp(span: Span) -> (Span, Span) {
+    let middle = span.start + 1;
+    (Span::new(span.start, middle), Span::new(middle, span.end))
 }
 
 #[cfg(test)]

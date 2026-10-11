@@ -42,8 +42,8 @@ GradsOf_f)`, built from `f`'s already-lowered HIR by `derive_reverses`, which `l
 once every function, generic instances and lifted closures included, is lowered: a `@grad` body
 may call any of them. `lower_program` only records the names of the `@grad` functions as it
 lowers them. A generic `@grad` template is derived per INSTANCE (recorded from the
-monomorphization drain), so each instance `f_g_...` gets its own `GradsOf_f_g_...` and
-`__f_g_...__rev` over concrete shapes; an instance nothing calls is never emitted. A `@grad`
+monomorphization drain), so each instance `f$g_...` gets its own `GradsOf_f$g_...` and
+`__f$g_...__rev` over concrete shapes; an instance nothing calls is never emitted. A `@grad`
 METHOD (inherent, non-generic `impl`, borrowed receiver; the checker refuses every other form) is
 recorded as `(type, method)` by `lower_program` and derived by `derive_method_reverses` under the
 key `Type__method`: `GradsOf_Type__method` joins the items, and `__method__rev` is pushed into the
@@ -361,7 +361,7 @@ signature under a `type_subst` map (consulted by `resolve_type` for a parameter 
 per-instance name, enqueues the instance if unseen, and emits a `Call` to the mangled name. A
 worklist drains after the ordinary items. The backend pre-declares all functions, so emission
 order is irrelevant. `unify_ast_hir` also binds through an instance: `Option<U>` against
-`Opt_g_i32` reads the instance's arguments (`instance_args`, from `struct_instances` /
+`Opt$g_i32` reads the instance's arguments (`instance_args`, from `struct_instances` /
 `enum_instance_args`) and unifies them pairwise. An associated function of a generic type
 (`Cell::new(42)`, `generic_assoc_fn`) infers the type's instance the same way, plus any turbofish,
 and calls that instance's function (`lower_generic_assoc_call`).
@@ -386,12 +386,18 @@ before the impls were recorded is caught up by `register_existing_enum_instance_
 a `HirType::Newtype` with its resolved inner type when it names a newtype, a struct otherwise).
 A method call on a newtype receiver resolves through `impl_methods` as an enum's does.
 
-**The mangling scheme is load-bearing.** `mangle_instance` (`name_g_<type…>`) and
-`mangle_struct_instance` (`Base_g_<type…>`) use a **single**-underscore marker, deliberately
-avoiding `__`, because the backend recovers a method's receiver struct by splitting the method
-symbol on `__` and taking the first segment. Semantic analysis rejects a user name containing
-`__`, so the receiver segment never holds one. A generic method's instance name
-(`method__g_<type…>`) is the only method part that does, which the first-segment split allows.
+**The mangling scheme is load-bearing.** `mangle_instance` (`name$g_<type…>`) and
+`mangle_struct_instance` (`Base$g_<type…>`) use a `$g` marker. It avoids `__`, because the
+backend recovers a method's receiver struct by splitting the method symbol on `__` and taking
+the first segment, and semantic analysis rejects a user name containing `__`, so the receiver
+segment never holds one. It holds `$`, which no identifier can, so no declared function or type
+shares an instance's name (with `_g`, a function named `size_g_i32` took the symbol of
+`size<i32>`). A generic method's instance name is `method$g_<type…>`. `mangle_type` makes each
+type token self-delimiting so the concatenation is injective: a declared type's name is prefixed
+with its length (`5Inner`), a trait object's too (`dyn4Show`), and a function type spells its
+arity, parameters and result (`fn1_i32_bool`). Without it the struct `tup2_i32_i32` and the
+tuple `(i32, i32)` shared a token, as did `Pair<A_B, C>` and `Pair<A, B_C>`, and every function
+type.
 
 **Generic methods** (a method's own `<U>`) are templates too. `register_impl_methods` (a plain
 impl) and `register_instance_methods` (each generic-impl instance) store them in
@@ -429,7 +435,7 @@ lengths.
 `mono_enum_pending` worklist, drained ahead of the struct worklist. A generic `Item::Enum` is
 registered as a template and never lowered directly; `instantiate_generic_enum` resolves its
 variants under the argument substitution and emits one ordinary `HirItem::Enum` per instance
-(named by `mangle_struct_instance`, e.g. `Opt_g_i32`), so backends stay generic-unaware.
+(named by `mangle_struct_instance`, e.g. `Opt$g_i32`), so backends stay generic-unaware.
 Construction mirrors the checker: the instance comes from the expected type, else the payload is
 unified against the template, else any remaining parameter is taken from the enclosing return
 instance. To make that fallback available, `lower_body` tracks the declared return type in

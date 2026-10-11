@@ -339,6 +339,14 @@ impl TypeChecker {
             return;
         }
         self.enter_generic_scope(&def.generics, &def.lifetimes);
+        // Read before the methods are registered, so these are the impl's bounds alone.
+        let bounds = self.generic_bounds.clone();
+        if !bounds.is_empty() {
+            for method in &def.methods {
+                self.impl_bounds
+                    .insert(format!("{}__{}", base, method.name.name), bounds.clone());
+            }
+        }
         let _ = self.register_impl(def);
         self.exit_generic_scope();
         self.generic_impls
@@ -471,6 +479,32 @@ impl TypeChecker {
         Type::Struct(mangled)
     }
 
+    /// Whether every concrete argument of an instance meets the bounds of the impl that
+    /// declares `methods`. Arguments that still mention a type parameter count as met.
+    fn instance_meets_impl_bounds(
+        &self,
+        base: &str,
+        methods: &[ast_types::MethodDef],
+        impl_subst: &HashMap<String, Type>,
+    ) -> bool {
+        let Some(bounds) = methods
+            .first()
+            .and_then(|m| self.impl_bounds.get(&format!("{}__{}", base, m.name.name)))
+        else {
+            return true;
+        };
+        bounds.iter().all(|(param, param_bounds)| {
+            let Some(concrete) = impl_subst.get(param) else {
+                return true;
+            };
+            self.mentions_type_parameter(concrete)
+                || param_bounds.iter().all(|b| {
+                    !self.traits.contains_key(&b.trait_name)
+                        || self.satisfies_bound(concrete, &b.trait_name)
+                })
+        })
+    }
+
     /// Register the methods of every generic `impl` of `base` for the concrete
     /// instance `mangled`, substituting the impl's type parameters (mapped positionally
     /// from the impl's type arguments to the struct's concrete arguments) into each
@@ -535,6 +569,12 @@ impl TypeChecker {
             let Some(trait_ident) = &imp.trait_name else {
                 continue;
             };
+            // `impl<T: Show> Show for Cell<T>` makes `Cell<N>` a `Show` only when `N` is
+            // one. An argument still naming a type parameter is undecided here and keeps
+            // the conformance; its own bound is checked where it is used.
+            if !self.instance_meets_impl_bounds(base, &imp.methods, &impl_subst) {
+                continue;
+            }
             let trait_name = trait_ident.name.clone();
             if let Some(bindings) = self
                 .impl_assoc

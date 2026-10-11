@@ -16,6 +16,12 @@ use crate::{Lowerer, LoweringError, is_float, is_integer};
 
 /// The gradient slot's two surface accessors. `.backward()` is a statement the block
 /// lowering pairs with its `@grad` call, never an expression.
+/// The scalar types a parameter may name. An argument to one is typed by it in a
+/// generic call too, so a literal there takes it.
+const SCALAR_TYPE_NAMES: [&str; 14] = [
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "bf16", "f32", "f64", "bool",
+    "char",
+];
 const GRAD_METHOD: &str = "grad";
 const HESSIAN_METHOD: &str = "hessian";
 const ZERO_GRAD_METHOD: &str = "zero_grad";
@@ -90,10 +96,8 @@ impl Lowerer {
                 .generic_methods
                 .contains_key(&format!("{}__{}", type_name.name, member.name)) =>
             {
-                let mut lowered_args = Vec::with_capacity(args.len());
-                for arg in args {
-                    lowered_args.push(self.lower_expr(arg, None)?);
-                }
+                let key = format!("{}__{}", type_name.name, member.name);
+                let lowered_args = self.lower_generic_method_args(&key, type_args, args)?;
                 self.generic_assoc_instance_call(
                     &type_name.name,
                     &member.name,
@@ -342,21 +346,15 @@ impl Lowerer {
             }
         }
 
-        // Arguments drive inference, so lower them with no expected type first.
-        let mut lowered_args = Vec::with_capacity(args.len());
-        for arg in args {
-            lowered_args.push(self.lower_expr(arg, None)?);
-        }
-        for (param, larg) in template.params.iter().zip(lowered_args.iter()) {
-            self.unify_ast_hir(
-                &param.ty,
-                &larg.ty,
-                &gnames,
-                &cnames,
-                &mut subst,
-                &mut const_subst,
-            );
-        }
+        let params: Vec<&ast_types::Type> = template.params.iter().map(|p| &p.ty).collect();
+        let lowered_args = self.lower_generic_args(
+            &params,
+            args,
+            &gnames,
+            &cnames,
+            &mut subst,
+            &mut const_subst,
+        )?;
 
         // Resolve the concrete parameter and return types under the inferred bindings.
         let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
@@ -410,6 +408,45 @@ impl Lowerer {
         ))
     }
 
+    /// Lower a generic call's arguments in order, unifying each with its parameter as it
+    /// goes. An argument whose parameter is a scalar type, written as one or a parameter
+    /// already bound by the turbofish or an earlier argument, is lowered against that
+    /// type, so a literal there takes it, as in a non-generic call; the checker types
+    /// the argument by the same rule.
+    pub(crate) fn lower_generic_args(
+        &mut self,
+        params: &[&ast_types::Type],
+        args: &[Expr],
+        gnames: &std::collections::HashSet<String>,
+        cnames: &std::collections::HashSet<String>,
+        subst: &mut std::collections::HashMap<String, HirType>,
+        const_subst: &mut std::collections::HashMap<String, u64>,
+    ) -> Result<Vec<HirExpr>, LoweringError> {
+        let mut lowered = Vec::with_capacity(args.len());
+        for (i, arg) in args.iter().enumerate() {
+            let Some(param) = params.get(i) else {
+                lowered.push(self.lower_expr(arg, None)?);
+                continue;
+            };
+            let expected = match param {
+                ast_types::Type::Named(ident) => match subst.get(&ident.name) {
+                    Some(bound) => Some(bound.clone()),
+                    None if gnames.contains(&ident.name) || cnames.contains(&ident.name) => None,
+                    None if SCALAR_TYPE_NAMES.contains(&ident.name.as_str()) => {
+                        Some(self.resolve_type(param)?)
+                    }
+                    None => None,
+                },
+                _ => None,
+            }
+            .filter(super::coercion::is_scalar);
+            let larg = self.lower_expr(arg, expected.as_ref())?;
+            self.unify_ast_hir(param, &larg.ty, gnames, cnames, subst, const_subst);
+            lowered.push(larg);
+        }
+        Ok(lowered)
+    }
+
     /// The associated function `member` a generic `impl` of the template `base` declares.
     fn generic_assoc_fn(&self, base: &str, member: &str) -> Option<&ast_types::MethodDef> {
         self.generic_impls
@@ -430,42 +467,29 @@ impl Lowerer {
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         let generics = self.template_generics(base);
-        let params: Vec<ast_types::Type> = self
+        let (params, own_generics): (Vec<ast_types::Type>, Vec<ast_types::GenericParam>) = self
             .generic_assoc_fn(base, member)
-            .map(|m| m.params.iter().map(|p| p.ty.clone()).collect())
+            .map(|m| {
+                let params = m.params.iter().map(|p| p.ty.clone()).collect();
+                (params, m.generics.clone())
+            })
             .unwrap_or_default();
-        let (gnames, cnames): (Vec<_>, Vec<_>) = generics
-            .iter()
-            .partition(|g| matches!(g.kind, ast_types::GenericParamKind::Type));
-        let gnames = gnames.iter().map(|g| g.name.name.clone()).collect();
-        let cnames = cnames.iter().map(|g| g.name.name.clone()).collect();
-
+        // The function's own parameters follow the type's, in the names and in the
+        // turbofish, so an argument they fix is typed by them as the checker types it.
+        let all_generics: Vec<_> = generics.iter().chain(&own_generics).cloned().collect();
+        let (gnames, cnames) = crate::items::generic_name_sets(&all_generics);
         let mut subst = std::collections::HashMap::new();
         let mut const_subst = std::collections::HashMap::new();
-        for (gp, arg) in generics.iter().zip(type_args) {
-            match arg {
-                ast_types::GenericArg::Const { value, .. } => {
-                    const_subst.insert(gp.name.name.clone(), *value as u64);
-                }
-                ast_types::GenericArg::Type(ty) => {
-                    subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
-                }
-            }
-        }
-        let mut lowered_args = Vec::with_capacity(args.len());
-        for arg in args {
-            lowered_args.push(self.lower_expr(arg, None)?);
-        }
-        for (param, larg) in params.iter().zip(&lowered_args) {
-            self.unify_ast_hir(
-                param,
-                &larg.ty,
-                &gnames,
-                &cnames,
-                &mut subst,
-                &mut const_subst,
-            );
-        }
+        self.seed_turbofish(&all_generics, type_args, &mut subst, &mut const_subst)?;
+        let params: Vec<&ast_types::Type> = params.iter().collect();
+        let lowered_args = self.lower_generic_args(
+            &params,
+            args,
+            &gnames,
+            &cnames,
+            &mut subst,
+            &mut const_subst,
+        )?;
 
         let mut instance_args = Vec::with_capacity(generics.len());
         for gp in &generics {
@@ -779,10 +803,7 @@ impl Lowerer {
         }
 
         if let Some(key) = self.generic_method_key(recv.referent(), method) {
-            let mut lowered_args = Vec::with_capacity(args.len());
-            for arg in args {
-                lowered_args.push(self.lower_expr(arg, None)?);
-            }
+            let lowered_args = self.lower_generic_method_args(&key, type_args, args)?;
             let (name, _, ret) = self.instantiate_generic_method(&key, type_args, &lowered_args)?;
             let callee = HirExpr::new(
                 HirExprKind::FieldAccess {

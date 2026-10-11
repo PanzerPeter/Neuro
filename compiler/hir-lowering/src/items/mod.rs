@@ -17,6 +17,7 @@ use shared_types::Literal;
 use crate::{Lowerer, LoweringError};
 
 mod mono;
+pub(crate) use mono::generic_name_sets;
 mod register;
 
 /// The attribute pinning a function's body to a GPU. Its form (on a free function, at

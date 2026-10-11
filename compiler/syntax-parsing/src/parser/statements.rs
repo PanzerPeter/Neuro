@@ -249,15 +249,16 @@ impl Parser {
     /// single-`Stmt` shape of [`Parser::parse_stmt`].
     pub(crate) fn parse_stmt_into(&mut self, out: &mut Vec<Stmt>) -> ParseResult<()> {
         self.nested(|p| p.at_statement_level(|p| p.parse_stmt_into_here(out)))?;
-        self.expect_statement_end()
+        self.expect_line_end("a newline or '}' to end the statement")
     }
 
     /// A statement ends at a newline, the `}` closing its block, or the end of input.
     /// Anything else on the same line is a second expression the statement never
     /// read: without this, `val x = 5 6` bound 5 and parsed `6` as its own statement.
     /// A newline already consumed counts too, since `if c { }` with no `else` skips
-    /// the line break while looking for one.
-    fn expect_statement_end(&self) -> ParseResult<()> {
+    /// the line break while looking for one. Items obey the same rule, so `expected`
+    /// names which of the two ended.
+    pub(super) fn expect_line_end(&self, expected: &str) -> ParseResult<()> {
         let ended_on_newline = self
             .current
             .checked_sub(1)
@@ -273,7 +274,7 @@ impl Parser {
             {
                 Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "a newline or '}' to end the statement".to_string(),
+                    expected: expected.to_string(),
                     span: token.span,
                 })
             }

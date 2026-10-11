@@ -90,8 +90,10 @@ Methods live in the same flat function table as free functions, keyed by
 recovers a method's receiver type by splitting its symbol on `__`, so no generated name may
 introduce a second `__`. Two consequences:
 
-- Monomorphized instance names use a single-underscore marker, `_g_`, for a generic struct
-  instance (`Pair_g_i32_f64`) and for a generic function instance (`identity_g_i32`).
+- Monomorphized instance names use a `$g` marker, which holds no `__` and no identifier
+  character, for a generic struct instance (`Pair$g_i32_f64`) and for a generic function
+  instance (`identity$g_i32`). A type argument that is a declared type is prefixed with its
+  name's length (`Pair$g_5Inner`), so two different argument lists never spell alike.
 - User-declared identifiers may not contain `__` (pass 0z, `TypeError::ReservedNameSeparator`),
   so a user method can never collide with a generated instance or vtable-thunk symbol.
 

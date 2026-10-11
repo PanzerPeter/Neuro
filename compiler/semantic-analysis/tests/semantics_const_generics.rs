@@ -104,3 +104,58 @@ func main() -> i32 { 0 }"#;
             .any(|e| matches!(e, TypeError::ConstParamNotInteger { .. }))
     );
 }
+
+/// The span and reason of each `ConstHasNoValue` a program reports.
+fn no_value_errors(source: &str) -> Vec<(String, shared_types::Span)> {
+    match check(source) {
+        Ok(()) => Vec::new(),
+        Err(errors) => errors
+            .into_iter()
+            .filter_map(|e| match e {
+                TypeError::ConstHasNoValue { reason, span } => Some((reason, span)),
+                _ => None,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn regression_lim_213_where_predicate_without_a_value_is_refused() {
+    // A predicate whose arithmetic has no value cannot hold for any instance, so it is
+    // refused at the instantiation rather than skipped as if it were still symbolic.
+    for (source, operation) in [
+        (
+            "func f<const N: u32>(a: [i32; N]) -> i32 where N / 0 > 1 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
+            "N / 0",
+        ),
+        (
+            "func f<const N: u32>(a: [i32; N]) -> i32 where N % (N - 2) == 0 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
+            "N % (N - 2)",
+        ),
+        (
+            "func f<const N: u32>(a: [i32; N]) -> i32 where N * 10000000000000000000 * 10000000000000000000 > 0 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
+            "N * 10000000000000000000 * 10000000000000000000",
+        ),
+    ] {
+        let errors = no_value_errors(source);
+        assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+        let span = errors[0].1;
+        assert_eq!(&source[span.start..span.end], operation, "{source}");
+    }
+}
+
+#[test]
+fn regression_lim_213_constant_shift_outside_its_width_is_refused_with_a_span() {
+    let source = "const C: i32 = 1 << 40\nfunc main() -> i32 { C }";
+    let errors = no_value_errors(source);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(&source[errors[0].1.start..errors[0].1.end], "1 << 40");
+    for source in [
+        "const C: i32 = 1 << 31\nfunc main() -> i32 { C }",
+        "const C: u8 = 1 << 7\nfunc main() -> i32 { C as i32 }",
+    ] {
+        assert!(no_value_errors(source).is_empty(), "{source}");
+    }
+    let negative = "const C: i64 = 1 << -1\nfunc main() -> i32 { 0 }";
+    assert_eq!(no_value_errors(negative).len(), 1);
+}

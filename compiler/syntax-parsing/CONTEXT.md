@@ -128,13 +128,17 @@ the tuple-index parse, so it needs no expression grammar of its own.
   where a `{` cannot be a body block. Both restore the previous value on the error path too, so
   nesting composes: `if check(Point { x: 1 }) && flag { }` reads the literal inside the argument
   list and the trailing brace as the body.
-- **A statement ends at a newline, its block's `}`, or end of input.** `parse_stmt_into` checks
-  what follows (`expect_statement_end`), so `val x = 5 6` is an `UnexpectedToken` rather than a
-  binding of `5` followed by a stray statement `6`; a malformed literal the lexer splits
-  (`0b102`) is caught the same way. A newline already consumed counts, because an `if` with no
-  `else` skips the line break while looking for one. An `if` in *expression* position skips
-  newlines after a block only when an `else` follows (`skip_newlines_before_else`), so the
-  boundary rule below still applies to the line after it.
+- **A statement or an item ends at a newline, its block's `}`, or end of input.** `parse_stmt_into`
+  and the item loop check what follows (`expect_line_end`), so `struct A {} struct B {}` is an
+  error and `val x = 5 6` is an `UnexpectedToken` rather than a binding of `5` followed by a
+  stray statement `6`; a malformed literal the lexer splits (`0b102`) is caught the same way. A
+  newline already consumed counts, because an `if` with no `else` skips the line break while
+  looking for one. An `if` in *expression* position skips newlines after a block only when an
+  `else` follows (`skip_newlines_before_else`), so the boundary rule below still applies to the
+  line after it.
+- **`&&` in a type or prefix position is two borrows.** The lexer emits one logical-and token;
+  `parse_reference_type_tail` and the prefix arm split it (`split_amp_amp`, one byte of span
+  each), so `&&i32` and `&&a` read as `& &i32` and `& &a`.
 - **Statement boundaries.** `parse_expr_inner` treats a newline followed by `(`, `[`, `*`, `-`,
   `&`, `|` or `@` as a statement boundary: each can also begin an expression. `-`, `&` and `|`
   joined the set with BUG-069, before which a tail `-x` folded into the line above as a

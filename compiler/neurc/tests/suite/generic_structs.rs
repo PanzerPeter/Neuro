@@ -217,3 +217,123 @@ func main() -> i32 {
         "a non-Copy type argument must make the instance move, not copy"
     );
 }
+
+#[test]
+fn regression_bug_108_generic_impl_bounds_are_checked_at_the_call() {
+    // `impl<T: Show> Cell<T>`: a call on a `Cell<i32>` is refused at the call, not left
+    // to lowering. A where clause, a type parameter passed on without the bound, an
+    // associated function, and a bounded trait impl are refused the same way.
+    let test = CompileTest::new();
+    for source in [
+        r#"
+trait Show {
+    func show(&self) -> i32
+}
+
+struct Cell<T> {
+    v: T,
+}
+
+impl<T: Show> Cell<T> {
+    func get(&self) -> i32 {
+        self.v.show()
+    }
+}
+
+func main() -> i32 {
+    val c = Cell { v: 3 }
+    c.get()
+}
+"#,
+        r#"
+trait Show { func show(&self) -> i32 }
+struct Cell<T> { v: T }
+impl<T> Cell<T> where T: Show {
+    func get(&self) -> i32 { self.v.show() }
+    func make(v: T) -> Cell<T> { Cell { v } }
+}
+func through<U>(c: &Cell<U>) -> i32 { c.get() }
+func main() -> i32 {
+    val c = Cell::make(3)
+    0
+}
+"#,
+        r#"
+trait Show { func show(&self) -> i32 }
+struct Cell<T> { v: T }
+impl<T: Show> Show for Cell<T> { func show(&self) -> i32 { self.v.show() } }
+func use_show<S: Show>(s: &S) -> i32 { s.show() }
+func main() -> i32 {
+    val a = Cell { v: 3 }
+    use_show(&a)
+}
+"#,
+    ] {
+        let err = test
+            .check("bounds.nr", source)
+            .expect_err("a type argument missing the impl's bound must be refused");
+        assert!(
+            err.contains("does not implement required trait 'Show'"),
+            "{err}"
+        );
+        assert!(!err.contains("lowering"), "{err}");
+    }
+}
+
+#[test]
+fn regression_bug_108_an_instance_that_never_calls_a_bounded_method_compiles() {
+    // An unbounded `Cell<i32>` is fine while nothing calls `get`; the bounded impl is
+    // not emitted for it.
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "bounds_ok.nr",
+            r#"
+trait Show { func show(&self) -> i32 }
+@derive(Copy, Clone)
+struct N { v: i32 }
+impl Show for N { func show(&self) -> i32 { self.v } }
+struct Cell<T> { v: T }
+impl<T: Show> Cell<T> {
+    func get(&self) -> i32 { self.v.show() }
+    func twice(&self) -> i32 { self.get() + self.get() }
+    func make(v: T) -> Cell<T> { Cell { v } }
+}
+func via<U: Show>(c: &Cell<U>) -> i32 { c.get() }
+func main() -> i32 {
+    val c = Cell { v: N { v: 3 } }
+    val d = Cell::make(N { v: 4 })
+    val unused = Cell { v: 5 }
+    c.get() + c.twice() + via(&d) + unused.v - 1
+}
+"#,
+        )
+        .expect("should compile and run");
+    assert_eq!(exit, 17);
+    let exit = test
+        .compile_and_run(
+            "bounds_conformance.nr",
+            r#"
+trait Show { func show(&self) -> i32 }
+@derive(Copy, Clone)
+struct N { v: i32 }
+impl Show for N { func show(&self) -> i32 { self.v } }
+struct Cell<T> { v: T }
+impl<T: Show> Show for Cell<T> { func show(&self) -> i32 { self.v.show() * 2 } }
+enum Maybe<T> { Yes(T), No }
+impl<T: Show> Maybe<T> {
+    func get(self) -> i32 { match self { Maybe::Yes(x) => x.show(), Maybe::No => 0 } }
+}
+func use_show<S: Show>(s: &S) -> i32 { s.show() }
+func main() -> i32 {
+    val a = Cell { v: N { v: 2 } }
+    val b = Cell { v: Cell { v: N { v: 1 } } }
+    val m: Maybe<N> = Maybe::Yes(N { v: 6 })
+    val unused: Maybe<i32> = Maybe::No
+    use_show(&a) + use_show(&b) + m.get()
+}
+"#,
+        )
+        .expect("should compile and run");
+    assert_eq!(exit, 14);
+}

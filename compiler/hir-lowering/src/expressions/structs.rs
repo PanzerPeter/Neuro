@@ -180,7 +180,7 @@ impl Lowerer {
         };
         let names_base = instance
             .strip_prefix(base)
-            .is_some_and(|rest| rest.starts_with("_g_"));
+            .is_some_and(|rest| rest.starts_with("$g_"));
         if !names_base || !self.struct_instances.contains_key(instance) {
             return None;
         }

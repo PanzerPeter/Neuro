@@ -10,6 +10,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
 
 use super::peel_newtype;
+use crate::codegen::string_ownership::tail_exits;
 
 /// Whether this expression shape allocates the tensor buffer it hands back, so that
 /// nothing else can still own it.
@@ -84,6 +85,19 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::InterpString { .. } => true,
             // A newtype is its inner value: wrapping a fresh buffer hands it on unchanged.
             HirExprKind::NewtypeConstruct { value, .. } => self.produces_owned_string(value),
+            // A branch or a block yields one of its tails, so it hands over a buffer of
+            // its own exactly when every tail does. A tail that is not an expression (an
+            // arm that returns) leaves the value unnamed, and the answer is the safe one.
+            HirExprKind::If {
+                else_block: Some(_),
+                ..
+            }
+            | HirExprKind::Match { .. }
+            | HirExprKind::Block { .. } => {
+                let mut tails = Vec::new();
+                tail_exits(expr, &mut tails)
+                    && tails.iter().all(|tail| self.produces_owned_string(tail))
+            }
             // `+` yielding a `string` is `codegen_string_concat`, which always allocates
             // a `len1 + len2` buffer. No numeric addition produces a `string`, so the
             // result type alone identifies the concatenation.
@@ -123,8 +137,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 // A function whose every return path allocates hands the buffer to its
                 // caller, which is the one storing position that no expression shape
                 // can settle. The summary excludes a name a local binding shadows, so a
-                // closure called through the indirect path is not mistaken for it.
-                HirExprKind::Variable(name) => self.string_ownership.returns_owned(name),
+                // function value called through the indirect path is not mistaken for
+                // it; a closure whose lifted body is known is asked under that body's name.
+                HirExprKind::Variable(_) | HirExprKind::Closure { .. } => {
+                    match (self.lifted_closure_name(callee), &callee.kind) {
+                        (Some(lifted), _) => self.string_ownership.returns_owned(&lifted),
+                        (None, HirExprKind::Variable(name)) => {
+                            self.string_ownership.returns_owned(name)
+                        }
+                        (None, _) => false,
+                    }
+                }
                 _ => false,
             },
             _ => false,
@@ -220,6 +243,54 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// The run-time owner bit of a read-only argument that is a call to a `string`
+    /// forwarder, taken right after the argument is evaluated (the next argument's
+    /// evaluation would overwrite it). `s(a + b)` hands back the buffer it was given,
+    /// owned exactly when that argument was, and a read-only callee leaves it to the
+    /// caller, which has no binding to release it through.
+    pub(crate) fn forwarded_argument_owner(
+        &mut self,
+        callee: &str,
+        index: usize,
+        arg: &HirExpr,
+    ) -> Option<IntValue<'ctx>> {
+        if !self.string_ownership.param_is_read_only(callee, index) {
+            return None;
+        }
+        self.take_forwarded_owner(arg)
+    }
+
+    /// Release, after the call, each forwarded argument whose owner bit is set.
+    pub(crate) fn release_forwarded_arguments(
+        &mut self,
+        owners: &[(usize, IntValue<'ctx>)],
+        values: &[BasicValueEnum<'ctx>],
+    ) -> CodegenResult<()> {
+        for (index, owner) in owners {
+            let Some(BasicValueEnum::StructValue(fat_ptr)) = values.get(*index) else {
+                continue;
+            };
+            let function = self
+                .builder
+                .get_insert_block()
+                .and_then(|block| block.get_parent())
+                .ok_or_else(|| {
+                    CodegenError::InternalError("a call outside any function".to_string())
+                })?;
+            let release = self.context.append_basic_block(function, "fwd.release");
+            let done = self.context.append_basic_block(function, "fwd.done");
+            self.builder
+                .build_conditional_branch(*owner, release, done)?;
+            self.builder.position_at_end(release);
+            let buffer = self.builder.build_extract_value(*fat_ptr, 0, "fwd.buf")?;
+            let free_fn = self.release_fn()?;
+            self.builder.build_call(free_fn, &[buffer.into()], "")?;
+            self.builder.build_unconditional_branch(done)?;
+            self.builder.position_at_end(done);
+        }
+        Ok(())
+    }
+
     /// The drop flag of the binding `expr` names, when that binding may own a heap
     /// `string`.
     pub(super) fn owned_string_flag_ptr(&self, expr: &HirExpr) -> Option<PointerValue<'ctx>> {
@@ -256,7 +327,10 @@ impl<'ctx> CodegenContext<'ctx> {
             return None;
         };
         let key = match &callee.kind {
-            HirExprKind::Variable(name) => name.clone(),
+            HirExprKind::Variable(name) => self
+                .lifted_closure_name(callee)
+                .unwrap_or_else(|| name.clone()),
+            HirExprKind::Closure { .. } => self.lifted_closure_name(callee)?,
             HirExprKind::Path { type_name, member } => format!("{}__{}", type_name, member),
             HirExprKind::FieldAccess { object, field } => {
                 match Type::from_hir(&object.ty).referent() {

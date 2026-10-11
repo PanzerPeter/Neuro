@@ -32,6 +32,8 @@ Reads `.nr` files from disk; writes nothing.
   `io.nr` beside `math.nr`; only a directory with a `mod.nr` opens a level. A directory
   named in a path but *missing* its `mod.nr` is an error rather than a silent miss.
   That is the one case where "no file" is certainly a mistake.
+- **A leading UTF-8 byte order mark is skipped where the file is read**, here and in `neurc`'s
+  `read_source`, never in the lexer: stripping it there would shift every span by three bytes.
 - **An inline `module { }` block is a module with no file.** The loader lifts each block out
   of its parent's items and registers it as an ordinary graph module, so the visibility rule,
   the flat merge, the collision check, and the `ModuleId` stamp all reach it without a special
