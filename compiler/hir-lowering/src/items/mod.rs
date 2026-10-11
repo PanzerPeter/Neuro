@@ -250,6 +250,11 @@ impl Lowerer {
                 self.emit_mono_struct(&ms)?;
                 continue;
             }
+            if let Some(mm) = self.mono_method_pending.pop() {
+                self.mono_depth = mm.depth;
+                self.emit_mono_method(&mm)?;
+                continue;
+            }
             if let Some(instance) = self.mono_pending.pop() {
                 self.mono_depth = instance.depth;
                 let hir_fn = self.lower_mono_instance(&instance)?;
@@ -405,7 +410,8 @@ impl Lowerer {
         let self_type = self.impl_target_type(&struct_name)?;
         let saved_ty = self.enter_impl_assoc(def)?;
         let mut methods = Vec::new();
-        for method in &def.methods {
+        // A generic method's instances are emitted per call, from its own worklist.
+        for method in def.methods.iter().filter(|m| m.generics.is_empty()) {
             // Owned `self` on a `Copy` receiver is a valid operator-trait method;
             // the checker rejected it on any non-`Copy` type, so it is lowered like any
             // other method (an owned `Copy` receiver is ABI-identical to `&self`).

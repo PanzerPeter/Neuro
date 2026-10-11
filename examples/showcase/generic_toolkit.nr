@@ -14,6 +14,8 @@
 //   · generics at an enclosing parameter: `Option<T>` and `Result<Cell<T>, string>` in
 //     generic signatures, `Cell<T>` in its own impl, propagated with `?` and unwrapped
 //     with `??`
+//   · generic methods: `Cell<T>::with<U>` adds its own parameter to the impl's, inferred
+//     from a `string` argument or supplied by a turbofish after the method name
 //
 // Each generic template below (function, struct, or impl) is emitted once per
 // concrete type or const argument, so `T` and `N` cost nothing at runtime.
@@ -51,6 +53,12 @@ impl<T> Cell<T> {
 
     func peek(self) -> Option<T> {
         Option::Some(self.value)
+    }
+
+    // A generic method: `U` is the method's own, so each `(T, U)` pair called is one
+    // instance, and the body is checked once with both abstract.
+    func with<U>(self, other: U) -> Pair<T, U> {
+        Pair { first: self.value, second: other }
     }
 }
 
@@ -188,6 +196,11 @@ func main() -> i32 {
         Result::Err(_) => false,
     }
 
+    // Generic methods. `with` infers `U = string` from its argument; the turbofish names
+    // `U = i64` after the method name.
+    val tagged = Cell::new(5).with("five")             // with<string>  -> (5, "five")
+    val wide = Cell::new(true).with::<i64>(40i64)      // with::<i64>   -> (true, 40)
+
     println("identity<i32>(10)          = {base}")
     println("choose<i32>(true, 10, 0)   = {pick}")
     println("second<f64, i32>(2.5, 4)   = {k}")
@@ -204,9 +217,12 @@ func main() -> i32 {
     println("Guard destructors run      = {destroyed}")
     println("wrap_first<i32> peeked     = {kept_value}")
     println("wrap_first<bool> got Ok    = {stopped}")
+    println("Cell<i32>::with<string>    = ({tagged.first}, {tagged.second})")
+    println("Cell<bool>::with::<i64>    = ({wide.first}, {wide.second})")
 
-    // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 + 8 + 15 + 3 + 2 + 2 = 87
+    // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 + 8 + 15 + 3 + 2 + 2 + 5 = 92
     val total = pick + base + k + t.0 + t.1 + a + cv + bonus + id2 + s + c + d + destroyed
+        + tagged.first
     println("total                      = {total}")
     return total
 }

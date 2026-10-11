@@ -6,10 +6,10 @@
 
 use super::{DEBUG_TRAIT, DROP_METHOD, DROP_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
-use crate::type_checkers::TypeChecker;
 use crate::type_checkers::collections::{HASH_METHOD, HASHABLE_TRAIT};
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
 use crate::type_checkers::val_else::stmts_diverge;
+use crate::type_checkers::{MethodGenerics, TypeChecker};
 use crate::types::Type;
 use ast_types::{ImplDef, SelfParam};
 use std::collections::HashMap;
@@ -67,7 +67,19 @@ impl TypeChecker {
                 self.consuming_self_methods.insert(mangled.clone());
             }
 
+            if let Some(trait_name) = &def.trait_name
+                && !method.generics.is_empty()
+            {
+                self.record_error(TypeError::GenericMethodInTraitImpl {
+                    trait_name: trait_name.name.clone(),
+                    method: method.name.name.clone(),
+                    span: method.name.span,
+                });
+            }
+
             // Build the full parameter type list: implicit `self` first for instance methods.
+            self.check_method_generic_names(method);
+            let saved_scope = self.enter_method_generics(method);
             let mut param_types: Vec<Type> = Vec::new();
             if method.self_param.is_some() {
                 param_types.push(self_ty.clone());
@@ -85,6 +97,8 @@ impl TypeChecker {
             } else {
                 Type::Void
             };
+            let own_generics = (!method.generics.is_empty()).then(|| self.method_generics(method));
+            self.exit_method_generics(saved_scope);
 
             let func_ty = Type::Function {
                 params: param_types,
@@ -100,6 +114,9 @@ impl TypeChecker {
             }
 
             self.functions.insert(mangled.clone(), func_ty);
+            if let Some(own) = own_generics {
+                self.generic_methods.insert(mangled.clone(), own);
+            }
             method_entries.push((method.name.name.clone(), mangled));
         }
 
@@ -131,6 +148,39 @@ impl TypeChecker {
         self.self_type = saved_self;
         self.self_assoc = saved_assoc;
         Some(())
+    }
+
+    /// What a generic method declares itself, read while its parameters are in scope so
+    /// the const types and bounds resolve against them.
+    fn method_generics(&self, method: &ast_types::MethodDef) -> MethodGenerics {
+        let const_types = method
+            .generics
+            .iter()
+            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
+            .map(|g| {
+                let ty = self.const_scope.get(&g.name.name).cloned();
+                (g.name.name.clone(), ty.unwrap_or(Type::Unknown))
+            })
+            .collect();
+        let bounds = method
+            .generics
+            .iter()
+            .filter(|g| !g.bounds.is_empty())
+            .map(|g| {
+                let resolved = self.generic_bounds.get(&g.name.name).cloned();
+                (g.name.name.clone(), resolved.unwrap_or_default())
+            })
+            .collect();
+        MethodGenerics {
+            param_names: method
+                .generics
+                .iter()
+                .map(|g| g.name.name.clone())
+                .collect(),
+            const_types,
+            where_predicates: method.where_predicates.clone(),
+            bounds,
+        }
     }
 
     /// The receiver type an `impl` target names: a struct or an enum, generic templates
@@ -445,6 +495,9 @@ impl TypeChecker {
             };
 
             self.refuse_function_valued_return(&return_type, method.name.span);
+            // The signature in `functions` was resolved with these in scope; the body
+            // names the same placeholders.
+            let saved_scope = self.enter_method_generics(method);
             self.symbols.push_scope();
             self.current_function_return_type = Some(return_type.clone());
             let warnings_before = self.warnings.len();
@@ -529,6 +582,7 @@ impl TypeChecker {
             self.current_function_return_type = None;
             self.current_fn_outliving.clear();
             self.self_is_owned = false;
+            self.exit_method_generics(saved_scope);
         }
 
         self.self_assoc = saved_assoc;

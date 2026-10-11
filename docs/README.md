@@ -43,7 +43,7 @@ Design goals:
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |
 | [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `pool` arena blocks |
 | [Operators](language-reference/operators.md) | Arithmetic, comparison, logical, bitwise, cast, overloading, assignment places, `??`, `?`, `\|>`, `>>` |
-| [Structs](language-reference/structs.md) | User-defined types, `impl` methods, associated functions, derives, enums |
+| [Structs](language-reference/structs.md) | User-defined types, `impl` methods, generic methods, associated functions, derives, enums |
 | [Memory Model](language-reference/memory-model.md) | What is reclaimed and when: stack values, collections, reassigned bindings, `pool` blocks, and what still leaks in alpha |
 | [Modules](language-reference/modules.md) | Multi-file programs, `mod.nr` directories, qualified paths, `import`, inline `module` blocks, `export import` re-exports, visibility |
 

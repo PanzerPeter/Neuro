@@ -506,6 +506,16 @@ impl TypeChecker {
                 };
                 let inst_sig = self.substitute_generic(&sig, &impl_subst, span);
                 self.functions.insert(inst_key.clone(), inst_sig);
+                if let Some(mut own) = self.generic_methods.get(&base_key).cloned() {
+                    // A method bound may constrain an associated type to the impl's `T`,
+                    // which this instance has fixed.
+                    for bound in own.bounds.values_mut().flatten() {
+                        for (_, ty) in &mut bound.assoc {
+                            *ty = self.substitute_generic(ty, &impl_subst, span);
+                        }
+                    }
+                    self.generic_methods.insert(inst_key.clone(), own);
+                }
                 if self.mut_self_methods.contains(&base_key) {
                     self.mut_self_methods.insert(inst_key.clone());
                 }

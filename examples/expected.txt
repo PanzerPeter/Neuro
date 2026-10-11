@@ -134,6 +134,7 @@ control_flow/while_true_lint.nr       7
 
 # --- structs: definition, field access, impl methods, derives ---------------
 structs/derives.nr               21
+structs/generic_methods.nr       42
 structs/methods.nr               42
 structs/mut_self_accumulator.nr  42
 structs/neuron.nr                4
@@ -167,7 +168,7 @@ showcase/displaced_owners.nr         8
 showcase/enum_records.nr             46
 showcase/field_report.nr             63
 showcase/frozen_features.nr          23
-showcase/generic_toolkit.nr          87
+showcase/generic_toolkit.nr          92
 showcase/gpu_fallback.nr             3
 showcase/gpu_layer.nr                3  gpu
 showcase/heat_diffusion.nr           100  gpu

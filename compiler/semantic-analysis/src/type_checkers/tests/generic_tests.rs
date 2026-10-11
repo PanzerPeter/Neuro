@@ -472,3 +472,192 @@ func main() -> i32 {
     );
     assert!(errors.is_empty(), "expected no errors, got {errors:?}");
 }
+
+#[test]
+fn generic_method_infers_or_takes_a_turbofish() {
+    let errors = semantic_errors(
+        r#"
+enum Maybe<T> { Some(T), Nothing }
+struct B { v: i32 }
+impl B {
+    func pick<U>(&self, a: U, b: U) -> U { if self.v > 0 { a } else { b } }
+    func none<U>(&self) -> Maybe<U> { Maybe::Nothing }
+}
+func main() -> i32 {
+    val b = B { v: 1 }
+    val wide: i64 = b.pick::<i64>(1i64, 2i64)
+    val o: Maybe<f64> = b.none::<f64>()
+    b.pick(3, 4)
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn generic_method_parameter_is_not_inferred_from_its_result() {
+    let source = r#"
+enum Maybe<T> { Some(T), Nothing }
+struct B { v: i32 }
+impl B { func none<U>(&self) -> Maybe<U> { Maybe::Nothing } }
+func main() -> i32 {
+    val b = B { v: 1 }
+    val o = b.none()
+    0
+}
+"#;
+    let errors = semantic_errors(source);
+    let at = source.find("b.none()").expect("call");
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            TypeError::GenericParamNotInferable { name, span } if name == "U" && span.start == at)),
+        "got {errors:?}"
+    );
+}
+
+#[test]
+fn turbofish_count_names_the_method() {
+    let source = r#"
+struct B { v: i32 }
+impl B {
+    func pick<U>(&self, a: U) -> U { a }
+    func plain(&self) -> i32 { self.v }
+}
+func main() -> i32 {
+    val b = B { v: 1 }
+    val x = b.pick::<i32, i64>(1)
+    b.plain::<i32>()
+}
+"#;
+    let errors = semantic_errors(source);
+    let names: Vec<(&str, usize)> = errors
+        .iter()
+        .filter_map(|e| match e {
+            TypeError::TurbofishCountMismatch { name, expected, .. } => {
+                Some((name.as_str(), *expected))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, vec![("pick", 1), ("plain", 0)], "got {errors:?}");
+}
+
+#[test]
+fn generic_method_parameter_moves_like_a_generic_functions() {
+    let errors = semantic_errors(
+        r#"
+struct B { v: i32 }
+impl B {
+    func dup<U>(&self, u: U) -> U {
+        val a = u
+        val b = u
+        b
+    }
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { .. })),
+        "an abstract `U` is non-Copy in the body; got {errors:?}"
+    );
+}
+
+#[test]
+fn generic_method_bound_is_checked_at_the_call() {
+    let source = r#"
+trait Show { func show(&self) -> i32 }
+struct B { v: i32 }
+impl B { func need<U: Show>(&self, u: &U) -> i32 { u.show() } }
+func main() -> i32 {
+    val b = B { v: 1 }
+    val n = 3
+    b.need(&n)
+}
+"#;
+    let errors = semantic_errors(source);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TraitBoundNotSatisfied { .. })),
+        "got {errors:?}"
+    );
+}
+
+#[test]
+fn method_type_parameter_may_not_reuse_an_impl_parameter() {
+    let source = r#"
+struct W<T> { v: T }
+impl<T> W<T> { func f<T>(&self, t: T) -> i32 { 0 } }
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(source);
+    let at = source.find("<T>(&self").expect("method generics") + 1;
+    let spans: Vec<usize> = errors
+        .iter()
+        .filter_map(|e| match e {
+            TypeError::MethodGenericShadowsImpl { name, span } if name == "T" => Some(span.start),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        spans,
+        vec![at],
+        "reported once, at the parameter; got {errors:?}"
+    );
+}
+
+#[test]
+fn trait_impl_method_may_not_be_generic() {
+    let source = r#"
+trait Show { func show(&self) -> i32 }
+struct B { v: i32 }
+impl Show for B { func show<U>(&self) -> i32 { 0 } }
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(source);
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            TypeError::GenericMethodInTraitImpl { method, .. } if method == "show")),
+        "got {errors:?}"
+    );
+}
+
+#[test]
+fn associated_function_turbofish_lists_the_types_parameters_then_its_own() {
+    let errors = semantic_errors(
+        r#"
+enum Maybe<T> { Some(T), Nothing }
+struct Cell<T> { v: T }
+impl<T> Cell<T> {
+    func empty<U>() -> Maybe<U> { Maybe::Nothing }
+}
+func main() -> i32 {
+    val o: Maybe<f64> = Cell::empty::<i32, f64>()
+    0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn grad_on_a_generic_method_is_refused() {
+    let errors = semantic_errors(
+        r#"
+struct B { v: f32 }
+impl B {
+    @grad
+    func g<U>(&self, x: f32, u: U) -> f32 { x }
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            TypeError::GradFormUnsupported { form, .. } if form == "on a generic method")),
+        "got {errors:?}"
+    );
+}

@@ -11,7 +11,7 @@ mod newtypes;
 mod structs;
 pub(crate) mod traits;
 
-use super::{BoundInfo, TypeChecker};
+use super::{BoundInfo, GenericScope, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::{Attribute, Item};
@@ -191,6 +191,59 @@ impl TypeChecker {
         self.const_scope.clear();
         self.lifetime_scope.clear();
         self.generic_bounds.clear();
+        self.add_generic_params(generics, lifetimes);
+    }
+
+    /// Put a generic method's own parameters in scope on top of its impl's, returning the
+    /// scope to restore once its signature or body is done. `None` for a method that
+    /// declares none, which leaves the scope untouched.
+    pub(crate) fn enter_method_generics(
+        &mut self,
+        method: &ast_types::MethodDef,
+    ) -> Option<GenericScope> {
+        if method.generics.is_empty() && method.lifetimes.is_empty() {
+            return None;
+        }
+        let saved = GenericScope {
+            types: self.generic_scope.clone(),
+            consts: self.const_scope.clone(),
+            lifetimes: self.lifetime_scope.clone(),
+            bounds: self.generic_bounds.clone(),
+        };
+        self.add_generic_params(&method.generics, &method.lifetimes);
+        Some(saved)
+    }
+
+    /// Reject a method type parameter named like one of its impl's, which must be in
+    /// scope. One name, one parameter: inside the body a reused `T` could mean either,
+    /// and substitution, which is by name, would silently pick the method's.
+    pub(crate) fn check_method_generic_names(&mut self, method: &ast_types::MethodDef) {
+        for gp in &method.generics {
+            let name = &gp.name.name;
+            if self.generic_scope.contains(name) || self.const_scope.contains_key(name) {
+                self.record_error(TypeError::MethodGenericShadowsImpl {
+                    name: name.clone(),
+                    span: gp.name.span,
+                });
+            }
+        }
+    }
+
+    /// Restore the scope [`Self::enter_method_generics`] replaced.
+    pub(crate) fn exit_method_generics(&mut self, saved: Option<GenericScope>) {
+        let Some(saved) = saved else { return };
+        self.generic_scope = saved.types;
+        self.const_scope = saved.consts;
+        self.lifetime_scope = saved.lifetimes;
+        self.generic_bounds = saved.bounds;
+    }
+
+    /// Add generic and lifetime parameters to whatever scope is already in place.
+    fn add_generic_params(
+        &mut self,
+        generics: &[ast_types::GenericParam],
+        lifetimes: &[shared_types::Identifier],
+    ) {
         for lt in lifetimes {
             self.lifetime_scope.insert(lt.name.clone());
         }

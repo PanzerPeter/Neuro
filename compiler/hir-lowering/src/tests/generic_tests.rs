@@ -288,3 +288,69 @@ fn a_generic_feeding_itself_a_growing_type_stops_at_the_depth_limit() {
         "{err:?}"
     );
 }
+
+/// Every method an impl of `type_name` carries, by name, across all its blocks.
+fn impl_method_names(program: &neuro_hir::HirProgram, type_name: &str) -> Vec<String> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Impl(block) if block.type_name == type_name => Some(&block.methods),
+            _ => None,
+        })
+        .flatten()
+        .map(|m| m.name.clone())
+        .collect()
+}
+
+#[test]
+fn generic_method_monomorphizes_per_type_argument() {
+    // The template never reaches the HIR; each distinct argument list is one method of the
+    // receiver's type, named so it cannot collide with a method the type declares.
+    let program = lower(
+        "struct B { v: i32 }\n\
+         impl B { func pick<U>(&self, a: U) -> U { a }\n func get(&self) -> i32 { self.v } }\n\
+         func main() -> i32 { val b = B { v: 1 }\n val x = b.pick(2.0)\n val y = b.pick(3)\n\
+         val z = b.pick(4)\n b.get() }",
+    );
+    let mut names = impl_method_names(&program, "B");
+    names.sort();
+    assert_eq!(names, vec!["get", "pick__g_f64", "pick__g_i32"]);
+}
+
+#[test]
+fn generic_method_of_a_generic_impl_is_instanced_per_receiver_instance() {
+    let program = lower(
+        "struct Cell<T> { value: T }\n\
+         impl<T> Cell<T> { func with<U>(self, u: U) -> U { u } }\n\
+         func main() -> i32 { val a = Cell { value: 1 }\n val b = Cell { value: true }\n\
+         val x = a.with(2.0)\n b.with(3) }",
+    );
+    let mut instances: Vec<(String, String)> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Impl(block) if block.type_name.starts_with("Cell_g") => Some(block),
+            _ => None,
+        })
+        .flat_map(|block| {
+            block
+                .methods
+                .iter()
+                .map(|m| (block.type_name.clone(), m.name.clone()))
+        })
+        .collect();
+    instances.sort();
+    let expected = [
+        ("Cell_g_bool", "with__g_i32"),
+        ("Cell_g_i32", "with__g_f64"),
+    ];
+    let expected: Vec<(String, String)> = expected
+        .iter()
+        .map(|(t, m)| (t.to_string(), m.to_string()))
+        .collect();
+    assert_eq!(
+        instances, expected,
+        "one instance per receiver instance and argument"
+    );
+}

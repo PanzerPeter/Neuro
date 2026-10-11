@@ -235,6 +235,11 @@ struct Lowerer {
     struct_instances: HashMap<String, (String, Vec<MonoArg>)>,
     /// Generic-struct instances discovered but whose HIR items are not yet emitted.
     mono_struct_pending: Vec<MonoStruct>,
+    /// Generic methods keyed `Type__method`, a generic impl's under each instance's name,
+    /// with what the body lowers under besides the method's own parameters.
+    generic_methods: HashMap<String, GenericMethod>,
+    /// Generic-method instances discovered but not yet lowered.
+    mono_method_pending: Vec<MonoMethod>,
     /// Active type-parameter substitution while a monomorphized instance body is being
     /// lowered: parameter name → concrete type. Empty outside instance lowering; a
     /// `Named` annotation matching an entry resolves to the concrete type.
@@ -342,6 +347,29 @@ struct MonoStruct {
     const_subst: HashMap<String, u64>,
 }
 
+/// A generic method's template: the type whose impl declares it (an instance's name for a
+/// generic impl), and the substitutions in force there, the impl's parameters and
+/// associated-type bindings, which every instance of the method extends with its own.
+#[derive(Clone)]
+struct GenericMethod {
+    type_name: String,
+    self_type: HirType,
+    def: ast_types::MethodDef,
+    subst: HashMap<String, HirType>,
+    const_subst: HashMap<String, u64>,
+    const_types: HashMap<String, HirType>,
+}
+
+/// One pending generic-method instance: the template's key, the instance's method name
+/// within the type, and the full substitution its body lowers under.
+struct MonoMethod {
+    depth: u32,
+    key: String,
+    name: String,
+    subst: HashMap<String, HirType>,
+    const_subst: HashMap<String, u64>,
+}
+
 /// One pending generic-enum instantiation: the base template name, the mangled
 /// instance name, and the substitutions its payload types resolve under. Emission
 /// produces one `HirItem::Enum` carrying fully concrete payloads.
@@ -401,6 +429,8 @@ impl Lowerer {
             generic_impls: HashMap::new(),
             struct_instances: HashMap::new(),
             mono_struct_pending: Vec::new(),
+            generic_methods: HashMap::new(),
+            mono_method_pending: Vec::new(),
             type_subst: HashMap::new(),
             const_subst: HashMap::new(),
             const_types: HashMap::new(),

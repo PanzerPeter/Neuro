@@ -38,6 +38,9 @@ fn impl_item(type_name: &str, method_names: &[&str]) -> Item {
             .iter()
             .map(|m| MethodDef {
                 name: make_ident(m),
+                generics: Vec::new(),
+                lifetimes: Vec::new(),
+                where_predicates: Vec::new(),
                 self_param: Some(ast_types::SelfParam::Ref),
                 params: Vec::new(),
                 return_type: None,

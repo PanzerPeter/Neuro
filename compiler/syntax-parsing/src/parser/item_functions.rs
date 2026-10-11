@@ -453,6 +453,9 @@ impl Parser {
             });
         };
 
+        // A method's own parameters, on top of its impl's: `func map<U>(self, ...)`.
+        let (mut generics, lifetimes) = self.parse_generic_params()?;
+
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();
 
@@ -467,7 +470,7 @@ impl Parser {
             }
         }
 
-        let params = self.parse_parameter_list()?;
+        let mut params = self.parse_parameter_list()?;
 
         self.consume(TokenKind::RightParen, "')'")?;
         self.skip_newlines();
@@ -481,12 +484,24 @@ impl Parser {
         };
 
         self.skip_newlines();
+        let where_predicates = self.parse_where_clause(&mut generics)?;
+        self.skip_newlines();
+        // The same desugar a free function's parameters get: an argument-position
+        // `impl Trait` becomes one more of the method's own parameters.
+        let mut impl_counter = 0usize;
+        for param in &mut params {
+            param.ty = desugar_impl_trait_params(&param.ty, &mut impl_counter, &mut generics);
+        }
+        rekind_shape_params(&params, return_type.as_ref(), &mut generics);
         let body = self.parse_block()?;
 
         let end_span = self.previous_span(start.span);
 
         Ok(MethodDef {
             name,
+            generics,
+            lifetimes,
+            where_predicates,
             self_param,
             params,
             return_type,

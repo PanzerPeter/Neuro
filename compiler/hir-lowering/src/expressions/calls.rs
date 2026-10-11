@@ -82,6 +82,26 @@ impl Lowerer {
             {
                 self.lower_generic_assoc_call(&type_name.name, &member.name, type_args, args, span)
             }
+            // Ahead of the variant arm below: a generic associated function is a template,
+            // so no `Enum__member` signature is registered for it.
+            Expr::Path {
+                type_name, member, ..
+            } if self
+                .generic_methods
+                .contains_key(&format!("{}__{}", type_name.name, member.name)) =>
+            {
+                let mut lowered_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    lowered_args.push(self.lower_expr(arg, None)?);
+                }
+                self.generic_assoc_instance_call(
+                    &type_name.name,
+                    &member.name,
+                    type_args,
+                    lowered_args,
+                    span,
+                )
+            }
             // `Enum::Variant(args)` is a tuple-variant construction when the
             // type names an enum; otherwise an associated-function call.
             // A registered `Enum__member` is an associated function; the checker made sure
@@ -467,6 +487,20 @@ impl Lowerer {
         } else {
             self.instantiate_generic_struct(base, &instance_args)?
         };
+        // The function's own parameters follow the type's in the turbofish.
+        if self
+            .generic_methods
+            .contains_key(&format!("{}__{}", instance, member))
+        {
+            let own_args = type_args.get(generics.len()..).unwrap_or_default();
+            return self.generic_assoc_instance_call(
+                &instance,
+                member,
+                own_args,
+                lowered_args,
+                span,
+            );
+        }
 
         let (params, ret) = self.assoc_signature(&instance, member)?;
         let callee = HirExpr::new(
@@ -488,6 +522,51 @@ impl Lowerer {
             ret,
             span,
         ))
+    }
+
+    /// A call to the generic associated function `member` of `type_name`, a concrete type
+    /// or an instance, at the instance its own parameters select.
+    fn generic_assoc_instance_call(
+        &mut self,
+        type_name: &str,
+        member: &str,
+        type_args: &[ast_types::GenericArg],
+        lowered_args: Vec<HirExpr>,
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let key = format!("{}__{}", type_name, member);
+        let (name, params, ret) =
+            self.instantiate_generic_method(&key, type_args, &lowered_args)?;
+        let callee = HirExpr::new(
+            HirExprKind::Path {
+                type_name: type_name.to_string(),
+                member: name,
+            },
+            HirType::Function {
+                params,
+                ret: Box::new(ret.clone()),
+            },
+            span,
+        );
+        Ok(HirExpr::new(
+            HirExprKind::Call {
+                callee: Box::new(callee),
+                args: lowered_args,
+            },
+            ret,
+            span,
+        ))
+    }
+
+    /// The key of `method` on `receiver` when that method is generic.
+    fn generic_method_key(&self, receiver: &HirType, method: &str) -> Option<String> {
+        let (HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. }) =
+            receiver
+        else {
+            return None;
+        };
+        let key = format!("{}__{}", name, method);
+        self.generic_methods.contains_key(&key).then_some(key)
     }
 
     /// Build the method call an overloaded binary operator desugars to:
@@ -697,6 +776,30 @@ impl Lowerer {
             && matches!(recv.referent(), HirType::Tensor { .. })
         {
             return self.lower_tensor_sort(object, method, args, span);
+        }
+
+        if let Some(key) = self.generic_method_key(recv.referent(), method) {
+            let mut lowered_args = Vec::with_capacity(args.len());
+            for arg in args {
+                lowered_args.push(self.lower_expr(arg, None)?);
+            }
+            let (name, _, ret) = self.instantiate_generic_method(&key, type_args, &lowered_args)?;
+            let callee = HirExpr::new(
+                HirExprKind::FieldAccess {
+                    object: Box::new(object),
+                    field: name,
+                },
+                ret.clone(),
+                span,
+            );
+            return Ok(HirExpr::new(
+                HirExprKind::Call {
+                    callee: Box::new(callee),
+                    args: lowered_args,
+                },
+                ret,
+                span,
+            ));
         }
 
         let impl_receiver = match recv.referent() {

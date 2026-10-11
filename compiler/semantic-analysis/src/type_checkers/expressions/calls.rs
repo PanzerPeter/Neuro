@@ -361,18 +361,20 @@ impl TypeChecker {
             Some(s) => s.clone(),
             None => return Type::Unknown,
         };
-        self.check_generic_call_with(func_name, &sig, type_args, args, span)
+        self.check_generic_call_with(func_name, &sig, type_args, args, None, span)
     }
 
     /// [`Self::check_generic_call`] against an explicit signature: an associated function
     /// of a generic type is generic over the type's parameters without being a template
-    /// of its own.
+    /// of its own, and a generic method over its own. `receiver` is a method's, paired
+    /// with whether it is taken `&mut`, as [`Self::check_receiver_call_args`] takes it.
     fn check_generic_call_with(
         &mut self,
         func_name: &str,
         sig: &GenericFnSig,
         type_args: &[ast_types::GenericArg],
         args: &[ast_types::Expr],
+        receiver: Option<(&ast_types::Expr, bool)>,
         span: shared_types::Span,
     ) -> Type {
         let args = &*self.borrow_kernel_inputs(func_name, args);
@@ -389,6 +391,7 @@ impl TypeChecker {
         // rest from the call arguments. A const parameter binds to `Type::ConstValue`.
         let mut subst: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
         self.seed_turbofish(
+            func_name,
             &sig.param_names,
             &sig.const_types,
             type_args,
@@ -437,7 +440,7 @@ impl TypeChecker {
             // A by-value argument moves a non-Copy binding into the callee.
             self.record_move(arg);
         }
-        self.check_reborrow_exclusivity(None, args, &sig.params);
+        self.check_reborrow_exclusivity(receiver, args, &sig.params);
 
         // Every parameter must be bound, by inference or turbofish. A type argument is
         // unconstrained: the body was move-checked against an abstract `T` that is
@@ -461,12 +464,23 @@ impl TypeChecker {
         self.substitute_generic(&sig.ret, &subst, span)
     }
 
+    /// The key of `method` on `receiver` when that method is generic.
+    fn generic_method_key(&self, receiver: &Type, method: &str) -> Option<&String> {
+        let (Type::Struct(name) | Type::Enum(name) | Type::Newtype(name)) = receiver.referent()
+        else {
+            return None;
+        };
+        let key = self.impl_methods.get(name)?.get(method)?;
+        self.generic_methods.contains_key(key).then_some(key)
+    }
+
     /// Bind explicit turbofish generic arguments into `subst`, positionally against
     /// the callee's declared parameters. A const parameter takes a const argument (bound
     /// to [`Type::ConstValue`]); a type parameter takes a type argument. Kind or count
     /// mismatches are reported.
     pub(super) fn seed_turbofish(
         &mut self,
+        callee: &str,
         param_names: &[String],
         const_types: &std::collections::HashMap<String, Type>,
         type_args: &[ast_types::GenericArg],
@@ -478,7 +492,7 @@ impl TypeChecker {
         }
         if type_args.len() != param_names.len() {
             self.record_error(TypeError::TurbofishCountMismatch {
-                name: param_names.first().cloned().unwrap_or_default(),
+                name: callee.to_string(),
                 expected: param_names.len(),
                 found: type_args.len(),
                 span,
@@ -555,12 +569,16 @@ impl TypeChecker {
                 if matches!(obj_ty, Type::Unknown) {
                     return Some(Type::Unknown);
                 }
-                // No method declares type parameters, so a turbofish on one names nothing,
-                // exactly as it would on a non-generic free function. `.to_checked::<T>()`
-                // is the one builtin that reads its turbofish, as its target type.
+                // A turbofish names a generic method's own parameters, so on any other
+                // method it names nothing, exactly as on a non-generic free function.
+                // `.to_checked::<T>()` is the one builtin that reads its turbofish, as its
+                // target type.
                 let reads_turbofish = field.name == TO_CHECKED_METHOD
                     && (obj_ty.referent().is_float() || obj_ty.referent().is_half_float());
-                if !type_args.is_empty() && !reads_turbofish {
+                if !type_args.is_empty()
+                    && !reads_turbofish
+                    && self.generic_method_key(&obj_ty, &field.name).is_none()
+                {
                     self.record_error(TypeError::TurbofishCountMismatch {
                         name: field.name.clone(),
                         expected: 0,
@@ -733,6 +751,17 @@ impl TypeChecker {
                 };
 
                 let exclusive_receiver = self.mut_self_methods.contains(&mangled);
+                if let Some(own) = self.generic_methods.get(&mangled) {
+                    let sig = own.signature(visible_params.to_vec(), return_type);
+                    return Some(self.check_generic_call_with(
+                        &field.name,
+                        &sig,
+                        type_args,
+                        args,
+                        Some((object, exclusive_receiver)),
+                        *span,
+                    ));
+                }
                 self.check_receiver_call_args(
                     Some((object, exclusive_receiver)),
                     args,
@@ -812,17 +841,33 @@ impl TypeChecker {
                 // `Cell::new(42)`: an associated function of a generic type is generic
                 // over the type's parameters, which the call infers like a generic
                 // function's, since lowering builds it on one instance of the type.
-                if let Some((_, own)) = self.instance_parts(&type_name.name) {
-                    let sig = GenericFnSig {
-                        param_names: own.iter().map(|g| g.to_string()).collect(),
+                // Its own parameters, if it declares any, follow the type's in the one
+                // turbofish the call can write.
+                let callee = format!("{}::{}", type_name.name, member.name);
+                let method_generics = self.generic_methods.get(&mangled).cloned();
+                if let Some((_, type_params)) = self.instance_parts(&type_name.name) {
+                    let mut sig = GenericFnSig {
+                        param_names: type_params.iter().map(|g| g.to_string()).collect(),
                         const_types: HashMap::new(),
                         params: param_types,
                         ret: return_type,
                         where_predicates: Vec::new(),
                         bounds: HashMap::new(),
                     };
+                    if let Some(own) = method_generics {
+                        sig.param_names.extend(own.param_names);
+                        sig.const_types = own.const_types;
+                        sig.where_predicates = own.where_predicates;
+                        sig.bounds = own.bounds;
+                    }
                     return Some(
-                        self.check_generic_call_with(&mangled, &sig, type_args, args, *span),
+                        self.check_generic_call_with(&callee, &sig, type_args, args, None, *span),
+                    );
+                }
+                if let Some(own) = method_generics {
+                    let sig = own.signature(param_types, return_type);
+                    return Some(
+                        self.check_generic_call_with(&callee, &sig, type_args, args, None, *span),
                     );
                 }
 

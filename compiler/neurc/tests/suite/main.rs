@@ -54,6 +54,7 @@ mod float_methods;
 mod float_suffixes;
 mod forward_references;
 mod functions;
+mod generic_methods;
 mod generic_structs;
 mod generics;
 mod gpu_amd;

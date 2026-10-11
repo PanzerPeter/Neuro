@@ -673,6 +673,19 @@ function type names a type parameter is `FunctionToGenericHigherOrder` (the clos
 "not passed to a generic higher-order function"), reported instead of a mismatch between a
 template and the identical-looking concrete type.
 
+**Methods.** A method's own `<U>` go on top of its impl's scope through
+`enter_method_generics` / `exit_method_generics` (a `GenericScope` snapshot), around both the
+signature in `register_impl` and the body in `check_impl`. The signature stays in `functions`
+under the method's key, with `Type::Generic` placeholders, so every pass reading method tables
+works unchanged; `generic_methods` holds what the method declares itself (`MethodGenerics`),
+copied to each generic-impl instance by `instantiate_impls_for`. A call builds a `GenericFnSig`
+from it over the visible parameters and goes through `check_generic_call_with`, which takes the
+receiver so the reborrow-exclusivity check still sees it. An associated function of a generic
+type appends its own names after the type's, so one turbofish lists both. A method parameter
+reusing an impl parameter's name is `MethodGenericShadowsImpl`; one in a trait impl is
+`GenericMethodInTraitImpl`; `@grad` on one is `GradFormUnsupported`. `TurbofishCountMismatch`
+names the callee (it used to print the first parameter's name).
+
 **`Type::Generic` answers `false` to `is_type_copy` and `true` to `is_type_move_tracked`**, which
 is what makes checking the body once sound: a second read of a `T`-typed binding is
 `UseOfMovedValue`, a closure may not capture one, and `[v, v]` / `(v, v)` are rejected by the

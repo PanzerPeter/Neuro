@@ -81,6 +81,9 @@ pub(crate) struct TypeChecker {
     /// NOT placed in `functions`: calls to it route through generic inference, which
     /// substitutes concrete type arguments per call site (monomorphization).
     generic_funcs: HashMap<String, GenericFnSig>,
+    /// Generic methods, keyed by the method's mangled key in `functions`, generic-impl
+    /// instances included, with the parameters each declares itself.
+    generic_methods: HashMap<String, MethodGenerics>,
     /// Functions carrying a `@grad`, generic templates included by name, with what each
     /// differentiates. A `val` bound directly to a call of one holds the borrows of those
     /// arguments until its `.backward()`.
@@ -245,6 +248,42 @@ pub(crate) struct BoundInfo {
     pub(crate) assoc: Vec<(String, Type)>,
 }
 
+/// The parameters a generic method declares itself, on top of its impl's. Its signature
+/// stays in `functions` under the method's key, carrying [`Type::Generic`] placeholders
+/// for these names, so the body checks against it like any method's; a call reads this
+/// to infer them as [`GenericFnSig`] does a generic function's.
+#[derive(Clone)]
+pub(crate) struct MethodGenerics {
+    pub(crate) param_names: Vec<String>,
+    pub(crate) const_types: HashMap<String, Type>,
+    pub(crate) where_predicates: Vec<ast_types::Expr>,
+    pub(crate) bounds: HashMap<String, Vec<BoundInfo>>,
+}
+
+impl MethodGenerics {
+    /// The generic signature one call infers against: the method's own parameters over
+    /// its visible (non-`self`) parameter types and return type.
+    pub(crate) fn signature(&self, params: Vec<Type>, ret: Type) -> GenericFnSig {
+        GenericFnSig {
+            param_names: self.param_names.clone(),
+            const_types: self.const_types.clone(),
+            params,
+            ret,
+            where_predicates: self.where_predicates.clone(),
+            bounds: self.bounds.clone(),
+        }
+    }
+}
+
+/// The generic scope a generic method's own parameters were added over, restored when
+/// its signature or body is done.
+pub(crate) struct GenericScope {
+    pub(crate) types: HashSet<String>,
+    pub(crate) consts: HashMap<String, Type>,
+    pub(crate) lifetimes: HashSet<String>,
+    pub(crate) bounds: HashMap<String, Vec<BoundInfo>>,
+}
+
 /// A user-declared trait's resolved method signatures, keyed by method name.
 #[derive(Clone)]
 pub(crate) struct TraitInfo {
@@ -391,6 +430,7 @@ impl TypeChecker {
             mut_self_methods: HashSet::new(),
             consuming_self_methods: HashSet::new(),
             generic_funcs: HashMap::new(),
+            generic_methods: HashMap::new(),
             grad_functions: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),

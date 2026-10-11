@@ -99,6 +99,9 @@ fn func(name: &str, params: Vec<Parameter>, body: Vec<Stmt>) -> Item {
 fn method(name: &str, self_param: Option<SelfParam>, params: Vec<Parameter>) -> MethodDef {
     MethodDef {
         name: ident(name),
+        generics: Vec::new(),
+        lifetimes: Vec::new(),
+        where_predicates: Vec::new(),
         self_param,
         params,
         return_type: None,

@@ -239,6 +239,19 @@ impl Lowerer {
             // owned-`self` method reaching lowering is sound and is registered normally.
             let mangled = format!("{}__{}", struct_name, method.name.name);
             let self_ty = self.impl_target_type(struct_name)?;
+            // A template has no signature until a call fixes its own parameters.
+            if !method.generics.is_empty() {
+                let template = crate::GenericMethod {
+                    type_name: struct_name.to_string(),
+                    self_type: self_ty,
+                    def: method.clone(),
+                    subst: self.type_subst.clone(),
+                    const_subst: self.const_subst.clone(),
+                    const_types: self.const_types.clone(),
+                };
+                self.generic_methods.insert(mangled, template);
+                continue;
+            }
             let (params, ret) = self.method_signature(&self_ty, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
             if crate::autodiff::is_grad(&method.attributes) {

@@ -139,3 +139,53 @@ fn test_parse_turbofish_const_argument() {
     assert_eq!(type_args.len(), 1);
     assert!(matches!(type_args[0], GenericArg::Const { value: 4, .. }));
 }
+
+#[test]
+fn test_parse_generic_method_with_bound_and_where_clause() {
+    // A method's own parameters follow its name; a `where` bound folds into them as a
+    // function's does.
+    use syntax_parsing::GenericParamKind;
+    let source = "impl S { func pick<U: Show, const N: u32>(&self, u: U) -> U where N > 0 { u } }";
+    let items = parse(source).expect("should parse");
+    let Item::Impl(def) = &items[0] else {
+        panic!("expected impl item, got {:?}", items[0]);
+    };
+    let method = &def.methods[0];
+    assert_eq!(method.generics.len(), 2);
+    assert_eq!(method.generics[0].name.name, "U");
+    assert_eq!(method.generics[0].bounds.len(), 1);
+    assert!(matches!(
+        method.generics[1].kind,
+        GenericParamKind::Const(_)
+    ));
+    assert_eq!(method.where_predicates.len(), 1);
+}
+
+#[test]
+fn test_parse_method_turbofish_call() {
+    use syntax_parsing::{Expr, Stmt};
+    let source = "func main() -> i32 { b.pick::<i64>(x, y) }";
+    let items = parse(source).expect("should parse");
+    let Item::Function(func) = &items[0] else {
+        panic!("expected function item, got {:?}", items[0]);
+    };
+    let Some(Stmt::Expr(Expr::Call {
+        func: callee,
+        type_args,
+        ..
+    })) = func.body.last()
+    else {
+        panic!("expected a trailing call");
+    };
+    assert!(matches!(callee.as_ref(), Expr::FieldAccess { field, .. } if field.name == "pick"));
+    assert_eq!(type_args.len(), 1);
+}
+
+#[test]
+fn test_trait_method_may_not_declare_type_parameters() {
+    let source = "trait Show {\n    func show<U>(&self, u: U) -> i32\n}";
+    let err = parse(source)
+        .expect_err("a trait method declares no type parameters of its own")
+        .to_string();
+    assert!(err.contains("only an inherent `impl` method may"), "{err}");
+}

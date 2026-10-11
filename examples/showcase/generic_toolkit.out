@@ -14,4 +14,6 @@ identity<string>           = axis
 Guard destructors run      = 2
 wrap_first<i32> peeked     = 21
 wrap_first<bool> got Ok    = false
-total                      = 87
+Cell<i32>::with<string>    = (5, five)
+Cell<bool>::with::<i64>    = (true, 40)
+total                      = 92

@@ -15,6 +15,10 @@ use super::Parser;
 const TRAIT_ASSOC_DECL_FORM: &str =
     "a newline; a trait declares `type Name`, an impl binds it with `type Name = T`";
 
+/// What a trait method must look like after its name, for the diagnostic that rejects a
+/// type-parameter list there.
+const TRAIT_METHOD_GENERICS_FORM: &str = "'('; a trait method declares no type parameters of its own, only an inherent `impl` method may";
+
 impl Parser {
     /// Parse an `impl TypeName { … }` block
     pub(crate) fn parse_impl_def(&mut self) -> ParseResult<ImplDef> {
@@ -211,6 +215,17 @@ impl Parser {
         let start = self.consume(TokenKind::Func, "'func'")?;
         self.skip_newlines();
         let name = self.consume_identifier("method name")?;
+
+        // Generic methods are inherent-only: a trait declaring one would need conformance
+        // over the parameters, calls through a bound and the object-safety rule, none of
+        // which exist yet. Refused here so the message names the rule, not a stray `<`.
+        if let Some(less) = self.peek().filter(|t| t.kind == TokenKind::Less) {
+            return Err(ParseError::UnexpectedToken {
+                found: TokenKind::Less,
+                expected: TRAIT_METHOD_GENERICS_FORM.to_string(),
+                span: less.span,
+            });
+        }
 
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();

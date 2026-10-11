@@ -223,6 +223,15 @@ pub enum SelfParam {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodDef {
     pub name: Identifier,
+    /// The method's own `<U>` parameters, declared after its name and in addition to its
+    /// impl's. Empty for an ordinary method. A generic method is a template, instantiated
+    /// per receiver type and argument list exactly like a generic function.
+    pub generics: Vec<GenericParam>,
+    /// Lifetime names the method declares itself. See [`FunctionDef::lifetimes`].
+    pub lifetimes: Vec<Identifier>,
+    /// Value predicates from the method's `where` clause. See
+    /// [`FunctionDef::where_predicates`].
+    pub where_predicates: Vec<Expr>,
     /// None for associated functions, Some for instance methods.
     pub self_param: Option<SelfParam>,
     pub params: Vec<Parameter>,

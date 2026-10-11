@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.11.0] - 2026-10-11
+
+### Added
+
+- Generic methods. A method declares type parameters of its own after its name, in addition to
+  its impl's: `func with<U>(self, other: U) -> Pair<T, U>`. A call infers them from the
+  arguments, or a turbofish after the method name supplies them (`cell.with::<i64>(40i64)`).
+  Bounds and `where` clauses work as on a function, and each set of type arguments a program
+  uses compiles to its own copy of the method. Enums, newtypes and generic impls take them too.
+- An associated function takes its own type parameters the same way. On a generic type, one
+  turbofish lists the type's parameters and then the function's: `Cell::empty::<i32, f64>()`.
+- An inherent method may take an `impl Trait` parameter, as a free function can.
+- The compiler refuses a method type parameter that reuses its impl's parameter name, and a
+  generic method in a trait `impl`, with an error naming the rule. A `<` after a trait method's
+  name is a parse error that names it as well: trait methods declare no type parameters.
+- Example `structs/generic_methods.nr`; `showcase/generic_toolkit.nr` adds `Cell<T>::with<U>`.
+
+### Fixed
+
+- A turbofish with the wrong number of arguments names the function or method it was written
+  on, rather than that function's first type parameter.
+
 ## [5.10.1] - 2026-10-10
 
 ### Fixed

@@ -121,7 +121,21 @@ impl Lowerer {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             for method in &imp.methods {
                 let inst_key = format!("{}__{}", mangled, method.name.name);
-                if self.functions.contains_key(&inst_key) {
+                if self.functions.contains_key(&inst_key)
+                    || self.generic_methods.contains_key(&inst_key)
+                {
+                    continue;
+                }
+                if !method.generics.is_empty() {
+                    let template = crate::GenericMethod {
+                        type_name: mangled.to_string(),
+                        self_type: self_ty.clone(),
+                        def: method.clone(),
+                        subst: impl_subst.clone(),
+                        const_subst: const_subst.clone(),
+                        const_types: self.const_param_types(&base_generics)?,
+                    };
+                    self.generic_methods.insert(inst_key, template);
                     continue;
                 }
                 let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
@@ -233,7 +247,8 @@ impl Lowerer {
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, generics, subst);
             let mut methods = Vec::new();
-            for method in &imp.methods {
+            // A generic method's instances are emitted per call, from its own worklist.
+            for method in imp.methods.iter().filter(|m| m.generics.is_empty()) {
                 let const_types = self.const_param_types(generics)?;
                 let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
                 let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
@@ -336,6 +351,125 @@ impl Lowerer {
             &me.subst,
             &me.const_subst,
         )
+    }
+
+    /// Instantiate the generic method `key` for one call, mirroring the checker: its own
+    /// parameters come from the turbofish, then from unifying its parameter annotations
+    /// against the lowered arguments. Queues the instance once and returns its method
+    /// name within the type, with its visible (non-`self`) parameter types and return type.
+    pub(crate) fn instantiate_generic_method(
+        &mut self,
+        key: &str,
+        type_args: &[ast_types::GenericArg],
+        lowered_args: &[neuro_hir::HirExpr],
+    ) -> Result<(String, Vec<HirType>, HirType), LoweringError> {
+        let template = self.generic_methods.get(key).cloned().ok_or_else(|| {
+            LoweringError::UnresolvedCall {
+                target: key.to_string(),
+            }
+        })?;
+        let def = &template.def;
+        let (gnames, cnames): (Vec<_>, Vec<_>) = def
+            .generics
+            .iter()
+            .partition(|g| matches!(g.kind, ast_types::GenericParamKind::Type));
+        let gnames = gnames.iter().map(|g| g.name.name.clone()).collect();
+        let cnames = cnames.iter().map(|g| g.name.name.clone()).collect();
+
+        let mut subst = template.subst.clone();
+        let mut const_subst = template.const_subst.clone();
+        for (gp, arg) in def.generics.iter().zip(type_args) {
+            match arg {
+                ast_types::GenericArg::Const { value, .. } => {
+                    const_subst.insert(gp.name.name.clone(), *value as u64);
+                }
+                ast_types::GenericArg::Type(ty) => {
+                    subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+                }
+            }
+        }
+        for (param, larg) in def.params.iter().zip(lowered_args) {
+            self.unify_ast_hir(
+                &param.ty,
+                &larg.ty,
+                &gnames,
+                &cnames,
+                &mut subst,
+                &mut const_subst,
+            );
+        }
+        let unbound = def
+            .generics
+            .iter()
+            .find(|g| !subst.contains_key(&g.name.name) && !const_subst.contains_key(&g.name.name));
+        if let Some(gp) = unbound {
+            return Err(LoweringError::UnresolvedType {
+                name: format!("{} parameter '{}'", key, gp.name.name),
+            });
+        }
+
+        // `__` cannot appear in a user's method name, so the instance never collides with
+        // a method the type declares.
+        let name = crate::mangle_instance(
+            &format!("{}_", def.name.name),
+            &def.generics,
+            &subst,
+            &const_subst,
+        );
+        let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
+        let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
+        let signature = self.method_signature(&template.self_type, def);
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
+        let (params, ret) = signature?;
+
+        let instance_key = format!("{}__{}", template.type_name, name);
+        self.functions
+            .insert(instance_key.clone(), (params.clone(), ret.clone()));
+        if self.mono_seen.insert(instance_key) {
+            let depth = self.next_instance_depth(key)?;
+            self.mono_method_pending.push(crate::MonoMethod {
+                depth,
+                key: key.to_string(),
+                name: name.clone(),
+                subst,
+                const_subst,
+            });
+        }
+        let visible = match def.self_param {
+            Some(_) => params.get(1..).unwrap_or_default().to_vec(),
+            None => params,
+        };
+        Ok((name, visible, ret))
+    }
+
+    /// Emit one generic-method instance as a one-method `HirItem::Impl` of its type, so a
+    /// backend lowers it, receiver and symbol included, exactly like a written method.
+    pub(super) fn emit_mono_method(&mut self, mm: &crate::MonoMethod) -> Result<(), LoweringError> {
+        let template = self.generic_methods.get(&mm.key).cloned().ok_or_else(|| {
+            LoweringError::UnresolvedCall {
+                target: mm.key.clone(),
+            }
+        })?;
+        let mut const_types = template.const_types.clone();
+        const_types.extend(self.const_param_types(&template.def.generics)?);
+        let saved_ty = std::mem::replace(&mut self.type_subst, mm.subst.clone());
+        let saved_c = std::mem::replace(&mut self.const_subst, mm.const_subst.clone());
+        let saved_ct = std::mem::replace(&mut self.const_types, const_types);
+        let lowered = self.lower_method(&template.self_type, &template.def);
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
+        self.const_types = saved_ct;
+        let mut method = lowered?;
+        method.name = mm.name.clone();
+        self.mono_items.push(HirItem::Impl(HirImpl {
+            type_name: template.type_name,
+            self_type: template.self_type,
+            trait_name: None,
+            methods: vec![method],
+            span: template.def.span,
+        }));
+        Ok(())
     }
 
     /// Lower one monomorphized instance of a generic template: substitute its type

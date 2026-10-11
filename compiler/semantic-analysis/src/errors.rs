@@ -42,6 +42,20 @@ pub enum TypeError {
     GenericParamShadowsBuiltin { name: String, span: Span },
 
     #[error(
+        "method type parameter '{name}' reuses a name its `impl` already declares; give the method's parameter a name of its own"
+    )]
+    MethodGenericShadowsImpl { name: String, span: Span },
+
+    #[error(
+        "method '{method}' of the `impl {trait_name}` declares type parameters of its own; a trait method declares none, so only an inherent `impl` method may be generic"
+    )]
+    GenericMethodInTraitImpl {
+        trait_name: String,
+        method: String,
+        span: Span,
+    },
+
+    #[error(
         "generic parameter '{name}' cannot be inferred from the call arguments; supply it explicitly with a turbofish, e.g. `f::<...>(...)`"
     )]
     GenericParamNotInferable { name: String, span: Span },
@@ -1510,6 +1524,8 @@ impl TypeError {
             | Self::FunctionUsedAsValue { span, .. }
             | Self::FunctionToGenericHigherOrder { span, .. }
             | Self::GenericParamShadowsBuiltin { span, .. }
+            | Self::MethodGenericShadowsImpl { span, .. }
+            | Self::GenericMethodInTraitImpl { span, .. }
             | Self::GenericParamNotInferable { span, .. }
             | Self::UnknownArrayLength { span, .. }
             | Self::ArrayLengthTooLarge { span, .. }

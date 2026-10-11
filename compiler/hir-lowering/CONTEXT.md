@@ -389,8 +389,25 @@ A method call on a newtype receiver resolves through `impl_methods` as an enum's
 **The mangling scheme is load-bearing.** `mangle_instance` (`name_g_<type…>`) and
 `mangle_struct_instance` (`Base_g_<type…>`) use a **single**-underscore marker, deliberately
 avoiding `__`, because the backend recovers a method's receiver struct by splitting the method
-symbol on `__`. Semantic analysis rejects a user name containing `__`, so `<instance>__<method>`
-holds exactly one separator from both sides.
+symbol on `__` and taking the first segment. Semantic analysis rejects a user name containing
+`__`, so the receiver segment never holds one. A generic method's instance name
+(`method__g_<type…>`) is the only method part that does, which the first-segment split allows.
+
+**Generic methods** (a method's own `<U>`) are templates too. `register_impl_methods` (a plain
+impl) and `register_instance_methods` (each generic-impl instance) store them in
+`generic_methods`, keyed `Type__method`, with the substitution in force there (the impl's
+parameters, its `Self::Assoc` bindings, its const types) and register no signature.
+`instantiate_generic_method` infers the method's own parameters from the turbofish, then by
+`unify_ast_hir` against the lowered arguments, registers `Type__method__g_<args>` in
+`functions` and queues a `MonoMethod` once; `emit_mono_method` lowers the body under the merged
+substitution and emits it as a one-method `HirImpl` of the receiver's type, so the backend
+lowers it, receiver mode and symbol included, as a written method. The three call shapes all
+route there: `lower_method_call` (receiver), the plain `Type::f` arm of `lower_call` (ahead of
+the enum-variant arm, since a template registers no `Type__f`), and `lower_generic_assoc_call`,
+where the turbofish lists the type's parameters first and the function's own after them.
+The instance's method name is the one generated name with a second `__`: the backend takes the
+receiver from the symbol's first segment only, and no user method name contains `__`, so
+`pick__g_i64` collides with nothing.
 
 `instantiate_generic_impls` also records each instance's `trait_impls` entry, mirroring the
 checker: without it a generic iterator adapter would satisfy `Iterator` under its base name

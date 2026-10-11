@@ -498,6 +498,31 @@ impl<T> Cell<T> {
 }
 ```
 
+### Generic methods
+
+A method may declare type parameters of its own, after its name and in addition to its impl's.
+A call infers them from its arguments; when the arguments do not mention one, a turbofish after
+the method name supplies it. Each set of type arguments a program uses compiles to its own copy
+of the method, exactly as a generic function does. Bounds and `where` clauses work as they do
+on a function.
+
+```neuro
+impl<T> Cell<T> {
+    func with<U>(self, other: U) -> Pair<T, U> {
+        Pair { first: self.v, second: other }
+    }
+}
+
+val p = Cell::new(5).with("five")        // U = string, inferred
+val q = Cell::new(true).with::<i64>(40i64)  // U = i64, from the turbofish
+```
+
+An associated function takes its own parameters the same way. On a generic type, one turbofish
+lists the type's parameters first and the function's own after them:
+`Cell::empty::<i32, f64>()`. A method's parameter may not reuse a name its impl declares. Trait
+methods take no type parameters of their own, so a generic method lives in an inherent `impl`.
+[`generic_methods.nr`](../../examples/structs/generic_methods.nr) runs the forms above.
+
 ### Const (value) parameters
 
 A generic struct may also declare a **const parameter**, a compile-time value used as an array
@@ -673,6 +698,8 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `NotATraitMethod` | A trait impl defines a method the trait does not declare |
 | `TraitMethodSignatureMismatch` | An impl method's signature differs from the trait's |
 | `TraitBoundNotSatisfied` | A generic argument does not implement a required trait |
+| `MethodGenericShadowsImpl` | A generic method's parameter reuses a name its `impl` declares |
+| `GenericMethodInTraitImpl` | A method of a trait `impl` declares type parameters of its own |
 | `UnknownDerive` | A `@derive` argument that names no derivable trait |
 | `UnimplementedDerive` | A `@derive` argument the spec allows but no pass generates yet |
 | `DuplicateDerive` | The same trait listed twice in a `@derive` list |

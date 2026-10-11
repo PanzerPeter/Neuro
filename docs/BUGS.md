@@ -122,8 +122,8 @@ and return tokens. The backend splits mangled names on `__`, so that convention 
 ## BUG-105: a literal argument to a generic call ignores its concrete parameter type
 
 - **Status**: open, confirmed
-- **Area**: `semantic-analysis` `check_generic_call` in `type_checkers/calls.rs`, and
-  `hir-lowering` `lower_generic_call`
+- **Area**: `semantic-analysis` `check_generic_call_with` in `type_checkers/expressions/calls.rs`,
+  and `hir-lowering` `lower_generic_call` and `instantiate_generic_method`
 - **Severity**: minor. A valid program is refused; nothing unsound is emitted
 
 **Minimal repro**
@@ -138,7 +138,8 @@ func main() -> i32 {
 
 Expected: it compiles and returns 1. `second` is a concrete `i64`, and a literal passed to a
 concrete parameter takes its type, as in a non-generic call. Observed: "expected i64, found i32"
-on `5`.
+on `5`. A turbofish does not help, on a function or a generic method: `b.pick::<i64>(3, 4)` reports
+the same on both literals.
 
 **Root cause**: confirmed in the code. `check_generic_call` checks every argument with no expected
 type. Passing the parameter type for a scalar parameter fixes the checker, but `lower_generic_call`

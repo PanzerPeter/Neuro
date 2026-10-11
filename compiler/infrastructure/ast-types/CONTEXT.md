@@ -198,7 +198,11 @@ walkers.
   `PRELUDE_MODULE` (`ModuleId::MAX`) is the id the implicit prelude's own declarations carry. It
   lives here rather than in the driver because two slices read it: the driver stamps it, and the
   type checker gates the intrinsics the prelude's bodies are written against on it.
-- **Lifetimes.** `lifetimes: Vec<Identifier>` on `FunctionDef` / `StructDef` / `ImplDef` and
+- **Generic methods.** `MethodDef` carries its own `generics`, `lifetimes` and
+  `where_predicates`, the same three a `FunctionDef` does, declared after the method's name and
+  on top of its impl's. `TraitMethod` has none: a trait method declares no type parameters.
+- **Lifetimes.** `lifetimes: Vec<Identifier>` on `FunctionDef` / `StructDef` / `ImplDef` /
+  `MethodDef` and
   `lifetime: Option<Identifier>` on `Type::Reference` are kept apart from `generics` because
   lifetimes are a distinct namespace and do not drive monomorphization. Both are validated and
   then erased: a reference type's identity does not depend on its lifetime. `EnumDef` has no

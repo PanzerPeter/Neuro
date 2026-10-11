@@ -255,6 +255,8 @@ impl TypeChecker {
             Some("on a method of a trait `impl`")
         } else if !def.generics.is_empty() || !def.type_args.is_empty() {
             Some("on a method of a generic `impl`")
+        } else if !method.generics.is_empty() {
+            Some("on a generic method")
         } else if method.self_param.is_none() {
             Some("on an associated function")
         } else {
