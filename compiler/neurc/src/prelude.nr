@@ -18,6 +18,29 @@ export enum Result<T, E> {
     Err(E)
 }
 
+// The derivable traits. `@derive` writes each of these impls field by field; a program
+// may write one by hand instead and name any of them as a bound. The scalars, `string`,
+// and a struct carrying the derive implement them with no impl block here.
+//
+// `Copy` has no methods: it is the promise that a value duplicates instead of moving.
+// It requires `Clone` (`Copy: Clone`), which the compiler enforces, because a trait
+// here cannot declare a supertrait yet.
+export trait Copy {}
+
+export trait Clone {
+    func clone(&self) -> Self
+}
+
+// `{x:?}` renders through this: it appends the value's debug form to `out`.
+export trait Debug {
+    func fmt_debug(&self, out: &mut StringBuilder)
+}
+
+// What a `HashMap` key hashes with. Two values `==` treats as equal must hash alike.
+export trait Hashable {
+    func hash(&self) -> u64
+}
+
 // Total-order wrappers over the floating-point types.
 //
 // `<` on a raw float is IEEE-754, which is a partial order: NaN compares false against

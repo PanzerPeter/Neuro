@@ -11,6 +11,7 @@ mod newtypes;
 mod structs;
 pub(crate) mod traits;
 
+use super::derivable::{CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use super::{BoundInfo, GenericScope, TypeChecker};
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
@@ -31,23 +32,15 @@ fn is_builtin_type_name(name: &str) -> bool {
 
 /// The attribute name carrying trait derivations (`@derive(...)`).
 const DERIVE_ATTRIBUTE: &str = "derive";
-/// Derive argument requesting the `Copy` trait.
-const COPY_TRAIT: &str = "Copy";
-/// Derive argument requesting the `Clone` trait.
-const CLONE_TRAIT: &str = "Clone";
-/// Derive argument requesting the `Debug` trait: the `{x:?}` rendering.
-const DEBUG_TRAIT: &str = "Debug";
-/// Derive argument requesting the `PartialEq` trait: field-wise `==` / `!=`.
-const PARTIAL_EQ_TRAIT: &str = "PartialEq";
-/// Derive argument requesting the `Hashable` trait. Named by the spec's derivable
-/// set but not yet generated, so it is a diagnostic rather than a silent no-op.
-const HASHABLE_DERIVE: &str = "Hashable";
+/// The traits `@derive` generates, in the order the diagnostic lists them.
+const DERIVABLE_TRAITS: &[&str] = &[
+    COPY_TRAIT,
+    CLONE_TRAIT,
+    DEBUG_TRAIT,
+    PARTIAL_EQ_TRAIT,
+    HASHABLE_TRAIT,
+];
 
-/// The derive arguments this compiler acts upon, in the order the diagnostic lists them.
-const IMPLEMENTED_DERIVES: &[&str] = &[COPY_TRAIT, CLONE_TRAIT, DEBUG_TRAIT, PARTIAL_EQ_TRAIT];
-
-/// Derive arguments the spec names as derivable but that no pass generates yet.
-const PENDING_DERIVES: &[&str] = &[HASHABLE_DERIVE];
 /// The attributes some pass acts on. The set is fixed by the language, so any other name is an error:
 /// ignoring it would let a misspelled `@no_grad` leave a call differentiated.
 const IMPLEMENTED_ATTRIBUTES: &[&str] = &[
@@ -383,6 +376,14 @@ impl TypeChecker {
                         .zip(ae)
                         .all(|(p, a)| self.unify_generic(p, a, subst))
             }
+            (Type::Collection { kind: pk, args: pa }, Type::Collection { kind: ak, args: aa }) => {
+                pk == ak
+                    && pa.len() == aa.len()
+                    && pa
+                        .iter()
+                        .zip(aa)
+                        .all(|(p, a)| self.unify_generic(p, a, subst))
+            }
             // `Option<T>` against `Option<i32>`: two instances of one template unify
             // through their arguments, since the names alone never match. The same name on
             // both sides still binds: a caller's `Option<T>` hands the callee's `T` its own.
@@ -435,6 +436,13 @@ impl TypeChecker {
                     .map(|e| self.substitute_generic(e, subst, span))
                     .collect(),
             ),
+            Type::Collection { kind, args } => Type::Collection {
+                kind: *kind,
+                args: args
+                    .iter()
+                    .map(|a| self.substitute_generic(a, subst, span))
+                    .collect(),
+            },
             Type::Function { params, ret } => Type::Function {
                 params: params
                     .iter()

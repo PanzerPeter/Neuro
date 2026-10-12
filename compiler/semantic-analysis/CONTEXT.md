@@ -38,8 +38,10 @@ module per declaration kind beside it. `tests/` is split by subject.
   fixed set the language reference defines is `UnknownAttribute`, and one the reference names but no pass
   acts on yet is `UnimplementedAttribute`, so neither is a silent no-op.
 - **1. structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
-  `clone_structs` / `debug_structs` / `partial_eq_structs`, and every derive argument validated
-  (`UnknownDerive`, `UnimplementedDerive`, `DuplicateDerive`). **1b. `validate_copy_derive`** and
+  `clone_structs` / `debug_structs` / `partial_eq_structs` / `hashable_structs`, and every derive
+  argument validated (`UnknownDerive`, `DuplicateDerive`). `register_copy_impls` then records each
+  hand-written `impl Copy` into `copy_structs` too (a struct only, not a generic one:
+  `InvalidCopyImpl`), before anything reads `Copy`. **1b. `validate_copy_derive`** and
   **`validate_field_derives`** run per struct once all are registered, so a field that is another
   struct resolves regardless of declaration order.
 - **1d. `register_trait`** runs before impl registration. Trait NAMES are collected first
@@ -51,9 +53,11 @@ module per declaration kind beside it. `tests/` is split by subject.
   (`impl_target_type`); on an enum a member sharing a variant's name is refused
   (`ImplMemberNamesVariant`), and a generic enum's impls are also instantiated for any instance
   built before them in the declaration pass.
-- **2b. `check_operator_supertraits`** enforces `Comparable: PartialEq` order-independently
-  (`MissingSupertraitImpl`). **2c. `check_derive_impl_conflicts`** rejects a struct that both
-  derives a trait and declares an `impl` of it (`DeriveConflictsWithImpl`).
+- **2b. `check_operator_supertraits`** enforces `Comparable: PartialEq` and `Copy: Clone`
+  order-independently (`MissingSupertraitImpl`); a derive supplies a supertrait as an impl does.
+  **2c. `check_derive_impl_conflicts`** rejects a struct that both derives one of the five
+  derivable traits and declares an `impl` of it (`DeriveConflictsWithImpl`), reading the derives
+  off the struct's attributes, since a hand `impl Copy` lands in `copy_structs` as well.
 - **3. consts** into `constants`, giving forward references and cross-function visibility with
   no ordering constraint. **3b. every function signature** via `register_function_signature`
   (parameter and return types resolved in the function's generic scope), run over *all* functions
@@ -347,8 +351,12 @@ a wrong count):
   builtin that reads the call's turbofish (`resolve_builtin_method` takes `type_args` for it):
   exactly one type argument, an integer (`ToCheckedTargetNotInteger` otherwise), and no value
   arguments. A value receiver only, as for `is_nan`.
-- A struct receiver's `.clone()` is a nullary builtin when the struct derives `Clone`/`Copy` and
-  no user `clone` method exists (a user method shadows); it returns the struct type.
+- `check_supplied_trait_method` (`derivable.rs`) types a derivable trait's method on a receiver
+  that implements the trait with no impl: `.clone()` on a `Copy` value or a `Clone`-deriving
+  struct returns the referent type, `.hash()` on a hashable builtin or a `Hashable`-deriving
+  struct is `u64`, `.fmt_debug(&mut out)` on anything `{x:?}` renders is `void`. A struct reaches
+  it only when `impl_methods` has no such method, so a hand-written impl always wins; any other
+  receiver reaches it after the builtin surface.
 
 **Panic-family builtins.** `check_plain_call` consults `resolve_panic_builtin` before ordinary
 resolution, and only when no user function of the same name is registered. `panic(msg: string)`,
@@ -530,15 +538,16 @@ scope) are both untouched, and a body that always leaves the loop via `break` or
 (`stmts_exit_loop`) is exempt, because its move runs once. The restore after it is unchanged: the
 loop may run zero times, so the binding still owns its value on the path past the loop.
 
-**`@derive(...)`.** `copy_structs` / `clone_structs` / `debug_structs` / `partial_eq_structs` are
-populated from `StructDef.attributes` in `record_derive_intent`, which also validates the argument
-list: `IMPLEMENTED_DERIVES` (`Copy`, `Clone`, `Debug`, `PartialEq`) are acted upon,
-`PENDING_DERIVES` (`Hashable`) reports `UnimplementedDerive`, anything else `UnknownDerive`, and a
-repeat is `DuplicateDerive`. Nothing is silently ignored. Pass 1b checks every field of a Copy
-struct is itself Copy (`CopyDeriveNonCopyField`) and every field of a `Debug` / `PartialEq` struct
-is renderable / comparable by the derived rules (`DeriveFieldUnsupported`,
-`is_debug_renderable` / `is_derived_comparable`: a scalar, `string`, or another struct carrying the
-same derive, since the generated code reaches inside a field no other way). A `Clone` struct that is
+**`@derive(...)`.** `copy_structs` / `clone_structs` / `debug_structs` / `partial_eq_structs` /
+`hashable_structs` are populated from `StructDef.attributes` in `record_derive_intent`, which also
+validates the argument list against `DERIVABLE_TRAITS` (all five): anything else is
+`UnknownDerive`, and a repeat is `DuplicateDerive`. Nothing is silently ignored. Pass 1b checks
+every field of a Copy struct is itself Copy (`CopyDeriveNonCopyField`, also for a hand-written
+`impl Copy`) and every field of a `Debug` / `PartialEq` / `Hashable` struct is renderable /
+comparable / hashable by the derived rules (`DeriveFieldUnsupported`, `is_debug_renderable` /
+`is_derived_comparable` / `is_derived_hashable`: a scalar (an integer, `bool` or `char` for a
+hash), `string`, or another struct carrying the same derive, since the generated code reaches
+inside a field no other way, and the rule runs before any impl is registered). A `Clone` struct that is
 not `Copy` gets the same check through `is_derived_cloneable`: the backend's derived clone copies
 the struct's bytes, so a field must be `Copy`, a `Clone` struct, or an array, tuple or newtype of
 those. A field that owns a buffer (`string`, a tensor, a collection, `StringBuilder`) would end up
@@ -700,8 +709,9 @@ associated call merges them into `sig.bounds`, so `c.get()` on a `Cell<i32>` is
 bounds it meets (`instance_meets_impl_bounds`). A literal argument whose parameter is a concrete
 scalar, or a type parameter already bound, is checked against that type, as in a plain call.
 
-**`Type::Generic` answers `false` to `is_type_copy` and `true` to `is_type_move_tracked`**, which
-is what makes checking the body once sound: a second read of a `T`-typed binding is
+**`Type::Generic` answers `false` to `is_type_copy` and `true` to `is_type_move_tracked`** unless
+the parameter carries a `Copy` bound (`has_copy_bound`), which every instance then meets. That is
+what makes checking the body once sound: a second read of a `T`-typed binding is
 `UseOfMovedValue`, a closure may not capture one, and `[v, v]` / `(v, v)` are rejected by the
 aggregate element rule. Three positions are re-validated once per instantiation and therefore
 defer on `Type::mentions_generic` instead of asking `is_type_copy`: an array and a tuple
@@ -735,7 +745,8 @@ already has. Three operations reach through instances by their arguments: `unify
 (`Option<U>` against `Option<i32>` binds `U`), `substitute_generic` (rebuilds `Option<T>` as
 `Option<i32>`, which is also how a generic impl's method signature becomes the instance's), and
 `mentions_type_parameter` (`Option<T>` is not concrete). All three are `TypeChecker` methods because
-the answer lives in the instance tables. A call `Cell::new(42)` to an associated function of a
+the answer lives in the instance tables, and all three reach through a collection's arguments too,
+so a call returning `Vec<T>` hands its caller a `Vec<i32>`. A call `Cell::new(42)` to an associated function of a
 generic type infers the type's parameters as `check_generic_call` does, through
 `check_generic_call_with`; with nothing to infer from it is `GenericParamNotInferable`, and a
 turbofish answers it.
@@ -796,6 +807,20 @@ shape casts, `.clone()`, `.to(device)`, and compound assignment) reporting
 is what needs no extent: binding, passing, returning, moving and dropping.
 
 ### Traits
+**The derivable traits** (`derivable.rs`). The prelude declares `Copy`, `Clone`, `Debug` and
+`Hashable` as ordinary traits, so a hand-written impl goes through conformance and a bound
+dispatches through `resolve_generic_trait_method` (a `Copy` bound reaches `Clone`'s `clone`).
+`PartialEq` stays the operator lang-item, since `PartialEq<Rhs = Self>` needs trait type
+parameters; `is_checkable_bound` still checks a bound naming it at the call. A bound is met
+through `satisfies_bound`: a type parameter by its own bounds, anything else by
+`implements_without_impl` (a scalar, `string` or a deriving struct, per trait) or by
+`trait_impls`. A reference meets none of the five, because a method call reads through it to the
+referent. `type_implements_trait` stays nominal: it answers `&T` to `&dyn Trait` coercion and
+return-position `impl Trait`, where a derive has no vtable or method to stand behind it. The map
+key rules read `satisfies_bound`, so a derived `PartialEq` + `Hashable` struct is a key.
+`{x:?}` on a struct accepts a hand-written `Debug` as well as the derive, and on an enum, a
+newtype or a `T: Debug` parameter accepts the trait (`debugs_by_trait`).
+
 `traits` (name → `TraitInfo` of resolved method signatures), `trait_impls` (the `(trait, type)`
 pairs with an impl), `impl_assoc` (`(trait, type)` → what that impl bound each associated type
 to), and `generic_bounds` (type-parameter → `BoundInfo`s, live inside a generic definition)
@@ -844,8 +869,6 @@ same check for return-position `impl Trait<Assoc = U>`.
 - `Drop`: `register_drop_impl` requires exactly the destructor `drop(&mut self)` (no params, no
   return, else `InvalidDropImpl`) and `T` must not be `Copy` (`DropTypeCannotBeCopy`). No Drop
   state is kept on the checker; the backend recomputes the Drop-type set from the AST.
-- `Hashable`: `register_hashable_impl` enforces the single `hash(&self) -> u64`
-  (`InvalidHashableImpl`).
 - The **operator traits** (`Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Not`, `BitAnd`, `BitOr`,
   `BitXor`, `Shl`, `PartialEq`, `Comparable`), defined in `type_checkers/operator_traits.rs`.
   `register_operator_impl` requires a `Copy` receiver (`OperatorTraitRequiresCopy`) and a declared
@@ -1236,7 +1259,7 @@ compiler-known nominal type, never `Copy` and always move-tracked.
 `type_checkers/collections.rs` owns the rules:
 
 - `resolve_collection` resolves the generic application from `resolve_type`, validating storable
-  elements (`Copy` or `string`) and map keys; a program declaring its own generic type of that
+  elements (`Copy`, a type parameter bounded by `Copy` included, or `string`) and map keys; a program declaring its own generic type of that
   name shadows the builtin. `string` is storable because the collection takes a copy of the bytes
   rather than the operand's fat pointer: the slot owns what it holds, an element read copies back
   out, and the collection releases its slots when it is destroyed.
@@ -1247,8 +1270,8 @@ compiler-known nominal type, never `Copy` and always move-tracked.
   `==` operand, because an insertion copies the bytes rather than taking the operand's buffer.
   Fallible readers instantiate the prelude `Option<T>`.
 - Raw float keys are rejected toward `OrderedF32` / `OrderedF64` (IEEE-754 `<` is a partial
-  order); a struct key requires `impl PartialEq` plus `impl Hashable` (hashed) or `impl
-  Comparable` (ordered).
+  order); a struct key requires `PartialEq` plus `Hashable` (hashed), derived or by hand, or
+  `PartialEq` plus `impl Comparable` (ordered).
 - Indexing, index assignment, and `for`-in accept a `Vec` alongside an array.
 
 `StringBuilder` is a fourth, **nullary** kind (`arity() == 0`), so `Collection { kind: StringBuilder, args: [] }`
@@ -1260,8 +1283,7 @@ returns the type directly rather than demanding an annotation. `ParamSlot::Text`
 `ResultShape::OwnedString` back `push_str` and `to_string`; `len` / `clear` fall out of the
 existing kind-agnostic entries. `Type`'s `Display` omits `<>` for a nullary collection.
 
-Errors: `CollectionTypeNotInferable`, `InvalidCollectionElement`, `InvalidCollectionKey`,
-`InvalidHashableImpl`.
+Errors: `CollectionTypeNotInferable`, `InvalidCollectionElement`, `InvalidCollectionKey`.
 
 ### String interpolation
 `type_checkers/expressions/interpolation.rs`. Each hole's expression is checked, its type

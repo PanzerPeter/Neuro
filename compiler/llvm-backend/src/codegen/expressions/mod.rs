@@ -33,6 +33,10 @@ use crate::codegen::context::{BuiltinMethod, CodegenContext, resolve_builtin_met
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
+/// The method `Hashable` declares, which the compiler answers itself for a type that
+/// implements the trait with no method of its own.
+const HASH_METHOD: &str = "hash";
+
 /// Row-major element strides for `shape`: the distance between neighbouring elements
 /// along each axis, in elements (the product of every extent below it), which is also
 /// how DLPack counts them.
@@ -379,6 +383,9 @@ impl<'ctx> CodegenContext<'ctx> {
                         &result_ty,
                     );
                 }
+                if field == HASH_METHOD && self.hashes_without_method(recv_ty.referent()) {
+                    return Ok(Some(self.codegen_supplied_hash(&recv_ty, object)?));
+                }
                 if let Type::Struct(struct_name) = recv_ty.referent() {
                     let mangled = format!("{}__{}", struct_name, field);
                     // `struct.clone()` is a builtin deep copy when no user method
@@ -454,6 +461,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 "unsupported call expression".to_string(),
             )),
         }
+    }
+
+    /// Whether `.hash()` on `ty` is the compiler's own hash: a builtin key type, or a
+    /// struct that derives `Hashable` and so has no `hash` method to call.
+    fn hashes_without_method(&self, ty: &Type) -> bool {
+        ty.is_int_like()
+            || matches!(ty, Type::Bool | Type::String)
+            || self.derived_key(ty, HASH_METHOD).is_some()
     }
 
     /// Lower a dereference `*operand` to a load of the referent. The operand

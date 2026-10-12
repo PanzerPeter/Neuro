@@ -26,7 +26,7 @@ not what each one does.
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
-| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, `Self`, derives | [Structs](../docs/language-reference/structs.md) |
+| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs](../docs/language-reference/structs.md) |
 | `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
 | `showcase/`     | Bigger programs proving many features work **together** | see the index below |
 
@@ -106,6 +106,7 @@ One line each. The program's own header comment is the full description.
 - [`activation_fit.nr`](showcase/activation_fit.nr): one neuron trained under two activations passed into the same `@grad` loss, a closure capturing a local and a `>>` composition, which the loss applies with `.map` and sums with `.reduce`, so each `.backward()` call gets a derivative made for the function it passes
 - [`attention_head.nr`](showcase/attention_head.nr): one attention head written as two `einsum` contractions, with a `>>` composition rescaling every score through `.map` and `.reduce` folding the context
 - [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas, with a `PoolAware` scratch type the arena sweeps in reverse construction order, a headline the compiler routes off the arena because the binding it is stored into outlives the block, and a summary line a declared function builds so a `&mut self` method may store it past the block
+- [`bin_tally.nr`](showcase/bin_tally.nr): the derivable traits as bounds: a `HashMap` keyed by a struct that derives `PartialEq` and `Hashable`, a `Vec<T>` filled in a body bounded by `T: Copy`, and one `T: Debug` body rendering a derived struct, an enum with a hand-written `Debug` matched on its variants, and an integer
 - [`borrow_discipline.nr`](showcase/borrow_discipline.nr): `&mut self` methods, arrays and interpolation written around a live borrow, which freezes the borrowee's own name and forbids moving out from under it; operators and a method call through a `& &` read their borrowed operands without `*`
 - [`borrowed_text.nr`](showcase/borrowed_text.nr): explicit lifetime annotations over borrowed text
 - [`buffered_report.nr`](showcase/buffered_report.nr): a shift report long enough to exercise buffered stdout

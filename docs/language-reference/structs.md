@@ -379,9 +379,9 @@ everything exactly once.
 
 ## Derived Traits (`@derive`)
 
-A struct opts into a small set of compiler-generated traits with `@derive(...)`. The
-derivable-and-implemented set is `Copy`, `Clone`, `Debug`, `PartialEq`; any other name in the
-list is a compile error rather than a silent no-op.
+A struct opts into compiler-generated impls with `@derive(...)`. The derivable set is `Copy`,
+`Clone`, `Debug`, `PartialEq` and `Hashable`; any other name in the list is a compile error
+rather than a silent no-op.
 
 ```neuro
 @derive(Debug, PartialEq)
@@ -399,19 +399,70 @@ func main() -> i32 {
 }
 ```
 
-Both derives recurse, and both are generated inline over the fields rather than through a
+The derives recurse, and they are generated inline over the fields rather than through a
 method. That has two consequences worth knowing:
 
-- Every field must itself be renderable / comparable: a scalar, `string`, `char`, `bool`, or
-  another struct carrying the same derive. Anything else is a `DeriveFieldUnsupported` error
-  naming the field.
-- Deriving `PartialEq` and also writing `impl PartialEq for` the same struct is a
-  `DeriveConflictsWithImpl` error. Pick one: the derive for structural equality, the `impl`
-  when the comparison is not field-wise (or when the struct is a `HashMap` / `BTreeMap` key,
-  which calls the trait method and so needs the `impl`).
+- Every field must itself be handled by the same derive: a scalar, `string`, `char`, `bool`, or
+  another struct carrying the same derive (`Hashable` also refuses a float field). A field whose
+  type implements the trait by hand does not qualify. Anything else is a
+  `DeriveFieldUnsupported` error naming the field.
+- Deriving a trait and also writing its `impl` for the same struct is a
+  `DeriveConflictsWithImpl` error. Pick one: the derive for the field-wise behavior, the `impl`
+  when it should be something else. `@derive(Copy)` derives `Clone` too.
+
+A struct that derives `PartialEq` and `Hashable` is a `HashMap` key with no hand-written impls.
 
 `{value:?}` is the only hole a struct renders in. A struct has no display form, so `"{p}"`
 is an error even with `@derive(Debug)`. See [`examples/structs/derives.nr`](../../examples/structs/derives.nr).
+
+### Derivable traits by hand and as bounds
+
+Each derivable name is also an ordinary trait. The prelude declares four of them:
+
+```neuro
+trait Copy {}                     // requires `Clone`
+trait Clone { func clone(&self) -> Self }
+trait Debug { func fmt_debug(&self, out: &mut StringBuilder) }
+trait Hashable { func hash(&self) -> u64 }
+```
+
+`PartialEq` is the [operator trait](operators.md#operator-overloading) behind `==`.
+
+A struct may implement any of them by hand. `{x:?}` calls a hand-written `fmt_debug`, and a
+hand-written `impl Copy` is accepted only where `@derive(Copy)` would be: on a struct whose
+fields are all `Copy`, with no `Drop`, and with `Clone` implemented as well.
+
+```neuro
+struct Money { cents: i64 }
+
+impl Debug for Money {
+    func fmt_debug(&self, out: &mut StringBuilder) {
+        out.push_str("${self.cents / 100}.{self.cents % 100:02}")
+    }
+}
+
+impl Clone for Money {
+    func clone(&self) -> Self { Money { cents: self.cents } }
+}
+
+impl Copy for Money {}
+```
+
+Any of the five names may bound a type parameter. A derive, a hand-written impl and a builtin
+type meet the bound alike: the scalars implement all five (a float is not `Hashable`), `string`
+all but `Copy`, and every `Copy` type is `Clone`. So one generic body serves all of them:
+
+```neuro
+func label<T: Debug>(name: string, v: &T) -> string {
+    "{name} = {v:?}"            // a derived struct, `Money`, or an `i32`
+}
+```
+
+`.clone()` on a `Copy` value is a copy, and `.hash()` on an integer, `bool`, `char`, `string`
+or a struct that derives `Hashable` returns the hash a `HashMap` uses for that key. What a
+`T: Copy` or `T: Clone` bound gives a generic body is in
+[Functions](functions.md#ownership-through-a-type-parameter). See
+[`examples/structs/derivable_traits.nr`](../../examples/structs/derivable_traits.nr).
 
 ## Definition Order Independence
 
@@ -701,11 +752,12 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `MethodGenericShadowsImpl` | A generic method's parameter reuses a name its `impl` declares |
 | `GenericMethodInTraitImpl` | A method of a trait `impl` declares type parameters of its own |
 | `UnknownDerive` | A `@derive` argument that names no derivable trait |
-| `UnimplementedDerive` | A `@derive` argument the spec allows but no pass generates yet |
 | `DuplicateDerive` | The same trait listed twice in a `@derive` list |
-| `DeriveFieldUnsupported` | A field a derived `Debug` / `PartialEq` cannot render or compare |
+| `DeriveFieldUnsupported` | A field a derive cannot render, compare, clone or hash |
 | `DeriveConflictsWithImpl` | A struct both derives a trait and declares an `impl` of it |
-| `UnrenderableStruct` | A struct hole missing `@derive(Debug)`, or missing the `:?` specifier |
+| `InvalidCopyImpl` | `impl Copy` on an enum, a newtype or a generic struct |
+| `MissingSupertraitImpl` | `impl Copy` without `Clone`, or `impl Comparable` without `PartialEq` |
+| `UnrenderableStruct` | A struct hole with no `Debug`, derived or by hand, or missing the `:?` specifier |
 
 ## References
 

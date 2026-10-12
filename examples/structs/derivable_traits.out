@@ -1,0 +1,4 @@
+tile = Tile { row: 2, col: 3 }
+price = $12.50
+count = 7
+2 tiles; equal tiles hash alike: true

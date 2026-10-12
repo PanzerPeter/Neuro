@@ -4,9 +4,10 @@
 // here adds methods to the same `impl TypeChecker` block.
 
 use super::builtins::TO_CHECKED_METHOD;
-use super::{CLONE_METHOD, COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
+use super::{COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
 use crate::errors::TypeError;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
+use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::{BoundInfo, GenericFnSig};
 use crate::types::{CollectionKind, Type};
@@ -110,7 +111,14 @@ impl TypeChecker {
         method: &str,
         span: Span,
     ) -> Option<(Vec<Type>, Type)> {
-        let bounds = self.generic_bounds.get(param)?.clone();
+        let mut bounds = self.generic_bounds.get(param)?.clone();
+        // `Copy: Clone`, so a `Copy` bound reaches `.clone()` as a `Clone` bound would.
+        if bounds.iter().any(|b| b.trait_name == COPY_TRAIT) {
+            bounds.push(BoundInfo {
+                trait_name: CLONE_TRAIT.to_string(),
+                assoc: Vec::new(),
+            });
+        }
         for bound in bounds {
             let Some(sig) = self
                 .traits
@@ -172,7 +180,7 @@ impl TypeChecker {
     /// Validate a call's arguments against the callee's visible parameter types: arity,
     /// per-argument compatibility, and by-value move recording. Shared by the trait
     /// method-dispatch path.
-    pub(super) fn check_call_args(
+    pub(crate) fn check_call_args(
         &mut self,
         args: &[ast_types::Expr],
         visible_params: &[Type],
@@ -279,7 +287,7 @@ impl TypeChecker {
             for bound in param_bounds {
                 // A bound naming an unknown trait is reported once at the impl/decl site;
                 // skip it here so the same typo is not echoed at every call.
-                if !self.traits.contains_key(&bound.trait_name) {
+                if !self.is_checkable_bound(&bound.trait_name) {
                     continue;
                 }
                 if !self.satisfies_bound(concrete, &bound.trait_name) {
@@ -296,20 +304,10 @@ impl TypeChecker {
         }
     }
 
-    /// Whether `concrete` implements `trait_name`: a struct, enum or newtype through an
-    /// `impl`, a type parameter through a bound of its own. Nothing else implements a
-    /// user trait.
-    pub(crate) fn satisfies_bound(&self, concrete: &Type, trait_name: &str) -> bool {
-        match concrete {
-            Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => self
-                .trait_impls
-                .contains(&(trait_name.to_string(), name.clone())),
-            Type::Generic(name) => self
-                .generic_bounds
-                .get(name)
-                .is_some_and(|b| b.iter().any(|o| o.trait_name == trait_name)),
-            _ => false,
-        }
+    /// Whether a bound naming `trait_name` is checked against a call's type arguments: a
+    /// declared trait is, and so is `PartialEq`, which the compiler knows by name instead.
+    pub(crate) fn is_checkable_bound(&self, trait_name: &str) -> bool {
+        trait_name == PARTIAL_EQ_TRAIT || self.traits.contains_key(trait_name)
     }
 
     /// Verify a `Trait<Assoc = T>` bound against what the concrete type argument's impl
@@ -729,6 +727,11 @@ impl TypeChecker {
                         ) {
                             return Some(ret);
                         }
+                        if let Some(ret) =
+                            self.check_supplied_trait_method(&obj_ty, &field.name, args, *span)
+                        {
+                            return Some(ret);
+                        }
                         self.record_error(TypeError::MethodNotFound {
                             struct_name: obj_ty.to_string(),
                             method_name: field.name.clone(),
@@ -745,19 +748,13 @@ impl TypeChecker {
                 {
                     Some(k) => k.clone(),
                     None => {
-                        // `.clone()` on a struct that derives `Clone` (or `Copy`) is a
-                        // compiler-known builtin, a deep copy yielding the same
-                        // struct type. A user-defined `clone` method shadows it (handled
-                        // above by the impl_methods lookup).
-                        if field.name == CLONE_METHOD && self.struct_is_clone(&struct_name) {
-                            if !args.is_empty() {
-                                self.record_error(TypeError::ArgumentCountMismatch {
-                                    expected: 0,
-                                    found: args.len(),
-                                    span: *span,
-                                });
-                            }
-                            return Some(Type::Struct(struct_name));
+                        // A derived trait has no method in `impl_methods`: `.clone()`,
+                        // `.hash()` and `.fmt_debug(out)` on a struct carrying the derive
+                        // are generated instead. A hand-written impl was found above.
+                        if let Some(ret) =
+                            self.check_supplied_trait_method(&obj_ty, &field.name, args, *span)
+                        {
+                            return Some(ret);
                         }
                         self.record_error(TypeError::MethodNotFound {
                             struct_name,

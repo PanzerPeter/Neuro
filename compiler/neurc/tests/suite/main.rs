@@ -35,6 +35,7 @@ mod const_generics;
 mod constants;
 mod control_flow;
 mod copy_clone;
+mod derivable_traits;
 mod derives;
 mod destructuring;
 mod device_management;

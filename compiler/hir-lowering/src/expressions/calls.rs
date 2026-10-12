@@ -823,6 +823,10 @@ impl Lowerer {
             ));
         }
 
+        if let Some(lowered) = self.lower_supplied_trait_method(&object, method, args, span)? {
+            return Ok(lowered);
+        }
+
         let impl_receiver = match recv.referent() {
             HirType::Struct(name) => Some(name.clone()),
             // An enum's own method; anything else on an enum is the compiler-known

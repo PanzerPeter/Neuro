@@ -274,23 +274,6 @@ func main() -> i32 { return 0 }
 }
 
 #[test]
-fn unimplemented_derive_argument_is_rejected() {
-    let stderr = check_error(
-        r#"
-@derive(Hashable)
-struct P { x: i32 }
-
-func main() -> i32 { return 0 }
-"#,
-        "pending",
-    );
-    assert!(
-        stderr.contains("not implemented yet"),
-        "expected an unimplemented-derive diagnostic, got: {stderr}"
-    );
-}
-
-#[test]
 fn a_struct_without_the_debug_derive_cannot_be_interpolated() {
     let stderr = check_error(
         r#"

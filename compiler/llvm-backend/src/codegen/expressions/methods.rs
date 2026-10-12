@@ -316,6 +316,30 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(CodegenError::from)
     }
 
+    /// `value.hash()` on a type that implements `Hashable` with no `hash` method of its
+    /// own: a builtin key type, or a struct that derives it. It is the map's key hash, so
+    /// the two never disagree. A string receiver built for the call is released once its
+    /// bytes are hashed.
+    pub(super) fn codegen_supplied_hash(
+        &mut self,
+        recv_ty: &Type,
+        receiver: &HirExpr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let key_ty = recv_ty.referent().clone();
+        if matches!(key_ty, Type::String) {
+            let text = self.string_receiver_struct(receiver)?;
+            let hash = self.emit_key_hash(&key_ty, text.into())?;
+            self.release_string_temporary(receiver, text.into())?;
+            return Ok(hash.into());
+        }
+        let value = if matches!(recv_ty, Type::Reference { .. }) {
+            self.codegen_deref(receiver, &key_ty)?
+        } else {
+            self.codegen_expr(receiver)?
+        };
+        Ok(self.emit_key_hash(&key_ty, value)?.into())
+    }
+
     /// Lower a string receiver to its `{ ptr, len }` fat-pointer value.
     ///
     /// An owned `string` and an immutable `&string` are both already the struct. A `&mut

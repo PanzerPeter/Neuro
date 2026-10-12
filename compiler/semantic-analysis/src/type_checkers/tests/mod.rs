@@ -5,6 +5,7 @@ mod builtin_tests;
 mod coalesce_tests;
 mod comparison_tests;
 mod decl_tests;
+mod derivable_tests;
 mod derive_tests;
 mod drop_tests;
 mod elementwise_math_tests;

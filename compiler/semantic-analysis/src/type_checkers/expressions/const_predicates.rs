@@ -117,7 +117,9 @@ impl TypeChecker {
             Type::Array { element, size } => {
                 matches!(size, ArrayLen::Param(_)) || self.mentions_type_parameter(element)
             }
-            Type::Tuple(elements) => elements.iter().any(|e| self.mentions_type_parameter(e)),
+            Type::Tuple(elements) | Type::Collection { args: elements, .. } => {
+                elements.iter().any(|e| self.mentions_type_parameter(e))
+            }
             Type::Function { params, ret } => {
                 params.iter().any(|p| self.mentions_type_parameter(p))
                     || self.mentions_type_parameter(ret)

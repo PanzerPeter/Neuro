@@ -258,7 +258,7 @@ func main() -> i32 { 0 }
         .compile(&path)
         .expect_err("an owning array field must block `@derive(Copy)`");
     assert!(
-        err.contains("cannot derive Copy"),
+        err.contains("cannot be `Copy`"),
         "expected a derive diagnostic, got: {err}"
     );
 }

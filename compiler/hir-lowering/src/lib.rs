@@ -32,6 +32,7 @@ use shared_types::Span;
 mod autodiff;
 mod closures;
 mod collections;
+mod derivable;
 mod elementwise_math;
 mod expressions;
 mod items;
@@ -262,6 +263,9 @@ struct Lowerer {
     /// Concrete instance functions produced by monomorphization, appended to the
     /// program after the ordinary items.
     mono_items: Vec<neuro_hir::HirItem>,
+    /// The `{x:?}` helpers already emitted into `mono_items`, one per type whose `Debug`
+    /// is written by hand.
+    debug_string_helpers: HashSet<String>,
     /// Lifted closure bodies discovered while lowering expressions, appended to the
     /// program as top-level [`neuro_hir::HirItem::Closure`] items.
     closure_items: Vec<neuro_hir::HirItem>,
@@ -438,6 +442,7 @@ impl Lowerer {
             mono_depth: 0,
             mono_seen: HashSet::new(),
             mono_items: Vec::new(),
+            debug_string_helpers: HashSet::new(),
             closure_items: Vec::new(),
             closure_counter: 0,
             coalesce_counter: 0,

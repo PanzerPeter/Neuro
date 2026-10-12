@@ -7,6 +7,7 @@ use shared_types::{
 
 use super::TypeChecker;
 use crate::errors::TypeError;
+use crate::type_checkers::derivable::DEBUG_TRAIT;
 use crate::types::Type;
 
 impl TypeChecker {
@@ -39,6 +40,8 @@ impl TypeChecker {
                     });
                     continue;
                 }
+            } else if kind == FormatKind::Debug && self.debugs_by_trait(&rendered) {
+                // Rendered by its `Debug` impl, or per instance under a `T: Debug` bound.
             } else if !self.is_formattable(&rendered, kind) {
                 self.record_error(TypeError::UnformattableType {
                     ty: rendered,
@@ -64,22 +67,31 @@ impl TypeChecker {
         ty.is_numeric() || matches!(ty, Type::Bool | Type::Char | Type::String)
     }
 
+    /// Whether a non-struct `ty` renders under `{x:?}` through `Debug` rather than as a
+    /// builtin: an enum or newtype with a hand-written impl, or a type parameter bounded by
+    /// `Debug`, whose instances each render their own way.
+    fn debugs_by_trait(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Enum(_) | Type::Newtype(_) | Type::Generic(_))
+            && self.satisfies_bound(ty, DEBUG_TRAIT)
+    }
+
     /// What stops struct `name` rendering under `kind`, or `None` when nothing does.
     ///
     /// A struct has no `Display` form, so it renders under `{x:?}` and only when it
-    /// derives `Debug`. Both refusals point at the missing half rather than at the list
-    /// of renderable primitives, which a struct can never join.
+    /// implements `Debug`, by derive or by hand. Both refusals point at the missing half
+    /// rather than at the list of renderable primitives, which a struct can never join.
     fn struct_render_obstacle(&self, name: &str, kind: FormatKind) -> Option<String> {
-        if !self.struct_is_debug(name) {
+        if !self.satisfies_bound(&Type::Struct(name.to_string()), DEBUG_TRAIT) {
             return Some(format!(
-                "a struct renders only through its debug form; add `@derive(Debug)` to `{}`",
+                "a struct renders only through its debug form; add `@derive(Debug)` to `{}` \
+                 or implement `Debug` for it",
                 name
             ));
         }
         if kind != FormatKind::Debug {
             return Some(
                 "a struct has no display form; add the `:?` specifier to the hole to use \
-                 its derived debug rendering"
+                 its debug rendering"
                     .to_string(),
             );
         }

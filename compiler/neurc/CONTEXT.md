@@ -136,6 +136,9 @@ shadows it. The items are otherwise ordinary declarations: nothing downstream sp
 name: `semantic-analysis` asks whether a type has an `impl PoolAware` before letting a `pool`
 block own a value with a destructor. It reads the answer out of the ordinary trait-impl table, so
 the declaration here stays an ordinary trait and a program that shadows `PoolAware` gets its own.
+The derivable traits `Copy`, `Clone`, `Debug` and `Hashable` are declared here the same way.
+`semantic-analysis` adds what a trait declaration cannot say yet (`Copy` requires `Clone`) and
+which types implement them with no impl (the scalars, `string`, a struct carrying the derive).
 
 Dropping one item takes with it every prelude declaration written against it. `Chars::next`
 returns `Option<char>`, so a program declaring its own `Option` would leave the prelude's own

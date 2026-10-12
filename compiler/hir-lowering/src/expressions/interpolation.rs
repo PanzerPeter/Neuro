@@ -23,10 +23,9 @@ impl Lowerer {
             match part {
                 InterpPart::Text(text) => lowered.push(HirInterpPart::Text(text.clone())),
                 InterpPart::Formatted { expr, spec, .. } => {
-                    lowered.push(HirInterpPart::Formatted {
-                        expr: self.lower_expr(expr, None)?,
-                        spec: spec.clone().unwrap_or_default(),
-                    })
+                    let expr = self.lower_expr(expr, None)?;
+                    lowered
+                        .push(self.debug_hole_through_impl(expr, spec.clone().unwrap_or_default()))
                 }
             }
         }

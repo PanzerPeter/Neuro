@@ -651,7 +651,7 @@ mod tests {
             "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("cannot derive Copy")),
+            errs.iter().any(|e| e.contains("cannot be `Copy`")),
             "Copy with a string field must be rejected; got {errs:?}"
         );
     }

@@ -62,6 +62,9 @@ pub(crate) struct TypeChecker {
     /// one compares its fields; the operator does not route through a method, so this is
     /// distinct from a hand-written `impl PartialEq` in `operator_binary_impls`.
     partial_eq_structs: HashSet<String>,
+    /// Names of structs that derive `Hashable` (`@derive(Hashable)`): their hash folds
+    /// the fields' hashes, generated with no `hash` method to call.
+    hashable_structs: HashSet<String>,
     /// Names of structs with an `impl Drop` block. A `pool` block refuses to own a value
     /// of one unless it is also `PoolAware`: the arena releases in a single store and
     /// cannot run an arbitrary destructor per object.
@@ -387,6 +390,7 @@ mod closures;
 mod collections;
 mod const_eval;
 mod declarations;
+mod derivable;
 mod expressions;
 mod gpu;
 mod grad;
@@ -430,6 +434,7 @@ impl TypeChecker {
             clone_structs: HashSet::new(),
             debug_structs: HashSet::new(),
             partial_eq_structs: HashSet::new(),
+            hashable_structs: HashSet::new(),
             drop_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             mut_self_methods: HashSet::new(),
@@ -601,11 +606,11 @@ impl TypeChecker {
         match ty {
             Type::String | Type::Void | Type::Function { .. } | Type::Unknown => false,
             // An abstract type parameter answers for every instantiation at once, and a
-            // generic body is checked exactly once, so the only sound answer is the
-            // conservative one. A caller whose position IS re-validated per instance —
-            // a `@derive(Copy)` field scan — defers explicitly at its own site instead,
-            // as `is_debug_renderable` does.
-            Type::Generic(_) => false,
+            // generic body is checked exactly once, so without a `Copy` bound the only
+            // sound answer is the conservative one. A caller whose position IS
+            // re-validated per instance (a `@derive(Copy)` field scan) defers explicitly
+            // at its own site instead, as `is_debug_renderable` does.
+            Type::Generic(name) => self.has_copy_bound(name),
             Type::Struct(name) => self.copy_structs.contains(name),
             // A newtype forwards `Copy` from its inner type. Cycles are
             // rejected at registration, so this recursion terminates.
@@ -681,8 +686,9 @@ impl TypeChecker {
             // the only answer sound for EVERY instantiation is the conservative one:
             // track it. A body that survives this check is valid when `T` is `string` and
             // merely over-restricted when `T` is `i32`, whereas the reverse would let a
-            // template move a buffer twice once it was instantiated with an owner.
-            Type::Generic(_) => true,
+            // template move a buffer twice once it was instantiated with an owner. A
+            // `Copy` bound is the exception: every instance it admits copies.
+            Type::Generic(name) => !self.has_copy_bound(name),
             Type::Struct(name) => !self.copy_structs.contains(name),
             Type::Collection { .. } => true,
             Type::Tensor { .. } => true,
@@ -712,17 +718,6 @@ impl TypeChecker {
                 .unwrap_or(false),
             _ => false,
         }
-    }
-
-    /// Whether a struct named `name` supports `.clone()`: i.e. it derives `Clone` (or `Copy`,
-    /// which implies `Clone`).
-    pub(crate) fn struct_is_clone(&self, name: &str) -> bool {
-        self.clone_structs.contains(name)
-    }
-
-    /// Whether a struct named `name` derives `Debug`.
-    pub(crate) fn struct_is_debug(&self, name: &str) -> bool {
-        self.debug_structs.contains(name)
     }
 
     /// Whether a struct named `name` derives `PartialEq`.
@@ -977,6 +972,10 @@ impl TypeChecker {
             }
         }
 
+        // A hand-written `impl Copy` makes its struct `Copy` exactly as the derive does, so
+        // it is recorded with the derives, before anything asks.
+        self.register_copy_impls(items);
+
         // Pass 1a: resolve enum variant payloads, now that every nominal name exists.
         for item in items {
             if let Item::Enum(def) = item {
@@ -1025,13 +1024,13 @@ impl TypeChecker {
             }
         }
 
-        // Pass 2b: operator-trait supertrait check, after all impls are
-        // registered so `Comparable: PartialEq` is order-independent.
+        // Pass 2b: supertrait check, after all impls are registered so
+        // `Comparable: PartialEq` and `Copy: Clone` are order-independent.
         self.check_operator_supertraits(items);
 
         // Pass 2c: a derived trait and a hand-written impl of the same trait are two
-        // different `==`, and the operator dispatch would silently pick the impl. Runs
-        // after every impl is registered so the check is independent of source order.
+        // implementations, and each consumer would silently pick one. Runs after every
+        // impl is registered so the check is independent of source order.
         self.check_derive_impl_conflicts(items);
 
         // Pass 3: register module-level constants so they are visible in function bodies

@@ -1,0 +1,5 @@
+bin   Bin { aisle: 1, shelf: 2 }
+hits  3
+grade aged 3d
+grade aged 3d
+grade fresh

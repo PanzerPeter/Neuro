@@ -407,28 +407,29 @@ Rules:
   floats including `f16` / `bf16`, `bool`, `char`) are `Copy`, and so are arrays and tuples of
   them; `string` and the collections are not; a struct field is `Copy` only when its type also
   derives `Copy`. Anything else is a compile error that names the offending field.
-- `Copy` implies `Clone`.
+- `Copy` implies `Clone`. `.clone()` on any `Copy` value returns a copy.
 - `@derive(Clone)` (or `Copy`) enables `struct.clone()`, an explicit copy that returns a fresh
-  value without moving the receiver. A user-defined `clone` method in an `impl` block shadows
-  the builtin. The derived copy does not yet clone a field that owns a buffer (`string`, a
-  tensor, a collection, `StringBuilder`, or an array of them), so such a field makes the derive
-  a `DeriveFieldUnsupported` error ([BUG-098](../BUGS.md)); write a method that clones each
-  field instead.
+  value without moving the receiver. The derived copy does not yet clone a field that owns a
+  buffer (`string`, a tensor, a collection, `StringBuilder`, or an array of them), so such a
+  field makes the derive a `DeriveFieldUnsupported` error ([BUG-098](../BUGS.md)); write
+  `impl Clone` by hand instead.
 - `@derive(Debug)` gives the struct its `{value:?}` rendering: the struct's name followed by
   each field in declaration order, e.g. `Point { x: 1, y: 2 }`. A field-less struct renders as
   its bare name. Every field must itself be renderable (a scalar, `string`, `char`, `bool`, or
   another struct that derives `Debug`). Otherwise the derive is a `DeriveFieldUnsupported` error.
   A struct has no *display* form, so `"{p}"` stays an error even with the derive; write `"{p:?}"`.
 - `@derive(PartialEq)` gives the struct `==` and `!=`, compared field by field. The same field
-  rule applies: a nested struct must derive `PartialEq` too. The comparison is generated inline
-  and never calls a method, which is why a struct that both derives `PartialEq` and declares
-  `impl PartialEq for` it is a `DeriveConflictsWithImpl` error: keep one.
-- The derivable-and-implemented set is exactly `Copy`, `Clone`, `Debug`, `PartialEq`. Any other
-  name in a `@derive` list is a compile error, never a silent no-op: `Hashable` is specified but
-  not generated yet (`UnimplementedDerive`: write the `impl` by hand), and anything else is
-  `UnknownDerive`. A repeated name is `DuplicateDerive`.
-- A derived `PartialEq` does **not** satisfy the `impl PartialEq` a struct key of a `HashMap` or
-  `BTreeMap` requires: a collection key calls the trait method, and a derive provides none.
+  rule applies: a nested struct must derive `PartialEq` too.
+- `@derive(Hashable)` gives the struct a hash of its fields, taken in declaration order. Each
+  field must be an integer, `bool`, `char`, `string`, or a struct that derives `Hashable`; a
+  float is refused. A struct deriving `PartialEq` and `Hashable` is a `HashMap` key.
+- The derivable set is exactly `Copy`, `Clone`, `Debug`, `PartialEq`, `Hashable`. Any other
+  name in a `@derive` list is `UnknownDerive`, never a silent no-op, and a repeated name is
+  `DuplicateDerive`. Deriving a trait and also writing its `impl` for the same struct is
+  `DeriveConflictsWithImpl`: keep one.
+
+Each derivable name is also an ordinary trait, implementable by hand and usable as a bound;
+[Structs](structs.md#derivable-traits-by-hand-and-as-bounds) covers both.
 
 ```neuro
 @derive(Clone)
@@ -459,7 +460,7 @@ end to end, including the recursion through a nested struct.
 | `AssignToImmutableField` | Field assignment on a `val` binding |
 | `StructAlreadyDefined` | Two `struct` declarations share the same name |
 | `UnknownStruct` | Struct literal references an undeclared struct name |
-| `CopyDeriveNonCopyField` | `@derive(Copy)` on a struct with a non-`Copy` field |
+| `CopyDeriveNonCopyField` | `@derive(Copy)` or `impl Copy` on a struct with a non-`Copy` field |
 
 ## Enum Types
 
@@ -1537,8 +1538,8 @@ that ordering is the reason to choose it.
   `Copy` struct, enum, tuple, or array) or `string`.
 - **Keys** additionally need equality and, per map, a hash or a total order. The
   compiler supplies both for integer, `bool`, `char`, and `string` keys. A
-  struct key supplies them itself: `impl PartialEq` plus `impl Hashable`
-  (`HashMap`) or `impl Comparable` (`BTreeMap`).
+  struct key needs `PartialEq` plus `Hashable` (`HashMap`), derived or written
+  by hand, or `PartialEq` plus `impl Comparable` (`BTreeMap`).
 - **Float keys are rejected.** IEEE-754 comparison is a partial order, NaN
   compares false against everything, including itself, so a map keyed on a raw
   float could hold a key it can never find again. Use the prelude's validating
@@ -1554,8 +1555,8 @@ float has no representation-independent answer, so they are ordered-map keys.
 
 ### `Hashable`
 
-`Hashable` is a compiler-known lang-item trait, like `Drop` and the operator
-traits, write the `impl`, never a `trait` declaration:
+`Hashable` is a prelude trait, `trait Hashable { func hash(&self) -> u64 }`. A struct derives
+it or implements it by hand:
 
 ```neuro
 impl Hashable for Point {
@@ -1565,8 +1566,9 @@ impl Hashable for Point {
 }
 ```
 
-The shape is fixed: exactly one `hash(&self) -> u64`. Equal keys must hash
-equally; the map only needs that much.
+Equal keys must hash equally; the map only needs that much. The integers, `bool`, `char` and
+`string` implement it already, and `.hash()` on one of them, or on a struct that derives it,
+returns the hash the map uses for that key.
 
 ### Current limits
 

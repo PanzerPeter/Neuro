@@ -4,14 +4,13 @@
 //! One of the declaration-kind modules under `declarations`; each adds methods
 //! to the same `impl TypeChecker` block.
 
-use super::{DEBUG_TRAIT, DROP_METHOD, DROP_TRAIT, PARTIAL_EQ_TRAIT};
+use super::{CLONE_TRAIT, COPY_TRAIT, DERIVABLE_TRAITS, DERIVE_ATTRIBUTE, DROP_METHOD, DROP_TRAIT};
 use crate::errors::TypeError;
-use crate::type_checkers::collections::{HASH_METHOD, HASHABLE_TRAIT};
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
 use crate::type_checkers::val_else::stmts_diverge;
 use crate::type_checkers::{MethodGenerics, TypeChecker};
 use crate::types::Type;
-use ast_types::{ImplDef, SelfParam};
+use ast_types::{ImplDef, Item, SelfParam, StructDef};
 use std::collections::HashMap;
 
 impl TypeChecker {
@@ -136,8 +135,6 @@ impl TypeChecker {
         if let Some(t) = &def.trait_name {
             if t.name == DROP_TRAIT {
                 // handled above
-            } else if t.name == HASHABLE_TRAIT {
-                self.register_hashable_impl(def, &struct_name);
             } else if is_operator_trait(&t.name) {
                 self.register_operator_impl(def, &struct_name, &t.name.clone(), struct_is_copy);
             } else {
@@ -330,58 +327,116 @@ impl TypeChecker {
             .insert((trait_name.to_string(), struct_name.to_string()));
     }
 
-    /// Verify each operator-trait impl also provides any required supertrait impl
-    /// (`Comparable: PartialEq`). Runs after every impl is registered so the check
-    /// is independent of source order.
-    pub(crate) fn check_operator_supertraits(&mut self, items: &[ast_types::Item]) {
+    /// Verify each trait impl also has its required supertrait (`Comparable: PartialEq`,
+    /// `Copy: Clone`). Runs after every impl is registered so the check is independent of
+    /// source order. A derive provides a supertrait as well as an impl does.
+    pub(crate) fn check_operator_supertraits(&mut self, items: &[Item]) {
         for item in items {
-            let ast_types::Item::Impl(def) = item else {
+            let Item::Impl(def) = item else {
                 continue;
             };
             let Some(t) = &def.trait_name else { continue };
-            let Some(spec) = operator_trait_spec(&t.name) else {
+            let type_name = &def.type_name.name;
+            let supertrait = if t.name == COPY_TRAIT {
+                // An `impl Copy` already refused for its target has nothing left to need.
+                if !self.copy_structs.contains(type_name) {
+                    continue;
+                }
+                CLONE_TRAIT
+            } else if let Some(sup) = operator_trait_spec(&t.name).and_then(|spec| spec.supertrait)
+            {
+                sup
+            } else {
                 continue;
             };
-            if let Some(sup) = spec.supertrait {
-                let has_super = self
-                    .trait_impls
-                    .contains(&(sup.to_string(), def.type_name.name.clone()));
-                if !has_super {
-                    self.record_error(TypeError::MissingSupertraitImpl {
-                        trait_name: t.name.clone(),
-                        supertrait: sup.to_string(),
-                        type_name: def.type_name.name.clone(),
-                        span: t.span,
-                    });
-                }
+            let has_super = if supertrait == CLONE_TRAIT {
+                // Not `satisfies_bound`: every `Copy` type answers `Clone` there, and the
+                // `Copy` impl being checked is what made this type `Copy`.
+                self.clone_structs.contains(type_name)
+                    || self
+                        .trait_impls
+                        .contains(&(CLONE_TRAIT.to_string(), type_name.clone()))
+            } else {
+                self.impl_target_type(type_name)
+                    .is_some_and(|ty| self.satisfies_bound(&ty, supertrait))
+            };
+            if !has_super {
+                self.record_error(TypeError::MissingSupertraitImpl {
+                    trait_name: t.name.clone(),
+                    supertrait: supertrait.to_string(),
+                    type_name: type_name.clone(),
+                    span: t.span,
+                });
             }
+        }
+    }
+
+    /// Record each hand-written `impl Copy for S` before anything asks whether `S` copies.
+    ///
+    /// Runs with the struct registration, ahead of every rule that reads `Copy`: the
+    /// field validation that follows holds the impl to what `@derive(Copy)` would accept,
+    /// and impl registration decides from it whether a `self` method consumes.
+    pub(crate) fn register_copy_impls(&mut self, items: &[Item]) {
+        for item in items {
+            let Item::Impl(def) = item else { continue };
+            if def.trait_name.as_ref().is_none_or(|t| t.name != COPY_TRAIT) {
+                continue;
+            }
+            let name = &def.type_name.name;
+            let refusal = if self.generic_structs.contains_key(name) {
+                Some(
+                    "a generic struct is `Copy` through `@derive(Copy)`, which each instance re-checks",
+                )
+            } else if !self.struct_defs.contains_key(name) {
+                Some(
+                    "only a struct implements `Copy` by hand; an enum or a newtype is `Copy` exactly when what it holds is",
+                )
+            } else {
+                None
+            };
+            if let Some(reason) = refusal {
+                self.record_error(TypeError::InvalidCopyImpl {
+                    type_name: name.clone(),
+                    reason: reason.to_string(),
+                    span: def.type_name.span,
+                });
+                continue;
+            }
+            self.copy_structs.insert(name.clone());
         }
     }
 
     /// Reject a struct that both derives a trait and declares an `impl` of it.
     ///
-    /// The two produce different code: the derive compares fields inline, the impl
-    /// routes the operator through a method, and the operator dispatch consults the
-    /// impl first, so the derive would be silently outranked.
-    pub(crate) fn check_derive_impl_conflicts(&mut self, items: &[ast_types::Item]) {
-        let mut conflicts: Vec<(String, &'static str, shared_types::Span)> = Vec::new();
+    /// The two produce different code, so keeping both would leave one of them silently
+    /// unused: the operator dispatch consults the impl first, while `{x:?}` and a map
+    /// key read the derive. `@derive(Copy)` derives `Clone` too.
+    pub(crate) fn check_derive_impl_conflicts(&mut self, items: &[Item]) {
+        let derives: HashMap<&str, Vec<&str>> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Struct(def) => Some((def.name.name.as_str(), derived_traits(def))),
+                _ => None,
+            })
+            .collect();
+        let mut conflicts: Vec<(String, String, shared_types::Span)> = Vec::new();
         for item in items {
-            let ast_types::Item::Impl(def) = item else {
+            let Item::Impl(def) = item else {
                 continue;
             };
             let Some(t) = &def.trait_name else { continue };
             let struct_name = &def.type_name.name;
-            let derived = match t.name.as_str() {
-                PARTIAL_EQ_TRAIT if self.struct_is_partial_eq(struct_name) => PARTIAL_EQ_TRAIT,
-                DEBUG_TRAIT if self.struct_is_debug(struct_name) => DEBUG_TRAIT,
-                _ => continue,
-            };
-            conflicts.push((struct_name.clone(), derived, t.span));
+            if derives
+                .get(struct_name.as_str())
+                .is_some_and(|derived| derived.contains(&t.name.as_str()))
+            {
+                conflicts.push((struct_name.clone(), t.name.clone(), t.span));
+            }
         }
         for (struct_name, trait_name, span) in conflicts {
             self.record_error(TypeError::DeriveConflictsWithImpl {
                 struct_name,
-                trait_name: trait_name.to_string(),
+                trait_name,
                 span,
             });
         }
@@ -441,38 +496,6 @@ impl TypeChecker {
                 span: def.span,
             });
         }
-    }
-
-    /// Validate an `impl Hashable for T` block and record the impl.
-    ///
-    /// `Hashable` is a compiler-known lang-item like `Drop` and the operator traits: it
-    /// exists so a user struct can be a `HashMap` key, and the generated probe sequence
-    /// calls `T__hash` directly. The shape is therefore fixed: one `hash(&self) -> u64`
-    /// method, taking the receiver by reference so hashing never moves the key.
-    pub(super) fn register_hashable_impl(&mut self, def: &ImplDef, struct_name: &str) {
-        let valid = match def.methods.as_slice() {
-            [method] if method.name.name == HASH_METHOD => {
-                matches!(method.self_param, Some(SelfParam::Ref))
-                    && method.params.is_empty()
-                    && method
-                        .return_type
-                        .as_ref()
-                        .and_then(|t| self.resolve_type(t))
-                        .is_some_and(|t| t == Type::U64)
-            }
-            _ => false,
-        };
-
-        if !valid {
-            self.record_error(TypeError::InvalidHashableImpl {
-                type_name: struct_name.to_string(),
-                span: def.span,
-            });
-            return;
-        }
-
-        self.trait_impls
-            .insert((HASHABLE_TRAIT.to_string(), struct_name.to_string()));
     }
 
     /// Type-check the body of each method in an `impl` block.
@@ -587,4 +610,20 @@ impl TypeChecker {
 
         self.self_assoc = saved_assoc;
     }
+}
+
+/// The traits a struct's `@derive` attributes name, `Clone` included when `Copy` is.
+/// Names outside the derivable set are left out: they are reported where the derive is.
+fn derived_traits(def: &StructDef) -> Vec<&str> {
+    let mut derived: Vec<&str> = def
+        .attributes
+        .iter()
+        .filter(|attr| attr.name.name == DERIVE_ATTRIBUTE)
+        .flat_map(|attr| &attr.args)
+        .filter_map(|arg| DERIVABLE_TRAITS.iter().find(|d| **d == arg.name).copied())
+        .collect();
+    if derived.contains(&COPY_TRAIT) {
+        derived.push(CLONE_TRAIT);
+    }
+    derived
 }

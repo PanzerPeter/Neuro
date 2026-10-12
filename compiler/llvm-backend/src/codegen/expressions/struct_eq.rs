@@ -71,7 +71,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Normalize a struct operand to its aggregate value: a `&mut S` operand is the
     /// referent's address and must be read through before its fields can be extracted.
-    fn load_struct_value(
+    pub(crate) fn load_struct_value(
         &self,
         value: &BasicValueEnum<'ctx>,
         name: &str,

@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.12.0] - 2026-10-12
+
+### Added
+
+- `Copy`, `Clone`, `Debug` and `Hashable` are declared traits in the prelude, and `PartialEq`
+  can now be named as a bound. Each can be implemented by hand and used as a bound. A derive, a
+  hand-written impl and a builtin type all meet a bound the same way, so one generic body
+  instantiates over all three.
+- `T: Copy` makes `T` copy instead of move inside a generic body, so `val a = v; val b = v`
+  compiles. `T: Clone` gives the body `v.clone()`, returning a `T`, and so does `T: Copy`.
+- `Vec<T>` in a generic body when `T: Copy`.
+- `impl Clone for S` written by hand: `s.clone()` and a `T: Clone` body call it.
+- `impl Copy for S {}` written by hand. It is accepted where `@derive(Copy)` would be: on a
+  struct whose fields are all `Copy`, with no `Drop`, and with `Clone` implemented.
+- `impl Debug for S` with `func fmt_debug(&self, out: &mut StringBuilder)`. `{s:?}` calls it,
+  and so does `{v:?}` in a body bounded by `T: Debug`.
+- `@derive(Hashable)`, which hashes the fields in order. A struct deriving `PartialEq` and
+  `Hashable` is a `HashMap` key without hand-written impls.
+- `.hash()` on integers, `bool`, `char`, `string` and derived structs, `.fmt_debug(out)` on
+  every type `{x:?}` renders, and `.clone()` on every `Copy` value. `.hash()` returns the same
+  hash a `HashMap` uses for the key.
+- A bound naming `PartialEq` is checked at the call. It used to be accepted for any type.
+
+### Changed
+
+- `impl Hashable for S` is checked against the trait like any other impl, so a wrong signature
+  reports the mismatch.
+- Deriving a trait and also implementing it by hand is refused for all five derivable traits.
+  `@derive(Copy)` counts as deriving `Clone`.
+
+### Fixed
+
+- A `HashMap` or `BTreeMap` with `bool` keys compiles. The type checker accepted it, but code
+  generation stopped with "Bool cannot be used as a map key".
+
 ## [5.11.1] - 2026-10-11
 
 ### Changed

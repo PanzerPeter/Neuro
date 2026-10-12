@@ -3,7 +3,8 @@
 // The compiler supplies all three for the builtin key types. A struct key routes them to
 // its own `PartialEq` / `Comparable` / `Hashable` impl methods, which semantic analysis
 // has already required. That is how `BTreeMap<OrderedF32, V>` gets a total order over
-// values that `f32` itself cannot provide.
+// values that `f32` itself cannot provide. A struct that derives `PartialEq` or
+// `Hashable` has no method to call: its equality and hash are generated over its fields.
 
 use inkwell::IntPredicate;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
@@ -11,6 +12,10 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
+
+/// The methods a struct key's `PartialEq` and `Hashable` impls provide.
+const EQ_METHOD: &str = "eq";
+const HASH_METHOD: &str = "hash";
 
 /// The string hash helper: `__neuro_hash_string(ptr, len) -> i64`.
 const STRING_HASH_HELPER: &str = "__neuro_hash_string";
@@ -36,7 +41,7 @@ impl<'ctx> CodegenContext<'ctx> {
         lhs: BasicValueEnum<'ctx>,
         rhs: BasicValueEnum<'ctx>,
     ) -> CodegenResult<IntValue<'ctx>> {
-        if key_ty.is_int_like() {
+        if key_ty.is_int_like() || matches!(key_ty, Type::Bool) {
             return self
                 .builder
                 .build_int_compare(
@@ -50,7 +55,10 @@ impl<'ctx> CodegenContext<'ctx> {
         if matches!(key_ty, Type::String) {
             return self.codegen_string_eq(lhs, rhs);
         }
-        self.call_key_method(key_ty, "eq", &[lhs, rhs], "key.eq")
+        if let Some(name) = self.derived_key(key_ty, EQ_METHOD) {
+            return self.codegen_derived_struct_eq(&name, lhs, rhs);
+        }
+        self.call_key_method(key_ty, EQ_METHOD, &[lhs, rhs], "key.eq")
     }
 
     /// Whether `lhs` orders strictly before `rhs`. Only the ordered map needs this, and
@@ -61,8 +69,9 @@ impl<'ctx> CodegenContext<'ctx> {
         lhs: BasicValueEnum<'ctx>,
         rhs: BasicValueEnum<'ctx>,
     ) -> CodegenResult<IntValue<'ctx>> {
-        if key_ty.is_int_like() {
-            let predicate = if key_ty.is_unsigned_like() {
+        if key_ty.is_int_like() || matches!(key_ty, Type::Bool) {
+            // `false < true`, which is also the order of their `i1` bit patterns.
+            let predicate = if key_ty.is_unsigned_like() || matches!(key_ty, Type::Bool) {
                 IntPredicate::ULT
             } else {
                 IntPredicate::SLT
@@ -83,13 +92,15 @@ impl<'ctx> CodegenContext<'ctx> {
         self.call_key_method(key_ty, "lt", &[lhs, rhs], "key.lt")
     }
 
-    /// A 64-bit hash of a key.
-    pub(super) fn emit_key_hash(
+    /// A 64-bit hash of a key. This is also what `.hash()` returns on a value whose type
+    /// implements `Hashable` without a `hash` method of its own, so a map and a generic
+    /// body bounded by `Hashable` agree on every key's hash.
+    pub(crate) fn emit_key_hash(
         &mut self,
         key_ty: &Type,
         key: BasicValueEnum<'ctx>,
     ) -> CodegenResult<IntValue<'ctx>> {
-        if key_ty.is_int_like() {
+        if key_ty.is_int_like() || matches!(key_ty, Type::Bool) {
             let widened = self.builder.build_int_z_extend(
                 key.into_int_value(),
                 self.context.i64_type(),
@@ -115,7 +126,52 @@ impl<'ctx> CodegenContext<'ctx> {
                 .ok_or_else(|| CodegenError::InternalError("string hash returned void".into()))?
                 .into_int_value());
         }
-        self.call_key_method(key_ty, "hash", &[key], "key.hash")
+        if let Some(name) = self.derived_key(key_ty, HASH_METHOD) {
+            return self.emit_derived_struct_hash(&name, key);
+        }
+        self.call_key_method(key_ty, HASH_METHOD, &[key], "key.hash")
+    }
+
+    /// The struct name of `key_ty` when it is a struct with no `method` of its own, whose
+    /// trait the derive therefore supplies; semantic analysis admitted no other.
+    pub(crate) fn derived_key(&self, key_ty: &Type, method: &str) -> Option<String> {
+        let Type::Struct(name) = key_ty else {
+            return None;
+        };
+        let mangled = format!("{}__{}", name, method);
+        (!self.functions.contains_key(&mangled)).then(|| name.clone())
+    }
+
+    /// `@derive(Hashable)`: FNV-1a over the fields' own hashes, in declaration order, so
+    /// two values a derived `==` calls equal hash alike.
+    fn emit_derived_struct_hash(
+        &mut self,
+        name: &str,
+        value: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let fields = self
+            .struct_defs
+            .get(name)
+            .ok_or_else(|| CodegenError::UnsupportedType(format!("unknown struct '{}'", name)))?
+            .clone();
+        let aggregate = self.load_struct_value(&value, name)?;
+        let i64_ty = self.context.i64_type();
+        let mut hash = i64_ty.const_int(FNV_OFFSET_BASIS, false);
+        for (index, (field_name, field_ty)) in fields.iter().enumerate() {
+            let field = self.builder.build_extract_value(
+                aggregate,
+                index as u32,
+                &format!("hash.{}", field_name),
+            )?;
+            let field_hash = self.emit_key_hash(field_ty, field)?;
+            let mixed = self.builder.build_xor(hash, field_hash, "hash.fold")?;
+            hash = self.builder.build_int_mul(
+                mixed,
+                i64_ty.const_int(FNV_PRIME, false),
+                "hash.step",
+            )?;
+        }
+        Ok(hash)
     }
 
     /// Scramble an integer key so that adjacent values do not land in adjacent slots.

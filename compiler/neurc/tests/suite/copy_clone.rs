@@ -67,7 +67,7 @@ func main() -> i32 { 0 }
     let (success, stderr) = check_source(source);
     assert!(!success, "deriving Copy with a non-Copy field must fail");
     assert!(
-        stderr.contains("cannot derive Copy"),
+        stderr.contains("cannot be `Copy`"),
         "expected Copy-derive diagnostic, got: {stderr}"
     );
 }

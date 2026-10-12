@@ -68,15 +68,15 @@ two existing ones.
 | 0a | Pre-register newtype *names* (`predeclare_newtype`) | a newtype may appear as a struct field, enum payload, or another newtype's inner before its own declaration |
 | 0 | Pre-register enum *names* (`predeclare_enum`), keeping a generic template under its base name for construction-site inference | an enum may be a struct field type, and vice versa |
 | 0b | Pre-register trait *names* | a struct field may be a `&dyn Trait` of a trait registered only in pass 1d |
-| 1 | Register struct definitions (generic ones via `register_generic_struct`); record derive intent | type names must resolve in method signatures |
+| 1 | Register struct definitions (generic ones via `register_generic_struct`); record derive intent, then each hand-written `impl Copy` (`register_copy_impls`) | type names must resolve in method signatures, and every later rule reads `Copy` |
 | 1a | Resolve enum variant payloads (`resolve_enum_variants`) | a payload may name a struct, so it cannot be resolved until pass 1 has run |
 | 1c | Resolve and validate newtype inner types | every nominal name is known by now; rejects cycles, which is what makes every predicate recursing through an inner type terminate |
 | 1e | Reject an enum stored inline inside itself (`reject_recursive_enums`) | the cycle can pass through struct fields, payloads and newtype inners, which are all resolved by now |
 | 1b | Validate `@derive(Copy)` and the other derives field by field | runs after 1c so a newtype field reports its real `Copy`-ness |
 | 1d | Register trait declarations, then check the object safety of every `dyn Trait` a struct field named (`check_deferred_object_safety`) | `impl Trait for T` conformance and generic trait bounds need the trait's method signatures, and so does object safety |
 | 2 | Register `impl` method signatures (generic ones via `register_generic_impl`) | uses the struct types from pass 1 |
-| 2b | Operator-trait supertrait check (`check_operator_supertraits`) | all impls are registered, so `Comparable: PartialEq` is order-independent |
-| 2c | Reject a type that both derives a trait and implements it by hand (`check_derive_impl_conflicts`) | the two would be two different `==`, and dispatch would silently pick the impl |
+| 2b | Supertrait check (`check_operator_supertraits`) | all impls are registered, so `Comparable: PartialEq` and `Copy: Clone` are order-independent |
+| 2c | Reject a type that both derives a trait and implements it by hand (`check_derive_impl_conflicts`) | the two are two implementations, and each consumer would silently pick one |
 | 3 | Register module-level constants | they must be visible in every function body |
 | 3b | Register every free function's signature (`register_function_signature`) | a call resolves regardless of source order, and mutually recursive functions can name each other |
 | 3c | `@grad` signature rules (`check_grad_attributes`) | every signature is resolved, and the generated bundle name can be tested against every declared struct |

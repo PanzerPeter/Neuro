@@ -1475,10 +1475,16 @@ saves and restores the caller's insertion point and `current_function`. A lookup
 index, or `-1`. `codegen/collections/` is split `mod` / `vectors` / `keys` / `maps`, with `maps/`
 further split into `lookup`, `insertion`, `iteration`, `probing`, and `growth`.
 
-Key equality, order, and hash are compiler-supplied for int-like and `string` keys (FNV-1a for
-strings, a SplitMix64 finalizer for integers, `memcmp` for string order) and routed to
-`{Struct}__{eq,lt,hash}` for struct keys, adapting each argument to whatever parameter shape the
-impl declared. Semantic analysis has already required those impls and rejects raw float keys.
+Key equality, order, and hash are compiler-supplied for int-like, `bool` and `string` keys
+(FNV-1a for strings, a SplitMix64 finalizer for integers and `bool`, `memcmp` for string order)
+and routed to `{Struct}__{eq,lt,hash}` for struct keys, adapting each argument to whatever
+parameter shape the impl declared. A struct with no such method derives the trait
+(`derived_key`): its equality is `codegen_derived_struct_eq`, and its hash
+(`emit_derived_struct_hash`) is FNV-1a over each field's own key hash, so two keys the derived
+`==` calls equal hash alike. Semantic analysis has already required the traits and rejects raw
+float keys. `.hash()` on a receiver with no `hash` method of its own (a builtin key type, or a
+struct deriving `Hashable`) is `codegen_supplied_hash`, the same `emit_key_hash`, so a map and a
+`T: Hashable` body agree on every hash.
 
 `v[i]` is bounds-checked in **every** build, unlike `[T; N]`: a `Vec`'s length is not a
 compile-time constant the optimizer can fold away. `pop` / `get` build their `Option<T>` with

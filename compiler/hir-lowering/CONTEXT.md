@@ -303,6 +303,19 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   dispatch to, so `==` / `!=` on one stays an `HirExprKind::Binary` typed `Bool` and the backend
   expands it over the fields. Handled in the `Binary` arm *before* `binary_result_type`, which
   admits no aggregate operand: that is the whole difference from the operator-trait route above.
+- **The derivable traits' supplied methods** (`derivable.rs`). A receiver with no method of its
+  own by that name, which the checker admitted because it implements the trait without an impl:
+  `.clone()` on a `Copy` value is the value, read through a borrowed receiver (`Deref`);
+  `.hash()` stays a `hash` call for the backend to answer with the map's own key hash;
+  `.fmt_debug(out)` becomes `out.push_str("{x:?}")`. `lower_supplied_trait_method` runs before the
+  impl dispatch in `lower_method_call`, so a generic body bounded by the trait instantiates the
+  same way over a builtin, a derive and an impl. The other direction is
+  `debug_hole_through_impl`: a `{x:?}` hole on a struct, enum or newtype with a hand-written
+  `Debug` (`trait_impls` plus its own `fmt_debug`) calls `Type__fmt_debug$string`, a helper
+  emitted once per type into `mono_items` (`debug_string_helpers`), which builds a
+  `StringBuilder`, calls `fmt_debug` into it and returns its text; the hole then prints that
+  `string` under the default spec, since `:?` would quote it. `$` cannot appear in a source name,
+  and every return path of the helper allocates, so the hole owns the result.
 - **`val-else`** (`val_else.rs`). `lower_val_else` reuses `pattern_test` / `pattern_bindings` from
   `expressions/matches.rs` for the success test and bindings, lowers the `else` branch in a pushed
   scope with its own binding, and only then defines the pattern's bindings in the **enclosing**

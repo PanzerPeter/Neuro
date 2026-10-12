@@ -71,7 +71,7 @@ written, field by field, so `name` is copied with its own `.clone()`. Observed:
 
 ```text
 struct 'Named' cannot derive `Clone`: field 'name' has type string, which owns a buffer that a
-derived `.clone()` cannot copy yet; build the copy in a method of your own
+derived `.clone()` cannot copy yet; write `impl Clone` by hand
 ```
 
 A tensor, `Vec`, `StringBuilder`, an array of `string`, and a generic field instantiated with any
@@ -80,7 +80,8 @@ of them are refused the same way.
 **Root cause**: confirmed in the code. The backend's derived clone loads the struct's bytes. That
 is a faithful copy only for fields that are `Copy` or are themselves structs cloned that way.
 
-**Workaround**: write a method that builds the copy, calling `.clone()` on each owning field.
+**Workaround**: write `impl Clone` by hand, calling `.clone()` on each owning field. The hand
+impl meets a `T: Clone` bound exactly as the derive would.
 
 **Fix sketch**: generate the derived clone field by field: a `string` or tensor field through its
 own clone, a nested struct recursively, an array or tuple per element. A field type with no

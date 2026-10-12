@@ -1,4 +1,4 @@
-// `@derive(...)` argument validation and the `Debug` / `PartialEq` derives.
+// `@derive(...)` argument validation and the `Debug` / `PartialEq` / `Hashable` derives.
 
 use super::semantic_errors;
 use crate::errors::TypeError;
@@ -22,23 +22,17 @@ fn unknown_derive_argument_is_rejected() {
     );
 }
 
-/// `Hashable` is in the spec's derivable set but nothing generates it yet, so it gets
-/// its own diagnostic rather than being lumped in with a misspelling.
+/// Every name in the derivable set is generated, `Hashable` included.
 #[test]
-fn pending_derive_argument_reports_as_unimplemented() {
+fn hashable_derive_passes_validation() {
     let errors = semantic_errors(
         r#"
-        @derive(Hashable)
-        struct P { x: i32 }
+        @derive(PartialEq, Hashable)
+        struct P { x: i32, tag: string, on: bool, c: char }
         func main() -> i32 { return 0 }
         "#,
     );
-    assert!(
-        errors.iter().any(
-            |e| matches!(e, TypeError::UnimplementedDerive { name, .. } if name == "Hashable")
-        ),
-        "a pending derive must report as unimplemented, got {errors:?}"
-    );
+    assert!(errors.is_empty(), "got {errors:?}");
 }
 
 #[test]

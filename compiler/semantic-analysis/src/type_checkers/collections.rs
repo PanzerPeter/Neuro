@@ -15,6 +15,7 @@ use ast_types::Expr;
 use shared_types::Span;
 
 use super::TypeChecker;
+use super::derivable::{HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
 use crate::types::{CollectionKind, Type};
 
@@ -22,12 +23,6 @@ use crate::types::{CollectionKind, Type};
 /// from the prelude rather than the compiler, so a program compiled without one gets a
 /// plain "unknown type" diagnostic instead of a silently wrong result type.
 pub(crate) const OPTION_ENUM: &str = "Option";
-
-/// The lang-item trait a `HashMap` key must implement: `func hash(&self) -> u64`.
-pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
-
-/// The single method a [`HASHABLE_TRAIT`] impl provides.
-pub(crate) const HASH_METHOD: &str = "hash";
 
 impl TypeChecker {
     /// Resolve a `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` / `StringBuilder` annotation,
@@ -62,7 +57,8 @@ impl TypeChecker {
 
     /// Whether a value of `ty` can live inside a collection's buffer.
     ///
-    /// A `Copy` type is bit-copied in and out with no ownership consequences. `string`
+    /// A `Copy` type is bit-copied in and out with no ownership consequences, a type
+    /// parameter bounded by `Copy` included, since every instance is one. `string`
     /// is the one non-`Copy` exception, and it is admitted because the collection takes
     /// a copy of the bytes rather than the operand's fat pointer: the slot owns what it
     /// holds, an element read copies back out, and the collection releases its slots when
@@ -77,7 +73,6 @@ impl TypeChecker {
                     ty,
                     Type::Reference { .. }
                         | Type::Collection { .. }
-                        | Type::Generic(_)
                         | Type::ConstValue(_)
                         | Type::Void
                         | Type::Function { .. }
@@ -128,20 +123,20 @@ impl TypeChecker {
             );
         };
 
-        // A struct key routes equality, hashing, and ordering through its own impls, so
-        // each required lang-item trait must actually be implemented for it.
+        // A struct key routes equality, hashing and ordering through the traits it
+        // implements, derived or written by hand, so each one the map needs must be there.
         let name = name.clone();
-        let mut required = vec!["PartialEq"];
+        let mut required = vec![PARTIAL_EQ_TRAIT];
         match kind {
             CollectionKind::HashMap => required.push(HASHABLE_TRAIT),
             CollectionKind::BTreeMap => required.push("Comparable"),
             CollectionKind::Vec | CollectionKind::StringBuilder => {}
         }
         for trait_name in required {
-            if !self.trait_impls_contains(trait_name, &name) {
+            if !self.satisfies_bound(ty, trait_name) {
                 return reject(
                     self,
-                    format!("struct keys require `impl {} for {}`", trait_name, name),
+                    format!("struct keys require `{}` on {}", trait_name, name),
                 );
             }
         }
@@ -271,12 +266,6 @@ impl TypeChecker {
             } => args.first().cloned(),
             _ => None,
         }
-    }
-
-    /// Whether `(trait_name, type_name)` has an `impl` block. Wraps the private impl
-    /// table so the collection key rules can consult it.
-    fn trait_impls_contains(&self, trait_name: &str, type_name: &str) -> bool {
-        self.type_implements_trait(&Type::Struct(type_name.to_string()), trait_name)
     }
 
     /// Instantiate `Option<T>` for a fallible reader's result. The prelude declares it;
@@ -539,7 +528,7 @@ mod tests {
             "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("impl PartialEq for Id")),
+            errs.iter().any(|e| e.contains("require `PartialEq` on Id")),
             "expected a missing-impl diagnostic, got {errs:?}"
         );
     }

@@ -134,6 +134,7 @@ control_flow/while_true_lint.nr       7
 
 # --- structs: definition, field access, impl methods, derives ---------------
 structs/derives.nr               21
+structs/derivable_traits.nr      24
 structs/generic_methods.nr       42
 structs/methods.nr               42
 structs/mut_self_accumulator.nr  42
@@ -157,6 +158,7 @@ modules/shapes/mod.nr   module
 showcase/activation_fit.nr           22
 showcase/attention_head.nr           7
 showcase/batch_arena.nr              4
+showcase/bin_tally.nr                53
 showcase/borrow_discipline.nr        48
 showcase/borrowed_text.nr            25
 showcase/buffered_report.nr          40

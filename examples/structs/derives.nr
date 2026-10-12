@@ -5,9 +5,9 @@
 // field by field. Both recurse: a field that is itself a struct needs the same
 // derive, which is what lets `Reading` render and compare through `Sensor`.
 //
-// Every name in a `@derive` list is checked. `@derive(Debug, PartialEq)` is the whole
-// derivable-and-implemented set beyond `Copy` / `Clone`; anything else (a misspelling,
-// or a trait no pass generates yet) is a compile error rather than a silent no-op.
+// Every name in a `@derive` list is checked. The derivable set is `Copy`, `Clone`,
+// `Debug`, `PartialEq` and `Hashable`; anything else, a misspelling included, is a
+// compile error rather than a silent no-op.
 
 @derive(Debug, PartialEq)
 struct Sensor {

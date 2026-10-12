@@ -919,9 +919,27 @@ val n = identity(41)                        // identity<i32>
 The value is passed by value and returned by value, and a [`Drop`](structs.md#destructors-impl-drop) type's
 destructor runs exactly once per value, whether the callee consumes it or hands it back.
 
-**Restrictions.** The same conservatism bars a `T` from the positions restricted to
-`Copy` types: a closure may not capture a `T`-typed binding, and `[v, v]` or `(v, v)` over a `T`
-duplicates one owner, so the second slot is a use of a moved value. Generic **struct** and
+A bound is how a body earns more. `T: Copy` makes `T` copy instead of move, so `dup` above
+compiles as `dup<T: Copy>`, and a `Vec<T>` may be built in the body. `T: Clone` gives the body
+`v.clone()`, which returns a `T`; a `Copy` bound gives it too. The scalars, `string`, a struct
+that derives the trait and one that implements it by hand all meet these bounds alike (see
+[Structs](structs.md#derivable-traits-by-hand-and-as-bounds)). A reference does not meet them yet.
+
+```neuro
+func dup<T: Copy>(v: T) -> (T, T) {
+    val a = v
+    val b = v        // fine: every instance copies
+    (a, b)
+}
+
+func twice<T: Clone>(v: &T) -> T {
+    v.clone()
+}
+```
+
+**Restrictions.** Without a `Copy` bound, the same conservatism bars a `T` from the positions
+restricted to `Copy` types: a closure may not capture a `T`-typed binding, and `[v, v]` or
+`(v, v)` over a `T` duplicates one owner, so the second slot is a use of a moved value. Generic **struct** and
 **enum** type arguments carry no `Copy` requirement either: the instance holds the value and
 moves with it (see [Types → Ownership of an element](types.md#ownership-of-an-element)). Generic
 `impl` blocks are supported.

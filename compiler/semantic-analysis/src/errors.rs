@@ -140,7 +140,7 @@ pub enum TypeError {
     InvalidOperator { op: String, ty: Type, span: Span },
 
     #[error(
-        "struct '{struct_name}' cannot derive Copy: field '{field_name}' has type {field_type}, which is not Copy"
+        "struct '{struct_name}' cannot be `Copy`: field '{field_name}' has type {field_type}, which is not Copy"
     )]
     CopyDeriveNonCopyField {
         struct_name: String,
@@ -155,11 +155,6 @@ pub enum TypeError {
         derivable: String,
         span: Span,
     },
-
-    #[error(
-        "`@derive({name})` is specified but not implemented yet: write the impl by hand for now"
-    )]
-    UnimplementedDerive { name: String, span: Span },
 
     #[error("`@{name}` is not an attribute: the attributes are {known}")]
     UnknownAttribute {
@@ -1206,8 +1201,12 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`impl Hashable for {type_name}` must provide exactly `func hash(&self) -> u64`")]
-    InvalidHashableImpl { type_name: String, span: Span },
+    #[error("`impl Copy for {type_name}` is not allowed: {reason}")]
+    InvalidCopyImpl {
+        type_name: String,
+        reason: String,
+        span: Span,
+    },
 
     #[error("an index must be an integer, found {found}")]
     IndexNotInteger { found: Type, span: Span },
@@ -1549,7 +1548,6 @@ impl TypeError {
             | Self::InvalidOperator { span, .. }
             | Self::CopyDeriveNonCopyField { span, .. }
             | Self::UnknownDerive { span, .. }
-            | Self::UnimplementedDerive { span, .. }
             | Self::UnknownAttribute { span, .. }
             | Self::UnimplementedAttribute { span, .. }
             | Self::DuplicateDerive { span, .. }
@@ -1713,7 +1711,7 @@ impl TypeError {
             | Self::CollectionTypeNotInferable { span, .. }
             | Self::InvalidCollectionElement { span, .. }
             | Self::InvalidCollectionKey { span, .. }
-            | Self::InvalidHashableImpl { span, .. }
+            | Self::InvalidCopyImpl { span, .. }
             | Self::IndexNotInteger { span, .. }
             | Self::ArrayLengthMismatch { span, .. }
             | Self::NotATuple { span, .. }
