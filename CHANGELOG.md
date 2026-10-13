@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.12.1] - 2026-10-13
+
+### Fixed
+
+- CI coverage job: stable Rust 1.99 builds against LLVM 23, and the tarpaulin 0.35.4 the job
+  installed cannot parse LLVM 23 profraw files, so the merge step failed. The job now pins
+  tarpaulin 0.37.5 through a current `install-action`.
+
 ## [5.12.0] - 2026-10-12
 
 ### Added

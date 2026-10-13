@@ -212,9 +212,11 @@ jobs:
       - name: Setup LLVM 23 + MLIR 23
         uses: ./.github/actions/setup-llvm
       - name: Install tarpaulin
-        uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.62.13
+        # The llvm engine parses profraw files itself, so tarpaulin must know the
+        # LLVM major stable rustc builds against (LLVM 23 needs 0.37.1 or later).
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
-          tool: cargo-tarpaulin
+          tool: cargo-tarpaulin@0.37.5
       - name: Generate Coverage
         # The default ptrace engine reports a SIGSEGV it intercepts while a test spawns
         # threads (the parser depth tests do) as a test segfault; source-based coverage
