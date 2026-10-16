@@ -43,7 +43,7 @@ impl TypeChecker {
             .unwrap_or(Type::Unknown);
 
         let (param, ret) = match &callee_ty {
-            Type::Function { params, ret } if params.len() == 1 => {
+            Type::Function { params, ret, .. } if params.len() == 1 => {
                 (params[0].clone(), (**ret).clone())
             }
             Type::Unknown => return None,

@@ -13,6 +13,23 @@ mod places;
 mod returns;
 pub(crate) use returns::tail_expr;
 
+fn peel_parens(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Paren(inner, _) => peel_parens(inner),
+        other => other,
+    }
+}
+
+/// The span a scope-bound function value may occupy when `value` is checked whole: its
+/// own, if it is a closure literal or a binding, through any parentheses. Those are the
+/// two shapes that hand the value on intact rather than storing it inside another.
+pub(crate) fn function_value_position(value: &Expr) -> Option<shared_types::Span> {
+    match peel_parens(value) {
+        inner @ (Expr::Closure { .. } | Expr::Identifier(_)) => Some(inner.span()),
+        _ => None,
+    }
+}
+
 /// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, or a
 /// `x.slice(range)` view into `x`), return that place's name and whether the borrow is
 /// exclusive. A borrow wrapped in any other expression (a block, an `if`, a call result)
@@ -216,6 +233,13 @@ impl TypeChecker {
         ) {
             return;
         }
+        if let Expr::Closure { span, .. } = value
+            && let Some(borrows) = self.scope_bound_closures.get(span).cloned()
+        {
+            for (place, exclusive) in borrows {
+                self.symbols.attach_borrow(holder, &place, exclusive);
+            }
+        }
         let (mut targets, mut live) = (Vec::new(), Vec::new());
         tail_borrow_targets(
             value,
@@ -229,6 +253,19 @@ impl TypeChecker {
         }
         for name in live {
             self.symbols.inherit_borrows(holder, &name);
+        }
+    }
+
+    /// Whether `value` is a closure that borrows or owns a non-Copy capture: such a
+    /// literal, or a binding already holding one.
+    pub(crate) fn yields_scope_bound_closure(&self, value: &Expr) -> bool {
+        match peel_parens(value) {
+            Expr::Closure { span, .. } => self.scope_bound_closures.contains_key(span),
+            Expr::Identifier(ident) => self
+                .symbols
+                .lookup(&ident.name)
+                .is_some_and(|info| info.scope_bound),
+            _ => false,
         }
     }
 
@@ -310,7 +347,10 @@ impl TypeChecker {
                 // and the two want opposite treatment below, so record which one it was.
                 let errors_before = self.errors.len();
                 let init_ty = if let Some(init_expr) = init {
-                    self.check_expr(init_expr, declared_ty.as_ref())
+                    self.function_value_slot = function_value_position(init_expr);
+                    let init_ty = self.check_expr(init_expr, declared_ty.as_ref());
+                    self.function_value_slot = None;
+                    init_ty
                 } else {
                     None
                 };
@@ -404,6 +444,9 @@ impl TypeChecker {
                     }
                     if let Some(ty) = self.symbols.lookup(&holder).map(|s| s.ty.clone()) {
                         self.hold_returned_borrows(&holder, init_expr, &ty);
+                    }
+                    if self.yields_scope_bound_closure(init_expr) {
+                        self.symbols.mark_scope_bound(&holder);
                     }
                     // A `mut` loss could be reassigned, and the `.backward()` would then
                     // run the derivative of a call its value no longer came from.

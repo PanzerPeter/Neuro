@@ -5,6 +5,43 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-109: a reference assigned inside a block may outlive what it borrows
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; the assignment path that makes a `mut` reference binding hold
+  its new borrow (`attach_borrow` in `type_checkers/statements/places.rs`)
+- **Severity**: major. A silent use after free: the program compiles and reads released memory
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val t: Vec<i32> = Vec::new()
+    mut b: &Vec<i32> = &t
+    {
+        mut v: Vec<i32> = Vec::new()
+        v.push(41)
+        b = &v
+    }
+    return b[0]
+}
+```
+
+Expected: a compile error, since `v` dies at the end of the block while `b` still borrows it.
+Observed: it compiles, `v`'s buffer is released at the brace, and `b[0]` reads it (the run exits
+with a garbage value, not 41).
+
+**Root cause**: confirmed in the code. The assignment makes `b` hold a borrow of `v`, but nothing
+compares the two bindings' scopes: a borrow is checked for conflicts while both live, never for a
+holder declared outside the borrowee's scope.
+
+**Workaround**: declare the reference inside the block that owns what it borrows.
+
+**Fix sketch**: refuse an assignment that makes a binding hold a borrow of a place declared in a
+deeper scope than the binding itself (the `BorrowProvenance::scope` the symbol table already
+records gives both depths). Regression test: the repro above, and the same assignment where `v`
+is declared beside `b`, which must keep compiling.
+
 ## BUG-099: a struct returned through a binding may hold a borrow of its locals
 
 - **Status**: open, confirmed. Narrowed: a struct, enum or tuple literal, an enum variant

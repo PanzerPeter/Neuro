@@ -14,7 +14,7 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
     `ImportSelection`, `Parameter`, `ParamLabel`, `GenericParam`, `GenericParamKind`,
     `TraitBound`, `Attribute`, `AttributeNamedArg`
   - `statements`: `Stmt`, `Place`, `LoopAdapter`, `LoopAdapterKind`
-  - `types`: `Type`, `ArraySize`, `TensorDim`, `TensorExtent`, `GenericArg`
+  - `types`: `Type`, `ArraySize`, `FunctionMode`, `TensorDim`, `TensorExtent`, `GenericArg`
 
 ## Shared Kernel
 - shared-types: `Span`, `Identifier`, `Literal`, `FormatSpec` embedded in AST nodes
@@ -105,6 +105,10 @@ walkers.
 - `BinaryOp::MatMul` is the matrix product `a @ b`. It is a `BinaryOp` like any other, but it is
   the one that is not element-wise on tensors (it contracts the operands' inner axis) so each
   stage separates it from the arithmetic family rather than sharing an arm with it.
+- `Type::Function { mode, .. }` carries the call trait a function type asks for:
+  `FunctionMode::{Shared, Mut, Once}` for `(T) -> U`, `mut (T) -> U` and `once (T) -> U`. The
+  variants are ordered weakest first, so `a <= b` reads "a value of mode `a` fits a slot of mode
+  `b`", which is the whole assignability rule the checker applies.
 - `Expr::Compose { functions, span }` is the composition chain `f >> g >> h`. It carries
   `Vec<Identifier>`, not operand expressions: composition takes named functions, and a name is
   not a value in this language. The chain is flattened by the parser, so the node holds two or

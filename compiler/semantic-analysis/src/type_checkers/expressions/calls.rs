@@ -8,9 +8,10 @@ use super::{COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
 use crate::errors::TypeError;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
 use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, PARTIAL_EQ_TRAIT};
+use crate::type_checkers::statements::function_value_position;
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::{BoundInfo, GenericFnSig};
-use crate::types::{CollectionKind, Type};
+use crate::types::{CollectionKind, FunctionMode, Type};
 use ast_types::{Expr, GenericArg};
 use shared_types::{Identifier, Span};
 use std::collections::HashMap;
@@ -63,9 +64,12 @@ impl TypeChecker {
         // A local binding of function type (a closure or a function-typed
         // parameter) is callable directly: `f(args)`. It shadows a same-named
         // top-level function, matching the usual locals-over-globals precedence.
-        if let Some(Type::Function { params, ret }) =
+        if let Some(Type::Function { params, ret, mode }) =
             self.symbols.lookup(func_name).map(|info| info.ty.clone())
         {
+            if mode == FunctionMode::Once {
+                self.consume_once_callee(func_name, span);
+            }
             self.check_call_args(args, &params, span);
             return Some(*ret);
         }
@@ -81,7 +85,7 @@ impl TypeChecker {
         };
 
         let (param_types, return_type) = match func_ty {
-            Type::Function { params, ret } => (params, *ret),
+            Type::Function { params, ret, .. } => (params, *ret),
             _ => {
                 self.record_error(TypeError::NotCallable { ty: func_ty, span });
                 return Some(Type::Unknown);
@@ -177,6 +181,27 @@ impl TypeChecker {
         None
     }
 
+    /// Call a `once` binding: the call may consume what the closure captured, so it uses
+    /// the binding up, and a call after that is a use of a moved value.
+    fn consume_once_callee(&mut self, name: &str, span: Span) {
+        let callee = ast_types::Expr::Identifier(Identifier {
+            name: name.to_string(),
+            span,
+        });
+        if let Some(moved_at) = self
+            .symbols
+            .lookup(name)
+            .and_then(|info| info.moves.conflict_with_whole())
+        {
+            self.record_error(TypeError::UseOfMovedValue {
+                name: name.to_string(),
+                span,
+                moved_at,
+            });
+        }
+        self.record_move(&callee);
+    }
+
     /// Validate a call's arguments against the callee's visible parameter types: arity,
     /// per-argument compatibility, and by-value move recording. Shared by the trait
     /// method-dispatch path.
@@ -207,7 +232,14 @@ impl TypeChecker {
             });
         }
         for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
-            if let Some(arg_ty) = self.check_expr(arg, Some(expected_ty)) {
+            // A function-typed parameter only calls what it is given, and the callee
+            // returns before the caller's scope ends, so a scope-bound closure may go in.
+            if matches!(expected_ty, Type::Function { .. }) {
+                self.function_value_slot = function_value_position(arg);
+            }
+            let checked = self.check_expr(arg, Some(expected_ty));
+            self.function_value_slot = None;
+            if let Some(arg_ty) = checked {
                 let arg_ty = shared_reborrow(arg_ty, expected_ty);
                 if !self.assignable(&arg_ty, expected_ty) {
                     self.record_type_mismatch(expected_ty, arg_ty, arg.span());
@@ -787,7 +819,7 @@ impl TypeChecker {
                 // when checking arity and types.
                 let func_ty = self.functions.get(&mangled).cloned();
                 let (param_types, return_type) = match func_ty {
-                    Some(Type::Function { params, ret }) => (params, *ret),
+                    Some(Type::Function { params, ret, .. }) => (params, *ret),
                     _ => return Some(Type::Unknown),
                 };
 
@@ -882,7 +914,7 @@ impl TypeChecker {
                 };
 
                 let (param_types, return_type) = match func_ty {
-                    Type::Function { params, ret } => (params, *ret),
+                    Type::Function { params, ret, .. } => (params, *ret),
                     _ => return Some(Type::Unknown),
                 };
 
@@ -935,10 +967,12 @@ impl TypeChecker {
             }
 
             _ => {
+                self.function_value_slot = function_value_position(func);
                 let expr_ty = self.check_expr(func, None).unwrap_or(Type::Unknown);
+                self.function_value_slot = None;
                 // Any expression of function type is callable, a closure literal called in
                 // place included: the value is the same one a binding would hold.
-                if let Type::Function { params, ret } = expr_ty {
+                if let Type::Function { params, ret, .. } = expr_ty {
                     self.check_call_args(args, &params, *span);
                     return Some(*ret);
                 }

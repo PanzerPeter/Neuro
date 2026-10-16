@@ -2,7 +2,7 @@ use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
-use ast_types::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};
+use ast_types::{ArraySize, FunctionMode, GenericArg, TensorDim, TensorExtent, Type};
 
 use super::Parser;
 
@@ -24,7 +24,46 @@ pub(super) const TENSOR_TYPE_NAME: &str = "Tensor";
 /// `impl` desugar or the type checker says which type it stands for.
 pub(super) const SELF_TYPE_NAME: &str = "Self";
 
+/// The contextual word that makes a function type `FnOnce`: `once (T) -> U`.
+const ONCE_MODE: &str = "once";
+
 impl Parser {
+    /// The call mode a `mut` or `once` written ahead of a parenthesized type list asks
+    /// for. `once` is not a keyword: it means a mode only directly before `(`, where no
+    /// type named `once` could stand, so it stays free as an ordinary name everywhere.
+    fn function_mode_prefix(&self) -> Option<FunctionMode> {
+        let mode = match self.peek_kind()? {
+            TokenKind::Mut => FunctionMode::Mut,
+            TokenKind::Identifier(name) if name == ONCE_MODE => FunctionMode::Once,
+            _ => return None,
+        };
+        let next = self.tokens.get(self.current + 1).map(|t| &t.kind);
+        matches!(next, Some(TokenKind::LeftParen)).then_some(mode)
+    }
+
+    /// `mut (T) -> U` / `once (T) -> U`: the mode word, then a function type. A tuple
+    /// type after it is an error, since only a callable has a call mode.
+    fn parse_moded_function_type(&mut self, mode: FunctionMode) -> ParseResult<Type> {
+        let prefix = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
+            expected: "a function type mode".to_string(),
+        })?;
+        match self.parse_type_here()? {
+            Type::Function {
+                params, ret, span, ..
+            } => Ok(Type::Function {
+                params,
+                ret,
+                mode,
+                span: prefix.span.merge(span),
+            }),
+            other => Err(ParseError::UnexpectedToken {
+                found: prefix.kind,
+                expected: "a function type `(T, ...) -> R` after the call mode".to_string(),
+                span: prefix.span.merge(other.span()),
+            }),
+        }
+    }
+
     /// Parse a type annotation
     pub(crate) fn parse_type(&mut self) -> ParseResult<Type> {
         self.nested(Self::parse_type_here)
@@ -74,6 +113,9 @@ impl Parser {
                 span,
             });
         }
+        if let Some(mode) = self.function_mode_prefix() {
+            return self.parse_moded_function_type(mode);
+        }
         // A parenthesized type list opens either a tuple type `(T1, T2, ...)` or a
         // closure/function type `(T1, ...) -> R`: disambiguated by a trailing `->`.
         // A tuple needs two or more elements; a function type accepts zero or more.
@@ -103,6 +145,7 @@ impl Parser {
                 return Ok(Type::Function {
                     params: elements,
                     ret: Box::new(ret),
+                    mode: FunctionMode::Shared,
                     span,
                 });
             }

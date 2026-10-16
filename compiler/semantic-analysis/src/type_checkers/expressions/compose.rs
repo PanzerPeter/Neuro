@@ -7,7 +7,7 @@ use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{FunctionMode, Type};
 
 /// One stage of a composition: its parameter type and its return type.
 type Stage = (Type, Type);
@@ -57,6 +57,7 @@ impl TypeChecker {
         Type::Function {
             params: vec![param.clone()],
             ret: Box::new(ret.clone()),
+            mode: FunctionMode::Shared,
         }
     }
 
@@ -80,7 +81,8 @@ impl TypeChecker {
             });
             return None;
         }
-        let Some(Type::Function { params, ret }) = self.functions.get(&name.name).cloned() else {
+        let Some(Type::Function { params, ret, .. }) = self.functions.get(&name.name).cloned()
+        else {
             self.record_error(TypeError::ComposeUndefined {
                 name: name.name.clone(),
                 span: name.span,

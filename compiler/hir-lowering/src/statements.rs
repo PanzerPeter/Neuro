@@ -1,7 +1,7 @@
 //! Statement lowering.
 
 use ast_types::{Expr, Place, Stmt};
-use neuro_hir::{HirPlace, HirStmt, HirType};
+use neuro_hir::{HirExprKind, HirPlace, HirStmt, HirType};
 
 use crate::iteration::{LoopPosition, char_indices_receiver};
 use crate::{LoopCtx, Lowerer, LoweringError};
@@ -453,6 +453,14 @@ impl Lowerer {
                     .ok_or_else(|| LoweringError::Malformed {
                         detail: format!("assignment to unbound name '{}'", ident.name),
                     })?;
+                if let HirExprKind::Deref { operand } =
+                    self.binding_value(&ident.name, ty.clone(), ident.span).kind
+                {
+                    return Ok(HirPlace::Deref {
+                        pointer: operand,
+                        ty,
+                    });
+                }
                 Ok(HirPlace::Var {
                     name: ident.name.clone(),
                     ty,

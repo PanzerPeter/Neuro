@@ -461,7 +461,15 @@ tag test and its payload bindings.
 prefix is a reserved generated-symbol marker the checker forbids in user names), collected in
 `closure_items` and appended after the monomorphization worklists. Captures are the body's free
 variables that resolve to an enclosing **local** binding (`lookup_local` excludes module
-constants), snapshotted in first-seen order with their types. A block body lowers through
+constants), in first-seen order. `collect_captures` settles each as the checker does: a `Copy`
+value the body does not write (`FreeVars::writes`: an assignment root, a `&mut` operand, a call of
+a method whose name some `&mut self` method has) is copied, a `move` closure copies or moves every
+capture, and any other is borrowed (`HirCapture::borrowed`, typed `&mut T`). The captures sit in a
+scope of their own outside the parameters', so a body binding hides a capture instead of
+overwriting it, and `borrowed_captures` marks the borrowed ones by scope index. Inside the body
+`binding_value` reads one as `*name`, `lower_place` writes it through `HirPlace::Deref`, and
+`borrow_of_capture` hands `&name` / `&mut name` the reference itself. A capture an enclosing
+closure borrowed is already that reference, so a nested closure copies it. A block body lowers through
 `lower_body` (the annotation supplies the return type); a single-expression body infers it. The
 value site emits `HirExprKind::Closure { name, captures }` typed as `HirType::Function`, and
 `lower_ident_call` dispatches a call on a local function-typed binding indirectly (the callee is

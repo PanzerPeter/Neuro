@@ -88,3 +88,104 @@ fn a_name_bound_inside_a_closure_hides_only_the_reads_in_its_scope() {
     assert_eq!(capture_names(&program, "inner"), ["v"]);
     assert_eq!(capture_names(&program, "place"), ["k"]);
 }
+
+/// Each capture of the closure `binding` is initialized with in `main`, with whether
+/// the environment borrows it.
+fn capture_modes(program: &neuro_hir::HirProgram, binding: &str) -> Vec<(String, bool, HirType)> {
+    let init = binding_init(function_body(program, "main"), binding);
+    match &init.kind {
+        HirExprKind::Closure { captures, .. } => captures
+            .iter()
+            .map(|c| (c.name.clone(), c.borrowed, c.ty.clone()))
+            .collect(),
+        other => panic!("expected a closure value, got {:?}", other),
+    }
+}
+
+fn mut_ref(inner: HirType) -> HirType {
+    HirType::Reference {
+        inner: Box::new(inner),
+        mutable: true,
+    }
+}
+
+#[test]
+fn a_capture_is_copied_borrowed_or_moved_as_the_body_uses_it() {
+    let program = lower(
+        "func main() -> i32 {
+            mut n = 1
+            val k = 2
+            val s = \"a\" + \"b\"
+            val read = |x: i32| -> u64 { s.len() + (k as u64) }
+            val write = |x: i32| -> void { n += x }
+            val owned = move |x: i32| -> u64 { s.len() }
+            0
+        }",
+    );
+    assert_eq!(
+        capture_modes(&program, "read"),
+        [
+            ("s".to_string(), true, mut_ref(HirType::String)),
+            ("k".to_string(), false, HirType::I32),
+        ]
+    );
+    assert_eq!(
+        capture_modes(&program, "write"),
+        [("n".to_string(), true, mut_ref(HirType::I32))]
+    );
+    assert_eq!(
+        capture_modes(&program, "owned"),
+        [("s".to_string(), false, HirType::String)]
+    );
+}
+
+/// The body of a closure that borrows `s` reads it through the reference its
+/// environment holds.
+#[test]
+fn a_borrowed_capture_is_read_through_its_reference() {
+    let program = lower(
+        "func main() -> i32 {
+            val s = \"a\" + \"b\"
+            val f = |x: i32| -> u64 { s.len() }
+            0
+        }",
+    );
+    let closure = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Closure(c) => Some(c),
+            _ => None,
+        })
+        .expect("a lifted closure item should be emitted");
+    let rendered = format!("{:?}", closure.body);
+    assert!(
+        rendered.contains("Deref { operand: HirExpr { kind: Variable(\"s\")"),
+        "{rendered}"
+    );
+}
+
+/// An inner closure reading what the outer one borrowed copies the outer reference.
+#[test]
+fn a_nested_closure_copies_the_reference_its_enclosing_closure_borrowed() {
+    let program = lower(
+        "func main() -> i32 {
+            mut n = 0
+            val outer = |x: i32| -> void {
+                val inner = |y: i32| -> void { n += y }
+                inner(x)
+            }
+            0
+        }",
+    );
+    let inner = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Closure(c) if c.captures.iter().all(|cap| !cap.borrowed) => Some(c),
+            _ => None,
+        })
+        .expect("the inner closure copies its capture");
+    assert_eq!(inner.captures[0].name, "n");
+    assert_eq!(inner.captures[0].ty, mut_ref(HirType::I32));
+}

@@ -120,7 +120,7 @@ impl TypeChecker {
             Type::Tuple(elements) | Type::Collection { args: elements, .. } => {
                 elements.iter().any(|e| self.mentions_type_parameter(e))
             }
-            Type::Function { params, ret } => {
+            Type::Function { params, ret, .. } => {
                 params.iter().any(|p| self.mentions_type_parameter(p))
                     || self.mentions_type_parameter(ret)
             }

@@ -111,7 +111,7 @@ module per declaration kind beside it. `tests/` is split by subject.
   first in field access) and are refused read whole; anywhere else they are undefined names
   like any other. It also records the `KernelOut` parameters (`enter_kernel_outs`); the
   identifier arm refuses any read of one (`check_kernel_out_read`) except as the object of an
-  index, which `check_index_base` marks, and `validate_captures` refuses a closure capturing one.
+  index, which `check_index_base` marks, and `settle_captures` refuses a closure capturing one.
   That index, read or written (`val x = out[i]`, `out[i] = v`, `out[i] += v`), is refused outside
   an `unsafe` block (`check_kernel_out_index`, called from `check_index_base`; the `Unsafe` arm
   counts the enclosing blocks in `unsafe_depth`).
@@ -940,13 +940,35 @@ concrete type at zero cost. Errors: `ImplTraitNotAllowedHere`, `ImplReturnNotInf
 
 ### Closures
 `type_checkers/closures.rs`. `check_closure` types an `Expr::Closure` as
-`Type::Function { params, ret }`: parameters require an annotation (`ClosureParamNeedsType`), a
+`Type::Function { params, ret, mode }`: parameters require an annotation (`ClosureParamNeedsType`), a
 block body requires an explicit return type and is checked like a function body
 (`ClosureBlockNeedsReturnType`), and a single-expression body infers its return type. Two
-parameters with one name are `VariableAlreadyDefined` at the second, as in a function's list. Capture
-analysis (a free-variable walk) rejects capturing a non-Copy enclosing local
-(`ClosureCapturesNonCopy`) or assigning to a captured variable (`ClosureAssignsCapture`); module
-constants and functions are referenced directly, not captured. The walk is scoped (`FreeVars`
+parameters with one name are `VariableAlreadyDefined` at the second, as in a function's list.
+Module constants and functions are referenced directly, not captured.
+
+`settle_captures` runs after the body is checked, because two uses decide a capture's mode that
+only the check sees: a move out of it (`moves_since` against a snapshot taken before the body)
+and a `&mut self` call on it (`mut_receivers`, the log `check_mut_self_receiver` appends to). A
+capture the body writes (an assignment rooted at it, a `&mut` of it, such a call) is borrowed
+`&mut` and makes the closure `FunctionMode::Mut`; a `Copy` one it only reads is copied and holds
+nothing; any other is borrowed `&`. A `move` closure moves every non-`Copy` capture out of its
+source (`record_move`), and one whose body moves a capture is `FunctionMode::Once`. A closure
+without `move` that moves a capture is `ClosureMovesCapture`. Inside a `@kernel` body only the old
+rule holds (`ClosureCapturesNonCopy`, `ClosureAssignsCapture`): MLIR copies captures. The transient
+borrows the enclosing statement had in flight are restored after the body (its own statements end
+them as they go), then each borrowed capture takes its borrow (`borrow_capture`), transient until
+`hold_carried_borrows` makes the initialized binding hold it, as `val r = &x` does.
+
+A closure that borrows or owns a non-`Copy` capture is scope-bound (`scope_bound_closures`, keyed
+by the literal's span, and `SymbolInfo::scope_bound` on a binding holding one). It may be checked
+only in `function_value_slot`: the whole initializer of a binding, or a whole argument to a
+function-typed parameter (`check_receiver_call_args`), or a callee. Anywhere else it could be
+stored past what it borrows: `ScopeBoundClosureStored`. A built-in method sets no slot, so `.map`
+and friends refuse one too. `Type::Function`'s `mode` makes `is_compatible_with` directional (a
+value fits a slot of its own mode or a stronger one), a `once` value is move-tracked, and a call
+through a `once` binding moves it (`consume_once_callee`).
+
+The walk is scoped (`FreeVars`
 keeps one set per block, arm, loop body, `val`-`else` branch and inner closure), mirroring
 `hir-lowering`'s capture walk so the two agree: a name the body binds hides an enclosing one
 only after the binding and inside its scope, so a read before a shadowing `val`, in a sibling

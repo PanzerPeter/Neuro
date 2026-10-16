@@ -263,6 +263,10 @@ pub(crate) enum DropTarget {
     /// A value that releases nothing itself and only holds owners, such as a plain
     /// struct of tensors. `DropEntry::held` carries the work; this target emits none.
     Aggregate,
+    /// A value of this type a `move` closure's environment owns. Released whole, through
+    /// a plan of its type made at the release, so that the one flag the environment
+    /// carries for it is all a body consuming the value has to clear.
+    Captured(Type),
 }
 
 /// Central state container for LLVM IR code generation.
@@ -342,6 +346,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// [`Self::string_ownership`] under the body's generated name. Keyed by the alloca
     /// rather than the name, so a shadowing binding never inherits another's entry.
     pub(crate) closure_bindings: HashMap<PointerValue<'ctx>, String>,
+    /// The owned captures of the closure body being emitted, by name: the drop entry the
+    /// creating scope registered, seen from inside the body so a move or a reassignment
+    /// there settles the environment's flag. Never emitted at the body's own exits.
+    pub(crate) captured_drop_entries: HashMap<String, DropEntry<'ctx>>,
 
     /// Names of structs implementing `PoolAware` (`impl PoolAware for T`). Inside a
     /// `pool` body a binding of such a type is registered with the arena instead of
@@ -458,6 +466,7 @@ impl<'ctx> CodegenContext<'ctx> {
             struct_written_names: HashMap::new(),
             string_ownership: StringOwnership::default(),
             closure_bindings: HashMap::new(),
+            captured_drop_entries: HashMap::new(),
             const_values: HashMap::new(),
             overflow_checks: false,
             source: None,

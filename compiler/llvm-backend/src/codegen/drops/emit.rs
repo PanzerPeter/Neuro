@@ -284,6 +284,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 let enum_name = enum_name.clone();
                 self.emit_enum_payload_drop(storage_ptr, &enum_name)?
             }
+            DropTarget::Captured(ty) => {
+                let ty = ty.clone();
+                self.emit_captured_drop(storage_ptr, &ty)?
+            }
             DropTarget::Aggregate => {
                 return Err(CodegenError::InternalError(
                     "a holder with no release of its own reached the destructor path".to_string(),

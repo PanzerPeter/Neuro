@@ -9,7 +9,7 @@ use crate::errors::TypeError;
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
 use crate::type_checkers::val_else::stmts_diverge;
 use crate::type_checkers::{MethodGenerics, TypeChecker};
-use crate::types::Type;
+use crate::types::{FunctionMode, Type};
 use ast_types::{ImplDef, Item, SelfParam, StructDef};
 use std::collections::HashMap;
 
@@ -102,6 +102,7 @@ impl TypeChecker {
             let func_ty = Type::Function {
                 params: param_types,
                 ret: Box::new(return_type),
+                mode: FunctionMode::Shared,
             };
 
             if self.functions.contains_key(&mangled) {
@@ -513,7 +514,7 @@ impl TypeChecker {
             };
 
             let (param_types, return_type) = match func_ty {
-                Type::Function { params, ret } => (params, *ret),
+                Type::Function { params, ret, .. } => (params, *ret),
                 _ => continue,
             };
 

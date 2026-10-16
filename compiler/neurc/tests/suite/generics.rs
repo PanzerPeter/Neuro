@@ -194,10 +194,10 @@ func main() -> i32 {
 }
 
 #[test]
-fn capturing_an_abstract_type_in_a_closure_is_rejected() {
+fn moving_an_abstract_capture_out_of_a_closure_is_rejected() {
     let test = CompileTest::new();
-    // A capture duplicates the binding, which the template cannot allow: at
-    // `T = string` every call would hand the closure the same buffer to free.
+    // The capture is borrowed, since `T` is not known to be `Copy`, so moving it out
+    // would hand every call the same buffer to free at `T = string`.
     let source = r#"
 func hold<T>(v: T) -> i32 {
     val f = |x: i32| -> i32 {
@@ -215,10 +215,7 @@ func main() -> i32 {
     let err = test
         .compile(&path)
         .expect_err("a closure capturing an abstract-typed binding must be rejected");
-    assert!(
-        err.contains("closure captures 'v' of non-Copy type T"),
-        "{err}"
-    );
+    assert!(err.contains("closure moves captured 'v' out"), "{err}");
 }
 
 #[test]

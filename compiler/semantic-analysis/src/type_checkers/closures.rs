@@ -2,17 +2,19 @@
 //!
 //! A closure is type-checked as an anonymous callable of type
 //! [`Type::Function`]. Free variables referenced in the body that resolve to an
-//! enclosing local binding are *captures*. This phase captures Copy values by
-//! value; a non-Copy capture or an assignment to a capture is rejected.
-
-use std::collections::HashSet;
+//! enclosing local binding are *captures*, each settled per variable by how the body
+//! uses it: a `Copy` value it only reads is copied, a value it writes is
+//! borrowed `&mut`, any other value is borrowed `&`, and a `move` closure takes every
+//! capture by value. The strongest use decides the closure's call mode.
+use std::collections::{HashMap, HashSet};
 
 use ast_types::{ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
 use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::symbol_table::MoveState;
+use crate::types::{FunctionMode, Type};
 
 impl TypeChecker {
     /// Type-check a closure literal, returning its [`Type::Function`] type.
@@ -28,9 +30,14 @@ impl TypeChecker {
         params: &[ClosureParam],
         ret: Option<&ast_types::Type>,
         body: &Expr,
+        is_move: bool,
         expected: Option<(&[Type], &Type)>,
         span: Span,
     ) -> Type {
+        let in_slot = self.function_value_slot == Some(span);
+        let moves_before = self.symbols.snapshot_moves();
+        let transients_before = self.symbols.transient_borrows();
+        let receivers_before = self.mut_receivers.len();
         let mut param_types = Vec::with_capacity(params.len());
         for (index, p) in params.iter().enumerate() {
             let fixed = expected.and_then(|(types, _)| types.get(index));
@@ -59,8 +66,6 @@ impl TypeChecker {
                 }
             }
         }
-
-        self.validate_captures(params, body);
 
         // Resolve an explicit return annotation up front so the body is checked
         // against it; without one, the body's type is the closure's return type.
@@ -139,9 +144,27 @@ impl TypeChecker {
         self.loop_stack = saved_loops;
         self.refuse_function_valued_return(&result_ret, span);
 
+        // The body's own statements ended its borrows as they went, and with them any
+        // the enclosing statement had in flight; what the closure borrows is added below.
+        self.symbols.set_transient_borrows(&transients_before);
+        let mode = self.settle_captures(
+            params,
+            body,
+            is_move,
+            CaptureEvidence {
+                moves_before: &moves_before,
+                receivers_before,
+            },
+            span,
+        );
+        if self.scope_bound_closures.contains_key(&span) && !in_slot {
+            self.record_error(TypeError::ScopeBoundClosureStored { span });
+        }
+
         Type::Function {
             params: param_types,
             ret: Box::new(result_ret),
+            mode,
         }
     }
 
@@ -175,44 +198,155 @@ impl TypeChecker {
         self.symbols.pop_scope();
     }
 
-    /// Validate that every captured variable is Copy and is not assigned through.
-    /// A capture is a free variable of the body that resolves to an enclosing local
-    /// binding (module constants and top-level functions are referenced directly, not
-    /// captured, so they are excluded here).
-    fn validate_captures(&mut self, params: &[ClosureParam], body: &Expr) {
+    /// Decide how the closure holds each capture and return its call mode.
+    ///
+    /// Runs after the body is checked, because two uses only the body check sees decide a
+    /// mode: a move out of a capture (its move state changed) and a `&mut self` call on
+    /// one. A borrowed capture takes its borrow here, transient until the binding the
+    /// literal initializes takes it over; a `move` closure moves each non-`Copy`
+    /// capture out of its source. `lowering`'s capture walk settles the same way.
+    fn settle_captures(
+        &mut self,
+        params: &[ClosureParam],
+        body: &Expr,
+        is_move: bool,
+        evidence: CaptureEvidence<'_>,
+        span: Span,
+    ) -> FunctionMode {
         let fv = free_vars(params, body);
+        let consumed: HashMap<String, Span> = self
+            .symbols
+            .moves_since(evidence.moves_before)
+            .into_iter()
+            .collect();
+        let receivers: HashSet<String> = self.mut_receivers[evidence.receivers_before..]
+            .iter()
+            .cloned()
+            .collect();
+        let mutated = |name: &String| {
+            fv.assigns
+                .iter()
+                .chain(&fv.mut_borrows)
+                .any(|(n, _)| n == name)
+                || receivers.contains(name)
+        };
 
-        let mut seen: HashSet<String> = HashSet::new();
-        for (name, span) in &fv.reads {
-            if !seen.insert(name.clone()) {
+        let mut mode = FunctionMode::Shared;
+        let mut borrows = Vec::new();
+        let mut scope_bound = false;
+        let mut seen: HashSet<&String> = HashSet::new();
+        for (name, use_span) in fv.reads.iter().chain(&fv.assigns) {
+            if !seen.insert(name) {
                 continue;
             }
             // A reference is `Copy`, so a kernel's output handle would pass the check below.
             if self.in_kernel && self.names_kernel_out(name) {
-                self.refuse_kernel_out_use(name, *span);
+                self.refuse_kernel_out_use(name, *use_span);
                 continue;
             }
-            if let Some(info) = self.symbols.lookup(name) {
-                let ty = info.ty.clone();
-                if !self.is_type_copy(&ty) {
-                    self.record_error(TypeError::ClosureCapturesNonCopy {
+            let Some(ty) = self.symbols.lookup(name).map(|info| info.ty.clone()) else {
+                continue;
+            };
+            let copy = self.is_type_copy(&ty);
+            let writes = mutated(name);
+            if self.in_kernel {
+                self.refuse_kernel_capture(name, ty, copy, writes, *use_span);
+                continue;
+            }
+            if writes {
+                mode = mode.max(FunctionMode::Mut);
+            }
+            if let Some(moved_at) = consumed.get(name) {
+                mode = FunctionMode::Once;
+                if !is_move && !copy {
+                    self.record_error(TypeError::ClosureMovesCapture {
                         name: name.clone(),
-                        ty,
-                        span: *span,
+                        span: *moved_at,
                     });
+                    continue;
                 }
             }
-        }
-
-        for (name, span) in &fv.assigns {
-            if self.symbols.lookup(name).is_some() {
-                self.record_error(TypeError::ClosureAssignsCapture {
-                    name: name.clone(),
-                    span: *span,
-                });
+            if is_move {
+                if !copy {
+                    scope_bound = true;
+                    self.record_move(&Expr::Identifier(Identifier {
+                        name: name.clone(),
+                        span: *use_span,
+                    }));
+                }
+                continue;
             }
+            // A copy of a `Copy` value the body only reads is indistinguishable from a
+            // borrow of it, and holds nothing the caller could trip over.
+            if copy && !writes {
+                continue;
+            }
+            scope_bound = true;
+            self.borrow_capture(name, writes, *use_span);
+            borrows.push((name.clone(), writes));
+        }
+        if scope_bound {
+            self.scope_bound_closures.insert(span, borrows);
+        }
+        mode
+    }
+
+    /// Take the borrow a capture by reference holds, refusing one that conflicts with a
+    /// borrow the enclosing statement has in flight (`f(&mut v, || v.len())`). A
+    /// conflict with a borrow a binding holds was already reported where the body used
+    /// the capture.
+    fn borrow_capture(&mut self, name: &str, exclusive: bool, span: Span) {
+        let (Some((shared, held_exclusive)), Some((held_shared, persistent_exclusive))) = (
+            self.symbols.borrow_counts(name),
+            self.symbols.persistent_borrow_counts(name),
+        ) else {
+            return;
+        };
+        let in_flight_shared = shared - held_shared;
+        let in_flight_exclusive = held_exclusive - persistent_exclusive;
+        if exclusive && in_flight_shared + in_flight_exclusive > 0 {
+            self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
+                name: name.to_string(),
+                span,
+            });
+        } else if !exclusive && in_flight_exclusive > 0 {
+            self.record_error(TypeError::CannotBorrowWhileMutablyBorrowed {
+                name: name.to_string(),
+                span,
+            });
+        }
+        self.symbols.add_transient_borrow(name, exclusive);
+    }
+
+    /// A kernel body lowers through MLIR, which takes a closure's captures by copy only.
+    fn refuse_kernel_capture(
+        &mut self,
+        name: &str,
+        ty: Type,
+        copy: bool,
+        writes: bool,
+        span: Span,
+    ) {
+        if !copy {
+            self.record_error(TypeError::ClosureCapturesNonCopy {
+                name: name.to_string(),
+                ty,
+                span,
+            });
+        } else if writes {
+            self.record_error(TypeError::ClosureAssignsCapture {
+                name: name.to_string(),
+                span,
+            });
         }
     }
+}
+
+/// What the body check left behind that capture settlement reads: the move states before
+/// it, and where the receiver log stood.
+struct CaptureEvidence<'a> {
+    moves_before: &'a [MoveState],
+    receivers_before: usize,
 }
 
 /// The names a closure reads from its enclosing scope, each once: its captures, plus any
@@ -249,6 +383,8 @@ struct FreeVars {
     scopes: Vec<HashSet<String>>,
     reads: Vec<(String, Span)>,
     assigns: Vec<(String, Span)>,
+    /// Bindings the body borrows `&mut` by name.
+    mut_borrows: Vec<(String, Span)>,
 }
 
 impl FreeVars {
@@ -265,6 +401,12 @@ impl FreeVars {
     fn assign(&mut self, name: &str, span: Span) {
         if !self.is_bound(name) {
             self.assigns.push((name.to_string(), span));
+        }
+    }
+
+    fn mut_borrow(&mut self, name: &str, span: Span) {
+        if !self.is_bound(name) {
+            self.mut_borrows.push((name.to_string(), span));
         }
     }
 
@@ -479,7 +621,14 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
         | Expr::Unsafe { stmts, .. }
         | Expr::Pool { stmts, .. }
         | Expr::Loop { body: stmts, .. } => collect_block(stmts, fv),
-        Expr::Reference { operand, .. } => collect_expr(operand, fv),
+        Expr::Reference {
+            operand, mutable, ..
+        } => {
+            if *mutable && let Some(ident) = bare_identifier(operand) {
+                fv.mut_borrow(&ident.name, ident.span);
+            }
+            collect_expr(operand, fv)
+        }
         Expr::Deref { operand, .. } => collect_expr(operand, fv),
         Expr::Try { operand, .. } => collect_expr(operand, fv),
         Expr::Range { start, end, .. } => {
@@ -532,6 +681,15 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
     }
 }
 
+/// The binding `expr` names, through any parentheses.
+fn bare_identifier(expr: &Expr) -> Option<&Identifier> {
+    match expr {
+        Expr::Identifier(ident) => Some(ident),
+        Expr::Paren(inner, _) => bare_identifier(inner),
+        _ => None,
+    }
+}
+
 /// Record the free variables the expressions inside an assignment place reach. The
 /// root binding is recorded as an assignment by the caller, not as a read.
 fn collect_place(place: &Place, fv: &mut FreeVars) {
@@ -577,6 +735,8 @@ mod tests {
     use super::super::tests::semantic_errors;
     use crate::errors::TypeError;
 
+    /// Whether the closure borrows the outer `s`, which shows as the move after it being
+    /// refused while the closure lives.
     fn captures_non_copy(body: &str) -> bool {
         let errors = semantic_errors(&format!(
             "enum E {{ A(i32), B }}
@@ -586,12 +746,13 @@ func main() -> i32 {{
     val g = |a: i32| -> u64 {{
         {body}
     }}
+    val t = s
     0
 }}"
         ));
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::ClosureCapturesNonCopy { name, .. } if name == "s"))
+            .any(|e| matches!(e, TypeError::CannotMoveWhileBorrowed { name, .. } if name == "s"))
     }
 
     /// A name the body binds hides an enclosing one only after the binding and inside its
@@ -623,6 +784,117 @@ func main() -> i32 {{
             "val h = |s: i32| -> i32 { s }\n h(1) as u64",
         ] {
             assert!(!captures_non_copy(body), "{body}: 's' is the inner binding");
+        }
+    }
+
+    /// A closure that writes a capture is `mut`, so a slot asking for a plain function
+    /// refuses it, and one asking for `mut` or `once` takes it.
+    #[test]
+    fn a_written_capture_makes_the_closure_mut() {
+        let refused = semantic_errors(
+            "func want(f: () -> void) { f() }
+func main() -> i32 {
+    mut c = 0
+    want(|| -> void { c += 1 })
+    0
+}",
+        );
+        assert!(
+            refused
+                .iter()
+                .any(|e| matches!(e, TypeError::Mismatch { .. })),
+            "{refused:?}"
+        );
+        let accepted = semantic_errors(
+            "func want(f: mut () -> void) { f() }
+func last(f: once () -> void) { f() }
+func main() -> i32 {
+    mut c = 0
+    want(|| -> void { c += 1 })
+    last(|| -> void { c += 1 })
+    c
+}",
+        );
+        assert!(accepted.is_empty(), "{accepted:?}");
+    }
+
+    /// A `Copy` value the body only reads is copied, so the binding stays free to change.
+    #[test]
+    fn a_read_only_copy_capture_holds_no_borrow() {
+        let errors = semantic_errors(
+            "func main() -> i32 {
+    mut x = 1
+    val f = |y: i32| -> i32 { x + y }
+    x = 2
+    f(x)
+}",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A `&mut self` call on a capture writes it: the closure borrows it exclusively.
+    #[test]
+    fn a_mutating_method_on_a_capture_borrows_it_exclusively() {
+        let errors = semantic_errors(
+            "func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    val push = |x: i32| -> void { v.push(x) }
+    push(1)
+    v.len() as i32
+}",
+        );
+        assert!(
+            errors.iter().any(
+                |e| matches!(e, TypeError::CannotUseWhileMutablyBorrowed { name, .. } if name == "v")
+            ),
+            "{errors:?}"
+        );
+    }
+
+    /// A `move` closure takes its non-`Copy` captures, and one that gives a capture away
+    /// is `once`: its binding is used up by the first call.
+    #[test]
+    fn a_move_closure_owns_its_captures_and_a_consuming_one_is_called_once() {
+        let errors = semantic_errors(
+            "func consume(s: string) -> u64 { s.len() }
+func main() -> i32 {
+    val s = \"a\" + \"b\"
+    val f = move || -> u64 { consume(s) }
+    val n = s.len()
+    val a = f()
+    (a + f()) as i32
+}",
+        );
+        let moved: Vec<&str> = errors
+            .iter()
+            .filter_map(|e| match e {
+                TypeError::UseOfMovedValue { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(moved, ["s", "f"], "{errors:?}");
+    }
+
+    #[test]
+    fn a_scope_bound_closure_cannot_be_stored() {
+        for stored in [
+            "mut g = |x: i32| -> u64 { 0 }\n    g = |x: i32| -> u64 { s.len() }",
+            "val f = |x: i32| -> u64 { s.len() }\n    val pair = (f, 1)",
+            "val g = {\n        |x: i32| -> u64 { s.len() }\n    }",
+        ] {
+            let errors = semantic_errors(&format!(
+                "func main() -> i32 {{
+    val s = \"a\" + \"b\"
+    {stored}
+    0
+}}"
+            ));
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. })),
+                "{stored}: {errors:?}"
+            );
         }
     }
 }

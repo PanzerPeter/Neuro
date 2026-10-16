@@ -19,4 +19,4 @@ pub use items::{
     StructDef, TraitBound, TraitDef, TraitMethod, VariantPayload,
 };
 pub use statements::{LoopAdapter, LoopAdapterKind, Place, Stmt};
-pub use types::{ArraySize, GenericArg, TensorDim, TensorExtent, Type};
+pub use types::{ArraySize, FunctionMode, GenericArg, TensorDim, TensorExtent, Type};

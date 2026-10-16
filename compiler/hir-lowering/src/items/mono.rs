@@ -67,6 +67,9 @@ impl Lowerer {
             if self.clone_structs.contains(base) {
                 self.clone_structs.insert(mangled.clone());
             }
+            if self.copy_structs.contains(base) {
+                self.copy_structs.insert(mangled.clone());
+            }
             if self.partial_eq_structs.contains(base) {
                 self.partial_eq_structs.insert(mangled.clone());
             }
@@ -120,6 +123,9 @@ impl Lowerer {
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             for method in &imp.methods {
+                if method.self_param == Some(ast_types::SelfParam::RefMut) {
+                    self.mut_self_method_names.insert(method.name.name.clone());
+                }
                 let inst_key = format!("{}__{}", mangled, method.name.name);
                 if self.functions.contains_key(&inst_key)
                     || self.generic_methods.contains_key(&inst_key)

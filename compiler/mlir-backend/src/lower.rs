@@ -537,6 +537,7 @@ mod tests {
                 captures: vec![HirCapture {
                     name: "n".to_string(),
                     ty: HirType::I32,
+                    borrowed: false,
                 }],
                 params: vec![param("x", HirType::I32)],
                 return_type: HirType::I32,

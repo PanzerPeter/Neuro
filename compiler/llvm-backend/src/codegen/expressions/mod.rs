@@ -320,7 +320,9 @@ impl<'ctx> CodegenContext<'ctx> {
             }
 
             // A closure value: build its `{ fn_ptr, env_ptr }` fat pointer.
-            HirExprKind::Closure { name, captures } => self.codegen_closure_value(name, captures),
+            HirExprKind::Closure { name, captures } => {
+                self.codegen_closure_value(name, captures, expr.span)
+            }
         }
     }
 
@@ -500,7 +502,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// the place rather than taking its address. `borrow_ty` is the borrow's own type,
     /// which is what settles that. The operand's type cannot, since `&s` and `&mut s`
     /// name the same place.
-    fn codegen_reference(
+    pub(crate) fn codegen_reference(
         &mut self,
         operand: &HirExpr,
         borrow_ty: &Type,

@@ -1379,14 +1379,24 @@ pub enum TypeError {
     ClosureParamNeedsType { name: String, span: Span },
 
     #[error(
-        "closure captures '{name}' of non-Copy type {ty}: only Copy values may be captured in this phase (capture by reference / move of owned values is not yet supported)"
+        "a closure inside a `@kernel` body captures '{name}' of non-Copy type {ty}: a kernel closure captures Copy values only; borrow it outside the closure and capture the reference"
     )]
     ClosureCapturesNonCopy { name: String, ty: Type, span: Span },
 
     #[error(
-        "closure assigns to captured variable '{name}': a captured variable is read-only in this phase (mutable capture / FnMut is not yet supported)"
+        "a closure inside a `@kernel` body assigns to captured variable '{name}': a kernel closure captures by copy, so it may not write a capture"
     )]
     ClosureAssignsCapture { name: String, span: Span },
+
+    #[error(
+        "closure moves captured '{name}' out, but a closure without `move` captures it by reference: write `move |...|` so the closure owns '{name}' and may give it away"
+    )]
+    ClosureMovesCapture { name: String, span: Span },
+
+    #[error(
+        "this closure borrows or owns a non-Copy capture, so it lives only as long as the scope that built it: bind it with `val` or `mut`, pass it to a function-typed parameter of a declared function, or call it; it cannot be assigned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map`"
+    )]
+    ScopeBoundClosureStored { span: Span },
 
     #[error(
         "a block-bodied closure needs an explicit return type: write `|params| -> R {{ ... }}` (only single-expression closures `|x| expr` infer their return type)"
@@ -1750,6 +1760,8 @@ impl TypeError {
             | Self::ClosureParamNeedsType { span, .. }
             | Self::ClosureCapturesNonCopy { span, .. }
             | Self::ClosureAssignsCapture { span, .. }
+            | Self::ClosureMovesCapture { span, .. }
+            | Self::ScopeBoundClosureStored { span }
             | Self::ClosureBlockNeedsReturnType { span, .. }
             | Self::UnformattableType { span, .. }
             | Self::UnrenderableStruct { span, .. }

@@ -6,7 +6,7 @@ use ast_types::{Attribute, Item, MethodDef, ModuleId, Stmt};
 
 use crate::errors::TypeError;
 use crate::symbol_table::{MoveState, SymbolTable};
-use crate::types::Type;
+use crate::types::{FunctionMode, Type};
 use crate::warnings::{Warning, WarningCode};
 
 /// Type checker state
@@ -215,6 +215,17 @@ pub(crate) struct TypeChecker {
     /// the whole-binding rule is checked once, at the outermost link, against that
     /// link's own path.
     in_sub_place: bool,
+    /// Every closure literal that borrows or owns a non-Copy capture, keyed by its span,
+    /// with the bindings it borrows and whether each borrow is exclusive. The binding the
+    /// literal initializes takes the borrows over (`hold_carried_borrows`).
+    scope_bound_closures: HashMap<shared_types::Span, Vec<(String, bool)>>,
+    /// The one position a scope-bound function value may be checked in next: the whole
+    /// initializer of a binding, or a whole argument to a function-typed parameter.
+    /// Anywhere else it could be stored past the bindings it reads.
+    function_value_slot: Option<shared_types::Span>,
+    /// Every binding a `&mut self` method call takes as its receiver, in order: how a
+    /// closure body's mutation of a capture through a method is seen.
+    mut_receivers: Vec<String>,
 }
 
 /// The construction form of an enum variant, determining how it is built:
@@ -477,6 +488,9 @@ impl TypeChecker {
             pool_stack: Vec::new(),
             in_borrow_operand: false,
             in_sub_place: false,
+            scope_bound_closures: HashMap::new(),
+            function_value_slot: None,
+            mut_receivers: Vec::new(),
         }
     }
 
@@ -692,6 +706,12 @@ impl TypeChecker {
             Type::Struct(name) => !self.copy_structs.contains(name),
             Type::Collection { .. } => true,
             Type::Tensor { .. } => true,
+            // Calling a `once` value may consume what it captured, so a second call must
+            // be refused, and so must a copy that could make it.
+            Type::Function {
+                mode: FunctionMode::Once,
+                ..
+            } => true,
             // An aggregate is tracked exactly when it holds something tracked: the
             // owner of a `[string; 3]` is the array binding, and duplicating it would
             // duplicate every buffer inside it.

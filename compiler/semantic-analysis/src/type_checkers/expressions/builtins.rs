@@ -677,6 +677,7 @@ impl TypeChecker {
             self.record_error(TypeError::CannotBorrowValue { span });
             return;
         };
+        self.mut_receivers.push(name.clone());
         let Some(info) = self.symbols.lookup(&name) else {
             return;
         };

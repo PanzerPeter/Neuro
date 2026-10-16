@@ -202,8 +202,8 @@ impl Lowerer {
         // same-named top-level function, matching the frontend's precedence.
         if let Some(HirType::Function { params, ret }) = self.lookup_local(name) {
             let args = self.lower_args(args, &params)?;
-            let callee = HirExpr::new(
-                HirExprKind::Variable(name.to_string()),
+            let callee = self.binding_value(
+                name,
                 HirType::Function {
                     params,
                     ret: ret.clone(),

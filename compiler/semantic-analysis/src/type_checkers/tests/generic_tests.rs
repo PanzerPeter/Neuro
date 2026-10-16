@@ -127,9 +127,9 @@ func main() -> i32 { return 0 }
 }
 
 #[test]
-fn closure_capturing_an_abstract_type_is_rejected() {
-    // A capture duplicates the binding into the closure, so every call would run the
-    // destructor of one owner again once `T` was instantiated with a `Drop` type.
+fn closure_moving_an_abstract_capture_out_is_rejected() {
+    // `T` is not known to be `Copy`, so the closure borrows `v`, and every call would
+    // move the one value out again once `T` was instantiated with a `Drop` type.
     let errors = semantic_errors(
         r#"
 func hold<T>(v: T) -> i32 { val f = |x: i32| -> i32 { val held = v
@@ -141,7 +141,7 @@ func main() -> i32 { return 0 }
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::ClosureCapturesNonCopy { .. })),
+            .any(|e| matches!(e, TypeError::ClosureMovesCapture { .. })),
         "capturing an abstract-typed binding must be reported; got {errors:?}"
     );
 }

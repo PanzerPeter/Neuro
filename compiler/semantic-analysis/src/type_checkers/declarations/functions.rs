@@ -7,7 +7,7 @@
 use crate::errors::TypeError;
 use crate::type_checkers::val_else::{stmt_diverges, stmts_diverge};
 use crate::type_checkers::{BoundInfo, GenericFnSig, TypeChecker};
-use crate::types::Type;
+use crate::types::{FunctionMode, Type};
 use ast_types::{Expr, FunctionDef, Stmt};
 use shared_types::Span;
 use std::collections::HashMap;
@@ -129,6 +129,7 @@ impl TypeChecker {
                 Type::Function {
                     params: param_types.clone(),
                     ret: Box::new(return_type.clone()),
+                    mode: FunctionMode::Shared,
                 },
             );
         } else {
@@ -376,7 +377,8 @@ impl TypeChecker {
         func: &FunctionDef,
     ) -> Option<(Vec<Type>, Type)> {
         if func.generics.is_empty() {
-            let Some(Type::Function { params, ret }) = self.functions.get(&func.name.name) else {
+            let Some(Type::Function { params, ret, .. }) = self.functions.get(&func.name.name)
+            else {
                 return None;
             };
             return Some((params.clone(), (**ret).clone()));

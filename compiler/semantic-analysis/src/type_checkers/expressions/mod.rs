@@ -127,6 +127,7 @@ impl TypeChecker {
                 // Variables take priority; constants are a fallback so locals can shadow consts.
                 if let Some(symbol_info) = self.symbols.lookup(&ident.name) {
                     let ty = symbol_info.ty.clone();
+                    let scope_bound = symbol_info.scope_bound;
                     // As the base of a longer place, the name is not read as a whole:
                     // the outermost link checks its own path instead.
                     let moved_at = if self.in_sub_place {
@@ -140,6 +141,9 @@ impl TypeChecker {
                             span: ident.span,
                             moved_at,
                         });
+                    }
+                    if scope_bound && self.function_value_slot != Some(ident.span) {
+                        self.record_error(TypeError::ScopeBoundClosureStored { span: ident.span });
                     }
                     self.check_borrowee_read(&ident.name, ident.span);
                     if self.in_kernel {
@@ -381,9 +385,9 @@ impl TypeChecker {
                 params,
                 ret,
                 body,
+                is_move,
                 span,
-                ..
-            } => Some(self.check_closure(params, ret.as_ref(), body, None, *span)),
+            } => Some(self.check_closure(params, ret.as_ref(), body, *is_move, None, *span)),
 
             Expr::Compose { functions, span } => Some(self.check_compose(functions, *span)),
         }

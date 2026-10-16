@@ -2,7 +2,7 @@
 //! recorded before any body is lowered, so bodies resolve names regardless of order.
 
 use ast_types::{
-    ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, StructDef, VariantPayload,
+    ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef, VariantPayload,
 };
 use neuro_hir::HirType;
 
@@ -109,6 +109,9 @@ impl Lowerer {
                 }
             }
         }
+        if copy {
+            self.copy_structs.insert(def.name.name.clone());
+        }
         // `Copy` implies `Clone`: a Copy type is trivially cloneable.
         if copy || clone {
             self.clone_structs.insert(def.name.name.clone());
@@ -123,21 +126,24 @@ impl Lowerer {
     /// distinct set of type arguments is monomorphized on demand. Clone/Copy intent is
     /// recorded under the base name so instances can inherit `.clone()` support.
     pub(super) fn register_generic_struct(&mut self, def: &StructDef) {
-        let mut clone = false;
-        let mut partial_eq = false;
+        let (mut copy, mut clone, mut partial_eq) = (false, false, false);
         for attr in &def.attributes {
             if attr.name.name != DERIVE_ATTRIBUTE {
                 continue;
             }
             for arg in &attr.args {
                 match arg.name.as_str() {
-                    COPY_TRAIT | CLONE_TRAIT => clone = true,
+                    COPY_TRAIT => copy = true,
+                    CLONE_TRAIT => clone = true,
                     PARTIAL_EQ_TRAIT => partial_eq = true,
                     _ => {}
                 }
             }
         }
-        if clone {
+        if copy {
+            self.copy_structs.insert(def.name.name.clone());
+        }
+        if copy || clone {
             self.clone_structs.insert(def.name.name.clone());
         }
         if partial_eq {
@@ -234,6 +240,9 @@ impl Lowerer {
         struct_name: &str,
     ) -> Result<(), LoweringError> {
         for method in &def.methods {
+            if method.self_param == Some(SelfParam::RefMut) {
+                self.mut_self_method_names.insert(method.name.name.clone());
+            }
             // An owned `self` on a `Copy` receiver is valid for operator-trait methods
             // The checker already rejected it on any non-`Copy` type, so every
             // owned-`self` method reaching lowering is sound and is registered normally.

@@ -200,7 +200,8 @@ impl TypeChecker {
             };
             (sig.params, sig.ret)
         } else {
-            let Some(Type::Function { params, ret }) = self.functions.get(&func.name.name).cloned()
+            let Some(Type::Function { params, ret, .. }) =
+                self.functions.get(&func.name.name).cloned()
             else {
                 return;
             };
@@ -280,7 +281,7 @@ impl TypeChecker {
         else {
             return;
         };
-        let Some(Type::Function { params, ret }) = self.functions.get(&key).cloned() else {
+        let Some(Type::Function { params, ret, .. }) = self.functions.get(&key).cloned() else {
             return;
         };
 

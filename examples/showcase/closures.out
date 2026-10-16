@@ -1,4 +1,8 @@
 capture by value  |x| x + bias      = 50
 move closure      move |x| x * scale = 30
 struct method     s.apply(5)         = 10
-total                                = 90
+mut capture       count += x         = 10
+vec push capture  seen.push(x * x)   = 4 items, last 16
+borrowed string   neuro.len() + x     = 30
+once closure      shout(banner)      = 9
+total                                = 143

@@ -300,7 +300,9 @@ impl TypeChecker {
                 Some(self.instantiate_generic(&name.name, &resolved, *span))
             }
             // Closure / function type `(T1, ...) -> R`: the type of a callable value.
-            ast_types::Type::Function { params, ret, .. } => {
+            ast_types::Type::Function {
+                params, ret, mode, ..
+            } => {
                 let mut resolved = Vec::with_capacity(params.len());
                 for param in params {
                     resolved.push(self.resolve_type(param)?);
@@ -309,6 +311,7 @@ impl TypeChecker {
                 Some(Type::Function {
                     params: resolved,
                     ret: Box::new(ret_ty),
+                    mode: *mode,
                 })
             }
             // Statically shaped tensor `Tensor<T, [d0, ...]>`. A literal extent the

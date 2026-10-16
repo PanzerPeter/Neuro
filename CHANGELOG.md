@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.13.0] - 2026-10-16
+
+### Added
+
+- Closures capture any value, each variable by how the body uses it: a `Copy` value it only reads
+  is copied, any other value it only reads is borrowed `&`, and a value it writes (assigns, takes
+  `&mut`, calls a `&mut self` method on) is borrowed `&mut`. `|x: i32| -> void { log.push(x) }`
+  and `|| -> void { count += 1 }` now compile, and the writes land in the captured binding. A
+  borrowing closure holds its borrow while it lives, under the same rules as `val r = &x`.
+- `move` closures take every capture by value: a non-`Copy` capture is moved out of its source and
+  released when the scope that created the closure ends, and a `Copy` one is the closure's own
+  copy, kept from call to call.
+- Function types carry a call mode: `(T) -> U`, `mut (T) -> U` and `once (T) -> U`. A closure
+  that writes a capture is `mut`; a `move` closure that moves a capture out is `once`, and calling
+  a `once` value a second time is a use of a moved value. A closure fits a parameter of its own
+  mode or a later one in that list.
+
+### Changed
+
+- A closure without `move` that moves a capture out is refused with a hint to write `move`; the
+  old blanket refusal of every non-`Copy` capture is gone.
+- A closure that borrows or owns a non-`Copy` capture may initialize a binding, be passed to a
+  function-typed parameter, or be called, and nothing else: assigning it, storing it in another
+  value, yielding it from a block or handing it to a built-in method such as `.map` is refused.
+
 ## [5.12.1] - 2026-10-13
 
 ### Fixed

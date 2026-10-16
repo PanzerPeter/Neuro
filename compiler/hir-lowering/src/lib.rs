@@ -177,6 +177,14 @@ struct Lowerer {
     newtypes: HashMap<String, ast_types::Type>,
     /// Structs that support `.clone()` (derive `Clone`, or `Copy` which implies it).
     clone_structs: HashSet<String>,
+    /// Structs that derive `Copy`, which a closure copies rather than borrows.
+    copy_structs: HashSet<String>,
+    /// The names of every `&mut self` method: a closure calling one on a `Copy` capture
+    /// writes it, so it borrows the capture instead of copying it.
+    mut_self_method_names: HashSet<String>,
+    /// The borrowed captures of the closures being lowered, as (scope index, name): the
+    /// body reads each one through the reference its environment holds.
+    borrowed_captures: HashSet<(usize, String)>,
     /// Structs that derive `PartialEq`. `==` / `!=` on one lowers to a plain binary
     /// node the backend expands field-wise, NOT to a method call. A derived comparison
     /// has no `eq` to dispatch to, which is what distinguishes it from an `impl`.
@@ -414,6 +422,9 @@ impl Lowerer {
             mono_enum_pending: Vec::new(),
             newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
+            copy_structs: HashSet::new(),
+            mut_self_method_names: HashSet::new(),
+            borrowed_captures: HashSet::new(),
             partial_eq_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             trait_impls: HashSet::new(),

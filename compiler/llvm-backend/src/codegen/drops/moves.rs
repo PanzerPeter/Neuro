@@ -106,7 +106,10 @@ impl<'ctx> CodegenContext<'ctx> {
             return;
         };
         let prefix = path.unwrap_or_default();
-        if prefix.is_empty() {
+        // A captured value has no held entries to disown one part at a time, so moving
+        // any part of it disowns the whole: what is left behind leaks rather than being
+        // released along with the part already gone.
+        if prefix.is_empty() || matches!(entry.target, DropTarget::Captured(_)) {
             flags.push(entry.flag_ptr);
         }
         flags.extend(

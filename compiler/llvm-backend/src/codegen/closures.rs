@@ -3,19 +3,24 @@
 //! A closure is represented uniformly as a `{ fn_ptr, env_ptr }` fat pointer. Each
 //! closure literal is lifted to a top-level function whose first LLVM parameter is a
 //! pointer to its captured-environment struct; the value site allocates that struct
-//! in the defining frame, snapshots each Copy capture into it, and pairs the
+//! in the defining frame, stores each capture into it (a copy of the value, the value
+//! a `move` closure takes over, or the address of a borrowed binding), and pairs the
 //! function pointer with the environment pointer. A call loads both halves and
-//! dispatches indirectly.
-
+//! dispatches indirectly. The body reads its captures where the environment holds them.
+//!
+//! A capture that owns something is followed by an `i1` field saying whether it still
+//! does. The scope that built the closure releases it while that flag stands; a body
+//! that moves the capture out clears it, which is how a `once` call settles who frees it.
 use inkwell::AddressSpace;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
-use neuro_hir::{HirCapture, HirClosure, HirExpr, HirExprKind};
+use neuro_hir::{HirCapture, HirClosure, HirExpr, HirExprKind, HirType};
+use shared_types::Span;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-use super::context::CodegenContext;
+use super::context::{CodegenContext, DropEntry, DropTarget};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Declare a lifted closure's LLVM signature: `(env_ptr, params...) -> ret`.
@@ -65,19 +70,37 @@ impl<'ctx> CodegenContext<'ctx> {
                 CodegenError::InternalError("closure is missing its environment parameter".into())
             })?
             .into_pointer_value();
-        let env_struct_ty = self.closure_env_type(&closure.captures)?;
+        // Each capture is read and written in place, so a write a `move` closure makes
+        // to its own copy is still there at the next call.
+        let env = self.closure_env_layout(&closure.captures)?;
+        self.captured_drop_entries.clear();
         for (i, cap) in closure.captures.iter().enumerate() {
             let sem_ty = Type::from_hir(&cap.ty);
             let llvm_ty = self.get_any_llvm_type(&sem_ty)?;
             let field_ptr =
                 self.builder
-                    .build_struct_gep(env_struct_ty, env_ptr, i as u32, &cap.name)?;
-            let loaded = self.builder.build_load(llvm_ty, field_ptr, &cap.name)?;
-            let alloca = self.entry_alloca(llvm_ty, &cap.name)?;
-            self.builder.build_store(alloca, loaded)?;
-            self.variables.insert(cap.name.clone(), alloca);
+                    .build_struct_gep(env.struct_ty, env_ptr, i as u32, &cap.name)?;
+            self.variables.insert(cap.name.clone(), field_ptr);
             self.variable_types.insert(cap.name.clone(), llvm_ty);
             self.type_env.insert(cap.name.clone(), sem_ty);
+            if let Some((flag_index, target)) = env.owned_flag(i) {
+                let flag_ptr = self.builder.build_struct_gep(
+                    env.struct_ty,
+                    env_ptr,
+                    flag_index,
+                    "capture.owns.ptr",
+                )?;
+                self.captured_drop_entries.insert(
+                    cap.name.clone(),
+                    DropEntry {
+                        name: cap.name.clone(),
+                        storage_ptr: field_ptr,
+                        flag_ptr,
+                        target,
+                        held: Vec::new(),
+                    },
+                );
+            }
         }
 
         // User parameters follow the environment pointer (LLVM params 1..=n).
@@ -94,43 +117,87 @@ impl<'ctx> CodegenContext<'ctx> {
                 .insert(param.name.clone(), Type::from_hir(&param.ty));
         }
 
-        // Captures are Copy and parameters are borrowed/Copy, so the body opens a
-        // drop scope with no registered owned bindings; locals register themselves.
+        // The body owns none of its captures: what the environment owns, the scope that
+        // built it releases. Locals register themselves in the body's own scope.
         self.push_drop_scope();
         let ret_ty = Type::from_hir(&closure.return_type);
-        self.codegen_body(&closure.body, &ret_ty)
+        let emitted = self.codegen_body(&closure.body, &ret_ty);
+        self.captured_drop_entries.clear();
+        emitted
     }
 
-    /// Build the anonymous LLVM struct type for a closure's captured environment,
-    /// one field per capture in layout order. Used at both the definition site (to
-    /// GEP/load) and the value site (to alloca/store), which must agree on layout.
-    fn closure_env_type(
-        &self,
-        captures: &[HirCapture],
-    ) -> CodegenResult<inkwell::types::StructType<'ctx>> {
+    /// The layout of a closure's captured environment: one field per capture in order,
+    /// then one `i1` ownership flag per capture that owns something. The definition site
+    /// (to GEP) and the value site (to alloca and store) must agree on it.
+    fn closure_env_layout(&self, captures: &[HirCapture]) -> CodegenResult<EnvLayout<'ctx>> {
         let mut field_tys: Vec<BasicTypeEnum<'ctx>> = Vec::with_capacity(captures.len());
-        for cap in captures {
-            field_tys.push(self.get_any_llvm_type(&Type::from_hir(&cap.ty))?);
+        let mut owned = Vec::new();
+        for (i, cap) in captures.iter().enumerate() {
+            let ty = Type::from_hir(&cap.ty);
+            field_tys.push(self.get_any_llvm_type(&ty)?);
+            if cap.borrowed {
+                continue;
+            }
+            if let Some(target) = self.captured_drop_target(&ty) {
+                owned.push((i, target));
+            }
         }
-        Ok(self.context.struct_type(&field_tys, false))
+        field_tys.extend(
+            owned
+                .iter()
+                .map(|_| BasicTypeEnum::from(self.context.bool_type())),
+        );
+        Ok(EnvLayout {
+            struct_ty: self.context.struct_type(&field_tys, false),
+            capture_count: captures.len(),
+            owned,
+        })
     }
 
     /// Lower a closure value expression: allocate the environment in the current
-    /// frame, snapshot each capture into it, and build the `{ fn_ptr, env_ptr }`
-    /// fat pointer.
+    /// frame, store each capture into it, and build the `{ fn_ptr, env_ptr }` fat
+    /// pointer.
+    ///
+    /// A capture that owns something moves in: its source binding is disowned, and the
+    /// environment's flag takes over the ownership the source had, which the innermost
+    /// scope then releases while the flag still stands.
     pub(crate) fn codegen_closure_value(
         &mut self,
         name: &str,
         captures: &[HirCapture],
+        span: Span,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let env_struct_ty = self.closure_env_type(captures)?;
-        let env_ptr = self.entry_alloca(env_struct_ty, "closure.env")?;
+        let env = self.closure_env_layout(captures)?;
+        let env_ptr = self.entry_alloca(env.struct_ty, "closure.env")?;
         for (i, cap) in captures.iter().enumerate() {
-            let value = self.codegen_identifier(&cap.name)?;
             let field_ptr =
                 self.builder
-                    .build_struct_gep(env_struct_ty, env_ptr, i as u32, "closure.cap")?;
+                    .build_struct_gep(env.struct_ty, env_ptr, i as u32, "closure.cap")?;
+            let ty = Type::from_hir(&cap.ty);
+            let source_ty = match (&cap.ty, cap.borrowed) {
+                (HirType::Reference { inner, .. }, true) => (**inner).clone(),
+                _ => cap.ty.clone(),
+            };
+            let source = HirExpr::new(HirExprKind::Variable(cap.name.clone()), source_ty, span);
+            let value = if cap.borrowed {
+                self.codegen_reference(&source, &ty)?
+            } else {
+                self.codegen_identifier(&cap.name)?
+            };
             self.builder.build_store(field_ptr, value)?;
+            let Some((flag_index, target)) = env.owned_flag(i) else {
+                continue;
+            };
+            let owns = self.owns_binding_now(&cap.name)?;
+            self.mark_moved_for_drop(&source);
+            let flag_ptr = self.builder.build_struct_gep(
+                env.struct_ty,
+                env_ptr,
+                flag_index,
+                "closure.owns",
+            )?;
+            self.builder.build_store(flag_ptr, owns)?;
+            self.register_captured_drop(field_ptr, flag_ptr, target);
         }
 
         let function = *self
@@ -283,6 +350,30 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder
                 .build_indirect_call(fn_type, target.fn_ptr, &call_args, "closure.call")?;
         Ok(call.try_as_basic_value().basic())
+    }
+}
+
+/// A closure environment's struct type, and which captures own their value.
+struct EnvLayout<'ctx> {
+    struct_ty: inkwell::types::StructType<'ctx>,
+    capture_count: usize,
+    /// Each owning capture's index, with how its value is released, in field order.
+    owned: Vec<(usize, DropTarget)>,
+}
+
+impl EnvLayout<'_> {
+    /// The field index of capture `index`'s ownership flag, with its release, when the
+    /// capture owns its value.
+    fn owned_flag(&self, index: usize) -> Option<(u32, DropTarget)> {
+        self.owned
+            .iter()
+            .position(|(owned, _)| *owned == index)
+            .map(|slot| {
+                (
+                    (self.capture_count + slot) as u32,
+                    self.owned[slot].1.clone(),
+                )
+            })
     }
 }
 

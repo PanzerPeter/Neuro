@@ -1192,10 +1192,18 @@ enclosing literal uses, so a nested rendering's scratch buffers are freed once c
 ## Closure ABI
 `codegen/closures.rs`. A closure value is a `{ fn_ptr, env_ptr }` fat pointer, and `map_type`
 lowers `Type::Function` to that two-pointer struct. `declare_closure` / `codegen_closure` emit each
-`HirItem::Closure` as a function `(env_ptr, params...) -> ret` whose prologue GEP/loads the
-captures out of the environment struct into locals. `codegen_closure_value` allocates that struct
-in the **defining frame**, snapshots each Copy capture, and pairs the closure function pointer with
-it. `codegen_call_dispatch` routes a call whose callee is a local variable to
+`HirItem::Closure` as a function `(env_ptr, params...) -> ret` whose prologue binds each capture to
+its field of the environment struct, in place, so a `move` closure's writes to its own copy last
+from one call to the next. `codegen_closure_value` allocates that struct in the **defining frame**,
+stores each capture (the value, or `&name` for a `borrowed` one), and pairs the closure function
+pointer with it. `closure_env_layout` appends one `i1` ownership flag per capture that owns
+something. At the value site such a capture's source is disowned (`mark_moved_for_drop`), its flag
+takes the source's ownership (`owns_binding_now`), and the innermost scope registers the field for
+release under that flag (`register_captured_drop`, `DropTarget::Captured`, which plans the value's
+owners fresh at the release so one flag covers them all). Inside the body the same field and flag
+are the capture's drop entry (`captured_drop_entries`, consulted by `live_drop_entry`, never
+emitted at the body's exits), so a body that moves the capture out, a `once` call, clears the flag
+and the scope releases nothing twice. `codegen_call_dispatch` routes a call whose callee is a local variable to
 `codegen_indirect_call`, which extracts both pointers and issues an indirect call with the
 environment as the hidden first argument.
 
@@ -1209,8 +1217,8 @@ leaves its argument's owner bit in `forwarded_string_owner` under the lifted nam
 reached any other way (a parameter, a field, a `mut` binding) stays unresolved, so its arguments
 move and its result owns nothing. That leaks rather than frees a buffer something still holds.
 
-The closure environment is frame-local, so a closure that escapes its defining scope is out of
-scope this phase.
+The closure environment is frame-local and its owned captures die with the scope that built it,
+so the checker keeps every closure that borrows or owns a non-`Copy` capture inside that scope.
 
 ## Dynamic Dispatch ABI
 `codegen/dispatch.rs`. `emit_vtables` walks every `impl Trait for Type` whose trait is

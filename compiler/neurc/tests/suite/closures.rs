@@ -123,8 +123,9 @@ func main() -> i32 {
     assert_eq!(exit, 15);
 }
 
+/// A closure without `move` borrows what it captures, so it may not give a capture away.
 #[test]
-fn capturing_non_copy_value_is_rejected() {
+fn moving_a_capture_out_of_a_non_move_closure_is_rejected() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
@@ -139,10 +140,10 @@ func main() -> i32 {
     let source_path = test.write_source("closure_noncopy.nr", source);
     let err = test
         .compile(&source_path)
-        .expect_err("capturing a non-Copy value should be a type error");
+        .expect_err("moving a borrowed capture out should be a type error");
     assert!(
-        err.contains("non-Copy"),
-        "expected a non-Copy capture diagnostic, got: {err}"
+        err.contains("closure moves captured 's' out"),
+        "expected a move-out-of-capture diagnostic, got: {err}"
     );
 }
 

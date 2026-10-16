@@ -109,11 +109,7 @@ impl Lowerer {
                 ))
             }
             Expr::Identifier(ident) => match self.lookup(&ident.name) {
-                Some(ty) => Ok(HirExpr::new(
-                    HirExprKind::Variable(ident.name.clone()),
-                    ty,
-                    ident.span,
-                )),
+                Some(ty) => Ok(self.binding_value(&ident.name, ty, ident.span)),
                 None if self.functions.contains_key(&ident.name) => {
                     self.lower_function_value(ident)
                 }
@@ -291,9 +287,9 @@ impl Lowerer {
                 params,
                 ret,
                 body,
+                is_move,
                 span,
-                ..
-            } => self.lower_closure(params, ret.as_ref(), body, *span),
+            } => self.lower_closure(params, ret.as_ref(), body, *is_move, *span),
 
             Expr::Compose { functions, span } => self.lower_compose(functions, *span),
 
@@ -381,6 +377,9 @@ impl Lowerer {
                 mutable,
                 span,
             } => {
+                if let Some(reference) = self.borrow_of_capture(operand, *mutable, *span) {
+                    return Ok(reference);
+                }
                 let operand = self.lower_expr(operand, None)?;
                 let ty = HirType::Reference {
                     inner: Box::new(operand.ty.clone()),

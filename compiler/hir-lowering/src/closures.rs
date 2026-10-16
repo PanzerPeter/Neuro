@@ -3,9 +3,11 @@
 //!
 //! Captures are the free variables of the body that resolve to an enclosing *local*
 //! binding (module constants and functions are referenced directly, so they are not
-//! captured). Every capture is Copy this phase, so the environment is a plain
-//! by-value snapshot.
-
+//! captured). Each is settled the way the checker settles it: a `Copy` value
+//! the body only reads is copied, a `move` closure copies or moves every capture, and
+//! any other capture is borrowed. A borrowed capture's environment field holds
+//! `&mut name`, and every use of `name` in the body reads or writes through it, so the
+//! backend sees a closure over a reference and nothing new.
 use std::collections::HashSet;
 
 use ast_types::{ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
@@ -31,6 +33,7 @@ impl Lowerer {
         params: &[ClosureParam],
         ret: Option<&ast_types::Type>,
         body: &Expr,
+        is_move: bool,
         span: Span,
     ) -> Result<HirExpr, LoweringError> {
         let mut hir_params = Vec::with_capacity(params.len());
@@ -52,35 +55,37 @@ impl Lowerer {
             });
         }
 
-        let captures = self.collect_captures(params, body);
+        let settled = self.collect_captures(params, body, is_move);
         let ret_hint = match ret {
             Some(t) => Some(self.resolve_type(t)?),
             None => None,
         };
 
-        // Lower the body with the captures and parameters bound in a fresh scope. A
-        // block body is lowered like a function body (checker-guaranteed annotation
-        // supplies its return type); a single-expression body infers its type.
+        // Lower the body with the captures in a scope of their own and the parameters in
+        // one inside it, where the body's top-level bindings land too: a body binding
+        // that shadows a capture then hides it rather than overwriting it. A block body
+        // is lowered like a function body (checker-guaranteed annotation supplies its
+        // return type); a single-expression body infers its type.
         self.push_scope();
-        for c in &captures {
-            self.define(c.name.clone(), c.ty.clone());
+        let capture_scope = self.scopes.len() - 1;
+        for (capture, visible) in &settled {
+            self.define(capture.name.clone(), visible.clone());
+            if visible != &capture.ty {
+                self.borrowed_captures
+                    .insert((capture_scope, capture.name.clone()));
+            }
         }
+        self.push_scope();
         for p in &hir_params {
             self.define(p.name.clone(), p.ty.clone());
         }
-        let (body_stmts, return_type) = match body {
-            Expr::Block { stmts, .. } => {
-                let return_type = ret_hint.clone().unwrap_or(HirType::Void);
-                let lowered = self.lower_body(stmts, &return_type)?;
-                (lowered, return_type)
-            }
-            single => {
-                let body_hir = self.lower_expr(single, ret_hint.as_ref())?;
-                let return_type = ret_hint.clone().unwrap_or_else(|| body_hir.ty.clone());
-                (vec![HirStmt::Expr(body_hir)], return_type)
-            }
-        };
+        let lowered = self.lower_closure_body(body, ret_hint);
         self.pop_scope();
+        self.pop_scope();
+        self.borrowed_captures
+            .retain(|(scope, _)| *scope != capture_scope);
+        let (body_stmts, return_type) = lowered?;
+        let captures: Vec<HirCapture> = settled.into_iter().map(|(capture, _)| capture).collect();
 
         let name = format!("__closure_{}", self.closure_counter);
         self.closure_counter += 1;
@@ -103,6 +108,124 @@ impl Lowerer {
             fn_ty,
             span,
         ))
+    }
+
+    /// Lower a closure body whose captures and parameters are already bound, handing back
+    /// its statements and return type.
+    fn lower_closure_body(
+        &mut self,
+        body: &Expr,
+        ret_hint: Option<HirType>,
+    ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
+        Ok(match body {
+            Expr::Block { stmts, .. } => {
+                let return_type = ret_hint.clone().unwrap_or(HirType::Void);
+                let lowered = self.lower_body(stmts, &return_type)?;
+                (lowered, return_type)
+            }
+            single => {
+                let body_hir = self.lower_expr(single, ret_hint.as_ref())?;
+                let return_type = ret_hint.unwrap_or_else(|| body_hir.ty.clone());
+                (vec![HirStmt::Expr(body_hir)], return_type)
+            }
+        })
+    }
+
+    /// The value of the binding `name` of type `ty`: the binding itself, or, for a
+    /// closure body's borrowed capture, a read through the reference standing for it.
+    pub(crate) fn binding_value(&self, name: &str, ty: HirType, span: Span) -> HirExpr {
+        let variable = |ty| HirExpr::new(HirExprKind::Variable(name.to_string()), ty, span);
+        match self.capture_reference(name) {
+            Some(reference) => HirExpr::new(
+                HirExprKind::Deref {
+                    operand: Box::new(variable(reference)),
+                },
+                ty,
+                span,
+            ),
+            None => variable(ty),
+        }
+    }
+
+    /// `&name` / `&mut name` of a borrowed capture is the reference the environment
+    /// already holds. `None` for anything else, which lowers as an ordinary borrow.
+    ///
+    /// The shared borrow of a `string` is the exception that still reads through it: its
+    /// representation is the fat pointer by value, not the address the capture holds.
+    pub(crate) fn borrow_of_capture(
+        &self,
+        operand: &Expr,
+        mutable: bool,
+        span: Span,
+    ) -> Option<HirExpr> {
+        let Expr::Identifier(ident) = peel_parens(operand) else {
+            return None;
+        };
+        let HirType::Reference { inner, .. } = self.capture_reference(&ident.name)? else {
+            return None;
+        };
+        let ty = HirType::Reference {
+            inner: inner.clone(),
+            mutable,
+        };
+        if !mutable && *inner == HirType::String {
+            let read = self.binding_value(&ident.name, *inner, span);
+            return Some(HirExpr::new(
+                HirExprKind::Reference {
+                    operand: Box::new(read),
+                    mutable,
+                },
+                ty,
+                span,
+            ));
+        }
+        Some(HirExpr::new(
+            HirExprKind::Variable(ident.name.clone()),
+            ty,
+            span,
+        ))
+    }
+
+    /// The reference a closure body reads `name` through, when the binding `name`
+    /// resolves to is one of the body's borrowed captures.
+    fn capture_reference(&self, name: &str) -> Option<HirType> {
+        let (scope, ty) = self
+            .scopes
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, scope)| scope.get(name).map(|ty| (index, ty)))?;
+        self.borrowed_captures
+            .contains(&(scope, name.to_string()))
+            .then(|| HirType::Reference {
+                inner: Box::new(ty.clone()),
+                mutable: true,
+            })
+    }
+
+    /// Whether a value of `ty` is `Copy`, mirroring the checker: duplicated rather than
+    /// moved, and so copied into a closure that only reads it.
+    fn is_copy(&self, ty: &HirType) -> bool {
+        match ty {
+            HirType::String
+            | HirType::Void
+            | HirType::Function { .. }
+            | HirType::Collection { .. }
+            | HirType::Tensor { .. }
+            | HirType::DynObject(_)
+            | HirType::Slice(_) => false,
+            HirType::Struct(name) => self.copy_structs.contains(name),
+            HirType::Enum(name) => self.enums.get(name).is_some_and(|variants| {
+                variants
+                    .iter()
+                    .flat_map(|variant| &variant.fields)
+                    .all(|(_, field)| self.is_copy(field))
+            }),
+            HirType::Newtype { inner, .. } => self.is_copy(inner),
+            HirType::Array { element, .. } => self.is_copy(element),
+            HirType::Tuple(elements) => elements.iter().all(|e| self.is_copy(e)),
+            _ => true,
+        }
     }
 
     /// Lower `f >> g >> h` to the capture-free closure that applies each stage in turn.
@@ -227,8 +350,18 @@ impl Lowerer {
 
     /// Compute the ordered, de-duplicated capture list: free variables of the body
     /// (names no scope of the closure binds at the point they are read) that resolve
-    /// to an enclosing local binding, paired with that binding's type.
-    fn collect_captures(&self, params: &[ClosureParam], body: &Expr) -> Vec<HirCapture> {
+    /// to an enclosing local binding. Each comes with the type the body sees it at,
+    /// which differs from the capture's own exactly when the body reads it through a
+    /// reference.
+    ///
+    /// A capture the enclosing closure itself borrowed is already a reference, so this
+    /// closure copies that reference rather than borrowing it again.
+    fn collect_captures(
+        &self,
+        params: &[ClosureParam],
+        body: &Expr,
+        is_move: bool,
+    ) -> Vec<(HirCapture, HirType)> {
         let mut walk = FreeVars::default();
         walk.scoped(|fv| {
             for p in params {
@@ -238,19 +371,51 @@ impl Lowerer {
         });
         let mut captures = Vec::new();
         let mut seen = HashSet::new();
-        for name in walk.reads {
-            if seen.contains(&name) {
+        for name in &walk.reads {
+            if !seen.insert(name) {
                 continue;
             }
-            if let Some(ty) = self.lookup_local(&name) {
-                captures.push(HirCapture {
-                    name: name.clone(),
-                    ty,
-                });
+            let Some(ty) = self.lookup_local(name) else {
+                continue;
+            };
+            let name = name.clone();
+            if let Some(reference) = self.capture_reference(&name) {
+                let capture = HirCapture {
+                    name,
+                    ty: reference,
+                    borrowed: false,
+                };
+                captures.push((capture, ty));
+                continue;
             }
-            seen.insert(name);
+            let writes = walk.writes(&name, &self.mut_self_method_names);
+            if is_move || (self.is_copy(&ty) && !writes) {
+                let capture = HirCapture {
+                    name,
+                    ty: ty.clone(),
+                    borrowed: false,
+                };
+                captures.push((capture, ty));
+                continue;
+            }
+            let capture = HirCapture {
+                name,
+                ty: HirType::Reference {
+                    inner: Box::new(ty.clone()),
+                    mutable: true,
+                },
+                borrowed: true,
+            };
+            captures.push((capture, ty));
         }
         captures
+    }
+}
+
+fn peel_parens(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Paren(inner, _) => peel_parens(inner),
+        other => other,
     }
 }
 
@@ -264,13 +429,45 @@ struct FreeVars {
     /// Names bound inside the body, one set per open scope, innermost last.
     scopes: Vec<HashSet<String>>,
     reads: Vec<String>,
+    /// Free names the body writes: an assignment's root, the operand of `&mut`.
+    writes: Vec<String>,
+    /// Free names a method is called on, with the method's name.
+    receivers: Vec<(String, String)>,
 }
 
 impl FreeVars {
+    fn is_free(&self, name: &str) -> bool {
+        !self.scopes.iter().any(|scope| scope.contains(name))
+    }
+
     fn read(&mut self, name: &str) {
-        if !self.scopes.iter().any(|scope| scope.contains(name)) {
+        if self.is_free(name) {
             self.reads.push(name.to_string());
         }
+    }
+
+    fn write(&mut self, name: &str) {
+        if self.is_free(name) {
+            self.writes.push(name.to_string());
+        }
+    }
+
+    fn receive(&mut self, name: &str, method: &str) {
+        if self.is_free(name) {
+            self.receivers.push((name.to_string(), method.to_string()));
+        }
+    }
+
+    /// Whether the body writes the capture `name`, the checker's test: an assignment
+    /// rooted at it, a `&mut` of it, or a call of a `&mut self` method on it. The method
+    /// is matched by name alone, which can only borrow a capture the checker copies, never
+    /// the reverse.
+    fn writes(&self, name: &str, mut_self_methods: &HashSet<String>) -> bool {
+        self.writes.iter().any(|written| written == name)
+            || self
+                .receivers
+                .iter()
+                .any(|(root, method)| root == name && mut_self_methods.contains(method))
     }
 
     fn bind(&mut self, name: &str) {
@@ -296,6 +493,9 @@ fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
             fv.bind(&name.name);
         }
         Stmt::Assign { place, value, .. } => {
+            if let Some(root) = place.root() {
+                fv.write(&root.name);
+            }
             collect_place(place, fv);
             collect_expr(value, fv);
         }
@@ -419,6 +619,20 @@ fn collect_loop_body(
     });
 }
 
+/// The binding a method receiver is a place of, as the checker roots one: through
+/// parentheses, fields, elements and dereferences.
+fn place_root(expr: &Expr) -> Option<&Identifier> {
+    match expr {
+        Expr::Identifier(ident) => Some(ident),
+        Expr::Paren(inner, _) => place_root(inner),
+        Expr::FieldAccess { object, .. }
+        | Expr::Index { object, .. }
+        | Expr::TupleIndex { object, .. } => place_root(object),
+        Expr::Deref { operand, .. } => place_root(operand),
+        _ => None,
+    }
+}
+
 /// Every name an assignment target reads: its root and any index on the way to it.
 fn collect_place(place: &Place, fv: &mut FreeVars) {
     match place {
@@ -467,6 +681,11 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
             collect_expr(right, fv);
         }
         Expr::Call { func, args, .. } => {
+            if let Expr::FieldAccess { object, field, .. } = func.as_ref()
+                && let Some(root) = place_root(object)
+            {
+                fv.receive(&root.name, &field.name);
+            }
             collect_expr(func, fv);
             for arg in args {
                 collect_expr(arg, fv);
@@ -518,7 +737,14 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
         | Expr::Unsafe { stmts, .. }
         | Expr::Pool { stmts, .. }
         | Expr::Loop { body: stmts, .. } => collect_block(stmts, fv),
-        Expr::Reference { operand, .. } => collect_expr(operand, fv),
+        Expr::Reference {
+            operand, mutable, ..
+        } => {
+            if *mutable && let Expr::Identifier(ident) = peel_parens(operand) {
+                fv.write(&ident.name);
+            }
+            collect_expr(operand, fv)
+        }
         Expr::Deref { operand, .. } => collect_expr(operand, fv),
         Expr::Range { start, end, .. } => {
             collect_expr(start, fv);

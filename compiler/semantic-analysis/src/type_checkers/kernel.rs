@@ -303,6 +303,7 @@ impl TypeChecker {
             params,
             ret.as_ref(),
             body,
+            false,
             Some((&fixed, &Type::Void)),
             *closure_span,
         );

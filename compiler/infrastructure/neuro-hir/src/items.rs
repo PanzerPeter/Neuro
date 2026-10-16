@@ -48,11 +48,17 @@ pub struct HirClosure {
 }
 
 /// One captured variable of a closure: the enclosing binding's name (used both to
-/// load it at the definition site and to bind it inside the body) and its type.
+/// read it at the definition site and to bind it inside the body) and its type.
+///
+/// A `borrowed` capture holds `&mut name` instead of the value: `ty` is that reference
+/// type, and the body reads and writes the binding through it (`*name`). Any other
+/// capture is a copy of the value, or, for a type that owns something, the value moved
+/// into the closure.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirCapture {
     pub name: String,
     pub ty: HirType,
+    pub borrowed: bool,
 }
 
 /// The vtable contract of a declared trait.

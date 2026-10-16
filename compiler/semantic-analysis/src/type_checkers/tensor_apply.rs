@@ -87,7 +87,7 @@ impl TypeChecker {
         // The function value is READ, not moved: it is evaluated once and called per
         // element, and stays usable after the traversal.
         let callee_ty = self.check_expr(callee, None).unwrap_or(Type::Unknown);
-        let Type::Function { params, ret } = &callee_ty else {
+        let Type::Function { params, ret, .. } = &callee_ty else {
             if !matches!(callee_ty, Type::Unknown) {
                 self.record_error(TypeError::TensorApplyNotCallable {
                     method: method.to_string(),

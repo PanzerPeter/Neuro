@@ -169,6 +169,10 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `Type::Slice`, anything else must be the `;` of a sized `Type::Array`. Whether the slice is
   legal where it was written is not decided here: semantic analysis rejects one outside a
   reference, exactly as it does for a bare `dyn Trait`.
+- **Function type modes.** `mut (T) -> U` and `once (T) -> U` set `Type::Function`'s `mode`.
+  `once` is no keyword: `function_mode_prefix` reads it (and `mut`) as a mode only when `(`
+  follows, a place no type named `once` could stand, so `once` stays an ordinary name. A tuple
+  type after the mode is an error.
 - **Shape argument vs. array/slice type argument.** `Tensor<f32, [2, 3]>` is the one type
   application whose argument is a shape rather than a type, and it shares its opening bracket
   with `Box<[T; N]>` / `Box<[T]>`. `shape_argument_ahead` decides on the token after `[`: an

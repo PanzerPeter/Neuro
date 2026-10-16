@@ -8,7 +8,7 @@
 // program declares no `Drop` types: the scope stack stays empty and nothing is
 // emitted.
 
-use inkwell::values::{BasicValueEnum, PointerValue};
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use crate::errors::CodegenResult;
@@ -25,6 +25,11 @@ mod string_positions;
 /// The name an unbound temporary's drop entry is registered under. `__` is rejected in
 /// every declared name, so no move site can reach the entry.
 const UNBOUND_TEMPORARY: &str = "__unbound_temporary";
+
+/// The name a closure environment's owned capture is registered under in the scope
+/// that built the closure. Unspellable, so no binding's move reaches it there; inside
+/// the body the capture's own name reaches it through `captured_drop_entries`.
+const CAPTURED_ENVIRONMENT: &str = "__closure_environment";
 
 /// The drop flag of a `string` position inside a holder. It is the one flag that
 /// starts `false`, so its name is what tells an armed position from a planned one.
@@ -409,6 +414,69 @@ impl<'ctx> CodegenContext<'ctx> {
             .flat_map(|scope| scope.iter().rev())
             .find(|entry| entry.name == name)
             .filter(|entry| entry.storage_ptr == *storage)
+            .or_else(|| {
+                self.captured_drop_entries
+                    .get(name)
+                    .filter(|entry| entry.storage_ptr == *storage)
+            })
+    }
+
+    /// How a `move` closure's environment releases a capture of type `ty`, or `None`
+    /// when the value owns nothing. A `string` keeps its own target: whether it owns a
+    /// buffer is the runtime flag moved in with it, not its type.
+    pub(crate) fn captured_drop_target(&self, ty: &Type) -> Option<DropTarget> {
+        if matches!(ty, Type::String) {
+            return Some(DropTarget::HeapString);
+        }
+        self.drop_target_of(ty)
+            .map(|_| DropTarget::Captured(ty.clone()))
+    }
+
+    /// Whether the binding `name` owns its value right now, read from its drop flag. A
+    /// binding with no entry owns nothing this frame could release.
+    pub(crate) fn owns_binding_now(&mut self, name: &str) -> CodegenResult<IntValue<'ctx>> {
+        let bool_ty = self.context.bool_type();
+        let Some(flag_ptr) = self.live_drop_entry(name).map(|entry| entry.flag_ptr) else {
+            return Ok(bool_ty.const_zero());
+        };
+        Ok(self
+            .builder
+            .build_load(bool_ty, flag_ptr, "capture.owns")?
+            .into_int_value())
+    }
+
+    /// Release, at the end of the innermost scope, the capture a closure environment
+    /// holds at `storage_ptr`, while the flag at `flag_ptr` still says it owns it.
+    pub(crate) fn register_captured_drop(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        flag_ptr: PointerValue<'ctx>,
+        target: DropTarget,
+    ) {
+        if let Some(scope) = self.drop_scopes.last_mut() {
+            scope.push(DropEntry {
+                name: CAPTURED_ENVIRONMENT.to_string(),
+                storage_ptr,
+                flag_ptr,
+                target,
+                held: Vec::new(),
+            });
+        }
+    }
+
+    /// Release a value a closure environment owned, whole: plan its owners now, under
+    /// fresh flags, and run them at once.
+    pub(super) fn emit_captured_drop(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        ty: &Type,
+    ) -> CodegenResult<()> {
+        let depth = self.drop_scopes.len();
+        self.push_drop_scope();
+        self.register_owned_binding(UNBOUND_TEMPORARY, storage_ptr, ty)?;
+        self.emit_drops_through(depth)?;
+        self.pop_drop_scope();
+        Ok(())
     }
 
     /// The positions a value of `ty` holds, in declaration order, as `(accessor

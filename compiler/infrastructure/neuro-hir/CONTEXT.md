@@ -165,9 +165,12 @@ names the container the length comes from, the node's `ty` is the slice referenc
 **Closures are lifted items.** `HirItem::Closure(HirClosure { name, captures, params,
 return_type, body, span })` is one lifted item per closure literal, whose first (implicit)
 parameter at codegen is the captured-environment pointer. `HirExprKind::Closure { name,
-captures }` is the value referencing it, listing the enclosing variables to snapshot in
-capture-layout order (`HirCapture { name, ty }`). The value's `ty` is the ordinary
-`HirType::Function { params, ret }`.
+captures }` is the value referencing it, listing the enclosing variables in capture-layout
+order (`HirCapture { name, ty, borrowed }`). A `borrowed` capture's `ty` is `&mut T` and the value
+site stores `&name`; the lifted body already reads it as `*name`, so a backend treats it as one
+more reference-typed capture. Any other capture stores the value: a copy, or, for a type that owns
+something, the value a `move` closure takes over. The value's `ty` is the ordinary
+`HirType::Function { params, ret }`: the call mode is a frontend fact no backend needs.
 
 **Match arms are fully resolved, so backends need no pattern logic.** `HirExprKind::Match
 { scrutinee, arms }` carries `HirMatchArm { tests, bindings, guard, body }`.

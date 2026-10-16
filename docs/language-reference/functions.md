@@ -938,8 +938,9 @@ func twice<T: Clone>(v: &T) -> T {
 ```
 
 **Restrictions.** Without a `Copy` bound, the same conservatism bars a `T` from the positions
-restricted to `Copy` types: a closure may not capture a `T`-typed binding, and `[v, v]` or
-`(v, v)` over a `T` duplicates one owner, so the second slot is a use of a moved value. Generic **struct** and
+restricted to `Copy` types: a closure borrows a `T`-typed binding rather than copying it, so it
+may move it out only as a `move` closure, and `[v, v]` or `(v, v)` over a `T` duplicates one
+owner, so the second slot is a use of a moved value. Generic **struct** and
 **enum** type arguments carry no `Copy` requirement either: the instance holds the value and
 moves with it (see [Types → Ownership of an element](types.md#ownership-of-an-element)). Generic
 `impl` blocks are supported.
@@ -1087,29 +1088,98 @@ val clamp = |x: i32| -> i32 {
 // Zero parameters.
 val make = || 42
 
-// `move` forces every capture to be taken by value (required when the closure
-// would outlive the captured bindings).
+// `move` takes every capture by value: the closure owns what it captured.
 val label = 100
 val tagged = move |x: i32| x + label
 ```
 
 ### Capture
 
-A closure captures each free variable its body reads **by value**; the variable
-must be `Copy` for now, and it remains usable after the closure is created
-because it was copied, not moved:
+A closure captures each free variable its body uses, and how it holds one depends on that use,
+variable by variable:
+
+| The body | The capture | Example |
+| --- | --- | --- |
+| only reads a `Copy` value | a copy | `\|n: i32\| n + offset` |
+| only reads any other value | a shared borrow `&` | `\|n: i32\| name.len() + n` |
+| writes it (assigns, takes `&mut`, calls a `&mut self` method) | a mutable borrow `&mut` | `\|\| -> void { count += 1 }` |
 
 ```neuro
 func main() -> i32 {
     val offset = 10
-    val shift  = |n: i32| n + offset   // captures `offset` by value
+    val shift  = |n: i32| n + offset   // copies `offset`
     val a = shift(5)                   // 15
-    a + offset                         // `offset` still usable -> 25
+
+    mut count = 0
+    {
+        val bump = || -> void { count += 1 }   // borrows `count` mutably
+        bump()
+        bump()
+    }                                  // the borrow ends with `bump`
+    a + offset + count                 // 27
 }
 ```
 
-Capturing a non-`Copy` value (such as a `string`), or assigning to a captured
-variable inside the closure, is a compile error for now.
+A borrowing closure holds its borrow for as long as it lives, exactly as `val r = &x` does: the
+binding cannot be moved while a closure reads it, and cannot be used at all while one writes it.
+End the closure's scope, as the block above does, before using the binding again.
+
+A `move` closure takes every capture by value. A `Copy` capture is copied into the closure, which
+keeps its own copy from call to call; any other capture is moved in, so its source binding is gone,
+and the closure releases it when the scope that created it ends:
+
+```neuro
+mut n = 0
+val tick = move || -> i32 {
+    n += 1
+    n
+}
+tick()        // 1
+tick()        // 2, and `n` is still 0
+```
+
+A closure without `move` may not move a capture out (pass a `string` it captured to a function
+that takes one by value, say): it only borrowed it. The diagnostic asks for `move`.
+
+### Call modes
+
+How a closure uses its captures decides how it may be called. One that only reads them can be
+called any number of times; one that writes a capture is a `mut` function; a `move` closure that
+moves a capture out can be called once. A parameter's function type says which it accepts:
+
+| Parameter type | Accepts | The callee may |
+| --- | --- | --- |
+| `f: (T) -> U` | closures that only read their captures, and named functions | call `f` any number of times |
+| `f: mut (T) -> U` | those, and closures that write a capture | call `f` any number of times |
+| `f: once (T) -> U` | every closure | call `f` once |
+
+```neuro
+func twice(f: mut () -> void) {
+    f()
+    f()
+}
+
+func finish(report: once () -> u64) -> u64 {
+    report()
+}
+
+func shout(message: string) -> u64 { message.len() }
+
+func main() -> i32 {
+    mut count = 0
+    {
+        twice(|| -> void { count += 1 })
+    }
+    val banner = "done" + "!"
+    val n = finish(move || -> u64 { shout(banner) })
+    count + n as i32                   // 2 + 5
+}
+```
+
+A closure that writes a capture passed where a plain `(T) -> U` is asked, or a `once` closure
+where a `mut` one is, is a type mismatch. Calling a `once` value a second time, or copying it, is
+a use of a moved value. `once` is a mode only in front of a function type; elsewhere it is an
+ordinary name.
 
 ### Function types and higher-order functions
 
@@ -1149,14 +1219,20 @@ error: a function value cannot be returned: a closure reads its captures from th
 that built it, so it may not outlive that frame
 ```
 
+A closure that borrows a capture, or owns a non-`Copy` one, is tied to the scope that created
+it. It may initialize a binding, be passed to a function-typed parameter of a
+declared function, or be called; it may not be assigned to an existing binding, stored inside
+another value, yielded from a block, or handed to a built-in method such as `.map`.
+
 ### Not yet supported
 
 - Parameter-type inference (`|x| x * x` without an annotation).
 - Passing a closure to a **generic** higher-order function
   (`func f<T, U>(x: T, g: (T) -> U) -> U`).
-- The `Fn` / `FnMut` / `FnOnce` distinction with by-reference, mutable, or
-  move-of-owned capture (all capture is currently by-value `Copy`).
 - Returning or storing a closure so it escapes its defining scope, and `dyn Fn`.
+- A closure that borrows or owns a non-`Copy` capture, passed to a built-in method
+  (`.map`, `.filter`, `.zip`, `.reduce`).
+- A closure without `move` taking a capture by value because its body moves it out.
 
 ## References
 

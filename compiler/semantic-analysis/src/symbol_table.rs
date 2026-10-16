@@ -127,6 +127,9 @@ pub(crate) struct SymbolInfo {
     borrows: Vec<BorrowProvenance>,
     /// Set on a `val` bound directly to a `@grad` call's result.
     pub(crate) grad_loss: Option<GradLoss>,
+    /// Holds a closure that borrows or owns a non-Copy capture, which must not be
+    /// stored anywhere that outlives this binding's scope.
+    pub(crate) scope_bound: bool,
 }
 
 impl SymbolInfo {
@@ -141,6 +144,7 @@ impl SymbolInfo {
             exclusive_transient: 0,
             borrows: Vec::new(),
             grad_loss: None,
+            scope_bound: false,
         }
     }
 }
@@ -354,6 +358,13 @@ impl SymbolTable {
                 scope,
                 exclusive,
             });
+        }
+    }
+
+    /// Mark `holder` as holding a scope-bound closure.
+    pub(crate) fn mark_scope_bound(&mut self, holder: &str) {
+        if let Some(info) = self.lookup_mut(holder) {
+            info.scope_bound = true;
         }
     }
 

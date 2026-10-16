@@ -443,12 +443,13 @@ impl TypeChecker {
                     .map(|a| self.substitute_generic(a, subst, span))
                     .collect(),
             },
-            Type::Function { params, ret } => Type::Function {
+            Type::Function { params, ret, mode } => Type::Function {
                 params: params
                     .iter()
                     .map(|p| self.substitute_generic(p, subst, span))
                     .collect(),
                 ret: Box::new(self.substitute_generic(ret, subst, span)),
+                mode: *mode,
             },
             Type::Struct(name) | Type::Enum(name) => {
                 let Some((base, args)) = self.instance_parts(name) else {

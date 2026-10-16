@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+pub(crate) use ast_types::FunctionMode;
+
 /// One compile-time extent: the length of a fixed-size array `[T; N]`, or one axis
 /// of a tensor shape `Tensor<T, [M, K]>`.
 ///
@@ -128,9 +130,13 @@ pub enum Type {
     Char,
     String,
     Void,
+    /// A callable value. `mode` is the call trait: for a closure, the strongest use its
+    /// body makes of a capture; for a written function type, the weakest trait a value
+    /// must have to be passed in.
     Function {
         params: Vec<Type>,
         ret: Box<Type>,
+        mode: FunctionMode,
     },
     /// User-defined struct type, identified by name (nominal typing).
     Struct(std::string::String),
@@ -283,18 +289,23 @@ impl Type {
             | (Type::String, Type::String)
             | (Type::Void, Type::Void) => true,
 
-            // Function types must match exactly
+            // Signatures must match exactly. The mode is the one directional part: a
+            // value fits a slot asking for its own call trait or a weaker one (`Fn`
+            // where `FnMut` is asked, never the reverse), so `self` is the value.
             (
                 Type::Function {
                     params: p1,
                     ret: r1,
+                    mode: m1,
                 },
                 Type::Function {
                     params: p2,
                     ret: r2,
+                    mode: m2,
                 },
             ) => {
-                p1.len() == p2.len()
+                m1 <= m2
+                    && p1.len() == p2.len()
                     && p1
                         .iter()
                         .zip(p2.iter())
@@ -530,7 +541,7 @@ impl Type {
             Type::Reference { inner, .. } | Type::Slice(inner) => inner.mentions_generic(),
             Type::Array { element, .. } => element.mentions_generic(),
             Type::Tuple(elements) => elements.iter().any(Type::mentions_generic),
-            Type::Function { params, ret } => {
+            Type::Function { params, ret, .. } => {
                 params.iter().any(Type::mentions_generic) || ret.mentions_generic()
             }
             Type::Collection { args, .. } => args.iter().any(Type::mentions_generic),
@@ -609,7 +620,12 @@ impl fmt::Display for Type {
                 }
                 write!(f, ")")
             }
-            Type::Function { params, ret } => {
+            Type::Function { params, ret, mode } => {
+                match mode {
+                    FunctionMode::Shared => {}
+                    FunctionMode::Mut => write!(f, "mut ")?,
+                    FunctionMode::Once => write!(f, "once ")?,
+                }
                 write!(f, "fn(")?;
                 for (i, param) in params.iter().enumerate() {
                     if i > 0 {
@@ -763,20 +779,43 @@ mod tests {
         let func1 = Type::Function {
             params: vec![Type::I32, Type::Bool],
             ret: Box::new(Type::I32),
+            mode: FunctionMode::Shared,
         };
 
         let func2 = Type::Function {
             params: vec![Type::I32, Type::Bool],
             ret: Box::new(Type::I32),
+            mode: FunctionMode::Shared,
         };
 
         let func3 = Type::Function {
             params: vec![Type::I32],
             ret: Box::new(Type::I32),
+            mode: FunctionMode::Shared,
         };
 
         assert!(func1.is_compatible_with(&func2));
         assert!(!func1.is_compatible_with(&func3));
+    }
+
+    #[test]
+    fn a_function_value_fits_a_mode_at_or_above_its_own() {
+        let with_mode = |mode| Type::Function {
+            params: vec![Type::I32],
+            ret: Box::new(Type::I32),
+            mode,
+        };
+        let (shared, mutable, once) = (
+            with_mode(FunctionMode::Shared),
+            with_mode(FunctionMode::Mut),
+            with_mode(FunctionMode::Once),
+        );
+        assert!(shared.is_compatible_with(&mutable));
+        assert!(shared.is_compatible_with(&once));
+        assert!(mutable.is_compatible_with(&once));
+        assert!(!mutable.is_compatible_with(&shared));
+        assert!(!once.is_compatible_with(&mutable));
+        assert_eq!(mutable.to_string(), "mut fn(i32) -> i32");
     }
 
     #[test]

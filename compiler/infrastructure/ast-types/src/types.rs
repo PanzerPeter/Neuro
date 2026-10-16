@@ -24,6 +24,21 @@ impl GenericArg {
     }
 }
 
+/// How often, and through what access, a value of a function type may be called: the
+/// call trait the type demands of a closure passed into it. Ordered weakest first, so a
+/// closure fits any mode at or after its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum FunctionMode {
+    /// `(T) -> U`: callable any number of times through a shared borrow (`Fn`).
+    #[default]
+    Shared,
+    /// `mut (T) -> U`: a call may write a capture (`FnMut`).
+    Mut,
+    /// `once (T) -> U`: a call may consume a capture, so it is called at most once
+    /// (`FnOnce`).
+    Once,
+}
+
 /// The length of a fixed-size array type `[T; N]`.
 ///
 /// Ordinarily a compile-time integer literal. Inside a generic definition it may
@@ -143,10 +158,11 @@ pub enum Type {
     /// Closure / function type `(T1, T2, ...) -> R`: the type of a callable value
     /// (a closure literal or a function-typed parameter). Parentheses around the
     /// parameter types distinguish it from a closure *literal* `|p| body`. `span`
-    /// covers the leading `(` through the return type.
+    /// covers the leading `mut` / `once` (when written) through the return type.
     Function {
         params: Vec<Type>,
         ret: Box<Type>,
+        mode: FunctionMode,
         span: Span,
     },
 
