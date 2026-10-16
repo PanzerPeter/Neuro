@@ -215,10 +215,18 @@ pub(crate) struct TypeChecker {
     /// the whole-binding rule is checked once, at the outermost link, against that
     /// link's own path.
     in_sub_place: bool,
-    /// Every closure literal that borrows or owns a non-Copy capture, keyed by its span,
-    /// with the bindings it borrows and whether each borrow is exclusive. The binding the
-    /// literal initializes takes the borrows over (`hold_carried_borrows`).
+    /// Every closure literal that borrows a capture or holds a scope-bound value, keyed by
+    /// its span, with the bindings it borrows and whether each borrow is exclusive. The
+    /// binding the literal initializes takes the borrows over (`hold_carried_borrows`).
     scope_bound_closures: HashMap<shared_types::Span, Vec<(String, bool)>>,
+    /// Whether the closure body being checked takes its return type from its last
+    /// expression, which leaves a `return` in it nothing to be checked against.
+    inferring_closure_return: bool,
+    /// Scope-bound closures that only copy references, which a block may yield into the
+    /// binding it initializes: the borrows they carry are followed out of the block.
+    reference_closures: std::collections::HashSet<shared_types::Span>,
+    /// The closure literal the block initializing a binding ends in (`block_tail_closure`).
+    block_tail_slot: Option<shared_types::Span>,
     /// The one position a scope-bound function value may be checked in next: the whole
     /// initializer of a binding, or a whole argument to a function-typed parameter.
     /// Anywhere else it could be stored past the bindings it reads.
@@ -489,6 +497,9 @@ impl TypeChecker {
             in_borrow_operand: false,
             in_sub_place: false,
             scope_bound_closures: HashMap::new(),
+            inferring_closure_return: false,
+            reference_closures: std::collections::HashSet::new(),
+            block_tail_slot: None,
             function_value_slot: None,
             mut_receivers: Vec::new(),
         }

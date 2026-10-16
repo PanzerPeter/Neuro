@@ -28,6 +28,7 @@ use ast_types::{LoopAdapter, LoopAdapterKind, Stmt, UnaryOp};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
 use shared_types::{Identifier, Literal, Span};
 
+use crate::closures::ClosureHint;
 use crate::iteration::{LOOP_INDEX_TYPE, cursor_place, variable};
 use crate::{Lowerer, LoweringError};
 
@@ -58,9 +59,13 @@ impl Lowerer {
     ///
     /// Must run in the scope that encloses the loop: the bindings it defines are
     /// referenced from inside the body and must outlive one iteration.
+    ///
+    /// `element` is what the head yields, which is what a closure literal's parameter is
+    /// typed by when it carries no annotation.
     pub(crate) fn plan_loop_adapters(
         &mut self,
         adapters: &[LoopAdapter],
+        element: &HirType,
         index: &Option<Identifier>,
         span: Span,
     ) -> Result<AdapterPlan, LoweringError> {
@@ -69,8 +74,16 @@ impl Lowerer {
 
         let mut prelude = Vec::with_capacity(adapters.len() + 1);
         let mut steps = Vec::with_capacity(adapters.len());
+        let mut current = element.clone();
         for (position, adapter) in adapters.iter().enumerate() {
-            let callee = self.lower_expr(&adapter.callee, None)?;
+            let hint = ClosureHint {
+                params: vec![Some(current.clone())],
+                ret: match adapter.kind {
+                    LoopAdapterKind::Filter => Some(HirType::Bool),
+                    LoopAdapterKind::Map => None,
+                },
+            };
+            let callee = self.lower_function_arg(&adapter.callee, &hint)?;
             let HirType::Function { ret, .. } = &callee.ty else {
                 return Err(LoweringError::Malformed {
                     detail: format!(
@@ -80,6 +93,9 @@ impl Lowerer {
                 });
             };
             let result = (**ret).clone();
+            if adapter.kind == LoopAdapterKind::Map {
+                current = result.clone();
+            }
             let binding = format!("__adapt_fn_{}_{}", id, position);
             self.define(binding.clone(), callee.ty.clone());
             prelude.push(HirStmt::VarDecl {
@@ -245,7 +261,7 @@ impl Lowerer {
     ) -> Result<HirStmt, LoweringError> {
         self.in_adapter_scope(|lo| {
             let element_ty = start.ty.clone();
-            let plan = lo.plan_loop_adapters(adapters, index, span)?;
+            let plan = lo.plan_loop_adapters(adapters, &element_ty, index, span)?;
             let element = plan.element.clone();
             let loop_body = lo.lower_loop_body_with(label, false, |lo| {
                 lo.define(element.clone(), element_ty.clone());
@@ -281,7 +297,7 @@ impl Lowerer {
         span: Span,
     ) -> Result<HirStmt, LoweringError> {
         self.in_adapter_scope(|lo| {
-            let plan = lo.plan_loop_adapters(adapters, index, span)?;
+            let plan = lo.plan_loop_adapters(adapters, &element_ty, index, span)?;
             let element = plan.element.clone();
             let loop_body = lo.lower_loop_body_with(label, false, |lo| {
                 lo.define(element.clone(), element_ty.clone());

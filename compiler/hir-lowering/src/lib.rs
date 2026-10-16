@@ -641,6 +641,22 @@ impl Lowerer {
                     self.unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
                 }
             }
+            (
+                ast_types::Type::Function {
+                    params: pp,
+                    ret: pr,
+                    ..
+                },
+                HirType::Function {
+                    params: ap,
+                    ret: ar,
+                },
+            ) if pp.len() == ap.len() => {
+                for (p, a) in pp.iter().zip(ap) {
+                    self.unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
+                }
+                self.unify_ast_hir(pr, ar, gnames, cnames, subst, const_subst);
+            }
             // `Inner<U>` against the instance `Inner<i32>`: an instance carries its arguments,
             // so the parameters its annotation names bind through them.
             (

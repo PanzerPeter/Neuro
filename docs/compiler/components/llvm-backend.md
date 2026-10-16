@@ -54,7 +54,7 @@ located runtime-panic diagnostics (array bounds, slice boundaries, integer overf
 | tuple | anonymous LLVM struct, elements in position order |
 | `[T; N]` | `[N x T]` |
 | enum | tagged union `{ i32 tag, [W x [K x i64]] payload }`, `W` slots for the widest variant, `K` words for the widest payload field |
-| closure | `{ fn_ptr, env_ptr }` fat pointer, no heap allocation |
+| closure | `{ fn_ptr, env_ptr }` fat pointer; the environment is a counted heap block shared by every copy, null when nothing is captured |
 | `void` | `void` |
 
 The full ABI contract (string, struct, method, builtin-method, overflow, panic, drop,

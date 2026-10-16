@@ -375,9 +375,13 @@ per-instance name, enqueues the instance if unseen, and emits a `Call` to the ma
 worklist drains after the ordinary items. The backend pre-declares all functions, so emission
 order is irrelevant. `unify_ast_hir` also binds through an instance: `Option<U>` against
 `Opt$g_i32` reads the instance's arguments (`instance_args`, from `struct_instances` /
-`enum_instance_args`) and unifies them pairwise. An associated function of a generic type
-(`Cell::new(42)`, `generic_assoc_fn`) infers the type's instance the same way, plus any turbofish,
-and calls that instance's function (`lower_generic_assoc_call`).
+`enum_instance_args`) and unifies them pairwise, and through a function type position by
+position. An associated function of a generic type (`Cell::new(42)`, `generic_assoc_fn`) infers
+the type's instance the same way, plus any turbofish, and calls that instance's function
+(`lower_generic_assoc_call`). `lower_generic_args`, shared by all three, lowers a closure literal
+for a function-typed parameter after the other arguments, as the checker types it, with a hint of
+what they bound (`generic_closure_hint`; `mentions_any` leaves a position naming an unbound
+parameter open), and keeps the arguments in their own order.
 
 Every function, struct and enum instance records its depth: one more than the body that requested
 it (`mono_depth`, set as each worklist item is emitted). Past `MAX_INSTANCE_DEPTH` the request is
@@ -469,9 +473,16 @@ scope of their own outside the parameters', so a body binding hides a capture in
 overwriting it, and `borrowed_captures` marks the borrowed ones by scope index. Inside the body
 `binding_value` reads one as `*name`, `lower_place` writes it through `HirPlace::Deref`, and
 `borrow_of_capture` hands `&name` / `&mut name` the reference itself. A capture an enclosing
-closure borrowed is already that reference, so a nested closure copies it. A block body lowers through
-`lower_body` (the annotation supplies the return type); a single-expression body infers it. The
-value site emits `HirExprKind::Closure { name, captures }` typed as `HirType::Function`, and
+closure borrowed is already that reference, so a nested closure copies it.
+
+`lower_closure` takes a `ClosureHint`: what the literal's context fixes of its type, read as the
+checker reads it. `lower_expr` builds one from its `expected` function type
+(`ClosureHint::of`); a tensor traversal (element types, a `.zip` operand lowered first, a `.reduce`
+seed first when the accumulator is unannotated), a `for`-head adapter (`plan_loop_adapters` takes
+the head's element type) and a generic call build theirs through `lower_function_arg`. A
+parameter takes its annotation, else the hint. A block body with a return type lowers through
+`lower_body`; without one, `lower_inferred_body` types it by its last expression or trailing
+`if`/`else`, as `infer_closure_block` does. The value site emits `HirExprKind::Closure { name, captures }` typed as `HirType::Function`, and
 `lower_ident_call` dispatches a call on a local function-typed binding indirectly (the callee is
 a `HirExprKind::Variable` of `HirType::Function`).
 

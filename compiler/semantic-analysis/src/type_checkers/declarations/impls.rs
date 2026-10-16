@@ -518,7 +518,6 @@ impl TypeChecker {
                 _ => continue,
             };
 
-            self.refuse_function_valued_return(&return_type, method.name.span);
             // The signature in `functions` was resolved with these in scope; the body
             // names the same placeholders.
             let saved_scope = self.enter_method_generics(method);
@@ -575,6 +574,7 @@ impl TypeChecker {
                         span: param.name.span,
                     });
                 }
+                self.bind_function_param(&param.name.name, param_ty);
             }
 
             // The implicit-return tail is checked once, below: see the same rule in

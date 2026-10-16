@@ -264,7 +264,7 @@ impl<'ctx> CodegenContext<'ctx> {
             path.push(segment);
             moves.flags.push((path, owns));
         }
-        self.mark_moved_for_drop(value);
+        self.mark_moved_for_drop(value)?;
         Ok(val)
     }
 

@@ -14,36 +14,48 @@ func main() -> i32 { return identity(41) }
     assert!(errors.is_empty(), "expected no errors, got {errors:?}");
 }
 
+/// A function value handed to a generic higher-order function takes part in inferring
+/// its type parameters: a named function, a turbofished call, and a closure whose
+/// parameter type comes from the argument before it or after it.
 #[test]
-fn regression_function_to_generic_higher_order_names_the_restriction() {
-    // Passing a function value to a generic `(T) -> T` parameter was reported as
-    // "expected fn(i32) -> i32, found fn(i32) -> i32". It is refused under its own
-    // name, once, at the argument, with or without a turbofish.
-    let source = r#"
+fn a_function_value_infers_a_generic_higher_order_call() {
+    let errors = semantic_errors(
+        r#"
 func inc(x: i32) -> i32 { x + 1 }
-func apply<T>(x: T, f: (T) -> T) -> T { f(x) }
+func apply<T, U>(x: T, f: (T) -> U) -> U { f(x) }
+func first<T, U>(f: (T) -> U, x: T) -> U { f(x) }
 func main() -> i32 {
     val a = apply(3, inc)
-    val b = apply::<i32>(3, |x: i32| -> i32 { x + 1 })
-    return a + b
+    val b = apply::<i32, i32>(3, |x| x + 1)
+    val c = apply(5, |x| x * x)
+    val d: i64 = first(|x| x as i64, 7)
+    val wide = apply(2, |x| { val y = x * 3
+        y as i64 })
+    return a + b + c + (d + wide) as i32
 }
-"#;
-    let errors = semantic_errors(source);
-    let spans: Vec<usize> = errors
-        .iter()
-        .filter_map(|e| match e {
-            TypeError::FunctionToGenericHigherOrder { span, .. } => Some(span.start),
-            _ => None,
-        })
-        .collect();
-    let first = source.find("inc)").expect("first argument");
-    let second = source.find("|x: i32|").expect("second argument");
-    assert_eq!(spans, vec![first, second], "got {errors:?}");
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+/// What a generic higher-order call infers still has to agree: the closure's result
+/// binds `U`, and a second use of `U` must match it.
+#[test]
+fn a_closure_result_contradicting_its_type_parameter_is_refused() {
+    let errors = semantic_errors(
+        r#"
+func pick<T, U>(x: T, f: (T) -> U, fallback: U) -> U { f(x) }
+func main() -> i32 {
+    val a = pick(3, |x| x > 1, 4)
+    0
+}
+"#,
+    );
     assert!(
-        !errors
+        errors
             .iter()
             .any(|e| matches!(e, TypeError::Mismatch { .. })),
-        "no generic mismatch alongside it; got {errors:?}"
+        "got {errors:?}"
     );
 }
 

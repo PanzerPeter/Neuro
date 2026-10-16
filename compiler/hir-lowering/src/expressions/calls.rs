@@ -408,11 +408,13 @@ impl Lowerer {
         ))
     }
 
-    /// Lower a generic call's arguments in order, unifying each with its parameter as it
-    /// goes. An argument whose parameter is a scalar type, written as one or a parameter
-    /// already bound by the turbofish or an earlier argument, is lowered against that
-    /// type, so a literal there takes it, as in a non-generic call; the checker types
-    /// the argument by the same rule.
+    /// Lower a generic call's arguments, unifying each with its parameter as it goes. An
+    /// argument whose parameter is a scalar type, written as one or a parameter already
+    /// bound by the turbofish or an earlier argument, is lowered against that type, so a
+    /// literal there takes it, as in a non-generic call. A closure literal handed to a
+    /// function-typed parameter waits for the others, then takes what they bound of its
+    /// signature. The checker types the arguments by the same rules and in the same order;
+    /// the result keeps the arguments' own order.
     pub(crate) fn lower_generic_args(
         &mut self,
         params: &[&ast_types::Type],
@@ -422,29 +424,100 @@ impl Lowerer {
         subst: &mut std::collections::HashMap<String, HirType>,
         const_subst: &mut std::collections::HashMap<String, u64>,
     ) -> Result<Vec<HirExpr>, LoweringError> {
-        let mut lowered = Vec::with_capacity(args.len());
-        for (i, arg) in args.iter().enumerate() {
+        let deferred = |i: usize| {
+            matches!(params.get(i), Some(ast_types::Type::Function { .. }))
+                && matches!(crate::closures::peel_parens(&args[i]), Expr::Closure { .. })
+        };
+        let order: Vec<usize> = (0..args.len())
+            .filter(|i| !deferred(*i))
+            .chain((0..args.len()).filter(|i| deferred(*i)))
+            .collect();
+        let mut lowered: Vec<Option<HirExpr>> = (0..args.len()).map(|_| None).collect();
+        for i in order {
+            let arg = &args[i];
             let Some(param) = params.get(i) else {
-                lowered.push(self.lower_expr(arg, None)?);
+                lowered[i] = Some(self.lower_expr(arg, None)?);
                 continue;
             };
-            let expected = match param {
-                ast_types::Type::Named(ident) => match subst.get(&ident.name) {
-                    Some(bound) => Some(bound.clone()),
-                    None if gnames.contains(&ident.name) || cnames.contains(&ident.name) => None,
-                    None if SCALAR_TYPE_NAMES.contains(&ident.name.as_str()) => {
-                        Some(self.resolve_type(param)?)
+            let larg = match param {
+                ast_types::Type::Function { .. } => {
+                    let hint = self.generic_closure_hint(param, gnames, cnames, subst, const_subst);
+                    self.lower_function_arg(arg, &hint?)?
+                }
+                _ => {
+                    let expected = match param {
+                        ast_types::Type::Named(ident) => match subst.get(&ident.name) {
+                            Some(bound) => Some(bound.clone()),
+                            None if gnames.contains(&ident.name)
+                                || cnames.contains(&ident.name) =>
+                            {
+                                None
+                            }
+                            None if SCALAR_TYPE_NAMES.contains(&ident.name.as_str()) => {
+                                Some(self.resolve_type(param)?)
+                            }
+                            None => None,
+                        },
+                        _ => None,
                     }
-                    None => None,
-                },
-                _ => None,
-            }
-            .filter(super::coercion::is_scalar);
-            let larg = self.lower_expr(arg, expected.as_ref())?;
+                    .filter(|ty| {
+                        super::coercion::is_scalar(ty) || matches!(ty, HirType::Function { .. })
+                    });
+                    self.lower_expr(arg, expected.as_ref())?
+                }
+            };
             self.unify_ast_hir(param, &larg.ty, gnames, cnames, subst, const_subst);
-            lowered.push(larg);
+            lowered[i] = Some(larg);
         }
-        Ok(lowered)
+        lowered
+            .into_iter()
+            .map(|arg| {
+                arg.ok_or_else(|| LoweringError::Malformed {
+                    detail: "a generic call argument was never lowered".to_string(),
+                })
+            })
+            .collect()
+    }
+
+    /// What the function-typed parameter `param` of a generic call fixes of a closure
+    /// literal's type so far: each position resolved under the bindings inferred until
+    /// now, and `None` where it still names a parameter nothing has bound.
+    fn generic_closure_hint(
+        &mut self,
+        param: &ast_types::Type,
+        gnames: &std::collections::HashSet<String>,
+        cnames: &std::collections::HashSet<String>,
+        subst: &std::collections::HashMap<String, HirType>,
+        const_subst: &std::collections::HashMap<String, u64>,
+    ) -> Result<crate::closures::ClosureHint, LoweringError> {
+        let ast_types::Type::Function { params, ret, .. } = param else {
+            return Ok(crate::closures::ClosureHint::default());
+        };
+        let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
+        let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
+        let mut fixed = |ty: &ast_types::Type| match crate::items::mentions_any(
+            ty,
+            gnames,
+            cnames,
+            subst,
+            const_subst,
+        ) {
+            true => Ok(None),
+            false => self.resolve_type(ty).map(Some),
+        };
+        let hint = params
+            .iter()
+            .map(&mut fixed)
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|params| {
+                Ok(crate::closures::ClosureHint {
+                    params,
+                    ret: fixed(ret)?,
+                })
+            });
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
+        hint
     }
 
     /// The associated function `member` a generic `impl` of the template `base` declares.

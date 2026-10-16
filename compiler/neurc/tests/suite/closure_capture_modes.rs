@@ -219,8 +219,5 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(
-        err.contains("lives only as long as the scope that built it"),
-        "{err}"
-    );
+    assert!(err.contains("lives only as long as that scope"), "{err}");
 }

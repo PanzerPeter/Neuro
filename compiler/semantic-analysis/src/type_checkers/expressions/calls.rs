@@ -435,37 +435,47 @@ impl TypeChecker {
             span,
         );
 
-        for (arg, param) in args.iter().zip(sig.params.iter()) {
+        // A closure literal handed to a function-typed parameter waits for the other
+        // arguments, which may bind the type parameters its own parameters are written
+        // in (`apply(|x| x * x, 5)`). Lowering takes the arguments in the same order.
+        let deferred = |arg: &ast_types::Expr, param: &Type| {
+            matches!(param, Type::Function { .. }) && closure_literal_arg(arg)
+        };
+        let order = args
+            .iter()
+            .zip(sig.params.iter())
+            .filter(|(arg, param)| !deferred(arg, param))
+            .chain(
+                args.iter()
+                    .zip(sig.params.iter())
+                    .filter(|(arg, param)| deferred(arg, param)),
+            );
+        for (arg, param) in order {
             // A scalar parameter, written as one or a type parameter the turbofish or an
             // earlier argument has bound, types its argument as a non-generic call's does,
-            // so a literal there takes it. Lowering applies the same rule.
+            // so a literal there takes it. A function-typed one hands a closure literal
+            // the signature inferred so far. Lowering applies the same rule.
             let expected = match param {
                 Type::Generic(name) => subst.get(name).cloned(),
+                Type::Function { .. } => {
+                    let open: Vec<String> = sig
+                        .param_names
+                        .iter()
+                        .filter(|name| !subst.contains_key(*name))
+                        .cloned()
+                        .collect();
+                    Some(self.partially_substituted(param, &subst, &open, arg.span()))
+                }
                 other => Some(other.clone()),
             }
-            .filter(Type::is_scalar);
-            let arg_ty = shared_reborrow(
-                self.check_expr(arg, expected.as_ref())
-                    .unwrap_or(Type::Unknown),
-                param,
-            );
+            .filter(|ty| ty.is_scalar() || matches!(ty, Type::Function { .. }));
+            if matches!(param, Type::Function { .. }) {
+                self.function_value_slot = function_value_position(arg);
+            }
+            let checked = self.check_expr(arg, expected.as_ref());
+            self.function_value_slot = None;
+            let arg_ty = shared_reborrow(checked.unwrap_or(Type::Unknown), param);
             if !matches!(arg_ty, Type::Unknown) && !self.unify_generic(param, &arg_ty, &mut subst) {
-                // A closure is not passed to a generic higher-order function (the
-                // closures section of the language reference), and unification has no
-                // rule for a function type. Say so: the generic mismatch below would print
-                // two identical-looking types, `fn(i32) -> i32` against its template.
-                if matches!(param, Type::Function { .. })
-                    && matches!(arg_ty, Type::Function { .. })
-                    && self.mentions_type_parameter(param)
-                {
-                    self.record_error(TypeError::FunctionToGenericHigherOrder {
-                        callee: func_name.to_string(),
-                        param: param.clone(),
-                        span: arg.span(),
-                    });
-                    self.record_move(arg);
-                    continue;
-                }
                 // A shape parameter this argument contradicts is reported by name: the
                 // expected type below was itself inferred from an earlier argument, so
                 // printing it alone leaves the reader to work out which extent moved.
@@ -509,6 +519,51 @@ impl TypeChecker {
         self.check_where_predicates(&sig.where_predicates, &subst);
 
         self.substitute_generic(&sig.ret, &subst, span)
+    }
+
+    /// `ty` with every type parameter `subst` binds replaced, and every position that
+    /// names one of `open`, the callee's parameters nothing has bound yet, left as
+    /// `Unknown`, which a closure's context reads as "not fixed".
+    fn partially_substituted(
+        &mut self,
+        ty: &Type,
+        subst: &HashMap<String, Type>,
+        open: &[String],
+        span: Span,
+    ) -> Type {
+        match ty {
+            Type::Function { params, ret, mode } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| self.partially_substituted(p, subst, open, span))
+                    .collect(),
+                ret: Box::new(self.partially_substituted(ret, subst, open, span)),
+                mode: *mode,
+            },
+            other if self.names_any(other, open) => Type::Unknown,
+            other => self.substitute_generic(other, subst, span),
+        }
+    }
+
+    /// Whether `ty` names any of the type parameters `names`.
+    fn names_any(&self, ty: &Type, names: &[String]) -> bool {
+        match ty {
+            Type::Generic(name) => names.contains(name),
+            Type::Reference { inner, .. } => self.names_any(inner, names),
+            Type::Array { element, .. } | Type::Tensor { element, .. } => {
+                self.names_any(element, names)
+            }
+            Type::Tuple(elements) | Type::Collection { args: elements, .. } => {
+                elements.iter().any(|e| self.names_any(e, names))
+            }
+            Type::Function { params, ret, .. } => {
+                params.iter().any(|p| self.names_any(p, names)) || self.names_any(ret, names)
+            }
+            Type::Struct(name) | Type::Enum(name) => self
+                .instance_parts(name)
+                .is_some_and(|(_, args)| args.iter().any(|a| self.names_any(a, names))),
+            _ => false,
+        }
     }
 
     /// Check a method call on an instance of a generic type against the bounds the
@@ -1039,4 +1094,13 @@ fn shared_reborrow(found: Type, expected: &Type) -> Type {
         },
         (found, _) => found,
     }
+}
+
+/// Whether `arg` is a closure literal, through any parentheses.
+fn closure_literal_arg(arg: &Expr) -> bool {
+    let mut arg = arg;
+    while let Expr::Paren(inner, _) = arg {
+        arg = inner;
+    }
+    matches!(arg, Expr::Closure { .. })
 }

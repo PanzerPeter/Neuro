@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.14.0] - 2026-10-16
+
+### Added
+
+- Closure parameters take their types from context. `|x| x * x` compiles wherever its function
+  type is known: passed to a `(i32) -> i32` parameter, bound as `val f: (i32) -> i32 = ...`,
+  stored in a function-typed field, returned from a function, or handed to a tensor's `.map`,
+  `.zip` and `.reduce` or a `for` head's `.map` and `.filter`. An unannotated `.reduce`
+  accumulator takes the seed's type.
+- A block-bodied closure without `-> T` returns its last expression, or a trailing `if` / `else`.
+  It may not use `return`.
+- Closures can be passed to generic higher-order functions. In `apply(5, |x| x * x)` with
+  `func apply<T, U>(value: T, f: (T) -> U) -> U`, the `5` binds `T`, the closure is typed from
+  it, and its result binds `U`. The closure may come before the arguments that bind it, and a
+  named function or a function-typed binding works in the same place. This covers generic
+  methods and associated functions too.
+- Closures can be returned, stored in struct fields, enum payloads, tuples and arrays, and
+  stored through a `&mut`, as long as they borrow nothing. `func make_adder(n: i32) -> (i32) ->
+  i32 { |x| x + n }` works, and so does a `move` closure that owns a `string` it captured. A
+  closure's environment is shared by every copy of the closure and released with the last one,
+  together with whatever a `move` closure moved into it.
+
+### Changed
+
+- A closure that copies a reference into its environment, a function-typed parameter, and a
+  closure capturing either now stay in the scope that made them, like a closure that borrows a
+  capture: they cannot be returned or stored. A function cannot return a closure over the function
+  values it was handed. A `move` closure over owned values is no longer scope-bound.
+- A closure binding that borrows can now be passed to a tensor's `.map` / `.zip` / `.reduce` or a
+  `for`-head adapter. A borrowing closure literal written directly there is still refused.
+
+### Fixed
+
+- A closure body that read a `Copy` field of a value it owned through `move` (`n.id`) gave up
+  the whole value, so its `Drop` never ran.
+
 ## [5.13.0] - 2026-10-16
 
 ### Added

@@ -880,10 +880,13 @@ function per element. They differ only in what that function is handed and what 
 its answer.
 
 ```neuro
-val doubled = tensor.map(|x: f32| -> f32 { x * 2.0 })              // same shape, elementwise
-val paired  = tensor.zip(other, |a: f32, b: f32| -> f32 { a * b }) // same shape, two inputs
-val total   = tensor.reduce(0.0, |acc: f32, x: f32| -> f32 { acc + x })
+val doubled = tensor.map(|x| x * 2.0)              // same shape, elementwise
+val paired  = tensor.zip(other, |a, b| a * b)      // same shape, two inputs
+val total   = tensor.reduce(0.0, |acc, x| acc + x)
 ```
+
+A closure literal's parameters need no annotation here: each takes the type of the element it is
+handed, and an unannotated accumulator takes the seed's type.
 
 `.map` is the one construct that changes what a tensor's buffer holds: the result's element
 type is the **function's return type**, not the receiver's, so `t.map(|x: i32| -> f64 { ... })`
@@ -895,8 +898,9 @@ two need not hold the same element type, the function's parameters saying what e
 
 `.reduce` answers **one value of the seed's type**, not a rank-0 tensor, the way a
 whole-tensor `.sum()` does: a reader should not need a second call to get the number out.
-The accumulator is the **first** parameter, which is what `|acc, x|` means, and an untyped
-seed takes its type from that parameter: `0.0` folded over an `f32` tensor is an `f32`.
+The accumulator is the **first** parameter, which is what `|acc, x|` means. An untyped seed takes
+its type from an annotated accumulator, or from the element type when the accumulator is left
+open: `0.0` folded over an `f32` tensor is an `f32` either way.
 
 The function is an ordinary function value, so anything that produces one is a stage: a
 closure literal, a closure binding, or a `>>` composition.

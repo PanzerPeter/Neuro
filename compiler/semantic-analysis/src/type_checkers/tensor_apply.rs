@@ -14,6 +14,8 @@
 // the buffer, so its result has no shape the type system can name.
 
 use super::TypeChecker;
+use super::closures::{closure_context, closure_param_unannotated};
+use super::statements::binding_position;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::Expr;
@@ -84,9 +86,28 @@ impl TypeChecker {
         };
 
         let callee = &args[expected - 1];
+        // A `.reduce` whose closure leaves its accumulator unannotated takes the seed's
+        // type for it, so the seed goes first, against the element type, which is what a
+        // literal seed then takes. `hir-lowering` orders the two the same way.
+        let early_seed =
+            (method == REDUCE_METHOD && closure_param_unannotated(callee, 0)).then(|| {
+                self.check_expr(&args[0], Some(element))
+                    .unwrap_or(Type::Unknown)
+            });
+        let wanted_params = match method {
+            MAP_METHOD => vec![element.clone()],
+            ZIP_METHOD => vec![element.clone(), zipped.clone().unwrap_or(Type::Unknown)],
+            _ => vec![early_seed.clone().unwrap_or(Type::Unknown), element.clone()],
+        };
+        let context = closure_context(callee, wanted_params, Type::Unknown);
         // The function value is READ, not moved: it is evaluated once and called per
-        // element, and stays usable after the traversal.
-        let callee_ty = self.check_expr(callee, None).unwrap_or(Type::Unknown);
+        // element, and stays usable after the traversal. A binding that may borrow is
+        // read here and nowhere else, so it may be named.
+        self.function_value_slot = binding_position(callee);
+        let callee_ty = self
+            .check_expr(callee, Some(&context))
+            .unwrap_or(Type::Unknown);
+        self.function_value_slot = None;
         let Type::Function { params, ret, .. } = &callee_ty else {
             if !matches!(callee_ty, Type::Unknown) {
                 self.record_error(TypeError::TensorApplyNotCallable {
@@ -100,10 +121,12 @@ impl TypeChecker {
 
         let carried = match method {
             ZIP_METHOD => zipped,
-            REDUCE_METHOD => Some(
-                self.check_expr(&args[0], params.first())
+            REDUCE_METHOD => Some(match early_seed {
+                Some(seed) => seed,
+                None => self
+                    .check_expr(&args[0], params.first())
                     .unwrap_or(Type::Unknown),
-            ),
+            }),
             _ => None,
         };
 

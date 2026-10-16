@@ -177,7 +177,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if borrowed {
             self.own_strings_stored_through_borrow(elem_ptr, &element_ty, &owners)?;
         }
-        self.mark_moved_for_drop(value);
+        self.mark_moved_for_drop(value)?;
         Ok(())
     }
 
@@ -207,7 +207,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // borrows instead and leaves ownership where it is.
         let consumes_elements = !matches!(obj_ty, Type::Reference { .. });
         if consumes_elements {
-            self.mark_moved_for_drop(iterable);
+            self.mark_moved_for_drop(iterable)?;
         }
         let (base_ptr, element_ty, size) = self.array_place_ptr(iterable, &obj_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;

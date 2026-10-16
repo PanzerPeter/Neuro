@@ -32,8 +32,16 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_values = Vec::new();
         let mut passed = Vec::new();
         let mut forwarded_args = Vec::new();
+        // An outlined tensor operation's body is built by MLIR, which reads a function
+        // value it is handed and gives back no count: the caller keeps its own.
+        let external = self.expanded_calls.contains_key(func_name);
         for (index, arg) in args.iter().enumerate() {
             let val = self.codegen_expr(arg)?;
+            if external && self.holds_function(&Type::from_hir(&arg.ty)) {
+                passed.push(val);
+                arg_values.push(BasicMetadataValueEnum::from(val));
+                continue;
+            }
             // The call hands this argument's buffer back, so what it yields is owned
             // exactly when the argument was; the move below is about to clear that.
             if forwarded == Some(index) {
@@ -49,14 +57,19 @@ impl<'ctx> CodegenContext<'ctx> {
             // reaches only an argument that allocated in place, and a place that
             // loses its flag here is then released by nobody.
             if !self.string_ownership.param_is_read_only(func_name, index) {
-                self.mark_moved_for_drop(arg);
+                self.mark_moved_for_drop(arg)?;
             }
             passed.push(val);
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
         if let Some((callee, symbol)) = self.expanded_calls.get(func_name).cloned() {
-            return self.emit_external_call(&callee, &symbol, crate::BodyMemory::Host, &passed);
+            let result =
+                self.emit_external_call(&callee, &symbol, crate::BodyMemory::Host, &passed)?;
+            for (arg, value) in args.iter().zip(&passed) {
+                self.release_fresh_function(arg, *value)?;
+            }
+            return Ok(result);
         }
         let call_result = self
             .builder
@@ -146,7 +159,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // A consuming receiver was moved into the callee, which destroys it at its own
         // exit; leaving the caller's drop flag set would release the same value twice.
         if self.consuming_self_methods.contains(mangled_name) {
-            self.mark_moved_for_drop(receiver);
+            self.mark_moved_for_drop(receiver)?;
         }
         let mut arg_values: Vec<BasicMetadataValueEnum> =
             vec![BasicMetadataValueEnum::from(self_arg)];
@@ -170,7 +183,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .string_ownership
                 .param_is_read_only(mangled_name, index)
             {
-                self.mark_moved_for_drop(arg);
+                self.mark_moved_for_drop(arg)?;
             }
             passed.push(val);
             arg_values.push(BasicMetadataValueEnum::from(val));
@@ -566,7 +579,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     // A tail `HirStmt::Expr(<place>)` is an implicit return that moves the
                     // place out, so it must not be dropped here.
                     if let Some(HirStmt::Expr(expr)) = tail {
-                        self.mark_moved_for_drop(expr);
+                        self.mark_moved_for_drop(expr)?;
                     }
                     self.emit_drops_through(0)?;
                     self.builder.build_return(Some(&ret_val))?;

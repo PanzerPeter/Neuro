@@ -79,7 +79,7 @@ impl<'ctx> CodegenContext<'ctx> {
         slot_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         if !matches!(slot_ty, Type::String) {
-            self.mark_moved_for_drop(expr);
+            self.mark_moved_for_drop(expr)?;
             return Ok(value);
         }
         if self.produces_owned_string(expr) {

@@ -8,6 +8,8 @@
 use ast_types::{LoopAdapter, LoopAdapterKind};
 
 use super::TypeChecker;
+use super::closures::closure_context;
+use super::statements::binding_position;
 use crate::errors::TypeError;
 use crate::types::Type;
 
@@ -36,11 +38,22 @@ impl TypeChecker {
 
     fn check_loop_adapter(&mut self, element: Option<Type>, adapter: &LoopAdapter) -> Option<Type> {
         let name = adapter_name(adapter.kind).to_string();
+        let answer = match adapter.kind {
+            LoopAdapterKind::Filter => Type::Bool,
+            LoopAdapterKind::Map => Type::Unknown,
+        };
+        let context = closure_context(
+            &adapter.callee,
+            vec![element.clone().unwrap_or(Type::Unknown)],
+            answer,
+        );
         // The function value is READ, not moved: it is evaluated once, called per
         // element, and stays usable after the loop.
+        self.function_value_slot = binding_position(&adapter.callee);
         let callee_ty = self
-            .check_expr(&adapter.callee, None)
+            .check_expr(&adapter.callee, Some(&context))
             .unwrap_or(Type::Unknown);
+        self.function_value_slot = None;
 
         let (param, ret) = match &callee_ty {
             Type::Function { params, ret, .. } if params.len() == 1 => {

@@ -129,7 +129,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 // A diverging arm value (e.g. `else { panic("x") }`) terminates the block
                 // with `unreachable`; there is no result to store and the caller skips merge.
                 if !self.current_block_terminated() {
-                    self.mark_moved_for_drop(expr);
+                    self.mark_moved_for_drop(expr)?;
                     self.builder.build_store(alloca, val)?;
                 }
             } else {
@@ -219,7 +219,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let result = if let (true, HirStmt::Expr(expr)) = (value_tail, last) {
             let val = self.codegen_expr(expr)?;
             // The yielded place escapes the block, so it is moved out, not dropped here.
-            self.mark_moved_for_drop(expr);
+            self.mark_moved_for_drop(expr)?;
             val
         } else {
             if !self.current_block_terminated() {

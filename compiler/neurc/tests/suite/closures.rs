@@ -148,7 +148,7 @@ func main() -> i32 {
 }
 
 #[test]
-fn closure_parameter_needs_type_annotation() {
+fn closure_parameter_with_no_context_needs_a_type() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
@@ -159,10 +159,10 @@ func main() -> i32 {
     let source_path = test.write_source("closure_untyped_param.nr", source);
     let err = test
         .compile(&source_path)
-        .expect_err("an unannotated closure parameter should be a type error");
+        .expect_err("a closure parameter nothing types should be a type error");
     assert!(
-        err.contains("type annotation"),
-        "expected a parameter-annotation diagnostic, got: {err}"
+        err.contains("closure parameter 'x' needs a type"),
+        "expected a parameter-type diagnostic, got: {err}"
     );
 }
 

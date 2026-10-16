@@ -28,21 +28,27 @@ const FUNCTION_VALUE_PARAM: &str = "__fn_value_arg";
 impl Lowerer {
     /// Lower a closure literal to its fat-pointer value, lifting the body to a
     /// top-level closure item collected in [`Lowerer::closure_items`].
+    ///
+    /// `hint` is what the literal's context fixes of its type, read the way the checker
+    /// reads it: an annotation wins, a parameter without one takes the context's type,
+    /// and a missing return type is the context's or else the body's.
     pub(crate) fn lower_closure(
         &mut self,
         params: &[ClosureParam],
         ret: Option<&ast_types::Type>,
         body: &Expr,
         is_move: bool,
+        hint: &ClosureHint,
         span: Span,
     ) -> Result<HirExpr, LoweringError> {
         let mut hir_params = Vec::with_capacity(params.len());
-        for p in params {
-            let ty = match &p.ty {
-                Some(t) => self.resolve_type(t)?,
-                // The checker requires an annotation, so a missing one here is a
-                // frontend inconsistency rather than a user error.
-                None => {
+        for (index, p) in params.iter().enumerate() {
+            let ty = match (&p.ty, hint.params.get(index).cloned().flatten()) {
+                (Some(t), _) => self.resolve_type(t)?,
+                (None, Some(fixed)) => fixed,
+                // The checker refuses a parameter nothing types, so a missing one here is
+                // a frontend inconsistency rather than a user error.
+                (None, None) => {
                     return Err(LoweringError::UnresolvedType {
                         name: format!("closure parameter '{}'", p.name.name),
                     });
@@ -58,14 +64,14 @@ impl Lowerer {
         let settled = self.collect_captures(params, body, is_move);
         let ret_hint = match ret {
             Some(t) => Some(self.resolve_type(t)?),
-            None => None,
+            None => hint.ret.clone(),
         };
 
         // Lower the body with the captures in a scope of their own and the parameters in
         // one inside it, where the body's top-level bindings land too: a body binding
         // that shadows a capture then hides it rather than overwriting it. A block body
-        // is lowered like a function body (checker-guaranteed annotation supplies its
-        // return type); a single-expression body infers its type.
+        // with a return type is lowered like a function body; without one, and for a
+        // single expression, the body's own type is the return type.
         self.push_scope();
         let capture_scope = self.scopes.len() - 1;
         for (capture, visible) in &settled {
@@ -118,17 +124,89 @@ impl Lowerer {
         ret_hint: Option<HirType>,
     ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
         Ok(match body {
-            Expr::Block { stmts, .. } => {
-                let return_type = ret_hint.clone().unwrap_or(HirType::Void);
-                let lowered = self.lower_body(stmts, &return_type)?;
-                (lowered, return_type)
-            }
+            Expr::Block { stmts, .. } => match ret_hint {
+                Some(return_type) => {
+                    let lowered = self.lower_body(stmts, &return_type)?;
+                    (lowered, return_type)
+                }
+                None => self.lower_inferred_body(stmts)?,
+            },
             single => {
                 let body_hir = self.lower_expr(single, ret_hint.as_ref())?;
                 let return_type = ret_hint.unwrap_or_else(|| body_hir.ty.clone());
                 (vec![HirStmt::Expr(body_hir)], return_type)
             }
         })
+    }
+
+    /// Lower a block body that nothing gives a return type, and hand back its statements
+    /// with the type of what it ends with: its last expression, or a trailing `if` with an
+    /// `else`. A body ending in any other statement returns nothing. The checker infers
+    /// the same, and refuses a `return` in such a body.
+    fn lower_inferred_body(
+        &mut self,
+        stmts: &[Stmt],
+    ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
+        let saved_return = std::mem::replace(&mut self.current_return, HirType::Void);
+        let lowered = self.lower_inferred_stmts(stmts);
+        self.current_return = saved_return;
+        lowered
+    }
+
+    fn lower_inferred_stmts(
+        &mut self,
+        stmts: &[Stmt],
+    ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
+        let mut out = Vec::with_capacity(stmts.len());
+        let Some((last, init)) = stmts.split_last() else {
+            return Ok((out, HirType::Void));
+        };
+        for stmt in init {
+            self.lower_stmt_into(stmt, &mut out)?;
+        }
+        let tail = match last {
+            Stmt::Expr(expr) => self.lower_expr(expr, None)?,
+            Stmt::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block: else_block @ Some(_),
+                span,
+            } => self.lower_if_expr(
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                None,
+                *span,
+            )?,
+            other => {
+                self.lower_stmt_into(other, &mut out)?;
+                return Ok((out, HirType::Void));
+            }
+        };
+        let return_type = tail.ty.clone();
+        out.push(HirStmt::Expr(tail));
+        Ok((out, return_type))
+    }
+
+    /// Lower `arg`, which a function-typed position takes: a closure literal with what
+    /// `hint` fixes of its type, anything else as it is.
+    pub(crate) fn lower_function_arg(
+        &mut self,
+        arg: &Expr,
+        hint: &ClosureHint,
+    ) -> Result<HirExpr, LoweringError> {
+        match peel_parens(arg) {
+            Expr::Closure {
+                params,
+                ret,
+                body,
+                is_move,
+                span,
+            } => self.lower_closure(params, ret.as_ref(), body, *is_move, hint, *span),
+            _ => self.lower_expr(arg, None),
+        }
     }
 
     /// The value of the binding `name` of type `ty`: the binding itself, or, for a
@@ -412,7 +490,34 @@ impl Lowerer {
     }
 }
 
-fn peel_parens(expr: &Expr) -> &Expr {
+/// What a closure literal's context fixes of its type, position by position: `None` for
+/// a parameter or result the context leaves open.
+#[derive(Clone, Default)]
+pub(crate) struct ClosureHint {
+    pub(crate) params: Vec<Option<HirType>>,
+    pub(crate) ret: Option<HirType>,
+}
+
+impl ClosureHint {
+    /// The hint a context's expected type gives: all of it, when it is a function type.
+    pub(crate) fn of(expected: Option<&HirType>) -> Self {
+        match expected {
+            Some(HirType::Function { params, ret }) => Self {
+                params: params.iter().cloned().map(Some).collect(),
+                ret: Some((**ret).clone()),
+            },
+            _ => Self::default(),
+        }
+    }
+}
+
+/// Whether `callee` is a closure literal whose parameter `index` carries no annotation.
+pub(crate) fn closure_param_unannotated(callee: &Expr, index: usize) -> bool {
+    matches!(peel_parens(callee), Expr::Closure { params, .. }
+        if params.get(index).is_some_and(|p| p.ty.is_none()))
+}
+
+pub(crate) fn peel_parens(expr: &Expr) -> &Expr {
     match expr {
         Expr::Paren(inner, _) => peel_parens(inner),
         other => other,

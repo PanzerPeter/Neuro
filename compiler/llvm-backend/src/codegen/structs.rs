@@ -98,7 +98,7 @@ impl<'ctx> CodegenContext<'ctx> {
                             base_expr.ty.clone(),
                             base_expr.span,
                         );
-                        self.mark_moved_for_drop(&taken);
+                        self.mark_moved_for_drop(&taken)?;
                     }
                 }
                 value
@@ -285,7 +285,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if let Some(field_ty) = &borrowed {
             self.own_strings_stored_through_borrow(field_ptr, field_ty, &owners)?;
         }
-        self.mark_moved_for_drop(value);
+        self.mark_moved_for_drop(value)?;
         Ok(())
     }
 

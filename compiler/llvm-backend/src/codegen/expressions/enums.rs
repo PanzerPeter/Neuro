@@ -32,7 +32,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // the tag switch, so the place it came from must not. A `string` payload is
             // not released by the enum and keeps its source's ownership.
             if self.holds_owner(&field_ty) {
-                self.mark_moved_for_drop(field);
+                self.mark_moved_for_drop(field)?;
             }
         }
         let borrowed: Vec<(BasicValueEnum<'ctx>, &Type)> =

@@ -30,6 +30,33 @@ pub(crate) fn function_value_position(value: &Expr) -> Option<shared_types::Span
     }
 }
 
+/// The span of the closure literal a block yields as its last expression, through nested
+/// blocks: a binding's initializer may end in a closure that only copies references, whose
+/// borrows `hold_carried_borrows` follows out of the block.
+pub(crate) fn block_tail_closure(value: &Expr) -> Option<shared_types::Span> {
+    match peel_parens(value) {
+        Expr::Block { stmts, .. } => match stmts.last()? {
+            Stmt::Expr(tail) => match peel_parens(tail) {
+                closure @ Expr::Closure { .. } => Some(closure.span()),
+                nested => block_tail_closure(nested),
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The span a scope-bound binding may be named at when `value` is read whole by a
+/// built-in that calls it and keeps nothing: its own, if it is a bare binding. A borrowing
+/// closure literal written there stays refused: a tensor traversal marks its operands
+/// `noalias`, which a `&mut` capture of one would break.
+pub(crate) fn binding_position(value: &Expr) -> Option<shared_types::Span> {
+    match peel_parens(value) {
+        inner @ Expr::Identifier(_) => Some(inner.span()),
+        _ => None,
+    }
+}
+
 /// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, or a
 /// `x.slice(range)` view into `x`), return that place's name and whether the borrow is
 /// exclusive. A borrow wrapped in any other expression (a block, an `if`, a call result)
@@ -167,7 +194,7 @@ fn follow_binding<'a>(
 }
 
 /// Whether a value of `ty` holds a reference anywhere a tail could hand one out.
-fn carries_borrow(ty: &Type) -> bool {
+pub(crate) fn carries_borrow(ty: &Type) -> bool {
     match ty {
         Type::Reference { .. } => true,
         Type::Tuple(elements) => elements.iter().any(carries_borrow),
@@ -256,9 +283,12 @@ impl TypeChecker {
         }
     }
 
-    /// Whether `value` is a closure that borrows or owns a non-Copy capture: such a
-    /// literal, or a binding already holding one.
+    /// Whether `value` yields a value that may borrow: a scope-bound closure literal, a
+    /// block ending in one, or a binding already holding one.
     pub(crate) fn yields_scope_bound_closure(&self, value: &Expr) -> bool {
+        if let Some(span) = block_tail_closure(value) {
+            return self.scope_bound_closures.contains_key(&span);
+        }
         match peel_parens(value) {
             Expr::Closure { span, .. } => self.scope_bound_closures.contains_key(span),
             Expr::Identifier(ident) => self
@@ -348,8 +378,13 @@ impl TypeChecker {
                 let errors_before = self.errors.len();
                 let init_ty = if let Some(init_expr) = init {
                     self.function_value_slot = function_value_position(init_expr);
+                    // The block's own bindings are checked inside it, so the outer slot is
+                    // put back rather than cleared.
+                    let outer_tail =
+                        std::mem::replace(&mut self.block_tail_slot, block_tail_closure(init_expr));
                     let init_ty = self.check_expr(init_expr, declared_ty.as_ref());
                     self.function_value_slot = None;
+                    self.block_tail_slot = outer_tail;
                     init_ty
                 } else {
                     None
@@ -468,6 +503,9 @@ impl TypeChecker {
 
             Stmt::Return { value, span } => {
                 self.check_pool_return(*span);
+                if self.inferring_closure_return && self.current_function_return_type.is_none() {
+                    self.record_error(TypeError::ClosureBlockNeedsReturnType { span: *span });
+                }
                 // Cloned to release the borrow on `self` before `check_expr`.
                 let expected_return = self.current_function_return_type.clone();
                 let return_ty = if let Some(expr) = value {

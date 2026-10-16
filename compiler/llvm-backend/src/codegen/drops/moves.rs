@@ -86,30 +86,41 @@ impl<'ctx> CodegenContext<'ctx> {
     /// holder's siblings armed — that is what makes destructuring a sequence of ordinary
     /// moves. Naming the binding itself, or naming a place through an index the compiler
     /// cannot evaluate, disowns the whole binding.
-    pub(crate) fn mark_moved_for_drop(&mut self, expr: &HirExpr) {
-        if self.drop_scopes.is_empty() {
-            return;
-        }
+    ///
+    /// A value that shares on copy (function values and holders of nothing else) is
+    /// copied, not moved: the language lets the source be read again, so the copy takes
+    /// counts of its own and the source keeps its flags.
+    pub(crate) fn mark_moved_for_drop(&mut self, expr: &HirExpr) -> CodegenResult<()> {
         let expr = peel_newtype(expr);
+        let ty = Type::from_hir(&expr.ty);
+        if self.shares_on_copy(&ty) {
+            return self.retain_copied(expr, &ty);
+        }
+        if self.drop_scopes.is_empty() {
+            return Ok(());
+        }
         let Some((name, path)) = Self::moved_place(expr) else {
-            return;
+            return Ok(());
         };
         // The whole-binding collapse stands in for "some element left"; a read that moves
         // nothing out must not disown the holder, or none of its owners is ever released.
         if path.is_none() && self.read_moves_nothing(expr) {
-            return;
+            return Ok(());
         }
 
         let mut flags: Vec<PointerValue<'ctx>> = Vec::new();
         let entry = self.live_drop_entry(name);
         let Some(entry) = entry else {
-            return;
+            return Ok(());
         };
         let prefix = path.unwrap_or_default();
         // A captured value has no held entries to disown one part at a time, so moving
-        // any part of it disowns the whole: what is left behind leaks rather than being
-        // released along with the part already gone.
-        if prefix.is_empty() || matches!(entry.target, DropTarget::Captured(_)) {
+        // any part of it that owns something disowns the whole: what is left behind leaks
+        // rather than being released along with the part already gone. Reading a part
+        // that owns nothing (`n.id`) takes nothing.
+        let takes_an_owner = self.drop_target_of(&ty).is_some();
+        if prefix.is_empty() || (matches!(entry.target, DropTarget::Captured(_)) && takes_an_owner)
+        {
             flags.push(entry.flag_ptr);
         }
         flags.extend(
@@ -122,8 +133,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let zero = self.context.bool_type().const_zero();
         for flag_ptr in flags {
-            let _ = self.builder.build_store(flag_ptr, zero);
+            self.builder.build_store(flag_ptr, zero)?;
         }
+        Ok(())
     }
 
     /// Whether reading `expr` leaves its holder owning everything it owned: a `Copy`

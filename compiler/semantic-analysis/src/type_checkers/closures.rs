@@ -12,6 +12,7 @@ use ast_types::{ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
 use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
+use super::statements::carries_borrow;
 use crate::errors::TypeError;
 use crate::symbol_table::MoveState;
 use crate::types::{FunctionMode, Type};
@@ -19,28 +20,35 @@ use crate::types::{FunctionMode, Type};
 impl TypeChecker {
     /// Type-check a closure literal, returning its [`Type::Function`] type.
     ///
-    /// Parameters require an explicit type annotation this phase (parameter-type
-    /// inference is deferred), unless `expected` fixes the signature: the closure a
-    /// compiler-known method takes, whose parameters and result are the method's to say.
-    /// An annotation must then match the expected type. The body is checked with the
-    /// parameters bound on top of the still-visible enclosing scope, so captured
-    /// variables resolve normally.
+    /// `expected` is the function type the closure's context gives it: the parameter it
+    /// is passed to, the binding or field it initializes, the position it is returned
+    /// from. A parameter without an annotation takes its type from there, and one with
+    /// neither is refused. The return type is the annotation, else the context's, else
+    /// the body's own: a single expression's type, or a block's last expression. An
+    /// `Unknown` in `expected` fixes nothing, which is how a generic call hands over a
+    /// signature it has only partly inferred. The body is checked with the parameters
+    /// bound on top of the still-visible enclosing scope, so captured variables resolve
+    /// normally.
     pub(crate) fn check_closure(
         &mut self,
         params: &[ClosureParam],
         ret: Option<&ast_types::Type>,
         body: &Expr,
         is_move: bool,
-        expected: Option<(&[Type], &Type)>,
+        expected: Option<&Type>,
         span: Span,
     ) -> Type {
         let in_slot = self.function_value_slot == Some(span);
         let moves_before = self.symbols.snapshot_moves();
         let transients_before = self.symbols.transient_borrows();
         let receivers_before = self.mut_receivers.len();
+        let (fixed_params, fixed_ret) = match expected {
+            Some(Type::Function { params, ret, .. }) => (params.as_slice(), known(ret)),
+            _ => (&[][..], None),
+        };
         let mut param_types = Vec::with_capacity(params.len());
         for (index, p) in params.iter().enumerate() {
-            let fixed = expected.and_then(|(types, _)| types.get(index));
+            let fixed = fixed_params.get(index).and_then(known);
             match (&p.ty, fixed) {
                 (Some(ty), Some(fixed)) => {
                     let written = self.resolve_type(ty).unwrap_or(Type::Unknown);
@@ -68,13 +76,11 @@ impl TypeChecker {
         }
 
         // Resolve an explicit return annotation up front so the body is checked
-        // against it; without one, the body's type is the closure's return type.
+        // against it; without one, the context's, and without that the body's type.
         let written_ret = ret.and_then(|t| self.resolve_type(t));
-        let ret_ty = match expected {
-            Some((_, fixed)) => {
-                if let Some(written) = written_ret
-                    && written != *fixed
-                {
+        let ret_ty = match (written_ret, fixed_ret) {
+            (Some(written), Some(fixed)) => {
+                if written != *fixed {
                     self.record_error(TypeError::Mismatch {
                         expected: fixed.clone(),
                         found: written,
@@ -83,13 +89,15 @@ impl TypeChecker {
                 }
                 Some(fixed.clone())
             }
-            None => written_ret,
+            (written, fixed) => written.or_else(|| fixed.cloned()),
         };
 
         // An early `return` inside the closure body returns from the *closure*, not the
         // enclosing function, so redirect the return-type context for the body check.
         let saved_return = self.current_function_return_type.take();
         self.current_function_return_type = ret_ty.clone();
+        let saved_inferring =
+            std::mem::replace(&mut self.inferring_closure_return, ret_ty.is_none());
 
         // For the same reason, an enclosing loop is not in scope inside the body: a
         // `break` cannot leave the closure to reach it, and letting the enclosing
@@ -105,20 +113,19 @@ impl TypeChecker {
                     span: p.name.span,
                 });
             }
+            self.bind_function_param(&p.name.name, ty);
         }
 
         // A block body is checked like a function body (a trailing expression is the
-        // implicit return; a trailing `return`/`if` is fine) and requires an explicit
-        // return type. A single-expression body infers its return type.
+        // implicit return; a trailing `return`/`if` is fine).
         let result_ret = match body {
-            Expr::Block { stmts, .. } => {
-                let declared = ret_ty.clone().unwrap_or_else(|| {
-                    self.record_error(TypeError::ClosureBlockNeedsReturnType { span });
-                    Type::Unknown
-                });
-                self.check_closure_block(stmts, &declared);
-                declared
-            }
+            Expr::Block { stmts, .. } => match ret_ty {
+                Some(declared) => {
+                    self.check_closure_block(stmts, &declared);
+                    declared
+                }
+                None => self.infer_closure_block(stmts),
+            },
             single => {
                 let body_ty = self
                     .check_expr(single, ret_ty.as_ref())
@@ -141,8 +148,8 @@ impl TypeChecker {
 
         self.symbols.pop_scope();
         self.current_function_return_type = saved_return;
+        self.inferring_closure_return = saved_inferring;
         self.loop_stack = saved_loops;
-        self.refuse_function_valued_return(&result_ret, span);
 
         // The body's own statements ended its borrows as they went, and with them any
         // the enclosing statement had in flight; what the closure borrows is added below.
@@ -157,7 +164,8 @@ impl TypeChecker {
             },
             span,
         );
-        if self.scope_bound_closures.contains_key(&span) && !in_slot {
+        let carried = self.block_tail_slot == Some(span) && self.reference_closures.contains(&span);
+        if self.scope_bound_closures.contains_key(&span) && !in_slot && !carried {
             self.record_error(TypeError::ScopeBoundClosureStored { span });
         }
 
@@ -165,6 +173,14 @@ impl TypeChecker {
             params: param_types,
             ret: Box::new(result_ret),
             mode,
+        }
+    }
+
+    /// A function-typed parameter may be handed a closure that borrows from the
+    /// caller's frame, so the body keeps it in the bounds such a closure lives in.
+    pub(crate) fn bind_function_param(&mut self, name: &str, ty: &Type) {
+        if matches!(ty, Type::Function { .. }) {
+            self.symbols.mark_scope_bound(name);
         }
     }
 
@@ -196,6 +212,44 @@ impl TypeChecker {
             }
         }
         self.symbols.pop_scope();
+    }
+
+    /// Check a block-bodied closure nothing gives a return type, and return the type of
+    /// what it ends with: its last expression, or a trailing `if` with an `else`. A body
+    /// ending in any other statement returns nothing. `hir-lowering` infers the same.
+    fn infer_closure_block(&mut self, stmts: &[Stmt]) -> Type {
+        self.symbols.push_scope();
+        let mut result = Type::Void;
+        if let Some((last, init)) = stmts.split_last() {
+            for stmt in init {
+                let _ = self.check_stmt(stmt);
+            }
+            result = match last {
+                Stmt::Expr(e) => self.check_expr(e, None).unwrap_or(Type::Unknown),
+                Stmt::If {
+                    condition,
+                    then_block,
+                    else_if_blocks,
+                    else_block: else_block @ Some(_),
+                    span,
+                } => self
+                    .check_if_expr(
+                        condition,
+                        then_block,
+                        else_if_blocks,
+                        else_block,
+                        span,
+                        None,
+                    )
+                    .unwrap_or(Type::Unknown),
+                other => {
+                    let _ = self.check_stmt(other);
+                    Type::Void
+                }
+            };
+        }
+        self.symbols.pop_scope();
+        result
     }
 
     /// Decide how the closure holds each capture and return its call mode.
@@ -234,6 +288,7 @@ impl TypeChecker {
         let mut mode = FunctionMode::Shared;
         let mut borrows = Vec::new();
         let mut scope_bound = false;
+        let mut copies_reference = false;
         let mut seen: HashSet<&String> = HashSet::new();
         for (name, use_span) in fv.reads.iter().chain(&fv.assigns) {
             if !seen.insert(name) {
@@ -266,9 +321,16 @@ impl TypeChecker {
                     continue;
                 }
             }
+            // A reference taken by copy is still a borrow the closure holds, and a value
+            // that may itself borrow keeps whatever holds it in its scope too.
+            copies_reference |= carries_borrow(&ty);
+            scope_bound |= carries_borrow(&ty)
+                || self
+                    .symbols
+                    .lookup(name)
+                    .is_some_and(|info| info.scope_bound);
             if is_move {
                 if !copy {
-                    scope_bound = true;
                     self.record_move(&Expr::Identifier(Identifier {
                         name: name.clone(),
                         span: *use_span,
@@ -286,6 +348,16 @@ impl TypeChecker {
             borrows.push((name.clone(), writes));
         }
         if scope_bound {
+            // Only a closure whose sole reason is a copied reference: one that borrows a
+            // capture of its own, or holds a bound value, carries what nothing follows.
+            let held_bound = fv.reads.iter().any(|(name, _)| {
+                self.symbols
+                    .lookup(name)
+                    .is_some_and(|info| info.scope_bound && !carries_borrow(&info.ty))
+            });
+            if copies_reference && borrows.is_empty() && !held_bound {
+                self.reference_closures.insert(span);
+            }
             self.scope_bound_closures.insert(span, borrows);
         }
         mode
@@ -340,6 +412,52 @@ impl TypeChecker {
             });
         }
     }
+}
+
+/// The function type a built-in's context gives the closure literal `callee`, when it is
+/// one: `params` and `ret`, apart from each type the literal writes itself, which the
+/// built-in then checks against its own rule with its own diagnostic.
+pub(crate) fn closure_context(callee: &Expr, params: Vec<Type>, ret: Type) -> Type {
+    let literal = closure_literal(callee);
+    let params = params
+        .into_iter()
+        .enumerate()
+        .map(
+            |(index, ty)| match closure_param_unannotated(callee, index) {
+                true => ty,
+                false => Type::Unknown,
+            },
+        )
+        .collect();
+    let ret = match literal {
+        Some(Expr::Closure { ret: None, .. }) => ret,
+        _ => Type::Unknown,
+    };
+    Type::Function {
+        params,
+        ret: Box::new(ret),
+        mode: FunctionMode::Once,
+    }
+}
+
+/// Whether `callee` is a closure literal whose parameter `index` carries no annotation.
+pub(crate) fn closure_param_unannotated(callee: &Expr, index: usize) -> bool {
+    matches!(closure_literal(callee), Some(Expr::Closure { params, .. })
+        if params.get(index).is_some_and(|p| p.ty.is_none()))
+}
+
+/// `callee` itself, through any parentheses, when it is a closure literal.
+fn closure_literal(callee: &Expr) -> Option<&Expr> {
+    let mut callee = callee;
+    while let Expr::Paren(inner, _) = callee {
+        callee = inner;
+    }
+    matches!(callee, Expr::Closure { .. }).then_some(callee)
+}
+
+/// `ty`, unless it is the `Unknown` that stands for a type the context does not fix.
+fn known(ty: &Type) -> Option<&Type> {
+    (!matches!(ty, Type::Unknown)).then_some(ty)
 }
 
 /// What the body check left behind that capture settlement reads: the move states before
@@ -894,6 +1012,43 @@ func main() -> i32 {
                     .iter()
                     .any(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. })),
                 "{stored}: {errors:?}"
+            );
+        }
+    }
+
+    /// A parameter with no annotation takes its type from the function type the context
+    /// gives the literal, and the body's result is the closure's return type.
+    #[test]
+    fn a_closure_takes_its_signature_from_its_context() {
+        let errors = semantic_errors(
+            "func twice(f: (i32) -> i32, x: i32) -> i32 { f(f(x)) }
+func main() -> i32 {
+    val square: (i32) -> i32 = |x| x * x
+    val wide = |x: i32| {
+        val y = x * 2
+        y as i64
+    }
+    val w: i64 = wide(3)
+    twice(|x| x + 1, square(2))
+}",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A closure holding a reference holds a borrow, whether it copied the reference or
+    /// took it by `move`, so it may not leave the scope the borrow belongs to.
+    #[test]
+    fn a_closure_holding_a_reference_cannot_be_returned() {
+        for body in ["|| s.len()", "move || s.len()"] {
+            let errors = semantic_errors(&format!(
+                "func len_of(s: &string) -> () -> u64 {{ {body} }}
+func main() -> i32 {{ 0 }}"
+            ));
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. })),
+                "{body}: {errors:?}"
             );
         }
     }

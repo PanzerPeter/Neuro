@@ -376,6 +376,28 @@ impl TypeChecker {
                         .zip(ae)
                         .all(|(p, a)| self.unify_generic(p, a, subst))
             }
+            // A function value fits a slot asking for its own call trait or a weaker one,
+            // the same direction `is_compatible_with` takes.
+            (
+                Type::Function {
+                    params: pp,
+                    ret: pr,
+                    mode: pm,
+                },
+                Type::Function {
+                    params: ap,
+                    ret: ar,
+                    mode: am,
+                },
+            ) => {
+                am <= pm
+                    && pp.len() == ap.len()
+                    && pp
+                        .iter()
+                        .zip(ap)
+                        .all(|(p, a)| self.unify_generic(p, a, subst))
+                    && self.unify_generic(pr, ar, subst)
+            }
             (Type::Collection { kind: pk, args: pa }, Type::Collection { kind: ak, args: aa }) => {
                 pk == ak
                     && pa.len() == aa.len()

@@ -11,6 +11,7 @@ use ast_types::Expr;
 use neuro_hir::{HirExpr, HirExprKind, HirTensorApply, HirType};
 use shared_types::Span;
 
+use crate::closures::{ClosureHint, closure_param_unannotated};
 use crate::{Lowerer, LoweringError, malformed};
 
 pub(crate) const MAP_METHOD: &str = "map";
@@ -34,7 +35,12 @@ impl Lowerer {
         args: &[Expr],
         span: Span,
     ) -> Result<HirExpr, LoweringError> {
-        let HirType::Tensor { shape, names, .. } = receiver.ty.referent().clone() else {
+        let HirType::Tensor {
+            shape,
+            names,
+            element,
+        } = receiver.ty.referent().clone()
+        else {
             return Err(malformed(format!(
                 "`.{method}` reached lowering on a non-tensor receiver"
             )));
@@ -47,11 +53,38 @@ impl Lowerer {
                 "`.{method}` reached lowering with no function"
             )));
         };
-        // The function is lowered first so a `.reduce`'s seed can take its type from the
-        // accumulator parameter, the way the checker resolved it: an untyped `0.0` folded
-        // over an `f32` tensor is an `f32`, and lowering it without the hint would build
-        // an accumulator the function cannot be called with.
-        let callee = self.lower_expr(callee, None)?;
+        // The order is the checker's. A `.zip`'s second tensor goes first, since it says
+        // what the function's second parameter is handed. A `.reduce`'s seed goes after
+        // the function, typed by its accumulator parameter (an untyped `0.0` folded over
+        // an `f32` tensor is an `f32`), unless the function is a closure literal leaving
+        // that parameter open: then the seed goes first, against the element type, and
+        // the accumulator takes the seed's type.
+        let seed_first = kind == HirTensorApply::Reduce && closure_param_unannotated(callee, 0);
+        let early = match (kind, leading.first()) {
+            (HirTensorApply::Zip, Some(entry)) => Some(self.lower_expr(entry, None)?),
+            (HirTensorApply::Reduce, Some(entry)) if seed_first => {
+                Some(self.lower_expr(entry, Some(&element))?)
+            }
+            _ => None,
+        };
+        let hint = ClosureHint {
+            params: match (kind, &early) {
+                (HirTensorApply::Map, _) => vec![Some((*element).clone())],
+                (HirTensorApply::Zip, Some(other)) => vec![
+                    Some((*element).clone()),
+                    match other.ty.referent() {
+                        HirType::Tensor { element, .. } => Some((**element).clone()),
+                        _ => None,
+                    },
+                ],
+                (HirTensorApply::Reduce, Some(seed)) => {
+                    vec![Some(seed.ty.clone()), Some((*element).clone())]
+                }
+                _ => vec![None, Some((*element).clone())],
+            },
+            ret: None,
+        };
+        let callee = self.lower_function_arg(callee, &hint)?;
         let HirType::Function { params, ret } = &callee.ty else {
             return Err(malformed(format!(
                 "`.{method}` reached lowering with a non-function argument"
@@ -62,9 +95,10 @@ impl Lowerer {
             _ => None,
         };
         let ret = (**ret).clone();
-        let operand = match leading.first() {
-            Some(entry) => Some(Box::new(self.lower_expr(entry, seed_ty.as_ref())?)),
-            None => None,
+        let operand = match (early, leading.first()) {
+            (Some(lowered), _) => Some(Box::new(lowered)),
+            (None, Some(entry)) => Some(Box::new(self.lower_expr(entry, seed_ty.as_ref())?)),
+            (None, None) => None,
         };
 
         // A fold answers one value for the whole buffer, so it carries the seed's type.

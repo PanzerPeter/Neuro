@@ -29,15 +29,6 @@ pub enum TypeError {
     )]
     FunctionUsedAsValue { name: String, span: Span },
 
-    #[error(
-        "a function value cannot be passed to the generic function '{callee}': its parameter type `{param}` names a type parameter, and a function argument does not infer one; declare that parameter with concrete types"
-    )]
-    FunctionToGenericHigherOrder {
-        callee: String,
-        param: Type,
-        span: Span,
-    },
-
     #[error("generic type parameter '{name}' shadows a built-in type name")]
     GenericParamShadowsBuiltin { name: String, span: Span },
 
@@ -1122,11 +1113,6 @@ pub enum TypeError {
     CannotAssignWhileBorrowed { name: String, span: Span },
 
     #[error(
-        "a function value cannot {problem}: a closure reads its captures from the frame that built it, so it may not outlive that frame; call it where it is written, or pass it down as an argument"
-    )]
-    FunctionValueEscapes { problem: String, span: Span },
-
-    #[error(
         "cannot return a reference to '{name}': it is local to this function and does not outlive the call; return a reference derived from a parameter instead"
     )]
     ReturnsReferenceToLocal { name: String, span: Span },
@@ -1374,7 +1360,7 @@ pub enum TypeError {
     RefutablePayloadPattern { span: Span },
 
     #[error(
-        "closure parameter '{name}' needs a type annotation: write `|{name}: T| ...`; closure parameter-type inference is not yet supported"
+        "closure parameter '{name}' needs a type: annotate it (`|{name}: T| ...`), or write the closure where a function type says what it takes, such as a typed binding `val f: (T) -> R = ...` or an argument to a function-typed parameter"
     )]
     ClosureParamNeedsType { name: String, span: Span },
 
@@ -1394,12 +1380,12 @@ pub enum TypeError {
     ClosureMovesCapture { name: String, span: Span },
 
     #[error(
-        "this closure borrows or owns a non-Copy capture, so it lives only as long as the scope that built it: bind it with `val` or `mut`, pass it to a function-typed parameter of a declared function, or call it; it cannot be assigned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map`"
+        "this value may borrow from the scope that built it (a closure that borrows a capture, a function-typed parameter, or a closure holding either), so it lives only as long as that scope: bind it with `val` or `mut`, pass it to a function-typed parameter, or call it; it cannot be assigned, returned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map`"
     )]
     ScopeBoundClosureStored { span: Span },
 
     #[error(
-        "a block-bodied closure needs an explicit return type: write `|params| -> R {{ ... }}` (only single-expression closures `|x| expr` infer their return type)"
+        "a closure body that uses `return` needs a return type: write `|params| -> R {{ ... }}`, or give the closure a function type from its context; without one, the body's last expression is its result"
     )]
     ClosureBlockNeedsReturnType { span: Span },
 
@@ -1534,7 +1520,6 @@ impl TypeError {
             | Self::UndefinedFunction { span, .. }
             | Self::InvalidMainSignature { span, .. }
             | Self::FunctionUsedAsValue { span, .. }
-            | Self::FunctionToGenericHigherOrder { span, .. }
             | Self::GenericParamShadowsBuiltin { span, .. }
             | Self::MethodGenericShadowsImpl { span, .. }
             | Self::GenericMethodInTraitImpl { span, .. }
@@ -1708,7 +1693,6 @@ impl TypeError {
             | Self::CannotUseWhileMutablyBorrowed { span, .. }
             | Self::CannotMoveWhileBorrowed { span, .. }
             | Self::CannotAssignWhileBorrowed { span, .. }
-            | Self::FunctionValueEscapes { span, .. }
             | Self::ReturnsReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::SliceExpectsRange { span, .. }

@@ -610,7 +610,7 @@ Variants may be written qualified (`Option::Some`, `Result::Err`) or, because th
 - **No enum that holds itself inline**, directly or through a struct, array, tuple or another
   enum: it would have no finite size.
 - **No `impl Drop` on an enum** (`InvalidDropImpl`): only a struct runs a user destructor.
-- **No `.map_err` or other `Option` / `Result` helper methods.** They would be generic over a closure's result type, and a closure cannot yet be passed to a generic higher-order function.
+- **No `.map_err` or other `Option` / `Result` helper methods yet.**
 - **No lifetime parameters on an enum**; `enum E<'a, T>` is a parse error.
 
 ### Type Errors

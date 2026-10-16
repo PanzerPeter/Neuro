@@ -684,10 +684,12 @@ checks trait bounds (`check_trait_bounds` / `TraitBoundNotSatisfied`, keyed off
 `Copy` requirement**: the abstract body was already checked against a conservatively non-`Copy`
 `T`, so it holds for every instantiation. Errors: `GenericParamShadowsBuiltin`,
 `GenericParamNotInferable` (fires at the call site, since turbofish exists).
-`unify_generic` has no rule for a function type, so a function value passed to a parameter whose
-function type names a type parameter is `FunctionToGenericHigherOrder` (the closures section's
-"not passed to a generic higher-order function"), reported instead of a mismatch between a
-template and the identical-looking concrete type.
+`unify_generic` unifies a function type position by position, and the mode directionally (the
+argument's call trait may be weaker than the slot's). A closure literal for a function-typed
+parameter is checked after the other arguments, with what they bound handed to it as its context
+(`partially_substituted`: a position naming a still-unbound parameter of the callee becomes
+`Unknown`), so its result can bind the rest. A function-typed parameter of a generic call opens
+`function_value_slot` like a non-generic one.
 
 **Methods.** A method's own `<U>` go on top of its impl's scope through
 `enter_method_generics` / `exit_method_generics` (a `GenericScope` snapshot), around both the
@@ -940,11 +942,18 @@ concrete type at zero cost. Errors: `ImplTraitNotAllowedHere`, `ImplReturnNotInf
 
 ### Closures
 `type_checkers/closures.rs`. `check_closure` types an `Expr::Closure` as
-`Type::Function { params, ret, mode }`: parameters require an annotation (`ClosureParamNeedsType`), a
-block body requires an explicit return type and is checked like a function body
-(`ClosureBlockNeedsReturnType`), and a single-expression body infers its return type. Two
-parameters with one name are `VariableAlreadyDefined` at the second, as in a function's list.
-Module constants and functions are referenced directly, not captured.
+`Type::Function { params, ret, mode }`, given the function type its context expects (`check_expr`
+passes `expected` through when it is one; `Unknown` in it fixes nothing). A parameter takes its
+annotation, else the context's type, else is `ClosureParamNeedsType`. The return type is the
+annotation, else the context's, else the body's: a single expression's type, or a block's last
+expression or trailing `if`/`else` (`infer_closure_block`), with `Void` for a block ending in any
+other statement. `inferring_closure_return` makes a `return` in a body typed by itself
+`ClosureBlockNeedsReturnType`. The built-ins give their closure its element types through
+`closure_context`, which leaves every position the literal annotates `Unknown` so the built-in's
+own diagnostic still reports it; an unannotated `.reduce` accumulator types the seed first,
+against the element type. `hir-lowering` reads the same contexts the same way. Two parameters
+with one name are `VariableAlreadyDefined` at the second, as in a function's list. Module
+constants and functions are referenced directly, not captured.
 
 `settle_captures` runs after the body is checked, because two uses decide a capture's mode that
 only the check sees: a move out of it (`moves_since` against a snapshot taken before the body)
@@ -959,12 +968,21 @@ borrows the enclosing statement had in flight are restored after the body (its o
 them as they go), then each borrowed capture takes its borrow (`borrow_capture`), transient until
 `hold_carried_borrows` makes the initialized binding hold it, as `val r = &x` does.
 
-A closure that borrows or owns a non-`Copy` capture is scope-bound (`scope_bound_closures`, keyed
-by the literal's span, and `SymbolInfo::scope_bound` on a binding holding one). It may be checked
-only in `function_value_slot`: the whole initializer of a binding, or a whole argument to a
-function-typed parameter (`check_receiver_call_args`), or a callee. Anywhere else it could be
-stored past what it borrows: `ScopeBoundClosureStored`. A built-in method sets no slot, so `.map`
-and friends refuse one too. `Type::Function`'s `mode` makes `is_compatible_with` directional (a
+A value that may borrow is scope-bound (`scope_bound_closures`, keyed by the literal's span, and
+`SymbolInfo::scope_bound` on a binding holding one): a closure that borrows a capture or holds a
+reference by copy (`carries_borrow`), a function-typed parameter of a function, method or closure
+(`bind_function_param`: its caller may have passed a borrowing closure), and a closure capturing
+either, `move` or not. It may be checked only in `function_value_slot`: the whole initializer of a
+binding, or a whole argument to a function-typed parameter (`check_receiver_call_args`,
+`check_generic_call_with`), or a callee. A tensor traversal and a `for`-head adapter open it for a
+bare binding only (`binding_position`), so a borrowing literal written there is still refused.
+Anywhere else it could be stored past what it borrows: `ScopeBoundClosureStored`. One exception:
+a closure bound only by a reference it copied (`reference_closures`) may be the last expression of
+a block that initializes a binding (`block_tail_slot`, `block_tail_closure`), since
+`hold_carried_borrows` follows the borrows it carries out of the block; the binding is then bound
+itself (`yields_scope_bound_closure` looks through the block). A `move`
+closure over owned values is not scope-bound: its environment owns them and may outlive the
+scope. `Type::Function`'s `mode` makes `is_compatible_with` directional (a
 value fits a slot of its own mode or a stronger one), a `once` value is move-tracked, and a call
 through a `once` binding moves it (`consume_once_callee`).
 
@@ -981,13 +999,12 @@ afterwards. `check_plain_call` dispatches a call on a local binding of function 
 A non-generic function's bare name types as its `Type::Function` (BUG-071); only a generic one
 is `FunctionUsedAsValue`, having no single type until its type arguments are named.
 
-A closure's environment lives in the frame that wrote it, so a function value stays there
-(`FunctionValueEscapes`, BUG-072). `holds_function_value` walks a type through struct fields,
-enum payloads, newtypes, arrays and tuples; a declared return type that holds one is refused at
-the function, method or closure (`refuse_function_valued_return`), and so is a store of one
-through a reference (`reached_through_reference`: a `*r`, a reference on the way to the root, or a
-borrowed `self`). A store into a local holder stays legal. Because no callee can keep a function
-value, `check_pool_retention` does not count a parameter holding one as a retainable handover.
+A closure's environment is a counted heap block the backend shares between copies, so a function
+value that is not scope-bound may be returned, stored in a holder, or stored through a reference.
+That is what BUG-072's frame-bound rule guarded, and the scope-bound rule above now covers the
+part of it that still holds. `holds_function_value` walks a type through struct fields, enum
+payloads, newtypes, arrays and tuples for `hold_carried_borrows`. A callee may keep a function
+value, so `check_pool_retention` judges a closure argument by its captures like any other.
 
 ### Composition
 `expressions/compose.rs`. `check_compose` types an `Expr::Compose` as

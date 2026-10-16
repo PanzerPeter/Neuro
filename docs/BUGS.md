@@ -5,6 +5,42 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-110: an `impl` bounded by `Copy` or `Clone` emits nothing for a primitive argument
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering`; `instance_meets_impl_bounds` in `items/mono.rs`
+- **Severity**: major. A program the checker accepts fails to build with an internal codegen
+  error
+
+**Minimal repro**
+
+```neuro
+struct Box2<T: Copy> { v: T }
+impl<T: Copy> Box2<T> {
+    func make(v: T, w: T) -> Box2<T> { Box2 { v: w } }
+}
+func main() -> i32 {
+    val b = Box2::make(2, 3)
+    b.v
+}
+```
+
+Expected: the program builds and exits with 3. Observed: `Code generation error: undefined
+function: Box2$g_i32__make`. The same program without the two `: Copy` bounds builds.
+
+**Root cause**: confirmed in the code. Lowering emits an instance's `impl` only when every bound
+holds, and it decides that from `trait_impls` alone: a trait the program (here, the prelude)
+declares is met only by a struct, enum or newtype with a matching `impl`. A primitive, tuple or
+array argument therefore fails `T: Copy`, `T: Clone`, `T: PartialEq` or `T: Hashable`, which the
+checker's `satisfies_bound` grants it, and the impl's functions are never emitted.
+
+**Workaround**: drop the bound from the type and its `impl` when the body does not need it.
+
+**Fix sketch**: give lowering the checker's answer for the derivable traits on non-nominal
+types (scalars, `char`, `bool`, and tuples and arrays of such), or record which bounds the
+checker found satisfied per instance. Regression test: the repro above, plus the same with a
+`(i32, i32)` argument.
+
 ## BUG-109: a reference assigned inside a block may outlive what it borrows
 
 - **Status**: open, confirmed

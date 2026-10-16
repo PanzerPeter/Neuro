@@ -151,7 +151,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
         self.builder.build_store(slot, val)?;
-        self.mark_moved_for_drop(value);
+        self.mark_moved_for_drop(value)?;
         Ok(())
     }
 

@@ -2974,3 +2974,46 @@ fn regression_bug_038_a_closure_binding_uses_its_lifted_body_summary() {
         "the forwarded result is released by the binding that took it:\n{body}"
     );
 }
+
+/// A closure's environment is a heap block counted per copy: built with a count of one,
+/// retained by a copy out of a binding, given back by each binding at its scope's end, and
+/// freed by the closure's own release once the count reaches zero. A closure that
+/// captures nothing has a null environment and allocates nothing.
+#[test]
+fn a_closure_environment_is_counted_on_the_heap() {
+    let source = r#"
+        func make_adder(n: i32) -> (i32) -> i32 { |x| x + n }
+        func main() -> i32 {
+            val add = make_adder(2)
+            val copy = add
+            val plain = |x: i32| -> i32 { x + 1 }
+            return copy(1) + plain(1)
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let maker = function_body(&ir, "make_adder");
+    assert!(
+        maker.contains("call ptr @malloc") && maker.contains("store i64 1, ptr %closure.count"),
+        "the environment is allocated with a count of one:\n{maker}"
+    );
+    let main = function_body(&ir, "main");
+    assert_eq!(
+        main.matches("call void @__neuro_fn_retain(").count(),
+        1,
+        "the copy out of `add` retains:\n{main}"
+    );
+    assert_eq!(
+        main.matches("call void @__neuro_fn_release(").count(),
+        3,
+        "each of the three bindings gives its count back:\n{main}"
+    );
+    assert!(
+        main.contains("{ ptr @__closure_1, ptr null }"),
+        "a closure with no captures has a null environment:\n{main}"
+    );
+    let release = function_body(&ir, "__closure_0.env.drop");
+    assert!(
+        release.contains("call void @free"),
+        "the closure's release frees the environment:\n{release}"
+    );
+}

@@ -91,7 +91,7 @@ impl Lowerer {
         // per protocol step.
         let plan = match adapters.is_empty() {
             true => None,
-            false => Some(self.plan_loop_adapters(adapters, index, span)?),
+            false => Some(self.plan_loop_adapters(adapters, &item_ty, index, span)?),
         };
 
         self.protocol_counter += 1;

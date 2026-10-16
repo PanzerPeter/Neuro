@@ -1076,14 +1076,18 @@ A **closure** is an anonymous callable written with pipe-delimited parameters,
 `|params| body`. It can capture variables from the enclosing scope.
 
 ```neuro
-// Single-expression body (no braces): the return type is inferred.
+// Single-expression body (no braces): the return type is the body's.
 val square = |x: i32| x * x
 val nine   = square(3)              // 9
 
-// Block body: an explicit return type is required.
-val clamp = |x: i32| -> i32 {
+// Block body: the return type is its last expression's, or write it.
+val clamp = |x: i32| {
     if x < 0 { 0 } else { x }
 }
+val wide = |x: i32| -> i64 { x as i64 * 2 }
+
+// The binding's type gives `x` its type.
+val cube: (i32) -> i32 = |x| x * x * x
 
 // Zero parameters.
 val make = || 42
@@ -1126,7 +1130,7 @@ End the closure's scope, as the block above does, before using the binding again
 
 A `move` closure takes every capture by value. A `Copy` capture is copied into the closure, which
 keeps its own copy from call to call; any other capture is moved in, so its source binding is gone,
-and the closure releases it when the scope that created it ends:
+and the closure releases it when its last copy is gone:
 
 ```neuro
 mut n = 0
@@ -1181,6 +1185,31 @@ where a `mut` one is, is a type mismatch. Calling a `once` value a second time, 
 a use of a moved value. `once` is a mode only in front of a function type; elsewhere it is an
 ordinary name.
 
+### Inference
+
+A closure parameter without an annotation takes its type from the function type the closure's
+context gives it: the parameter it is passed to, the typed binding, field or place it
+initializes, or the position it is returned from. The return type is the annotation, else the
+context's, else the body's own. `.map`, `.zip` and `.reduce` on a tensor, and `.map` / `.filter`
+in a `for` head, hand their closure the element type:
+
+```neuro
+func twice(f: (i32) -> i32, x: i32) -> i32 { f(f(x)) }
+
+func main() -> i32 {
+    val k = 3
+    val t: Tensor<f32, [3]> = [1.0, 2.0, 3.0]
+    val doubled = t.map(|x| x * 2.0)              // `x` is `f32`
+    val total = t.reduce(0.0, |acc, x| acc + x)   // the seed types `acc`
+    twice(|x| x + k, 1)                           // 7
+}
+```
+
+A parameter that nothing types is an error, so `val f = |x| x + 1` alone is refused: a later
+call does not type it. Annotate the parameter, or give the binding a function type. A block
+body that takes its return type from its last expression may not `return`; write the return
+type if it needs to.
+
 ### Function types and higher-order functions
 
 A closure or function value has the type `(T1, ...) -> R`. A function that takes
@@ -1193,7 +1222,7 @@ func apply(v: i32, f: (i32) -> i32) -> i32 {
 
 func main() -> i32 {
     val bump = 3
-    apply(5, |x: i32| x + bump)        // 8
+    apply(5, |x| x + bump)             // 8
 }
 ```
 
@@ -1201,38 +1230,79 @@ A function's own name is a value of its function type too, so `apply(5, double)`
 `func double(x: i32) -> i32` directly, and `val f = double` binds it. A generic function
 has no single type until its type arguments are named, so its bare name is refused.
 
+A higher-order function may be generic. The closure passed to it takes part in inferring its
+type parameters: it is typed after the call's other arguments, so it sees what they bound, and
+its result binds the rest:
+
+```neuro
+func map_one<T, U>(value: T, f: (T) -> U) -> U {
+    f(value)
+}
+
+func main() -> i32 {
+    val wide = map_one(7, |x| x as i64 * 3)   // T = i32, U = i64
+    wide as i32
+}
+```
+
 Any expression of function type can be called, not only a name: a closure literal called where
 it is written, `(|x: i32| -> i32 { x + 1 })(3)`, or a function chosen by an `if`,
 `(if fast { quick } else { exact })(v)`.
 
-Each closure compiles to a `{ function pointer, environment pointer }` value with
-no heap allocation; a call dispatches indirectly through it.
+### Returning and storing closures
 
-Because the environment lives in the frame that wrote the closure, a function value
-stays in that frame. It may be bound, stored into a local struct or array, passed down
-to a callee and called, but a function whose return type is or holds a function type is
-an error, and so is storing one through a reference (`h.f = g` with `h: &mut Holder`,
-`*slot = g`, or `self.f = g` in a `&mut self` method):
+A closure that borrows nothing owns its environment, so it can be returned, stored in a struct
+or an enum, and copied like any other value:
 
-```text
-error: a function value cannot be returned: a closure reads its captures from the frame
-that built it, so it may not outlive that frame
+```neuro
+struct Scaler { apply: (f32) -> f32 }
+
+func make_adder(n: i32) -> (i32) -> i32 {
+    |x| x + n                          // copies `n`
+}
+
+func scaler(factor: f32) -> Scaler {
+    Scaler { apply: |x| x * factor }
+}
+
+func main() -> i32 {
+    val add_two = make_adder(2)
+    val again = add_two                // a copy: both call the same closure
+    val half = scaler(0.5)
+    val f = half.apply
+    add_two(1) + again(2) + f(8.0) as i32   // 3 + 4 + 4
+}
 ```
 
-A closure that borrows a capture, or owns a non-`Copy` one, is tied to the scope that created
-it. It may initialize a binding, be passed to a function-typed parameter of a
-declared function, or be called; it may not be assigned to an existing binding, stored inside
-another value, yielded from a block, or handed to a built-in method such as `.map`.
+Each closure compiles to a `{ function pointer, environment pointer }` value; a call dispatches
+indirectly through it. The environment is a heap block every copy shares (a closure with no
+captures has none), freed with the last copy along with whatever a `move` closure moved into it.
+Because the copies share it, every copy of an `FnMut` closure sees the writes any of them makes.
+
+A value that may borrow lives only in the scope that made it:
+
+- a closure that borrows a capture, or copies a reference into its environment;
+- a function-typed parameter, since its caller may have passed such a closure;
+- a closure that captures either.
+
+Such a value may initialize a binding, be passed to a function-typed parameter or read by a
+built-in that only calls it, or be called. It may not be returned, assigned, stored inside
+another value, or yielded from a block:
+
+```text
+error: this value may borrow from the scope that built it (a closure that borrows a capture, a
+function-typed parameter, or a closure holding either), so it lives only as long as that scope
+```
 
 ### Not yet supported
 
-- Parameter-type inference (`|x| x * x` without an annotation).
-- Passing a closure to a **generic** higher-order function
-  (`func f<T, U>(x: T, g: (T) -> U) -> U`).
-- Returning or storing a closure so it escapes its defining scope, and `dyn Fn`.
-- A closure that borrows or owns a non-`Copy` capture, passed to a built-in method
-  (`.map`, `.filter`, `.zip`, `.reduce`).
+- Returning a closure over the function values a function was handed
+  (`func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 { move |x| g(f(x)) }`).
+- Storing a borrowing closure in a holder that dies before what it borrows.
+- A borrowing closure literal written as the argument of a built-in method (`.map`, `.filter`,
+  `.zip`, `.reduce`); bind it to a `val` first.
 - A closure without `move` taking a capture by value because its body moves it out.
+- A closure literal as a `|>` stage without annotations, since nothing gives it a context there.
 
 ## References
 

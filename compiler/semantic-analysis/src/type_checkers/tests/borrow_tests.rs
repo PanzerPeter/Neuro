@@ -422,18 +422,18 @@ func main() -> i32 {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
-fn escapes(errors: &[TypeError]) -> usize {
+fn scope_bound(errors: &[TypeError]) -> usize {
     errors
         .iter()
-        .filter(|e| matches!(e, TypeError::FunctionValueEscapes { .. }))
+        .filter(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. }))
         .count()
 }
 
-/// A closure reads its captures from the frame that wrote it, so a function value may
-/// not leave that frame: stored through a reference, or returned. Both were accepted, and
-/// the stored or returned closure then read a dead frame (`2 * 11` for `2 * 3`).
+/// A function-typed parameter may hold a closure that borrows from the caller's frame,
+/// so it may not leave the callee: stored through a reference or returned. BUG-072 read
+/// a dead frame through exactly these stores.
 #[test]
-fn test_bug_072_a_function_value_may_not_leave_its_frame() {
+fn test_bug_072_a_function_typed_parameter_may_not_leave_its_callee() {
     let prelude = r#"
 struct Holder { f: (f32) -> f32 }
 type F = (f32) -> f32
@@ -442,16 +442,35 @@ type F = (f32) -> f32
         "func keep(h: &mut Holder, g: (f32) -> f32) { h.f = g }",
         "func keep(s: &mut F, g: F) { *s = g }",
         "impl Holder { func set(&mut self, g: (f32) -> f32) { self.f = g } }",
-        "func make(k: f32) -> (f32) -> f32 { |x: f32| -> f32 { x * k } }",
-        "func make(k: f32) -> Holder { Holder { f: |x: f32| -> f32 { x * k } } }",
+        "func pass(g: (f32) -> f32) -> (f32) -> f32 { g }",
+        "func wrap(g: (f32) -> f32) -> (f32) -> f32 { move |x: f32| -> f32 { g(x) } }",
     ];
     for item in escaping {
         let errors = semantic_errors(&format!("{prelude}{item}\nfunc main() -> i32 {{ 0 }}\n"));
         assert_eq!(
-            escapes(&errors),
+            scope_bound(&errors),
             1,
             "`{item}` must be refused once; got {errors:?}"
         );
+    }
+}
+
+/// A closure that borrows nothing owns its environment, so it may leave the frame that
+/// built it: returned, returned inside a struct, or stored through a reference.
+#[test]
+fn an_owning_closure_may_leave_its_frame() {
+    let prelude = r#"
+struct Holder { f: (f32) -> f32 }
+"#;
+    let escaping = [
+        "func make(k: f32) -> (f32) -> f32 { |x| x * k }",
+        "func make(k: f32) -> Holder { Holder { f: |x| x * k } }",
+        "func keep(h: &mut Holder, k: f32) { h.f = |x| x * k }",
+        "func owned(s: string) -> () -> u64 { move || s.len() }",
+    ];
+    for item in escaping {
+        let errors = semantic_errors(&format!("{prelude}{item}\nfunc main() -> i32 {{ 0 }}\n"));
+        assert!(errors.is_empty(), "`{item}`: {errors:?}");
     }
 }
 

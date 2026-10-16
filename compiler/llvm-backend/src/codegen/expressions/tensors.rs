@@ -364,7 +364,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor receiver does not lower to a pointer".to_string(),
             ));
         };
-        self.mark_moved_for_drop(receiver);
+        self.mark_moved_for_drop(receiver)?;
         self.build_dlpack_redescribe(source, result_ty)?;
         // The derivatives belonged to the consumed receiver and are shaped like it, so the
         // result starts without them.
@@ -393,7 +393,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor receiver does not lower to a pointer".to_string(),
             ));
         };
-        self.mark_moved_for_drop(receiver);
+        self.mark_moved_for_drop(receiver)?;
         let device = args.first().ok_or_else(|| {
             CodegenError::InternalError("`.to` reached codegen without a device".to_string())
         })?;

@@ -196,8 +196,6 @@ impl TypeChecker {
             return None;
         };
 
-        self.refuse_function_valued_return(&return_type, func.name.span);
-
         // Enter function scope
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
@@ -231,6 +229,7 @@ impl TypeChecker {
                     span: param.name.span,
                 });
             }
+            self.bind_function_param(&param.name.name, param_ty);
         }
         if self.in_kernel {
             self.enter_kernel_outs(func);

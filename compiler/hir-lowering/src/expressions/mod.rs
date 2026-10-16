@@ -289,7 +289,14 @@ impl Lowerer {
                 body,
                 is_move,
                 span,
-            } => self.lower_closure(params, ret.as_ref(), body, *is_move, *span),
+            } => self.lower_closure(
+                params,
+                ret.as_ref(),
+                body,
+                *is_move,
+                &crate::closures::ClosureHint::of(expected),
+                *span,
+            ),
 
             Expr::Compose { functions, span } => self.lower_compose(functions, *span),
 
@@ -637,7 +644,7 @@ impl Lowerer {
 
     /// Lower an `if` in value position, from either `Expr::If` or a block's trailing
     /// `Stmt::If`. An `if` is a value only with an `else`; otherwise it yields unit.
-    pub(super) fn lower_if_expr(
+    pub(crate) fn lower_if_expr(
         &mut self,
         condition: &ast_types::Expr,
         then_block: &[ast_types::Stmt],

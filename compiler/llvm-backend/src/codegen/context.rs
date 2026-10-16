@@ -267,6 +267,9 @@ pub(crate) enum DropTarget {
     /// a plan of its type made at the release, so that the one flag the environment
     /// carries for it is all a body consuming the value has to clear.
     Captured(Type),
+    /// A function value: give back the count it holds of its closure's environment,
+    /// which the last count releases.
+    FunctionValue,
 }
 
 /// Central state container for LLVM IR code generation.

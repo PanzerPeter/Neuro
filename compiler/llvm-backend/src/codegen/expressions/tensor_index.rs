@@ -175,7 +175,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let strides = row_major_strides(&shape);
         let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
         self.write_tensor_element(handle, elem_llvm, base, val)?;
-        self.mark_moved_for_drop(value);
+        self.mark_moved_for_drop(value)?;
         Ok(())
     }
 

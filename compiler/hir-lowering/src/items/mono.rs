@@ -612,3 +612,40 @@ pub(crate) fn generic_name_sets(
         consts.iter().map(|g| g.name.name.clone()).collect(),
     )
 }
+
+/// Whether `ty` names a type or const parameter of `gnames` / `cnames` that `subst` /
+/// `const_subst` has not bound yet, so a context written in it fixes nothing there.
+pub(crate) fn mentions_any(
+    ty: &ast_types::Type,
+    gnames: &std::collections::HashSet<String>,
+    cnames: &std::collections::HashSet<String>,
+    subst: &std::collections::HashMap<String, neuro_hir::HirType>,
+    const_subst: &std::collections::HashMap<String, u64>,
+) -> bool {
+    let open_type = |name: &str| gnames.contains(name) && !subst.contains_key(name);
+    let open_const = |name: &str| cnames.contains(name) && !const_subst.contains_key(name);
+    let inner = |ty: &ast_types::Type| mentions_any(ty, gnames, cnames, subst, const_subst);
+    match ty {
+        ast_types::Type::Named(ident) => open_type(&ident.name) || open_const(&ident.name),
+        ast_types::Type::Reference { inner: of, .. }
+        | ast_types::Type::Slice { element: of, .. } => inner(of),
+        ast_types::Type::Array { element, size, .. } => {
+            matches!(size, ast_types::ArraySize::Const(id) if open_const(&id.name))
+                || inner(element)
+        }
+        ast_types::Type::Tuple { elements, .. } => elements.iter().any(inner),
+        ast_types::Type::Generic { args, .. } => args.iter().any(|arg| match arg {
+            ast_types::GenericArg::Type(ty) => inner(ty),
+            ast_types::GenericArg::Const { .. } => false,
+        }),
+        ast_types::Type::Function { params, ret, .. } => params.iter().any(inner) || inner(ret),
+        ast_types::Type::Tensor {
+            element_type,
+            shape,
+            ..
+        } => shape.iter().any(
+            |dim| matches!(&dim.extent, ast_types::TensorExtent::Param(id) if open_const(&id.name)),
+        ) || inner(element_type),
+        ast_types::Type::ImplTrait { .. } | ast_types::Type::DynTrait { .. } => false,
+    }
+}

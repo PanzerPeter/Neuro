@@ -189,3 +189,81 @@ fn a_nested_closure_copies_the_reference_its_enclosing_closure_borrowed() {
     assert_eq!(inner.captures[0].name, "n");
     assert_eq!(inner.captures[0].ty, mut_ref(HirType::I32));
 }
+
+/// The type of the closure `binding` is initialized with in `main`.
+fn closure_type(program: &neuro_hir::HirProgram, binding: &str) -> HirType {
+    binding_init(function_body(program, "main"), binding)
+        .ty
+        .clone()
+}
+
+fn function_type(params: Vec<HirType>, ret: HirType) -> HirType {
+    HirType::Function {
+        params,
+        ret: Box::new(ret),
+    }
+}
+
+/// A parameter with no annotation takes the type the binding's annotation gives it, and
+/// a block body with no return type returns its last expression, as the checker infers.
+#[test]
+fn a_closure_takes_its_signature_from_its_context_and_body() {
+    let program = lower(
+        "func main() -> i32 {
+            val square: (i32) -> i32 = |x| x * x
+            val widen = |x: i32| {
+                val y = x + 1
+                y as i64
+            }
+            val sign = |x: i32| { if x < 0 { -1 } else { 1 } }
+            val unit = |x: i32| { val y = x }
+            square(2) + widen(1) as i32 + sign(3)
+        }",
+    );
+    assert_eq!(
+        closure_type(&program, "square"),
+        function_type(vec![HirType::I32], HirType::I32)
+    );
+    assert_eq!(
+        closure_type(&program, "widen"),
+        function_type(vec![HirType::I32], HirType::I64)
+    );
+    assert_eq!(
+        closure_type(&program, "sign"),
+        function_type(vec![HirType::I32], HirType::I32)
+    );
+    assert_eq!(
+        closure_type(&program, "unit"),
+        function_type(vec![HirType::I32], HirType::Void)
+    );
+}
+
+/// A closure literal handed to a generic higher-order function waits for the other
+/// arguments, takes what they bound, and binds the rest through its own result.
+#[test]
+fn a_closure_argument_infers_a_generic_instance() {
+    let program = lower(
+        "func first<T, U>(f: (T) -> U, value: T) -> U { f(value) }
+        func main() -> i32 {
+            val wide = first(|x| x as i64 * 2, 7)
+            wide as i32
+        }",
+    );
+    assert!(
+        super::function_names(&program)
+            .iter()
+            .any(|name| name.starts_with("first$") && name.contains("i64")),
+        "{:?}",
+        super::function_names(&program)
+    );
+    let init = binding_init(function_body(&program, "main"), "wide");
+    let HirExprKind::Call { args, .. } = &init.kind else {
+        panic!("expected a call, got {:?}", init.kind);
+    };
+    assert_eq!(
+        args[0].ty,
+        function_type(vec![HirType::I32], HirType::I64),
+        "the closure keeps its own position"
+    );
+    assert_eq!(args[1].ty, HirType::I32);
+}

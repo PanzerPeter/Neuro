@@ -350,12 +350,6 @@ impl TypeChecker {
         // displaces an owned value frees what the borrow points into. Tested before the RHS,
         // like a whole-binding store.
         self.refuse_store_while_borrowed(place);
-        if self.holds_function_value(place_ty) && self.reached_through_reference(place) {
-            self.record_error(TypeError::FunctionValueEscapes {
-                problem: "be stored through a reference".to_string(),
-                span,
-            });
-        }
 
         match place {
             Place::Deref { .. } => self.check_pool_ref_store(place_ty, value, span),
@@ -421,8 +415,8 @@ impl TypeChecker {
             .is_some_and(|ty| self.nearest_reference(object, &ty).is_some())
     }
 
-    /// Whether a value of `ty` is, or holds, a function value. A closure's captures live
-    /// in the frame that wrote it, so the language keeps such a value inside that frame.
+    /// Whether a value of `ty` is, or holds, a function value, which may carry a borrow
+    /// in its captures.
     pub(crate) fn holds_function_value(&self, ty: &Type) -> bool {
         self.holds_function_within(ty, &mut std::collections::HashSet::new())
     }
@@ -463,16 +457,6 @@ impl TypeChecker {
                 .iter()
                 .any(|element| self.holds_function_within(element, seen)),
             _ => false,
-        }
-    }
-
-    /// Refuse a declared return type that is or holds a function value.
-    pub(crate) fn refuse_function_valued_return(&mut self, return_type: &Type, span: Span) {
-        if self.holds_function_value(return_type) {
-            self.record_error(TypeError::FunctionValueEscapes {
-                problem: "be returned".to_string(),
-                span,
-            });
         }
     }
 

@@ -153,6 +153,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.emit_collection_free(storage_ptr, &collection_ty)?
             }
             Some(DropTarget::TensorBuffer) => self.emit_tensor_buffer_free(storage_ptr)?,
+            Some(DropTarget::FunctionValue) => self.emit_function_release(storage_ptr)?,
             Some(DropTarget::EnumPayload(enum_name)) => {
                 self.emit_enum_payload_drop(storage_ptr, &enum_name)?
             }
@@ -239,7 +240,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Emit a single flag-guarded destructor:
     /// `if drop_flag { destroy(&storage); drop_flag = false }`.
-    pub(super) fn emit_one_drop(
+    pub(crate) fn emit_one_drop(
         &mut self,
         storage_ptr: PointerValue<'ctx>,
         flag_ptr: PointerValue<'ctx>,
@@ -280,6 +281,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             DropTarget::HeapString => self.emit_heap_string_free(storage_ptr)?,
             DropTarget::TensorBuffer => self.emit_tensor_buffer_free(storage_ptr)?,
+            DropTarget::FunctionValue => self.emit_function_release(storage_ptr)?,
             DropTarget::EnumPayload(enum_name) => {
                 let enum_name = enum_name.clone();
                 self.emit_enum_payload_drop(storage_ptr, &enum_name)?

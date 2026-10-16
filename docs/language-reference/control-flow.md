@@ -698,14 +698,17 @@ adapter type of their own:
 - `.filter(p)` drops each element for which `p(element)` is false.
 
 ```neuro
-for value in [1, 2, 3, 4].map(|x: i32| -> i32 { x * 2 }) {
+for value in [1, 2, 3, 4].map(|x| x * 2) {
     println("{value}")        // 2, 4, 6, 8
 }
 
-for value in (0..12).filter(|x: i32| -> bool { x % 4 == 0 }) {
+for value in (0..12).filter(|x| x % 4 == 0) {
     println("{value}")        // 0, 4, 8
 }
 ```
+
+A closure literal's parameter takes the type of the element it is handed, so it needs no
+annotation.
 
 The chain runs left to right (a filter sees what the map before it produced)
 and composes to any depth. Each element is pulled through the whole chain one at
@@ -713,8 +716,8 @@ a time; nothing in between is materialized:
 
 ```neuro
 for value in [1, 2, 3, 4, 5]
-    .map(|x: i32| -> i32 { x * x })
-    .filter(|x: i32| -> bool { x > 4 }) {
+    .map(|x| x * x)
+    .filter(|x| x > 4) {
     println("{value}")        // 9, 16, 25
 }
 ```

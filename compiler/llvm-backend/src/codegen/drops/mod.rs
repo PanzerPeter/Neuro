@@ -18,18 +18,16 @@ use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
 
 mod displace;
 mod emit;
+mod functions;
 mod moves;
+
+pub(crate) use functions::{ENV_HEADER_FIELDS, is_pure_place};
 mod owned_strings;
 mod string_positions;
 
 /// The name an unbound temporary's drop entry is registered under. `__` is rejected in
 /// every declared name, so no move site can reach the entry.
 const UNBOUND_TEMPORARY: &str = "__unbound_temporary";
-
-/// The name a closure environment's owned capture is registered under in the scope
-/// that built the closure. Unspellable, so no binding's move reaches it there; inside
-/// the body the capture's own name reaches it through `captured_drop_entries`.
-const CAPTURED_ENVIRONMENT: &str = "__closure_environment";
 
 /// The drop flag of a `string` position inside a holder. It is the one flag that
 /// starts `false`, so its name is what tells an armed position from a planned one.
@@ -78,6 +76,8 @@ impl<'ctx> CodegenContext<'ctx> {
             // So does a tensor: every construction allocates its buffer, and the type
             // says so, and there is no borrowed value of tensor type to confuse it with.
             Type::Tensor { .. } => Some(DropTarget::TensorBuffer),
+            // A function value holds a count of its environment.
+            Type::Function { .. } => Some(DropTarget::FunctionValue),
             Type::Struct(name) if self.drop_types.contains(name) => {
                 Some(DropTarget::UserDrop(name.clone()))
             }
@@ -104,7 +104,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// proven to own one.
     pub(crate) fn holds_owner(&self, ty: &Type) -> bool {
         match ty {
-            Type::Collection { .. } | Type::Tensor { .. } => true,
+            Type::Collection { .. } | Type::Tensor { .. } | Type::Function { .. } => true,
             Type::Struct(name) => {
                 self.drop_types.contains(name)
                     || self
@@ -172,13 +172,13 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Destroy `value`, the result of `expr`, when it is a fresh value no binding owns
-    /// and it runs a user destructor: a statement nothing reads, or a temporary only read
-    /// from (`make().id`). No scope exit reaches such a value, so without this its
-    /// destructor never ran (BUG-047).
+    /// and it runs a user destructor or holds a function value: a statement nothing
+    /// reads, or a temporary only read from (`make().id`). No scope exit reaches such a
+    /// value, so without this its destructor never ran (BUG-047).
     ///
-    /// Only a call, a struct literal or an enum construction is fresh; anything else may
-    /// be a read of a value some binding still owns. Inside a `pool` it does nothing: the
-    /// arena, not a scope, owns what the block allocates.
+    /// Only a call, a struct literal, an enum construction or a closure literal is fresh;
+    /// anything else may be a read of a value some binding still owns. Inside a `pool` it
+    /// does nothing: the arena, not a scope, owns what the block allocates.
     pub(crate) fn drop_unbound_temporary(
         &mut self,
         expr: &HirExpr,
@@ -189,9 +189,11 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::Call { .. }
                 | HirExprKind::StructLiteral { .. }
                 | HirExprKind::EnumConstruct { .. }
+                | HirExprKind::Closure { .. }
         );
         let ty = Type::from_hir(&expr.ty);
-        if !fresh || self.pool_depth > 0 || !self.holds_user_drop(&ty) {
+        if !fresh || self.pool_depth > 0 || !(self.holds_user_drop(&ty) || self.holds_function(&ty))
+        {
             return Ok(());
         }
         if self.current_block_terminated() {
@@ -432,6 +434,27 @@ impl<'ctx> CodegenContext<'ctx> {
             .map(|_| DropTarget::Captured(ty.clone()))
     }
 
+    /// Whether a closure environment taking the binding `name` of `ty` by value owns what
+    /// it took. A value that shares on copy was given a count of its own by the move. A
+    /// `PoolAware` value stays the arena's, whose sweep releases it.
+    pub(crate) fn capture_ownership(
+        &mut self,
+        name: &str,
+        ty: &Type,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let bool_ty = self.context.bool_type();
+        if self.shares_on_copy(ty) {
+            return Ok(bool_ty.const_int(1, false));
+        }
+        if self
+            .live_drop_entry(name)
+            .is_some_and(|entry| matches!(entry.target, DropTarget::PoolRegistered))
+        {
+            return Ok(bool_ty.const_zero());
+        }
+        self.owns_binding_now(name)
+    }
+
     /// Whether the binding `name` owns its value right now, read from its drop flag. A
     /// binding with no entry owns nothing this frame could release.
     pub(crate) fn owns_binding_now(&mut self, name: &str) -> CodegenResult<IntValue<'ctx>> {
@@ -443,25 +466,6 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_load(bool_ty, flag_ptr, "capture.owns")?
             .into_int_value())
-    }
-
-    /// Release, at the end of the innermost scope, the capture a closure environment
-    /// holds at `storage_ptr`, while the flag at `flag_ptr` still says it owns it.
-    pub(crate) fn register_captured_drop(
-        &mut self,
-        storage_ptr: PointerValue<'ctx>,
-        flag_ptr: PointerValue<'ctx>,
-        target: DropTarget,
-    ) {
-        if let Some(scope) = self.drop_scopes.last_mut() {
-            scope.push(DropEntry {
-                name: CAPTURED_ENVIRONMENT.to_string(),
-                storage_ptr,
-                flag_ptr,
-                target,
-                held: Vec::new(),
-            });
-        }
     }
 
     /// Release a value a closure environment owned, whole: plan its owners now, under

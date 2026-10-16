@@ -91,7 +91,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // Binding a place into a new owner moves it (`val b = a`): clear the source's
             // drop flag so it is not also dropped. Then register the new binding.
             if let Some(expr) = init {
-                self.mark_moved_for_drop(expr);
+                self.mark_moved_for_drop(expr)?;
             }
             // Bound only now: until here the initializer's names still mean the bindings
             // it reads, so `val x = x` disowns the `x` it shadows rather than itself.
@@ -260,7 +260,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // Assigning a place moves it into the target, so the source stops being an owner
         // and the target starts being one.
         if !assigns_from_itself {
-            self.mark_moved_for_drop(value);
+            self.mark_moved_for_drop(value)?;
         }
         if let Some((flag_ptr, target)) = rearm {
             self.rearm_drop_flag(flag_ptr, &target, value)?;
@@ -328,7 +328,7 @@ impl<'ctx> CodegenContext<'ctx> {
             CodegenError::LlvmError(format!("failed to store through reference: {}", e))
         })?;
         self.own_strings_stored_through_borrow(ptr, &referent, &owners)?;
-        self.mark_moved_for_drop(value);
+        self.mark_moved_for_drop(value)?;
         Ok(())
     }
 
@@ -343,7 +343,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             // Returning a place moves it out, so it must not be dropped; every other
             // live `Drop` binding in the function is destroyed before control leaves.
-            self.mark_moved_for_drop(expr);
+            self.mark_moved_for_drop(expr)?;
             self.emit_drops_through(0)?;
             self.builder
                 .build_return(Some(&ret_val))
@@ -550,7 +550,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         self.builder.build_store(slot, val)?;
                     }
                     // A broken-out place is moved out of the loop and must not be dropped.
-                    self.mark_moved_for_drop(value_expr);
+                    self.mark_moved_for_drop(value_expr)?;
                 }
 
                 // Destroy every binding from here down to the loop's body scope before

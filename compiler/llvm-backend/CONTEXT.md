@@ -1194,16 +1194,36 @@ enclosing literal uses, so a nested rendering's scratch buffers are freed once c
 lowers `Type::Function` to that two-pointer struct. `declare_closure` / `codegen_closure` emit each
 `HirItem::Closure` as a function `(env_ptr, params...) -> ret` whose prologue binds each capture to
 its field of the environment struct, in place, so a `move` closure's writes to its own copy last
-from one call to the next. `codegen_closure_value` allocates that struct in the **defining frame**,
-stores each capture (the value, or `&name` for a `borrowed` one), and pairs the closure function
-pointer with it. `closure_env_layout` appends one `i1` ownership flag per capture that owns
-something. At the value site such a capture's source is disowned (`mark_moved_for_drop`), its flag
-takes the source's ownership (`owns_binding_now`), and the innermost scope registers the field for
-release under that flag (`register_captured_drop`, `DropTarget::Captured`, which plans the value's
-owners fresh at the release so one flag covers them all). Inside the body the same field and flag
-are the capture's drop entry (`captured_drop_entries`, consulted by `live_drop_entry`, never
-emitted at the body's exits), so a body that moves the capture out, a `once` call, clears the flag
-and the scope releases nothing twice. `codegen_call_dispatch` routes a call whose callee is a local variable to
+from one call to the next. `codegen_closure_value` allocates that struct with `malloc` (never the
+arena: it may outlive a `pool`), stores each capture (the value, or `&name` for a `borrowed` one),
+and pairs the closure function pointer with it; a closure with no captures pairs it with null.
+`closure_env_layout` opens with a header (`ENV_HEADER_FIELDS`: an `i64` count, starting at 1, and
+the address of the closure's release `<closure>.env.drop`, which `declare_closure` declares and
+`codegen_closure` defines after the body) and appends one `i1` ownership flag per capture that
+owns something. At the value site such a capture's source is disowned (`mark_moved_for_drop`) and
+its flag takes the source's ownership (`capture_ownership`: a function value always owns the
+count its copy took, a `PoolAware` value stays the arena's). The release frees each owned capture
+under its flag (`DropTarget::Captured`, which plans the value's owners fresh at the release so one
+flag covers them all), then the block. Inside the body the same field and flag are the capture's
+drop entry (`captured_drop_entries`, consulted by `live_drop_entry`, never emitted at the body's
+exits), so a body that moves the capture out, a `once` call, clears the flag and the release frees
+nothing twice. Reading a part of an owned capture that owns nothing (`n.id`) disowns nothing.
+
+**Counting.** `drops/functions.rs`. Every function value is a typed owner
+(`DropTarget::FunctionValue`, `holds_owner`), so the planner releases one in a binding, a
+parameter, a field, an element or a payload: `__neuro_fn_release` takes a count back and calls the
+release at zero; `__neuro_fn_retain` adds one; both skip a null environment and are built on first
+use. Because the language copies a function value freely, a type that `shares_on_copy` (function
+values, and holders of nothing else) is copied, not moved: `mark_moved_for_drop` hands it to
+`retain_copied`, which takes a count of every function value in it when the source is a place it
+can read again (`is_pure_place`), while a fresh value (a literal, a call's result) hands its count
+over. A holder that owns anything else keeps the plain move, which the checker guarantees.
+`release_fresh_function` gives back what a read-only consumer leaves behind: a closure literal or
+call result called in place (`codegen_indirect_call`), and an outlined tensor operation's function
+argument, for which `codegen_call` takes no count since MLIR's body gives none back. A `match` arm
+binding a function payload takes a count unless the arm disowned the scrutinee
+(`ArmOwnership::Arm { shares }`). A closure body registers its parameters that hold a function
+value, which every caller counted. `codegen_call_dispatch` routes a call whose callee is a local variable to
 `codegen_indirect_call`, which extracts both pointers and issues an indirect call with the
 environment as the hidden first argument.
 
@@ -1217,8 +1237,8 @@ leaves its argument's owner bit in `forwarded_string_owner` under the lifted nam
 reached any other way (a parameter, a field, a `mut` binding) stays unresolved, so its arguments
 move and its result owns nothing. That leaks rather than frees a buffer something still holds.
 
-The closure environment is frame-local and its owned captures die with the scope that built it,
-so the checker keeps every closure that borrows or owns a non-`Copy` capture inside that scope.
+The environment outlives the scope that built it, and its owned captures with it. A borrowed
+capture's address does not, so the checker keeps every closure that may borrow inside that scope.
 
 ## Dynamic Dispatch ABI
 `codegen/dispatch.rs`. `emit_vtables` walks every `impl Trait for Type` whose trait is

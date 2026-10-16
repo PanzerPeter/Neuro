@@ -18,7 +18,7 @@ use ast_types::{Attribute, Expr, FunctionDef, GenericArg, Item};
 use shared_types::{Identifier, Literal, Span};
 
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, TensorAxis, Type};
+use crate::types::{ArrayLen, FunctionMode, TensorAxis, Type};
 
 use super::TypeChecker;
 
@@ -292,19 +292,23 @@ impl TypeChecker {
         let Some(Type::Tensor { element, shape }) = tensor else {
             return Some(Type::Void);
         };
-        let fixed = [
-            Type::U64,
-            Type::Reference {
-                inner: Box::new(Type::Slice(element)),
-                mutable: true,
-            },
-        ];
+        let fixed = Type::Function {
+            params: vec![
+                Type::U64,
+                Type::Reference {
+                    inner: Box::new(Type::Slice(element)),
+                    mutable: true,
+                },
+            ],
+            ret: Box::new(Type::Void),
+            mode: FunctionMode::Shared,
+        };
         self.check_closure(
             params,
             ret.as_ref(),
             body,
             false,
-            Some((&fixed, &Type::Void)),
+            Some(&fixed),
             *closure_span,
         );
         self.check_partition_share(&out.name, &shape, span);

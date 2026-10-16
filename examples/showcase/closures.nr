@@ -9,6 +9,10 @@
 //   · capture modes: a closure that writes a local borrows it `&mut` and is passed to a
 //     `mut (..)` parameter; one that reads a heap `string` or pushes to a `Vec` borrows
 //     it; a `move` closure that gives its `string` away is `once`
+//   · inference: closures with no annotations, typed by the generic function they are
+//     handed to, whose type parameters they help infer
+//   · escaping closures: built inside a function and returned in a struct, kept in an
+//     `Option` and matched back out, and a `move` closure returned with the `string` it owns
 //
 // The results are composed into a single deterministic exit code.
 
@@ -37,6 +41,36 @@ func finish(report: once () -> u64) -> u64 {
 
 func shout(message: string) -> u64 {
     message.len()
+}
+
+// Fold an array into one value. `T` and `U` come from the call, and the closure literal
+// handed to `f` takes its parameter types from them, so it needs no annotations.
+func fold<T: Copy, U>(xs: [T; 4], init: U, f: (U, T) -> U) -> U {
+    mut acc = init
+    for i in 0..4 {
+        acc = f(acc, xs[i])
+    }
+    acc
+}
+
+// A transform chosen at run time and kept in a struct field. The closure is built here and
+// returned inside the struct, so it outlives the call that made it.
+struct Transform {
+    label: string,
+    apply: (i32) -> i32
+}
+
+func pick_transform(offset: i32, squared: bool) -> Transform {
+    if squared {
+        Transform { label: "square", apply: |x| x * x + offset }
+    } else {
+        Transform { label: "shift", apply: |x| x + offset }
+    }
+}
+
+// A `move` closure owns the `string` it captured, so it may be returned as well.
+func length_of(word: string) -> () -> u64 {
+    move || word.len()
 }
 
 struct Scaler {
@@ -96,6 +130,28 @@ func main() -> i32 {
 
     val captured = count + (seen.len() as i32) + measured + (announced as i32)
     val total = biased + scaled + doubled + captured
-    println("total                                = {total}")
-    total                                            // 90 + 10 + 4 + 30 + 9 = 143
+    // Inference: none of these closures is annotated.
+    val summed = fold(data, 0, |acc, x| acc + x)                               // 10
+    val widest = fold(data, 0i64, |acc, x| if x as i64 > acc { x as i64 } else { acc })   // 4
+
+    // Escaping closures: each was built inside a function that has since returned.
+    val chosen = pick_transform(1, false)
+    val shift = chosen.apply
+    val stored = Option::Some(pick_transform(0, true))
+    val square = match stored {
+        Option::Some(t) => t.apply,
+        Option::None => shift
+    }
+    val escaped = shift(2) + square(3)                                         // 3 + 9 = 12
+    val count_word = length_of("ab" + "cd")
+    val owned = count_word() as i32                                            // 4
+
+    println("generic fold      |acc, x| acc + x   = {summed}")
+    println("generic fold      widest as i64      = {widest}")
+    println("returned closure  {chosen.label}(2) + square(3) = {escaped}")
+    println("owned capture     word.len()         = {owned}")
+
+    val inferred = summed + (widest as i32) + escaped + owned
+    println("total                                = {total + inferred}")
+    total + inferred                                 // 143 + 10 + 4 + 12 + 4 = 173
 }

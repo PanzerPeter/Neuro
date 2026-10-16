@@ -16,6 +16,7 @@ use neuro_hir::{
 };
 
 use crate::codegen::context::{CodegenContext, DropTarget};
+use crate::codegen::drops::is_pure_place;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -36,7 +37,12 @@ pub(crate) enum ArmOwnership<'e> {
     /// A `match` arm: the caller has opened a scope for these bindings, and the payload
     /// they take is theirs for the arm's duration. `scrutinee` is the expression it came
     /// out of, which is what says whether a `string` payload is a buffer of its own.
-    Arm { scrutinee: &'e HirExpr },
+    /// `shares` says the scrutinee keeps its function values, so a binding of one takes
+    /// a count of its own.
+    Arm {
+        scrutinee: &'e HirExpr,
+        shares: bool,
+    },
     /// A `val ... else` binding, whose release belongs to the binding it introduces into
     /// the enclosing scope rather than to the pattern.
     Enclosing,
@@ -71,13 +77,21 @@ impl<'ctx> CodegenContext<'ctx> {
         // owner the scrutinee holds is disowned at once: a part of the variant the taken
         // arm did not bind leaks rather than being released twice. An arm that binds
         // nothing takes nothing, so it hands the scrutinee its flags back.
+        //
+        // A scrutinee whose only owners are function values is copied, not moved, since
+        // the language lets it be read again: it keeps its counts, and a binding takes
+        // its own. So does a binding out of a place nothing here disowned, one reached
+        // through a borrow.
+        let copies = self.shares_on_copy(scrut_sem.referent());
         let mut disowned = Vec::new();
         if let HirExprKind::Variable(name) = &scrutinee.kind
+            && !copies
             && arms.iter().any(|arm| !arm.bindings.is_empty())
         {
             let name = name.clone();
             disowned = self.mark_held_moved_for_drop(&name)?;
         }
+        let shares = is_pure_place(scrutinee) && disowned.is_empty();
 
         let is_void = matches!(result_ty, Type::Void);
         let result_slot = if is_void {
@@ -122,7 +136,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             self.codegen_arm_body(
                 arm,
-                scrutinee,
+                ArmOwnership::Arm { scrutinee, shares },
                 scrut_alloca,
                 scrut_llvm,
                 &scrut_sem,
@@ -225,7 +239,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn codegen_arm_body(
         &mut self,
         arm: &HirMatchArm,
-        scrutinee: &HirExpr,
+        ownership: ArmOwnership<'_>,
         scrut_alloca: PointerValue<'ctx>,
         scrut_llvm: BasicTypeEnum<'ctx>,
         scrut_sem: &Type,
@@ -242,7 +256,7 @@ impl<'ctx> CodegenContext<'ctx> {
             scrut_alloca,
             scrut_llvm,
             scrut_sem,
-            ArmOwnership::Arm { scrutinee },
+            ownership,
         )?;
 
         if let Some(guard) = &arm.guard {
@@ -260,7 +274,7 @@ impl<'ctx> CodegenContext<'ctx> {
             Some(slot) => {
                 let val = self.codegen_expr(&arm.body)?;
                 if !self.current_block_terminated() {
-                    self.mark_moved_for_drop(&arm.body);
+                    self.mark_moved_for_drop(&arm.body)?;
                     self.builder.build_store(slot, val)?;
                 }
             }
@@ -325,7 +339,10 @@ impl<'ctx> CodegenContext<'ctx> {
 
             let payload = matches!(b.source, HirBindingSource::EnumPayload { .. });
             match (ownership, payload) {
-                (ArmOwnership::Arm { scrutinee }, true) => {
+                (ArmOwnership::Arm { scrutinee, shares }, true) => {
+                    if shares && self.holds_function(&sem) {
+                        self.retain_held_functions(alloca, &sem)?;
+                    }
                     self.register_arm_payload(&b.name, alloca, &sem, scrutinee)?;
                 }
                 (ArmOwnership::EnclosingString { scrutinee }, true)

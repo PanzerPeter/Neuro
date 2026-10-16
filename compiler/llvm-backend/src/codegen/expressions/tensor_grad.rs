@@ -105,7 +105,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         "a derivative does not lower to a tensor handle".to_string(),
                     ));
                 };
-                self.mark_moved_for_drop(derivative);
+                self.mark_moved_for_drop(derivative)?;
                 // A second `.backward()` replaces the derivative, so the old one is released
                 // rather than leaked.
                 match slot {
@@ -131,7 +131,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a detached receiver does not lower to a tensor handle".to_string(),
             ));
         };
-        self.mark_moved_for_drop(receiver);
+        self.mark_moved_for_drop(receiver)?;
         self.release_derivatives(handle)?;
         Ok(handle.into())
     }
