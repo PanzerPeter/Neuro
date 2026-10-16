@@ -1208,8 +1208,9 @@ impl<'f> BodyEmitter<'f> {
     }
 
     /// A math function on one float: the `math` dialect op of its name, which the GPU
-    /// conversion turns into a call into the vendor's device math library, or `sign`'s two
-    /// compares, as the LLVM backend writes it.
+    /// conversion turns into a call into the vendor's device math library, `sign`'s two
+    /// compares, as the LLVM backend writes it, or `abs`'s cleared sign bit, which is
+    /// `fabs` exactly.
     fn math(
         &mut self,
         op: HirMathOp,
@@ -1221,7 +1222,9 @@ impl<'f> BodyEmitter<'f> {
         let Some(mlir) = scalar_type(&expr.ty).filter(|_| is_float(&expr.ty)) else {
             return Err(Refused::new(expr.span, "a math function on a non-float"));
         };
-        if !self.math && op != HirMathOp::Sign {
+        // `sign` is two compares and `abs` clears the sign bit, so neither needs the device
+        // library.
+        if !self.math && !matches!(op, HirMathOp::Sign | HirMathOp::Abs) {
             return Err(Refused::new(expr.span, NO_DEVICE_MATH));
         }
         let value = self.expr(operand, exit)?;
@@ -1230,7 +1233,16 @@ impl<'f> BodyEmitter<'f> {
             HirMathOp::Log => "log",
             HirMathOp::Sqrt => "sqrt",
             HirMathOp::Tanh => "tanh",
-            HirMathOp::Abs => "absf",
+            HirMathOp::Abs => {
+                let (bits, mask) = match mlir {
+                    "f32" => ("i32", i32::MAX as i64),
+                    _ => ("i64", i64::MAX),
+                };
+                let raw = self.assign(&format!("arith.bitcast {value} : {mlir} to {bits}"));
+                let mask = self.assign(&format!("arith.constant {mask} : {bits}"));
+                let magnitude = self.assign(&format!("arith.andi {raw}, {mask} : {bits}"));
+                return Ok(self.assign(&format!("arith.bitcast {magnitude} : {bits} to {mlir}")));
+            }
             HirMathOp::Pow => {
                 let Some(exponent) = exponent else {
                     return Err(Refused::new(expr.span, "a `.pow` without an exponent"));

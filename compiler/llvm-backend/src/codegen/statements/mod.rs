@@ -344,12 +344,12 @@ impl<'ctx> CodegenContext<'ctx> {
             // Returning a place moves it out, so it must not be dropped; every other
             // live `Drop` binding in the function is destroyed before control leaves.
             self.mark_moved_for_drop(expr)?;
-            self.emit_drops_through(0)?;
+            self.emit_exit_through(0, outlives_arena(&expr.ty))?;
             self.builder
                 .build_return(Some(&ret_val))
                 .map_err(|e| CodegenError::LlvmError(format!("failed to build return: {}", e)))?;
         } else {
-            self.emit_drops_through(0)?;
+            self.emit_exit_through(0, true)?;
             self.builder.build_return(None).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to build void return: {}", e))
             })?;
@@ -555,7 +555,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 // Destroy every binding from here down to the loop's body scope before
                 // leaving the loop.
-                self.emit_drops_through(drop_depth)?;
+                self.emit_exit_through(drop_depth, true)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block()
                     && current_bb.get_terminator().is_none()
@@ -576,7 +576,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 // Re-entering the loop ends this iteration's body scope, so its bindings
                 // are destroyed before the back-edge.
-                self.emit_drops_through(drop_depth)?;
+                self.emit_exit_through(drop_depth, true)?;
 
                 if let Some(current_bb) = self.builder.get_insert_block()
                     && current_bb.get_terminator().is_none()
@@ -661,4 +661,26 @@ impl<'ctx> CodegenContext<'ctx> {
         self.const_values.insert(def.name.clone(), val);
         Ok(())
     }
+}
+
+/// Whether a value of `ty` holds no address, so no arena release can leave it dangling.
+fn outlives_arena(ty: &HirType) -> bool {
+    matches!(
+        ty,
+        HirType::I8
+            | HirType::I16
+            | HirType::I32
+            | HirType::I64
+            | HirType::U8
+            | HirType::U16
+            | HirType::U32
+            | HirType::U64
+            | HirType::F16
+            | HirType::BF16
+            | HirType::F32
+            | HirType::F64
+            | HirType::Bool
+            | HirType::Char
+            | HirType::Void
+    )
 }

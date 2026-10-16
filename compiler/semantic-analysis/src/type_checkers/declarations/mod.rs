@@ -43,14 +43,11 @@ const DERIVABLE_TRAITS: &[&str] = &[
 
 /// The attributes some pass acts on. The set is fixed by the language, so any other name is an error:
 /// ignoring it would let a misspelled `@no_grad` leave a call differentiated.
-const IMPLEMENTED_ATTRIBUTES: &[&str] = &[
-    DERIVE_ATTRIBUTE,
-    "grad",
-    "no_grad",
-    "gpu",
-    "kernel",
-    "allow",
-];
+const IMPLEMENTED_ATTRIBUTES: &[&str] =
+    &[DERIVE_ATTRIBUTE, "grad", "no_grad", "gpu", "kernel", ALLOW];
+
+/// The lint opt-out, the one attribute a `const` takes.
+const ALLOW: &str = "allow";
 
 /// Attributes the spec names that no pass acts on yet. Accepting one would be the silent
 /// no-op the fixed set exists to prevent.
@@ -131,6 +128,16 @@ impl TypeChecker {
                 Item::Function(def) => def.attributes.iter().collect(),
                 Item::Struct(def) => def.attributes.iter().collect(),
                 Item::Impl(def) => def.methods.iter().flat_map(|m| &m.attributes).collect(),
+                Item::Const(def) => {
+                    // A constant has no body for any other attribute to act on.
+                    for attr in def.attributes.iter().filter(|a| a.name.name != ALLOW) {
+                        self.record_error(TypeError::AttributeOnConst {
+                            name: attr.name.name.clone(),
+                            span: attr.span,
+                        });
+                    }
+                    continue;
+                }
                 _ => continue,
             };
             for attr in attributes {

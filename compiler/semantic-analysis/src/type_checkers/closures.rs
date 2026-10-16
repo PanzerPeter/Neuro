@@ -176,6 +176,23 @@ impl TypeChecker {
         }
     }
 
+    /// Refuse a closure literal holding a `&mut` borrow, written as the function a
+    /// built-in calls per element: its borrow starts after the built-in read its
+    /// receiver, so nothing stops it from writing what the built-in is walking.
+    /// `slot` is the argument's [`function_value_position`].
+    ///
+    /// [`function_value_position`]: super::statements::function_value_position
+    pub(crate) fn refuse_mutating_closure_literal(&mut self, slot: Option<Span>) {
+        if let Some(span) = slot
+            && self
+                .scope_bound_closures
+                .get(&span)
+                .is_some_and(|borrows| borrows.iter().any(|(_, exclusive)| *exclusive))
+        {
+            self.record_error(TypeError::ScopeBoundClosureStored { span });
+        }
+    }
+
     /// A function-typed parameter may be handed a closure that borrows from the
     /// caller's frame, so the body keeps it in the bounds such a closure lives in.
     pub(crate) fn bind_function_param(&mut self, name: &str, ty: &Type) {

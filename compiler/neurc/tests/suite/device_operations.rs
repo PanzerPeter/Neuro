@@ -881,3 +881,41 @@ func main() -> i32 {
         );
     }
 }
+
+/// `.abs()` on a device clears the sign bit rather than calling the vendor's math library,
+/// so it is the host's `fabs` exactly: `-0.0` gives `+0.0`, and a kernel computes it too.
+#[cfg(target_os = "linux")]
+#[test]
+fn abs_on_the_device_is_the_hosts_bit_for_bit() {
+    const SOURCE: &str = r#"
+@kernel(threads: [4])
+func magnitudes(a: Tensor<f64, [4]>, out: KernelOut<Tensor<f64, [4]>>) {
+    val i = thread_id.x
+    if i < 4 {
+        unsafe { out[i] = a[i].abs() }
+    }
+}
+
+func main() -> i32 {
+    val a: Tensor<f32, [4]> = [-0.0, -1e-30, -1e30, 2.5]
+    val d: Tensor<f64, [4]> = [-0.0, -1e-300, -1e300, 2.5]
+    val dev = a.clone().to(Device::GPU(0)).abs().to(Device::CPU)
+    mut k: Tensor<f64, [4]> = Tensor::zeros()
+    magnitudes(d, &mut k)
+    val host = a.abs()
+    mut wrong = 0
+    for i in 0..4 {
+        if dev[i] != host[i] { wrong += 1 }
+        if k[i] != d[i].abs() { wrong += 1 }
+    }
+    println("{1.0f32 / dev[0]} {1.0 / k[0]}")
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "abs_on_device.nr", SOURCE, false);
+    if without_gpu(&output) || String::from_utf8_lossy(&output.stderr).contains("`@gpu` needs") {
+        return;
+    }
+    assert_ran(&output, 0, "inf inf\n");
+}

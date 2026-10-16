@@ -1202,7 +1202,12 @@ A cast whose operand is a compile-time constant (a float literal, a `const`, or 
 over those) that the target cannot hold is reported as the warning
 `float-cast-out-of-range`. The program still compiles, and the cast still saturates.
 Silence the warning with `@allow(float_cast_out_of_range)` on the enclosing function or
-method.
+method, or on the module-level `const` whose initializer holds the cast:
+
+```neuro
+@allow(float_cast_out_of_range)
+const CEILING: i32 = 1e20 as i32
+```
 
 ## Examples
 
@@ -1539,7 +1544,9 @@ that ordering is the reason to choose it.
 - **Keys** additionally need equality and, per map, a hash or a total order. The
   compiler supplies both for integer, `bool`, `char`, and `string` keys. A
   struct key needs `PartialEq` plus `Hashable` (`HashMap`), derived or written
-  by hand, or `PartialEq` plus `impl Comparable` (`BTreeMap`).
+  by hand, or `PartialEq` plus `impl Comparable` (`BTreeMap`). A type parameter
+  is a key when its bounds name the same traits and `Copy`
+  (`func count<K: Hashable + PartialEq + Copy>`).
 - **Float keys are rejected.** IEEE-754 comparison is a partial order, NaN
   compares false against everything, including itself, so a map keyed on a raw
   float could hold a key it can never find again. Use the prelude's validating

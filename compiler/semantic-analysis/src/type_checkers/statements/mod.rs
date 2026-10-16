@@ -5,7 +5,7 @@ use crate::symbol_table::pending_key;
 use crate::types::Type;
 
 use super::backward::gradient_view_root;
-use super::val_else::stmts_diverge;
+use super::val_else::{expr_diverges, stmts_diverge};
 use super::{LoopContext, TypeChecker};
 
 mod loops;
@@ -42,17 +42,6 @@ pub(crate) fn block_tail_closure(value: &Expr) -> Option<shared_types::Span> {
             },
             _ => None,
         },
-        _ => None,
-    }
-}
-
-/// The span a scope-bound binding may be named at when `value` is read whole by a
-/// built-in that calls it and keeps nothing: its own, if it is a bare binding. A borrowing
-/// closure literal written there stays refused: a tensor traversal marks its operands
-/// `noalias`, which a `&mut` capture of one would break.
-pub(crate) fn binding_position(value: &Expr) -> Option<shared_types::Span> {
-    match peel_parens(value) {
-        inner @ Expr::Identifier(_) => Some(inner.span()),
         _ => None,
     }
 }
@@ -437,7 +426,15 @@ impl TypeChecker {
                 // leaving the name undefined turned every later use of it into a
                 // second, misleading "undefined variable" report chasing an error
                 // already given.
-                if init_errored && matches!(final_ty, Type::Unknown) {
+                //
+                // In a program already refused, an `Unknown` that no divergence explains
+                // came from a value an earlier error left at `Unknown` (`val c = b.sum()`
+                // after `b`'s initializer failed), so it is bound the same way.
+                let poisoned = !self.errors.is_empty()
+                    && init
+                        .as_ref()
+                        .is_some_and(|init_expr| !expr_diverges(init_expr));
+                if (init_errored || poisoned) && matches!(final_ty, Type::Unknown) {
                     self.symbols.define_pending(&name.name, final_ty, *mutable);
                     self.symbols.commit_pending(&name.name);
                     return Some(());
@@ -502,7 +499,6 @@ impl TypeChecker {
             } => self.check_assign(place, *op, value, *span),
 
             Stmt::Return { value, span } => {
-                self.check_pool_return(*span);
                 if self.inferring_closure_return && self.current_function_return_type.is_none() {
                     self.record_error(TypeError::ClosureBlockNeedsReturnType { span: *span });
                 }
@@ -514,6 +510,7 @@ impl TypeChecker {
                 } else {
                     Type::Void
                 };
+                self.check_pool_return(&return_ty, *span);
 
                 // Check against expected return type (skip if return type is unknown)
                 if let Some(expected) = self.current_function_return_type.clone()
@@ -720,6 +717,7 @@ impl TypeChecker {
                     continue_moves: Vec::new(),
                 });
                 self.symbols.push_scope();
+                self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
                 if let Some(element_ty) = element_ty
@@ -826,6 +824,7 @@ impl TypeChecker {
                     continue_moves: Vec::new(),
                 });
                 self.symbols.push_scope();
+                self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
                 if let Some(element_ty) = element_ty
@@ -852,13 +851,18 @@ impl TypeChecker {
 
             Stmt::Break { label, value, span } => {
                 self.check_loop_control_label(label.as_ref(), *span, true);
-                self.check_pool_loop_jump("break", label.as_ref().map(|l| l.name.as_str()), *span);
                 self.record_break_target(label.as_ref());
                 if let Some(value_expr) = value {
                     let expected = self.break_target_expected(label.as_ref());
                     let value_ty = self
                         .check_expr(value_expr, expected.as_ref())
                         .unwrap_or(Type::Unknown);
+                    self.check_pool_loop_jump(
+                        "break",
+                        label.as_ref().map(|l| l.name.as_str()),
+                        &value_ty,
+                        *span,
+                    );
                     if !matches!(value_ty, Type::Unknown) {
                         self.record_break_value(label.as_ref(), value_ty, *span);
                     }
@@ -870,11 +874,6 @@ impl TypeChecker {
 
             Stmt::Continue { label, span } => {
                 self.check_loop_control_label(label.as_ref(), *span, false);
-                self.check_pool_loop_jump(
-                    "continue",
-                    label.as_ref().map(|l| l.name.as_str()),
-                    *span,
-                );
                 self.record_jump_moves(label.as_ref(), false);
                 Some(())
             }

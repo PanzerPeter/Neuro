@@ -626,7 +626,7 @@ form reads better.
 
 **Message**:
 ```text
-warning[float-cast-out-of-range] at 42..53: constant `1e20` does not fit `i32` and saturates to its maximum; use `.to_checked::<i32>()` for an `Option`, or silence with `@allow(float_cast_out_of_range)` on the enclosing function
+warning[float-cast-out-of-range] at 42..53: constant `1e20` does not fit `i32` and saturates to its maximum; use `.to_checked::<i32>()` for an `Option`, or silence with `@allow(float_cast_out_of_range)` on the enclosing function or `const`
 ```
 
 **Cause**: An `as` cast from a float to an integer type whose operand is a constant the target
@@ -635,7 +635,8 @@ which is rarely the value the author meant.
 
 **Solution**: Fix the constant or widen the target type. Where the program computes the value
 at run time, `.to_checked::<T>()` returns `None` for it instead of clamping. If the clamp is
-what you want, add `@allow(float_cast_out_of_range)` to the enclosing function or method.
+what you want, add `@allow(float_cast_out_of_range)` to the enclosing function or method, or
+to the `const` whose initializer holds the cast.
 
 ## FAQ
 

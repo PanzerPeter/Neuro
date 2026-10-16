@@ -78,7 +78,9 @@ impl TypeChecker {
                 field,
                 span: field_span,
             } => {
-                let obj_ty = self.check_expr(object, None)?;
+                // Peeled to one `&` like a field read, so `c.n` on a `&mut &mut P` writes
+                // `P`'s field, and is writable only if every layer is `&mut`.
+                let obj_ty = self.check_expr(object, None)?.auto_deref();
                 let Type::Struct(struct_name) = obj_ty.referent().clone() else {
                     self.record_error(TypeError::UnknownField {
                         struct_name: obj_ty.to_string(),

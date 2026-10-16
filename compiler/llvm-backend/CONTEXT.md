@@ -1462,7 +1462,14 @@ indirectly, honours the cell's flag so a moved-out value is passed over, and run
 
 In a program whose external bodies run on a device, `codegen_pool_expr` also takes the current
 device's arena mark on entry (`__neuro_device_mark`) and restores it after the host arena's
-release. The sweep dispatches `bulk_release` per registered instance. Between calls the current
+release.
+
+A jump out of a pool runs the same release. `codegen_pool_expr` pushes a `PoolExit` (the body's
+drop-scope index, both marks, the sweep's stop marker) onto `pool_exits`, and `return`, `break`
+and `continue` leave through `emit_exit_through`, which emits each scope's drops innermost first
+and, after the body scope of every pool the jump leaves, that pool's sweep and release. A
+`return` whose value is not a scalar can only be a `?` residual, which the checker does not see as
+a jump; it sweeps but keeps the arena mark, since the residual may live in the arena. The sweep dispatches `bulk_release` per registered instance. Between calls the current
 device is GPU 0; a call on another GPU restores that GPU's arena before it returns.
 
 **Known limits**: the chunk is reserved once and never released, an allocation that does not fit

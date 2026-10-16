@@ -198,6 +198,52 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_field_is_written_through_every_layer_of_a_nested_mutable_borrow() {
+    // The place rule once read through one `&mut` only, so `c.n = 9` was refused.
+    let source = r#"
+struct P { n: i32, a: [i32; 2] }
+
+func set(c: &mut &mut P) {
+    c.n = 9
+    c.a[1] = 4
+    c.n += 1
+}
+
+func main() -> i32 {
+    mut p = P { n: 1, a: [0, 0] }
+    {
+        mut r = &mut p
+        set(&mut r)
+        mut rr = &mut r
+        rr.n += 20
+        val rrr = &mut rr
+        rrr.a[0] = 100
+    }
+    return p.n + p.a[1] + p.a[0]
+}
+"#;
+    assert_eq!(run(source), 134);
+}
+
+#[test]
+fn a_field_is_not_written_through_a_shared_layer_of_a_nested_borrow() {
+    let diagnostics = rejection(
+        r#"
+struct P { n: i32 }
+
+func set(c: &mut &P) {
+    c.n = 9
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
+    );
+    assert!(diagnostics.contains("cannot assign"), "{diagnostics}");
+}
+
+#[test]
 fn binding_a_borrow_keeps_it_a_borrow() {
     let diagnostics = rejection(
         r#"

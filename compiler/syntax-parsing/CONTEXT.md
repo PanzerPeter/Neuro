@@ -286,7 +286,8 @@ the tuple-index parse, so it needs no expression grammar of its own.
   reading attributes, because an attribute list is claimed by the declaration that follows it and
   this marker has none. It is accepted only as the first thing in a file (not after a
   declaration, and not inside a `module { }` block, which is not a file), reported as
-  `ParseError::MisplacedNoPrelude`.
+  `ParseError::MisplacedNoPrelude`. An attribute list may precede a `func`, a `struct` or a
+  `const` (whose `ConstDef.attributes` carries it); before anything else it is a parse error.
 - **Nested generics close cleanly.** `>` closes an argument list one token at a time; nested
   `Foo<Bar<T>>` lexes as two separate `>` tokens, never a `>>`. The `::<` turbofish check wins at
   every step, so `f::<i32>(x)` and `math::helper::<i32>(x)` both parse.

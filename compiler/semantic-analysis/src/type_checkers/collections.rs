@@ -15,7 +15,7 @@ use ast_types::Expr;
 use shared_types::Span;
 
 use super::TypeChecker;
-use super::derivable::{HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
+use super::derivable::{COPY_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
 use crate::types::{CollectionKind, Type};
 
@@ -116,17 +116,24 @@ impl TypeChecker {
         if ty.is_integer() || matches!(ty, Type::Bool | Type::Char | Type::String) {
             return Some(());
         }
-        let Type::Struct(name) = ty else {
-            return reject(
-                self,
-                "only integer, `bool`, `char`, `string`, and struct keys are supported".to_string(),
-            );
-        };
-
         // A struct key routes equality, hashing and ordering through the traits it
         // implements, derived or written by hand, so each one the map needs must be there.
+        // A type parameter supplies them through its bounds, and each instance's key is
+        // one of the kinds above.
+        let (Type::Struct(name) | Type::Generic(name)) = ty else {
+            return reject(
+                self,
+                "only integer, `bool`, `char`, `string`, struct and type-parameter keys are \
+                 supported"
+                    .to_string(),
+            );
+        };
         let name = name.clone();
         let mut required = vec![PARTIAL_EQ_TRAIT];
+        // A slot bit-copies its key, so an abstract key must be `Copy` in every instance.
+        if matches!(ty, Type::Generic(_)) {
+            required.push(COPY_TRAIT);
+        }
         match kind {
             CollectionKind::HashMap => required.push(HASHABLE_TRAIT),
             CollectionKind::BTreeMap => required.push("Comparable"),
@@ -136,7 +143,7 @@ impl TypeChecker {
             if !self.satisfies_bound(ty, trait_name) {
                 return reject(
                     self,
-                    format!("struct keys require `{}` on {}", trait_name, name),
+                    format!("map keys require `{}` on {}", trait_name, name),
                 );
             }
         }

@@ -4,13 +4,14 @@
 // One `linalg.generic` per call: the operand walked with the identity map, `.pow`'s exponent a
 // scalar every point reads, and the `math` dialect op of the function's name as the body. The
 // GPU conversion turns each into the vendor's device math library (libdevice on NVIDIA, ocml
-// on AMD). `sqrt` and `abs` are exact there as on the host; the four transcendental functions
-// are the device library's, which may differ from the host's C library in the last bits.
+// on AMD). `sqrt` is exact there as on the host, and `abs` on a device is its cleared sign
+// bit, which needs no library. The four transcendental functions are the device library's,
+// which may differ from the host's C library in the last bits.
 // `sign`, which only a derivative writes, is two compares.
 
 use crate::{
     errors::MlirError,
-    guards::Lowering,
+    guards::{Lowering, Side},
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, cast_elements, empty_tensor, half_precision,
@@ -23,8 +24,10 @@ use melior::{
     Context,
     dialect::arith::{self, CmpfPredicate},
     ir::{
-        Block, BlockLike, Location, Type, Value, attribute::FloatAttribute,
+        Block, BlockLike, Location, Type, Value,
+        attribute::{FloatAttribute, IntegerAttribute},
         operation::OperationBuilder,
+        r#type::IntegerType,
     },
 };
 use neuro_hir::{HirExpr, HirExprKind, HirMathOp, HirType};
@@ -112,7 +115,14 @@ pub(crate) fn build_math<'c, 'a>(
             iterators: iterator_types(context, rank, 0)?,
         },
         tensor_type,
-        math_block(context, location, element_type, *op, inputs.len())?,
+        math_block(
+            context,
+            location,
+            element_type,
+            *op,
+            inputs.len(),
+            lowering.side == Side::Device,
+        )?,
     )?;
     Ok(Some(match half {
         true => cast_elements(context, location, block, value, (&wide, &math.ty))?,
@@ -121,17 +131,21 @@ pub(crate) fn build_math<'c, 'a>(
 }
 
 /// The body over `(element[, exponent], destination)`: the function applied to the element.
+/// On a device, `abs` clears the sign bit, which is `fabs` exactly and needs no vendor math
+/// library.
 fn math_block<'c>(
     context: &'c Context,
     location: Location<'c>,
     element: Type<'c>,
     op: HirMathOp,
     inputs: usize,
+    device: bool,
 ) -> Result<Block<'c>, MlirError> {
     let block = Block::new(&vec![(element, location); inputs + 1]);
     let value: Value = block.argument(0)?.into();
     let result = match op {
         HirMathOp::Sign => sign(context, location, &block, element, value)?,
+        HirMathOp::Abs if device => magnitude(context, location, &block, element, value)?,
         HirMathOp::Pow => {
             let power = block.argument(1)?.into();
             append(
@@ -164,6 +178,33 @@ fn math_op<'c>(
         .add_operands(operands)
         .add_results(&[element])
         .build()?)
+}
+
+/// `value` with its sign bit cleared: `fabs`, `-0.0` and a negative NaN included.
+fn magnitude<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    element: Type<'c>,
+    value: Value<'c, 'a>,
+) -> Result<Value<'c, 'a>, MlirError> {
+    let width = if element == Type::float32(context) {
+        32
+    } else {
+        64
+    };
+    let bits = IntegerType::new(context, width).into();
+    let raw = append(block, arith::bitcast(value, bits, location))?;
+    let mask = append(
+        block,
+        arith::constant(
+            context,
+            IntegerAttribute::new(bits, (u64::MAX >> (65 - width)) as i64).into(),
+            location,
+        ),
+    )?;
+    let cleared = append(block, arith::andi(raw, mask, location))?;
+    append(block, arith::bitcast(cleared, element, location))
 }
 
 /// `1` above zero, `-1` below, and the value itself otherwise (either zero, or NaN), as the
@@ -237,11 +278,17 @@ mod tests {
             ("g.log()", "math.log"),
             ("g.sqrt()", "math.sqrt"),
             ("g.tanh()", "math.tanh"),
-            ("g.abs()", "math.absf"),
         ] {
             let text = device_module(&program(&format!("    val r = {call}")));
             assert!(text.contains(op), "`{call}`:\n{text}");
         }
+    }
+
+    #[test]
+    fn a_device_abs_clears_the_sign_bit_and_calls_no_library() {
+        let text = device_module(&program("    val r = g.abs()"));
+        assert!(text.contains("arith.andi"), "{text}");
+        assert!(!text.contains("math."), "{text}");
     }
 
     #[test]

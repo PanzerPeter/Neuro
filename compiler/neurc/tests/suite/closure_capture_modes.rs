@@ -221,3 +221,85 @@ func main() -> i32 {
     );
     assert!(err.contains("lives only as long as that scope"), "{err}");
 }
+
+#[test]
+fn a_reading_closure_literal_is_handed_straight_to_a_built_in_method() {
+    // Each literal borrows `cfg`, and once had to be bound to a `val` first.
+    let source = r#"
+struct Cfg { k: i32, name: string }
+
+func main() -> i32 {
+    val cfg = Cfg { k: 3, name: "a" + "bc" }
+    val arr = [1, 2, 3, 4]
+    mut total = 0
+    for x in arr.map(|v| v * cfg.k).filter(|v| v > cfg.name.len() as i32) {
+        total += x
+    }
+    val t: Tensor<i32, [3]> = [1, 2, 3]
+    val u = t.map(|e| e + cfg.name.len() as i32)
+    val s = t.zip(&u, |a, b| a * b + cfg.k)
+    val r = t.reduce(0, |acc, e| acc + e * cfg.k)
+    return total + u[2] + s[0] + r
+}
+"#;
+    // 6 + 9 + 12, then 6, then 1 * 4 + 3, then 3 * (1 + 2 + 3).
+    assert_eq!(run("builtin_literal.nr", source), 27 + 6 + 7 + 18);
+}
+
+#[test]
+fn a_for_head_literal_holds_its_borrows_until_the_loop_ends() {
+    let err = refused(
+        "adapter_borrow_held.nr",
+        r#"
+func main() -> i32 {
+    val arr = [1, 2, 3, 4]
+    mut lim = "a" + "b"
+    mut total = 0
+    for x in arr.filter(|e| e > lim.len() as i32) {
+        lim = "x" + "yzw"
+        total += x
+    }
+    lim = "q" + "q"
+    return total
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot assign to 'lim' while it is borrowed"),
+        "{err}"
+    );
+    assert_eq!(err.matches("cannot assign to 'lim'").count(), 1, "{err}");
+}
+
+#[test]
+fn a_mutating_closure_literal_is_not_handed_to_a_built_in_method() {
+    let err = refused(
+        "builtin_mutating_literal.nr",
+        r#"
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    mut total = 0
+    for x in v.filter(|e| {
+        v.push(5)
+        true
+    }) {
+        total += x
+    }
+    val t: Tensor<i32, [3]> = [1, 2, 3]
+    mut c = "a" + "b"
+    val u = t.map(|e| {
+        c = "x" + "y"
+        e
+    })
+    return total
+}
+"#,
+    );
+    assert_eq!(
+        err.matches("as a closure literal that holds a `&mut`")
+            .count(),
+        2,
+        "{err}"
+    );
+}

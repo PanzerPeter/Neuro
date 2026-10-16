@@ -157,6 +157,9 @@ pub enum TypeError {
     #[error("`@{name}` is specified but not implemented yet, so it would have no effect")]
     UnimplementedAttribute { name: String, span: Span },
 
+    #[error("`@{name}` cannot be written on a `const`: a constant takes `@allow` only")]
+    AttributeOnConst { name: String, span: Span },
+
     #[error("`@derive({name})` is listed twice on struct '{struct_name}'")]
     DuplicateDerive {
         struct_name: String,
@@ -1380,7 +1383,7 @@ pub enum TypeError {
     ClosureMovesCapture { name: String, span: Span },
 
     #[error(
-        "this value may borrow from the scope that built it (a closure that borrows a capture, a function-typed parameter, or a closure holding either), so it lives only as long as that scope: bind it with `val` or `mut`, pass it to a function-typed parameter, or call it; it cannot be assigned, returned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map`"
+        "this value may borrow from the scope that built it (a closure that borrows a capture, a function-typed parameter, or a closure holding either), so it lives only as long as that scope: bind it with `val` or `mut`, pass it to a function-typed parameter, or call it; it cannot be assigned, returned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map` as a closure literal that holds a `&mut`"
     )]
     ScopeBoundClosureStored { span: Span },
 
@@ -1440,7 +1443,7 @@ pub enum TypeError {
     },
 
     #[error(
-        "'{keyword}' may not leave {pool}; the arena is released at the block's closing brace and jumping past it would skip that release"
+        "'{keyword}' may carry only a number, `bool` or `char` out of {pool}: anything else may live in the block's arena, which is released on the way out"
     )]
     PoolControlFlowEscapes {
         keyword: String,
@@ -1545,6 +1548,7 @@ impl TypeError {
             | Self::UnknownDerive { span, .. }
             | Self::UnknownAttribute { span, .. }
             | Self::UnimplementedAttribute { span, .. }
+            | Self::AttributeOnConst { span, .. }
             | Self::DuplicateDerive { span, .. }
             | Self::DeriveConflictsWithImpl { span, .. }
             | Self::DeriveFieldUnsupported { span, .. }

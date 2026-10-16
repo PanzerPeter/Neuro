@@ -132,3 +132,38 @@ func main() -> i32 {
         "only the undefined name is an error; got {errors:?}"
     );
 }
+
+#[test]
+fn a_value_an_earlier_error_left_unknown_reports_nothing_further() {
+    // `b` binds at `Unknown` after the move error, and `b.sum()` once made `c` a `void`
+    // binding, then an undefined name.
+    let errors = semantic_errors(
+        "func f(a: Tensor<f32, [2]>) -> f32 {\n    val b = a + a\n    val c = b.sum()\n    c\n}\nfunc main() -> i32 { 0 }\n",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        matches!(errors[0], TypeError::UseOfMovedValue { .. }),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn a_refused_return_type_is_reported_once_not_at_each_call() {
+    let errors = semantic_errors(
+        "func get() -> Opton<i32> { 1 }\nfunc main() -> i32 {\n    val x = get() ?? 0\n    val y = get() ?? 1\n    x + y\n}\n",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
+#[test]
+fn a_diverging_initializer_is_still_no_value_to_bind() {
+    let errors = semantic_errors(
+        "func g() -> Opton<i32> { 1 }\nfunc main() -> i32 {\n    val x = panic(\"no\")\n    0\n}\n",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::VoidBinding { .. })),
+        "{errors:?}"
+    );
+}

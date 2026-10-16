@@ -286,7 +286,10 @@ and, only then, serializes `MATH_PROBE` (one `math.exp`) with diagnostics swallo
 there when that succeeds with no `.extern` and no `__ocml_` left. Without it the linkable module is
 rebuilt without the functions that call math (so `build_linkable_module`'s `admit` is a
 `&dyn Fn`), and `kernel_launchers` re-emits a `@kernel` body with math refused. The answer is
-cached for the compile in a `OnceCell`.
+cached for the compile in a `OnceCell`. `.abs()` never asks: on the device side (`Side::Device` in
+`tensor_math.rs`, and every `@kernel` body) it is the sign bit cleared through `arith.bitcast` and
+`arith.andi`, which is `fabs` bit for bit. `llvm.intr.fabs` / `llvm.intr.sqrt` are not an option:
+the vendor conversions mark both illegal and want the library call.
 
 **Tensor arithmetic and the bodies above.** `tensor_arithmetic::build_body` turns a
 function whose statements are `val` bindings and a final `return` or tail expression over the

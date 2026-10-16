@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.14.1] - 2026-10-16
+
+### Added
+
+- `v.eq(&w)` works on anything `==` already compares (numbers, `string`, a struct deriving
+  `PartialEq`) and in a generic body bounded by `T: PartialEq` or `T: Comparable`. It was
+  "no method `eq`" unless the type had a hand-written `impl PartialEq`.
+- A type parameter can key a `HashMap` or `BTreeMap` when its bounds supply what the map needs:
+  `PartialEq`, then `Hashable` or `Comparable`, and `Copy`. `HashMap<K, V>` inside
+  `func count<K: Hashable + PartialEq + Copy>` was rejected before.
+- A module-level `const` takes `@allow(...)`, so `@allow(float_cast_out_of_range)` silences the
+  out-of-range cast warning in its initializer. Any other attribute on a `const` is an error.
+
+### Changed
+
+- `return`, `break` and `continue` may leave a `pool` block. The block's `PoolAware` sweep and
+  arena release run on the way out. A `return` or `break` that leaves the block may carry a number,
+  `bool` or `char`, or nothing, since anything else could point into the arena it releases.
+- A closure literal that only reads what it borrows can be written straight into a tensor's
+  `.map` / `.zip` / `.reduce` or a `for` head's `.map` / `.filter`, without binding it first. A
+  `for` head's literal keeps its borrows until the loop ends. A literal that writes through a
+  borrow is still refused there.
+- `.abs()` on a device tensor, in a `@gpu` body and in a `@kernel` body clears the sign bit instead
+  of calling the vendor's math library, so it compiles without the CUDA toolkit and gives the
+  host's result bit for bit, `-0.0` included.
+- A `@kernel` whose grid needs more than 2^31 - 1 blocks along `x` or 65535 along `y` or `z` is a
+  compile error naming the axis. It used to compile and fail at launch.
+
+### Fixed
+
+- A field can be written through nested mutable borrows: `c.n = 9` with `c: &mut &mut P`. It was
+  refused, and `(*c).n = 9` was the workaround. A shared layer anywhere still refuses the write.
+- One mistake reports one error. A method call on a value an earlier error left untyped no longer
+  adds "cannot bind: the initializer has type void" and "undefined variable" after it, and a
+  misspelled return type is no longer reported again at each call site as a `void` operand.
+
 ## [5.14.0] - 2026-10-16
 
 ### Added

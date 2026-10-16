@@ -7,7 +7,7 @@ use super::builtins::TO_CHECKED_METHOD;
 use super::{COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
 use crate::errors::TypeError;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
-use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, PARTIAL_EQ_TRAIT};
+use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, EQ_METHOD, PARTIAL_EQ_TRAIT};
 use crate::type_checkers::statements::function_value_position;
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::{BoundInfo, GenericFnSig};
@@ -745,6 +745,20 @@ impl TypeChecker {
                         {
                             self.check_call_args(args, &visible_params, *span);
                             return Some(ret);
+                        }
+                        // `PartialEq` is the operator lang-item, not a declared trait, so
+                        // its `eq` is typed here; `Comparable: PartialEq` reaches it too.
+                        let this = Type::Generic(param.clone());
+                        if field.name == EQ_METHOD
+                            && (self.satisfies_bound(&this, PARTIAL_EQ_TRAIT)
+                                || self.satisfies_bound(&this, "Comparable"))
+                        {
+                            let rhs = Type::Reference {
+                                inner: Box::new(this),
+                                mutable: false,
+                            };
+                            self.check_call_args(args, &[rhs], *span);
+                            return Some(Type::Bool);
                         }
                         self.record_error(TypeError::MethodNotFound {
                             struct_name: param.clone(),

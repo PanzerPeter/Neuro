@@ -456,3 +456,130 @@ func main() -> i32 { 0 }
     );
     assert!(err.contains("T cannot be stored in a `Vec`"), "got: {err}");
 }
+
+#[test]
+fn eq_is_called_through_a_partial_eq_bound_and_on_a_derived_struct() {
+    // `.eq` was `MethodNotFound` on everything without a hand-written impl.
+    let out = stdout_of(
+        "eq_method.nr",
+        r#"
+@derive(PartialEq)
+struct P { a: i32, s: string }
+
+@derive(Copy, Clone)
+struct H { v: i32 }
+
+impl PartialEq for H {
+    func eq(&self, rhs: &H) -> bool { self.v % 10 == rhs.v % 10 }
+}
+
+func same<T: PartialEq>(v: T, w: T) -> bool { v.eq(&w) }
+func same_ref<T: PartialEq>(v: &T, w: &T) -> bool { v.eq(w) }
+func ordered<T: Comparable>(v: T, w: T) -> bool { v.eq(&w) }
+
+func main() -> i32 {
+    val p = P { a: 1, s: "q" + "r" }
+    val q = P { a: 1, s: "qr" }
+    val x = 7
+    val seven = 7
+    val strings = same("ab", "a" + "b")
+    println("{same(3, 3)} {same(3, 4)} {strings} {same(1.5, 2.5)}")
+    println("{p.eq(&q)} {same_ref(&p, &q)} {same(H { v: 13 }, H { v: 23 })}")
+    println("{ordered(5u8, 5u8)} {x.eq(&seven)}")
+    0
+}
+"#,
+    );
+    assert_eq!(
+        out, "true false true false\ntrue true true\ntrue true\n",
+        "got: {out}"
+    );
+}
+
+#[test]
+fn eq_needs_a_partial_eq_bound_or_implementor() {
+    let err = rejected(
+        "eq_unbounded.nr",
+        r#"
+struct Plain { a: i32 }
+
+func same<T>(v: T, w: T) -> bool { v.eq(&w) }
+
+func main() -> i32 {
+    val a = Plain { a: 1 }
+    val b = Plain { a: 1 }
+    if a.eq(&b) { 1 } else { 0 }
+}
+"#,
+    );
+    assert!(err.contains("'T' has no method 'eq'"), "got: {err}");
+    assert!(err.contains("'Plain' has no method 'eq'"), "got: {err}");
+}
+
+#[test]
+fn a_map_is_keyed_by_a_type_parameter_whose_bounds_supply_the_key_traits() {
+    let source = r#"
+@derive(Copy, Clone, PartialEq, Hashable)
+struct Pt { x: i32, y: i32 }
+
+func count<K: Hashable + PartialEq + Copy>(keys: [K; 4]) -> i32 {
+    mut m: HashMap<K, i32> = HashMap::new()
+    for k in keys {
+        val c = m.get(k) ?? 0
+        m.insert(k, c + 1)
+    }
+    m.len() as i32
+}
+
+func distinct<K: Comparable + PartialEq + Copy>(a: K, b: K) -> i32 {
+    mut m: BTreeMap<K, i32> = BTreeMap::new()
+    m.insert(b, 2)
+    m.insert(a, 1)
+    m.insert(b, 3)
+    m.len() as i32
+}
+
+func main() -> i32 {
+    val a = count([1, 2, 2, 3])
+    val b = count([Pt { x: 1, y: 1 }, Pt { x: 1, y: 1 }, Pt { x: 2, y: 1 }, Pt { x: 1, y: 1 }])
+    val c = count(['a', 'b', 'c', 'd'])
+    val d = distinct(5u8, 9u8)
+    a * 1000 + b * 100 + c * 10 + d - 3000
+}
+"#;
+    assert_eq!(run("generic_key.nr", source), 242);
+}
+
+#[test]
+fn a_type_parameter_key_needs_every_key_trait_as_a_bound() {
+    let err = rejected(
+        "generic_key_bounds.nr",
+        r#"
+func a<K: PartialEq + Copy>(k: K) -> i32 {
+    val m: HashMap<K, i32> = HashMap::new()
+    m.len() as i32
+}
+
+func b<K: Hashable + PartialEq>(k: K) -> i32 {
+    val m: HashMap<K, i32> = HashMap::new()
+    m.len() as i32
+}
+
+func c<K: Hashable + PartialEq + Copy>(k: K) -> i32 {
+    val m: BTreeMap<K, i32> = BTreeMap::new()
+    m.len() as i32
+}
+
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        err.contains("map keys require `Hashable` on K"),
+        "got: {err}"
+    );
+    assert!(err.contains("map keys require `Copy` on K"), "got: {err}");
+    assert!(
+        err.contains("map keys require `Comparable` on K"),
+        "got: {err}"
+    );
+}

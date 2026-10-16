@@ -459,7 +459,9 @@ func label<T: Debug>(name: string, v: &T) -> string {
 ```
 
 `.clone()` on a `Copy` value is a copy, and `.hash()` on an integer, `bool`, `char`, `string`
-or a struct that derives `Hashable` returns the hash a `HashMap` uses for that key. What a
+or a struct that derives `Hashable` returns the hash a `HashMap` uses for that key. `v.eq(&w)`
+is `v == w` on anything `==` already compares, and a `T: PartialEq` (or `T: Comparable`) body
+may call it too. What a
 `T: Copy` or `T: Clone` bound gives a generic body is in
 [Functions](functions.md#ownership-through-a-type-parameter). See
 [`examples/structs/derivable_traits.nr`](../../examples/structs/derivable_traits.nr).

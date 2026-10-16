@@ -484,21 +484,76 @@ func main() -> i32 {
 }
 
 #[test]
-fn a_return_inside_a_pool_is_rejected() {
+fn a_return_carrying_an_arena_value_out_of_a_pool_is_rejected() {
     let test = CompileTest::new();
     let source = r#"
-func main() -> i32 {
+func name() -> string {
     pool {
-        return 1
+        return "a" + "b"
     }
+    "c"
 }
+
+func main() -> i32 { 0 }
 "#;
     let error = test
         .check("pool_return.nr", source)
-        .expect_err("a return jumps past the arena release");
+        .expect_err("the string may live in the arena the return releases");
     assert!(
-        error.contains("may not leave"),
+        error.contains("'return' may carry only a number, `bool` or `char` out of"),
         "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn return_break_and_continue_leave_a_pool_through_its_release() {
+    // Each jump was refused, since the release was emitted only at the closing brace.
+    // It now runs on the way out: the sweep reports each registration once, before the
+    // loop body's own destructor, and the scalar `return` value survives.
+    let source = r#"
+struct R { i: i32 }
+impl Drop for R { func drop(&mut self) { println("drop {self.i}") } }
+impl PoolAware for R {
+    func register_with_pool(&self, arena: &PoolHandle) {}
+    func bulk_release(&mut self) { println("swept {self.i}") }
+}
+struct D { i: i32 }
+impl Drop for D { func drop(&mut self) { println("dropD {self.i}") } }
+
+func find(limit: i32) -> i32 {
+    val outer = D { i: 100 }
+    for i in 0..10 {
+        val inner = D { i: 200 + i }
+        pool {
+            val r = R { i: i }
+            val s = "n" + "{i}"
+            if i == 1 { continue }
+            if i == limit { return s.len() as i32 + i * 10 }
+            if i == 3 { break }
+            println("body {i}")
+        }
+    }
+    -1
+}
+
+func main() -> i32 {
+    val a = find(2)
+    println("=")
+    val b = find(9)
+    return a * 100 + b - 2000
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("pool_jumps.nr", source))
+        .expect("the program compiles");
+    let output = std::process::Command::new(exe).output().expect("run");
+    assert_eq!(output.status.code(), Some(199));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "body 0\nswept 0\ndropD 200\nswept 1\ndropD 201\nswept 2\ndropD 202\ndropD 100\n=\n\
+         body 0\nswept 0\ndropD 200\nswept 1\ndropD 201\nbody 2\nswept 2\ndropD 202\n\
+         swept 3\ndropD 203\ndropD 100\n"
     );
 }
 

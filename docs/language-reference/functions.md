@@ -1299,8 +1299,10 @@ function-typed parameter, or a closure holding either), so it lives only as long
 - Returning a closure over the function values a function was handed
   (`func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 { move |x| g(f(x)) }`).
 - Storing a borrowing closure in a holder that dies before what it borrows.
-- A borrowing closure literal written as the argument of a built-in method (`.map`, `.filter`,
-  `.zip`, `.reduce`); bind it to a `val` first.
+- A closure literal that writes through a borrow, written as the argument of a built-in method
+  (`.map`, `.filter`, `.zip`, `.reduce`); bind it with `mut` first, so the borrow rules see it
+  beside what the method walks. A literal that only reads what it borrows goes there directly,
+  and a `for` head's literal keeps its borrows until the loop ends.
 - A closure without `move` taking a capture by value because its body moves it out.
 - A closure literal as a `|>` stage without annotations, since nothing gives it a context there.
 

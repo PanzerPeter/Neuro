@@ -17,8 +17,9 @@
 //     binding pointing at bytes the block's exit reclaims. Scalars are free to cross: an
 //     `i32` carries no address. So is anything the compiler can trace to the heap, which
 //     is both `summary` lines below.
-//   * `return`, `break` and `continue` may not leave the block. Each would jump past
-//     the arena release, so the compiler asks for the exit to be written outside.
+//   * A `return` or `break` that leaves the block carries a number, `bool` or `char`,
+//     or nothing. Leaving by `return`, `break` or `continue` runs the release on the
+//     way out, so nothing that could point into the arena may travel with the jump.
 //   * A value the block owns may not have a destructor unless its type also
 //     implements `PoolAware`. The arena is released in one store and cannot run a
 //     destructor per object; `PoolAware` is how a type says its release can be

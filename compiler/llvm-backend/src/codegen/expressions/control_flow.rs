@@ -171,27 +171,43 @@ impl<'ctx> CodegenContext<'ctx> {
             true => None,
             false => Some(self.emit_pool_head()?),
         };
+        let exit = crate::codegen::context::PoolExit {
+            scope: self.drop_scopes.len(),
+            mark,
+            device_mark,
+            registered,
+        };
         self.pool_depth += 1;
         self.pool_marks.push(mark);
         self.pool_locals.push(HashSet::new());
+        self.pool_exits.push(exit);
         let result = self.codegen_block_expr(stmts);
+        let _ = self.pool_exits.pop();
         let _ = self.pool_locals.pop();
         let _ = self.pool_marks.pop();
         self.pool_depth -= 1;
         result?;
         if !self.current_block_terminated() {
-            // Every `PoolAware` instance the block registered is released in reverse
-            // registration order, and only then does the mark restore reclaim the memory
-            // they were living in.
-            if let Some(registered) = registered {
-                self.emit_pool_sweep(registered)?;
-            }
-            self.emit_arena_release(mark)?;
-            if let Some(device_mark) = device_mark {
-                self.restore_device_arena(device_mark)?;
-            }
+            self.emit_pool_exit(&exit)?;
         }
         Ok(self.context.i32_type().const_int(0, false).into())
+    }
+
+    /// Leave a pool region: every `PoolAware` instance the block registered is released
+    /// in reverse registration order, and only then does the mark restore reclaim the
+    /// memory they were living in.
+    pub(crate) fn emit_pool_exit(
+        &mut self,
+        exit: &crate::codegen::context::PoolExit<'ctx>,
+    ) -> CodegenResult<()> {
+        if let Some(registered) = exit.registered {
+            self.emit_pool_sweep(registered)?;
+        }
+        self.emit_arena_release(exit.mark)?;
+        if let Some(device_mark) = exit.device_mark {
+            self.restore_device_arena(device_mark)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn codegen_block_expr(

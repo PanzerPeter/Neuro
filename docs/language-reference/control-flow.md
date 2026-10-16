@@ -175,9 +175,11 @@ Three rules keep arena memory from outliving the block, all checked at compile t
   `&mut` parameter are the two channels through which a callee reaches memory the
   caller holds, so passing an arena value through either (to a place declared
   before the `pool`) is refused.
-- **`return`, `break` and `continue` may not leave the block.** Each would jump
-  past the arena release. Write the exit outside the pool instead; a `break`
-  targeting a loop opened *inside* the block is fine, because it stays in it.
+- **A `return` or `break` that leaves the block carries a number, `bool` or `char`,
+  or nothing.** Leaving the block by `return`, `break` or `continue` runs its release
+  on the way out, so anything that could point into the arena may not travel with
+  the jump. A `break` targeting a loop opened *inside* the block stays in it, and
+  carries what it likes.
 
 ```neuro
 mut total: i32 = 0

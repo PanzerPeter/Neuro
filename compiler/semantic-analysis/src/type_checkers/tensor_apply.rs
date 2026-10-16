@@ -15,7 +15,7 @@
 
 use super::TypeChecker;
 use super::closures::{closure_context, closure_param_unannotated};
-use super::statements::binding_position;
+use super::statements::function_value_position;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type};
 use ast_types::Expr;
@@ -102,12 +102,16 @@ impl TypeChecker {
         let context = closure_context(callee, wanted_params, Type::Unknown);
         // The function value is READ, not moved: it is evaluated once and called per
         // element, and stays usable after the traversal. A binding that may borrow is
-        // read here and nowhere else, so it may be named.
-        self.function_value_slot = binding_position(callee);
+        // read here and nowhere else, so it may be named, and so may a closure literal
+        // that only reads what it borrows. A literal holding a `&mut` stays refused: the
+        // traversal marks its operands `noalias`, which a `&mut` of one would break.
+        let slot = function_value_position(callee);
+        self.function_value_slot = slot;
         let callee_ty = self
             .check_expr(callee, Some(&context))
             .unwrap_or(Type::Unknown);
         self.function_value_slot = None;
+        self.refuse_mutating_closure_literal(slot);
         let Type::Function { params, ret, .. } = &callee_ty else {
             if !matches!(callee_ty, Type::Unknown) {
                 self.record_error(TypeError::TensorApplyNotCallable {

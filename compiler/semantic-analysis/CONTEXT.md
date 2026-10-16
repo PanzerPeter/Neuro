@@ -36,7 +36,9 @@ module per declaration kind beside it. `tests/` is split by subject.
   table and the backend splits method symbols on it, so a user name carrying its own `__` could
   forge another item's symbol. `check_attribute_names` runs beside it: an attribute outside the
   fixed set the language reference defines is `UnknownAttribute`, and one the reference names but no pass
-  acts on yet is `UnimplementedAttribute`, so neither is a silent no-op.
+  acts on yet is `UnimplementedAttribute`, so neither is a silent no-op. A module `const` takes
+  `@allow` alone (`AttributeOnConst` otherwise), and pass 4 drops the warnings its initializer
+  raised that the `@allow` names, as it does for a function body.
 - **1. structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
   `clone_structs` / `debug_structs` / `partial_eq_structs` / `hashable_structs`, and every derive
   argument validated (`UnknownDerive`, `DuplicateDerive`). `register_copy_impls` then records each
@@ -225,7 +227,10 @@ initializer (`panic`, `unreachable`), which produces no value to bind and is rou
 `VoidBinding` below instead. The `Stmt::VarDecl` arm tells the two apart by whether the
 error list grew while the initializer was checked, and applies it whether the initializer came
 back `Unknown` or with no type at all (an undefined name): the second used to fall through to a
-false `UninitializedVariable`. A statement-level `if` / `else if` / `while` condition that is
+false `UninitializedVariable`. Once the program has any error, an `Unknown` initializer that
+`expr_diverges` does not explain binds silently too: it came from a value an earlier error left
+at `Unknown` (`val c = b.sum()` after `b`'s initializer failed). A return type that fails to
+resolve registers as `Unknown` rather than `void`, so its call sites stay quiet. A statement-level `if` / `else if` / `while` condition that is
 `Unknown` is not re-reported as a `bool` mismatch, as the expression-level `if` already skipped it.
 
 ### Primitive and reference type contracts
@@ -819,7 +824,10 @@ through `satisfies_bound`: a type parameter by its own bounds, anything else by
 `trait_impls`. A reference meets none of the five, because a method call reads through it to the
 referent. `type_implements_trait` stays nominal: it answers `&T` to `&dyn Trait` coercion and
 return-position `impl Trait`, where a derive has no vtable or method to stand behind it. The map
-key rules read `satisfies_bound`, so a derived `PartialEq` + `Hashable` struct is a key.
+key rules read `satisfies_bound`, so a derived `PartialEq` + `Hashable` struct is a key, and so is
+a type parameter bounded by the map's traits and `Copy`. `.eq(&rhs)` is typed by
+`check_supplied_trait_method` on a receiver with built-in `==` and no `eq` of its own, and on a
+type parameter bounded by `PartialEq` or `Comparable`; lowering turns it into the binary `==`.
 `{x:?}` on a struct accepts a hand-written `Debug` as well as the derive, and on an enum, a
 newtype or a `T: Debug` parameter accepts the trait (`debugs_by_trait`).
 
@@ -975,7 +983,10 @@ reference by copy (`carries_borrow`), a function-typed parameter of a function, 
 either, `move` or not. It may be checked only in `function_value_slot`: the whole initializer of a
 binding, or a whole argument to a function-typed parameter (`check_receiver_call_args`,
 `check_generic_call_with`), or a callee. A tensor traversal and a `for`-head adapter open it for a
-bare binding only (`binding_position`), so a borrowing literal written there is still refused.
+bare binding or a closure literal (`function_value_position`), but `refuse_mutating_closure_literal`
+refuses a literal holding a `&mut`, whose borrow would begin after the built-in read what it walks.
+A `for` head's literals keep their borrows for the loop under the hidden `$adapters` holder
+(`hold_adapter_borrows`), so the body cannot write what they read.
 Anywhere else it could be stored past what it borrows: `ScopeBoundClosureStored`. One exception:
 a closure bound only by a reference it copied (`reference_closures`) may be the last expression of
 a block that initializes a binding (`block_tail_slot`, `block_tail_closure`), since
@@ -1371,8 +1382,9 @@ that stays inside the block from one that leaves it.
 The checks hang off the statement arms that already know the types: every assignment form calls
 `check_pool_store` with the PLACE's type and the VALUE expression, `Stmt::DerefAssignment` calls
 `check_pool_ref_store` with the referent type and the value (the place behind a reference is not
-resolved here, so the referent type stands in for it), and `Return` / `Break` / `Continue` call the
-control-flow pair. A sixth, `check_pool_retention`, hangs off the `Expr::Call` arm instead,
+resolved here, so the referent type stands in for it), and `Return` / `Break` call the
+control-flow pair with the type of the value they carry: leaving a pool releases it on the way
+out, so only a number, `bool` or `char` (or no value) may travel with the jump. A sixth, `check_pool_retention`, hangs off the `Expr::Call` arm instead,
 because what it watches is not a store the block writes at all. All six are inert when
 `pool_stack` is empty, which is every program that writes no `pool`.
 

@@ -189,6 +189,8 @@ walkers.
   is deliberately a **sibling** of `args` rather than a wrapper around each argument: it is
   parse-only surface that `argument-binding` empties before type checking, so every pass
   downstream keeps reading `args` as the positional `Vec<Expr>` it always was.
+- **Attributes.** `attributes: Vec<Attribute>` on `FunctionDef`, `StructDef`, `MethodDef` and
+  `ConstDef`; a constant's is where its `@allow` lives.
 - **Visibility.** `exported: bool` on `FunctionDef`, `StructDef`, `EnumDef`, `TraitDef`,
   `ConstDef`, `NewtypeDef`, and `FieldDef`: `false` is the private default, set from a leading
   `export`. An enum struct-variant's `FieldDef` is always `exported: true`: a variant is reached

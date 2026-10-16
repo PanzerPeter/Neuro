@@ -39,6 +39,9 @@ const MAX_THREADS_PER_BLOCK: u64 = 1024;
 /// A launch grid has at most three axes, `x`, `y` and `z`.
 const GRID_AXES: [&str; 3] = ["x", "y", "z"];
 
+/// The most blocks a launch may run along each grid axis: NVIDIA's per-axis limits.
+const MAX_BLOCKS: [u64; 3] = [(1 << 31) - 1, 65_535, 65_535];
+
 /// The names only a kernel body can see, each with one `u32` field per grid axis.
 const GRID_NAMES: [&str; 2] = ["thread_id", "block_id"];
 
@@ -106,7 +109,7 @@ impl TypeChecker {
                 mutable: true,
                 ..
             } => match inner.as_ref() {
-                Type::Tensor { shape, .. } => Some(shape.len()),
+                Type::Tensor { shape, .. } => Some(shape),
                 _ => None,
             },
             _ => None,
@@ -116,12 +119,18 @@ impl TypeChecker {
                 "needs a `KernelOut<Tensor<T, S>>` parameter: the grid runs one thread per element of the first one",
                 func.name.span,
             ),
-            (Some(rank), Some(threads)) if rank != threads.len() => {
+            (Some(shape), Some(threads)) if shape.len() != threads.len() => {
                 let problem = format!(
-                    "gives `threads:` {} entries for a rank-{rank} grid tensor: one per axis",
-                    threads.len()
+                    "gives `threads:` {} entries for a rank-{} grid tensor: one per axis",
+                    threads.len(),
+                    shape.len()
                 );
                 self.kernel_error(&problem, attr.span);
+            }
+            (Some(shape), Some(threads)) => {
+                if let Some(problem) = grid_past_block_limits(shape, &threads) {
+                    self.kernel_error(&problem, attr.span);
+                }
             }
             _ => {}
         }
@@ -470,6 +479,26 @@ fn threads_argument(attr: &Attribute) -> Result<Vec<u64>, String> {
 }
 
 /// How many elements a tensor of `shape` holds, when every extent is a number.
+/// Why a launch over `shape` in blocks shaped `threads` runs more blocks along an axis than
+/// a GPU can, if it does. An extent known only per instance is checked by nobody here.
+fn grid_past_block_limits(shape: &[TensorAxis], threads: &[u64]) -> Option<String> {
+    shape
+        .iter()
+        .zip(threads)
+        .zip(GRID_AXES.iter().zip(MAX_BLOCKS))
+        .find_map(|((axis, &per_block), (&name, limit))| {
+            let ArrayLen::Fixed(extent) = axis.extent else {
+                return None;
+            };
+            let blocks = (extent as u64).div_ceil(per_block.max(1));
+            (blocks > limit).then(|| {
+                format!(
+                    "runs {blocks} blocks along `{name}` (an extent of {extent} in blocks of {per_block}); no GPU launches more than {limit} there"
+                )
+            })
+        })
+}
+
 fn element_count(shape: &[TensorAxis]) -> Option<u64> {
     shape
         .iter()

@@ -468,7 +468,8 @@ impl Lowerer {
             }
 
             Place::Field { object, field, .. } => {
-                let object = self.lower_expr(object, None)?;
+                let object =
+                    crate::expressions::coercion::auto_deref(self.lower_expr(object, None)?);
                 let HirType::Struct(struct_name) = object.ty.referent().clone() else {
                     return Err(LoweringError::Malformed {
                         detail: format!("field assignment into non-struct '{}'", object.ty),

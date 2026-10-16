@@ -515,4 +515,29 @@ func main() -> i32 {
         assert!(kernel_launchers(&program, &nvidia(), crate::Overflow::Checked, &|| true).is_ok());
         let _ = MlirError::KernelBodiesNotLowered(refusals);
     }
+
+    #[test]
+    fn a_kernel_abs_needs_no_math_library() {
+        let source = r#"
+@kernel(threads: [4])
+func k(a: Tensor<f64, [4]>, out: KernelOut<Tensor<f64, [4]>>) {
+    val i = thread_id.x
+    if i < 4 {
+        unsafe { out[i] = a[i].abs() }
+    }
+}
+
+func main() -> i32 {
+    val a = Tensor::<f64, [4]>::ones()
+    mut o = Tensor::<f64, [4]>::zeros()
+    k(a, &mut o)
+    return 0
+}
+"#;
+        let ast = syntax_parsing::parse(source).expect("the kernel parses");
+        let program = hir_lowering::lower_program(&ast).expect("the kernel lowers to HIR");
+        let launchers = kernel_launchers(&program, &nvidia(), crate::Overflow::Checked, &|| false)
+            .expect("`abs` is a cleared sign bit, not a library call");
+        assert!(launchers.text.contains("arith.andi"), "{}", launchers.text);
+    }
 }

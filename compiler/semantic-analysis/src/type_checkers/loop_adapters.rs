@@ -9,7 +9,7 @@ use ast_types::{LoopAdapter, LoopAdapterKind};
 
 use super::TypeChecker;
 use super::closures::closure_context;
-use super::statements::binding_position;
+use super::statements::function_value_position;
 use crate::errors::TypeError;
 use crate::types::Type;
 
@@ -17,6 +17,9 @@ use crate::types::Type;
 const FILTER_RESULT: &str = "bool";
 /// What `.map()`'s function must answer, named for the diagnostic.
 const MAP_RESULT: &str = "a value";
+/// The loop-scoped name an adapter chain's closure literals hold their borrows under.
+/// `$` cannot appear in a source identifier, so no binding can collide with it.
+const ADAPTER_HOLDER: &str = "$adapters";
 
 impl TypeChecker {
     /// Fold an adapter chain over the element type the head produces.
@@ -36,6 +39,32 @@ impl TypeChecker {
         current
     }
 
+    /// Hold the borrows of every closure literal an adapter chain was written with, for
+    /// as long as the loop scope just opened lives. The literal is called on every
+    /// iteration, so the body must not write what it reads, as it may not while a bound
+    /// closure holds the same borrows.
+    pub(crate) fn hold_adapter_borrows(&mut self, adapters: &[LoopAdapter]) {
+        let borrows: Vec<(String, bool)> = adapters
+            .iter()
+            .filter_map(|adapter| function_value_position(&adapter.callee))
+            .filter_map(|span| self.scope_bound_closures.get(&span))
+            .flatten()
+            .cloned()
+            .collect();
+        if borrows.is_empty()
+            || self
+                .symbols
+                .define(ADAPTER_HOLDER.to_string(), Type::Void, false)
+                .is_err()
+        {
+            return;
+        }
+        for (place, exclusive) in borrows {
+            self.symbols
+                .attach_borrow(ADAPTER_HOLDER, &place, exclusive);
+        }
+    }
+
     fn check_loop_adapter(&mut self, element: Option<Type>, adapter: &LoopAdapter) -> Option<Type> {
         let name = adapter_name(adapter.kind).to_string();
         let answer = match adapter.kind {
@@ -48,12 +77,15 @@ impl TypeChecker {
             answer,
         );
         // The function value is READ, not moved: it is evaluated once, called per
-        // element, and stays usable after the loop.
-        self.function_value_slot = binding_position(&adapter.callee);
+        // element, and stays usable after the loop. A borrowing closure literal written
+        // here dies with the loop, which holds its borrows (`hold_adapter_borrows`).
+        let slot = function_value_position(&adapter.callee);
+        self.function_value_slot = slot;
         let callee_ty = self
             .check_expr(&adapter.callee, Some(&context))
             .unwrap_or(Type::Unknown);
         self.function_value_slot = None;
+        self.refuse_mutating_closure_literal(slot);
 
         let (param, ret) = match &callee_ty {
             Type::Function { params, ret, .. } if params.len() == 1 => {

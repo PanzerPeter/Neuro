@@ -1105,7 +1105,9 @@ impl TypeChecker {
                 }
                 Item::Const(def) => {
                     self.current_module = def.module;
+                    let warnings_before = self.warnings.len();
                     let _ = self.check_const_item(def);
+                    self.drop_allowed_warnings(warnings_before, &def.attributes);
                 }
                 // Enums, newtypes, and traits carry no directly-checked bodies. Trait
                 // default-method bodies are checked through the impl copies the parser

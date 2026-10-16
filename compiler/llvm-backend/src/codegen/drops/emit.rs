@@ -214,14 +214,54 @@ impl<'ctx> CodegenContext<'ctx> {
     /// including `min_index`, in LIFO order, without popping any scope. Used at
     /// `return` (`min_index = 0`) and at `break`/`continue` (the loop's body scope).
     pub(crate) fn emit_drops_through(&mut self, min_index: usize) -> CodegenResult<()> {
-        if min_index >= self.drop_scopes.len() {
+        self.emit_drops_between(min_index, self.drop_scopes.len())
+    }
+
+    /// Leave every open scope from the innermost down to and including `min_index`, as a
+    /// `return`, `break` or `continue` does: each scope's destructors, and after the body
+    /// scope of a `pool` region the jump leaves, that region's release, innermost first.
+    ///
+    /// `release_arena` is false for a jump carrying a value the arena may hold. The
+    /// checker lets only a number, `bool` or `char` leave by `return` or `break`, so that
+    /// is a `?` propagating its residual: the registrations are swept, but the mark is
+    /// left where it is, so the value stays readable and the arena keeps the bytes.
+    pub(crate) fn emit_exit_through(
+        &mut self,
+        min_index: usize,
+        release_arena: bool,
+    ) -> CodegenResult<()> {
+        let left: Vec<_> = self
+            .pool_exits
+            .iter()
+            .rev()
+            .filter(|exit| exit.scope >= min_index)
+            .copied()
+            .collect();
+        let mut upper = self.drop_scopes.len();
+        for exit in left {
+            self.emit_drops_between(exit.scope, upper)?;
+            if self.current_block_terminated() {
+            } else if release_arena {
+                self.emit_pool_exit(&exit)?;
+            } else if let Some(registered) = exit.registered {
+                self.emit_pool_sweep(registered)?;
+            }
+            upper = exit.scope;
+        }
+        self.emit_drops_between(min_index, upper)
+    }
+
+    /// Destructor calls for the scopes `lower..upper`, innermost first.
+    fn emit_drops_between(&mut self, lower: usize, upper: usize) -> CodegenResult<()> {
+        let upper = upper.min(self.drop_scopes.len());
+        if lower >= upper {
             return Ok(());
         }
         // Snapshot the entries first so the destructor calls below can borrow `self`
         // mutably without aliasing the scope stack. Innermost scope first, reverse
         // declaration order within each scope.
         let mut pending: Vec<(PointerValue<'ctx>, PointerValue<'ctx>, DropTarget)> = Vec::new();
-        for scope in self.drop_scopes[min_index..].iter().rev() {
+        for scope in self.drop_scopes[lower..upper].iter().rev() {
             for entry in scope.iter().rev() {
                 // A pool-registered value outlives its own scope on purpose: its
                 // release is the arena's LIFO sweep at the pool's closing brace, so every

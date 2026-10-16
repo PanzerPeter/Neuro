@@ -22,6 +22,8 @@ pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
 pub(crate) const FMT_DEBUG_METHOD: &str = "fmt_debug";
 /// The method `Hashable` declares.
 pub(crate) const HASH_METHOD: &str = "hash";
+/// The method `PartialEq` declares: `eq(&self, rhs: &Self) -> bool`.
+pub(crate) const EQ_METHOD: &str = "eq";
 
 impl TypeChecker {
     /// Whether type parameter `param` carries a `Copy` bound in the scope being checked.
@@ -99,8 +101,8 @@ impl TypeChecker {
     }
 
     /// Type a call of a derivable trait's method on a receiver that implements the trait
-    /// without an `impl`: `x.clone()` on a `Copy` value, `s.hash()` and `s.fmt_debug(out)`
-    /// on a derived struct or a builtin. `None` when `method` is not one of those here,
+    /// without an `impl`: `x.clone()` on a `Copy` value, `s.hash()`, `s.eq(&t)` and
+    /// `s.fmt_debug(out)` on a derived struct or a builtin. `None` when `method` is not one of those here,
     /// so the caller reports the method as missing.
     pub(crate) fn check_supplied_trait_method(
         &mut self,
@@ -113,6 +115,14 @@ impl TypeChecker {
         let (trait_name, params, ret) = match method {
             super::expressions::CLONE_METHOD => (CLONE_TRAIT, Vec::new(), receiver.clone()),
             HASH_METHOD => (HASHABLE_TRAIT, Vec::new(), Type::U64),
+            EQ_METHOD => (
+                PARTIAL_EQ_TRAIT,
+                vec![Type::Reference {
+                    inner: Box::new(receiver.clone()),
+                    mutable: false,
+                }],
+                Type::Bool,
+            ),
             FMT_DEBUG_METHOD => (
                 DEBUG_TRAIT,
                 vec![Type::Reference {

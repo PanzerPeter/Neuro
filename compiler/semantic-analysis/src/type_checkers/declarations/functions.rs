@@ -97,7 +97,9 @@ impl TypeChecker {
                 assoc_bindings,
                 span,
             }) => self.resolve_impl_return(&trait_name.name, assoc_bindings, &func.body, *span),
-            Some(ret_ty) => self.resolve_type(ret_ty).unwrap_or(Type::Void),
+            // A return type that failed to resolve was reported; `Unknown` keeps each call
+            // site from reporting it again as a `void` it never wrote.
+            Some(ret_ty) => self.resolve_type(ret_ty).unwrap_or(Type::Unknown),
             None => Type::Void,
         };
 

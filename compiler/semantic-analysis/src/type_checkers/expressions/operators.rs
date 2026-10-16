@@ -619,7 +619,7 @@ impl TypeChecker {
             code: WarningCode::FloatCastOutOfRange,
             message: format!(
                 "{what}; use `.to_checked::<{to}>()` for an `Option`, or silence with \
-                 `@allow(float_cast_out_of_range)` on the enclosing function"
+                 `@allow(float_cast_out_of_range)` on the enclosing function or `const`"
             ),
             span,
         });

@@ -219,13 +219,33 @@ func main() -> i32 {
 }
 
 #[test]
-fn a_return_may_not_leave_a_pool() {
+fn a_return_carrying_a_scalar_may_leave_a_pool() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
     pool {
         return 1
     }
+    0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "leaving the block releases its arena on the way; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_return_carrying_an_arena_value_may_not_leave_a_pool() {
+    let errors = semantic_errors(
+        r#"
+func name() -> string {
+    pool {
+        val s = "a" + "b"
+        return s
+    }
+    "c"
 }
 "#,
     );
@@ -233,17 +253,18 @@ func main() -> i32 {
         errors
             .iter()
             .any(|e| matches!(e, TypeError::PoolControlFlowEscapes { .. })),
-        "a return jumps past the arena release; got {errors:?}"
+        "the string may live in the arena the return releases; got {errors:?}"
     );
 }
 
 #[test]
-fn a_break_targeting_an_outer_loop_is_rejected() {
+fn a_break_and_a_continue_targeting_an_outer_loop_may_leave_a_pool() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
     for i in 0..3 {
         pool {
+            if i == 0 { continue }
             break
         }
     }
@@ -251,12 +272,7 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::PoolControlFlowEscapes { .. })),
-        "the loop encloses the pool, so the break leaves it; got {errors:?}"
-    );
+    assert!(errors.is_empty(), "got {errors:?}");
 }
 
 #[test]
@@ -280,14 +296,14 @@ func main() -> i32 {
 }
 
 #[test]
-fn a_labeled_break_out_of_the_pool_is_rejected() {
+fn a_labeled_break_carrying_an_arena_value_out_of_the_pool_is_rejected() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
-    outer: for i in 0..3 {
+    val s = outer: loop {
         pool {
             for j in 0..3 {
-                break outer
+                break outer "a" + "b"
             }
         }
     }

@@ -1028,8 +1028,8 @@ tensor code over float or integer tensors of static shape and rank 1 or more: el
 `.topk()`, the elementwise math methods, slices at literal positions, `.t()` / `.permute(...)`
 and `einsum`, with scalar or tensor parameters (owned or `&`) and a tensor result. A generic
 function qualifies per instance. Integer arithmetic keeps the host's overflow and zero-divisor
-checks. Elementwise math also needs the GPU vendor's device math library when compiling
-(libdevice from the CUDA toolkit, or ROCm's).
+checks. Elementwise math other than `.abs()` also needs the GPU vendor's device math library
+when compiling (libdevice from the CUDA toolkit, or ROCm's).
 
 A program with a `@gpu` function checks for a usable GPU when it starts, before `main`.
 If there is none, it prints ``panic: `@gpu` needs an NVIDIA GPU, and none is usable:`` (or
@@ -1100,7 +1100,9 @@ grid tensor directly, and an axis the grid does not have reads 0. Neither name e
 kernel body, and a local of the same name hides it.
 
 Each axis runs enough blocks to cover its extent, rounded up, so the 37 × 45 tensor above gets a
-3 × 3 grid of 16 × 16 blocks, and the threads past the edge have no element. A body guards its
+3 × 3 grid of 16 × 16 blocks, and the threads past the edge have no element. A GPU runs at most
+2^31 - 1 blocks along `x` and 65535 along `y` and `z`, so a grid that needs more along an axis is
+a compile error naming the axis. A body guards its
 writes, as `row < 37 && col < 45` does. Every index is still checked when the kernel runs: a
 thread that reads or writes past an extent, divides an integer by zero, or (in a debug build)
 overflows an integer, stops the kernel, and the program aborts at the call with a `panic:`

@@ -285,6 +285,8 @@ pub struct ImplDef {
 /// The type annotation is mandatory; the value must be a constant expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstDef {
+    /// `@allow(...)`, the one attribute a constant takes.
+    pub attributes: Vec<Attribute>,
     pub name: Identifier,
     /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
     pub exported: bool,

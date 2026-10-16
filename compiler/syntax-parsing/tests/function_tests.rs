@@ -495,7 +495,19 @@ fn test_dangling_attribute_at_eof_is_rejected() {
         .expect_err("an attribute followed by neither func nor struct should be a parse error")
         .to_string();
     assert!(
-        err.contains("expected function or struct definition after attribute"),
+        err.contains("expected function, struct or const definition after attribute"),
         "{err}"
     );
+}
+
+#[test]
+fn test_attributes_attach_to_a_const() {
+    let source = "@allow(float_cast_out_of_range)\nexport const C: i32 = 1e20 as i32\n";
+    let program = parse(source).expect("an attribute on a const should parse");
+    let Some(Item::Const(def)) = program.first() else {
+        panic!("expected a const item");
+    };
+    assert!(def.exported);
+    assert_eq!(def.attributes.len(), 1);
+    assert_eq!(def.attributes[0].name.name, "allow");
 }

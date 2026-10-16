@@ -205,3 +205,40 @@ func main() -> i32 {
     );
     assert!(!stderr.contains("float-cast-out-of-range"), "{stderr}");
 }
+
+#[test]
+fn allow_on_a_const_silences_its_initializers_cast_warning() {
+    // A `const` took no attributes, so its initializer's warning could not be silenced.
+    let stderr = check_stderr(
+        "cast_warning_const.nr",
+        r#"
+@allow(float_cast_out_of_range)
+export const CEILING: i32 = 1e20 as i32
+const FLOOR: i32 = -1e20 as i32
+
+func main() -> i32 {
+    return CEILING - FLOOR
+}
+"#,
+    );
+    assert_eq!(
+        stderr.matches("float-cast-out-of-range").count(),
+        1,
+        "{stderr}"
+    );
+    assert!(stderr.contains("saturates to its minimum"), "{stderr}");
+}
+
+#[test]
+fn a_const_takes_no_attribute_but_allow() {
+    let err = CompileTest::new()
+        .check(
+            "const_attribute.nr",
+            "@grad\nconst C: f32 = 1.0\n\nfunc main() -> i32 { 0 }\n",
+        )
+        .expect_err("the program must be rejected");
+    assert!(
+        err.contains("`@grad` cannot be written on a `const`"),
+        "{err}"
+    );
+}

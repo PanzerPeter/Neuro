@@ -726,11 +726,16 @@ impl TypeChecker {
         }
     }
 
-    /// Reject a `return` written inside a pool block. Inert outside a pool.
-    pub(crate) fn check_pool_return(&mut self, span: Span) {
+    /// Reject a `return` inside a pool block that carries a value the block's arena may
+    /// hold. Leaving the block releases its arena on the way out, so a bare `return` and
+    /// one carrying a number, `bool` or `char` are fine. Inert outside a pool.
+    pub(crate) fn check_pool_return(&mut self, value: &Type, span: Span) {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
+        if jump_value_outlives_arena(value) {
+            return;
+        }
         let pool = pool.pool.clone();
         self.record_error(TypeError::PoolControlFlowEscapes {
             keyword: "return".to_string(),
@@ -739,13 +744,24 @@ impl TypeChecker {
         });
     }
 
-    /// Reject a `break` / `continue` whose target loop encloses the innermost pool.
-    /// A jump to a loop opened *inside* the block stays inside it and is allowed.
-    /// Inert outside a pool.
-    pub(crate) fn check_pool_loop_jump(&mut self, keyword: &str, label: Option<&str>, span: Span) {
+    /// Reject a `break value` whose target loop encloses the innermost pool and whose
+    /// value the block's arena may hold, as [`check_pool_return`] does for `return`.
+    /// A jump to a loop opened *inside* the block stays inside it. Inert outside a pool.
+    ///
+    /// [`check_pool_return`]: TypeChecker::check_pool_return
+    pub(crate) fn check_pool_loop_jump(
+        &mut self,
+        keyword: &str,
+        label: Option<&str>,
+        value: &Type,
+        span: Span,
+    ) {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
+        if jump_value_outlives_arena(value) {
+            return;
+        }
         let target = match label {
             Some(name) => self
                 .loop_stack
@@ -767,6 +783,12 @@ impl TypeChecker {
             span,
         });
     }
+}
+
+/// Whether a value a jump carries out of a `pool` cannot point into its arena: a number,
+/// `bool` or `char`, or no value at all.
+fn jump_value_outlives_arena(value: &Type) -> bool {
+    value.is_scalar() || matches!(value, Type::Void | Type::Unknown)
 }
 
 /// The binding at the base of a place expression: the one a write through the

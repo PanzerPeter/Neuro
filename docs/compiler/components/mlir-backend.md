@@ -350,7 +350,8 @@ A math function becomes a call into the GPU vendor's device math library (libdev
 ocml on AMD), which the kernels can link only when the CUDA toolkit or ROCm is found while
 compiling. `lower_for_gpu` probes for it once, only for a program whose GPU code calls one, and
 without it leaves such a body to the host (an outlined operation) or refuses it (`@gpu`,
-`@kernel`).
+`@kernel`). `.abs()` is the exception: a device computes it by clearing the sign bit, which is
+the host's `fabs` exactly and needs no library.
 
 Each symbol keeps `lower_for_link`'s signature, so the
 [LLVM backend](llvm-backend.md#mlir-bodies) wrapper serves either path. The two paths split the

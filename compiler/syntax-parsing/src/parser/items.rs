@@ -91,15 +91,21 @@ impl Parser {
                 let mut s = self.parse_struct_def(attributes)?;
                 s.exported = export.is_some();
                 items.push(Item::Struct(s));
+            } else if self.check(&TokenKind::Const) {
+                let mut c = self.parse_const_def()?;
+                c.exported = export.is_some();
+                c.attributes = attributes;
+                items.push(Item::Const(c));
             } else if !attributes.is_empty() {
-                // Attributes attach only to functions and structs today; rejecting here
-                // gives an actionable diagnostic instead of silently dropping them.
+                // Attributes attach only to functions, structs and constants today;
+                // rejecting here gives an actionable diagnostic instead of silently
+                // dropping them.
                 let token = self.peek().ok_or_else(|| ParseError::UnexpectedEof {
-                    expected: "function or struct definition after attribute".to_string(),
+                    expected: "function, struct or const definition after attribute".to_string(),
                 })?;
                 return Err(ParseError::UnexpectedToken {
                     found: token.kind.clone(),
-                    expected: "function or struct definition after attribute".to_string(),
+                    expected: "function, struct or const definition after attribute".to_string(),
                     span: token.span,
                 });
             } else if self.check(&TokenKind::Enum) {
@@ -117,10 +123,6 @@ impl Parser {
                 )?;
                 let impl_def = self.parse_impl_def()?;
                 items.push(Item::Impl(impl_def));
-            } else if self.check(&TokenKind::Const) {
-                let mut c = self.parse_const_def()?;
-                c.exported = export.is_some();
-                items.push(Item::Const(c));
             } else if self.check(&TokenKind::Type) {
                 reject_export(
                     export,
@@ -325,6 +327,7 @@ impl Parser {
         let span = start.span.merge(value.span());
 
         Ok(ConstDef {
+            attributes: Vec::new(),
             name,
             exported: false,
             module: 0,

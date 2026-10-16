@@ -125,6 +125,11 @@ fn a_malformed_kernel_is_refused_by_the_checker() {
             "@kernel(threads: [4])\nfunc k(a: Tensor<f32, [4]>, out: KernelOut<Tensor<f32, [4]>>) {}\nfunc main() -> i32 {\n    val a: Tensor<f32, [4]> = Tensor::ones()\n    mut r: Tensor<f32, [4]> = Tensor::zeros()\n    k(&a, &mut r)\n    return 0\n}\n",
             "pass the tensor, not `&`",
         ),
+        (
+            // 70000 blocks along `y`: the launch once failed at run time instead.
+            "@kernel(threads: [1, 1])\nfunc k(out: KernelOut<Tensor<u8, [2, 70000]>>) {}\nfunc main() -> i32 { return 0 }\n",
+            "runs 70000 blocks along `y` (an extent of 70000 in blocks of 1); no GPU launches more than 65535 there",
+        ),
     ] {
         let error = CompileTest::new()
             .check("malformed.nr", source)
