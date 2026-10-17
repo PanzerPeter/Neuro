@@ -117,7 +117,7 @@ fn a_gpu_index_the_machine_lacks_is_refused() {
 #[test]
 fn host_code_refuses_a_device_tensor_at_the_operation() {
     // Each operation's tensor operand starts in column 13, after `    val r = `.
-    let mut operations = vec!["val r = g.map(|v: f32| -> f32 { ((v as i32) << 1) as f32 })"];
+    let mut operations = vec!["val r = g.map(|v: f32| -> f32 { (v as i32).shr(1) as f32 })"];
     if !cfg!(target_os = "linux") {
         operations.extend([
             "val r = g.map(|v: f32| v * 2.0f32)",

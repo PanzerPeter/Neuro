@@ -166,16 +166,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_extract_value(struct_val, idx as u32, field_name)
                 .map_err(|e| CodegenError::LlvmError(format!("failed to read field: {}", e)))?;
             // A temporary only read from is destroyed once the field is copied out. A
-            // field that owns something is moved out instead, and destroying the rest
-            // would need a partial drop, so that temporary is left alone.
+            // field that owns something is moved out instead, and the rest of the
+            // temporary is destroyed around it.
             let field_owns = self
                 .struct_defs
                 .get(struct_name)
                 .and_then(|def| def.get(idx))
                 .is_some_and(|(_, ty)| self.drop_target_of(ty).is_some());
-            if !field_owns {
-                self.drop_unbound_temporary(object, aggregate)?;
-            }
+            let moved = field_owns.then_some(field_name);
+            self.drop_temporary_except(object, aggregate, moved)?;
             return Ok(field);
         }
 

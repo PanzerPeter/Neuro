@@ -11,7 +11,7 @@
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirType};
 
-use crate::errors::CodegenResult;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 use super::context::{CodegenContext, DropEntry, DropTarget, HeldDrop};
@@ -184,6 +184,19 @@ impl<'ctx> CodegenContext<'ctx> {
         expr: &HirExpr,
         value: BasicValueEnum<'ctx>,
     ) -> CodegenResult<()> {
+        self.drop_temporary_except(expr, value, None)
+    }
+
+    /// [`Self::drop_unbound_temporary`], leaving out the field `moved` when one owning
+    /// field has been moved out of the temporary (`make().f`): the reader owns that one,
+    /// and every other position is still the temporary's to release. A struct with a
+    /// destructor of its own is left whole, since its `drop` reads every field.
+    pub(crate) fn drop_temporary_except(
+        &mut self,
+        expr: &HirExpr,
+        value: BasicValueEnum<'ctx>,
+        moved: Option<&str>,
+    ) -> CodegenResult<()> {
         let fresh = matches!(
             expr.kind,
             HirExprKind::Call { .. }
@@ -199,11 +212,35 @@ impl<'ctx> CodegenContext<'ctx> {
         if self.current_block_terminated() {
             return Ok(());
         }
+        if moved.is_some() && matches!(self.drop_target_of(&ty), Some(DropTarget::UserDrop(_))) {
+            return Ok(());
+        }
         let slot = self.entry_alloca(value.get_type(), "unbound.tmp")?;
         self.builder.build_store(slot, value)?;
         let depth = self.drop_scopes.len();
         self.push_drop_scope();
         self.register_owned_binding(UNBOUND_TEMPORARY, slot, &ty)?;
+        if let Some(field) = moved {
+            // The scope pushed above holds the temporary's entry alone; it has no binding
+            // for `live_drop_entry` to resolve.
+            let taken: Vec<PointerValue<'ctx>> = self
+                .drop_scopes
+                .last()
+                .and_then(|scope| scope.last())
+                .map(|entry| {
+                    entry
+                        .held
+                        .iter()
+                        .filter(|held| held.path.first().is_some_and(|f| f == field))
+                        .map(|held| held.flag_ptr)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let zero = self.context.bool_type().const_zero();
+            for flag_ptr in taken {
+                self.builder.build_store(flag_ptr, zero)?;
+            }
+        }
         self.emit_drops_through(depth)?;
         self.pop_drop_scope();
         Ok(())
@@ -481,6 +518,152 @@ impl<'ctx> CodegenContext<'ctx> {
         self.emit_drops_through(depth)?;
         self.pop_drop_scope();
         Ok(())
+    }
+
+    /// The paths of the `string` positions a value of `ty` holds, in the order
+    /// [`Self::plan_held_drops`] gives them flags.
+    pub(crate) fn string_position_paths(&self, ty: &Type) -> Vec<Vec<String>> {
+        let mut out = Vec::new();
+        self.collect_string_paths(ty, &mut Vec::new(), &mut out);
+        out
+    }
+
+    fn collect_string_paths(&self, ty: &Type, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        for (segment, position_ty) in self.held_positions(ty) {
+            let is_string = matches!(position_ty, Type::String);
+            if !is_string
+                && !self.holds_owner(&position_ty)
+                && !self.holds_string_position(&position_ty)
+            {
+                continue;
+            }
+            path.push(segment);
+            if is_string {
+                out.push(path.clone());
+            } else {
+                self.collect_string_paths(&position_ty, path, out);
+            }
+            let _ = path.pop();
+        }
+    }
+
+    /// The `string` positions of a captured value of `ty` at `storage_ptr`, each guarded by
+    /// the flag `flags` holds for its path (in [`Self::string_position_paths`] order): the
+    /// held entries a closure body's capture carries, so a field store re-arms one.
+    pub(crate) fn captured_string_positions(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        ty: &Type,
+        flags: &[PointerValue<'ctx>],
+    ) -> CodegenResult<Vec<HeldDrop<'ctx>>> {
+        let paths = self.string_position_paths(ty);
+        let mut held = Vec::new();
+        self.plan_held_drops(storage_ptr, ty, &mut Vec::new(), &mut held)?;
+        Ok(held
+            .into_iter()
+            .filter(|position| matches!(position.target, DropTarget::HeapString))
+            .filter_map(|mut position| {
+                let index = paths.iter().position(|path| *path == position.path)?;
+                position.flag_ptr = *flags.get(index)?;
+                Some(position)
+            })
+            .collect())
+    }
+
+    /// Release the captured value of `ty` at `storage_ptr` when `owns_ptr` says the
+    /// environment owns it, its `string` positions owning what `flags` say: the flags
+    /// moved in with the capture, which its type alone cannot prove.
+    pub(crate) fn emit_captured_release(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        owns_ptr: PointerValue<'ctx>,
+        ty: &Type,
+        flags: &[PointerValue<'ctx>],
+    ) -> CodegenResult<()> {
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("a capture release outside a function".into())
+        })?;
+        let bool_ty = self.context.bool_type();
+        let owns = self
+            .builder
+            .build_load(bool_ty, owns_ptr, "capture.owns")?
+            .into_int_value();
+        let run_bb = self.context.append_basic_block(parent_fn, "capture.drop");
+        let cont_bb = self.context.append_basic_block(parent_fn, "capture.cont");
+        self.builder
+            .build_conditional_branch(owns, run_bb, cont_bb)?;
+        self.builder.position_at_end(run_bb);
+        let depth = self.drop_scopes.len();
+        self.push_drop_scope();
+        self.register_owned_binding(UNBOUND_TEMPORARY, storage_ptr, ty)?;
+        let paths = self.string_position_paths(ty);
+        let positions: Vec<(Vec<String>, PointerValue<'ctx>)> = self
+            .drop_scopes
+            .last()
+            .and_then(|scope| scope.last())
+            .map(|entry| {
+                entry
+                    .held
+                    .iter()
+                    .filter(|held| matches!(held.target, DropTarget::HeapString))
+                    .map(|held| (held.path.clone(), held.flag_ptr))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (path, flag_ptr) in positions {
+            let Some(source) = paths
+                .iter()
+                .position(|p| *p == path)
+                .and_then(|i| flags.get(i))
+            else {
+                continue;
+            };
+            let owned = self
+                .builder
+                .build_load(bool_ty, *source, "capture.string.owns")?;
+            self.builder.build_store(flag_ptr, owned)?;
+        }
+        self.emit_drops_through(depth)?;
+        self.pop_drop_scope();
+        self.builder.build_store(owns_ptr, bool_ty.const_zero())?;
+        self.builder.build_unconditional_branch(cont_bb)?;
+        self.builder.position_at_end(cont_bb);
+        Ok(())
+    }
+
+    /// Whether each `string` position of the binding `name` (a value of `ty`) owns its
+    /// buffer now, in `string_position_paths` order: false where nothing records it.
+    pub(crate) fn held_string_flags_of(
+        &mut self,
+        name: &str,
+        ty: &Type,
+    ) -> CodegenResult<Vec<IntValue<'ctx>>> {
+        let bool_ty = self.context.bool_type();
+        let flags: Vec<Option<PointerValue<'ctx>>> = self
+            .string_position_paths(ty)
+            .iter()
+            .map(|path| {
+                self.live_drop_entry(name).and_then(|entry| {
+                    entry
+                        .held
+                        .iter()
+                        .find(|held| {
+                            held.path == *path && matches!(held.target, DropTarget::HeapString)
+                        })
+                        .map(|held| held.flag_ptr)
+                })
+            })
+            .collect();
+        flags
+            .into_iter()
+            .map(|flag| match flag {
+                Some(flag_ptr) => Ok(self
+                    .builder
+                    .build_load(bool_ty, flag_ptr, "capture.string.owned")?
+                    .into_int_value()),
+                None => Ok(bool_ty.const_zero()),
+            })
+            .collect()
     }
 
     /// The positions a value of `ty` holds, in declaration order, as `(accessor

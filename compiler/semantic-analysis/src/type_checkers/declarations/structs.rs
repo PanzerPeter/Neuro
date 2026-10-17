@@ -140,8 +140,8 @@ impl TypeChecker {
         let partial_eq = self.partial_eq_structs.contains(registered);
         let hashable = self.hashable_structs.contains(registered);
         // `Copy` reports its own fields, and every `Copy` field is cloned by the copy.
-        let clone =
-            self.clone_structs.contains(registered) && !self.copy_structs.contains(registered);
+        let clone = self.clone_structs.contains(registered)
+            && !self.is_type_copy(&Type::Struct(registered.to_string()));
         if !debug && !partial_eq && !clone && !hashable {
             return;
         }
@@ -232,7 +232,7 @@ impl TypeChecker {
     /// structs are registered so a field whose type is another struct resolves regardless
     /// of declaration order.
     pub(crate) fn validate_copy_derive(&mut self, def: &StructDef) {
-        if !self.copy_structs.contains(&def.name.name) {
+        if !self.declares_copy(&def.name.name) {
             return;
         }
         // Collect offenders first to avoid borrowing `self` mutably while iterating fields.
@@ -456,9 +456,7 @@ impl TypeChecker {
                 self.private_fields.insert(mangled.clone(), private);
             }
 
-            if self.copy_structs.contains(base) {
-                self.copy_structs.insert(mangled.clone());
-            }
+            // `Copy` is not inherited here: `struct_copies` decides it per instance.
             if self.clone_structs.contains(base) {
                 self.clone_structs.insert(mangled.clone());
             }

@@ -35,6 +35,7 @@ fn host_bodies(
                         mlir_backend::GuardKind::Overflow => BodyGuardKind::Overflow,
                         mlir_backend::GuardKind::DivisionByZero => BodyGuardKind::DivisionByZero,
                         mlir_backend::GuardKind::RemainderByZero => BodyGuardKind::RemainderByZero,
+                        mlir_backend::GuardKind::ShiftOverflow => BodyGuardKind::ShiftOverflow,
                     },
                     offset: guard.offset,
                 })

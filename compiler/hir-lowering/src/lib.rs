@@ -177,8 +177,14 @@ struct Lowerer {
     newtypes: HashMap<String, ast_types::Type>,
     /// Structs that support `.clone()` (derive `Clone`, or `Copy` which implies it).
     clone_structs: HashSet<String>,
-    /// Structs that derive `Copy`, which a closure copies rather than borrows.
+    /// Structs that are `Copy`, derived or by a hand-written `impl Copy`, which a
+    /// closure copies rather than borrows. A generic struct's derive is recorded under
+    /// its base name.
     copy_structs: HashSet<String>,
+    /// Generic structs with a hand-written `impl Copy`: per struct parameter, whether the
+    /// impl bounds it by `Copy`. The checker decides an instance's `Copy` from the same
+    /// facts (see `Lowerer::is_copy`).
+    generic_copy_bounds: HashMap<String, Vec<bool>>,
     /// The names of every `&mut self` method: a closure calling one on a `Copy` capture
     /// writes it, so it borrows the capture instead of copying it.
     mut_self_method_names: HashSet<String>,
@@ -189,6 +195,10 @@ struct Lowerer {
     /// node the backend expands field-wise, NOT to a method call. A derived comparison
     /// has no `eq` to dispatch to, which is what distinguishes it from an `impl`.
     partial_eq_structs: HashSet<String>,
+    /// Structs that derive `Debug` or `Hashable`: with the sets above, what lowering needs
+    /// to tell whether an instance meets a derivable-trait bound, as the checker does.
+    debug_structs: HashSet<String>,
+    hashable_structs: HashSet<String>,
     /// Struct name → method name → mangled key into [`Self::functions`].
     impl_methods: HashMap<String, HashMap<String, String>>,
     /// Concrete `(trait name, implementing type name)` pairs with an
@@ -224,9 +234,9 @@ struct Lowerer {
     /// Whether the program moves a tensor to a device anywhere, which is what lets an
     /// outlined tensor operation run on one (`tensor_ops`).
     transfers: bool,
-    /// For each `@kernel` function, which parameters are bare `Tensor` inputs: a call
-    /// borrows those arguments instead of moving them.
-    kernel_inputs: HashMap<String, Vec<bool>>,
+    /// For each `@kernel` function, its parameter types as written. A bare `Tensor` is an
+    /// input, which a call borrows instead of moving.
+    kernel_params: HashMap<String, Vec<ast_types::Type>>,
     /// Generic free-function templates, keyed by name. A generic function is
     /// never lowered as-is; each distinct set of type arguments produces one
     /// monomorphized concrete function instead.
@@ -423,9 +433,12 @@ impl Lowerer {
             newtypes: HashMap::new(),
             clone_structs: HashSet::new(),
             copy_structs: HashSet::new(),
+            generic_copy_bounds: HashMap::new(),
             mut_self_method_names: HashSet::new(),
             borrowed_captures: HashSet::new(),
             partial_eq_structs: HashSet::new(),
+            debug_structs: HashSet::new(),
+            hashable_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             trait_impls: HashSet::new(),
             traits: HashMap::new(),
@@ -438,7 +451,7 @@ impl Lowerer {
             current_return: HirType::Void,
             in_kernel: false,
             transfers: false,
-            kernel_inputs: HashMap::new(),
+            kernel_params: HashMap::new(),
             generic_templates: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),

@@ -583,3 +583,37 @@ func main() -> i32 { 0 }
         "got: {err}"
     );
 }
+
+/// An impl bounded by a derivable trait applies to every instance whose argument meets the
+/// bound, a builtin type included. The bounded impls were left out of a builtin instance,
+/// so the methods the checker had accepted were undefined at code generation.
+#[test]
+fn regression_bounded_impl_reaches_builtin_arguments() {
+    let source = r#"
+@derive(Debug, PartialEq, Hashable, Clone)
+struct D { n: i32 }
+struct Cell<T> { v: T }
+impl<T: Debug> Cell<T> {
+    func dbg(&self) -> i32 {
+        println("{self.v:?}")
+        1
+    }
+}
+impl<T: PartialEq> Cell<T> { func same(&self, o: &Cell<T>) -> i32 { if self.v == o.v { 10 } else { 0 } } }
+impl<T: Hashable> Cell<T> { func h(&self) -> i32 { 100 } }
+impl<T: Copy> Cell<T> { func get(&self) -> T { self.v } }
+func main() -> i32 {
+    val a = Cell { v: 3 }
+    val s = Cell { v: "xy" }
+    val d = Cell { v: D { n: 2 } }
+    val f = Cell { v: 1.5f16 }
+    (a.dbg() + a.same(&a) + a.h()) + (s.dbg() + s.same(&s) + s.h())
+        + (d.dbg() + d.same(&d) + d.h()) + (f.dbg() + f.same(&f)) + a.get() - 100
+}
+"#;
+    assert_eq!(run("bounded_builtin.nr", source), 111 * 3 + 11 + 3 - 100);
+    assert_eq!(
+        stdout_of("bounded_builtin_out.nr", source),
+        "3\n\"xy\"\nD { n: 2 }\n1.5\n"
+    );
+}

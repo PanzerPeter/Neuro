@@ -98,7 +98,7 @@ pub(crate) fn kernel_launchers(
         let HirTarget::Kernel { threads } = function.target else {
             continue;
         };
-        match launcher(function, &symbol, threads, (guard, overflow), math) {
+        match launcher(program, function, &symbol, threads, (guard, overflow), math) {
             Ok(launcher) => {
                 text.push_str(&launcher);
                 functions.push((function.name.clone(), symbol));
@@ -123,6 +123,7 @@ pub(crate) fn kernel_launchers(
 
 /// One kernel's launcher: the grid sizes, then a `gpu.launch` whose region is the body.
 fn launcher(
+    program: &HirProgram,
     function: &HirFunction,
     symbol: &str,
     threads: [u32; 3],
@@ -142,9 +143,10 @@ fn launcher(
     if blocks.contains(&0) {
         return Ok(launch_text(symbol, &params, blocks, threads, ""));
     }
-    let mut region = BodyEmitter::new(function, style, threads, extents.clone(), true).emit()?;
+    let body = (program, function);
+    let mut region = BodyEmitter::new(body, style, threads, extents.clone(), true).emit()?;
     if uses_math(&region) && !math() {
-        region = BodyEmitter::new(function, style, threads, extents, false).emit()?;
+        region = BodyEmitter::new(body, style, threads, extents, false).emit()?;
     }
     Ok(launch_text(symbol, &params, blocks, threads, &region))
 }

@@ -340,7 +340,7 @@ impl TypeChecker {
             let type_name = &def.type_name.name;
             let supertrait = if t.name == COPY_TRAIT {
                 // An `impl Copy` already refused for its target has nothing left to need.
-                if !self.copy_structs.contains(type_name) {
+                if !self.declares_copy(type_name) {
                     continue;
                 }
                 CLONE_TRAIT
@@ -384,11 +384,11 @@ impl TypeChecker {
                 continue;
             }
             let name = &def.type_name.name;
-            let refusal = if self.generic_structs.contains_key(name) {
-                Some(
-                    "a generic struct is `Copy` through `@derive(Copy)`, which each instance re-checks",
-                )
-            } else if !self.struct_defs.contains_key(name) {
+            if self.generic_structs.contains_key(name) {
+                self.register_generic_copy_impl(def);
+                continue;
+            }
+            let refusal = if !self.struct_defs.contains_key(name) {
                 Some(
                     "only a struct implements `Copy` by hand; an enum or a newtype is `Copy` exactly when what it holds is",
                 )
@@ -405,6 +405,42 @@ impl TypeChecker {
             }
             self.copy_structs.insert(name.clone());
         }
+    }
+
+    /// Record `impl<T: Copy> Copy for Cell<T> {}`: which of the struct's parameters the
+    /// impl bounds. Lowering decides an instance's `Copy` from the same facts and has no
+    /// trait solver, so a bound other than `Copy` is refused rather than half-honoured.
+    fn register_generic_copy_impl(&mut self, def: &ImplDef) {
+        let name = &def.type_name.name;
+        let other_bound = def
+            .generics
+            .iter()
+            .flat_map(|g| &g.bounds)
+            .find(|b| b.trait_name.name != COPY_TRAIT);
+        if let Some(bound) = other_bound {
+            self.record_error(TypeError::InvalidCopyImpl {
+                type_name: name.clone(),
+                reason: format!(
+                    "a generic `impl Copy` may bound its parameters by `Copy` only, not `{}`",
+                    bound.trait_name.name
+                ),
+                span: bound.trait_name.span,
+            });
+            return;
+        }
+        let bounds = def
+            .type_args
+            .iter()
+            .map(|arg| {
+                let ast_types::Type::Named(id) = arg else {
+                    return false;
+                };
+                def.generics
+                    .iter()
+                    .any(|g| g.name.name == id.name && !g.bounds.is_empty())
+            })
+            .collect();
+        self.generic_copy_bounds.insert(name.clone(), bounds);
     }
 
     /// Reject a struct that both derives a trait and declares an `impl` of it.
@@ -463,7 +499,7 @@ impl TypeChecker {
         }
         self.drop_structs.insert(struct_name.to_string());
 
-        if self.copy_structs.contains(struct_name) {
+        if self.declares_copy(struct_name) {
             self.record_error(TypeError::DropTypeCannotBeCopy {
                 type_name: struct_name.to_string(),
                 span: def.type_name.span,

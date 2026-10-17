@@ -43,7 +43,10 @@ caches.
   whose body is a compound assignment or a `.map` / `.zip` / `.reduce` becomes a per-thread
   launcher instead (`kernel/body/traversal.rs`), as leniently. It
   lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
-  returns nothing and launches the body once per thread; a body construct the kernel lowering
+  returns nothing and launches the body once per thread. A `<<` checks its amount against the
+  operand's width on the debug tier (`GuardKind::ShiftOverflow`, the host's `shift overflow`) and
+  masks it from `-O1` up; a local `const` is a scalar local, and a scalar module constant read by
+  name lowers to its value (`module_constant`). A body construct the kernel lowering
   lacks is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
   function. A body calling a math function needs the vendor's device math library; without it
   (probed once, see Notes) a `FollowsOperands` one keeps its host body, a `@gpu` one is

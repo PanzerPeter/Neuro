@@ -930,3 +930,40 @@ func main() -> i32 {
         "each displaced token goes at its store, the rest at scope exit in reverse order"
     );
 }
+
+/// Moving one owning field out of a temporary (`make().n`) leaves the reader that field
+/// and destroys the temporary's other owners, each exactly once, a function value's
+/// environment included.
+#[test]
+fn moving_a_field_out_of_a_temporary_destroys_the_rest() {
+    let source = r#"
+struct Noisy { id: i32 }
+impl Drop for Noisy { func drop(&mut self) { println("drop {self.id}") } }
+struct In { n: Noisy, k: Noisy }
+struct H { f: () -> i32, n: Noisy, inner: In }
+func make() -> H {
+    val c = Noisy { id: 1 }
+    H { f: move || c.id, n: Noisy { id: 2 }, inner: In { n: Noisy { id: 3 }, k: Noisy { id: 4 } } }
+}
+func main() -> i32 {
+    val n = make().n
+    val inner = make().inner
+    val g = make().f
+    n.id + inner.k.id + g()
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("temporary_partial_drop.nr", source))
+        .expect("compile failed");
+    let run = std::process::Command::new(&exe).output().expect("run");
+    assert_eq!(run.status.code(), Some(2 + 4 + 1));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    for id in 1..=4 {
+        assert_eq!(
+            stdout.matches(&format!("drop {id}\n")).count(),
+            3,
+            "every value is built three times and destroyed once each time:\n{stdout}"
+        );
+    }
+}

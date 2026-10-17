@@ -196,7 +196,10 @@ load panics on a failed probe, or on a module the driver refuses (`cuModuleLoadD
 `__neuro_gpu_fallback`, an `i8` constant `define_gpu_fallback_flag` emits, is 1, which it is
 exactly when the program has no bare `@gpu` function; the load then answers a null module that
 nothing reads, since every call takes its host body. A refused module clears `ready` too: loads
-run in global constructors, so no call has picked its GPU body yet.
+run in global constructors, so no call has picked its GPU body yet. The panic names what needed the GPU
+through `__neuro_gpu_launcher`, a string constant `define_gpu_launcher` emits beside the flag:
+`` `@kernel` `` when the program's only GPU code is `@kernel` functions, `` `@gpu` `` otherwise.
+Both runtimes declare it `extern`, and `link_gpu_runtime` makes both globals internal.
 
 **Operations outlined to follow their operands.** A `Device` body whose target is
 `FollowsOperands` (a tensor operation lowering lifted out of host code) goes through
@@ -326,6 +329,8 @@ the assigned expression, so `s = s + "!"` frees the old buffer and keeps the new
 A bare binding name proves nothing about ownership, but the binding it names does, at run time:
 `load_owned_string_flag` reads its flag before the move clears it, and `val u = t` / `s = t`
 store that value into the target's flag, so the buffer changes owner rather than losing one. A
+held `string` position named as a place (`m.label`, `t.0`, `a[1]`) hands over its own flag the
+same way (`owned_string_flag_ptr`), so `val taken = m.label` owns what the position owned. A
 binding that may ever own a buffer carries a `HeapString` entry: one whose initializer owns, one
 moved from a binding that may own, and every `mut` one (its flag starts clear for a literal, so
 `mut s = "x"` then `s = a + b` has a flag for the assignment to arm). An immutable binding holding
@@ -358,9 +363,10 @@ then belongs to the storage, and is tracked one of three ways:
   excluded, since `codegen_call_dispatch` may send that call through the indirect path. A tail
   `if` (with an `else`), `match` or block exits through each branch's own tail (`tail_exits`). A
   `return` written inside an expression (a `loop` body, an `if` or `match` used as a value, a
-  block) is an exit `collect_returns` does not enumerate, so a body holding one is never a
-  producer: missing that exit once let a function that returned a literal through it be read as
-  allocating, and its caller freed the literal.
+  block) is an exit like any other: `collect_expression_returns` walks every such statement list
+  (never into a closure, whose returns leave the closure) and adds its returns. Missing one once
+  let a function that returned a literal through it be read as allocating, and its caller freed
+  the literal, so the walk covers every expression kind `walk` reaches.
 - **A forwarded parameter.** The pass's third answer: the functions whose every exit hands back
   one `string` parameter unchanged (a read of it, or a call to another forwarder passing it on,
   so again a growing fixpoint), with that parameter's index. What such a call yields is owned
@@ -376,8 +382,9 @@ then belongs to the storage, and is tracked one of three ways:
 - **A by-value argument.** The same pass records the `string` parameters whose callee provably only
   READS them, by a whitelist of positions that copy the bytes out (a `print`/`println` argument, an
   interpolation hole, a binary operand, a `.len()` or `.clone()` receiver, a `push_str` argument,
-  anything under an `as` cast, and an argument to another declared function whose parameter in
-  that position is itself read only). Every other occurrence is a retention. The last position
+  anything under an `as` cast, and an argument to another declared function, or to a method a
+  struct or enum receiver resolves to (`Type__method`), whose parameter in that position is itself
+  read only). Every other occurrence is a retention. The last position
   makes this summary a fixpoint too, growing from empty exactly like the return summary, and it
   trusts no callee name a local binding shadows. `.clone()` qualifies only because a `string`
   clone copies its bytes into a buffer of its own (`copy_string_bytes`) and is an owned producer;
@@ -600,9 +607,11 @@ always wraps, regardless of `overflow_checks`.
 ## Enum ABI
 `compile` builds an `enum_payloads` table (each enum's variant payload types) and hands it to the
 `TypeMapper`. `enum_payload_shape` derives the layout from it as `(slots, words)`: `slots` is the
-widest variant's field count, `words` the widest single payload field rounded up to whole 64-bit
-words (`llvm_words`, a deliberate over-estimate: every field is rounded up before it is summed,
-which cannot under-count a layout whose maximum alignment is 8). An enum is therefore the tagged
+widest variant's field count, `words` the widest single payload field's size rounded up to whole
+64-bit words. The size is the field's real layout (`natural_layout`: each scalar aligned to its own
+width, pointers 8 bytes, struct fields at aligned offsets), which a unit test holds to LLVM's
+`TargetData` for the host; a type that rule does not settle (a vector, an alignment past 8) takes
+`llvm_words`, the old upper bound that rounds every field to a word. An enum is therefore the tagged
 union `{ i32 tag, [W x [K x i64]] payload }`, usable as a parameter, return, or field via
 `map_type`.
 
@@ -1204,7 +1213,12 @@ owns something. At the value site such a capture's source is disowned (`mark_mov
 its flag takes the source's ownership (`capture_ownership`: a function value always owns the
 count its copy took, a `PoolAware` value stays the arena's). The release frees each owned capture
 under its flag (`DropTarget::Captured`, which plans the value's owners fresh at the release so one
-flag covers them all), then the block. Inside the body the same field and flag are the capture's
+flag covers them all), then the block. A capture whose type holds `string` positions also gets one
+`i1` per position after the ownership flags (`EnvLayout::strings`, in `string_position_paths`
+order): the value site copies the source's position flags in (`held_string_flags_of`), the body's
+drop entry holds those positions with the environment's flags (`captured_string_positions`), so a
+field store through the capture re-arms one and a move of one out clears only it, and the release
+copies them into its fresh plan (`emit_captured_release`). Inside the body the same field and flag are the capture's
 drop entry (`captured_drop_entries`, consulted by `live_drop_entry`, never emitted at the body's
 exits), so a body that moves the capture out, a `once` call, clears the flag and the release frees
 nothing twice. Reading a part of an owned capture that owns nothing (`n.id`) disowns nothing.
@@ -1303,9 +1317,12 @@ own type proves ownership.
 
 A fresh value that holds a user `Drop` type and that no binding ever owns is destroyed where it
 is last read (`drop_unbound_temporary`, BUG-047): a call, struct literal or enum construction whose
-statement value is discarded, one a field is read from (unless the field itself owns something and
-is moved out), and one passed as a `&self` receiver. It is stored to a slot, registered in a
-throwaway scope, and that scope's drops are emitted at once. Inside a `pool` it does nothing.
+statement value is discarded, one a field is read from, and one passed as a `&self` receiver. It
+is stored to a slot, registered in a throwaway scope, and that scope's drops are emitted at once.
+When the field read owns something it is moved out instead (`drop_temporary_except`): the held
+flags under that field are cleared first, so the reader keeps it and the rest is released. A
+struct with its own `Drop` impl is left whole there, since its destructor reads every field.
+Inside a `pool` it does nothing.
 
 Every lookup of a binding's drop entry goes through `live_drop_entry`, which matches the entry's
 storage against the alloca the name resolves to now. A binding that owns nothing registers no

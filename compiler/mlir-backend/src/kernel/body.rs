@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    HirExpr, HirExprKind, HirFunction, HirGridIndex, HirMathOp, HirPlace, HirStmt, HirTensorAxis,
-    HirType,
+    HirExpr, HirExprKind, HirFunction, HirGridIndex, HirItem, HirMathOp, HirPlace, HirProgram,
+    HirStmt, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -29,6 +29,7 @@ const INDEX_OUT_OF_BOUNDS: &str = "index out of bounds in a `@kernel` body";
 const DIVIDE_BY_ZERO: &str = "integer division by zero in a `@kernel` body";
 const REMAINDER_BY_ZERO: &str = "integer remainder by zero in a `@kernel` body";
 const OVERFLOW: &str = "integer overflow in a `@kernel` body";
+const SHIFT_OVERFLOW: &str = "shift overflow in a `@kernel` body";
 
 /// The launcher parameter a checked body stores a failed check's number into.
 pub(super) const STATUS: &str = "%status";
@@ -174,11 +175,13 @@ pub(crate) struct BodyEmitter<'f> {
     /// Where a `return` with a value stores it: the slot of the function being called, and
     /// its type. A `@kernel` returns nothing.
     returns: Option<(String, &'static str)>,
+    /// The program's module constants, a read of one lowering to its value.
+    program: &'f HirProgram,
 }
 
 impl<'f> BodyEmitter<'f> {
     pub(crate) fn new(
-        function: &'f HirFunction,
+        (program, function): (&'f HirProgram, &'f HirFunction),
         (guard, overflow): (GuardStyle, Overflow),
         threads: [u32; 3],
         grid: Vec<usize>,
@@ -215,6 +218,7 @@ impl<'f> BodyEmitter<'f> {
             stop: None,
             element: None,
             returns: None,
+            program,
         }
     }
 
@@ -323,22 +327,15 @@ impl<'f> BodyEmitter<'f> {
     fn statement(&mut self, statement: &HirStmt, exit: &str) -> Lowered<()> {
         match statement {
             HirStmt::VarDecl { name, ty, init, .. } => {
-                let mlir = scalar_type(ty)
-                    .ok_or_else(|| Refused::new(stmt_span(statement), "a local of this type"))?;
-                let slot = self.slot(mlir);
-                if let Some(init) = init {
-                    let value = self.expr(init, exit)?;
-                    self.line(&format!("memref.store {value}, {slot}[] : memref<{mlir}>"));
-                }
-                self.define(
-                    name,
-                    Binding::Slot {
-                        slot,
-                        ty: ty.clone(),
-                    },
-                );
-                Ok(())
+                self.local(name, ty, init.as_ref(), stmt_span(statement), exit)
             }
+            // A local `const` is a scalar local nothing reassigns.
+            HirStmt::Const {
+                name,
+                ty,
+                value,
+                span,
+            } => self.local(name, ty, Some(value), *span, exit),
             HirStmt::Assign { place, value, span } => self.store(place, value, *span, exit),
             HirStmt::If {
                 condition,
@@ -404,6 +401,44 @@ impl<'f> BodyEmitter<'f> {
             HirStmt::Expr(expr) => self.expr(expr, exit).map(|_| ()),
             other => Err(Refused::new(stmt_span(other), statement_kind(other))),
         }
+    }
+
+    /// The value of the module constant `name` when it is a scalar, which a read of it in
+    /// the body computes in place.
+    fn module_constant(&self, name: &str) -> Option<&'f HirExpr> {
+        self.program.items.iter().find_map(|item| match item {
+            HirItem::Const(constant)
+                if constant.name == name && scalar_type(&constant.ty).is_some() =>
+            {
+                Some(&constant.value)
+            }
+            _ => None,
+        })
+    }
+
+    /// A scalar local in a slot of its own, stored from `init` when it has one.
+    fn local(
+        &mut self,
+        name: &str,
+        ty: &HirType,
+        init: Option<&HirExpr>,
+        span: Span,
+        exit: &str,
+    ) -> Lowered<()> {
+        let mlir = scalar_type(ty).ok_or_else(|| Refused::new(span, "a local of this type"))?;
+        let slot = self.slot(mlir);
+        if let Some(init) = init {
+            let value = self.expr(init, exit)?;
+            self.line(&format!("memref.store {value}, {slot}[] : memref<{mlir}>"));
+        }
+        self.define(
+            name,
+            Binding::Slot {
+                slot,
+                ty: ty.clone(),
+            },
+        );
+        Ok(())
     }
 
     fn loop_target(&self, label: &Option<String>, span: Span) -> Lowered<&LoopTargets> {
@@ -699,7 +734,10 @@ impl<'f> BodyEmitter<'f> {
                     expr.span,
                     "a `partition` slice used other than by index or `.len()`",
                 )),
-                None => Err(Refused::new(expr.span, "a name from outside the kernel")),
+                None => match self.module_constant(name) {
+                    Some(value) => self.expr(value, exit),
+                    None => Err(Refused::new(expr.span, "a name from outside the kernel")),
+                },
             },
             HirExprKind::GridPosition { of, axis } => Ok(self.grid_position(*of, *axis)),
             HirExprKind::Binary { op, left, right } => self.binary(*op, left, right, expr, exit),
@@ -1026,6 +1064,7 @@ impl<'f> BodyEmitter<'f> {
             BinaryOp::BitAnd => "andi",
             BinaryOp::BitOr => "ori",
             BinaryOp::BitXor => "xori",
+            BinaryOp::Shl => return Ok(self.shift_left((&lhs, &rhs), operand_ty, expr.span.start)),
             _ => return Err(Refused::new(expr.span, "this operator on an integer")),
         };
         Ok(self.assign(&format!("arith.{name} {lhs}, {rhs} : {mlir}")))
@@ -1063,6 +1102,23 @@ impl<'f> BodyEmitter<'f> {
         let overflowed = self.assign(&format!("llvm.extractvalue {both}[1] : {pair}"));
         self.fail_if(&overflowed, GuardKind::Overflow, offset);
         value
+    }
+
+    /// `lhs << rhs` as the host shifts: on the debug tier an amount of at least the operand's
+    /// width stops the thread, and from `-O1` up the amount is taken modulo the width.
+    fn shift_left(&mut self, (lhs, rhs): (&str, &str), ty: &HirType, offset: usize) -> String {
+        let mlir = scalar_type(ty).unwrap_or("i64");
+        let width = int_width(ty).unwrap_or(64);
+        let amount = if self.overflow == Overflow::Wrapping {
+            let mask = self.assign(&format!("arith.constant {} : {mlir}", width - 1));
+            self.assign(&format!("arith.andi {rhs}, {mask} : {mlir}"))
+        } else {
+            let limit = self.assign(&format!("arith.constant {width} : {mlir}"));
+            let past = self.assign(&format!("arith.cmpi uge, {rhs}, {limit} : {mlir}"));
+            self.fail_if(&past, GuardKind::ShiftOverflow, offset);
+            rhs.to_string()
+        };
+        self.assign(&format!("arith.shli {lhs}, {amount} : {mlir}"))
     }
 
     fn checked_div_rem(
@@ -1117,6 +1173,7 @@ impl<'f> BodyEmitter<'f> {
                 GuardKind::Overflow => OVERFLOW,
                 GuardKind::DivisionByZero => DIVIDE_BY_ZERO,
                 GuardKind::RemainderByZero => REMAINDER_BY_ZERO,
+                GuardKind::ShiftOverflow => SHIFT_OVERFLOW,
             };
             let all = self.assign("arith.constant true");
             let passed = self.assign(&format!("arith.xori {failed}, {all} : i1"));

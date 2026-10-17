@@ -302,3 +302,116 @@ fn an_integer_overflow_stops_the_kernel_on_the_debug_tier_only() {
         }
     }
 }
+
+/// A program whose only GPU code is `@kernel` names `@kernel` when no GPU is usable.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_kernel_only_program_names_kernel_when_no_gpu_is_usable() {
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("kernel_no_gpu.nr", ADD_RELU))
+        .expect("the kernel program compiles");
+    let output = std::process::Command::new(&exe)
+        .env("CUDA_VISIBLE_DEVICES", "")
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("panic: `@kernel` needs an NVIDIA GPU, and none is usable: "),
+        "{stderr}"
+    );
+    assert!(output.stdout.is_empty(), "main must not run");
+}
+
+/// A kernel input may be a temporary: `k(a + b, ...)` binds it for the call, evaluating
+/// the arguments left to right, and gives what the bound form gives.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_kernel_input_may_be_a_temporary() {
+    let source = r#"
+@kernel(threads: [8])
+func axpy(a: Tensor<f32, [16]>, b: Tensor<f32, [16]>, k: u32, out: KernelOut<Tensor<f32, [16]>>) {
+    val i = thread_id.x
+    if i < 16 {
+        unsafe { out[i] = a[i] * (k as f32) + b[i] }
+    }
+}
+func noisy(tag: i32, t: Tensor<f32, [16]>) -> Tensor<f32, [16]> {
+    println("eval {tag}")
+    t
+}
+func main() -> i32 {
+    mut x: Tensor<f32, [16]> = Tensor::zeros()
+    for i in 0..16 { x[i] = i as f32 }
+    val y = Tensor::<f32, [16]>::ones()
+    mut r1: Tensor<f32, [16]> = Tensor::zeros()
+    mut r2: Tensor<f32, [16]> = Tensor::zeros()
+    axpy(noisy(1, &x + &y), noisy(2, &y * 2.0f32), 3, &mut r1)
+    val t1 = &x + &y
+    val t2 = &y * 2.0f32
+    axpy(t1, t2, 3, &mut r2)
+    if r1[15] == r2[15] { r1[15] as i32 } else { 0 }
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("kernel_temporary.nr", source))
+        .expect("a temporary kernel input compiles");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        return;
+    }
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "eval 1\neval 2\n");
+    assert_eq!(output.status.code(), Some(16 * 3 + 2));
+}
+
+/// A kernel body may shift, and read a local or module `const`, each as the host computes
+/// it; a device `.map` closure shifts on the GPU too. A shift by the operand's width or
+/// more panics on the debug tier with the host's message.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_kernel_body_shifts_and_reads_constants() {
+    let source = r#"
+const SCALE: i32 = 3
+@kernel(threads: [8])
+func f(a: Tensor<i32, [16]>, k: i32, out: KernelOut<Tensor<i32, [16]>>) {
+    const BIAS: i32 = 2
+    val i = thread_id.x
+    if i < 16 {
+        unsafe { out[i] = (a[i] << k) * SCALE + BIAS }
+    }
+}
+func main() -> i32 {
+    mut a: Tensor<i32, [16]> = Tensor::zeros()
+    for i in 0..16 { a[i] = i as i32 }
+    mut r: Tensor<i32, [16]> = Tensor::zeros()
+    f(a, 1, &mut r)
+    val shifted = a.clone().to(Device::GPU(0)).map(|x: i32| -> i32 { x << 2 }).to(Device::CPU)
+    r[15] + shifted[15]
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("kernel_shift.nr", source))
+        .expect("the kernel compiles");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    if String::from_utf8_lossy(&output.stderr).contains("none is usable") {
+        return;
+    }
+    assert_eq!(output.status.code(), Some((15 << 1) * 3 + 2 + (15 << 2)));
+
+    let past_width = source.replace("x << 2", "x << 40");
+    let exe = test
+        .compile(&test.write_source("kernel_shift_past.nr", &past_width))
+        .expect("the kernel compiles");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("panic: shift overflow at "), "{stderr}");
+}

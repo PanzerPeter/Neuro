@@ -72,7 +72,7 @@ impl TypeChecker {
             DEBUG_TRAIT => match ty {
                 Type::Struct(name) => self.debug_structs.contains(name),
                 Type::Bool | Type::Char | Type::String => true,
-                other => other.is_numeric(),
+                other => other.is_numeric() || other.is_half_float(),
             },
             HASHABLE_TRAIT => match ty {
                 Type::Struct(name) => self.hashable_structs.contains(name),

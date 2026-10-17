@@ -154,3 +154,83 @@ func main() -> i32 {
         .expect("Copy struct multi-rebind should compile and run");
     assert_eq!(exit_code, 13);
 }
+
+/// `impl Copy` by hand and `@derive(Copy)` make the same struct: a closure that reads one
+/// copies it, so reassigning the original afterwards does not change what the closure sees.
+#[test]
+fn regression_hand_written_copy_is_captured_by_copy() {
+    let source = r#"
+struct P { v: i32 }
+impl Clone for P { func clone(&self) -> P { P { v: self.v } } }
+impl Copy for P {}
+func main() -> i32 {
+    mut p = P { v: 1 }
+    val f = || p.v
+    p = P { v: 10 }
+    f() + p.v
+}
+"#;
+    let exit = CompileTest::new()
+        .compile_and_run("hand_copy_capture.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 11);
+}
+
+/// A generic struct's `Copy`, derived or written as `impl<T: Copy> Copy`, holds for an
+/// instance only when its fields copy: `Cell<string>` moves, `Cell<i32>` copies, and a
+/// bounded inherent impl's methods exist for a builtin argument.
+#[test]
+fn regression_generic_copy_is_decided_per_instance() {
+    let written = r#"
+struct Cell<T> { v: T }
+impl<T: Clone> Clone for Cell<T> { func clone(&self) -> Cell<T> { Cell { v: self.v.clone() } } }
+impl<T: Copy> Copy for Cell<T> {}
+impl<T: Copy> Cell<T> {
+    func twice(self) -> T {
+        val a = self
+        val b = self
+        b.v
+    }
+}
+func main() -> i32 {
+    mut p = Cell { v: 1 }
+    val f = || p.v
+    p = Cell { v: 10 }
+    val q = p
+    f() + q.v + p.twice()
+}
+"#;
+    let exit = CompileTest::new()
+        .compile_and_run("generic_impl_copy.nr", written)
+        .expect("compile/run failed");
+    assert_eq!(exit, 21);
+
+    for header in [
+        "@derive(Copy, Clone)\nstruct Cell<T> { v: T }",
+        "struct Cell<T> { v: T }\nimpl<T: Clone> Clone for Cell<T> { func clone(&self) -> Cell<T> { Cell { v: self.v.clone() } } }\nimpl<T: Copy> Copy for Cell<T> {}",
+    ] {
+        let source = format!(
+            "{header}\nfunc main() -> i32 {{\n    val a = Cell {{ v: \"a\" + \"b\" }}\n    val b = a\n    a.v.len() as i32\n}}\n"
+        );
+        let (success, stderr) = check_source(&source);
+        assert!(!success, "`Cell<string>` must move:\n{source}");
+        assert!(stderr.contains("use of moved value 'a'"), "{stderr}");
+    }
+}
+
+#[test]
+fn generic_impl_copy_takes_copy_bounds_only() {
+    let source = r#"
+trait Show { func show(&self) -> i32 }
+struct Cell<T> { v: T }
+impl<T: Clone> Clone for Cell<T> { func clone(&self) -> Cell<T> { Cell { v: self.v.clone() } } }
+impl<T: Show> Copy for Cell<T> {}
+func main() -> i32 { 0 }
+"#;
+    let (success, stderr) = check_source(source);
+    assert!(!success);
+    assert!(
+        stderr.contains("may bound its parameters by `Copy` only"),
+        "{stderr}"
+    );
+}

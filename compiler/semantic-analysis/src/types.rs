@@ -1,8 +1,35 @@
 // Type system definitions and type predicates
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 
 pub(crate) use ast_types::FunctionMode;
+
+thread_local! {
+    /// The parameter names of each generic struct and enum template, for diagnostics.
+    ///
+    /// The checker writes a template at its own parameters as the bare template name
+    /// (`Type::Enum("Option")` inside `func f<T>() -> Option<T>`), and instance mangling
+    /// reads [`Type`]'s `Display`, so `Display` may only append the parameters once
+    /// checking is over. [`crate::type_check`] empties this table before it checks and
+    /// fills it after, so a diagnostic rendered then prints `Option<T>`.
+    static TEMPLATE_PARAMS: RefCell<HashMap<String, Vec<String>>> = RefCell::new(HashMap::new());
+}
+
+/// Replace the template table [`Type`]'s `Display` reads (see `TEMPLATE_PARAMS`).
+pub(crate) fn set_template_params(params: HashMap<String, Vec<String>>) {
+    TEMPLATE_PARAMS.with(|table| *table.borrow_mut() = params);
+}
+
+/// Write a nominal type's name, with its own parameters appended when it is a template.
+fn write_nominal(f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    write!(f, "{}", name)?;
+    TEMPLATE_PARAMS.with(|table| match table.borrow().get(name) {
+        Some(params) => write!(f, "<{}>", params.join(", ")),
+        None => Ok(()),
+    })
+}
 
 /// One compile-time extent: the length of a fixed-size array `[T; N]`, or one axis
 /// of a tensor shape `Tensor<T, [M, K]>`.
@@ -585,8 +612,7 @@ impl fmt::Display for Type {
             Type::String => write!(f, "string"),
             Type::Void => write!(f, "void"),
             Type::Unknown => write!(f, "<error>"),
-            Type::Struct(name) => write!(f, "{}", name),
-            Type::Enum(name) => write!(f, "{}", name),
+            Type::Struct(name) | Type::Enum(name) => write_nominal(f, name),
             Type::Newtype(name) => write!(f, "{}", name),
             Type::Generic(name) => write!(f, "{}", name),
             Type::DynObject(name) => write!(f, "dyn {}", name),

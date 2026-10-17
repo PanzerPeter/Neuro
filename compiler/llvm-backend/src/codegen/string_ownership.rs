@@ -520,11 +520,8 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
             continue;
         }
         let mut exits = Vec::new();
-        if returns_inside_expressions(body) {
-            out.push((name, exits));
-            continue;
-        }
         collect_returns(body, &mut exits);
+        collect_expression_returns(body, &mut exits);
         if matches!(body.last(), Some(HirStmt::Expr(_))) && !block_tail_exits(body, &mut exits) {
             exits.clear();
         }
@@ -622,12 +619,13 @@ fn collect_returns<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
     }
 }
 
-/// Whether a `return` sits in a statement list that belongs to an expression: a block,
-/// a `loop`, an `if` or a `match` arm written where a value goes.
-fn returns_inside_expressions(body: &[HirStmt]) -> bool {
-    let mut found = false;
+/// Every `return value` in a statement list that belongs to an expression: a block, a
+/// `loop`, an `if` or a `match` arm written where a value goes, at any depth. Each is an
+/// exit of the function like a statement-level one. A closure is not walked into: its
+/// body is a lifted item whose returns leave the closure.
+fn collect_expression_returns<'a>(body: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
     walk_stmts(body, &mut |expr| {
-        let lists: Vec<&[HirStmt]> = match &expr.kind {
+        let lists: Vec<&'a [HirStmt]> = match &expr.kind {
             HirExprKind::If {
                 then_block,
                 else_if_blocks,
@@ -644,12 +642,9 @@ fn returns_inside_expressions(body: &[HirStmt]) -> bool {
             _ => Vec::new(),
         };
         for stmts in lists {
-            let mut returns = Vec::new();
-            collect_returns(stmts, &mut returns);
-            found |= !returns.is_empty();
+            collect_returns(stmts, out);
         }
     });
-    found
 }
 
 /// Whether `expr` always yields a freshly allocated buffer, reading a call against the
@@ -913,19 +908,32 @@ fn call_retains(callee: &HirExpr, args: &[HirExpr], name: &Param) -> bool {
         HirExprKind::Variable(func) if IO_BUILTINS.contains(&func.as_str()) => {
             args.iter().any(|arg| read_retains(arg, name))
         }
-        // `s.len()` takes the length word out; `b.push_str(s)` appends a copy. Every
-        // other method may hand back a view (`.slice`, `.chars`) or store the pointer.
+        // `s.len()` takes the length word out; `b.push_str(s)` appends a copy. A method
+        // this program declares reads an argument whose parameter is already known to be
+        // read only, keyed `Type__method` as the call site mangles it. Every other method
+        // may hand back a view (`.slice`, `.chars`) or store the pointer.
         HirExprKind::FieldAccess { object, field } => {
             let receiver_is_read = field == LEN_METHOD || field == CLONE_METHOD;
-            let args_are_reads = field == PUSH_STR_METHOD;
+            let declared = match object.ty.referent() {
+                HirType::Struct(type_name) | HirType::Enum(type_name) => {
+                    Some(format!("{type_name}__{field}"))
+                }
+                _ => None,
+            };
+            let arg_is_read = |index: usize| {
+                field == PUSH_STR_METHOD
+                    || declared
+                        .as_ref()
+                        .is_some_and(|key| name.read_only.contains(&(key.clone(), index)))
+            };
             let receiver = if receiver_is_read {
                 read_retains(object, name)
             } else {
                 mentions(object, name.name)
             };
             receiver
-                || args.iter().any(|arg| {
-                    if args_are_reads {
+                || args.iter().enumerate().any(|(index, arg)| {
+                    if arg_is_read(index) {
                         read_retains(arg, name)
                     } else {
                         mentions(arg, name.name)
@@ -984,7 +992,7 @@ fn place_mentions(place: &HirPlace, name: &str) -> bool {
 /// Apply `visit` to every expression a place is built from. The place itself is storage
 /// rather than an expression, so it is not visited; walking it in place, instead of
 /// through `HirPlace::to_expr`, spares a deep clone of its base on every assignment.
-fn walk_place(place: &HirPlace, visit: &mut impl FnMut(&HirExpr)) {
+fn walk_place<'a>(place: &'a HirPlace, visit: &mut impl FnMut(&'a HirExpr)) {
     match place {
         HirPlace::Var { .. } => {}
         HirPlace::Field { object, .. } => walk(object, visit),
@@ -1005,7 +1013,7 @@ fn walk_place(place: &HirPlace, visit: &mut impl FnMut(&HirExpr)) {
 }
 
 /// Apply `visit` to `expr` and every expression under it, statements included.
-fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
+fn walk<'a>(expr: &'a HirExpr, visit: &mut impl FnMut(&'a HirExpr)) {
     visit(expr);
     match &expr.kind {
         HirExprKind::Literal(_)
@@ -1146,7 +1154,7 @@ fn walk(expr: &HirExpr, visit: &mut impl FnMut(&HirExpr)) {
     }
 }
 
-fn walk_stmts(stmts: &[HirStmt], visit: &mut impl FnMut(&HirExpr)) {
+fn walk_stmts<'a>(stmts: &'a [HirStmt], visit: &mut impl FnMut(&'a HirExpr)) {
     for stmt in stmts {
         match stmt {
             HirStmt::VarDecl { init, .. } => {

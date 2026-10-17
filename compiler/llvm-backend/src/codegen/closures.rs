@@ -98,7 +98,7 @@ impl<'ctx> CodegenContext<'ctx> {
             )?;
             self.variables.insert(cap.name.clone(), field_ptr);
             self.variable_types.insert(cap.name.clone(), llvm_ty);
-            self.type_env.insert(cap.name.clone(), sem_ty);
+            self.type_env.insert(cap.name.clone(), sem_ty.clone());
             if let Some((flag_index, target)) = env.owned_flag(i) {
                 let flag_ptr = self.builder.build_struct_gep(
                     env.struct_ty,
@@ -106,6 +106,12 @@ impl<'ctx> CodegenContext<'ctx> {
                     flag_index,
                     "capture.owns.ptr",
                 )?;
+                let flags = self.env_fields(&env, env_ptr, env.string_flags(i))?;
+                let held = if flags.is_empty() {
+                    Vec::new()
+                } else {
+                    self.captured_string_positions(field_ptr, &sem_ty, &flags)?
+                };
                 self.captured_drop_entries.insert(
                     cap.name.clone(),
                     DropEntry {
@@ -113,7 +119,7 @@ impl<'ctx> CodegenContext<'ctx> {
                         storage_ptr: field_ptr,
                         flag_ptr,
                         target,
-                        held: Vec::new(),
+                        held,
                     },
                 );
             }
@@ -188,7 +194,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 flag_index,
                 "capture.owns.ptr",
             )?;
-            self.emit_one_drop(field_ptr, flag_ptr, &target)?;
+            let strings = self.env_fields(env, env_ptr, env.string_flags(i))?;
+            match &target {
+                DropTarget::Captured(ty) if !strings.is_empty() => {
+                    self.emit_captured_release(field_ptr, flag_ptr, ty, &strings)?
+                }
+                _ => self.emit_one_drop(field_ptr, flag_ptr, &target)?,
+            }
         }
         let free = self.get_or_declare_free();
         self.builder.build_call(free, &[env_ptr.into()], "")?;
@@ -219,10 +231,27 @@ impl<'ctx> CodegenContext<'ctx> {
                 .iter()
                 .map(|_| BasicTypeEnum::from(self.context.bool_type())),
         );
+        // A struct, tuple or array capture's `string` positions own what their flags said
+        // when it moved in, which its type cannot say, so each flag moves in with it.
+        let mut strings = Vec::new();
+        for (index, target) in &owned {
+            if let DropTarget::Captured(ty) = target {
+                let paths = self.string_position_paths(ty);
+                if !paths.is_empty() {
+                    strings.push((*index, field_tys.len() as u32, paths.len()));
+                    field_tys.extend(
+                        paths
+                            .iter()
+                            .map(|_| BasicTypeEnum::from(self.context.bool_type())),
+                    );
+                }
+            }
+        }
         Ok(EnvLayout {
             struct_ty: self.context.struct_type(&field_tys, false),
             capture_count: captures.len(),
             owned,
+            strings,
         })
     }
 
@@ -325,6 +354,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 continue;
             };
             let owns = self.capture_ownership(&cap.name, &ty)?;
+            let string_flags = env.string_flags(i);
+            if !string_flags.is_empty() {
+                let owned = self.held_string_flags_of(&cap.name, &ty)?;
+                let slots = self.env_fields(&env, env_ptr, string_flags)?;
+                for (slot, owned) in slots.into_iter().zip(owned) {
+                    self.builder.build_store(slot, owned)?;
+                }
+            }
             self.mark_moved_for_drop(&source)?;
             let flag_ptr = self.builder.build_struct_gep(
                 env.struct_ty,
@@ -335,6 +372,22 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_store(flag_ptr, owns)?;
         }
         Ok(env_ptr)
+    }
+
+    /// The addresses of the environment fields in `fields`.
+    fn env_fields(
+        &self,
+        env: &EnvLayout<'ctx>,
+        env_ptr: PointerValue<'ctx>,
+        fields: std::ops::Range<u32>,
+    ) -> CodegenResult<Vec<PointerValue<'ctx>>> {
+        fields
+            .map(|field| {
+                self.builder
+                    .build_struct_gep(env.struct_ty, env_ptr, field, "capture.string.owns.ptr")
+                    .map_err(CodegenError::from)
+            })
+            .collect()
     }
 
     /// Lower a call through a closure value (`f(args)` where `f` is a closure binding
@@ -478,12 +531,24 @@ struct EnvLayout<'ctx> {
     capture_count: usize,
     /// Each owning capture's index, with how its value is released, in field order.
     owned: Vec<(usize, DropTarget)>,
+    /// Each owning capture holding `string` positions: its index, the field index of its
+    /// first position flag, and how many follow, in `string_position_paths` order.
+    strings: Vec<(usize, u32, usize)>,
 }
 
 impl EnvLayout<'_> {
     /// The field index of capture `index`.
     fn capture_field(&self, index: usize) -> u32 {
         ENV_HEADER_FIELDS + index as u32
+    }
+
+    /// The field indices of capture `index`'s `string` position flags, none when it holds
+    /// no `string` position or does not own its value.
+    fn string_flags(&self, index: usize) -> std::ops::Range<u32> {
+        self.strings
+            .iter()
+            .find(|(capture, _, _)| *capture == index)
+            .map_or(0..0, |(_, first, count)| *first..*first + *count as u32)
     }
 
     /// The field index of capture `index`'s ownership flag, with its release, when the

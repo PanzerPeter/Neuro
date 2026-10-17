@@ -290,7 +290,11 @@ static void __attribute__((noreturn)) unusable(const char *what, const char *rea
                              reason));
 }
 
-static const char LAUNCH[] = "`@gpu`";
+// What a launch names when no GPU is usable: `@gpu`, or `@kernel` in a program whose only
+// GPU code is `@kernel` functions. The LLVM backend defines it, as it does
+// `__neuro_gpu_fallback`.
+extern const char __neuro_gpu_launcher[];
+#define LAUNCH __neuro_gpu_launcher
 static const char TRANSFER[] = "`Device::GPU`";
 
 static void check(gpu_result result, const char *call) {

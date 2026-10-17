@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.14.2] - 2026-10-17
+
+### Added
+
+- An `f16` or `bf16` value can be an interpolation hole: `"{h}"` prints the exact value it holds,
+  as an `f32` hole does, and takes the float format specs (`:.2`, `:e`, `:+`). A half field no
+  longer stops `@derive(Debug)`, and a half type meets a `T: Debug` bound.
+- `impl<T: Copy> Copy for Cell<T> {}` is accepted on a generic struct. Its parameters may be
+  bounded by `Copy` and nothing else.
+- A `@kernel` input may be a temporary: `k(a + b, &mut r)` binds `a + b` for the call, evaluates
+  the arguments left to right and drops it after the outputs are copied back.
+- A `@kernel` body, and a device `.map` / `.zip` / `.reduce` closure, may shift with `<<` and read
+  a local `const` or a scalar module constant. A shift by the operand's width or more panics with
+  the host's `shift overflow` on the debug tier and masks the amount from `-O1` up, as on the host.
+
+### Changed
+
+- A generic struct's `Copy`, derived or written by hand, is decided per instance: `Cell<i32>`
+  copies, and `Cell<string>`, whose field is not `Copy`, moves. Inside a generic body `Cell<T>`
+  copies only when `T` carries a `Copy` bound.
+- A program whose only GPU code is `@kernel` functions names `@kernel`, not `@gpu`, when it stops
+  at startup for want of a GPU.
+- A diagnostic prints a generic type at its own parameters in full: `expected Option<T>, found
+  Option<i32>` where it used to say `expected Option`.
+- An enum's payload slot is sized from the real layout of its widest field rather than from every
+  field rounded up to a 64-bit word, so an enum holding a struct of four `i32` takes two words a
+  field instead of four.
+
+### Fixed
+
+- BUG-111: a closure that read a struct with a hand-written `impl Copy` borrowed it, while the
+  checker treated the capture as a copy and allowed the original to be reassigned. The closure then
+  saw the new value. It copies the struct now, as it does for `@derive(Copy)`.
+- BUG-112: an instance of a `@derive(Copy)` generic struct over a non-`Copy` argument
+  (`Cell<string>`) was treated as `Copy`, so the value could be used after a move and its buffer
+  leaked.
+- BUG-113: a method of an impl bounded by `Copy`, `Clone`, `Debug`, `PartialEq` or `Hashable`
+  (`impl<T: Copy> Cell<T>`) was missing at code generation for an instance over a builtin type
+  such as `Cell<i32>`, so a program the checker accepted failed with "undefined function".
+- Reading an owning field out of a temporary (`make().n`) destroys the temporary's other fields,
+  a function value's environment included. They used to be left unreleased.
+- A `string` moved out of a struct field, tuple element or array element (`val s = p.name`) takes
+  that position's ownership, and a `move` closure releases the `string` fields of a struct it owns.
+  Both leaked the buffer.
+- A `string` parameter passed to a method that only reads it no longer counts as retained, so the
+  caller of the outer function releases its argument.
+- A function returning `string` through a `return` inside an expression (a `match` arm, an `if`
+  used as a value, a `loop` body) is recognised as handing back an owned buffer when every exit
+  allocates, so its caller releases the result.
+
 ## [5.14.1] - 2026-10-16
 
 ### Added

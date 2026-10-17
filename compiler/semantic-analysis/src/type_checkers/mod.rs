@@ -52,6 +52,10 @@ pub(crate) struct TypeChecker {
     /// Names of structs that derive `Copy` (`@derive(Copy)`). A Copy struct is
     /// duplicated on assignment instead of moved.
     copy_structs: HashSet<String>,
+    /// Generic structs with a hand-written `impl Copy`: for each of the struct's
+    /// parameters, whether the impl bounds it by `Copy`. An instance copies when those
+    /// arguments and all of its fields do (see [`Self::struct_copies`]).
+    generic_copy_bounds: HashMap<String, Vec<bool>>,
     /// Names of structs that derive `Clone`, either explicitly via `@derive(Clone)`
     /// or implicitly because they derive `Copy`. A Clone struct supports `.clone()`.
     clone_structs: HashSet<String>,
@@ -185,9 +189,9 @@ pub(crate) struct TypeChecker {
     /// How many `unsafe` blocks enclose the code being checked; indexing a `KernelOut`
     /// needs at least one.
     unsafe_depth: u32,
-    /// For each `@kernel` function, which parameters are bare `Tensor` inputs, the ones
-    /// a call borrows rather than moves.
-    kernel_inputs: HashMap<String, Vec<bool>>,
+    /// For each `@kernel` function, its parameter types as written. A bare `Tensor` is an
+    /// input, which a call borrows rather than moves.
+    kernel_params: HashMap<String, Vec<ast_types::Type>>,
     /// Names of bindings in the current function whose storage outlives the call:
     /// reference-typed parameters and the `self` receiver of an instance method.
     /// A returned reference is only safe when it ultimately borrows one of these:
@@ -450,6 +454,7 @@ impl TypeChecker {
             enum_instances: HashMap::new(),
             newtype_defs: HashMap::new(),
             copy_structs: HashSet::new(),
+            generic_copy_bounds: HashMap::new(),
             clone_structs: HashSet::new(),
             debug_structs: HashSet::new(),
             partial_eq_structs: HashSet::new(),
@@ -488,7 +493,7 @@ impl TypeChecker {
             kernel_out_scope: 0,
             indexed_kernel_out: None,
             unsafe_depth: 0,
-            kernel_inputs: HashMap::new(),
+            kernel_params: HashMap::new(),
             current_fn_outliving: HashSet::new(),
             backward_losses: HashSet::new(),
             self_is_owned: false,
@@ -605,6 +610,19 @@ impl TypeChecker {
         self.errors
     }
 
+    /// Each generic struct and enum template's parameter names, by template name.
+    pub(crate) fn template_params(&self) -> HashMap<String, Vec<String>> {
+        let structs = self.generic_structs.iter().map(|(n, d)| (n, &d.generics));
+        let enums = self.generic_enums.iter().map(|(n, d)| (n, &d.generics));
+        structs
+            .chain(enums)
+            .map(|(name, generics)| {
+                let params = generics.iter().map(|g| g.name.name.clone()).collect();
+                (name.clone(), params)
+            })
+            .collect()
+    }
+
     /// Get all collected lint warnings.
     pub(crate) fn into_warnings(self) -> Vec<Warning> {
         self.warnings
@@ -636,7 +654,7 @@ impl TypeChecker {
             // re-validated per instance (a `@derive(Copy)` field scan) defers explicitly
             // at its own site instead, as `is_debug_renderable` does.
             Type::Generic(name) => self.has_copy_bound(name),
-            Type::Struct(name) => self.copy_structs.contains(name),
+            Type::Struct(name) => self.struct_copies(name, visiting),
             // A newtype forwards `Copy` from its inner type. Cycles are
             // rejected at registration, so this recursion terminates.
             Type::Newtype(name) => self
@@ -702,6 +720,63 @@ impl TypeChecker {
         self.tracked_within(ty, &mut Vec::new())
     }
 
+    /// Whether struct `name` copies. A generic struct's template and each of its
+    /// instances copy when the template has a `Copy` impl, derived or written, whose
+    /// bounds the arguments meet, and every field copies too: `@derive(Copy)` writes
+    /// `impl<T: Copy> Copy`, so `Cell<string>` moves. It is decided here, per question,
+    /// because one instance name (`Cell<U>`) recurs in generic bodies whose bounds on `U`
+    /// differ.
+    fn struct_copies(&self, name: &str, visiting: &mut Vec<String>) -> bool {
+        let (base, args) = match self.struct_instances.get(name) {
+            Some((base, args)) => (base.as_str(), Some(args)),
+            None => (name, None),
+        };
+        let Some(template) = self.generic_structs.get(base) else {
+            return self.copy_structs.contains(name);
+        };
+        if visiting.iter().any(|v| v == name) {
+            return true;
+        }
+        let bounds_met = if self.copy_structs.contains(base) {
+            true
+        } else if let Some(bounds) = self.generic_copy_bounds.get(base) {
+            let own: Vec<Type>;
+            let args = match args {
+                Some(args) => args,
+                None => {
+                    own = template
+                        .generics
+                        .iter()
+                        .map(|g| Type::Generic(g.name.name.clone()))
+                        .collect();
+                    &own
+                }
+            };
+            bounds
+                .iter()
+                .zip(args)
+                .all(|(bounded, arg)| !bounded || self.copy_within(arg, visiting))
+        } else {
+            false
+        };
+        if !bounds_met {
+            return false;
+        }
+        visiting.push(name.to_string());
+        let fields_copy = self
+            .struct_defs
+            .get(name)
+            .is_some_and(|fields| fields.iter().all(|(_, ty)| self.copy_within(ty, visiting)));
+        visiting.pop();
+        fields_copy
+    }
+
+    /// Whether `name` has a `Copy` impl, derived or hand-written, whatever its instances
+    /// then decide.
+    pub(crate) fn declares_copy(&self, name: &str) -> bool {
+        self.copy_structs.contains(name) || self.generic_copy_bounds.contains_key(name)
+    }
+
     /// [`Self::is_type_move_tracked`], carrying the enums in progress for the reason
     /// [`Self::copy_within`] gives.
     fn tracked_within(&self, ty: &Type, visiting: &mut Vec<String>) -> bool {
@@ -714,7 +789,7 @@ impl TypeChecker {
             // template move a buffer twice once it was instantiated with an owner. A
             // `Copy` bound is the exception: every instance it admits copies.
             Type::Generic(name) => !self.has_copy_bound(name),
-            Type::Struct(name) => !self.copy_structs.contains(name),
+            Type::Struct(name) => !self.struct_copies(name, visiting),
             Type::Collection { .. } => true,
             Type::Tensor { .. } => true,
             // Calling a `once` value may consume what it captured, so a second call must
@@ -778,7 +853,7 @@ impl TypeChecker {
                 .map(|inner| self.is_debug_renderable(&inner))
                 .unwrap_or(false),
             Type::Bool | Type::Char | Type::String => true,
-            other => other.is_numeric(),
+            other => other.is_numeric() || other.is_half_float(),
         }
     }
 

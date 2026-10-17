@@ -19,7 +19,7 @@ use super::device_memory::{
     DEVICE_ALLOC_FN, DEVICE_CHECK_FN, DEVICE_CLONE_FN, DEVICE_COPY_FN, DEVICE_JOIN_FN,
     DEVICE_MARK_FN, DEVICE_MOVE_FN, DEVICE_RELEASE_FN, DEVICE_RESTORE_FN, DEVICE_SWITCH_FN,
     DEVICE_TENSOR_ALLOC_FN, DEVICE_TENSOR_FREE_FN, DEVICE_UPLOAD_FN, GPU_FALLBACK_GLOBAL,
-    GPU_PANIC_FN,
+    GPU_LAUNCHER_GLOBAL, GPU_PANIC_FN,
 };
 
 /// The GPU runtime ABI a device body calls, over CUDA and over HIP, one of them linked in
@@ -544,8 +544,10 @@ pub(crate) fn link_gpu_runtime<'ctx>(
     };
     link_ir(context, module, runtime, "the GPU runtime")?;
     internalize(module, &GPU_RUNTIME_ENTRY_POINTS);
-    if let Some(flag) = module.get_global(GPU_FALLBACK_GLOBAL) {
-        flag.set_linkage(Linkage::Internal);
+    for name in [GPU_FALLBACK_GLOBAL, GPU_LAUNCHER_GLOBAL] {
+        if let Some(global) = module.get_global(name) {
+            global.set_linkage(Linkage::Internal);
+        }
     }
     Ok(())
 }

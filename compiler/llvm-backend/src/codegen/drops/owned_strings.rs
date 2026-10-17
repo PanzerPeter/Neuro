@@ -292,14 +292,27 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The drop flag of the binding `expr` names, when that binding may own a heap
-    /// `string`.
+    /// `string`, or of the held `string` position it names (`p.name`, `t.0`, `a[1]`),
+    /// which a move out of it hands over just as a bare binding's does.
     pub(super) fn owned_string_flag_ptr(&self, expr: &HirExpr) -> Option<PointerValue<'ctx>> {
-        let HirExprKind::Variable(name) = &peel_newtype(expr).kind else {
+        let expr = peel_newtype(expr);
+        if let HirExprKind::Variable(name) = &expr.kind {
+            return self
+                .live_drop_entry(name)
+                .filter(|entry| matches!(entry.target, DropTarget::HeapString))
+                .map(|entry| entry.flag_ptr);
+        }
+        if !matches!(Type::from_hir(&expr.ty), Type::String) {
+            return None;
+        }
+        let (name, Some(path)) = Self::moved_place(expr)? else {
             return None;
         };
-        self.live_drop_entry(name)
-            .filter(|entry| matches!(entry.target, DropTarget::HeapString))
-            .map(|entry| entry.flag_ptr)
+        self.live_drop_entry(name)?
+            .held
+            .iter()
+            .find(|held| held.path == path && matches!(held.target, DropTarget::HeapString))
+            .map(|held| held.flag_ptr)
     }
 
     /// Whether the `string` argument `arg` is owned at this point of the run: `true` for

@@ -280,6 +280,9 @@ impl Lowerer {
                         detail: "a named argument reached lowering unbound".to_string(),
                     });
                 }
+                if let Some(bound) = self.kernel_call_binding_temporaries(func, args, *span) {
+                    return self.lower_expr(&bound, expected);
+                }
                 self.lower_call(func, type_args, args, expected, *span)
             }
 

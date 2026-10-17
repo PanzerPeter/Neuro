@@ -331,3 +331,20 @@ fn regression_diverging_initializer_is_rejected_as_a_valueless_binding() {
         "expected a VoidBinding diagnostic, got: {errors:?}"
     );
 }
+
+#[test]
+fn regression_generic_template_prints_with_its_own_parameters() {
+    // Inside `bad<T>`, `Cell<T>` is the template at its own parameters, which the checker
+    // writes as the bare name. A diagnostic must still print the parameters.
+    let source = r#"struct Cell<T> { v: T }
+    func bad<T>(x: T) -> Cell<T> {
+        Cell { v: 1 }
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let errors = type_check(&items).unwrap_err();
+    let message = errors[0].to_string();
+    assert!(
+        message.contains("expected Cell<T>, found Cell<i32>"),
+        "{message}"
+    );
+}

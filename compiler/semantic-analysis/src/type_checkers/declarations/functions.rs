@@ -118,12 +118,8 @@ impl TypeChecker {
         }
 
         if kernel {
-            let inputs = func
-                .params
-                .iter()
-                .map(|param| matches!(param.ty, ast_types::Type::Tensor { .. }))
-                .collect();
-            self.kernel_inputs.insert(func.name.name.clone(), inputs);
+            let params = func.params.iter().map(|param| param.ty.clone()).collect();
+            self.kernel_params.insert(func.name.name.clone(), params);
         }
         if func.generics.is_empty() {
             self.functions.insert(

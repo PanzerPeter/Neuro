@@ -28,8 +28,10 @@ table, return-position `impl Trait` resolution), and a divergence between the tw
 `LoweringError`, which is the point. Lowering assumes well-typedness: a shape the checker should
 have rejected is a `LoweringError`, never a panic. The one exception is `NotDifferentiable`, below.
 
-A registration pre-pass mirrors the checker's: struct field tables (plus `@derive(Copy/Clone)`
-and `@derive(PartialEq)` intent, in `clone_structs` / `partial_eq_structs`), `impl` method
+A registration pre-pass mirrors the checker's: struct field tables (plus the five derives'
+intent, in `copy_structs` / `clone_structs` / `partial_eq_structs` / `debug_structs` /
+`hashable_structs`, and each hand-written `impl Copy`: a plain struct into `copy_structs`, a
+generic one's `Copy`-bounded parameters into `generic_copy_bounds`), `impl` method
 signatures under mangled `Struct__method` keys, free-function signatures,
 trait method order, and module constants. Bodies then lower under a lexical scope stack and a
 loop-context stack.
@@ -102,7 +104,8 @@ to three axes with 1s), on instances as well. Before registration, `lower_progra
 items through `kernel_signatures`, which rewrites each kernel's `Tensor` input to `&Tensor` and
 `KernelOut<Tensor>` to `&mut Tensor` and records the inputs; `lower_ident_call` wraps a kernel
 call's input arguments in `&` (`borrow_kernel_inputs`), so the HIR of a kernel and its calls is
-the plain reference form. `lower_function_body` marks the body so that
+the plain reference form. A call with a temporary input first becomes the checker's block,
+binding every argument that is not a place to a `$kernel_arg<i>` (`kernel_call_binding_temporaries`). `lower_function_body` marks the body so that
 `thread_id.x` / `block_id.z` lower to `HirExprKind::GridPosition` (`expressions/grid.rs`) unless a
 local of that name shadows it. A kernel call inside a `@grad` body is refused like a `@gpu` one.
 In a kernel body, `out.partition(closure)` on a `&mut Tensor` lowers to
@@ -394,8 +397,12 @@ Generic structs and impls work the same way, through `generic_structs` / `generi
 annotation and from `lower_generic_struct_literal` after inferring the arguments from field
 values, each lowered against the matching field of the instance the expected type names when it
 names one (mirroring the checker, so the literal's type and layout agree). Each instance registers concrete fields plus impl-method signatures and emits one
-`HirItem::Struct` plus one `HirItem::Impl` per generic impl, with method bodies lowered under the
-impl's `type_subst` and `self` bound to the instance. Because these are ordinary struct/impl HIR
+`HirItem::Struct` plus one `HirItem::Impl` per generic impl whose bounds the instance meets
+(`instance_meets_impl_bounds`: a declared trait's impl, or for the five derivable traits the
+checker's builtin rule, `implements_derivable`), with method bodies lowered under the
+impl's `type_subst` and `self` bound to the instance. An instance is `Copy` when its template's
+`Copy` impl has its bounds met and every field is `Copy` (`struct_is_copy`), the checker's
+rule, so a closure copies exactly the captures the checker copied. Because these are ordinary struct/impl HIR
 items, the backend needs no generic awareness. A generic enum's impls follow the same path from
 `instantiate_generic_enum` and `emit_mono_enum` (shared `emit_instance_impls`); an instance made
 before the impls were recorded is caught up by `register_existing_enum_instance_methods`. Every

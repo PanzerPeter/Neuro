@@ -64,7 +64,7 @@
 @.str.18 = private unnamed_addr constant [16 x i8] c"hipModuleUnload\00", align 1
 @.str.19 = private unnamed_addr constant [17 x i8] c"hipMallocManaged\00", align 1
 @.str.20 = private unnamed_addr constant [21 x i8] c"an unknown HIP error\00", align 1
-@LAUNCH = internal constant [7 x i8] c"`@gpu`\00", align 1
+@__neuro_gpu_launcher = external constant [0 x i8], align 1
 @.str.21 = private unnamed_addr constant [18 x i8] c"%s failed with %s\00", align 1
 @.str.22 = private unnamed_addr constant [14 x i8] c"GPU error: %s\00", align 1
 @__neuro_gpu_fallback = external local_unnamed_addr constant i8, align 1
@@ -265,7 +265,7 @@ define dso_local i32 @__neuro_device_switch(i32 noundef %0) local_unnamed_addr {
 
 8:                                                ; preds = %6
   %9 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @LAUNCH, ptr noundef %9)
+  tail call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %9)
   unreachable
 
 10:                                               ; preds = %6
@@ -346,7 +346,7 @@ define internal fastcc noalias noundef ptr @load(ptr noundef %0) unnamed_addr {
 
 9:                                                ; preds = %8
   %10 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @LAUNCH, ptr noundef %10)
+  tail call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %10)
   unreachable
 
 11:                                               ; preds = %8
@@ -575,7 +575,7 @@ define dso_local ptr @mgpuStreamCreate() local_unnamed_addr {
 
 9:                                                ; preds = %7
   %10 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @LAUNCH, ptr noundef %10)
+  tail call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %10)
   unreachable
 
 11:                                               ; preds = %7
@@ -636,7 +636,7 @@ define dso_local ptr @mgpuMemAlloc(i64 noundef %0, ptr noundef readnone captures
 
 6:                                                ; preds = %3
   %7 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @LAUNCH, ptr noundef %7)
+  tail call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %7)
   unreachable
 
 8:                                                ; preds = %3
@@ -732,7 +732,7 @@ define dso_local nonnull ptr @_mlir_memref_to_llvm_alloc(i64 noundef %0) local_u
 
 12:                                               ; preds = %10
   %13 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @LAUNCH, ptr noundef %13)
+  tail call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %13)
   unreachable
 
 14:                                               ; preds = %10
@@ -777,7 +777,7 @@ define dso_local nonnull ptr @_mlir_memref_to_llvm_alloc(i64 noundef %0) local_u
 
 40:                                               ; preds = %38
   %41 = load ptr, ptr @unusable_reason, align 8
-  call fastcc void @unusable(ptr noundef nonnull @LAUNCH, ptr noundef %41)
+  call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %41)
   unreachable
 
 42:                                               ; preds = %38

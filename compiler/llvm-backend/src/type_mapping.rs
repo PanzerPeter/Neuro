@@ -107,7 +107,12 @@ impl<'ctx> TypeMapper<'ctx> {
         let slots = variants.iter().map(|v| v.len()).max().unwrap_or(0) as u32;
         let mut words = 1;
         for field in variants.iter().flatten() {
-            words = words.max(Self::llvm_words(self.map_type(field)?));
+            let ty = self.map_type(field)?;
+            let field_words = match self.natural_layout(ty) {
+                Some((size, _)) => size.div_ceil(8).max(1) as u32,
+                None => Self::llvm_words(ty),
+            };
+            words = words.max(field_words);
         }
         Ok((slots, words))
     }
@@ -125,6 +130,56 @@ impl<'ctx> TypeMapper<'ctx> {
     ) -> CodegenResult<inkwell::types::ArrayType<'ctx>> {
         let (_, words) = self.enum_payload_shape(name)?;
         Ok(self.context.i64_type().array_type(words))
+    }
+
+    /// An LLVM type's size and alignment in bytes, laid out as LLVM's data layout lays it
+    /// out on every target this backend supports: each scalar aligned to its own width,
+    /// pointers 8 bytes, and a struct's fields at aligned offsets with the whole padded to
+    /// its widest alignment. `None` for a type that rule does not settle (a vector, an
+    /// integer wider than 64 bits, an alignment past 8), which then takes the word bound.
+    fn natural_layout(&self, ty: BasicTypeEnum<'ctx>) -> Option<(u64, u64)> {
+        let (size, align) = match ty {
+            BasicTypeEnum::IntType(int_ty) => {
+                let bits = int_ty.get_bit_width();
+                if bits > 64 {
+                    return None;
+                }
+                let bytes = u64::from(bits.div_ceil(8)).next_power_of_two();
+                (bytes, bytes)
+            }
+            BasicTypeEnum::FloatType(float_ty) => {
+                let bytes = if float_ty == self.context.f64_type() {
+                    8
+                } else if float_ty == self.context.f32_type() {
+                    4
+                } else if float_ty == self.context.f16_type()
+                    || float_ty == self.context.bf16_type()
+                {
+                    2
+                } else {
+                    return None;
+                };
+                (bytes, bytes)
+            }
+            BasicTypeEnum::PointerType(_) => (8, 8),
+            BasicTypeEnum::ArrayType(arr) => {
+                let (element, align) = self.natural_layout(arr.get_element_type())?;
+                (element * u64::from(arr.len()), align)
+            }
+            BasicTypeEnum::StructType(st) => {
+                let mut offset = 0u64;
+                let mut widest = 1u64;
+                for field in st.get_field_types() {
+                    let (size, align) = self.natural_layout(field)?;
+                    let align = if st.is_packed() { 1 } else { align };
+                    offset = offset.next_multiple_of(align) + size;
+                    widest = widest.max(align);
+                }
+                (offset.next_multiple_of(widest), widest)
+            }
+            BasicTypeEnum::VectorType(_) | BasicTypeEnum::ScalableVectorType(_) => return None,
+        };
+        (align <= 8).then_some((size, align))
     }
 
     /// An upper bound on an LLVM type's storage, in whole 64-bit words.
@@ -510,6 +565,49 @@ impl<'ctx> TypeMapper<'ctx> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The enum payload layout agrees with LLVM's own data layout for the host, so a slot
+    /// sized from it holds every payload it is given.
+    #[test]
+    fn the_natural_layout_matches_the_targets_data_layout() {
+        let context = LLVMContext::create();
+        let mapper = TypeMapper::new(&context);
+        let (machine, _) = crate::host_target_machine(crate::OptimizationLevelSetting::O0)
+            .expect("the host has a target machine");
+        let data = machine.get_target_data();
+        let i32_ty = context.i32_type();
+        let ptr = context.ptr_type(inkwell::AddressSpace::default());
+        let quad = context.struct_type(&[i32_ty.into(); 4], false);
+        let mixed = context.struct_type(
+            &[
+                context.bool_type().into(),
+                context.f64_type().into(),
+                context.i16_type().into(),
+                context.f16_type().into(),
+                context.i8_type().array_type(3).into(),
+            ],
+            false,
+        );
+        let nested = context.struct_type(&[mixed.into(), ptr.into(), quad.into()], false);
+        let string = context.struct_type(&[ptr.into(), context.i64_type().into()], false);
+        let cases: [BasicTypeEnum; 8] = [
+            context.bool_type().into(),
+            context.bf16_type().into(),
+            quad.into(),
+            mixed.into(),
+            nested.into(),
+            string.into(),
+            mixed.array_type(3).into(),
+            context.struct_type(&[], false).into(),
+        ];
+        for ty in cases {
+            let (size, align) = mapper.natural_layout(ty).expect("a laid-out type");
+            assert_eq!(size, data.get_abi_size(&ty), "{ty}");
+            assert_eq!(align, u64::from(data.get_abi_alignment(&ty)), "{ty}");
+        }
+        // Four `i32` fit two words, where rounding every field to a word took four.
+        assert_eq!(mapper.natural_layout(quad.into()), Some((16, 4)));
+    }
 
     /// Every element type a tensor may hold maps to its DLPack code and width, and
     /// nothing else maps at all: an unmappable element is a diagnostic, not a guess.

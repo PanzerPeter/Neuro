@@ -12,9 +12,11 @@ use super::body_result_expr;
 
 /// The `@derive(...)` attribute name and the trait arguments lowering cares about.
 const DERIVE_ATTRIBUTE: &str = "derive";
-const COPY_TRAIT: &str = "Copy";
-const CLONE_TRAIT: &str = "Clone";
-const PARTIAL_EQ_TRAIT: &str = "PartialEq";
+pub(crate) const COPY_TRAIT: &str = "Copy";
+pub(crate) const CLONE_TRAIT: &str = "Clone";
+pub(crate) const PARTIAL_EQ_TRAIT: &str = "PartialEq";
+pub(crate) const DEBUG_TRAIT: &str = "Debug";
+pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
 
 impl Lowerer {
     /// Build the global symbol tables (structs, methods, functions, constants) in a
@@ -67,6 +69,7 @@ impl Lowerer {
         }
         for item in items {
             if let Item::Impl(def) = item {
+                self.register_copy_impl(def);
                 if def.generics.is_empty() && def.type_args.is_empty() {
                     self.register_impl(def)?;
                 } else {
@@ -94,61 +97,40 @@ impl Lowerer {
             fields.push((field.name.name.clone(), self.resolve_type(&field.ty)?));
         }
         self.structs.insert(def.name.name.clone(), fields);
-
-        let (mut copy, mut clone, mut partial_eq) = (false, false, false);
-        for attr in &def.attributes {
-            if attr.name.name != DERIVE_ATTRIBUTE {
-                continue;
-            }
-            for arg in &attr.args {
-                match arg.name.as_str() {
-                    COPY_TRAIT => copy = true,
-                    CLONE_TRAIT => clone = true,
-                    PARTIAL_EQ_TRAIT => partial_eq = true,
-                    _ => {}
-                }
-            }
-        }
-        if copy {
-            self.copy_structs.insert(def.name.name.clone());
-        }
-        // `Copy` implies `Clone`: a Copy type is trivially cloneable.
-        if copy || clone {
-            self.clone_structs.insert(def.name.name.clone());
-        }
-        if partial_eq {
-            self.partial_eq_structs.insert(def.name.name.clone());
-        }
+        self.record_derives(def);
         Ok(())
+    }
+
+    /// Record the traits a struct (or a generic template, under its base name) derives.
+    fn record_derives(&mut self, def: &StructDef) {
+        let name = &def.name.name;
+        let derived = def
+            .attributes
+            .iter()
+            .filter(|attr| attr.name.name == DERIVE_ATTRIBUTE)
+            .flat_map(|attr| &attr.args);
+        for arg in derived {
+            let set = match arg.name.as_str() {
+                COPY_TRAIT => &mut self.copy_structs,
+                CLONE_TRAIT => &mut self.clone_structs,
+                PARTIAL_EQ_TRAIT => &mut self.partial_eq_structs,
+                DEBUG_TRAIT => &mut self.debug_structs,
+                HASHABLE_TRAIT => &mut self.hashable_structs,
+                _ => continue,
+            };
+            set.insert(name.clone());
+            // `Copy` implies `Clone`: a Copy type is trivially cloneable.
+            if arg.name == COPY_TRAIT {
+                self.clone_structs.insert(name.clone());
+            }
+        }
     }
 
     /// Register a generic struct template. Only the template is recorded; each
     /// distinct set of type arguments is monomorphized on demand. Clone/Copy intent is
     /// recorded under the base name so instances can inherit `.clone()` support.
     pub(super) fn register_generic_struct(&mut self, def: &StructDef) {
-        let (mut copy, mut clone, mut partial_eq) = (false, false, false);
-        for attr in &def.attributes {
-            if attr.name.name != DERIVE_ATTRIBUTE {
-                continue;
-            }
-            for arg in &attr.args {
-                match arg.name.as_str() {
-                    COPY_TRAIT => copy = true,
-                    CLONE_TRAIT => clone = true,
-                    PARTIAL_EQ_TRAIT => partial_eq = true,
-                    _ => {}
-                }
-            }
-        }
-        if copy {
-            self.copy_structs.insert(def.name.name.clone());
-        }
-        if copy || clone {
-            self.clone_structs.insert(def.name.name.clone());
-        }
-        if partial_eq {
-            self.partial_eq_structs.insert(def.name.name.clone());
-        }
+        self.record_derives(def);
         self.generic_structs
             .insert(def.name.name.clone(), def.clone());
     }
@@ -220,6 +202,32 @@ impl Lowerer {
         }
         self.traits.insert(def.name.name.clone(), methods);
         Ok(())
+    }
+
+    /// Record a hand-written `impl Copy`, as the checker does: a plain struct is `Copy`,
+    /// and a generic one records which of its parameters the impl bounds by `Copy`.
+    fn register_copy_impl(&mut self, def: &ImplDef) {
+        if def.trait_name.as_ref().is_none_or(|t| t.name != COPY_TRAIT) {
+            return;
+        }
+        let name = def.type_name.name.clone();
+        if def.type_args.is_empty() {
+            self.copy_structs.insert(name);
+            return;
+        }
+        let bounds = def
+            .type_args
+            .iter()
+            .map(|arg| {
+                let ast_types::Type::Named(id) = arg else {
+                    return false;
+                };
+                def.generics
+                    .iter()
+                    .any(|g| g.name.name == id.name && !g.bounds.is_empty())
+            })
+            .collect();
+        self.generic_copy_bounds.insert(name, bounds);
     }
 
     pub(super) fn register_impl(&mut self, def: &ImplDef) -> Result<(), LoweringError> {

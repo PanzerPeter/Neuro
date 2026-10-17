@@ -148,7 +148,7 @@ waits for the copy to finish. A loop over the elements of a device tensor theref
 per element, so move the tensor back with `.to(Device::CPU)` before reading many of them.
 
 Some operations have no device form: an operation on an `f16`, `bf16` or `bool` tensor,
-`.map` / `.zip` / `.reduce` whose function uses an operator the GPU path lacks (a shift, say),
+`.map` / `.zip` / `.reduce` whose function uses a construct the GPU path lacks (a `match`, say),
 calls a function (a function passed by name does) or is passed through a local, and elementwise
 math or a float `%` when the compiler found no device math library. A tensor reached through a
 struct field works like any other: `layer.w.sum()` and `layer.w -= g` run where `layer.w` lives. Given a device tensor, each one aborts at the operation with
@@ -1113,8 +1113,8 @@ A kernel takes tensors it reads as `Tensor<T, S>`, tensors it writes as
 returns nothing: what it computes is what it writes.
 
 The call borrows every tensor it passes. An input is passed bare, `add_relu(a, b, &mut out)`,
-and the caller still owns it afterwards; it must be a named tensor, not a temporary such as
-`a + b`, and writing `&a` is an error. A kernel is called by name; it cannot be stored as a
+and the caller still owns it afterwards; a temporary such as `a + b` is bound for the call and
+dropped after it, and writing `&a` is an error. A kernel is called by name; it cannot be stored as a
 function value. An output is passed as `&mut out`, and the compiler turns
 that borrow into the kernel's `KernelOut` handle. One call may not pass the same tensor as an
 input and an output. A call copies each host tensor to the GPU and copies each output back after

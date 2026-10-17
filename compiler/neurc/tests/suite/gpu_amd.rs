@@ -185,6 +185,28 @@ mod kernels {
     }
 
     #[test]
+    fn a_kernel_program_built_for_amd_names_kernel_before_main() {
+        let test = CompileTest::new();
+        let source = test.write_source(
+            "kernel.nr",
+            "@kernel(threads: [4])\nfunc fill(out: KernelOut<Tensor<f32, [8]>>) {\n    \
+             val i = thread_id.x\n    if i < 8 {\n        unsafe { out[i] = 1.0 }\n    }\n}\n\
+             func main() -> i32 {\n    println(\"main ran\")\n    return 0\n}\n",
+        );
+        let rocm = rocm_with_lld(source.parent().expect("the source has a directory"));
+        let exe = source.with_extension("");
+        let output = compile_for_amd(&source, &rocm, &["-o", exe.to_str().expect("utf-8 path")]);
+        assert!(output.status.success(), "{output:?}");
+
+        let run = run_without_devices(&exe);
+        assert_aborted(
+            &run,
+            "panic: `@kernel` needs an AMD GPU, and none is usable: ",
+        );
+        assert!(run.stdout.is_empty(), "main must not run");
+    }
+
+    #[test]
     fn a_bare_gpu_program_built_for_amd_aborts_before_main() {
         let test = CompileTest::new();
         let source = test.write_source(

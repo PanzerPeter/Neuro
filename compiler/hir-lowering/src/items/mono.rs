@@ -67,11 +67,14 @@ impl Lowerer {
             if self.clone_structs.contains(base) {
                 self.clone_structs.insert(mangled.clone());
             }
-            if self.copy_structs.contains(base) {
-                self.copy_structs.insert(mangled.clone());
-            }
-            if self.partial_eq_structs.contains(base) {
-                self.partial_eq_structs.insert(mangled.clone());
+            for set in [
+                &mut self.partial_eq_structs,
+                &mut self.debug_structs,
+                &mut self.hashable_structs,
+            ] {
+                if set.contains(base) {
+                    set.insert(mangled.clone());
+                }
             }
 
             self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
@@ -296,6 +299,7 @@ impl Lowerer {
             param.bounds.iter().all(|bound| {
                 let trait_name = &bound.trait_name.name;
                 !self.traits.contains_key(trait_name)
+                    || self.implements_derivable(concrete, trait_name)
                     || match concrete {
                         HirType::Struct(name)
                         | HirType::Enum(name)
@@ -306,6 +310,48 @@ impl Lowerer {
                     }
             })
         })
+    }
+
+    /// Whether `ty` implements a derivable trait with no `impl` block, by the checker's
+    /// rule (`implements_without_impl`): a builtin type, or a struct deriving it. A
+    /// reference implements none of them.
+    fn implements_derivable(&self, ty: &HirType, trait_name: &str) -> bool {
+        use super::register::{
+            CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT,
+        };
+        let integer = matches!(
+            ty,
+            HirType::I8
+                | HirType::I16
+                | HirType::I32
+                | HirType::I64
+                | HirType::U8
+                | HirType::U16
+                | HirType::U32
+                | HirType::U64
+        );
+        let float = matches!(
+            ty,
+            HirType::F16 | HirType::BF16 | HirType::F32 | HirType::F64
+        );
+        let text = matches!(ty, HirType::Bool | HirType::Char | HirType::String);
+        let derives = |set: &std::collections::HashSet<String>| matches!(ty, HirType::Struct(name) if set.contains(name));
+        if matches!(ty, HirType::Reference { .. }) {
+            return false;
+        }
+        match trait_name {
+            COPY_TRAIT => self.is_copy(ty),
+            CLONE_TRAIT => {
+                matches!(ty, HirType::String) || derives(&self.clone_structs) || self.is_copy(ty)
+            }
+            DEBUG_TRAIT => integer || float || text || derives(&self.debug_structs),
+            HASHABLE_TRAIT => integer || text || derives(&self.hashable_structs),
+            PARTIAL_EQ_TRAIT => match ty {
+                HirType::Newtype { inner, .. } => self.implements_derivable(inner, trait_name),
+                _ => integer || float || text || derives(&self.partial_eq_structs),
+            },
+            _ => false,
+        }
     }
 
     /// Materialize a monomorphized generic-enum instance: register its concrete

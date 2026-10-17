@@ -24,6 +24,10 @@ use super::TypeChecker;
 
 pub(crate) const KERNEL_ATTRIBUTE: &str = "kernel";
 
+/// The names `kernel_call_binding_temporaries` binds a temporary argument to. `$` cannot
+/// appear in a source identifier, so no binding of the program's can collide with one.
+const KERNEL_ARG_PREFIX: &str = "$kernel_arg";
+
 /// The handle a kernel writes a tensor through. The compiler builds it at the call from a
 /// `&mut` tensor, so no other position can name it.
 const KERNEL_OUT_TYPE: &str = "KernelOut";
@@ -388,12 +392,12 @@ impl TypeChecker {
         callee: &str,
         args: &'a [Expr],
     ) -> Cow<'a, [Expr]> {
-        let Some(inputs) = self.kernel_inputs.get(callee).cloned() else {
+        let Some(params) = self.kernel_params.get(callee).cloned() else {
             return Cow::Borrowed(args);
         };
         let mut borrowed = args.to_vec();
-        for (arg, input) in borrowed.iter_mut().zip(inputs) {
-            if !input {
+        for (arg, param) in borrowed.iter_mut().zip(&params) {
+            if !is_kernel_input(param) {
                 continue;
             }
             if let Expr::Reference { span, .. } = arg {
@@ -411,6 +415,60 @@ impl TypeChecker {
             };
         }
         Cow::Owned(borrowed)
+    }
+
+    /// `k(a + b, &mut r)` as the block that binds `a + b` first: `{ val $kernel_arg0:
+    /// Tensor<...> = a + b; k($kernel_arg0, &mut r) }`. A call borrows each `Tensor` input,
+    /// and a temporary has nothing to borrow until it is bound; the binding drops after
+    /// the call. Every argument that is not a place is bound, in order, so the arguments
+    /// still evaluate left to right, and each binding carries its parameter's written type
+    /// so a literal takes the type it would have at the call. `None` when no input is a
+    /// temporary, or `func` is no kernel.
+    pub(crate) fn kernel_call_binding_temporaries(
+        &self,
+        func: &Expr,
+        args: &[Expr],
+        span: Span,
+    ) -> Option<Expr> {
+        let Expr::Identifier(callee) = func else {
+            return None;
+        };
+        let params = self.kernel_params.get(&callee.name)?;
+        let temporary_input = args
+            .iter()
+            .zip(params)
+            .any(|(arg, param)| is_kernel_input(param) && !is_kernel_place(arg));
+        if !temporary_input {
+            return None;
+        }
+        let mut stmts = Vec::new();
+        let mut bound_args = Vec::with_capacity(args.len());
+        for (index, (arg, param)) in args.iter().zip(params).enumerate() {
+            if is_kernel_place(arg) {
+                bound_args.push(arg.clone());
+                continue;
+            }
+            let name = Identifier {
+                name: format!("{KERNEL_ARG_PREFIX}{index}"),
+                span: arg.span(),
+            };
+            stmts.push(ast_types::Stmt::VarDecl {
+                name: name.clone(),
+                ty: Some(param.clone()),
+                init: Some(arg.clone()),
+                mutable: false,
+                span: arg.span(),
+            });
+            bound_args.push(Expr::Identifier(name));
+        }
+        stmts.push(ast_types::Stmt::Expr(Expr::Call {
+            func: Box::new(func.clone()),
+            type_args: Vec::new(),
+            args: bound_args,
+            arg_labels: Vec::new(),
+            span,
+        }));
+        Some(Expr::Block { stmts, span })
     }
 
     /// A kernel named as a value. A function type cannot say that its tensors are
@@ -544,3 +602,22 @@ fn parameter_problem(written: &ast_types::Type, ty: &Type) -> Option<&'static st
 }
 
 const TAKES: &str = "has a type a kernel cannot take: a number, a `bool`, `Tensor<T, S>` or `KernelOut<Tensor<T, S>>`";
+
+/// Whether a kernel parameter written as `ty` is a `Tensor` input, which a call borrows.
+fn is_kernel_input(ty: &ast_types::Type) -> bool {
+    matches!(ty, ast_types::Type::Tensor { .. })
+}
+
+/// Whether a kernel argument is left in place by `kernel_call_binding_temporaries`: a name,
+/// a field or element of one, or a borrow (an output's `&mut r`). An element keeps its
+/// place because binding it would move it out of its holder.
+fn is_kernel_place(arg: &Expr) -> bool {
+    match arg {
+        Expr::Identifier(_) | Expr::Reference { .. } | Expr::Index { .. } => true,
+        Expr::FieldAccess { object, .. } | Expr::TupleIndex { object, .. } => {
+            is_kernel_place(object)
+        }
+        Expr::Paren(inner, _) => is_kernel_place(inner),
+        _ => false,
+    }
+}

@@ -47,7 +47,13 @@ pub(in crate::kernel) fn outlined_launch(
     math: bool,
 ) -> Lowered<Option<Launch>> {
     let emitter = |threads| {
-        let mut emitter = BodyEmitter::new(function, (guard, overflow), threads, Vec::new(), math);
+        let mut emitter = BodyEmitter::new(
+            (program, function),
+            (guard, overflow),
+            threads,
+            Vec::new(),
+            math,
+        );
         emitter.failure = Failure::Report;
         emitter
     };
@@ -473,7 +479,7 @@ mod tests {
     #[test]
     fn what_the_device_cannot_compute_is_left_to_the_host() {
         for body in [
-            "    val r = g.map(|x: f32| -> f32 { ((x as i32) << 1) as f32 })",
+            "    val r = g.map(|x: f32| -> f32 { (x as i32).shr(1) as f32 })",
             "    val r = g.map(|x: f32| -> f32 { x.exp() })",
         ] {
             let (_, count) = launched(body, false);

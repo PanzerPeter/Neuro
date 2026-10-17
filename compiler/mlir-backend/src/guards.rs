@@ -84,6 +84,8 @@ pub enum GuardKind {
     Overflow,
     DivisionByZero,
     RemainderByZero,
+    /// A `<<` by at least its operand's width, on the debug tier.
+    ShiftOverflow,
 }
 
 /// One check in a linked body. A body that fails it lowers its status word to a key whose

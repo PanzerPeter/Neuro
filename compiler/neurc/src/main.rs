@@ -838,6 +838,7 @@ fn body_guards(
         mlir_backend::GuardKind::Overflow => llvm_backend::BodyGuardKind::Overflow,
         mlir_backend::GuardKind::DivisionByZero => llvm_backend::BodyGuardKind::DivisionByZero,
         mlir_backend::GuardKind::RemainderByZero => llvm_backend::BodyGuardKind::RemainderByZero,
+        mlir_backend::GuardKind::ShiftOverflow => llvm_backend::BodyGuardKind::ShiftOverflow,
     };
     guards
         .into_iter()

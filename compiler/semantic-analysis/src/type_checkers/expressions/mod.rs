@@ -159,7 +159,7 @@ impl TypeChecker {
                 } else if let Some(function_ty) = self.functions.get(&ident.name).cloned() {
                     // A function named as a value is an ordinary value of its function
                     // type; lowering wraps it in a closure that captures nothing.
-                    if self.kernel_inputs.contains_key(&ident.name) {
+                    if self.kernel_params.contains_key(&ident.name) {
                         self.refuse_kernel_value(ident);
                     }
                     Some(function_ty)
@@ -208,6 +208,9 @@ impl TypeChecker {
                 span,
                 ..
             } => {
+                if let Some(bound) = self.kernel_call_binding_temporaries(func, args, *span) {
+                    return self.check_expr(&bound, expected);
+                }
                 let ty = self.check_call_expr(func, type_args, args, span, expected);
                 // A call inside a pool hands the block a value it now owns, so the
                 // `Drop`-only rejection applies here and names the callee.

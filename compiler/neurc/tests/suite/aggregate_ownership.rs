@@ -327,3 +327,99 @@ func main() -> i32 {
         );
     }
 }
+
+/// Run `source` with its address space capped at 512 MB, so a loop that leaks a megabyte
+/// per iteration runs out of memory where one that releases it stays flat.
+#[cfg(target_os = "linux")]
+fn exit_under_memory_cap(name: &str, source: &str) -> Option<i32> {
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source(name, source))
+        .expect("compile failed");
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("ulimit -v 524288; exec '{}'", exe.display()))
+        .status()
+        .expect("run under a memory cap")
+        .code()
+}
+
+/// A `string` moved out of a held position (`val taken = m.label`) takes that position's
+/// ownership with it, and a `move` closure owning a struct releases its `string` fields:
+/// each loop below leaked a megabyte an iteration.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_string_moved_out_of_a_holder_or_a_captured_struct_is_released() {
+    let source = r#"
+struct N { id: i32, label: string }
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..1000 {
+        val n = N { id: 1, label: p + "" }
+        val f = move || -> i32 { n.id }
+        total += f() as i64
+        val m = N { id: 2, label: p + "" }
+        val taken = m.label
+        total += taken.len() as i64
+    }
+    if total == 1000 + 1000 * 1048576 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(
+        exit_under_memory_cap("held_string_moves.nr", source),
+        Some(0)
+    );
+}
+
+/// A `string` parameter handed to a method that only reads it is read only itself, so
+/// the caller of the outer function releases the argument after the call.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_parameter_passed_to_a_reading_method_is_released_by_the_caller() {
+    let source = r#"
+struct Log { n: i32 }
+impl Log {
+    func say(&self, s: string) -> i64 { s.len() as i64 + self.n as i64 }
+}
+func relay(l: &Log, s: string) -> i64 { l.say(s) }
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    val l = Log { n: 1 }
+    mut total: i64 = 0
+    for i in 0..1000 {
+        total += relay(&l, p + "")
+    }
+    if total == 1000 * (1048576 + 1) { 0 } else { 1 }
+}
+"#;
+    assert_eq!(exit_under_memory_cap("reading_method.nr", source), Some(0));
+}
+
+/// A `return` written inside an expression (here a `match` arm) is one more exit of the
+/// function: when every exit allocates, the caller owns and releases the result.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_return_inside_an_expression_still_makes_a_producer() {
+    let source = r#"
+func pick(p: &string, n: i32) -> string {
+    val y = match n {
+        0 => { return p + "" },
+        _ => n,
+    }
+    p + "{y}"
+}
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..1000 {
+        total += pick(&p, i % 2).len() as i64
+    }
+    if total == 1000 * 1048576 + 500 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(exit_under_memory_cap("nested_return.nr", source), Some(0));
+}

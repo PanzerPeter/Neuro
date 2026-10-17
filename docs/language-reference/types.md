@@ -242,7 +242,7 @@ val stepwise = one + step + step             // 1.0: each addition is a tie, rou
 val carried = (one as f32 + step as f32 + step as f32) as bf16   // 1.0078125
 ```
 
-There is no implicit widening. An `f16` meets only `f16`, so `h + 1.0f32` and `h + 1` are type errors; a program that wants `f32` accumulation writes `as f32`, as `carried` does. A half value is not interpolated into a string yet: widen it with `as f32` to print it.
+There is no implicit widening. An `f16` meets only `f16`, so `h + 1.0f32` and `h + 1` are type errors; a program that wants `f32` accumulation writes `as f32`, as `carried` does. A half hole in an interpolated string prints the exact value, as an `f32` hole does: `"{h}"` and `"{h as f32}"` give the same text.
 
 As **tensor element types** (`Tensor<bf16, [...]>`) they have elementwise operators (with a tensor or a half-precision scalar on the other side), compound assignment, matmul, `einsum`, reductions, sorts, traversals and the elementwise math methods. On the CPU each element is computed in `f32` and rounded back once, and a reduction accumulates in `f32`, so a long `bf16` sum does not stall where a 16-bit running total would.
 

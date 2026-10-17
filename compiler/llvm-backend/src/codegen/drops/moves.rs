@@ -118,7 +118,10 @@ impl<'ctx> CodegenContext<'ctx> {
         // any part of it that owns something disowns the whole: what is left behind leaks
         // rather than being released along with the part already gone. Reading a part
         // that owns nothing (`n.id`) takes nothing.
-        let takes_an_owner = self.drop_target_of(&ty).is_some();
+        // A `string` position the environment flags on its own is the exception: clearing
+        // that flag is all the move takes.
+        let takes_an_owner = self.drop_target_of(&ty).is_some()
+            && !(matches!(ty, Type::String) && entry.held.iter().any(|held| held.path == prefix));
         if prefix.is_empty() || (matches!(entry.target, DropTarget::Captured(_)) && takes_an_owner)
         {
             flags.push(entry.flag_ptr);

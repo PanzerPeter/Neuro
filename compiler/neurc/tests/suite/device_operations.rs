@@ -800,7 +800,7 @@ func main() -> i32 {
 fn what_has_no_device_form_refuses_a_device_tensor() {
     for (operation, column) in [
         (
-            "val r = g.map(|x: f32| -> f32 { ((x as i32) << 1) as f32 })",
+            "val r = g.map(|x: f32| -> f32 { (x as i32).shr(1) as f32 })",
             13,
         ),
         ("val r = g.map(f)", 13),

@@ -42,8 +42,15 @@ module per declaration kind beside it. `tests/` is split by subject.
 - **1. structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
   `clone_structs` / `debug_structs` / `partial_eq_structs` / `hashable_structs`, and every derive
   argument validated (`UnknownDerive`, `DuplicateDerive`). `register_copy_impls` then records each
-  hand-written `impl Copy` into `copy_structs` too (a struct only, not a generic one:
-  `InvalidCopyImpl`), before anything reads `Copy`. **1b. `validate_copy_derive`** and
+  hand-written `impl Copy` into `copy_structs` too (a struct only, `InvalidCopyImpl` on an enum
+  or newtype), before anything reads `Copy`. On a generic struct it records instead which
+  parameters the impl bounds (`generic_copy_bounds`); a bound other than `Copy` is
+  `InvalidCopyImpl`, since lowering decides an instance's `Copy` from the same facts and has no
+  trait solver. A generic struct's template and instances answer `Copy` per question
+  (`struct_copies`): the `Copy` impl, derived or written, must have its bounds met and every
+  field must be `Copy`, so `@derive(Copy) struct Cell<T>` gives a `Cell<string>` that moves.
+  It is not cached per instance because one name (`Cell<U>`) recurs in generic bodies whose
+  bounds on `U` differ. **1b. `validate_copy_derive`** and
   **`validate_field_derives`** run per struct once all are registered, so a field that is another
   struct resolves regardless of declaration order.
 - **1d. `register_trait`** runs before impl registration. Trait NAMES are collected first
@@ -59,7 +66,7 @@ module per declaration kind beside it. `tests/` is split by subject.
   order-independently (`MissingSupertraitImpl`); a derive supplies a supertrait as an impl does.
   **2c. `check_derive_impl_conflicts`** rejects a struct that both derives one of the five
   derivable traits and declares an `impl` of it (`DeriveConflictsWithImpl`), reading the derives
-  off the struct's attributes, since a hand `impl Copy` lands in `copy_structs` as well.
+  off the struct's attributes, since a hand `impl Copy` lands in `copy_structs` (or `generic_copy_bounds`) as well.
 - **3. consts** into `constants`, giving forward references and cross-function visibility with
   no ordering constraint. **3b. every function signature** via `register_function_signature`
   (parameter and return types resolved in the function's generic scope), run over *all* functions
@@ -106,8 +113,11 @@ module per declaration kind beside it. `tests/` is split by subject.
   `&mut Tensor`, so the body and the backends see ordinary references. `KernelOut` anywhere
   else is refused in `resolve_type` (`refuse_kernel_out_type`). A call to a kernel
   (`check_plain_call`, `check_generic_call`) rewrites each input argument to `&arg` first
-  (`borrow_kernel_inputs`, from the `kernel_inputs` table registration fills), so the call
-  borrows it under the ordinary rules, and an argument already written `&a` is refused.
+  (`borrow_kernel_inputs`, from the `kernel_params` table registration fills), so the call
+  borrows it under the ordinary rules, and an argument already written `&a` is refused. A call
+  whose input is a temporary (`k(a + b, &mut r)`) is checked as the block that binds it first
+  (`kernel_call_binding_temporaries`): every argument that is not a place goes, in order, to a
+  `$kernel_arg<i>` of its parameter's written type, and lowering rewrites the call the same way.
   `check_function` sets `in_kernel` for a `@kernel` body, where `thread_id` and `block_id` not
   shadowed by a local read as `u32` through `.x` / `.y` / `.z` (`check_grid_position`, called
   first in field access) and are refused read whole; anywhere else they are undefined names

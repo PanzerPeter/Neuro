@@ -76,8 +76,12 @@ fn collect_by_extension(dir: &Path, ext: &str) -> Vec<String> {
 /// The manifest marker after an exit code naming an example that needs a GPU.
 const GPU_MARKER: &str = "gpu";
 
-/// How the GPU runtime begins its diagnostic when the machine has no usable GPU.
-const NO_GPU_PANIC: &str = "panic: `@gpu` needs an NVIDIA GPU, and none is usable: ";
+/// How the GPU runtime begins its diagnostic when the machine has no usable GPU: it names
+/// `@kernel` in a program whose only GPU code is `@kernel` functions.
+const NO_GPU_PANICS: [&str; 2] = [
+    "panic: `@gpu` needs an NVIDIA GPU, and none is usable: ",
+    "panic: `@kernel` needs an NVIDIA GPU, and none is usable: ",
+];
 
 /// What the manifest says about one `.nr` file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,7 +271,7 @@ fn gpu_example_outcome(examples_dir: &Path, rel: &str) -> GpuOutcome {
         Err(e) => return GpuOutcome::Settled(Err(format!("failed to run: {e}"))),
     };
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.starts_with(NO_GPU_PANIC) {
+    if !NO_GPU_PANICS.iter().any(|panic| stderr.starts_with(panic)) {
         return GpuOutcome::RanOnGpu(exe);
     }
     GpuOutcome::Settled(

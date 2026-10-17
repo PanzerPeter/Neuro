@@ -125,14 +125,13 @@ impl Lowerer {
             if !is_kernel(func) {
                 continue;
             }
-            let mut inputs = Vec::with_capacity(func.params.len());
+            let params = func.params.iter().map(|param| param.ty.clone()).collect();
             for param in &mut func.params {
-                inputs.push(matches!(param.ty, ast_types::Type::Tensor { .. }));
                 if let Some(reference) = kernel_param_reference(&param.ty) {
                     param.ty = reference;
                 }
             }
-            self.kernel_inputs.insert(func.name.name.clone(), inputs);
+            self.kernel_params.insert(func.name.name.clone(), params);
         }
         Cow::Owned(items)
     }
@@ -144,11 +143,15 @@ impl Lowerer {
         callee: &str,
         args: &'a [Expr],
     ) -> Cow<'a, [Expr]> {
-        let Some(inputs) = self.kernel_inputs.get(callee) else {
+        let Some(params) = self.kernel_params.get(callee) else {
             return Cow::Borrowed(args);
         };
         let mut borrowed = args.to_vec();
-        for (arg, _) in borrowed.iter_mut().zip(inputs).filter(|(_, input)| **input) {
+        for (arg, _) in borrowed
+            .iter_mut()
+            .zip(params)
+            .filter(|(_, param)| is_kernel_input(param))
+        {
             let span = arg.span();
             *arg = Expr::Reference {
                 operand: Box::new(arg.clone()),
@@ -157,6 +160,58 @@ impl Lowerer {
             };
         }
         Cow::Owned(borrowed)
+    }
+
+    /// `k(a + b, &mut r)` as the block that binds `a + b` first, exactly as the checker
+    /// rewrites it (`kernel_call_binding_temporaries` there): every argument that is not a
+    /// place bound in order to a `$kernel_arg<i>` of its parameter's written type, then the
+    /// call. `None` when no `Tensor` input is a temporary, or `func` is no kernel.
+    pub(crate) fn kernel_call_binding_temporaries(
+        &self,
+        func: &ast_types::Expr,
+        args: &[ast_types::Expr],
+        span: shared_types::Span,
+    ) -> Option<ast_types::Expr> {
+        use ast_types::{Expr, Stmt};
+        let Expr::Identifier(callee) = func else {
+            return None;
+        };
+        let params = self.kernel_params.get(&callee.name)?;
+        let temporary_input = args
+            .iter()
+            .zip(params)
+            .any(|(arg, param)| is_kernel_input(param) && !is_kernel_place(arg));
+        if !temporary_input {
+            return None;
+        }
+        let mut stmts = Vec::new();
+        let mut bound_args = Vec::with_capacity(args.len());
+        for (index, (arg, param)) in args.iter().zip(params).enumerate() {
+            if is_kernel_place(arg) {
+                bound_args.push(arg.clone());
+                continue;
+            }
+            let name = shared_types::Identifier {
+                name: format!("{KERNEL_ARG_PREFIX}{index}"),
+                span: arg.span(),
+            };
+            stmts.push(Stmt::VarDecl {
+                name: name.clone(),
+                ty: Some(param.clone()),
+                init: Some(arg.clone()),
+                mutable: false,
+                span: arg.span(),
+            });
+            bound_args.push(Expr::Identifier(name));
+        }
+        stmts.push(Stmt::Expr(Expr::Call {
+            func: Box::new(func.clone()),
+            type_args: Vec::new(),
+            args: bound_args,
+            arg_labels: Vec::new(),
+            span,
+        }));
+        Some(Expr::Block { stmts, span })
     }
 
     /// Lower a function body, marking it as a kernel's when `target` says so: only there
@@ -554,5 +609,28 @@ fn lower_self_param(sp: &SelfParam) -> HirSelfParam {
         SelfParam::Ref => HirSelfParam::Ref,
         SelfParam::RefMut => HirSelfParam::RefMut,
         SelfParam::Owned => HirSelfParam::Owned,
+    }
+}
+
+/// The names a kernel call's temporary arguments are bound to; `$` keeps them apart from
+/// every name a program can write.
+const KERNEL_ARG_PREFIX: &str = "$kernel_arg";
+
+/// Whether a kernel parameter written as `ty` is a `Tensor` input, which a call borrows.
+fn is_kernel_input(ty: &ast_types::Type) -> bool {
+    matches!(ty, ast_types::Type::Tensor { .. })
+}
+
+/// Whether a kernel argument stays in place rather than being bound first, by the
+/// checker's rule: a name, a field or element of one, or a borrow.
+fn is_kernel_place(arg: &ast_types::Expr) -> bool {
+    use ast_types::Expr;
+    match arg {
+        Expr::Identifier(_) | Expr::Reference { .. } | Expr::Index { .. } => true,
+        Expr::FieldAccess { object, .. } | Expr::TupleIndex { object, .. } => {
+            is_kernel_place(object)
+        }
+        Expr::Paren(inner, _) => is_kernel_place(inner),
+        _ => false,
     }
 }

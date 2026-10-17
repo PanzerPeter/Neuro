@@ -315,7 +315,8 @@ A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging w
 `__neuro_gpu_usable` which of the two to call. The backend also defines the constant
 `__neuro_gpu_fallback`, 1 when no bare `@gpu` function exists. With it set, a module load
 that finds no usable GPU leaves the module unloaded instead of aborting, and every call takes
-its host body.
+its host body. Without it the load aborts, naming `@kernel` when the program's only GPU code is
+`@kernel` functions and `@gpu` otherwise (the constant `__neuro_gpu_launcher`).
 
 A tensor operation lowering outlined to follow its operands (`HirTarget::FollowsOperands`, in a
 program that moves a tensor to a device) is emitted the same three ways, but `f` picks per call:

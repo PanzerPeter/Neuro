@@ -86,6 +86,7 @@ pub enum BodyGuardKind {
     Overflow,
     DivisionByZero,
     RemainderByZero,
+    ShiftOverflow,
 }
 
 /// Where an external body's buffers live, which decides what its wrapper passes it.
@@ -399,6 +400,19 @@ fn build_module<'ctx>(
             .iter()
             .any(|item| matches!(item, HirItem::Function(f) if f.target.requires_gpu()));
         codegen_ctx.define_gpu_fallback_flag(every_function_falls_back);
+        let targets = || {
+            items.iter().filter_map(|item| match item {
+                HirItem::Function(f) => Some(f.target),
+                _ => None,
+            })
+        };
+        let kernels_only = targets().any(|t| matches!(t, HirTarget::Kernel { .. }))
+            && !targets().any(|t| matches!(t, HirTarget::Gpu | HirTarget::GpuOrHost));
+        codegen_ctx.define_gpu_launcher(if kernels_only {
+            codegen::device_memory::KERNEL_LAUNCH
+        } else {
+            codegen::device_memory::GPU_LAUNCH
+        });
     }
 
     // An outlined operation with a host body and none for a device runs on the host at

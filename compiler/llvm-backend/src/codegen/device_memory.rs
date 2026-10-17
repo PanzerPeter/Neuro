@@ -52,6 +52,14 @@ pub(crate) const GPU_PANIC_FN: &str = "__neuro_gpu_panic";
 /// aborting at startup.
 pub(crate) const GPU_FALLBACK_GLOBAL: &str = "__neuro_gpu_fallback";
 
+/// The runtime's name for what needs the GPU in its "none is usable" panic: `@gpu`, or
+/// `@kernel` in a program whose only GPU code is `@kernel` functions.
+pub(crate) const GPU_LAUNCHER_GLOBAL: &str = "__neuro_gpu_launcher";
+
+/// [`GPU_LAUNCHER_GLOBAL`]'s two values.
+pub(crate) const GPU_LAUNCH: &str = "`@gpu`";
+pub(crate) const KERNEL_LAUNCH: &str = "`@kernel`";
+
 /// The runtime's device-tensor calls (see `gpu_runtime.c`): a buffer that outlives the
 /// call making it, the transfers, its release, and the device-index check the transfers
 /// make.
@@ -155,6 +163,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // A `@gpu` body would have defined both before any function was generated, so
         // there is none, and a missing GPU is fatal only to the transfer that needs one.
         self.define_gpu_fallback_flag(true);
+        self.define_gpu_launcher(GPU_LAUNCH);
         Ok(())
     }
 
@@ -349,6 +358,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let flag = self.module.add_global(i8_type, None, GPU_FALLBACK_GLOBAL);
         flag.set_constant(true);
         flag.set_initializer(&i8_type.const_int(u64::from(every_function_falls_back), false));
+    }
+
+    /// Define [`GPU_LAUNCHER_GLOBAL`] as `launcher`'s text, external until the runtime is
+    /// linked like [`GPU_FALLBACK_GLOBAL`].
+    pub(crate) fn define_gpu_launcher(&self, launcher: &str) {
+        let text = self.context.const_string(launcher.as_bytes(), true);
+        let global = self
+            .module
+            .add_global(text.get_type(), None, GPU_LAUNCHER_GLOBAL);
+        global.set_constant(true);
+        global.set_initializer(&text);
     }
 
     /// Read the current device's arena mark, for

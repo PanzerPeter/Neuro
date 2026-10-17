@@ -430,7 +430,10 @@ trait Hashable { func hash(&self) -> u64 }
 
 A struct may implement any of them by hand. `{x:?}` calls a hand-written `fmt_debug`, and a
 hand-written `impl Copy` is accepted only where `@derive(Copy)` would be: on a struct whose
-fields are all `Copy`, with no `Drop`, and with `Clone` implemented as well.
+fields are all `Copy`, with no `Drop`, and with `Clone` implemented as well. On a generic struct,
+`impl<T: Copy> Copy for Cell<T> {}` may bound its parameters by `Copy` and nothing else.
+Derived or written, a generic struct's `Copy` holds per instance: `Cell<i32>` copies, and
+`Cell<string>`, whose field is not `Copy`, moves.
 
 ```neuro
 struct Money { cents: i64 }
@@ -757,7 +760,7 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `DuplicateDerive` | The same trait listed twice in a `@derive` list |
 | `DeriveFieldUnsupported` | A field a derive cannot render, compare, clone or hash |
 | `DeriveConflictsWithImpl` | A struct both derives a trait and declares an `impl` of it |
-| `InvalidCopyImpl` | `impl Copy` on an enum, a newtype or a generic struct |
+| `InvalidCopyImpl` | `impl Copy` on an enum or a newtype, or a generic `impl Copy` bounding a parameter by another trait |
 | `MissingSupertraitImpl` | `impl Copy` without `Clone`, or `impl Comparable` without `PartialEq` |
 | `UnrenderableStruct` | A struct hole with no `Debug`, derived or by hand, or missing the `:?` specifier |
 

@@ -292,3 +292,31 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 0);
 }
+
+#[test]
+fn half_values_interpolate_and_derive_debug() {
+    // A half hole renders the value it holds exactly, as an `f32` hole does, so `{h}` and
+    // `{h as f32}` print the same text. `Debug` reaches a half field and a `T: Debug` bound.
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Debug)
+struct P { a: f16, b: bf16 }
+func show<T: Debug>(x: T) { println("{x:?}") }
+func main() -> i32 {
+    val h = 1.0f16 / 3.0
+    val b: bf16 = 1.5
+    println("{h} {h as f32} {b} {h:.2} {b:e} {-h:+}")
+    println("{P { a: 0.5, b: 2.0 }:?}")
+    show(0.25bf16)
+    0
+}
+"#;
+    let exe = test
+        .compile(&test.write_source("half_interp.nr", source))
+        .expect("compile failed");
+    let run = std::process::Command::new(&exe).output().expect("run");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "0.333251953125 0.333251953125 1.5 0.33 1.5e0 -0.333251953125\nP { a: 0.5, b: 2.0 }\n0.25\n"
+    );
+}

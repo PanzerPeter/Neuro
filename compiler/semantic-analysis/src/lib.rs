@@ -55,8 +55,10 @@ use type_checkers::TypeChecker;
 /// to provide comprehensive feedback to the user. All errors include source
 /// location information (spans) for precise error reporting.
 pub fn type_check(items: &[Item]) -> Result<Vec<Warning>, Vec<TypeError>> {
+    types::set_template_params(Default::default());
     let mut checker = TypeChecker::new();
     let outcome = checker.check_program(items);
+    types::set_template_params(checker.template_params());
     if outcome.is_err() {
         Err(checker.into_errors())
     } else {

@@ -283,7 +283,7 @@ impl Lowerer {
 
     /// Whether a value of `ty` is `Copy`, mirroring the checker: duplicated rather than
     /// moved, and so copied into a closure that only reads it.
-    fn is_copy(&self, ty: &HirType) -> bool {
+    pub(crate) fn is_copy(&self, ty: &HirType) -> bool {
         match ty {
             HirType::String
             | HirType::Void
@@ -292,7 +292,7 @@ impl Lowerer {
             | HirType::Tensor { .. }
             | HirType::DynObject(_)
             | HirType::Slice(_) => false,
-            HirType::Struct(name) => self.copy_structs.contains(name),
+            HirType::Struct(name) => self.struct_is_copy(name),
             HirType::Enum(name) => self.enums.get(name).is_some_and(|variants| {
                 variants
                     .iter()
@@ -304,6 +304,27 @@ impl Lowerer {
             HirType::Tuple(elements) => elements.iter().all(|e| self.is_copy(e)),
             _ => true,
         }
+    }
+
+    /// Whether struct `name` is `Copy`. An instance of a generic struct is when its
+    /// template's `Copy` impl, derived or written, has its bounds met and every field is
+    /// `Copy`, the rule the checker applies.
+    fn struct_is_copy(&self, name: &str) -> bool {
+        let Some((base, args)) = self.struct_instances.get(name) else {
+            return self.copy_structs.contains(name);
+        };
+        let bounds_met = self.copy_structs.contains(base)
+            || self.generic_copy_bounds.get(base).is_some_and(|bounds| {
+                bounds.iter().zip(args).all(|(bounded, arg)| match arg {
+                    crate::MonoArg::Type(ty) => !bounded || self.is_copy(ty),
+                    crate::MonoArg::Const(_) => true,
+                })
+            });
+        bounds_met
+            && self
+                .structs
+                .get(name)
+                .is_some_and(|fields| fields.iter().all(|(_, ty)| self.is_copy(ty)))
     }
 
     /// Lower `f >> g >> h` to the capture-free closure that applies each stage in turn.
