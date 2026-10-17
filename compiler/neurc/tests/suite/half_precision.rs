@@ -316,7 +316,7 @@ func main() -> i32 {
         .expect("compile failed");
     let run = std::process::Command::new(&exe).output().expect("run");
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
         "0.333251953125 0.333251953125 1.5 0.33 1.5e0 -0.333251953125\nP { a: 0.5, b: 2.0 }\n0.25\n"
     );
 }

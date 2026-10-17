@@ -550,7 +550,7 @@ func main() -> i32 {
     let output = std::process::Command::new(exe).output().expect("run");
     assert_eq!(output.status.code(), Some(199));
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
         "body 0\nswept 0\ndropD 200\nswept 1\ndropD 201\nswept 2\ndropD 202\ndropD 100\n=\n\
          body 0\nswept 0\ndropD 200\nswept 1\ndropD 201\nbody 2\nswept 2\ndropD 202\n\
          swept 3\ndropD 203\ndropD 100\n"

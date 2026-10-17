@@ -958,7 +958,7 @@ func main() -> i32 {
         .expect("compile failed");
     let run = std::process::Command::new(&exe).output().expect("run");
     assert_eq!(run.status.code(), Some(2 + 4 + 1));
-    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stdout = String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n");
     for id in 1..=4 {
         assert_eq!(
             stdout.matches(&format!("drop {id}\n")).count(),

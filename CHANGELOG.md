@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.14.3] - 2026-10-17
+
+### Fixed
+
+- Three runtime tests compared a program's raw stdout against `\n` line endings and failed
+  on Windows, where fd 1 writes `\r\n`. They normalize line endings like the rest of the suite.
+- The device `.abs()` test now skips on a machine without a usable CUDA driver whichever of
+  the transfer or the `@kernel` launch reports it first.
+
 ## [5.14.2] - 2026-10-17
 
 ### Added

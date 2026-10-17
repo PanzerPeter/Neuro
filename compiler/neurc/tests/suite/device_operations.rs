@@ -914,7 +914,9 @@ func main() -> i32 {
 "#;
     let test = CompileTest::new();
     let output = run(&test, "abs_on_device.nr", SOURCE, false);
-    if without_gpu(&output) || String::from_utf8_lossy(&output.stderr).contains("`@gpu` needs") {
+    // Whichever of the transfer, `.abs()` and the kernel reaches the driver first reports it.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("needs an NVIDIA GPU, and none is usable: ") {
         return;
     }
     assert_ran(&output, 0, "inf inf\n");
