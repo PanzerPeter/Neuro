@@ -1433,7 +1433,7 @@ pub enum TypeError {
     },
 
     #[error(
-        "{callee} can store what it is given into {place}, which outlives {pool}; a value the block allocated would leave that store pointing into the arena released at the closing brace. Build the value outside the pool, or move the call out of it"
+        "{callee} can store what it is given into {place}, which outlives {pool}; an argument that may hold memory from this block's arena, or an enclosing pool's, is refused, since that store could be left pointing into an arena released before {place} is. Build the value outside the pool, or move the call out of it"
     )]
     PoolValueRetainedByCallee {
         callee: String,

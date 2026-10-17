@@ -26,7 +26,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ast_types::Item;
-use neuro_hir::{HirProgram, HirType};
+use neuro_hir::{HirGridIndex, HirProgram, HirType};
 use shared_types::Span;
 
 mod autodiff;
@@ -231,6 +231,10 @@ struct Lowerer {
     /// Whether the body being lowered is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
+    /// The kernel body's locals bound to a grid position whole (`val t = thread_id`), each
+    /// with the depth of the scope that binds it, innermost last. They are not in
+    /// `scopes`: `t.x` lowers to the axis read, and `t` is read no other way.
+    grid_aliases: Vec<(usize, String, HirGridIndex)>,
     /// Whether the program moves a tensor to a device anywhere, which is what lets an
     /// outlined tensor operation run on one (`tensor_ops`).
     transfers: bool,
@@ -281,9 +285,10 @@ struct Lowerer {
     /// Concrete instance functions produced by monomorphization, appended to the
     /// program after the ordinary items.
     mono_items: Vec<neuro_hir::HirItem>,
-    /// The `{x:?}` helpers already emitted into `mono_items`, one per type whose `Debug`
-    /// is written by hand.
-    debug_string_helpers: HashSet<String>,
+    /// The method-shaped helpers already emitted into `mono_items`, by name: a `{x:?}`
+    /// helper per type whose `Debug` is written by hand, and a derived clone per type whose
+    /// derived `.clone()` calls a field's own `clone`.
+    derive_helpers: HashSet<String>,
     /// Lifted closure bodies discovered while lowering expressions, appended to the
     /// program as top-level [`neuro_hir::HirItem::Closure`] items.
     closure_items: Vec<neuro_hir::HirItem>,
@@ -450,6 +455,7 @@ impl Lowerer {
             loop_stack: Vec::new(),
             current_return: HirType::Void,
             in_kernel: false,
+            grid_aliases: Vec::new(),
             transfers: false,
             kernel_params: HashMap::new(),
             generic_templates: HashMap::new(),
@@ -466,7 +472,7 @@ impl Lowerer {
             mono_depth: 0,
             mono_seen: HashSet::new(),
             mono_items: Vec::new(),
-            debug_string_helpers: HashSet::new(),
+            derive_helpers: HashSet::new(),
             closure_items: Vec::new(),
             closure_counter: 0,
             coalesce_counter: 0,
@@ -486,12 +492,17 @@ impl Lowerer {
 
     fn pop_scope(&mut self) {
         self.scopes.pop();
+        let depth = self.scopes.len();
+        self.grid_aliases.retain(|(at, _, _)| *at <= depth);
     }
 
     /// Define a binding in the innermost scope. A missing scope is a lowering bug
     /// (every body opens a scope first), so the define is silently dropped rather
     /// than panicking; the subsequent lookup would surface it as an error.
     fn define(&mut self, name: String, ty: HirType) {
+        let depth = self.scopes.len();
+        self.grid_aliases
+            .retain(|(at, alias, _)| *at != depth || *alias != name);
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name, ty);
         }

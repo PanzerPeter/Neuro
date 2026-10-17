@@ -86,6 +86,8 @@ pub enum GuardKind {
     RemainderByZero,
     /// A `<<` by at least its operand's width, on the debug tier.
     ShiftOverflow,
+    /// A range loop's `.step(n)` that is not positive, on every tier.
+    RangeStep,
 }
 
 /// One check in a linked body. A body that fails it lowers its status word to a key whose

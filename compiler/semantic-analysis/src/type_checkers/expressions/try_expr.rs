@@ -49,8 +49,13 @@ impl TypeChecker {
             return Some(Type::Unknown);
         };
 
+        // The failure leaves the function, so it leaves every open pool the way a `return`
+        // does: an `Option`'s carries no value, a `Result`'s carries its error.
         if kind.base == RESULT_ENUM {
             self.check_propagated_error(&kind.instance, &return_instance, span);
+            if let Some(error) = self.failure_payload(&kind.instance) {
+                self.check_pool_return("?", &error, span);
+            }
         }
 
         Some(kind.payload)

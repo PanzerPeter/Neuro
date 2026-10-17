@@ -2,7 +2,7 @@
 //! reads, and `out.partition(...)`, the write form that hands each thread its own run.
 
 use ast_types::{Expr, Stmt};
-use neuro_hir::{HirExpr, HirExprKind, HirGridIndex, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirGridIndex, HirStmt, HirType};
 use shared_types::Span;
 
 use crate::{Lowerer, LoweringError};
@@ -15,25 +15,73 @@ pub(super) const PARTITION_METHOD: &str = "partition";
 
 impl Lowerer {
     /// `thread_id.x` or `block_id.z` in a kernel body, where no local of that name
-    /// shadows it. The checker has already refused every other field of either name, and
-    /// the two names outside a kernel body.
+    /// shadows it, or `t.x` on a local bound to either whole. The checker has already
+    /// refused every other field of either name, and the two names outside a kernel body.
     pub(crate) fn grid_position(&self, object: &Expr, field: &str) -> Option<HirExprKind> {
         let Expr::Identifier(name) = object else {
             return None;
         };
-        if !self.in_kernel || self.lookup_local(&name.name).is_some() {
-            return None;
-        }
-        let of = match name.name.as_str() {
-            "thread_id" => HirGridIndex::Thread,
-            "block_id" => HirGridIndex::Block,
-            _ => return None,
-        };
+        let of = self.grid_named(&name.name)?;
         let axis = GRID_AXES.iter().position(|axis| *axis == field)?;
         Some(HirExprKind::GridPosition {
             of,
             axis: axis as u8,
         })
+    }
+
+    /// The grid position `name` names in a kernel body: `thread_id` or `block_id` where no
+    /// local hides it, or a local bound to one whole.
+    fn grid_named(&self, name: &str) -> Option<HirGridIndex> {
+        if !self.in_kernel {
+            return None;
+        }
+        let local = self
+            .scopes
+            .iter()
+            .rposition(|scope| scope.contains_key(name))
+            .map_or(0, |at| at + 1);
+        // The deepest alias of a name is its last: a deeper one is gone with its scope
+        // before a shallower one can follow it.
+        if let Some((at, _, of)) = self.grid_aliases.iter().rev().find(|(_, n, _)| n == name)
+            && *at > local
+        {
+            return Some(*of);
+        }
+        match name {
+            _ if local > 0 => None,
+            "thread_id" => Some(HirGridIndex::Thread),
+            "block_id" => Some(HirGridIndex::Block),
+            _ => None,
+        }
+    }
+
+    /// `val t = thread_id`, or `val u = t` for such a `t`, in a kernel body: the checker
+    /// lets only an immutable, unannotated local name a position whole, and reads it only
+    /// by field, so `t` becomes an alias each `t.x` resolves and the binding lowers to
+    /// nothing. `None` for any other binding.
+    pub(crate) fn grid_binding(
+        &mut self,
+        name: &str,
+        init: Option<&Expr>,
+        (mutable, annotated): (bool, bool),
+        span: Span,
+    ) -> Option<HirStmt> {
+        let Some(Expr::Identifier(source)) = init else {
+            return None;
+        };
+        if mutable || annotated {
+            return None;
+        }
+        let of = self.grid_named(&source.name)?;
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.remove(name);
+        }
+        let depth = self.scopes.len();
+        self.grid_aliases
+            .retain(|(at, alias, _)| *at != depth || alias != name);
+        self.grid_aliases.push((depth, name.to_string(), of));
+        let nothing = HirExprKind::Block { stmts: Vec::new() };
+        Some(HirStmt::Expr(HirExpr::new(nothing, HirType::Void, span)))
     }
 
     /// `out.partition(|base, slice| { ... })`, `out` already lowered: the closure's body

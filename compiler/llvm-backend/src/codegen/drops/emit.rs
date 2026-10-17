@@ -222,9 +222,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// scope of a `pool` region the jump leaves, that region's release, innermost first.
     ///
     /// `release_arena` is false for a jump carrying a value the arena may hold. The
-    /// checker lets only a number, `bool` or `char` leave by `return` or `break`, so that
-    /// is a `?` propagating its residual: the registrations are swept, but the mark is
-    /// left where it is, so the value stays readable and the arena keeps the bytes.
+    /// checker lets only a number, `bool` or `char`, or no value, leave by `return`,
+    /// `break` or `?`, so no checked program takes that path. Should one, the
+    /// registrations are swept but the mark is left where it is, so the value stays
+    /// readable and the arena keeps the bytes.
     pub(crate) fn emit_exit_through(
         &mut self,
         min_index: usize,

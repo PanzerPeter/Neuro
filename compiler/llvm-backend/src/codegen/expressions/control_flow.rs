@@ -23,6 +23,7 @@ impl<'ctx> CodegenContext<'ctx> {
         else_block: &Option<Vec<HirStmt>>,
         result_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let slots = self.branch_string_slots.take();
         let result_ty = result_ty.clone();
 
         if matches!(result_ty, Type::Void) {
@@ -46,13 +47,19 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_conditional_branch(cond_val, then_bb, else_bb)?;
 
         self.builder.position_at_end(then_bb);
-        self.codegen_arm_into_alloca(then_block, result_alloca)?;
+        self.codegen_arm_into_alloca(then_block, result_alloca, slots.as_deref())?;
         if !self.current_block_terminated() {
             self.builder.build_unconditional_branch(merge_bb)?;
         }
 
         self.builder.position_at_end(else_bb);
-        self.codegen_if_expr_else_arm(else_if_blocks, else_block, result_alloca, merge_bb)?;
+        self.codegen_if_expr_else_arm(
+            else_if_blocks,
+            else_block,
+            result_alloca,
+            merge_bb,
+            slots.as_deref(),
+        )?;
 
         self.builder.position_at_end(merge_bb);
         self.builder
@@ -67,6 +74,7 @@ impl<'ctx> CodegenContext<'ctx> {
         else_block: &Option<Vec<HirStmt>>,
         alloca: PointerValue<'ctx>,
         merge_bb: BasicBlock<'ctx>,
+        slots: Option<&[(Vec<String>, PointerValue<'ctx>)]>,
     ) -> CodegenResult<()> {
         if let Some(((elif_cond, elif_stmts), rest)) = else_if_blocks.split_first() {
             let parent_fn = self
@@ -84,15 +92,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_conditional_branch(elif_cond_val, elif_then_bb, elif_else_bb)?;
 
             self.builder.position_at_end(elif_then_bb);
-            self.codegen_arm_into_alloca(elif_stmts, alloca)?;
+            self.codegen_arm_into_alloca(elif_stmts, alloca, slots)?;
             if !self.current_block_terminated() {
                 self.builder.build_unconditional_branch(merge_bb)?;
             }
 
             self.builder.position_at_end(elif_else_bb);
-            self.codegen_if_expr_else_arm(rest, else_block, alloca, merge_bb)?;
+            self.codegen_if_expr_else_arm(rest, else_block, alloca, merge_bb, slots)?;
         } else if let Some(else_stmts) = else_block {
-            self.codegen_arm_into_alloca(else_stmts, alloca)?;
+            self.codegen_arm_into_alloca(else_stmts, alloca, slots)?;
             if !self.current_block_terminated() {
                 self.builder.build_unconditional_branch(merge_bb)?;
             }
@@ -106,11 +114,13 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// The arm is its own drop scope: locals declared in it are destroyed before
     /// control reaches the merge block, while a yielded place escapes (its drop flag
-    /// is cleared as a move).
+    /// is cleared as a move). `slots` receive the ownership of the `string` positions a
+    /// yielded holder hands over ([`Self::codegen_branch_tail`]).
     fn codegen_arm_into_alloca(
         &mut self,
         stmts: &[HirStmt],
         alloca: PointerValue<'ctx>,
+        slots: Option<&[(Vec<String>, PointerValue<'ctx>)]>,
     ) -> CodegenResult<()> {
         self.push_drop_scope();
         let Some((last, init)) = stmts.split_last() else {
@@ -125,7 +135,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         if !self.current_block_terminated() {
             if let HirStmt::Expr(expr) = last {
-                let val = self.codegen_expr(expr)?;
+                let val = self.codegen_branch_tail(expr, slots)?;
                 // A diverging arm value (e.g. `else { panic("x") }`) terminates the block
                 // with `unreachable`; there is no result to store and the caller skips merge.
                 if !self.current_block_terminated() {
@@ -214,6 +224,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         stmts: &[HirStmt],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let slots = self.branch_string_slots.take();
         self.push_drop_scope();
         let Some((last, init)) = stmts.split_last() else {
             self.pop_drop_scope();
@@ -233,7 +244,7 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => false,
         };
         let result = if let (true, HirStmt::Expr(expr)) = (value_tail, last) {
-            let val = self.codegen_expr(expr)?;
+            let val = self.codegen_branch_tail(expr, slots.as_deref())?;
             // The yielded place escapes the block, so it is moved out, not dropped here.
             self.mark_moved_for_drop(expr)?;
             val

@@ -23,6 +23,11 @@ const DEFAULT_FLOAT_CONVERSION: &str = ".16g";
 /// digits, hence 15. `__neuro_exp` trims the zeros this pads with.
 const DEFAULT_SCIENTIFIC_DECIMALS: u32 = 15;
 
+/// The method-shaped helper lowering emits for a type whose `Debug` is written by hand:
+/// `Type__fmt_debug$string(&self) -> string`, the type's own `fmt_debug` into a fresh
+/// builder.
+const DEBUG_STRING_METHOD: &str = "fmt_debug$string";
+
 /// Who owns the buffer behind a rendered piece.
 ///
 /// A rendering either hands back bytes the program already had (a `.rodata` literal,
@@ -229,6 +234,13 @@ impl<'ctx> CodegenContext<'ctx> {
         };
 
         let (rendered, owner) = match &target {
+            Type::Struct(name) | Type::Enum(name)
+                if self
+                    .functions
+                    .contains_key(&format!("{}__{}", name, DEBUG_STRING_METHOD)) =>
+            {
+                self.render_through_debug_impl(value, &target)?
+            }
             Type::String => self.render_string(value, spec, incoming)?,
             Type::Bool => self.render_bool(value, spec)?,
             Type::Char => self.render_char(value, spec)?,
@@ -298,6 +310,18 @@ impl<'ctx> CodegenContext<'ctx> {
             self.free_piece(piece)?;
         }
         Ok((joined, PieceOwner::Owned))
+    }
+
+    /// Render a value whose `Debug` is written by hand: a field of a derived struct, since
+    /// lowering already rewrote every hole of such a value. Its `fmt_debug` is reached
+    /// through the helper lowering emitted for the type, which hands back a fresh buffer.
+    fn render_through_debug_impl(
+        &self,
+        value: BasicValueEnum<'ctx>,
+        ty: &Type,
+    ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
+        let rendered = self.call_own_method(ty, DEBUG_STRING_METHOD, &[value], "dbg.impl")?;
+        Ok((rendered, PieceOwner::Owned))
     }
 
     /// The name the programmer wrote for struct key `name`. The two differ only for a

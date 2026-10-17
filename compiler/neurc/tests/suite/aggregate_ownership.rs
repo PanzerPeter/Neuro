@@ -423,3 +423,175 @@ func main() -> i32 {
 "#;
     assert_eq!(exit_under_memory_cap("nested_return.nr", source), Some(0));
 }
+
+/// A function whose tail is a `loop` leaves through its `break` values (and any `return`
+/// inside): when every one allocates, the caller owns and releases the result. A literal
+/// `break` beside an allocating one is copied, so the caller never frees `.rodata`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_loop_tail_with_allocating_breaks_is_a_producer() {
+    let source = r#"
+func plain(a: &string, c: bool) -> string {
+    loop {
+        if c { return a + "" }
+        break a + "!"
+    }
+}
+func labeled(a: &string, c: bool) -> string {
+    outer: loop {
+        loop {
+            if c { break outer a + "?" }
+            break
+        }
+        break outer a + "!"
+    }
+}
+func mixed(a: &string, c: bool) -> string {
+    loop {
+        if c { break "none" }
+        break a + "!"
+    }
+}
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..1000 {
+        val c = i % 2 == 0
+        total += plain(&p, c).len() as i64
+        total += labeled(&p, c).len() as i64
+        total += mixed(&p, c).len() as i64
+    }
+    if total == 1048577 * 2000 + 1048576 * 500 + 2000 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(
+        exit_under_memory_cap("loop_tail_breaks.nr", source),
+        Some(0)
+    );
+}
+
+/// A `break` written in a `match` arm of a tail `loop` is still one of its exits.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_break_in_a_match_arm_of_a_loop_tail_is_an_exit() {
+    let source = r#"
+func matched(a: &string, n: i32) -> string {
+    loop {
+        match n {
+            0 => { break "zero" }
+            _ => { break a + "m" }
+        }
+    }
+}
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..1000 {
+        total += matched(&p, i % 2).len() as i64
+    }
+    if total == 500 * 4 + 500 * 1048577 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(exit_under_memory_cap("loop_tail_match.nr", source), Some(0));
+}
+
+/// A holder an `if`, an `else if` chain, a nested `if`, a `match` or a block built owns
+/// the `string` positions its taken arm allocated or moved a binding into, so each loop
+/// below stays flat. A literal arm owns nothing, and a diverging arm hands over nothing.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_holder_a_branch_built_owns_its_string_positions() {
+    let source = r#"
+struct P { name: string, id: i32 }
+struct O { inner: P, tag: string }
+func pick(c: bool, p: &string) -> i64 {
+    val e = if c { P { name: p + "", id: 1 } } else { return 0 }
+    e.name.len() as i64
+}
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..400 {
+        val n = i % 3
+        val flat = if n == 0 { P { name: p + "", id: 1 } } else { P { name: "lit", id: 2 } }
+        val chain = if n == 0 { P { name: "a", id: 0 } } else if n == 1 { P { name: p + "", id: 1 } } else { if n == 2 { P { name: p + "!", id: 2 } } else { P { name: "z", id: 3 } } }
+        val t = p + ""
+        val picked = match n {
+            0 => P { name: t, id: 0 },
+            1 => {
+                val q = P { name: p + "", id: 1 }
+                q
+            },
+            _ => P { name: "x", id: 2 },
+        }
+        val pair = if n == 1 { (p + "", 1) } else { ("lit", 2) }
+        val deep = if n == 2 { O { inner: P { name: p + "", id: 1 }, tag: p + "" } } else { O { inner: P { name: "i", id: 0 }, tag: "t" } }
+        val src = P { name: p + "", id: 5 }
+        val other = P { name: "o", id: 6 }
+        val via = if n == 0 { src } else { other }
+        val moved = via
+        val blk = {
+            val s = p + ""
+            P { name: s, id: 7 }
+        }
+        mut r = P { name: "r", id: 0 }
+        r = if n == 1 { P { name: p + "", id: 1 } } else { P { name: "s", id: 2 } }
+        total += (flat.name.len() + chain.name.len() + picked.name.len() + pair.0.len()) as i64
+        total += (deep.inner.name.len() + deep.tag.len() + moved.name.len() + blk.name.len()) as i64
+        total += r.name.len() as i64 + pick(n == 2, &p)
+    }
+    if total == 1866 * 1048576 + 3066 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(exit_under_memory_cap("branch_holder.nr", source), Some(0));
+}
+
+/// A holder a call built owns the `string` positions its callee allocated on every return
+/// path: a struct, a nested struct, a tuple, a method's result and a returned local. A
+/// position some path fills from a literal stays unowned rather than freeing `.rodata`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_holder_a_call_built_owns_the_positions_its_callee_allocated() {
+    let source = r#"
+struct P { name: string, id: i32 }
+struct O { inner: P, tag: string }
+struct M { id: i32 }
+impl M {
+    func build(&self, a: &string) -> P { P { name: a + "!", id: self.id } }
+}
+func make(a: &string) -> P { P { name: a + "", id: 1 } }
+func via(a: &string) -> O { O { inner: make(a), tag: a + "" } }
+func pair(c: bool, a: &string) -> (string, string) {
+    if c { return (a + "?", "lit") }
+    (a + "", "x")
+}
+func local(a: &string) -> P {
+    val q = P { name: a + "", id: 4 }
+    q
+}
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    val m = M { id: 3 }
+    mut total: i64 = 0
+    for i in 0..200 {
+        val even = i % 2 == 0
+        val e1 = make(&p)
+        val e2 = via(&p)
+        val e3 = pair(even, &p)
+        val e4 = m.build(&p)
+        val e5 = local(&p)
+        mut e6 = make(&p)
+        e6 = make(&p)
+        val e7 = if even { make(&p) } else { P { name: "n", id: 0 } }
+        total += (e1.name.len() + e2.inner.name.len() + e2.tag.len() + e3.0.len()) as i64
+        total += (e4.name.len() + e5.name.len() + e6.name.len() + e7.name.len()) as i64
+    }
+    if total == 1500 * 1048576 + 400 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(exit_under_memory_cap("call_holder.nr", source), Some(0));
+}

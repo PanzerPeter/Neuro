@@ -333,18 +333,51 @@ fn derived_hashable_refuses_a_float_field() {
     );
 }
 
-/// The field rules run with the derives, before any impl is registered, so a struct
-/// field must derive the trait as well, exactly as `@derive(PartialEq)` requires.
+/// A derive calls a field's own method, so a field whose trait is written by hand meets
+/// every derived rule, the impls declared after the derives included.
 #[test]
-fn derived_hashable_refuses_a_hand_hashed_struct_field() {
-    let errors = errors_with_traits(
+fn a_derive_accepts_a_field_implementing_the_trait_by_hand() {
+    assert_clean(
         r#"
+        @derive(Debug, Clone, PartialEq, Hashable)
+        struct Wrap<T> { v: T }
         struct Inner { x: i32 }
+        @derive(Debug, Clone, PartialEq, Hashable)
+        struct Outer { inner: Inner, wrapped: Wrap<Inner>, n: u8 }
         impl Hashable for Inner {
             func hash(&self) -> u64 { self.x as u64 }
         }
-        @derive(Hashable)
-        struct Outer { inner: Inner, n: u8 }
+        impl Debug for Inner {
+            func fmt_debug(&self, out: &mut StringBuilder) {}
+        }
+        impl Clone for Inner {
+            func clone(&self) -> Self { Inner { x: self.x } }
+        }
+        impl Copy for Inner {}
+        impl PartialEq for Inner {
+            func eq(&self, rhs: &Inner) -> bool { true }
+        }
+        func main() -> i32 { 0 }
+        "#,
+    );
+}
+
+/// `PartialEq<i32>` compares an `Inner` with an `i32`, not with an `Inner`, so the derived
+/// `==` has no `eq` to call for the field.
+#[test]
+fn a_derived_partial_eq_refuses_a_field_compared_with_another_type() {
+    let errors = errors_with_traits(
+        r#"
+        struct Inner { x: i32 }
+        impl Clone for Inner {
+            func clone(&self) -> Self { Inner { x: self.x } }
+        }
+        impl Copy for Inner {}
+        impl PartialEq<i32> for Inner {
+            func eq(&self, rhs: &i32) -> bool { true }
+        }
+        @derive(PartialEq)
+        struct Outer { inner: Inner }
         func main() -> i32 { 0 }
         "#,
     );

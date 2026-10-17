@@ -36,6 +36,7 @@ fn host_bodies(
                         mlir_backend::GuardKind::DivisionByZero => BodyGuardKind::DivisionByZero,
                         mlir_backend::GuardKind::RemainderByZero => BodyGuardKind::RemainderByZero,
                         mlir_backend::GuardKind::ShiftOverflow => BodyGuardKind::ShiftOverflow,
+                        mlir_backend::GuardKind::RangeStep => BodyGuardKind::RangeStep,
                     },
                     offset: guard.offset,
                 })
@@ -657,6 +658,48 @@ fn nested_pools_take_nested_marks() {
     let body = function_body(&ir, "main");
     assert_eq!(body.matches("call i64 @__neuro_arena_mark()").count(), 2);
     assert_eq!(body.matches("call void @__neuro_arena_release(").count(), 2);
+}
+
+/// LIM-071: a `?` leaving a pool restores the mark on its way out when what it returns
+/// holds no address: `None`, or an `Err` over a number. Each exit kept the mark, so every
+/// failure leaked the rest of the block's arena space for the run.
+#[test]
+fn a_question_mark_leaving_a_pool_restores_the_mark() {
+    let source = r#"
+        enum Option<T> { Some(T), None }
+        enum Result<T, E> { Ok(T), Err(E) }
+
+        func pick(v: Option<string>) -> Option<i32> {
+            pool {
+                val joined = "a" + "b"
+                val s = v?
+                println(joined)
+            }
+            Option::Some(1)
+        }
+
+        func parse(r: Result<string, i32>) -> Result<i32, i32> {
+            pool {
+                val joined = "a" + "b"
+                val s = r?
+                println(joined)
+            }
+            Result::Ok(1)
+        }
+
+        func main() -> i32 {
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    for name in ["pick", "parse"] {
+        let body = function_body(&ir, name);
+        assert_eq!(
+            body.matches("call void @__neuro_arena_release(").count(),
+            2,
+            "the closing brace and the `?` exit both restore the mark, in:\n{body}"
+        );
+    }
 }
 
 /// The in-place guarantee, read off the IR: a compound assignment allocates nothing.

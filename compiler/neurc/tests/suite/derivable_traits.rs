@@ -617,3 +617,652 @@ func main() -> i32 {
         "3\n\"xy\"\nD { n: 2 }\n1.5\n"
     );
 }
+
+/// A derive writes the impl a programmer would have written, field by field, so a field
+/// whose trait is written by hand is rendered, compared, hashed and cloned by its own
+/// method, through a nested derive, an enum and a generic instance alike. Each hand-written
+/// impl here does something a field-wise one would not, so the output shows it was called.
+#[test]
+fn a_derive_calls_the_hand_written_impl_of_a_field() {
+    let source = r#"
+@derive(Debug, Clone)
+struct Wrap<T> {
+    v: T
+}
+
+struct Hand {
+    x: i32,
+    tag: string
+}
+
+enum Color {
+    Red,
+    Green
+}
+
+@derive(Debug, Clone)
+struct Mid {
+    h: Hand,
+    c: Color,
+    n: i32
+}
+
+@derive(Debug, Clone)
+struct Top {
+    m: Mid,
+    w: Wrap<Hand>
+}
+
+impl Debug for Hand {
+    func fmt_debug(&self, out: &mut StringBuilder) {
+        out.push_str("hand {self.x}")
+    }
+}
+
+impl Clone for Hand {
+    func clone(&self) -> Self {
+        print("[clone]")
+        Hand { x: self.x + 1, tag: self.tag.clone() }
+    }
+}
+
+impl Debug for Color {
+    func fmt_debug(&self, out: &mut StringBuilder) {
+        match self {
+            Color::Red => out.push_str("red"),
+            Color::Green => out.push_str("green")
+        }
+    }
+}
+
+impl Clone for Color {
+    func clone(&self) -> Self {
+        print("[color]")
+        Color::Green
+    }
+}
+
+struct Key {
+    x: i32,
+    junk: i32
+}
+
+impl Clone for Key {
+    func clone(&self) -> Self {
+        Key { x: self.x, junk: self.junk }
+    }
+}
+
+impl Copy for Key {}
+
+impl PartialEq for Key {
+    func eq(&self, rhs: &Key) -> bool {
+        self.x == rhs.x
+    }
+}
+
+impl Hashable for Key {
+    func hash(&self) -> u64 {
+        self.x as u64
+    }
+}
+
+@derive(PartialEq, Hashable)
+struct KeyMid {
+    k: Key,
+    n: i32
+}
+
+@derive(PartialEq, Hashable)
+struct KeyTop {
+    m: KeyMid
+}
+
+func key(x: i32, junk: i32) -> KeyTop {
+    KeyTop { m: KeyMid { k: Key { x: x, junk: junk }, n: 2 } }
+}
+
+func main() -> i32 {
+    val t = Top {
+        m: Mid { h: Hand { x: 1, tag: "a" }, c: Color::Red, n: 2 },
+        w: Wrap { v: Hand { x: 10, tag: "w" } }
+    }
+    println("{t:?}")
+    val u = t.clone()
+    println("")
+    println("{u:?} {u.m.h.tag} {t.m.h.tag}")
+    mut m: HashMap<KeyTop, i32> = HashMap::new()
+    m.insert(key(1, 5), 41)
+    val found = m.get(key(1, 6)) ?? 0
+    println("{key(1, 5) == key(1, 6)} {key(1, 5) == key(2, 5)} {key(1, 5).hash() == key(1, 6).hash()} {found}")
+    0
+}
+"#;
+    assert_eq!(
+        stdout_of("field_impls.nr", source),
+        "Top { m: Mid { h: hand 1, c: red, n: 2 }, w: Wrap { v: hand 10 } }\n\
+         [clone][color][clone]\n\
+         Top { m: Mid { h: hand 2, c: green, n: 2 }, w: Wrap { v: hand 11 } } a a\n\
+         true false true 41\n"
+    );
+}
+
+/// A hand-written impl that does what the derive would is indistinguishable from it.
+#[test]
+fn a_hand_written_field_impl_matches_the_derive_it_replaces() {
+    let program = |inner: &str| {
+        format!(
+            r#"
+{inner}
+
+@derive(Debug, Clone, PartialEq, Hashable)
+struct Outer {{
+    i: Inner,
+    n: i32
+}}
+
+func main() -> i32 {{
+    val a = Outer {{ i: Inner {{ x: 1, y: 2 }}, n: 3 }}
+    val b = a.clone()
+    val c = Outer {{ i: Inner {{ x: 1, y: 9 }}, n: 3 }}
+    println("{{a:?}} {{b:?}} {{a == b}} {{a == c}} {{a.hash() == b.hash()}}")
+    0
+}}
+"#
+        )
+    };
+    let derived =
+        program("@derive(Debug, Clone, PartialEq, Hashable)\nstruct Inner { x: i32, y: i32 }");
+    let by_hand = program(
+        r#"struct Inner { x: i32, y: i32 }
+
+impl Debug for Inner {
+    func fmt_debug(&self, out: &mut StringBuilder) {
+        out.push_str("Inner \{ x: {self.x}, y: {self.y} \}")
+    }
+}
+
+impl Clone for Inner {
+    func clone(&self) -> Self {
+        Inner { x: self.x, y: self.y }
+    }
+}
+
+impl Copy for Inner {}
+
+impl PartialEq for Inner {
+    func eq(&self, rhs: &Inner) -> bool {
+        self.x == rhs.x && self.y == rhs.y
+    }
+}
+
+impl Hashable for Inner {
+    func hash(&self) -> u64 {
+        (self.x * 31 + self.y) as u64
+    }
+}"#,
+    );
+    let expected = "Outer { i: Inner { x: 1, y: 2 }, n: 3 } Outer { i: Inner { x: 1, y: 2 }, n: 3 } true false true\n";
+    assert_eq!(stdout_of("derived_inner.nr", &derived), expected);
+    assert_eq!(stdout_of("hand_inner.nr", &by_hand), expected);
+}
+
+/// A `Copy` value's `.clone()` is a copy, so cloning a `Copy` struct calls no field's
+/// hand-written `clone`, at the top or nested inside a non-`Copy` struct, while that
+/// struct's own non-`Copy` field still has its `clone` called. The receiver may be a
+/// binding, a temporary or a borrow.
+#[test]
+fn a_copy_struct_clone_is_a_copy_whatever_its_fields_clone_does() {
+    let source = r#"
+struct P {
+    x: i32
+}
+
+impl Clone for P {
+    func clone(&self) -> Self {
+        print("[p]")
+        P { x: self.x + 100 }
+    }
+}
+
+impl Copy for P {}
+
+@derive(Copy, Clone)
+struct Q {
+    p: P,
+    n: i32
+}
+
+struct Hand {
+    x: i32,
+    tag: string
+}
+
+impl Clone for Hand {
+    func clone(&self) -> Self {
+        print("[h]")
+        Hand { x: self.x + 1, tag: self.tag.clone() }
+    }
+}
+
+@derive(Clone)
+struct Outer {
+    q: Q,
+    h: Hand
+}
+
+func make() -> Outer {
+    Outer { q: Q { p: P { x: 1 }, n: 2 }, h: Hand { x: 10, tag: "t" } }
+}
+
+func through(r: &Outer) -> Outer {
+    r.clone()
+}
+
+func main() -> i32 {
+    val q = Q { p: P { x: 1 }, n: 2 }
+    val q2 = q.clone()
+    println("|{q2.p.x}")
+    val o = make()
+    val o2 = o.clone()
+    println("|{o2.q.p.x} {o2.h.x}")
+    val o3 = make().clone()
+    println("|{o3.h.x} {o3.h.tag}")
+    val o4 = through(&o)
+    println("|{o4.h.x} {o.h.tag}")
+    q2.p.x + o2.q.p.x + o2.h.x + o3.h.x + o4.h.x
+}
+"#;
+    assert_eq!(
+        stdout_of("copy_clone_fields.nr", source),
+        "|1\n[h]|1 11\n[h]|11 t\n[h]|11 t\n"
+    );
+    assert_eq!(run("copy_clone_fields_exit.nr", source), 35);
+}
+
+/// A derived clone lends its receiver to the field-by-field impl as a hand-written `clone`
+/// is lent it: a borrow returned by a call, an array element and a temporary are read,
+/// never taken over, so nothing is freed or dropped twice and each `Drop` runs once, at
+/// its owner's scope exit.
+#[test]
+fn a_derived_clone_borrows_its_receiver_like_a_hand_written_one() {
+    let borrowed = r#"
+struct Hand {
+    v: Vec<i32>
+}
+
+impl Clone for Hand {
+    func clone(&self) -> Self {
+        print("c")
+        mut w: Vec<i32> = Vec::new()
+        w.push(self.v[0] + 1)
+        Hand { v: w }
+    }
+}
+
+@derive(Clone)
+struct Outer {
+    h: Hand,
+    k: i32
+}
+
+func get(o: &Outer) -> &Outer {
+    o
+}
+
+func run() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(10)
+    val o = Outer { h: Hand { v: v }, k: 2 }
+    val a = get(&o).clone()
+    print("|")
+    a.h.v[0] + o.h.v[0]
+}
+
+func main() -> i32 {
+    val r = run()
+    println("")
+    r
+}
+"#;
+    assert_eq!(stdout_of("borrowed_receiver.nr", borrowed), "c|\n");
+    assert_eq!(run("borrowed_receiver_exit.nr", borrowed), 21);
+    let dropped = r#"
+struct Hand {
+    n: i32
+}
+
+impl Clone for Hand {
+    func clone(&self) -> Self {
+        print("c")
+        Hand { n: self.n + 1 }
+    }
+}
+
+impl Drop for Hand {
+    func drop(&mut self) {
+        print("d{self.n}")
+    }
+}
+
+@derive(Clone)
+struct Outer {
+    h: Hand,
+    k: i32
+}
+
+func get(o: &Outer) -> &Outer {
+    o
+}
+
+func make(n: i32) -> Outer {
+    Outer { h: Hand { n: n }, k: 1 }
+}
+
+func run() -> i32 {
+    val o = Outer { h: Hand { n: 10 }, k: 2 }
+    val arr = [Outer { h: Hand { n: 30 }, k: 3 }]
+    val a = arr[0].clone()
+    print("|")
+    val b = make(20).clone()
+    print("|")
+    a.h.n + b.h.n
+}
+
+func main() -> i32 {
+    val r = run()
+    println("")
+    r
+}
+"#;
+    assert_eq!(
+        stdout_of("dropped_receiver.nr", dropped),
+        "c|cd20|d21d31d30d10\n"
+    );
+    assert_eq!(run("dropped_receiver_exit.nr", dropped), 52);
+    let indexed = r#"
+struct Hand {
+    v: Vec<i32>
+}
+
+impl Clone for Hand {
+    func clone(&self) -> Self {
+        print("c")
+        mut w: Vec<i32> = Vec::new()
+        w.push(self.v[0] + 1)
+        Hand { v: w }
+    }
+}
+
+@derive(Clone)
+struct Mid {
+    h: Hand
+}
+
+func one(n: i32) -> Vec<i32> {
+    mut v: Vec<i32> = Vec::new()
+    v.push(n)
+    v
+}
+
+func run() -> i32 {
+    val arr = [Mid { h: Hand { v: one(30) } }]
+    val q = arr[0].clone()
+    print("|")
+    q.h.v[0] + arr[0].h.v[0]
+}
+
+func main() -> i32 {
+    val r = run()
+    println("")
+    r
+}
+"#;
+    assert_eq!(stdout_of("indexed_receiver.nr", indexed), "c|\n");
+    assert_eq!(run("indexed_receiver_exit.nr", indexed), 61);
+}
+
+/// A tuple, an array and a newtype are cloned by their bytes, so a struct inside one
+/// whose derived clone calls a field's `clone` is refused there, as a hand-written one is.
+#[test]
+fn a_struct_cloned_by_its_fields_cannot_sit_in_a_tuple_or_array() {
+    let err = rejected(
+        "held_by_bytes.nr",
+        r#"
+struct Hand {
+    n: i32,
+    tag: string
+}
+
+impl Clone for Hand {
+    func clone(&self) -> Self {
+        print("c")
+        Hand { n: self.n + 1, tag: self.tag.clone() }
+    }
+}
+
+@derive(Clone)
+struct Mid {
+    h: Hand
+}
+
+@derive(Clone)
+struct Outer {
+    arr: [Mid; 2],
+    t: (Mid, i32)
+}
+
+func main() -> i32 {
+    val o = Outer { arr: [Mid { h: Hand { n: 1, tag: "a" + "b" } }, Mid { h: Hand { n: 2, tag: "c" + "d" } }], t: (Mid { h: Hand { n: 3, tag: "e" + "f" } }, 4) }
+    val p = o.clone()
+    println("")
+    println(p.arr[0].h.tag)
+    p.arr[0].h.n + p.arr[1].h.n + p.t.0.h.n
+}
+"#,
+    );
+    assert!(
+        err.contains("field 't' has type (Mid, i32), which is copied by its bytes"),
+        "got: {err}"
+    );
+    assert!(
+        err.contains("field 'arr' has type [Mid; 2], which is copied by its bytes"),
+        "got: {err}"
+    );
+}
+
+/// The derived `==` calls a field's `eq` only through its `PartialEq` impl: an inherent
+/// method of that name on a field that derives the trait is not its comparison.
+#[test]
+fn a_derived_eq_ignores_an_inherent_eq_on_a_field() {
+    let same_shape = r#"
+@derive(PartialEq)
+struct Inner {
+    x: i32
+}
+
+impl Inner {
+    func eq(&self, rhs: &Inner) -> bool {
+        false
+    }
+}
+
+@derive(PartialEq)
+struct Outer {
+    i: Inner,
+    k: i32
+}
+
+func main() -> i32 {
+    val a = Outer { i: Inner { x: 1 }, k: 2 }
+    val b = Outer { i: Inner { x: 1 }, k: 2 }
+    mut r = 0
+    if a.i == b.i {
+        r = r + 1
+    }
+    if a == b {
+        r = r + 10
+    }
+    r
+}
+"#;
+    assert_eq!(run("inherent_eq.nr", same_shape), 11);
+    let other_shape = r#"
+@derive(PartialEq)
+struct Inner {
+    x: i32
+}
+
+impl Inner {
+    func eq(&self, rhs: i64) -> i32 {
+        7
+    }
+}
+
+@derive(PartialEq)
+struct Outer {
+    i: Inner,
+    k: i32
+}
+
+func main() -> i32 {
+    val a = Outer { i: Inner { x: 1 }, k: 2 }
+    val b = Outer { i: Inner { x: 1 }, k: 2 }
+    mut r = 0
+    if a.i.x == b.i.x {
+        r = r + 1
+    }
+    if a == b {
+        r = r + 10
+    }
+    r
+}
+"#;
+    assert_eq!(run("inherent_eq_shape.nr", other_shape), 11);
+}
+
+/// A refused operator impl is reported once: the derive holding the type is not told to
+/// give it a derive as well.
+#[test]
+fn a_refused_field_impl_is_not_reported_missing_again() {
+    let err = rejected(
+        "refused_field_impl.nr",
+        r#"
+struct Hand {
+    tag: string
+}
+
+impl PartialEq for Hand {
+    func eq(&self, rhs: &Hand) -> bool {
+        true
+    }
+}
+
+@derive(PartialEq)
+struct Outer {
+    h: Hand
+}
+
+func main() -> i32 {
+    0
+}
+"#,
+    );
+    assert!(
+        err.contains("operator trait 'PartialEq' can only be implemented for a `Copy` type"),
+        "got: {err}"
+    );
+    assert!(!err.contains("cannot derive"), "got: {err}");
+}
+
+/// A derive calls a field's `clone` only through its `impl Clone`, the rule the checker
+/// and lowering share: an inherent method of that name on a field that derives `Clone` is
+/// not its clone, so the struct holding it, alone or inside a tuple, is copied.
+#[test]
+fn an_inherent_clone_on_a_field_is_not_its_clone_impl() {
+    let source = r#"
+@derive(Clone)
+struct H { x: i32 }
+impl H {
+    func clone(&self) -> H {
+        print("i")
+        H { x: self.x + 1 }
+    }
+}
+@derive(Clone)
+struct M { h: H }
+@derive(Clone)
+struct O { t: (M, i32) }
+func main() -> i32 {
+    val m = M { h: H { x: 1 } }
+    val m2 = m.clone()
+    val o = O { t: (M { h: H { x: 5 } }, 2) }
+    val o2 = o.clone()
+    println("")
+    m2.h.x + o2.t.0.h.x
+}
+"#;
+    assert_eq!(stdout_of("inherent_clone.nr", source), "\n");
+    assert_eq!(run("inherent_clone_exit.nr", source), 6);
+}
+
+/// A newtype field's hand-written `Clone` is called by the derive, so a struct holding one
+/// cannot sit in a tuple, which is copied by its bytes; the refusal says so rather than
+/// blaming a buffer.
+#[test]
+fn a_newtype_field_clone_is_called_and_a_byte_copy_of_it_refused() {
+    let called = r#"
+newtype N = i32
+
+impl Clone for N {
+    func clone(&self) -> Self {
+        print("n")
+        N(self.0 + 1)
+    }
+}
+
+@derive(Clone)
+struct S {
+    n: N,
+    k: i32
+}
+
+func main() -> i32 {
+    val s = S { n: N(1), k: 2 }
+    val c = s.clone()
+    println("")
+    c.n.0 + c.k
+}
+"#;
+    assert_eq!(stdout_of("newtype_clone.nr", called), "n\n");
+    assert_eq!(run("newtype_clone_exit.nr", called), 4);
+    let err = rejected(
+        "newtype_in_tuple.nr",
+        r#"
+newtype N = i32
+impl Clone for N {
+    func clone(&self) -> Self {
+        print("n")
+        N(self.0 + 1)
+    }
+}
+@derive(Clone)
+struct S { n: N }
+@derive(Clone)
+struct O { t: (S, i32) }
+func main() -> i32 {
+    val o = O { t: (S { n: N(1) }, 2) }
+    val c = o.clone()
+    println("")
+    c.t.0.n.0 + c.t.1
+}
+"#,
+    );
+    assert!(
+        err.contains(
+            "is copied by its bytes, so the `clone` a struct inside it calls would be skipped"
+        ),
+        "got: {err}"
+    );
+    assert!(!err.contains("owns a buffer"), "got: {err}");
+}

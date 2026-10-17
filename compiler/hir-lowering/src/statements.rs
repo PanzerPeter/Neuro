@@ -21,6 +21,10 @@ impl Lowerer {
                 mutable,
                 span,
             } => {
+                let shape = (*mutable, ty.is_some());
+                if let Some(alias) = self.grid_binding(&name.name, init.as_ref(), shape, *span) {
+                    return Ok(alias);
+                }
                 let declared = match ty {
                     Some(t) => Some(self.resolve_type(t)?),
                     None => None,

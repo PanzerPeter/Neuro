@@ -268,6 +268,7 @@ impl<'ctx> CodegenContext<'ctx> {
             crate::BodyGuardKind::DivisionByZero => DIVIDE_BY_ZERO_PANIC,
             crate::BodyGuardKind::RemainderByZero => REMAINDER_BY_ZERO_PANIC,
             crate::BodyGuardKind::ShiftOverflow => SHIFT_OVERFLOW_PANIC,
+            crate::BodyGuardKind::RangeStep => crate::codegen::statements::RANGE_STEP_NOT_POSITIVE,
         };
         self.codegen_guard_or_panic(ok, message, offset)
     }

@@ -149,6 +149,10 @@ impl TypeChecker {
                     if self.in_kernel {
                         self.check_kernel_out_read(ident);
                     }
+                    if matches!(ty, Type::GridPosition) {
+                        self.refuse_whole_grid_name(ident);
+                        return None;
+                    }
                     Some(ty)
                 } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
                     Some(const_ty)

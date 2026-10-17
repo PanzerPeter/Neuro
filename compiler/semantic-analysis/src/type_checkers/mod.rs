@@ -119,6 +119,10 @@ pub(crate) struct TypeChecker {
     /// `dyn Trait` types resolved before their trait was registered, with where they
     /// were written: object safety needs the methods, so it is checked once they exist.
     deferred_object_safety: Vec<(String, shared_types::Span)>,
+    /// Generic-struct instances made before any impl is registered, as (instance, template,
+    /// where it was written): their derives' field rules wait for the impls a field may
+    /// implement a derived trait through. `None` once those rules can run as instances arrive.
+    deferred_instance_derives: Option<Vec<(String, String, shared_types::Span)>>,
     /// Associated-type bindings in scope: the name after `Self::` → the type an impl
     /// bound it to. Non-empty only while an `impl` block's signatures and method bodies
     /// are checked, which is exactly the region where `Self::Item` denotes a type.
@@ -210,6 +214,10 @@ pub(crate) struct TypeChecker {
     /// Currently open `pool` blocks, innermost last. Empty outside a pool, which
     /// is what every escape check tests first.
     pool_stack: Vec<PoolContext>,
+    /// How many of `pool_stack`'s entries were opened outside the function or closure body
+    /// being checked. A `return`, `break` or `?` leaves only that body, so the jump rule
+    /// reads the pools above this floor; the store and call rules read them all.
+    jump_pool_floor: usize,
     /// Set while the operand of a `&` / `&mut` is being typed. Naming a place in
     /// order to borrow it is not an access to it, so the borrowee-access rule is
     /// suppressed there and the borrow-site exclusivity rules apply instead.
@@ -472,6 +480,7 @@ impl TypeChecker {
             traits: HashMap::new(),
             trait_names: HashSet::new(),
             deferred_object_safety: Vec::new(),
+            deferred_instance_derives: Some(Vec::new()),
             self_assoc: HashMap::new(),
             self_type: None,
             trait_impls: HashSet::new(),
@@ -499,6 +508,7 @@ impl TypeChecker {
             self_is_owned: false,
             loop_stack: Vec::new(),
             pool_stack: Vec::new(),
+            jump_pool_floor: 0,
             in_borrow_operand: false,
             in_sub_place: false,
             scope_bound_closures: HashMap::new(),
@@ -834,10 +844,11 @@ impl TypeChecker {
     /// Whether a `{x:?}` hole can render `ty`, and so whether a `@derive(Debug)` struct
     /// may hold it as a field.
     ///
-    /// The scalars and `string` render directly; a struct renders only when it derives
-    /// `Debug` itself, because the rendering is generated field by field and has no
-    /// other way to reach inside one. A borrow is NOT peeled: a field holding one is a
-    /// stored address, and the rendering reads fields out of the aggregate directly.
+    /// The scalars and `string` render directly; a struct renders here only when it
+    /// derives `Debug` itself, because the rendering is generated field by field. A field
+    /// whose `Debug` is written by hand is admitted by the field rule, which calls it. A
+    /// borrow is NOT peeled: a field holding one is a stored address, and the rendering
+    /// reads fields out of the aggregate directly.
     pub(crate) fn is_debug_renderable(&self, ty: &Type) -> bool {
         match ty {
             Type::Struct(name) => self.debug_structs.contains(name),
@@ -857,31 +868,78 @@ impl TypeChecker {
         }
     }
 
-    /// Whether a derived `.clone()` copies a field of type `ty` faithfully. The backend's
-    /// derived clone copies the struct's bytes, which duplicates a `Copy` value and a struct
-    /// that is itself cloned that way, but would leave a buffer-owning field shared by the
-    /// original and the copy, freed twice or read after its owner released it.
+    /// Whether a derived `.clone()` copies a field of type `ty` faithfully by its bytes,
+    /// which duplicates a `Copy` value and a struct that is itself cloned that way, but
+    /// would leave a buffer-owning field shared by the original and the copy, freed twice
+    /// or read after its owner released it. A field whose `Clone` is written by hand is
+    /// admitted by the field rule instead: the derived clone calls it.
     pub(crate) fn is_derived_cloneable(&self, ty: &Type) -> bool {
         match ty {
             Type::Struct(name) => self.clone_structs.contains(name),
             // A template defers to its instances, which are validated where they are made.
             Type::Generic(_) | Type::Unknown => true,
+            // A newtype, an array and a tuple are copied by their bytes, so a struct inside
+            // one must be too: one whose derived clone calls a field's `clone` is not.
             Type::Newtype(name) => self
                 .lookup_newtype_inner(name)
                 .cloned()
-                .is_some_and(|inner| self.is_derived_cloneable(&inner)),
-            Type::Array { element, .. } => self.is_derived_cloneable(element),
-            Type::Tuple(elements) => elements.iter().all(|e| self.is_derived_cloneable(e)),
+                .is_some_and(|inner| self.clones_by_bytes(&inner)),
+            Type::Array { element, .. } => self.clones_by_bytes(element),
+            Type::Tuple(elements) => elements.iter().all(|e| self.clones_by_bytes(e)),
             other => self.is_type_copy(other),
         }
+    }
+
+    /// [`Self::is_derived_cloneable`] for a value copied by its bytes inside a newtype,
+    /// an array or a tuple.
+    fn clones_by_bytes(&self, ty: &Type) -> bool {
+        self.is_derived_cloneable(ty) && !self.derived_clone_calls(ty)
+    }
+
+    /// Whether a value of `ty`, copied by its bytes as a newtype, an array or a tuple is,
+    /// holds a struct whose derived clone calls a field's `clone`, which that copy cannot.
+    pub(crate) fn byte_copy_skips_a_clone(&self, ty: &Type) -> bool {
+        let inner: Vec<Type> = match ty {
+            Type::Newtype(name) => self
+                .lookup_newtype_inner(name)
+                .cloned()
+                .into_iter()
+                .collect(),
+            Type::Array { element, .. } => vec![(**element).clone()],
+            Type::Tuple(elements) => elements.clone(),
+            _ => return false,
+        };
+        inner
+            .iter()
+            .any(|e| self.derived_clone_calls(e) || self.byte_copy_skips_a_clone(e))
+    }
+
+    /// Whether the derived clone of `ty` calls a hand-written `clone`: a non-`Copy`
+    /// struct deriving `Clone` with a field that has an `impl Clone` (not an inherent
+    /// method of that name), or with a field that is such a struct itself. A `Copy`
+    /// struct's clone is a copy of its bytes. Lowering's `clone_calls_fields` is the same
+    /// rule.
+    fn derived_clone_calls(&self, ty: &Type) -> bool {
+        let Type::Struct(name) = ty else {
+            return false;
+        };
+        if !self.clone_structs.contains(name) || self.is_type_copy(ty) {
+            return false;
+        }
+        self.struct_defs.get(name).is_some_and(|fields| {
+            fields.iter().any(|(_, field)| {
+                self.type_implements_trait(field, derivable::CLONE_TRAIT)
+                    || self.derived_clone_calls(field)
+            })
+        })
     }
 
     /// Whether a derived `==` can compare `ty`, and so whether a `@derive(PartialEq)`
     /// struct may hold it as a field.
     ///
-    /// A hand-written `impl PartialEq` does NOT qualify: the derived comparison is
-    /// emitted inline over the fields and never calls a method, so a nested struct must
-    /// carry the derive too.
+    /// A hand-written `impl PartialEq` does NOT qualify here: this is the comparison
+    /// emitted inline over the fields. The field rule admits one separately, and the
+    /// derived comparison calls its `eq`.
     pub(crate) fn is_derived_comparable(&self, ty: &Type) -> bool {
         match ty {
             Type::Struct(name) => self.partial_eq_structs.contains(name),
@@ -1106,7 +1164,6 @@ impl TypeChecker {
         for item in items {
             if let Item::Struct(def) = item {
                 self.validate_copy_derive(def);
-                self.validate_field_derives(def);
             }
         }
 
@@ -1138,6 +1195,19 @@ impl TypeChecker {
         // implementations, and each consumer would silently pick one. Runs after every
         // impl is registered so the check is independent of source order.
         self.check_derive_impl_conflicts(items);
+
+        // Pass 2d: the field rules of `@derive(Debug)`, `Clone`, `PartialEq` and
+        // `Hashable`. A field may implement the trait by hand, so they run once every impl
+        // is registered, for the structs and for the instances made so far alike.
+        for item in items {
+            if let Item::Struct(def) = item {
+                self.validate_field_derives(def);
+            }
+        }
+        for (instance, template, span) in self.deferred_instance_derives.take().unwrap_or_default()
+        {
+            self.validate_instance_derives(&instance, &template, span);
+        }
 
         // Pass 3: register module-level constants so they are visible in function bodies
         // regardless of source order.

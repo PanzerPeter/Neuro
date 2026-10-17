@@ -148,7 +148,7 @@ waits for the copy to finish. A loop over the elements of a device tensor theref
 per element, so move the tensor back with `.to(Device::CPU)` before reading many of them.
 
 Some operations have no device form: an operation on an `f16`, `bf16` or `bool` tensor,
-`.map` / `.zip` / `.reduce` whose function uses a construct the GPU path lacks (a `match`, say),
+`.map` / `.zip` / `.reduce` whose function uses a construct the GPU path lacks (a tuple, say),
 calls a function (a function passed by name does) or is passed through a local, and elementwise
 math or a float `%` when the compiler found no device math library. A tensor reached through a
 struct field works like any other: `layer.w.sum()` and `layer.w -= g` run where `layer.w` lives. Given a device tensor, each one aborts at the operation with
@@ -1094,7 +1094,9 @@ func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut
 ```
 
 Inside the body, `thread_id` is the thread's position in the whole grid and `block_id` its
-block's, each read one axis at a time as a `u32`: `.x`, `.y`, `.z`. `thread_id.x` is
+block's, each with three `u32` fields: `.x`, `.y`, `.z`. A field is read directly
+(`thread_id.x`), or through a `val` that binds the position whole (`val t = thread_id`, then
+`t.x`); used as a value in any other way, either is a compile error. `thread_id.x` is
 `block_id.x` times the block's `x` size plus the thread's place in its block, so it indexes the
 grid tensor directly, and an axis the grid does not have reads 0. Neither name exists outside a
 kernel body, and a local of the same name hides it.
@@ -1171,9 +1173,12 @@ in it ends the closure, not the kernel. The closure may read the kernel's inputs
 but not name a `KernelOut` handle. Inside it, `slice` is only indexed or asked its `.len()`.
 
 The body may use locals, arithmetic and comparisons, casts, `&&` / `||`, `if` (as a statement
-or with a value), `while`, `loop`, `for` over a range, `break`, `continue`, `return`, reads
-and writes of single tensor elements, `.flat(i)` and `partition`. Integer arithmetic wraps on
-overflow, as in a release build. Anything else, such as a function call, is a compile error at
+or with a value), `match` on an integer, `bool` or `char` (literal, range and `_` patterns,
+guards), `while`, `loop` (with a `break` value too), `for` over a range (`.rev()` and `.step(n)`
+included), `break`, `continue`, `return`, the integer methods `.wrapping_*`, `.saturating_*`
+and `.shr(n)`, `.is_nan()`, reads and writes of single tensor elements, `.flat(i)` and
+`partition`. Integer arithmetic follows the build's tier, as on the host: an overflow stops the
+kernel in a debug build (`-O0`) and wraps from `-O1` up. Anything else, such as a function call, is a compile error at
 that construct.
 
 The attribute goes on a free function, never beside `@gpu` or `@grad`, and a kernel needs a GPU

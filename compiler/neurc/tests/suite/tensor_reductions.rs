@@ -198,6 +198,229 @@ func main() -> i32 {
     assert_eq!(run_program("tensor_reduce_lanes.nr", source), 226);
 }
 
+/// The lane order written out in scalar code: `reference` folds the first `n` elements of a
+/// run copied into `run`, `serial` folds them left to right. `same` tells `-0.0` from `0.0`.
+const LANE_MODEL: &str = r#"
+func next(seed: i64) -> i64 {
+    return (seed * 1103515245 + 12345) % 2147483648
+}
+
+// Terms near 1e8 beside small ones, so where each addition happens decides the last bits.
+func sum_value(seed: i64) -> f32 {
+    val pick = (seed / 65536) % 4
+    val small = ((seed / 16) % 1000) as f32 * 0.001f32
+    if pick == 0 { return 100000000.0f32 + small * 64.0f32 }
+    if pick == 1 { return -100000000.0f32 }
+    return small + 1.0f32
+}
+
+// Negative numbers, a NaN now and then, and zeros of both signs as the largest, so which
+// zero a `.max()` keeps shows the order it met them in.
+func peak_value(seed: i64, nan: f32) -> f32 {
+    val pick = (seed / 65536) % 32
+    if pick == 0 { return 0.0f32 }
+    if pick == 1 { return -0.0f32 }
+    if pick == 2 { return nan }
+    return -(((seed / 16) % 1000) as f32) - 1.0f32
+}
+
+func same(a: f32, b: f32) -> bool {
+    if a.is_nan() { return b.is_nan() }
+    return a == b && 1.0f32 / a == 1.0f32 / b
+}
+
+func precedes(a: f32, b: f32, descending: bool) -> bool {
+    if a.is_nan() { return false }
+    if b.is_nan() { return true }
+    if descending { return a > b }
+    return a < b
+}
+
+// One fold step: op 0 adds, 1 keeps the larger, 2 the smaller.
+func fold(op: i32, acc: f32, value: f32) -> f32 {
+    if op == 0 { return acc + value }
+    if precedes(value, acc, op == 1) { return value }
+    return acc
+}
+
+func serial(run: &Tensor<f32, [RUN]>, n: i64, op: i32) -> f32 {
+    mut acc = run[0]
+    if op == 0 { acc = -0.0f32 }
+    mut i: i64 = 0
+    while i < n {
+        acc = fold(op, acc, run[i])
+        i += 1
+    }
+    return acc
+}
+
+func reference(run: &Tensor<f32, [RUN]>, n: i64, op: i32) -> f32 {
+    if n <= 4096 { return serial(run, n, op) }
+    mut lanes = Tensor::<f32, [4096]>::zeros()
+    mut l: i64 = 0
+    while l < 4096 {
+        mut p = run[l]
+        mut k: i64 = l + 4096
+        while k < n {
+            p = fold(op, p, run[k])
+            k += 4096
+        }
+        lanes[l] = p
+        l += 1
+    }
+    val folded = lanes_run(&lanes)
+    return serial(&folded, 4096, op)
+}
+
+func lanes_run(lanes: &Tensor<f32, [4096]>) -> Tensor<f32, [RUN]> {
+    mut out = Tensor::<f32, [RUN]>::zeros()
+    mut l = 0
+    while l < 4096 {
+        out[l] = lanes[l]
+        l += 1
+    }
+    return out
+}
+"#;
+
+/// `.sum()`, `.mean()`, `.max()` and `.min()` over runs below, at and above `REDUCE_LANES`
+/// (a multiple of it and not, and runs of several lane rows past the second), whole-tensor
+/// (rank 1 to 3), along the last axis, an outer one and a middle one, each matching the lane order bit for bit. Each sum of two lane rows
+/// or more also differs from a left-to-right fold, so a fold in another order would show.
+#[test]
+fn every_reduction_keeps_the_lane_order_bits() {
+    let cases: Vec<(Vec<usize>, Option<usize>)> = [4095, 4096, 4097, 8192, 9001, 12288, 20000]
+        .into_iter()
+        .flat_map(|n| {
+            [
+                (vec![n], None),
+                (vec![2, n], Some(1)),
+                (vec![n, 3], Some(0)),
+            ]
+        })
+        .chain([
+            (vec![3, 3001], None),
+            (vec![2, 4096], None),
+            (vec![2, 5000, 3], Some(1)),
+            (vec![3, 4, 4100], None),
+        ])
+        .collect();
+    let longest = cases
+        .iter()
+        .map(|(shape, axis)| axis.map_or(shape.iter().product(), |axis| shape[axis]))
+        .max()
+        .unwrap_or(0);
+    let mut body = String::new();
+    for (case, (shape, axis)) in cases.iter().enumerate() {
+        let dims = shape
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let all = |name: &str| {
+            (0..shape.len())
+                .map(|d| format!("{name}{d}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let loops = |name: &str, skip: Option<usize>| {
+            (0..shape.len())
+                .filter(|&d| Some(d) != skip)
+                .map(|d| format!("for {name}{d} in 0..{} {{ ", shape[d]))
+                .collect::<String>()
+        };
+        let close = |skip: Option<usize>| {
+            "} ".repeat((0..shape.len()).filter(|&d| Some(d) != skip).count())
+        };
+        body.push_str(&format!(
+            "    mut a{case} = Tensor::<f32, [{dims}]>::zeros()\n    mut b{case} = Tensor::<f32, [{dims}]>::zeros()\n    mut c{case} = Tensor::<f32, [{dims}]>::zeros()\n    {}seed = next(seed)\n a{case}[{i}] = sum_value(seed)\n seed = next(seed)\n val w = peak_value(seed, nan)\n b{case}[{i}] = w\n c{case}[{i}] = -w\n {}\n",
+            loops("i", None),
+            close(None),
+            i = all("i"),
+        ));
+        let (call, kept, n) = match axis {
+            None => (
+                String::new(),
+                String::new(),
+                shape.iter().product::<usize>(),
+            ),
+            Some(axis) => (
+                format!("axis: {axis}"),
+                (0..shape.len())
+                    .filter(|d| d != axis)
+                    .map(|d| format!("j{d}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                shape[*axis],
+            ),
+        };
+        let at = |value: &str| match axis {
+            None => value.to_string(),
+            Some(_) => format!("{value}[{kept}]"),
+        };
+        body.push_str(&format!(
+            "    val s{case} = a{case}.sum({call})\n    val m{case} = a{case}.mean({call})\n    val x{case} = b{case}.max({call})\n    val y{case} = c{case}.min({call})\n"
+        ));
+        // Copy each run into `run` in run order, then check its four results.
+        let (outer, copy, end) = match axis {
+            None => (
+                String::new(),
+                format!(
+                    "mut t{case} = 0\n {}ra[t{case}] = a{case}[{i}]\n rb[t{case}] = b{case}[{i}]\n rc[t{case}] = c{case}[{i}]\n t{case} += 1\n {}\n",
+                    loops("i", None),
+                    close(None),
+                    i = all("i"),
+                ),
+                String::new(),
+            ),
+            Some(axis) => {
+                let index = (0..shape.len())
+                    .map(|d| {
+                        if d == *axis {
+                            "t".to_string()
+                        } else {
+                            format!("j{d}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (
+                    loops("j", Some(*axis)),
+                    format!(
+                        "for t in 0..{n} {{ ra[t] = a{case}[{index}]\n rb[t] = b{case}[{index}]\n rc[t] = c{case}[{index}] }}\n"
+                    ),
+                    close(Some(*axis)),
+                )
+            }
+        };
+        let code = case * 5;
+        let sensitive = match n >= 2 * 4096 {
+            true => format!(
+                "if same(reference(&ra, {n}, 0), serial(&ra, {n}, 0)) {{ return {} }}\n",
+                code + 5
+            ),
+            false => String::new(),
+        };
+        body.push_str(&format!(
+            "    {outer}{copy} if !same({s}, reference(&ra, {n}, 0)) {{ return {} }}\n if !same({m}, reference(&ra, {n}, 0) / {n}.0f32) {{ return {} }}\n if !same({x}, reference(&rb, {n}, 1)) {{ return {} }}\n if !same({y}, reference(&rc, {n}, 2)) {{ return {} }}\n {sensitive}{end}\n",
+            code + 1,
+            code + 2,
+            code + 3,
+            code + 4,
+            s = at(&format!("s{case}")),
+            m = at(&format!("m{case}")),
+            x = at(&format!("x{case}")),
+            y = at(&format!("y{case}")),
+        ));
+    }
+    let source = format!(
+        "{}\nfunc main() -> i32 {{\n    val z = 0.0f32\n    val nan = z / z\n    mut seed: i64 = 11\n    mut ra = Tensor::<f32, [RUN]>::zeros()\n    mut rb = Tensor::<f32, [RUN]>::zeros()\n    mut rc = Tensor::<f32, [RUN]>::zeros()\n{body}    return 0\n}}\n",
+        LANE_MODEL
+    )
+    .replace("RUN", &longest.to_string());
+    assert_eq!(run_program("tensor_reduce_lane_bits.nr", &source), 0);
+}
+
 #[test]
 fn a_non_numeric_element_is_rejected() {
     let source = r#"

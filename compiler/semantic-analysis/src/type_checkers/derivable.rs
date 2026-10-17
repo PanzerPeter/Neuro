@@ -85,9 +85,8 @@ impl TypeChecker {
     }
 
     /// Whether a `@derive(Hashable)` struct may hold a field of type `ty`: the derived
-    /// hash folds each field's own hash, so the field must have one. A struct field must
-    /// derive it too, as for `PartialEq`: the rule runs with the derives, before any impl
-    /// is registered.
+    /// hash folds each field's own hash, so the field must have one. A field whose
+    /// `Hashable` is written by hand is admitted by the field rule, which sees impls.
     pub(crate) fn is_derived_hashable(&self, ty: &Type) -> bool {
         match ty {
             // A template defers to its instances, which are validated where they are made.

@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    HirExpr, HirExprKind, HirFunction, HirGridIndex, HirItem, HirMathOp, HirPlace, HirProgram,
-    HirStmt, HirTensorAxis, HirType,
+    HirBindingSource, HirExpr, HirExprKind, HirFunction, HirGridIndex, HirItem, HirMatchArm,
+    HirMatchTest, HirMathOp, HirPlace, HirProgram, HirStmt, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -30,6 +30,7 @@ const DIVIDE_BY_ZERO: &str = "integer division by zero in a `@kernel` body";
 const REMAINDER_BY_ZERO: &str = "integer remainder by zero in a `@kernel` body";
 const OVERFLOW: &str = "integer overflow in a `@kernel` body";
 const SHIFT_OVERFLOW: &str = "shift overflow in a `@kernel` body";
+const RANGE_STEP: &str = "range step must be positive in a `@kernel` body";
 
 /// The launcher parameter a checked body stores a failed check's number into.
 pub(super) const STATUS: &str = "%status";
@@ -83,6 +84,24 @@ pub(crate) fn memref_type(ty: &HirType) -> Option<String> {
     Some(format!("{text}{element}>"))
 }
 
+/// [`scalar_type`], and a `char` as the 32-bit code point the host holds it in. A `char` is
+/// only a local's or a `match`'s type here: no kernel parameter or tensor element is one.
+fn value_type(ty: &HirType) -> Option<&'static str> {
+    match ty {
+        HirType::Char => Some("i32"),
+        other => scalar_type(other),
+    }
+}
+
+/// The width a `match` tests a scrutinee at, or a cast converts it at: an integer's, or a
+/// `char`'s 32 bits. `None` for a `bool`, whose one bit `match_value` supplies itself.
+fn int_like_width(ty: &HirType) -> Option<u32> {
+    match ty {
+        HirType::Char => Some(32),
+        other => int_width(other),
+    }
+}
+
 fn is_unsigned(ty: &HirType) -> bool {
     matches!(ty, HirType::U8 | HirType::U16 | HirType::U32 | HirType::U64)
 }
@@ -130,11 +149,13 @@ pub(super) enum Failure {
     Report,
 }
 
-/// Where `break` and `continue` go for one enclosing loop.
+/// Where `break` and `continue` go for one enclosing loop, and, for a `loop` with a value,
+/// the slot a `break` stores it into and its type.
 struct LoopTargets {
     label: Option<String>,
     next: String,
     exit: String,
+    value: Option<(String, &'static str)>,
 }
 
 /// Emits one kernel body as the text of a `gpu.launch` region.
@@ -356,25 +377,19 @@ impl<'f> BodyEmitter<'f> {
                 condition,
                 body,
                 ..
-            } => self.while_loop(label, Some(condition), body, exit),
-            HirStmt::ForRange {
-                label,
-                index: None,
-                iterator,
-                start,
-                end,
-                inclusive,
-                reversed: false,
-                step: None,
-                body,
-                ..
-            } => self.for_range(label, iterator, start, end, *inclusive, body, exit),
-            HirStmt::Break {
-                label,
-                value: None,
-                span,
-            } => {
-                let target = self.loop_target(label, *span)?.exit.clone();
+            } => self.while_loop(label, Some(condition), body, None, exit),
+            HirStmt::ForRange { index: None, .. } => self.for_range(statement, exit),
+            HirStmt::Break { label, value, span } => {
+                let target = self.loop_target(label, *span)?;
+                let (target, slot) = (target.exit.clone(), target.value.clone());
+                match (value, slot) {
+                    (None, _) => {}
+                    (Some(value), Some((slot, ty))) => {
+                        let value = self.expr(value, exit)?;
+                        self.line(&format!("memref.store {value}, {slot}[] : memref<{ty}>"));
+                    }
+                    (Some(_), None) => return Err(Refused::new(*span, "a `break` with a value")),
+                }
                 self.branch(&target);
                 Ok(())
             }
@@ -425,7 +440,7 @@ impl<'f> BodyEmitter<'f> {
         span: Span,
         exit: &str,
     ) -> Lowered<()> {
-        let mlir = scalar_type(ty).ok_or_else(|| Refused::new(span, "a local of this type"))?;
+        let mlir = value_type(ty).ok_or_else(|| Refused::new(span, "a local of this type"))?;
         let slot = self.slot(mlir);
         if let Some(init) = init {
             let value = self.expr(init, exit)?;
@@ -455,7 +470,7 @@ impl<'f> BodyEmitter<'f> {
                 let Some(Binding::Slot { slot, ty }) = self.lookup(name) else {
                     return Err(Refused::new(span, "an assignment to a parameter"));
                 };
-                let mlir = scalar_type(&ty).unwrap_or("i1");
+                let mlir = value_type(&ty).unwrap_or("i1");
                 let value = self.expr(value, exit)?;
                 self.line(&format!("memref.store {value}, {slot}[] : memref<{mlir}>"));
                 Ok(())
@@ -607,11 +622,14 @@ impl<'f> BodyEmitter<'f> {
         Ok(())
     }
 
+    /// `while`, or `loop` when there is no `condition`. `value` is a valued `loop`'s result
+    /// slot, which its `break`s store into.
     fn while_loop(
         &mut self,
         label: &Option<String>,
         condition: Option<&HirExpr>,
         body: &[HirStmt],
+        value: Option<(String, &'static str)>,
         exit: &str,
     ) -> Lowered<()> {
         let head = self.block();
@@ -631,6 +649,7 @@ impl<'f> BodyEmitter<'f> {
             label: label.clone(),
             next: head.clone(),
             exit: after.clone(),
+            value,
         });
         self.statements(body, exit)?;
         self.loops.pop();
@@ -639,40 +658,65 @@ impl<'f> BodyEmitter<'f> {
         Ok(())
     }
 
-    /// `for i in start..end` (or `..=`): the bounds are read once, before the loop. The
-    /// inclusive form leaves at `end` before stepping, so an `end` at the type's maximum
-    /// does not wrap around into an endless loop.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the loop's pieces as the HIR hands them over"
-    )]
-    fn for_range(
-        &mut self,
-        label: &Option<String>,
-        iterator: &str,
-        start: &HirExpr,
-        end: &HirExpr,
-        inclusive: bool,
-        body: &[HirStmt],
-        exit: &str,
-    ) -> Lowered<()> {
+    /// `for i in start..end` (or `..=`), `.rev()` and `.step(n)` included, walked as the host
+    /// walks it. The bounds, then the stride, are read once before the loop, and a stride
+    /// that is not positive fails on every tier. The induction variable counts up from
+    /// `start` even when reversed: the binding is then `start + last - k`, stored at the top
+    /// of the body, so nothing steps below `start` (which wraps at an unsigned zero). A
+    /// stepped or inclusive loop leaves when the distance still to `end` is short of the
+    /// stride, rather than adding it first, which wraps near the type's maximum.
+    fn for_range(&mut self, range: &HirStmt, exit: &str) -> Lowered<()> {
+        let HirStmt::ForRange {
+            label,
+            index: None,
+            iterator,
+            start,
+            end,
+            inclusive,
+            reversed,
+            step,
+            body,
+            span,
+        } = range
+        else {
+            return Err(Refused::new(stmt_span(range), statement_kind(range)));
+        };
         let ty = start.ty.clone();
         let Some(width) = int_width(&ty) else {
-            return Err(Refused::new(start.span, "a loop over a non-integer range"));
+            return Err(Refused::new(*span, "a loop over a non-integer range"));
         };
         let mlir = format!("i{width}");
         let first = self.expr(start, exit)?;
         let last = self.expr(end, exit)?;
-        let slot = self.slot(&mlir);
-        self.line(&format!("memref.store {first}, {slot}[] : memref<{mlir}>"));
+        let stride = match step {
+            Some(step) => Some(self.range_stride(step, &ty, exit)?),
+            None => None,
+        };
+        let induction = self.slot(&mlir);
+        self.line(&format!(
+            "memref.store {first}, {induction}[] : memref<{mlir}>"
+        ));
+        let (binding, origin) = if *reversed {
+            let top = match inclusive {
+                true => last.clone(),
+                false => {
+                    let one = self.assign(&format!("arith.constant 1 : {mlir}"));
+                    self.assign(&format!("arith.subi {last}, {one} : {mlir}"))
+                }
+            };
+            let origin = self.assign(&format!("arith.addi {first}, {top} : {mlir}"));
+            (self.slot(&mlir), Some(origin))
+        } else {
+            (induction.clone(), None)
+        };
 
         let head = self.block();
         let inside = self.block();
-        let step = self.block();
+        let next = self.block();
         let after = self.block();
         self.branch(&head);
         self.start(&head);
-        let current = self.assign(&format!("memref.load {slot}[] : memref<{mlir}>"));
+        let current = self.assign(&format!("memref.load {induction}[] : memref<{mlir}>"));
         let order = match (inclusive, is_unsigned(&ty)) {
             (false, false) => "slt",
             (false, true) => "ult",
@@ -683,38 +727,69 @@ impl<'f> BodyEmitter<'f> {
         self.cond_branch(&more, &inside, &after);
 
         self.start(&inside);
+        if let Some(origin) = origin {
+            let mirrored = self.assign(&format!("arith.subi {origin}, {current} : {mlir}"));
+            self.line(&format!(
+                "memref.store {mirrored}, {binding}[] : memref<{mlir}>"
+            ));
+        }
         self.scopes.push(vec![(
             iterator.to_string(),
             Binding::Slot {
-                slot: slot.clone(),
+                slot: binding,
                 ty: ty.clone(),
             },
         )]);
         self.loops.push(LoopTargets {
             label: label.clone(),
-            next: step.clone(),
+            next: next.clone(),
             exit: after.clone(),
+            value: None,
         });
         let walked = self.statements(body, exit);
         self.loops.pop();
         self.scopes.pop();
         walked?;
-        self.branch(&step);
+        self.branch(&next);
 
-        self.start(&step);
-        let current = self.assign(&format!("memref.load {slot}[] : memref<{mlir}>"));
-        if inclusive {
+        self.start(&next);
+        let current = self.assign(&format!("memref.load {induction}[] : memref<{mlir}>"));
+        let increment = match &stride {
+            Some(stride) => stride.clone(),
+            None => self.assign(&format!("arith.constant 1 : {mlir}")),
+        };
+        if stride.is_some() || *inclusive {
+            // An inclusive range may still yield `end`, so a stride landing on it goes on.
+            let overshoots = if *inclusive { "ult" } else { "ule" };
+            let left = self.assign(&format!("arith.subi {last}, {current} : {mlir}"));
+            let done = self.assign(&format!(
+                "arith.cmpi {overshoots}, {left}, {increment} : {mlir}"
+            ));
             let advance = self.block();
-            let at_end = self.assign(&format!("arith.cmpi eq, {current}, {last} : {mlir}"));
-            self.cond_branch(&at_end, &after, &advance);
+            self.cond_branch(&done, &after, &advance);
             self.start(&advance);
         }
-        let one = self.assign(&format!("arith.constant 1 : {mlir}"));
-        let next = self.assign(&format!("arith.addi {current}, {one} : {mlir}"));
-        self.line(&format!("memref.store {next}, {slot}[] : memref<{mlir}>"));
+        let stepped = self.assign(&format!("arith.addi {current}, {increment} : {mlir}"));
+        self.line(&format!(
+            "memref.store {stepped}, {induction}[] : memref<{mlir}>"
+        ));
         self.branch(&head);
         self.start(&after);
         Ok(())
+    }
+
+    /// A `.step(n)` stride, read once: a zero one would never leave the loop and a negative
+    /// one has no meaning, so either fails, on every tier, as on the host.
+    fn range_stride(&mut self, step: &HirExpr, ty: &HirType, exit: &str) -> Lowered<String> {
+        let mlir = scalar_type(ty).unwrap_or("i64");
+        let stride = self.expr(step, exit)?;
+        let zero = self.assign(&format!("arith.constant 0 : {mlir}"));
+        let not_positive = if is_unsigned(ty) { "eq" } else { "sle" };
+        let failed = self.assign(&format!(
+            "arith.cmpi {not_positive}, {stride}, {zero} : {mlir}"
+        ));
+        self.fail_if(&failed, GuardKind::RangeStep, step.span.start);
+        Ok(stride)
     }
 
     /// Lower `expr`, returning the SSA value it produces (empty for one with no value).
@@ -723,10 +798,10 @@ impl<'f> BodyEmitter<'f> {
             HirExprKind::Literal(literal) => self.literal(literal, &expr.ty, expr.span),
             HirExprKind::Variable(name) => match self.lookup(name) {
                 Some(Binding::Slot { slot, ty }) => {
-                    let mlir = scalar_type(&ty).unwrap_or("i1");
+                    let mlir = value_type(&ty).unwrap_or("i1");
                     Ok(self.assign(&format!("memref.load {slot}[] : memref<{mlir}>")))
                 }
-                Some(Binding::Param { value, ty }) if scalar_type(&ty).is_some() => Ok(value),
+                Some(Binding::Param { value, ty }) if value_type(&ty).is_some() => Ok(value),
                 Some(Binding::Param { .. }) => {
                     Err(Refused::new(expr.span, "a tensor used as a whole"))
                 }
@@ -757,7 +832,7 @@ impl<'f> BodyEmitter<'f> {
                 let (memref, ty, indices) = self.indexed(object, index, expr.span, exit)?;
                 Ok(self.assign(&format!("memref.load {memref}[{indices}] : {ty}")))
             }
-            HirExprKind::Call { callee, args } => self.call(callee, args, expr.span),
+            HirExprKind::Call { callee, args } => self.call(callee, args, expr.span, exit),
             HirExprKind::KernelPartition {
                 out,
                 base,
@@ -773,7 +848,7 @@ impl<'f> BodyEmitter<'f> {
                 else_if_blocks,
                 else_block,
             } => {
-                let Some(mlir) = scalar_type(&expr.ty) else {
+                let Some(mlir) = value_type(&expr.ty) else {
                     self.if_chain(
                         condition,
                         then_block,
@@ -799,15 +874,24 @@ impl<'f> BodyEmitter<'f> {
                 self.block_value(stmts, &expr.ty, exit)
             }
             HirExprKind::Loop { label, body } if matches!(expr.ty, HirType::Void) => {
-                self.while_loop(label, None, body, exit)?;
+                self.while_loop(label, None, body, None, exit)?;
                 Ok(String::new())
             }
+            HirExprKind::Loop { label, body } => {
+                let Some(mlir) = value_type(&expr.ty) else {
+                    return Err(Refused::new(expr.span, expression_kind(&expr.kind)));
+                };
+                let slot = self.slot(mlir);
+                self.while_loop(label, None, body, Some((slot.clone(), mlir)), exit)?;
+                Ok(self.assign(&format!("memref.load {slot}[] : memref<{mlir}>")))
+            }
+            HirExprKind::Match { scrutinee, arms } => self.match_value(scrutinee, arms, expr, exit),
             _ => Err(Refused::new(expr.span, expression_kind(&expr.kind))),
         }
     }
 
     fn block_value(&mut self, statements: &[HirStmt], ty: &HirType, exit: &str) -> Lowered<String> {
-        let Some(mlir) = scalar_type(ty) else {
+        let Some(mlir) = value_type(ty) else {
             self.statements(statements, exit)?;
             return Ok(String::new());
         };
@@ -986,22 +1070,255 @@ impl<'f> BodyEmitter<'f> {
     }
 
     /// The one call a body makes: `slice.len()` on a partition slice, its run length.
-    fn call(&mut self, callee: &HirExpr, args: &[HirExpr], span: Span) -> Lowered<String> {
-        let length = match &callee.kind {
-            HirExprKind::FieldAccess { object, field } if field == "len" && args.is_empty() => {
-                self.slice(object).map(|view| view.chunk)
-            }
-            _ => None,
-        };
-        let Some(length) = length else {
+    fn call(
+        &mut self,
+        callee: &HirExpr,
+        args: &[HirExpr],
+        span: Span,
+        exit: &str,
+    ) -> Lowered<String> {
+        let HirExprKind::FieldAccess { object, field } = &callee.kind else {
             return Err(Refused::new(span, "a function call"));
         };
-        Ok(self.assign(&format!("arith.constant {length} : i64")))
+        if field == "len"
+            && args.is_empty()
+            && let Some(view) = self.slice(object)
+        {
+            return Ok(self.assign(&format!("arith.constant {} : i64", view.chunk)));
+        }
+        match self.scalar_method(object, field, args, exit)? {
+            Some(value) => Ok(value),
+            None => Err(Refused::new(span, "a function call")),
+        }
+    }
+
+    /// A method of a scalar receiver that the LLVM backend computes as plain arithmetic, as
+    /// it computes it: `.wrapping_add` / `_sub` / `_mul`, `.saturating_add` / `_sub` / `_mul`
+    /// and `.shr(n)` on an integer, and `.is_nan()` on a float. `None`, with nothing
+    /// emitted, for any other method.
+    fn scalar_method(
+        &mut self,
+        object: &HirExpr,
+        method: &str,
+        args: &[HirExpr],
+        exit: &str,
+    ) -> Lowered<Option<String>> {
+        let ty = &object.ty;
+        let Some(mlir) = scalar_type(ty) else {
+            return Ok(None);
+        };
+        if method == "is_nan" && is_float(ty) && args.is_empty() {
+            let value = self.expr(object, exit)?;
+            return Ok(Some(
+                self.assign(&format!("arith.cmpf uno, {value}, {value} : {mlir}")),
+            ));
+        }
+        let ([arg], Some(width)) = (args, int_width(ty)) else {
+            return Ok(None);
+        };
+        let integer_methods = [
+            "wrapping_add",
+            "wrapping_sub",
+            "wrapping_mul",
+            "saturating_add",
+            "saturating_sub",
+            "saturating_mul",
+            "shr",
+        ];
+        if !integer_methods.contains(&method) || arg.ty != *ty {
+            return Ok(None);
+        }
+        let lhs = self.expr(object, exit)?;
+        let rhs = self.expr(arg, exit)?;
+        let unsigned = is_unsigned(ty);
+        let sign = if unsigned { "u" } else { "s" };
+        let text = match method {
+            "wrapping_add" => format!("arith.addi {lhs}, {rhs} : {mlir}"),
+            "wrapping_sub" => format!("arith.subi {lhs}, {rhs} : {mlir}"),
+            "wrapping_mul" => format!("arith.muli {lhs}, {rhs} : {mlir}"),
+            "saturating_add" | "saturating_sub" => {
+                let op = &method["saturating_".len()..];
+                format!(
+                    "llvm.call_intrinsic \"llvm.{sign}{op}.sat.{mlir}\"({lhs}, {rhs}) : ({mlir}, {mlir}) -> {mlir}"
+                )
+            }
+            "saturating_mul" => {
+                return Ok(Some(self.saturating_mul((&lhs, &rhs), unsigned, width)));
+            }
+            // The host's diagnostic for `.shr` points at the receiver.
+            _ => {
+                let op = if unsigned { "shrui" } else { "shrsi" };
+                return Ok(Some(self.shift(op, (&lhs, &rhs), ty, object.span.start)));
+            }
+        };
+        Ok(Some(self.assign(&text)))
+    }
+
+    /// `lhs.saturating_mul(rhs)`: the wrapped product unless it overflowed, and then the
+    /// bound on the side the exact product lies, which the operands' signs give.
+    fn saturating_mul(&mut self, (lhs, rhs): (&str, &str), unsigned: bool, width: u32) -> String {
+        let mlir = format!("i{width}");
+        let sign = if unsigned { "u" } else { "s" };
+        let pair = format!("!llvm.struct<({mlir}, i1)>");
+        let both = self.assign(&format!(
+            "\"llvm.intr.{sign}mul.with.overflow\"({lhs}, {rhs}) : ({mlir}, {mlir}) -> {pair}"
+        ));
+        let product = self.assign(&format!("llvm.extractvalue {both}[0] : {pair}"));
+        let overflowed = self.assign(&format!("llvm.extractvalue {both}[1] : {pair}"));
+        let bound = if unsigned {
+            self.assign(&format!("arith.constant -1 : {mlir}"))
+        } else {
+            let max = signed_bits((1i128 << (width - 1)) - 1, width);
+            let min = signed_bits(1i128 << (width - 1), width);
+            let max = self.assign(&format!("arith.constant {max} : {mlir}"));
+            let min = self.assign(&format!("arith.constant {min} : {mlir}"));
+            let zero = self.assign(&format!("arith.constant 0 : {mlir}"));
+            let signs = self.assign(&format!("arith.xori {lhs}, {rhs} : {mlir}"));
+            let negative = self.assign(&format!("arith.cmpi slt, {signs}, {zero} : {mlir}"));
+            self.assign(&format!("arith.select {negative}, {min}, {max} : {mlir}"))
+        };
+        self.assign(&format!(
+            "arith.select {overflowed}, {bound}, {product} : {mlir}"
+        ))
+    }
+
+    /// `match` on an integer, `bool` or `char`, as the host tests it: each arm's
+    /// alternatives in turn, then its guard, and the first arm passing both runs, with a
+    /// bare binding naming the scrutinee. The checker has proven the arms exhaustive, so
+    /// the fall-through past the last one is never taken.
+    fn match_value(
+        &mut self,
+        scrutinee: &HirExpr,
+        arms: &[HirMatchArm],
+        expr: &HirExpr,
+        exit: &str,
+    ) -> Lowered<String> {
+        let ty = &scrutinee.ty;
+        let width = match ty {
+            HirType::Bool => Some(1),
+            other => int_like_width(other),
+        };
+        let (Some(mlir), Some(width)) = (value_type(ty), width) else {
+            return Err(Refused::new(expr.span, "a `match` on a non-scalar"));
+        };
+        let unsigned = is_unsigned(ty) || matches!(ty, HirType::Char);
+        let value = self.expr(scrutinee, exit)?;
+        let result = value_type(&expr.ty).map(|ty| (self.slot(ty), ty));
+        let join = self.block();
+        for arm in arms {
+            let mut matched = None;
+            for test in &arm.tests {
+                let one = self.match_test(test, &value, (mlir, width), unsigned, expr.span)?;
+                matched = Some(match matched {
+                    None => one,
+                    Some(all) => self.assign(&format!("arith.ori {all}, {one} : i1")),
+                });
+            }
+            let matched = match matched {
+                Some(matched) => matched,
+                None => self.assign("arith.constant false"),
+            };
+            let body = self.block();
+            let next = self.block();
+            self.cond_branch(&matched, &body, &next);
+            self.start(&body);
+            let mut bindings = Vec::with_capacity(arm.bindings.len());
+            for binding in &arm.bindings {
+                if !matches!(binding.source, HirBindingSource::Scrutinee) {
+                    return Err(Refused::new(expr.span, "a `match` binding of a payload"));
+                }
+                let bound = Binding::Param {
+                    value: value.clone(),
+                    ty: ty.clone(),
+                };
+                bindings.push((binding.name.clone(), bound));
+            }
+            self.scopes.push(bindings);
+            let walked = self.match_arm(arm, result.as_ref(), &next, exit);
+            self.scopes.pop();
+            walked?;
+            self.branch(&join);
+            self.start(&next);
+        }
+        self.branch(&join);
+        self.start(&join);
+        Ok(match result {
+            Some((slot, ty)) => self.assign(&format!("memref.load {slot}[] : memref<{ty}>")),
+            None => String::new(),
+        })
+    }
+
+    /// One arm past its tests: the guard, which falls through to `next` when it fails, then
+    /// the body, its value stored into `result` when the `match` has one.
+    fn match_arm(
+        &mut self,
+        arm: &HirMatchArm,
+        result: Option<&(String, &'static str)>,
+        next: &str,
+        exit: &str,
+    ) -> Lowered<()> {
+        if let Some(guard) = &arm.guard {
+            let passed = self.expr(guard, exit)?;
+            let run = self.block();
+            self.cond_branch(&passed, &run, next);
+            self.start(&run);
+        }
+        let value = self.expr(&arm.body, exit)?;
+        if let Some((slot, ty)) = result
+            && !self.terminated
+        {
+            self.line(&format!("memref.store {value}, {slot}[] : memref<{ty}>"));
+        }
+        Ok(())
+    }
+
+    /// One alternative of a `match` arm as an `i1`. A pattern's value is the low `width`
+    /// bits of an `i64`, read against the scrutinee's own signedness for a range.
+    fn match_test(
+        &mut self,
+        test: &HirMatchTest,
+        value: &str,
+        (mlir, width): (&str, u32),
+        unsigned: bool,
+        span: Span,
+    ) -> Lowered<String> {
+        let constant = |bits: i64| match width {
+            1 => format!("arith.constant {}", bits & 1 != 0),
+            _ => format!(
+                "arith.constant {} : {mlir}",
+                signed_bits(i128::from(bits), width)
+            ),
+        };
+        Ok(match test {
+            HirMatchTest::Wildcard => self.assign("arith.constant true"),
+            HirMatchTest::IntEq { value: want } => {
+                let want = self.assign(&constant(*want));
+                self.assign(&format!("arith.cmpi eq, {value}, {want} : {mlir}"))
+            }
+            HirMatchTest::IntRange { lo, hi } => {
+                let (at_least, at_most) = if unsigned {
+                    ("uge", "ule")
+                } else {
+                    ("sge", "sle")
+                };
+                let lo = self.assign(&constant(*lo));
+                let hi = self.assign(&constant(*hi));
+                let above = self.assign(&format!("arith.cmpi {at_least}, {value}, {lo} : {mlir}"));
+                let below = self.assign(&format!("arith.cmpi {at_most}, {value}, {hi} : {mlir}"));
+                self.assign(&format!("arith.andi {above}, {below} : i1"))
+            }
+            HirMatchTest::Tag { .. } => {
+                return Err(Refused::new(span, "a `match` on an enum"));
+            }
+        })
     }
 
     fn literal(&mut self, literal: &Literal, ty: &HirType, span: Span) -> Lowered<String> {
         let text = match (literal, ty) {
             (Literal::Boolean(value), HirType::Bool) => format!("arith.constant {value}"),
+            (Literal::Char(value), HirType::Char) => {
+                format!("arith.constant {} : i32", u32::from(*value))
+            }
             (Literal::Integer(value, _), ty) if int_width(ty).is_some() => {
                 let width = int_width(ty).unwrap_or(64);
                 format!("arith.constant {} : i{width}", signed_bits(*value, width))
@@ -1026,7 +1343,7 @@ impl<'f> BodyEmitter<'f> {
             return self.short_circuit(op, left, right, exit);
         }
         let operand_ty = &left.ty;
-        let Some(mlir) = scalar_type(operand_ty) else {
+        let Some(mlir) = value_type(operand_ty) else {
             return Err(Refused::new(expr.span, "an operator on a non-scalar"));
         };
         let lhs = self.expr(left, exit)?;
@@ -1064,7 +1381,9 @@ impl<'f> BodyEmitter<'f> {
             BinaryOp::BitAnd => "andi",
             BinaryOp::BitOr => "ori",
             BinaryOp::BitXor => "xori",
-            BinaryOp::Shl => return Ok(self.shift_left((&lhs, &rhs), operand_ty, expr.span.start)),
+            BinaryOp::Shl => {
+                return Ok(self.shift("shli", (&lhs, &rhs), operand_ty, expr.span.start));
+            }
             _ => return Err(Refused::new(expr.span, "this operator on an integer")),
         };
         Ok(self.assign(&format!("arith.{name} {lhs}, {rhs} : {mlir}")))
@@ -1104,9 +1423,10 @@ impl<'f> BodyEmitter<'f> {
         value
     }
 
-    /// `lhs << rhs` as the host shifts: on the debug tier an amount of at least the operand's
-    /// width stops the thread, and from `-O1` up the amount is taken modulo the width.
-    fn shift_left(&mut self, (lhs, rhs): (&str, &str), ty: &HirType, offset: usize) -> String {
+    /// `lhs << rhs`, or `.shr` when `op` is `shrsi` / `shrui`, as the host shifts: on the
+    /// debug tier an amount of at least the operand's width stops the thread, and from `-O1`
+    /// up the amount is taken modulo the width.
+    fn shift(&mut self, op: &str, (lhs, rhs): (&str, &str), ty: &HirType, offset: usize) -> String {
         let mlir = scalar_type(ty).unwrap_or("i64");
         let width = int_width(ty).unwrap_or(64);
         let amount = if self.overflow == Overflow::Wrapping {
@@ -1118,7 +1438,7 @@ impl<'f> BodyEmitter<'f> {
             self.fail_if(&past, GuardKind::ShiftOverflow, offset);
             rhs.to_string()
         };
-        self.assign(&format!("arith.shli {lhs}, {amount} : {mlir}"))
+        self.assign(&format!("arith.{op} {lhs}, {amount} : {mlir}"))
     }
 
     fn checked_div_rem(
@@ -1174,6 +1494,7 @@ impl<'f> BodyEmitter<'f> {
                 GuardKind::DivisionByZero => DIVIDE_BY_ZERO,
                 GuardKind::RemainderByZero => REMAINDER_BY_ZERO,
                 GuardKind::ShiftOverflow => SHIFT_OVERFLOW,
+                GuardKind::RangeStep => RANGE_STEP,
             };
             let all = self.assign("arith.constant true");
             let passed = self.assign(&format!("arith.xori {failed}, {all} : i1"));
@@ -1238,6 +1559,15 @@ impl<'f> BodyEmitter<'f> {
         let Some(mlir) = scalar_type(&operand.ty) else {
             return Err(Refused::new(expr.span, "an operator on a non-scalar"));
         };
+        // A negated integer literal is the constant it denotes, as on the host: `-128i8` is
+        // written as a magnitude past `i8::MAX`, and `0 - MIN` would overflow.
+        if let (UnaryOp::Negate, HirExprKind::Literal(Literal::Integer(magnitude, suffix))) =
+            (op, &operand.kind)
+            && int_width(&operand.ty).is_some()
+        {
+            let negated = Literal::Integer(magnitude.wrapping_neg(), *suffix);
+            return self.literal(&negated, &operand.ty, expr.span);
+        }
         let value = self.expr(operand, exit)?;
         let text = match (op, &operand.ty) {
             (UnaryOp::Negate, ty) if is_float(ty) => format!("arith.negf {value} : {mlir}"),
@@ -1325,15 +1655,17 @@ impl<'f> BodyEmitter<'f> {
     }
 
     fn cast(&mut self, value: &HirExpr, target: &HirType, exit: &str) -> Lowered<String> {
-        let (Some(from), Some(to)) = (scalar_type(&value.ty), scalar_type(target)) else {
+        let (Some(from), Some(to)) = (value_type(&value.ty), value_type(target)) else {
             return Err(Refused::new(value.span, "a cast between non-scalars"));
         };
         let source = self.expr(value, exit)?;
-        let (from_ty, from_width, to_width) = (&value.ty, int_width(&value.ty), int_width(target));
+        let (from_ty, from_width, to_width) =
+            (&value.ty, int_like_width(&value.ty), int_like_width(target));
         let text = match (from_width, to_width) {
             _ if from == to => return Ok(source),
+            // A `char` widens as the unsigned code point it is.
             (Some(a), Some(b)) if a < b => {
-                let extend = if is_unsigned(from_ty) {
+                let extend = if is_unsigned(from_ty) || matches!(from_ty, HirType::Char) {
                     "extui"
                 } else {
                     "extsi"
@@ -1386,7 +1718,7 @@ fn comparison(op: BinaryOp, ty: &HirType) -> Option<&'static str> {
             _ => return None,
         });
     }
-    let unsigned = is_unsigned(ty) || matches!(ty, HirType::Bool);
+    let unsigned = is_unsigned(ty) || matches!(ty, HirType::Bool | HirType::Char);
     Some(match (op, unsigned) {
         (BinaryOp::Equal, _) => "eq",
         (BinaryOp::NotEqual, _) => "ne",
@@ -1440,9 +1772,8 @@ fn stmt_span(statement: &HirStmt) -> Span {
 fn statement_kind(statement: &HirStmt) -> &'static str {
     match statement {
         HirStmt::TensorCompoundAssign { .. } => "a whole-tensor update",
-        HirStmt::ForRange { .. } => "a reversed, stepped or enumerated range loop",
+        HirStmt::ForRange { .. } => "an enumerated range loop",
         HirStmt::ForEach { .. } => "a loop over a collection",
-        HirStmt::Break { .. } => "a `break` with a value",
         HirStmt::Return { .. } => "a `return` with a value",
         HirStmt::ValElse { .. } => "a `val ... else`",
         HirStmt::Const { .. } => "a local constant",
@@ -1453,9 +1784,8 @@ fn statement_kind(statement: &HirStmt) -> &'static str {
 fn expression_kind(kind: &HirExprKind) -> &'static str {
     match kind {
         HirExprKind::Closure { .. } => "a closure",
-        HirExprKind::Match { .. } => "a `match`",
         HirExprKind::TensorIndex { .. } | HirExprKind::Index { .. } => "a tensor slice",
-        HirExprKind::Loop { .. } => "a `loop` with a value",
+        HirExprKind::Loop { .. } => "a `loop` with a value of this type",
         HirExprKind::Pool { .. } => "a `pool` block",
         _ => "this expression",
     }

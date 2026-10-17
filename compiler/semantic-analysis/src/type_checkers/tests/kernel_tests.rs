@@ -118,10 +118,24 @@ fn a_kernel_is_refused_on_a_method_and_beside_gpu_or_grad() {
 }
 
 #[test]
-fn grid_positions_are_read_one_axis_at_a_time() {
+fn grid_positions_are_read_by_axis_or_bound_whole_by_a_val() {
+    let whole = KERNEL.replace("block_id.z", "block_id").replace(
+        "(block as f32)",
+        "({\n            val again = block\n            again.z as f32\n        })",
+    );
+    let errors = semantic_errors(&whole);
+    assert!(errors.is_empty(), "got {errors:?}");
+
+    // Read as a value, rather than by field or into a `val`, it is refused where it is read.
     let src = KERNEL.replace("block_id.z", "block_id");
     let (_, at) = kernel_error(&src);
-    assert_eq!(at, src.find("block_id").expect("name"));
+    assert_eq!(at, src.find("(block as").expect("read") + 1);
+    for binding in ["mut block = block_id", "val block: u32 = block_id"] {
+        let src = KERNEL.replace("val block = block_id.z", binding);
+        let (problem, at) = kernel_error(&src);
+        assert!(problem.contains("binds it whole with `val`"), "{problem}");
+        assert_eq!(at, src.find("= block_id").expect("name") + 2);
+    }
 
     let src = KERNEL.replace("block_id.z", "block_id.w");
     let (_, at) = kernel_error(&src);

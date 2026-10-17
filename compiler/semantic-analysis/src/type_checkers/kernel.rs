@@ -141,7 +141,8 @@ impl TypeChecker {
     }
 
     /// `thread_id.x` or `block_id.z` inside a kernel body, where no binding of that name
-    /// shadows it, as the `u32` it reads. `None` when `object` is anything else.
+    /// shadows it, or `t.x` on a local bound to either whole, as the `u32` it reads. `None`
+    /// when `object` is anything else.
     pub(crate) fn check_grid_position(
         &mut self,
         object: &Expr,
@@ -150,7 +151,7 @@ impl TypeChecker {
         let Expr::Identifier(name) = object else {
             return None;
         };
-        if !self.is_grid_name(&name.name) {
+        if !self.is_grid_name(&name.name) && !self.is_grid_binding(&name.name) {
             return None;
         }
         if !GRID_AXES.contains(&field.name.as_str()) {
@@ -169,10 +170,40 @@ impl TypeChecker {
         self.in_kernel && GRID_NAMES.contains(&name) && self.symbols.lookup(name).is_none()
     }
 
-    /// A kernel-only name read whole rather than one axis at a time.
+    /// Whether `name` is a local bound to `thread_id` or `block_id` whole.
+    fn is_grid_binding(&self, name: &str) -> bool {
+        self.symbols
+            .lookup(name)
+            .is_some_and(|info| matches!(info.ty, Type::GridPosition))
+    }
+
+    /// `val t = thread_id`, or `val u = t` for such a `t`: an immutable, unannotated local
+    /// naming the whole position, which is what a `t.x` then reads. Whether `init` was one.
+    pub(crate) fn check_grid_binding(
+        &mut self,
+        name: &Identifier,
+        init: Option<&Expr>,
+        (mutable, annotated): (bool, bool),
+    ) -> bool {
+        let Some(Expr::Identifier(source)) = init else {
+            return false;
+        };
+        if mutable
+            || annotated
+            || !(self.is_grid_name(&source.name) || self.is_grid_binding(&source.name))
+        {
+            return false;
+        }
+        self.symbols
+            .define_pending(&name.name, Type::GridPosition, false);
+        self.symbols.commit_pending(&name.name);
+        true
+    }
+
+    /// A grid position read whole where only a field read or a `val` binding takes one.
     pub(crate) fn refuse_whole_grid_name(&mut self, name: &Identifier) {
         let problem = format!(
-            "body reads `{}` one axis at a time: `.x`, `.y` or `.z`",
+            "body reads `{}` one axis at a time (`.x`, `.y` or `.z`) or binds it whole with `val`",
             name.name
         );
         self.kernel_error(&problem, name.span);

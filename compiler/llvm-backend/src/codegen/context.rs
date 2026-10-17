@@ -200,6 +200,10 @@ pub(crate) struct LiteralStringMoves<'ctx> {
     pub(crate) flags: Vec<(Vec<String>, IntValue<'ctx>)>,
 }
 
+/// See [`CodegenContext::branch_string_slots`]: each slot's position path below the
+/// holder, and the slot.
+pub(crate) type BranchStringSlots<'ctx> = Vec<(Vec<String>, PointerValue<'ctx>)>;
+
 pub(crate) struct DropEntry<'ctx> {
     /// Source binding name, used to clear the flag when the value is moved.
     pub(crate) name: String,
@@ -360,6 +364,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// implementation, in which case no registry is emitted at all.
     pub(crate) pool_aware_types: std::collections::HashSet<String>,
 
+    /// Names of the types with an `impl PartialEq for T`, whose `T__eq` a derived `==`
+    /// calls for a field of that type. An inherent method named `eq` is not one.
+    pub(crate) partial_eq_impls: std::collections::HashSet<String>,
+
     /// Stack of lexical drop scopes, innermost last. Each scope lists the owned
     /// `Drop`-typed bindings declared in it, in declaration order; on normal scope
     /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
@@ -370,6 +378,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// carries, for the holder to take once it is registered. `None` everywhere else,
     /// including while a position that is not itself a literal is evaluated.
     pub(crate) literal_string_moves: Option<LiteralStringMoves<'ctx>>,
+
+    /// While a declaration or an assignment builds its holder through a branch (`if`,
+    /// `match`, a block), one `i1` slot per `string` position of the holder: each arm's
+    /// tail stores which of them it owns. Set only across the dispatch into the branch,
+    /// which takes it at once, so nothing evaluated before the arms ever sees it.
+    pub(crate) branch_string_slots: Option<BranchStringSlots<'ctx>>,
 
     /// The callee and the ownership of the argument the last call to a `string`
     /// forwarder handed back: whether the buffer that call yields is owned, read before
@@ -482,8 +496,10 @@ impl<'ctx> CodegenContext<'ctx> {
             drop_types: std::collections::HashSet::new(),
             consuming_self_methods: std::collections::HashSet::new(),
             pool_aware_types: std::collections::HashSet::new(),
+            partial_eq_impls: std::collections::HashSet::new(),
             drop_scopes: Vec::new(),
             literal_string_moves: None,
+            branch_string_slots: None,
             forwarded_string_owner: None,
             borrowed_self: false,
             name_scopes: Vec::new(),

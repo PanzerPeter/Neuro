@@ -1097,7 +1097,10 @@ pub(crate) fn iterators<'c>(
     parse_attribute(context, &format!("[{iterators}]"))
 }
 
-fn parse_attribute<'c>(context: &'c Context, source: &str) -> Result<Attribute<'c>, MlirError> {
+pub(crate) fn parse_attribute<'c>(
+    context: &'c Context,
+    source: &str,
+) -> Result<Attribute<'c>, MlirError> {
     Attribute::parse(context, source).ok_or_else(|| MlirError::AttributeSyntax(source.to_string()))
 }
 

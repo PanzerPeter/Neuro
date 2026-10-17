@@ -211,6 +211,10 @@ pub enum Type {
     /// resolution. The trait must be object-safe. Two trait objects are compatible only
     /// when they name the same trait (nominal).
     DynObject(std::string::String),
+    /// The position `thread_id` or `block_id` names inside a `@kernel` body, read whole:
+    /// three `u32` fields, `.x`, `.y` and `.z`. It is `Copy`, no annotation can name it,
+    /// and a value of it is only read by field or bound whole by a `val`.
+    GridPosition,
     /// An unresolved generic type parameter `T` inside a generic function body.
     /// It is nominal (`Generic("T")` is compatible only with itself) and supports no
     /// concrete operations (arithmetic, field access, …), which is exactly what a
@@ -616,6 +620,7 @@ impl fmt::Display for Type {
             Type::Newtype(name) => write!(f, "{}", name),
             Type::Generic(name) => write!(f, "{}", name),
             Type::DynObject(name) => write!(f, "dyn {}", name),
+            Type::GridPosition => write!(f, "grid position"),
             Type::Reference { inner, mutable } => {
                 if *mutable {
                     write!(f, "&mut {}", inner)

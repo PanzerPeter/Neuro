@@ -1300,3 +1300,554 @@ func main() -> i32 {
         .expect_err("a user `clone` may return the arena value itself");
     assert!(err.contains("outlives the pool"), "got: {err}");
 }
+
+/// LIM-212: a `&mut` to one of the block's own bindings writes storage that dies with
+/// the block, so a store and a call through it take the arena like the binding itself.
+/// It was refused as if the referent outlived the block.
+#[test]
+fn a_store_through_a_reference_to_a_block_local_runs() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Holder { t: Tensor<f32, [4]> }
+impl Holder {
+    func set(&mut self, n: Tensor<f32, [4]>) { self.t = n }
+}
+func put(dst: &mut Holder, v: Tensor<f32, [4]>) { dst.t = v }
+func main() -> i32 {
+    mut total = 0.0f32
+    for i in 0..3 {
+        pool {
+            mut local = Holder { t: Tensor::<f32, [4]>::zeros() }
+            val r = &mut local
+            r.t = Tensor::<f32, [4]>::ones()
+            r.set(Tensor::<f32, [4]>::ones() + Tensor::<f32, [4]>::ones())
+            put(r, Tensor::<f32, [4]>::ones() * 3.0f32)
+            total += r.t.sum()
+        }
+    }
+    total as i32
+}
+"#;
+    assert_eq!(test.compile_and_run("pool_ref_local.nr", source), Ok(36));
+}
+
+/// LIM-071: a `?` inside a pool leaves through the block's release when its failure
+/// carries no value or a number, and is refused when it carries anything else, the
+/// rule a `return` follows.
+#[test]
+fn a_question_mark_leaves_a_pool_through_its_release() {
+    let test = CompileTest::new();
+    let source = r#"
+func half(i: i32) -> Option<i32> {
+    mut out = 0
+    pool {
+        val s = "row " + "{i}"
+        val v = if i % 2 == 0 { Some(i) } else { None }
+        out = v? + s.len() as i32
+    }
+    Some(out)
+}
+func check(i: i32) -> Result<i32, i32> {
+    pool {
+        val s = "row " + "{i}"
+        val r: Result<i32, i32> = if i > 2 { Err(i) } else { Ok(i) }
+        val n = r?
+        println(s)
+    }
+    Ok(0)
+}
+func main() -> i32 {
+    mut hits = 0
+    for i in 0..1000 {
+        match half(i) {
+            Some(n) => { hits += 1 },
+            None => {}
+        }
+    }
+    mut errs = 0
+    for i in 0..5 {
+        match check(i) {
+            Ok(n) => {},
+            Err(e) => { errs += e }
+        }
+    }
+    hits / 10 + errs
+}
+"#;
+    assert_eq!(
+        stdout_of(&test, "pool_try.nr", source),
+        "row 0\nrow 1\nrow 2\n"
+    );
+    assert_eq!(test.compile_and_run("pool_try.nr", source), Ok(57));
+
+    let refused = r#"
+func parse(i: i32) -> Result<i32, string> {
+    pool {
+        val r: Result<i32, string> = if i > 2 { Err("bad " + "{i}") } else { Ok(i) }
+        val n = r?
+    }
+    Ok(1)
+}
+func main() -> i32 { 0 }
+"#;
+    let err = test
+        .check("pool_try_string.nr", refused)
+        .expect_err("the error string may live in the arena the exit releases");
+    assert!(
+        err.contains("'?' may carry only a number, `bool` or `char` out of"),
+        "got: {err}"
+    );
+}
+
+/// A binding of an enclosing pool, written from a nested one. The third pool reuses the
+/// arena the second released, so a tensor left behind in `a` reads back as its zeros.
+const NESTED_POOL_WRITE: &str = r#"
+struct Holder { t: Tensor<f32, [1024]> }
+impl Holder {
+    func set(&mut self, n: Tensor<f32, [1024]>) { self.t = n }
+}
+func put(dst: &mut Holder, v: Tensor<f32, [1024]>) { dst.t = v }
+func ones() -> Tensor<f32, [1024]> { Tensor::<f32, [1024]>::ones() }
+func main() -> i32 {
+    mut out = 0.0f32
+    pool {
+        mut a = Holder { t: Tensor::<f32, [1024]>::zeros() }
+        pool {
+            WRITE
+        }
+        pool {
+            val z = Tensor::<f32, [1024]>::zeros()
+            out = z.sum()
+        }
+        out = out + a.t.sum()
+    }
+    (out / 8.0f32) as i32
+}
+"#;
+
+/// The call rule judges a place against the INNERMOST pool, as the store rule does. A
+/// place an enclosing pool declared outlives the inner release, so a callee handed an
+/// argument the inner block allocated would keep it past that release. `a.set(..)` and
+/// `put(&mut a, ..)` compiled and read back 0 instead of 128; the direct store is routed
+/// off the arena, and a value a declared function built is heap memory.
+#[test]
+fn a_nested_pool_call_may_not_retain_its_arena_value_in_an_outer_pools_binding() {
+    let test = CompileTest::new();
+    let one = "Tensor::<f32, [1024]>::ones()";
+    for (i, write) in [format!("a.t = {one}"), "a.set(ones())".to_string()]
+        .iter()
+        .enumerate()
+    {
+        let source = NESTED_POOL_WRITE.replace("WRITE", write);
+        assert_eq!(
+            test.compile_and_run(&format!("nested_ok_{i}.nr"), &source),
+            Ok(128),
+            "{write}"
+        );
+    }
+    for (i, write) in [
+        format!("a.set({one})"),
+        format!("put(&mut a, {one})"),
+        format!("val r = &mut a\n r.set({one})"),
+        format!("val r = &mut a\n put(r, {one})"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = NESTED_POOL_WRITE.replace("WRITE", write);
+        let err = test
+            .check(&format!("nested_refused_{i}.nr"), &source)
+            .expect_err("the inner arena's tensor would outlive its release");
+        assert!(
+            err.contains("can store what it is given into"),
+            "{write}: got {err}"
+        );
+    }
+    let push = r#"
+func main() -> i32 {
+    pool {
+        mut v: Vec<string> = Vec::new()
+        pool {
+            v.push("ab" + "cd")
+        }
+    }
+    0
+}
+"#;
+    let err = test
+        .check("nested_push.nr", push)
+        .expect_err("the inner arena's string would outlive its release");
+    assert!(err.contains("'push' can store"), "got: {err}");
+}
+
+/// Every call form the retention rule has to reach, around one write and one read: the
+/// third pool reuses the arena the write's pool released, so a tensor left behind reads
+/// back as its zeros. The places are declared before the pools, or inside an enclosing one.
+const CALL_FORM_WRITE: &str = r#"
+struct Holder { t: Tensor<f32, [1024]> }
+impl Holder {
+    func set(&mut self, n: Tensor<f32, [1024]>) { self.t = n }
+}
+trait Setter { func put(&mut self, n: Tensor<f32, [1024]>) }
+impl Setter for Holder { func put(&mut self, n: Tensor<f32, [1024]>) { self.t = n } }
+func mk() -> Tensor<f32, [1024]> { Tensor::<f32, [1024]>::ones() }
+func main() -> i32 {
+    mut out = 0.0f32
+    val f = |d: &mut Holder, n: Tensor<f32, [1024]>| { d.t = n }
+    OPEN
+    mut arr = [Holder { t: Tensor::<f32, [1024]>::zeros() }, Holder { t: Tensor::<f32, [1024]>::zeros() }]
+    mut p = (Holder { t: Tensor::<f32, [1024]>::zeros() }, 1)
+    mut a = Holder { t: Tensor::<f32, [1024]>::zeros() }
+    WRITE
+    pool {
+        val z = Tensor::<f32, [1024]>::zeros()
+        out = z.sum()
+    }
+    out = out + READ.t.sum()
+    CLOSE
+    (out / 8.0f32) as i32
+}
+"#;
+
+fn call_form(write: &str, read: &str, nested: bool) -> String {
+    let (open, close) = if nested { ("pool {", "}") } else { ("", "") };
+    CALL_FORM_WRITE
+        .replace("OPEN", open)
+        .replace("CLOSE", close)
+        .replace("WRITE", write)
+        .replace("READ", read)
+}
+
+/// A call whose callee the retention rule could not name skipped it, so an indexed or
+/// tuple-field receiver, a `&mut dyn` receiver and a closure value with a `&mut`
+/// parameter each kept an arena tensor in a place outliving the pool (read back 0, not
+/// 128), whether the place predated every pool or an enclosing one declared it. Their
+/// resolved counterparts, a routed store and a value a declared function built, still run.
+#[test]
+fn every_call_form_reaches_the_retention_rule() {
+    let test = CompileTest::new();
+    let one = "Tensor::<f32, [1024]>::ones()";
+    let dyn_call = |arg: &str| {
+        format!("{{\n val d: &mut dyn Setter = &mut a\n pool {{\n d.put({arg})\n }}\n }}")
+    };
+    let refused = [
+        (format!("pool {{\n arr[0].set({one})\n }}"), "arr[0]"),
+        (format!("pool {{\n p.0.set({one})\n }}"), "p.0"),
+        (dyn_call(one), "a"),
+        (format!("pool {{\n f(&mut a, {one})\n }}"), "a"),
+    ];
+    for nested in [false, true] {
+        for (i, (write, read)) in refused.iter().enumerate() {
+            let source = call_form(write, read, nested);
+            let err = test
+                .check(&format!("call_form_refused_{nested}_{i}.nr"), &source)
+                .expect_err("the pool's tensor would outlive its release");
+            assert!(
+                err.contains("can store what it is given into"),
+                "{write}: got {err}"
+            );
+        }
+    }
+    let accepted = [
+        (format!("pool {{\n arr[0].t = {one}\n }}"), "arr[0]", true),
+        ("pool {\n arr[0].set(mk())\n }".to_string(), "arr[0]", true),
+        ("pool {\n p.0.set(mk())\n }".to_string(), "p.0", true),
+        (dyn_call("mk()"), "a", true),
+        ("pool {\n f(&mut a, mk())\n }".to_string(), "a", false),
+    ];
+    for (i, (write, read, nested)) in accepted.iter().enumerate() {
+        let source = call_form(write, read, *nested);
+        assert_eq!(
+            test.compile_and_run(&format!("call_form_ok_{i}.nr"), &source),
+            Ok(128),
+            "{write}"
+        );
+    }
+}
+
+/// A value an enclosing pool built, handed to that pool's own collection from a nested
+/// pool, is refused as the store `v[0] = s` is, and the diagnostic does not claim the
+/// inner block allocated it.
+#[test]
+fn an_enclosing_pools_value_handed_over_in_a_nested_pool_is_named_accurately() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut n = 0
+    pool {
+        mut v: Vec<string> = Vec::new()
+        val s = "ab" + "cd"
+        pool {
+            v.push(s)
+        }
+        n = v[0].len() as i32
+    }
+    n
+}
+"#;
+    let err = test
+        .check("enclosing_value_push.nr", source)
+        .expect_err("refused like the store form");
+    assert!(
+        err.contains("may hold memory from this block's arena, or an enclosing pool's"),
+        "got: {err}"
+    );
+}
+
+/// A `?` or `return` in a closure written inside a pool leaves the closure, not the pool,
+/// so the jump rule does not apply to it: a `string` error travels out of the closure.
+#[test]
+fn a_jump_in_a_closure_inside_a_pool_leaves_only_the_closure() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut n = 0
+    pool {
+        val by_try = |i: i32| -> Result<i32, string> {
+            val r: Result<i32, string> = if i > 2 { Err("bad " + "{i}") } else { Ok(i) }
+            val v = r?
+            Ok(v + 1)
+        }
+        val by_return = |i: i32| -> Result<i32, string> {
+            if i > 2 { return Err("bad " + "{i}") }
+            Ok(i + 10)
+        }
+        match by_try(1) {
+            Ok(v) => { n += v },
+            Err(e) => { n += 100 }
+        }
+        match by_try(5) {
+            Ok(v) => { n += 100 },
+            Err(e) => { n += e.len() as i32 }
+        }
+        match by_return(1) {
+            Ok(v) => { n += v },
+            Err(e) => { n += 100 }
+        }
+    }
+    n
+}
+"#;
+    assert_eq!(test.compile_and_run("closure_jump.nr", source), Ok(18));
+}
+
+/// A method dispatched through a trait reads its signature off the trait: a `&self`
+/// method through a `&mut dyn` keeps nothing (it was refused), and a `&mut self` one
+/// through a bounded type parameter can (it was waved through and read back 0).
+#[test]
+fn a_trait_dispatched_call_reads_the_trait_signature() {
+    let test = CompileTest::new();
+    let shared = r#"
+trait Scorer { func score(&self, x: Tensor<f32, [4]>) -> f32 }
+struct S { w: f32 }
+impl Scorer for S { func score(&self, x: Tensor<f32, [4]>) -> f32 { x.sum() * self.w } }
+func main() -> i32 {
+    mut s = S { w: 2.0f32 }
+    mut out = 0.0f32
+    {
+        val d: &mut dyn Scorer = &mut s
+        pool {
+            val x = Tensor::<f32, [4]>::ones()
+            out = d.score(x)
+        }
+    }
+    out as i32
+}
+"#;
+    assert_eq!(test.compile_and_run("dyn_shared_self.nr", shared), Ok(8));
+    let bounded = r#"
+struct Holder { t: Tensor<f32, [1024]> }
+trait Setter { func put(&mut self, n: Tensor<f32, [1024]>) }
+impl Setter for Holder { func put(&mut self, n: Tensor<f32, [1024]>) { self.t = n } }
+func go<T: Setter>(x: &mut T) {
+    pool { x.put(Tensor::<f32, [1024]>::ones()) }
+}
+func main() -> i32 {
+    mut a = Holder { t: Tensor::<f32, [1024]>::zeros() }
+    go(&mut a)
+    0
+}
+"#;
+    let err = test
+        .check("bounded_receiver.nr", bounded)
+        .expect_err("the pool's tensor would outlive its release in `a`");
+    assert!(
+        err.contains("'put' can store what it is given into 'x'"),
+        "got: {err}"
+    );
+}
+
+/// The sole place a callee can write, handed over as an argument, can only be stored
+/// back into itself: `put(&mut a, mk())` with `a` from an enclosing pool runs as the
+/// method form `a.set(mk())` does. Two places stay judged, since the callee could move
+/// one's enclosing-arena memory into the other.
+#[test]
+fn the_retaining_place_itself_is_not_a_value_handed_to_it() {
+    let test = CompileTest::new();
+    for (i, call) in ["put(&mut a, mk())", "f(&mut a, mk())"].iter().enumerate() {
+        let source = format!(
+            "struct Holder {{ t: Tensor<f32, [1024]> }}
+func mk() -> Tensor<f32, [1024]> {{ Tensor::<f32, [1024]>::ones() }}
+func put(d: &mut Holder, n: Tensor<f32, [1024]>) {{ d.t = n }}
+func main() -> i32 {{
+    mut out = 0.0f32
+    val f = |d: &mut Holder, n: Tensor<f32, [1024]>| {{ d.t = n }}
+    pool {{
+        mut a = Holder {{ t: Tensor::<f32, [1024]>::zeros() }}
+        pool {{
+            {call}
+        }}
+        pool {{
+            val z = Tensor::<f32, [1024]>::zeros()
+            out = z.sum()
+        }}
+        out = out + a.t.sum()
+    }}
+    (out / 8.0f32) as i32
+}}"
+        );
+        assert_eq!(
+            test.compile_and_run(&format!("sole_channel_{i}.nr"), &source),
+            Ok(128),
+            "{call}"
+        );
+    }
+    let two = r#"
+struct Holder { t: Tensor<f32, [1024]> }
+func both(a: &mut Holder, b: &mut Holder) { b.t = a.t.clone() }
+func main() -> i32 {
+    mut b = Holder { t: Tensor::<f32, [1024]>::zeros() }
+    pool {
+        mut a = Holder { t: Tensor::<f32, [1024]>::ones() }
+        pool {
+            both(&mut a, &mut b)
+        }
+    }
+    0
+}
+"#;
+    let err = test
+        .check("two_channels.nr", two)
+        .expect_err("`a` is an enclosing pool's and `b` outlives every pool");
+    assert!(err.contains("'both' can store"), "got: {err}");
+}
+
+/// A closure value the block built may return one of its captures, so its call is not
+/// a provable allocation even in a routed store; it read back the reused arena's bytes.
+/// One written before the pools captured nothing the arena holds.
+#[test]
+fn a_closure_the_block_built_is_not_a_provable_callee() {
+    let test = CompileTest::new();
+    for (i, closure) in ["move || -> string { return s }", "move || -> string { s }"]
+        .iter()
+        .enumerate()
+    {
+        let source = format!(
+            "func main() -> i32 {{
+    mut out = \"\"
+    pool {{
+        val s = \"abcd\" + \"efgh\"
+        val f = {closure}
+        out = f()
+    }}
+    out.len() as i32
+}}"
+        );
+        let err = test
+            .check(&format!("pool_closure_capture_out_{i}.nr"), &source)
+            .expect_err("the capture lives in the arena");
+        assert!(err.contains("'out' outlives"), "{closure}: got {err}");
+    }
+    let outer = r#"
+func main() -> i32 {
+    mut out = ""
+    val f = || -> string { "abcd" + "efgh" }
+    pool {
+        out = f()
+    }
+    pool {
+        val z = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" + "y"
+        print(z)
+    }
+    println("")
+    println(out)
+    out.len() as i32
+}
+"#;
+    assert_eq!(
+        stdout_of(&test, "pool_outer_closure.nr", outer),
+        "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzy\nabcdefgh\n"
+    );
+}
+
+/// A callee that computes a function value (an element, a tuple field, a deref, a
+/// branch, a closure literal) is judged by what that value can hold, as a named
+/// closure is: each of these handed the block's capture out and read back the reused
+/// arena's bytes. The same shapes over closures written before the pools still run.
+#[test]
+fn a_computed_closure_callee_is_judged_by_what_it_holds() {
+    let test = CompileTest::new();
+    for (i, (decl, call)) in [
+        ("val fs = [move || -> string { s }]", "fs[0]()"),
+        ("val p = (move || -> string { s }, 1)", "p.0()"),
+        ("val f = move || -> string { s }\n val r = &f", "(*r)()"),
+        (
+            "val f = move || -> string { s }",
+            "(if true { f } else { f })()",
+        ),
+        ("", "(move || -> string { s })()"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = format!(
+            "func main() -> i32 {{
+    mut out = \"\"
+    pool {{
+        val s = \"abcd\" + \"efgh\"
+        {decl}
+        out = {call}
+    }}
+    out.len() as i32
+}}"
+        );
+        let err = test
+            .check(&format!("computed_callee_{i}.nr"), &source)
+            .expect_err("the capture lives in the arena");
+        assert!(err.contains("'out' outlives"), "{call}: got {err}");
+    }
+    let outer = r#"
+func main() -> i32 {
+    mut out = ""
+    val fs = [|| -> string { "abcd" + "efgh" }, || -> string { "x" }]
+    val p = (|| -> string { "abcd" + "efgh" }, 1)
+    val f = || -> string { "abcd" + "efgh" }
+    val r = &f
+    mut n = 0
+    pool {
+        out = fs[0]()
+        n += out.len() as i32
+        out = p.0()
+        n += out.len() as i32
+        out = (*r)()
+        n += out.len() as i32
+        out = (move || -> string { "abcd" + "efgh" })()
+    }
+    pool {
+        val z = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" + "y"
+        print(z)
+    }
+    println("")
+    println(out)
+    n + out.len() as i32
+}
+"#;
+    assert_eq!(
+        stdout_of(&test, "computed_callee_outer.nr", outer),
+        "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzy\nabcdefgh\n"
+    );
+    assert_eq!(
+        test.compile_and_run("computed_callee_outer.nr", outer),
+        Ok(32)
+    );
+}

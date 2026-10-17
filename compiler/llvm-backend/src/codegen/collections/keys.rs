@@ -261,17 +261,32 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Call a struct key's trait method (`eq` / `lt` / `hash`), adapting each argument
     /// to the receiving parameter: an impl written with reference parameters takes
     /// addresses, one written by value takes the aggregate itself.
-    fn call_key_method(
-        &mut self,
+    pub(crate) fn call_key_method(
+        &self,
         key_ty: &Type,
         method: &str,
         args: &[BasicValueEnum<'ctx>],
         name: &str,
     ) -> CodegenResult<IntValue<'ctx>> {
-        let Type::Struct(struct_name) = key_ty else {
+        Ok(self
+            .call_own_method(key_ty, method, args, name)?
+            .into_int_value())
+    }
+
+    /// Call the method `method` a struct or enum type declares, on argument values, as
+    /// [`Self::call_key_method`] does: a derive reaches a field's hand-written trait
+    /// method this way.
+    pub(crate) fn call_own_method(
+        &self,
+        key_ty: &Type,
+        method: &str,
+        args: &[BasicValueEnum<'ctx>],
+        name: &str,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let (Type::Struct(struct_name) | Type::Enum(struct_name)) = key_ty else {
             return Err(CodegenError::UnsupportedType(format!(
-                "{:?} cannot be used as a map key",
-                key_ty
+                "{:?} has no method '{}' to call: only a struct or an enum declares one",
+                key_ty, method
             )));
         };
         let mangled = format!("{}__{}", struct_name, method);
@@ -294,20 +309,16 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
 
-        let result = self
-            .builder
+        self.builder
             .build_call(callee, &call_args, name)?
             .try_as_basic_value()
             .basic()
-            .ok_or_else(|| {
-                CodegenError::InternalError(format!("'{}' returned no value", mangled))
-            })?;
-        Ok(result.into_int_value())
+            .ok_or_else(|| CodegenError::InternalError(format!("'{}' returned no value", mangled)))
     }
 
     /// Materialize a value into a stack slot and yield its address, so it can be passed
     /// where a `&self` / `&Rhs` parameter is expected.
-    fn spill_to_stack(&mut self, value: BasicValueEnum<'ctx>) -> CodegenResult<PointerValue<'ctx>> {
+    fn spill_to_stack(&self, value: BasicValueEnum<'ctx>) -> CodegenResult<PointerValue<'ctx>> {
         let slot = self.entry_alloca(value.get_type(), "key.spill")?;
         self.builder.build_store(slot, value)?;
         Ok(slot)

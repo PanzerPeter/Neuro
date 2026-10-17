@@ -5,7 +5,7 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind};
 
-use crate::codegen::context::{CodegenContext, DropTarget};
+use crate::codegen::context::{BranchStringSlots, CodegenContext, DropTarget};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -17,9 +17,11 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Reads the holder's literal shape rather than its type: `P { name: a + b }` owns
     /// the concatenation and `P { name: "lit" }` owns nothing, and only the expression
-    /// tells the two apart. A holder built any other way — returned by a call, read out
-    /// of another value, selected by an `if` — arms nothing, because the buffer behind
-    /// its positions may be one something else still owns.
+    /// tells the two apart. A call arms the positions its callee always allocated
+    /// (`StringOwnership::held_strings_returned`). A holder built any other way, read
+    /// out of another value say, arms nothing here, because the buffer behind its
+    /// positions may be one something else still owns; a branch's arms hand theirs over
+    /// through [`codegen_branch_tail`].
     pub(crate) fn arm_stored_string_positions(
         &mut self,
         name: &str,
@@ -268,6 +270,108 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(val)
     }
 
+    /// One cleared slot per `string` position of `ty`, for the arms of the branch `value`
+    /// to store their positions' ownership into (`None` unless `value` is a branch
+    /// building a holder of `string` positions). A literal or a value of unproven origin
+    /// in an arm leaves its slot clear, so it is never released.
+    pub(crate) fn open_branch_string_slots(
+        &mut self,
+        value: &HirExpr,
+        ty: &Type,
+    ) -> CodegenResult<Option<BranchStringSlots<'ctx>>> {
+        if !Self::is_branch(value) {
+            return Ok(None);
+        }
+        let paths = self.string_position_paths(ty);
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        let bool_ty = self.context.bool_type();
+        let mut slots = Vec::with_capacity(paths.len());
+        for path in paths {
+            let slot = self.entry_alloca(bool_ty, "branch.str.owns")?;
+            self.builder.build_store(slot, bool_ty.const_zero())?;
+            slots.push((path, slot));
+        }
+        Ok(Some(slots))
+    }
+
+    /// The ownership the branch's arms left in `slots`, keyed by path, for
+    /// [`store_held_string_flags`] to hand to the holder that took the value.
+    pub(crate) fn load_branch_string_slots(
+        &mut self,
+        slots: &[(Vec<String>, PointerValue<'ctx>)],
+    ) -> CodegenResult<Vec<(Vec<String>, IntValue<'ctx>)>> {
+        let bool_ty = self.context.bool_type();
+        let mut flags = Vec::with_capacity(slots.len());
+        for (path, slot) in slots {
+            let owns = self
+                .builder
+                .build_load(bool_ty, *slot, "branch.str.owned")?
+                .into_int_value();
+            flags.push((path.clone(), owns));
+        }
+        Ok(flags)
+    }
+
+    /// Evaluate `expr`, the tail an arm of a holder-building branch yields, and store
+    /// into `slots` the ownership of each `string` position it hands over: armed for a
+    /// provable allocation, the moved binding's flag for a binding (whole, or moved into
+    /// a literal position), clear for the rest. A tail that is itself a branch passes the
+    /// slots on to its own arms; a tail that diverges stores nothing. Read before the
+    /// caller's move of `expr` clears the flags.
+    pub(crate) fn codegen_branch_tail(
+        &mut self,
+        expr: &HirExpr,
+        slots: Option<&[(Vec<String>, PointerValue<'ctx>)]>,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let Some(slots) = slots else {
+            return self.codegen_expr(expr);
+        };
+        if Self::is_branch(expr) {
+            self.branch_string_slots = Some(slots.to_vec());
+            let val = self.codegen_expr(expr);
+            self.branch_string_slots = None;
+            return val;
+        }
+        let collecting = Self::is_aggregate_literal(expr).then(Default::default);
+        let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
+        let val = self.codegen_expr(expr);
+        let mut owners = std::mem::replace(&mut self.literal_string_moves, outer)
+            .map(|moves| moves.flags)
+            .unwrap_or_default();
+        let val = val?;
+        if self.current_block_terminated() {
+            return Ok(val);
+        }
+        let mut proven = Vec::new();
+        self.collect_armed_positions(expr, &mut Vec::new(), &mut proven);
+        let armed = self.context.bool_type().const_int(1, false);
+        owners.extend(proven.into_iter().map(|path| (path, armed)));
+        owners.extend(self.load_held_string_flags(expr)?);
+        for (path, slot) in slots {
+            if let Some((_, owns)) = owners.iter().find(|(owned, _)| owned == path) {
+                self.builder.build_store(*slot, *owns)?;
+            }
+        }
+        Ok(val)
+    }
+
+    /// Whether `value` is a branch whose arms' tails [`codegen_branch_tail`] follows.
+    ///
+    /// Every kind listed here must `.take()` [`CodegenContext::branch_string_slots`] as
+    /// the first step of its codegen function, before it evaluates anything, or a
+    /// condition, scrutinee or earlier statement would store into the holder's slots.
+    fn is_branch(value: &HirExpr) -> bool {
+        matches!(
+            value.kind,
+            HirExprKind::If { .. }
+                | HirExprKind::Match { .. }
+                | HirExprKind::Block { .. }
+                | HirExprKind::Unsafe { .. }
+        )
+    }
+
     /// Whether `value` is an aggregate literal, the one holder shape whose positions'
     /// moved-in ownership [`codegen_literal_position`] can collect.
     pub(crate) fn is_aggregate_literal(value: &HirExpr) -> bool {
@@ -313,6 +417,16 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             HirExprKind::NewtypeConstruct { value: inner, .. } => {
                 self.collect_armed_positions(inner, path, out)
+            }
+            // A call hands over the positions its callee stored an allocation into on
+            // every return path, which the ownership summary read off its body.
+            HirExprKind::Call { callee, .. } => {
+                let Some(key) = self.summary_key(callee) else {
+                    return;
+                };
+                for position in self.string_ownership.held_strings_returned(&key) {
+                    out.push(path.iter().chain(position).cloned().collect());
+                }
             }
             _ => {}
         }

@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn what_the_device_cannot_compute_is_left_to_the_host() {
         for body in [
-            "    val r = g.map(|x: f32| -> f32 { (x as i32).shr(1) as f32 })",
+            "    val r = g.map(|x: f32| -> f32 { (x, 1.0f32).0 })",
             "    val r = g.map(|x: f32| -> f32 { x.exp() })",
         ] {
             let (_, count) = launched(body, false);

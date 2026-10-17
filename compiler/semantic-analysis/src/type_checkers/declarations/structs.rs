@@ -110,10 +110,11 @@ impl TypeChecker {
     /// Validate `@derive(Debug)`, `@derive(Clone)`, `@derive(PartialEq)` and
     /// `@derive(Hashable)`: every field must itself be handled by the same derived rule.
     ///
-    /// A derive generates code straight over the fields, so it can only reach a field
-    /// whose type the generated code knows how to handle: a scalar, `string`, or
-    /// another struct carrying the same derive. Run after all structs are registered so
-    /// a field naming a struct declared later still resolves.
+    /// A derive generates code over the fields, so it can only reach a field whose type
+    /// the generated code knows how to handle: a scalar, `string`, another struct carrying
+    /// the same derive, or a type implementing the trait by hand, whose own method the
+    /// generated code calls. Run after every impl is registered, so a field naming a
+    /// type declared or implemented later still resolves.
     pub(crate) fn validate_field_derives(&mut self, def: &StructDef) {
         let spans: HashMap<String, Span> = def
             .fields
@@ -123,6 +124,12 @@ impl TypeChecker {
         self.validate_derived_fields_of(&def.name.name, &def.name.name, |name| {
             spans.get(name).copied().unwrap_or(def.name.span)
         });
+    }
+
+    /// [`Self::validate_field_derives`] for the generic-struct instance `instance` of
+    /// `template`, reported against the template's name at `span`.
+    pub(crate) fn validate_instance_derives(&mut self, instance: &str, template: &str, span: Span) {
+        self.validate_derived_fields_of(instance, template, |_| span);
     }
 
     /// The field rule behind [`Self::validate_field_derives`], applied to whichever
@@ -154,7 +161,10 @@ impl TypeChecker {
                 // remedy is offered only when the offending field IS one; for any other
                 // type there is nothing to put the attribute on.
                 let derivable = matches!(field_ty, Type::Struct(_));
-                if debug && !self.is_debug_renderable(field_ty) {
+                if debug
+                    && !self.is_debug_renderable(field_ty)
+                    && !self.implements_by_hand(field_ty, DEBUG_TRAIT)
+                {
                     let reason = if derivable {
                         "renders no debug form; give it `@derive(Debug)` too"
                     } else {
@@ -168,11 +178,16 @@ impl TypeChecker {
                         span,
                     ));
                 }
-                if clone && !self.is_derived_cloneable(field_ty) {
+                if clone
+                    && !self.is_derived_cloneable(field_ty)
+                    && !self.implements_by_hand(field_ty, CLONE_TRAIT)
+                {
                     // A struct that derives `Clone` is never an offender here: if it owns a
                     // buffer, its own derive is the one refused.
                     let reason = if derivable {
                         "has no `.clone()`; give it `@derive(Clone)` too"
+                    } else if self.byte_copy_skips_a_clone(field_ty) {
+                        "is copied by its bytes, so the `clone` a struct inside it calls would be skipped; write `impl Clone` by hand"
                     } else {
                         "owns a buffer that a derived `.clone()` cannot copy yet; write `impl Clone` by hand"
                     };
@@ -184,7 +199,10 @@ impl TypeChecker {
                         span,
                     ));
                 }
-                if hashable && !self.is_derived_hashable(field_ty) {
+                if hashable
+                    && !self.is_derived_hashable(field_ty)
+                    && !self.implements_by_hand(field_ty, HASHABLE_TRAIT)
+                {
                     let reason = if derivable {
                         "has no hash; give it `@derive(Hashable)` too"
                     } else {
@@ -198,7 +216,10 @@ impl TypeChecker {
                         span,
                     ));
                 }
-                if partial_eq && !self.is_derived_comparable(field_ty) {
+                if partial_eq
+                    && !self.is_derived_comparable(field_ty)
+                    && !self.implements_by_hand(field_ty, PARTIAL_EQ_TRAIT)
+                {
                     let reason = if derivable {
                         "has no field-wise equality; give it `@derive(PartialEq)` too"
                     } else {
@@ -224,6 +245,21 @@ impl TypeChecker {
                 span,
             });
         }
+    }
+
+    /// Whether `ty` implements `trait_name` through an `impl` block, whose method a
+    /// derive calls on a field of that type. A `PartialEq` impl counts only when it
+    /// compares the type with itself, the call the derived `==` makes.
+    fn implements_by_hand(&self, ty: &Type, trait_name: &str) -> bool {
+        let (Type::Struct(name) | Type::Enum(name)) = ty else {
+            return false;
+        };
+        self.type_implements_trait(ty, trait_name)
+            && (trait_name != PARTIAL_EQ_TRAIT
+                || self
+                    .operator_binary_impls
+                    .get(&(name.clone(), ast_types::BinaryOp::Equal))
+                    .is_none_or(|dispatch| dispatch.rhs == *ty))
     }
 
     /// Validate that a struct deriving `Copy` has only `Copy` fields.
@@ -470,8 +506,12 @@ impl TypeChecker {
                 self.hashable_structs.insert(mangled.clone());
             }
             // The template's own fields are type parameters, which no derive rule can
-            // judge; the concrete substitution is the first point at which it can.
-            self.validate_derived_fields_of(&mangled, base, |_| span);
+            // judge; the concrete substitution is the first point at which it can, once
+            // the impls a field may implement the trait through are registered.
+            match &mut self.deferred_instance_derives {
+                Some(pending) => pending.push((mangled.clone(), base.to_string(), span)),
+                None => self.validate_instance_derives(&mangled, base, span),
+            }
 
             self.instantiate_impls_for(base, &mangled, args, span);
         }

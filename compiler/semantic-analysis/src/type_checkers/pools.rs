@@ -26,13 +26,13 @@
 
 use std::collections::HashSet;
 
-use ast_types::{BinaryOp, Expr, InterpPart, Stmt};
+use ast_types::{BinaryOp, Expr, InterpPart, SelfParam, Stmt};
 use shared_types::{Literal, Span};
 
 use crate::errors::TypeError;
 use crate::types::Type;
 
-use super::{PoolContext, TypeChecker};
+use super::{PoolContext, TraitMethodSig, TypeChecker};
 
 /// The trait a type implements to say its external resource can be released by the
 /// arena's single sweep instead of by a per-object destructor. Declared in the
@@ -104,10 +104,11 @@ impl TypeChecker {
         };
         // The backend routes a store unless its root is one of the innermost block's own
         // bindings. A reference the block declares may still point at a place outliving
-        // it, and that store is emitted where it is written, inside the arena.
+        // it, and that store is emitted where it is written, inside the arena. One that
+        // borrows a binding of the block itself writes storage that dies with it.
         let (emission, place) = if depth < pool.scope_floor {
             (Emission::Routed, format!("'{name}'"))
-        } else if through_reference {
+        } else if through_reference && !self.borrows_block_local(name) {
             (Emission::InPlace, format!("the place behind '{name}'"))
         } else {
             return;
@@ -315,6 +316,81 @@ impl TypeChecker {
         }
     }
 
+    /// Record what the `val` reference `holder` borrows (`val holder = &mut place`), when
+    /// `place` reaches no storage but its own. Only that shape is tracked: a reference
+    /// from a call, a `mut` one, or one to a field is not, and stays read as reaching
+    /// out. Inert outside a pool.
+    pub(super) fn note_block_referent(&mut self, holder: &str, place: &str) {
+        if self.pool_stack.is_empty() {
+            return;
+        }
+        let Some(symbol) = self.symbols.lookup(place) else {
+            return;
+        };
+        if self.self_contained(&symbol.ty, &mut HashSet::new()) {
+            self.symbols.set_block_referent(holder, place);
+        }
+    }
+
+    /// Whether `name` is a reference [`note_block_referent`] traced to a binding the
+    /// innermost open pool declares, so a write through it cannot outlive the block.
+    ///
+    /// [`note_block_referent`]: TypeChecker::note_block_referent
+    fn borrows_block_local(&self, name: &str) -> bool {
+        let (Some(pool), Some(symbol)) = (self.pool_stack.last(), self.symbols.lookup(name)) else {
+            return false;
+        };
+        symbol
+            .block_referent
+            .is_some_and(|scope| scope >= pool.scope_floor)
+    }
+
+    /// Whether a value of `ty` reaches no storage but its own and what it owns: no
+    /// reference, function value (its captures may borrow), trait object or type
+    /// parameter anywhere inside it. A name the declarations do not know is not.
+    fn self_contained(&self, ty: &Type, seen: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Reference { .. }
+            | Type::Function { .. }
+            | Type::DynObject(_)
+            | Type::Generic(_)
+            | Type::Slice(_)
+            | Type::Unknown => false,
+            Type::Struct(name) => {
+                !seen.insert(name.clone())
+                    || self.struct_defs.get(name).is_some_and(|fields| {
+                        fields
+                            .iter()
+                            .all(|(_, field)| self.self_contained(field, seen))
+                    })
+            }
+            Type::Enum(name) => {
+                !seen.insert(name.clone())
+                    || self.enum_defs.get(name).is_some_and(|variants| {
+                        variants
+                            .iter()
+                            .flat_map(|variant| variant.fields.iter())
+                            .all(|(_, payload)| self.self_contained(payload, seen))
+                    })
+            }
+            Type::Newtype(name) => {
+                !seen.insert(name.clone())
+                    || self
+                        .newtype_defs
+                        .get(name)
+                        .is_some_and(|inner| self.self_contained(inner, seen))
+            }
+            Type::Array { element, .. } | Type::Tensor { element, .. } => {
+                self.self_contained(element, seen)
+            }
+            Type::Tuple(elements) => elements
+                .iter()
+                .all(|element| self.self_contained(element, seen)),
+            Type::Collection { args, .. } => args.iter().all(|arg| self.self_contained(arg, seen)),
+            _ => true,
+        }
+    }
+
     /// Whether `name` resolves to a binding declared before the OUTERMOST open pool.
     ///
     /// The outermost, not the innermost: a binding made in an enclosing pool's body may
@@ -343,6 +419,29 @@ impl TypeChecker {
     /// callee is not known until runtime, so the compiler does not guess what it
     /// allocates or who ends up owning it.
     fn callee_provenance_is_provable(&self, func: &Expr, emission: Emission) -> bool {
+        // A function value runs a closure body, which may return one of its captures as it
+        // stands; one the block built may have captured the block's arena memory.
+        let mut callee = func;
+        while let Expr::Paren(inner, _) = callee {
+            callee = inner;
+        }
+        match callee {
+            Expr::Identifier(id) if self.symbols.lookup(&id.name).is_some() => {
+                return self.binding_carries_no_arena(&id.name);
+            }
+            // A function item, an associated function, or a method or field whose
+            // receiver the operand walk judges.
+            Expr::Identifier(_) | Expr::Path { .. } | Expr::FieldAccess { .. } => {}
+            // An element or tuple field holds what its root binding holds: a store of a
+            // closure the block built into an older one is refused by the store rule.
+            Expr::Index { .. } | Expr::TupleIndex { .. } => {
+                return root_binding(callee)
+                    .is_some_and(|root| self.binding_carries_no_arena(root));
+            }
+            // Any other callee (`fs[0]`, `p.0`, `(*r)`, a branch, a closure literal)
+            // computes a function value, judged by what that value can hold.
+            other => return self.carries_no_arena(other, emission),
+        }
         if self.callee_key(func).is_some() {
             return true;
         }
@@ -428,15 +527,20 @@ impl TypeChecker {
         if self.pool_stack.is_empty() {
             return;
         }
-        let Some(place) = self.retaining_place(func, args) else {
+        let places = self.retaining_places(func, args);
+        let Some(place) = places.first().cloned() else {
             return;
         };
         // Nothing the block owns is being handed over, so there is nothing to retain. A
         // parameter of pointerless type receives no address, whatever computed the argument.
-        // A function value is judged by what it captured: a callee may keep one.
+        // A function value is judged by what it captured: a callee may keep one. With one
+        // channel only, an argument rooted at that very place can only be stored back
+        // into itself; a second channel could carry it into an older place.
         let params = self.declared_params(func).unwrap_or_default();
         let handed_over = args.iter().enumerate().any(|(i, arg)| {
             !params.get(i).is_some_and(|param| self.pool_safe(param))
+                && !(places.len() == 1
+                    && root_binding(arg).is_some_and(|root| format!("'{root}'") == place))
                 && !self.carries_no_arena(arg, Emission::InPlace)
         });
         if !handed_over {
@@ -494,7 +598,7 @@ impl TypeChecker {
         });
     }
 
-    /// The outliving place this call gives the callee write access to, if any.
+    /// Every outliving place this call gives the callee write access to, quoted.
     ///
     /// Write access is read from the signature, not from the callee's body: a `&mut`
     /// parameter, or a `&mut self` receiver, is the whole set of channels through which
@@ -502,29 +606,109 @@ impl TypeChecker {
     /// stores through one is not asked, for the same reason `off_arena` does not ask
     /// what a callee allocates — an unproven answer has to be the one that keeps the
     /// value inside the block.
-    fn retaining_place(&self, func: &Expr, args: &[Expr]) -> Option<String> {
-        // The receiver is not in `args`; it rides inside a field-access callee, and its
-        // mutability lives in `mut_self_methods` rather than in the signature, where
-        // `self` is recorded as the bare struct type.
-        if let (Some(key), Some(object)) = (self.callee_key(func), self.callee_operand(func))
-            && self.mut_self_methods.contains(&key)
-            && let Some(root) = self.outliving_root(object)
-        {
-            return Some(root);
+    fn retaining_places(&self, func: &Expr, args: &[Expr]) -> Vec<String> {
+        let mut places = Vec::new();
+        // The receiver is not in `args`; it rides inside a field-access callee. A declared
+        // method's mutability lives in `mut_self_methods` rather than in the signature,
+        // where `self` is recorded as the bare struct type; a method dispatched through a
+        // trait (a `dyn` or a bounded type parameter) reads it off the trait.
+        if let Some(object) = self.callee_operand(func) {
+            let writes = match (self.retention_key(func), self.trait_method_sig(func)) {
+                (Some(key), _) => self.mut_self_methods.contains(&key),
+                (None, Some(sig)) => matches!(sig.self_param, Some(SelfParam::RefMut)),
+                // No signature in view: any receiver that is not a shared borrow.
+                (None, None) => {
+                    self.dispatched_by_trait(func)
+                        && !self
+                            .projection_type(object)
+                            .is_some_and(|ty| matches!(ty, Type::Reference { mutable: false, .. }))
+                }
+            };
+            if writes {
+                places.extend(self.outliving_root(object));
+            }
         }
+        match self.declared_params(func) {
+            Some(params) => places.extend(
+                params
+                    .iter()
+                    .zip(args)
+                    .filter(|(param, _)| matches!(param, Type::Reference { mutable: true, .. }))
+                    .filter_map(|(_, arg)| self.outliving_root(arg)),
+            ),
+            // A trait method whose signature names `Self` has no usable parameter list, so
+            // every argument that is itself a `&mut` is taken to keep what the call hands over.
+            None if self.dispatched_by_trait(func) => places.extend(
+                args.iter()
+                    .filter(|arg| self.is_mut_reference(arg))
+                    .filter_map(|arg| self.outliving_root(arg)),
+            ),
+            None => {}
+        }
+        places.dedup();
+        places
+    }
 
-        self.declared_params(func)?
-            .iter()
-            .zip(args)
-            .filter(|(param, _)| matches!(param, Type::Reference { mutable: true, .. }))
-            .find_map(|(_, arg)| self.outliving_root(arg))
+    /// Whether `func` is a method reached through a trait object or a type parameter, whose
+    /// body is not in view at the call.
+    fn dispatched_by_trait(&self, func: &Expr) -> bool {
+        self.callee_operand(func)
+            .and_then(|object| self.projection_type(object))
+            .is_some_and(|ty| matches!(ty.referent(), Type::DynObject(_) | Type::Generic(_)))
+    }
+
+    /// The trait signature of a method called through a trait object, or through a type
+    /// parameter one of whose bounds declares it.
+    fn trait_method_sig(&self, func: &Expr) -> Option<&TraitMethodSig> {
+        let Expr::FieldAccess { object, field, .. } = func else {
+            return None;
+        };
+        match self.projection_type(object)?.referent() {
+            Type::DynObject(name) => self.traits.get(name)?.methods.get(&field.name),
+            Type::Generic(name) => self
+                .generic_bounds
+                .get(name)?
+                .iter()
+                .find_map(|bound| self.traits.get(&bound.trait_name)?.methods.get(&field.name)),
+            _ => None,
+        }
+    }
+
+    /// [`callee_key`](TypeChecker::callee_key), widened for the retention rule to a method
+    /// whose receiver is reached through an index or a tuple field (`arr[0].set(..)`,
+    /// `p.0.set(..)`), or is an enum or newtype.
+    fn retention_key(&self, func: &Expr) -> Option<String> {
+        if let Some(key) = self.callee_key(func) {
+            return Some(key);
+        }
+        let Expr::FieldAccess { object, field, .. } = func else {
+            return None;
+        };
+        match self.projection_type(object)?.referent() {
+            Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => {
+                self.method_key(name, &field.name).cloned()
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether `expr` is a `&mut` borrow written at the call (`&mut a`) or a value of
+    /// `&mut` type.
+    fn is_mut_reference(&self, expr: &Expr) -> bool {
+        matches!(expr, Expr::Reference { mutable: true, .. })
+            || self
+                .projection_type(expr)
+                .is_some_and(|ty| matches!(ty, Type::Reference { mutable: true, .. }))
     }
 
     /// The callee's declared parameter types, aligned with the call's positional
-    /// arguments. `None` for a callee with no signature to read: a builtin, a trait
-    /// object, a closure value.
+    /// arguments: a declared function or method, a generic template, or a function value
+    /// (a closure binding or a struct field of function type), whose type carries them,
+    /// or a trait method dispatched through a `dyn` or a type parameter. `None` for a
+    /// callee with no signature to read: a builtin, or a trait method whose registered
+    /// parameters are placeholders for `Self`.
     fn declared_params(&self, func: &Expr) -> Option<&[Type]> {
-        if let Some(key) = self.callee_key(func) {
+        if let Some(key) = self.retention_key(func) {
             let Some(Type::Function { params, .. }) = self.functions.get(&key) else {
                 return None;
             };
@@ -535,19 +719,44 @@ impl TypeChecker {
                 None => Some(params.as_slice()),
             };
         }
+        if let Some(sig) = self.trait_method_sig(func) {
+            // A trait signature's `params` exclude `self` already.
+            return (!sig.resolved_per_use).then_some(sig.params.as_slice());
+        }
         // A generic template is not in `functions`, since each call site monomorphizes
         // its own instance, but its signature still says which parameters are `&mut`.
-        let Expr::Identifier(id) = func else {
-            return None;
+        if let Expr::Identifier(id) = func
+            && let Some(sig) = self.generic_funcs.get(&id.name)
+        {
+            return Some(sig.params.as_slice());
+        }
+        let value_ty = match func {
+            Expr::Identifier(id) => &self.symbols.lookup(&id.name)?.ty,
+            Expr::FieldAccess { object, field, .. } => {
+                let Type::Struct(owner) = self.projection_type(object)?.referent().clone() else {
+                    return None;
+                };
+                &self
+                    .struct_defs
+                    .get(&owner)?
+                    .iter()
+                    .find(|(name, _)| *name == field.name)?
+                    .1
+            }
+            _ => return None,
         };
-        self.generic_funcs
-            .get(&id.name)
-            .map(|sig| sig.params.as_slice())
+        match value_ty.referent() {
+            Type::Function { params, .. } => Some(params.as_slice()),
+            _ => None,
+        }
     }
 
     /// The binding a place expression is rooted in, quoted for a diagnostic, when that
-    /// binding was declared before every open pool. `None` when the expression is not
-    /// rooted in such a binding, which includes every expression that is not a place.
+    /// binding was declared before the INNERMOST open pool. `None` when the expression is
+    /// not rooted in such a binding, which includes every expression that is not a place.
+    ///
+    /// The innermost, as the store rule reads it: an argument is emitted in place, in the
+    /// innermost arena, so a place an enclosing pool declared still outlives its release.
     fn outliving_root(&self, place: &Expr) -> Option<String> {
         let name = root_binding(place)?;
         // A binding of pointerless type has nowhere to keep an address, so nothing
@@ -557,8 +766,15 @@ impl TypeChecker {
             .lookup(name)
             .is_none_or(|symbol| !self.pool_safe(symbol.ty.referent()));
         // A `&mut` the block declares reaches whatever it borrows, which may predate
-        // every open pool however recently the reference itself was made.
-        let reaches_out = self.declared_before_pools(name) || self.reaches_through_mut(place);
+        // every open pool however recently the reference itself was made, unless it
+        // borrows one of the innermost block's own bindings.
+        let declared_before = self.pool_stack.last().is_some_and(|pool| {
+            self.symbols
+                .defining_depth(name)
+                .is_some_and(|depth| depth < pool.scope_floor)
+        });
+        let reaches_out =
+            declared_before || (self.reaches_through_mut(place) && !self.borrows_block_local(name));
         (holds_pointers && reaches_out).then(|| format!("'{name}'"))
     }
 
@@ -726,11 +942,18 @@ impl TypeChecker {
         }
     }
 
+    /// The innermost open pool a jump can leave: one the function or closure body being
+    /// checked opened itself. `None` when every open pool encloses that body from outside.
+    fn jump_pool(&self) -> Option<&PoolContext> {
+        self.pool_stack[self.jump_pool_floor.min(self.pool_stack.len())..].last()
+    }
+
     /// Reject a `return` inside a pool block that carries a value the block's arena may
     /// hold. Leaving the block releases its arena on the way out, so a bare `return` and
-    /// one carrying a number, `bool` or `char` are fine. Inert outside a pool.
-    pub(crate) fn check_pool_return(&mut self, value: &Type, span: Span) {
-        let Some(pool) = self.pool_stack.last() else {
+    /// one carrying a number, `bool` or `char` are fine. A `?` is the same exit, named by
+    /// `keyword`, and `value` is what its failure carries. Inert outside a pool.
+    pub(crate) fn check_pool_return(&mut self, keyword: &str, value: &Type, span: Span) {
+        let Some(pool) = self.jump_pool() else {
             return;
         };
         if jump_value_outlives_arena(value) {
@@ -738,7 +961,7 @@ impl TypeChecker {
         }
         let pool = pool.pool.clone();
         self.record_error(TypeError::PoolControlFlowEscapes {
-            keyword: "return".to_string(),
+            keyword: keyword.to_string(),
             pool,
             span,
         });
@@ -756,7 +979,7 @@ impl TypeChecker {
         value: &Type,
         span: Span,
     ) {
-        let Some(pool) = self.pool_stack.last() else {
+        let Some(pool) = self.jump_pool() else {
             return;
         };
         if jump_value_outlives_arena(value) {
@@ -798,7 +1021,9 @@ fn root_binding(expr: &Expr) -> Option<&str> {
         Expr::Identifier(id) => Some(&id.name),
         Expr::Paren(inner, _) => root_binding(inner),
         Expr::Reference { operand, .. } | Expr::Deref { operand, .. } => root_binding(operand),
-        Expr::FieldAccess { object, .. } | Expr::Index { object, .. } => root_binding(object),
+        Expr::FieldAccess { object, .. }
+        | Expr::Index { object, .. }
+        | Expr::TupleIndex { object, .. } => root_binding(object),
         _ => None,
     }
 }

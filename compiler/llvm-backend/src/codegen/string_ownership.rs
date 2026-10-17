@@ -48,6 +48,10 @@ pub(crate) struct StringOwnership {
     /// one `string` parameter unchanged, with that parameter's index. What such a call
     /// yields is owned exactly when the argument it was passed was.
     forwards: HashMap<String, usize>,
+    /// Functions returning a holder, by the name a call site resolves to, with the paths
+    /// of the `string` positions every return path stores a fresh allocation into. A call
+    /// to one hands its caller those positions owned.
+    holder_returns: HashMap<String, Vec<Vec<String>>>,
 }
 
 impl StringOwnership {
@@ -64,6 +68,11 @@ impl StringOwnership {
     /// The index of the `string` parameter a call to `name` hands back unchanged.
     pub(crate) fn forwarded_param(&self, name: &str) -> Option<usize> {
         self.forwards.get(name).copied()
+    }
+
+    /// The `string` positions, by path, a call to `name` hands back owned.
+    pub(crate) fn held_strings_returned(&self, name: &str) -> &[Vec<String>] {
+        self.holder_returns.get(name).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -150,10 +159,96 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
         forwards.extend(grown);
     }
 
+    // The return summary again, per `string` position of a returned holder: the paths
+    // every exit stores an allocation into. A fixpoint because an exit may be a call to
+    // another such function; each pass only adds paths, so it converges, and a position
+    // owned only around a cycle is never claimed.
+    let holder_bodies = returning_bodies(items, |ty| {
+        matches!(ty, Type::Struct(_) | Type::Tuple(_) | Type::Array { .. })
+    });
+    let mut holder_returns: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    loop {
+        let mut grown = false;
+        for (name, exits) in &holder_bodies {
+            if exits.is_empty() || shadowed.contains(name) {
+                continue;
+            }
+            let mut every: Option<Vec<Vec<String>>> = None;
+            for exit in exits {
+                let mut armed = Vec::new();
+                allocated_positions(
+                    exit,
+                    &returns_owned,
+                    &holder_returns,
+                    &mut Vec::new(),
+                    &mut armed,
+                );
+                every = Some(match every {
+                    None => armed,
+                    Some(prev) => prev.into_iter().filter(|p| armed.contains(p)).collect(),
+                });
+            }
+            let every = every.unwrap_or_default();
+            if every.len() > holder_returns.get(name).map_or(0, Vec::len) {
+                holder_returns.insert(name.clone(), every);
+                grown = true;
+            }
+        }
+        if !grown {
+            break;
+        }
+    }
+
     StringOwnership {
         returns_owned,
         read_only_params,
         forwards,
+        holder_returns,
+    }
+}
+
+/// The paths of the `string` positions of the holder `expr` builds that it stores a
+/// fresh allocation into: an aggregate literal's positions [`allocates`] proves, walked
+/// with the segments the drop pass gives them, and a call's positions the summary so far
+/// proves. Anything else proves nothing.
+fn allocated_positions(
+    expr: &HirExpr,
+    producers: &HashSet<String>,
+    holders: &HashMap<String, Vec<Vec<String>>>,
+    path: &mut Vec<String>,
+    out: &mut Vec<Vec<String>>,
+) {
+    if matches!(Type::from_hir(&expr.ty), Type::String) {
+        if allocates(expr, producers) {
+            out.push(path.clone());
+        }
+        return;
+    }
+    match &expr.kind {
+        HirExprKind::StructLiteral { fields, .. } => {
+            for field in fields {
+                path.push(field.name.clone());
+                allocated_positions(&field.value, producers, holders, path, out);
+                let _ = path.pop();
+            }
+        }
+        HirExprKind::ArrayLiteral { elements } | HirExprKind::TupleLiteral { elements } => {
+            for (index, element) in elements.iter().enumerate() {
+                path.push(index.to_string());
+                allocated_positions(element, producers, holders, path, out);
+                let _ = path.pop();
+            }
+        }
+        HirExprKind::NewtypeConstruct { value, .. } => {
+            allocated_positions(value, producers, holders, path, out)
+        }
+        HirExprKind::Call { callee, .. } => {
+            let returned = callee_key(callee).and_then(|key| holders.get(&key));
+            for position in returned.into_iter().flatten() {
+                out.push(path.iter().chain(position).cloned().collect());
+            }
+        }
+        _ => {}
     }
 }
 
@@ -348,7 +443,93 @@ fn for_each_tail_mut(tail: &mut HirExpr, visit: &mut dyn FnMut(&mut HirExpr)) {
             }
         }
         HirExprKind::Block { stmts } => block_tail_mut(stmts, visit),
+        HirExprKind::Loop { label, body } => {
+            for_each_break_mut(body, label.as_deref(), false, visit);
+        }
         _ => visit(tail),
+    }
+}
+
+/// [`aimed_breaks`], visiting each aimed `break` value mutably. It steps through exactly the
+/// lists [`aimed_breaks`] enters, which [`loop_break_values`] has already vouched for.
+fn for_each_break_mut(
+    stmts: &mut [HirStmt],
+    target: Option<&str>,
+    nested: bool,
+    visit: &mut dyn FnMut(&mut HirExpr),
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Break {
+                label,
+                value: Some(value),
+                ..
+            } => {
+                if aims_at(label.as_deref(), target, nested) {
+                    visit(value);
+                }
+            }
+            HirStmt::If {
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => {
+                for_each_break_mut(then_block, target, nested, visit);
+                for (_, block) in else_if_blocks {
+                    for_each_break_mut(block, target, nested, visit);
+                }
+                if let Some(block) = else_block {
+                    for_each_break_mut(block, target, nested, visit);
+                }
+            }
+            HirStmt::While { body, .. }
+            | HirStmt::ForRange { body, .. }
+            | HirStmt::ForEach { body, .. } => for_each_break_mut(body, target, true, visit),
+            HirStmt::ValElse { else_block, .. } => {
+                for_each_break_mut(else_block, target, nested, visit);
+            }
+            HirStmt::Expr(expr)
+            | HirStmt::VarDecl {
+                init: Some(expr), ..
+            } => for_each_break_in_expr_mut(expr, target, nested, visit),
+            _ => {}
+        }
+    }
+}
+
+/// [`for_each_break_mut`] for the lists an expression holds, [`expression_lists`] mirrored.
+fn for_each_break_in_expr_mut(
+    expr: &mut HirExpr,
+    target: Option<&str>,
+    nested: bool,
+    visit: &mut dyn FnMut(&mut HirExpr),
+) {
+    match &mut expr.kind {
+        HirExprKind::Block { stmts }
+        | HirExprKind::Unsafe { stmts }
+        | HirExprKind::Pool { stmts, .. } => for_each_break_mut(stmts, target, nested, visit),
+        HirExprKind::Loop { body, .. } => for_each_break_mut(body, target, true, visit),
+        HirExprKind::If {
+            then_block,
+            else_if_blocks,
+            else_block,
+            ..
+        } => {
+            for_each_break_mut(then_block, target, nested, visit);
+            for (_, block) in else_if_blocks {
+                for_each_break_mut(block, target, nested, visit);
+            }
+            if let Some(block) = else_block {
+                for_each_break_mut(block, target, nested, visit);
+            }
+        }
+        HirExprKind::Match { arms, .. } => {
+            for arm in arms {
+                for_each_break_in_expr_mut(&mut arm.body, target, nested, visit);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -489,11 +670,19 @@ fn callables(items: &[HirItem]) -> Vec<Callable<'_>> {
 ///
 /// A callable with an exit this cannot enumerate gets an empty list and so never
 /// qualifies: the tail must be an expression statement, and every other exit an
-/// explicit `return` at statement level. A tail that is an `if`, a `match` or a block
-/// exits through each branch's own tail, which [`tail_exits`] reads through. A `return`
-/// inside an expression (a `loop` body, an `if` used as a value) is an exit
-/// [`collect_returns`] does not reach, so a body with one answers the safe way.
+/// explicit `return`. A tail that is an `if`, a `match` or a block exits through each
+/// branch's own tail, and a tail `loop` through the `break` values aimed at it, which
+/// [`tail_exits`] reads. A `return` inside an expression (a `loop` body, an `if` used as a
+/// value) is added by [`collect_expression_returns`]. A `break` the tail walk cannot account
+/// for makes the body unreadable, so it answers the safe way.
 fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
+    // A newtype over `string` is the `string` itself once erased.
+    returning_bodies(items, |ty| matches!(ty, Type::String))
+}
+
+/// The exits [`string_returning_bodies`] reads, for the callables whose return type
+/// `wanted` accepts.
+fn returning_bodies(items: &[HirItem], wanted: fn(&Type) -> bool) -> Vec<(String, Vec<&HirExpr>)> {
     let mut out: Vec<(String, Vec<&HirExpr>)> = Vec::new();
     let mut returning: Vec<(String, &HirType, &[HirStmt])> = Vec::new();
     for item in items {
@@ -515,8 +704,7 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
         }
     }
     for (name, return_type, body) in returning {
-        // A newtype over `string` is the `string` itself once erased.
-        if !matches!(Type::from_hir(return_type), Type::String) {
+        if !wanted(&Type::from_hir(return_type)) {
             continue;
         }
         let mut exits = Vec::new();
@@ -531,8 +719,9 @@ fn string_returning_bodies(items: &[HirItem]) -> Vec<(String, Vec<&HirExpr>)> {
 }
 
 /// The values a tail expression leaves through: itself, or for an `if` with an `else`, a
-/// `match` or a block, each branch's own tail. `false` when a branch ends in anything
-/// but an expression, whose value this cannot name.
+/// `match` or a block, each branch's own tail, or for a `loop` the `break` values aimed at
+/// it (none when it has no `break`: it leaves only through a `return`). `false` when a
+/// branch ends in anything but an expression, whose value this cannot name.
 pub(crate) fn tail_exits<'a>(tail: &'a HirExpr, out: &mut Vec<&'a HirExpr>) -> bool {
     match &tail.kind {
         HirExprKind::If {
@@ -549,6 +738,7 @@ pub(crate) fn tail_exits<'a>(tail: &'a HirExpr, out: &mut Vec<&'a HirExpr>) -> b
         }
         HirExprKind::Match { arms, .. } => arms.iter().all(|arm| tail_exits(&arm.body, out)),
         HirExprKind::Block { stmts } => block_tail_exits(stmts, out),
+        HirExprKind::Loop { label, body } => loop_break_values(label.as_deref(), body, out),
         _ => {
             out.push(tail);
             true
@@ -569,6 +759,138 @@ fn block_tail_exits<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) -> boo
         return tail_exits(init, out);
     }
     tail_exits(tail, out)
+}
+
+/// The `break` values aimed at the `loop` labeled `label` whose body is `body`: an
+/// unlabeled `break` outside any loop nested in the body, and a labeled one naming `label`.
+/// A `return` inside is not here, [`collect_expression_returns`] has it.
+///
+/// `false` when a `break` aimed here carries no value, or when the walk cannot account for
+/// every `break` in the body (one inside an operand, or in a nested loop sharing `label`),
+/// which would leave an exit unnamed. A closure body is a lifted item, never walked into.
+fn loop_break_values<'a>(
+    label: Option<&str>,
+    body: &'a [HirStmt],
+    out: &mut Vec<&'a HirExpr>,
+) -> bool {
+    let mut seen = 0;
+    let mut aimed = Vec::new();
+    if !aimed_breaks(body, label, false, &mut seen, &mut aimed) {
+        return false;
+    }
+    // Every `break` the walk did not step over sits in a list it never entered.
+    let mut total = count_breaks(body);
+    walk_stmts(body, &mut |expr| {
+        total += expression_blocks(expr)
+            .into_iter()
+            .map(count_breaks)
+            .sum::<usize>();
+    });
+    out.extend(aimed);
+    seen == total
+}
+
+/// Collect into `out` the value of each `break` in `stmts` aimed at the loop labeled
+/// `target`; `nested` is whether `stmts` sits inside a loop of the body.
+fn aimed_breaks<'a>(
+    stmts: &'a [HirStmt],
+    target: Option<&str>,
+    nested: bool,
+    seen: &mut usize,
+    out: &mut Vec<&'a HirExpr>,
+) -> bool {
+    stmts.iter().all(|stmt| {
+        if let HirStmt::Break { label, value, .. } = stmt {
+            *seen += 1;
+            if !aims_at(label.as_deref(), target, nested) {
+                return true;
+            }
+            return value.as_ref().is_some_and(|value| {
+                out.push(value);
+                true
+            });
+        }
+        nested_lists(stmt).into_iter().all(|(list, loop_label)| {
+            // A nested loop under the target's own label would make `break label` ambiguous.
+            if target.is_some() && loop_label.flatten() == target {
+                return false;
+            }
+            aimed_breaks(list, target, nested || loop_label.is_some(), seen, out)
+        })
+    })
+}
+
+/// Whether a `break` labeled `label` leaves the loop labeled `target`.
+fn aims_at(label: Option<&str>, target: Option<&str>, nested: bool) -> bool {
+    match label {
+        Some(_) => label == target,
+        None => !nested,
+    }
+}
+
+/// The statement lists a statement holds, each with the label of the loop it opens:
+/// `Some(label)` for a nested loop (`Some(None)` when unlabeled), `None` for plain nesting.
+fn nested_lists(stmt: &HirStmt) -> Vec<(&[HirStmt], Option<Option<&str>>)> {
+    match stmt {
+        HirStmt::If {
+            then_block,
+            else_if_blocks,
+            else_block,
+            ..
+        } => std::iter::once(then_block.as_slice())
+            .chain(else_if_blocks.iter().map(|(_, block)| block.as_slice()))
+            .chain(else_block.as_deref())
+            .map(|list| (list, None))
+            .collect(),
+        HirStmt::While { label, body, .. }
+        | HirStmt::ForRange { label, body, .. }
+        | HirStmt::ForEach { label, body, .. } => vec![(body.as_slice(), Some(label.as_deref()))],
+        HirStmt::ValElse { else_block, .. } => vec![(else_block.as_slice(), None)],
+        HirStmt::Expr(expr)
+        | HirStmt::VarDecl {
+            init: Some(expr), ..
+        } => expression_lists(expr),
+        _ => Vec::new(),
+    }
+}
+
+/// [`nested_lists`] for the lists an expression holds: its own blocks, and those of a `match`
+/// arm body, which is itself an expression.
+fn expression_lists(expr: &HirExpr) -> Vec<(&[HirStmt], Option<Option<&str>>)> {
+    if let HirExprKind::Match { arms, .. } = &expr.kind {
+        return arms
+            .iter()
+            .flat_map(|arm| expression_lists(&arm.body))
+            .collect();
+    }
+    let loop_label = match &expr.kind {
+        HirExprKind::Loop { label, .. } => Some(label.as_deref()),
+        _ => None,
+    };
+    expression_blocks(expr)
+        .into_iter()
+        .map(|list| (list, loop_label))
+        .collect()
+}
+
+/// How many `break` statements `stmts` holds through plain statement nesting. A `break` in
+/// the expression a statement holds is counted by the walk over the body's expressions.
+fn count_breaks(stmts: &[HirStmt]) -> usize {
+    stmts
+        .iter()
+        .map(|stmt| match stmt {
+            HirStmt::Break { .. } => 1,
+            HirStmt::If { .. }
+            | HirStmt::While { .. }
+            | HirStmt::ForRange { .. }
+            | HirStmt::ForEach { .. }
+            | HirStmt::ValElse { .. } => nested_lists(stmt)
+                .into_iter()
+                .map(|(list, _)| count_breaks(list))
+                .sum(),
+            _ => 0,
+        })
+        .sum()
 }
 
 /// The initializer of the binding `name` names after `stmts`, when the last declaration
@@ -625,26 +947,31 @@ fn collect_returns<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
 /// body is a lifted item whose returns leave the closure.
 fn collect_expression_returns<'a>(body: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
     walk_stmts(body, &mut |expr| {
-        let lists: Vec<&'a [HirStmt]> = match &expr.kind {
-            HirExprKind::If {
-                then_block,
-                else_if_blocks,
-                else_block,
-                ..
-            } => std::iter::once(then_block.as_slice())
-                .chain(else_if_blocks.iter().map(|(_, block)| block.as_slice()))
-                .chain(else_block.as_deref())
-                .collect(),
-            HirExprKind::Block { stmts }
-            | HirExprKind::Unsafe { stmts }
-            | HirExprKind::Pool { stmts, .. }
-            | HirExprKind::Loop { body: stmts, .. } => vec![stmts.as_slice()],
-            _ => Vec::new(),
-        };
-        for stmts in lists {
+        for stmts in expression_blocks(expr) {
             collect_returns(stmts, out);
         }
     });
+}
+
+/// The statement lists `expr` itself holds: the blocks of an `if`, a block, an `unsafe`
+/// block, a `pool` and a `loop` body. Not those of expressions nested in its operands.
+fn expression_blocks(expr: &HirExpr) -> Vec<&[HirStmt]> {
+    match &expr.kind {
+        HirExprKind::If {
+            then_block,
+            else_if_blocks,
+            else_block,
+            ..
+        } => std::iter::once(then_block.as_slice())
+            .chain(else_if_blocks.iter().map(|(_, block)| block.as_slice()))
+            .chain(else_block.as_deref())
+            .collect(),
+        HirExprKind::Block { stmts }
+        | HirExprKind::Unsafe { stmts }
+        | HirExprKind::Pool { stmts, .. }
+        | HirExprKind::Loop { body: stmts, .. } => vec![stmts.as_slice()],
+        _ => Vec::new(),
+    }
 }
 
 /// Whether `expr` always yields a freshly allocated buffer, reading a call against the
@@ -1278,5 +1605,48 @@ mod tests {
         assert!(owned.returns_owned("branch"));
         // A `mut` binding may hold a literal by the time the tail reads it.
         assert!(!owned.returns_owned("reassigned"));
+    }
+
+    #[test]
+    fn a_loop_tail_exits_through_the_break_values_aimed_at_it() {
+        let owned = summary(
+            "func plain(a: string, b: string, c: bool) -> string {\n    loop {\n        if c { return a + b }\n        break a + \"!\"\n    }\n}\nfunc labeled(a: string, c: bool) -> string {\n    outer: loop {\n        loop {\n            if c { break outer a + \"?\" }\n            break\n        }\n        break outer a + \"!\"\n    }\n}\nfunc inner(a: string, n: i32) -> string {\n    loop {\n        val k = loop { if n > 0 { break 1 } }\n        while n < 0 { break }\n        break a + \"{k}\"\n    }\n}\nfunc arm(a: string, c: bool) -> string {\n    if c { loop { break a + \"p\" } } else { a + \"q\" }\n}\nfunc matched(a: string, n: i32) -> string {\n    loop {\n        match n {\n            0 => { break \"zero\" }\n            _ => { break a + \"m\" }\n        }\n    }\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        for name in ["plain", "labeled", "inner", "arm", "matched"] {
+            assert!(owned.returns_owned(name), "{name} should produce");
+        }
+    }
+
+    #[test]
+    fn a_loop_tail_with_a_break_that_does_not_allocate_is_not_a_producer() {
+        let owned = summary(
+            "func forwards(a: string, c: bool) -> string {\n    loop {\n        if c { return a + \"x\" }\n        break a\n    }\n}\nfunc valueless(a: string) -> string {\n    loop {\n        while true { break }\n        return a + \"x\"\n    }\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(!owned.returns_owned("forwards"));
+        // No `break` aims at the loop, so the `return` is the only exit.
+        assert!(owned.returns_owned("valueless"));
+    }
+
+    #[test]
+    fn a_literal_break_beside_an_allocation_is_copied_not_freed() {
+        let source = "func f(a: string, c: bool) -> string {\n    loop {\n        if c { break \"none\" }\n        break a + \"!\"\n    }\n}\nfunc main() -> i32 { 0 }\n";
+        let ast = syntax_parsing::parse(source).expect("parsing failed");
+        let hir = hir_lowering::lower_program(&ast).expect("lowering failed");
+        assert!(!analyze(&hir.items).returns_owned("f"));
+        let promoted = promote_literal_exits(&hir.items).expect("the literal break is copied");
+        assert!(analyze(&promoted).returns_owned("f"));
+    }
+
+    #[test]
+    fn a_returned_holder_owns_only_the_positions_every_exit_allocates() {
+        let owned = summary(
+            "struct P { name: string, tag: string }\nfunc make(a: string) -> P { P { name: a + \"!\", tag: \"t\" } }\nfunc mixed(a: string, c: bool) -> P {\n    if c { return P { name: a + \"x\", tag: a + \"y\" } }\n    P { name: a + \"z\", tag: \"lit\" }\n}\nfunc chained(a: string) -> (P, string) { (make(a), \"q\") }\nfunc kept(p: P) -> P { p }\nfunc main() -> i32 { 0 }\n",
+        );
+        let name = [vec!["name".to_string()]];
+        assert_eq!(owned.held_strings_returned("make"), name);
+        assert_eq!(owned.held_strings_returned("mixed"), name);
+        let nested: Vec<String> = ["0", "name"].map(String::from).to_vec();
+        assert_eq!(owned.held_strings_returned("chained"), [nested]);
+        assert!(owned.held_strings_returned("kept").is_empty());
     }
 }

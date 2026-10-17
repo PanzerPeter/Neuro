@@ -292,7 +292,10 @@ with `icmp` / `fcmp` / `codegen_string_eq` and recursing into a nested struct, t
 results: none of the comparisons can have a side effect, so an `and` chain is cheaper than the
 branching a short-circuit would need. A `&mut S` operand is loaded through first. `!=` negates.
 Recursion is bounded by `MAX_DERIVE_DEPTH`, insurance against a future self-referential layout.
-A hand-written `impl PartialEq` never arrives here: lowering turned it into a method call.
+A hand-written `impl PartialEq` never arrives here as the operand type: lowering turned it into a
+method call. As a field's type it does, and the field is compared by its own `{Type}__eq`
+(`call_key_method`), but only for a type in `partial_eq_impls` (collected from the HIR impls
+whose trait is `PartialEq`): an inherent method named `eq` is not the type's comparison.
 
 `+` is concatenation, routed to `codegen_string_concat` before the numeric coercion: both operands
 are normalized with `load_string_fatptr`, a `len1 + len2` buffer is `malloc`'d, each operand's
@@ -342,7 +345,15 @@ literal collects the same thing per position while the declaration or assignment
 into a struct, tuple or array literal position (`Entry { label: t }`, nested literals included,
 each extending the path), and a functional update contributes its base's flags for the positions
 it takes. The collection is suspended inside any position that is not itself a literal, since a
-literal there (a call argument, a branch) builds some other value.
+literal there (a call argument, a branch) builds some other value. A holder built through a
+branch (an `if`, an `else if` chain, a `match`, a block, nested to any depth) collects the same
+facts per arm: `open_branch_string_slots` declares one cleared `i1` per `string` position before
+the branch, `branch_string_slots` carries them only across the dispatch into it (the branch takes
+them at once, so a condition, a scrutinee, a guard or an arm's earlier statements never see them),
+and `codegen_branch_tail` stores what the taken arm's tail hands over: armed for a provable
+allocation, a moved binding's flag (the holder whole, or a `string` moved into a literal
+position), nothing for a literal. A tail that is itself a branch passes the slots on; a diverging
+arm stores nothing. The declaration or assignment then reads the slots into its positions.
 
 A third kind of consumer STORES the fat pointer somewhere that outlives the expression. Ownership
 then belongs to the storage, and is tracked one of three ways:
@@ -351,7 +362,8 @@ then belongs to the storage, and is tracked one of three ways:
   `plan_held_drops` plans a `DropTarget::HeapString` held entry for every `string` position, with
   its flag DISARMED: the type proves nothing. `arm_stored_string_positions` arms the positions the
   initializer or field assignment stored a provable allocation into, walking the aggregate literal
-  in step with the held paths. A holder's move or its field's move clears those flags exactly as it
+  in step with the held paths, plus the positions a call's callee always allocated (below). A
+  holder's move or its field's move clears those flags exactly as it
   clears any other. An enum payload gets no such entry: its slot is destroyed under a tag switch
   with no flag to guard it.
 - **A function's return value.** `codegen/string_ownership.rs` reads every body once, before any is
@@ -361,12 +373,23 @@ then belongs to the storage, and is tracked one of three ways:
   with arguments is a producer. The set is a fixpoint, because one producer can be another's only return path; it
   starts empty and grows, so a recursive cycle never enters it. A name a local binding shadows is
   excluded, since `codegen_call_dispatch` may send that call through the indirect path. A tail
-  `if` (with an `else`), `match` or block exits through each branch's own tail (`tail_exits`). A
+  `if` (with an `else`), `match` or block exits through each branch's own tail (`tail_exits`), and
+  a tail `loop` through the `break` values aimed at it (none when it has no `break`):
+  `loop_break_values` follows an unlabeled `break` to the innermost loop and a labeled one to its
+  label, and answers "unreadable" when any `break` in the body sits where its walk does not look. A
   `return` written inside an expression (a `loop` body, an `if` or `match` used as a value, a
   block) is an exit like any other: `collect_expression_returns` walks every such statement list
   (never into a closure, whose returns leave the closure) and adds its returns. Missing one once
   let a function that returned a literal through it be read as allocating, and its caller freed
   the literal, so the walk covers every expression kind `walk` reaches.
+- **A holder's positions across a return.** The same pass reads every function returning a
+  struct, tuple or array through the same exits and records, per function, the paths of the
+  `string` positions EVERY exit stores an allocation into (`allocated_positions`: an aggregate
+  literal's positions `allocates` proves, and a call's positions this summary already proves, so
+  again a fixpoint growing from empty). `held_strings_returned` answers it, and
+  `collect_armed_positions` arms those positions wherever a call result is stored, so
+  `val e = make(&a)` owns what `make` allocated. A position some exit fills from a literal, a
+  parameter or anything unproven is not in the intersection and arms nothing.
 - **A forwarded parameter.** The pass's third answer: the functions whose every exit hands back
   one `string` parameter unchanged (a read of it, or a call to another forwarder passing it on,
   so again a growing fixpoint), with that parameter's index. What such a call yields is owned
@@ -415,7 +438,7 @@ then belongs to the storage, and is tracked one of three ways:
   where a `string` payload can be proven owned.
 
 **Known limits**: among the covered positions, three shapes stay unproven
-and leak: a holder a call built (the call proves nothing about its positions), a function with one
+and leak: a position a callee fills from a parameter or on only some paths, a function with one
 literal-returning path, and a parameter the callee may store. A collection read carried into a
 view-producing method (`v[0].slice(...)`, `.chars()`) leaks its copy, as any other anonymous
 string does there.
@@ -535,8 +558,10 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
 - `struct.clone()` → handled in the struct method-call arm rather than `resolve_builtin_method`
   (which is keyed by `Type`): when the receiver is a struct, the field is `clone`, and no
   `StructName__clone` exists, it passes `BuiltinMethod::StructClone`. Semantic analysis already
-  verified the `Clone` derive. Lowers to the receiver's aggregate value: faithful while
-  stack-allocated, must recurse into heap-owning fields later.
+  verified the `Clone` derive. Lowers to the receiver's aggregate value: faithful for every
+  struct that reaches it, since lowering sends the clone of a non-`Copy` struct whose fields call
+  a hand-written `clone` to the `S__clone$derived` method it emits instead (an inherent `&self`
+  method whose body is the field-by-field literal).
 - `tensor.clone()` → `BuiltinMethod::TensorClone` → `codegen_tensor_clone`
   (`expressions/tensors.rs`). A tensor value is a DLPack handle, so the clone allocates a second
   handle and a second buffer and `memcpy`s the elements across: the copy is independent and both
@@ -1195,8 +1220,10 @@ A `@derive(Debug)` struct hole renders through `render_struct_debug`, which fram
 Debug`, which is what quotes a nested `string` or `char` and recurses into a nested struct. The
 name comes from `struct_written_names` (`HirStruct::written_name`, set by `set_struct_written_names`
 beside `set_struct_defs`), so a monomorphized instance prints `Wrapper`, not `Wrapper$g_i32`. A
-field-less struct renders as its bare name. The pieces reuse the same `PieceOwner` bookkeeping the
-enclosing literal uses, so a nested rendering's scratch buffers are freed once copied out.
+field-less struct renders as its bare name. A field whose `Debug` is written by hand renders
+through the `{Type}__fmt_debug$string` helper lowering emitted for it (`render_through_debug_impl`),
+an owned piece. The pieces reuse the same `PieceOwner` bookkeeping the enclosing literal uses, so
+a nested rendering's scratch buffers are freed once copied out.
 
 ## Closure ABI
 `codegen/closures.rs`. A closure value is a `{ fn_ptr, env_ptr }` fat pointer, and `map_type`
@@ -1484,9 +1511,11 @@ release.
 A jump out of a pool runs the same release. `codegen_pool_expr` pushes a `PoolExit` (the body's
 drop-scope index, both marks, the sweep's stop marker) onto `pool_exits`, and `return`, `break`
 and `continue` leave through `emit_exit_through`, which emits each scope's drops innermost first
-and, after the body scope of every pool the jump leaves, that pool's sweep and release. A
-`return` whose value is not a scalar can only be a `?` residual, which the checker does not see as
-a jump; it sweeps but keeps the arena mark, since the residual may live in the arena. The sweep dispatches `bulk_release` per registered instance. Between calls the current
+and, after the body scope of every pool the jump leaves, that pool's sweep and release. A `?`
+lowers to a plain `return` of its residual, and `holds_no_address` releases the arena for one
+built only from scalars (`None`, an `Err` over a number) as for a scalar; the checker refuses
+every other `?` and `return` out of a pool. A value outside both still sweeps but keeps the
+arena mark, so no checked program reaches that path. The sweep dispatches `bulk_release` per registered instance. Between calls the current
 device is GPU 0; a call on another GPU restores that GPU's arena before it returns.
 
 **Known limits**: the chunk is reserved once and never released, an allocation that does not fit

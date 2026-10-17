@@ -547,3 +547,147 @@ fn a_block_over_arena_memory_is_rejected() {
         );
     }
 }
+
+/// LIM-212: a `&mut` the block declares that borrows one of the block's own bindings
+/// writes storage that dies with the block, for a store and for a callee alike.
+#[test]
+fn a_store_through_a_reference_to_a_block_local_is_allowed() {
+    let errors = semantic_errors(
+        r#"
+struct Holder { t: Tensor<f32, [4]> }
+impl Holder {
+    func set(&mut self, n: Tensor<f32, [4]>) { self.t = n }
+}
+func put(dst: &mut Holder, v: Tensor<f32, [4]>) { dst.t = v }
+func main() -> i32 {
+    pool {
+        mut local = Holder { t: Tensor::<f32, [4]>::zeros() }
+        val r = &mut local
+        r.t = Tensor::<f32, [4]>::ones()
+        r.set(Tensor::<f32, [4]>::ones())
+        put(r, Tensor::<f32, [4]>::ones())
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "the referent dies with the block; got {errors:?}"
+    );
+}
+
+/// The provenance belongs to the binding, not the name: a shadow in either order, or in
+/// a nested block, refuses exactly the store through the reference to the outer value.
+#[test]
+fn a_shadowed_reference_keeps_its_own_provenance() {
+    for body in [
+        "val r = &mut a\n r.t = Tensor::<f32, [4]>::ones()\n val r = &mut h\n r.t = Tensor::<f32, [4]>::ones()",
+        "val r = &mut h\n r.t = Tensor::<f32, [4]>::ones()\n val r = &mut a\n r.t = Tensor::<f32, [4]>::ones()",
+        "val r = &mut a\n {\n val r = &mut h\n r.t = Tensor::<f32, [4]>::ones()\n }\n r.t = Tensor::<f32, [4]>::ones()",
+    ] {
+        let errors = semantic_errors(&format!(
+            "struct Holder {{ t: Tensor<f32, [4]> }}
+func main() -> i32 {{
+    mut h = Holder {{ t: Tensor::<f32, [4]>::zeros() }}
+    pool {{
+        mut a = Holder {{ t: Tensor::<f32, [4]>::zeros() }}
+        {body}
+    }}
+    0
+}}"
+        ));
+        let refused = errors
+            .iter()
+            .filter(|e| matches!(e, TypeError::PoolStoreEscapes { .. }))
+            .count();
+        assert_eq!(refused, 1, "{body}: only the outer store; got {errors:?}");
+    }
+}
+
+/// What the checker cannot name precisely stays refused: a referent that is itself a
+/// reference, a `mut` reference, a referent of an enclosing pool, a reference a call
+/// returned.
+#[test]
+fn a_reference_whose_referent_may_outlive_the_block_is_still_rejected() {
+    for body in [
+        "mut a = &mut h\n val r = &mut a\n r.t = Tensor::<f32, [4]>::ones()",
+        "mut a = Holder { t: Tensor::<f32, [4]>::zeros() }\n mut r = &mut a\n r = &mut h\n r.t = Tensor::<f32, [4]>::ones()",
+        "mut a = Holder { t: Tensor::<f32, [4]>::zeros() }\n pool {\n val r = &mut a\n r.t = Tensor::<f32, [4]>::ones()\n }",
+        "val r = pick(&mut h)\n r.t = Tensor::<f32, [4]>::ones()",
+    ] {
+        let errors = semantic_errors(&format!(
+            "struct Holder {{ t: Tensor<f32, [4]> }}
+func pick(x: &mut Holder) -> &mut Holder {{ x }}
+func main() -> i32 {{
+    mut h = Holder {{ t: Tensor::<f32, [4]>::zeros() }}
+    pool {{
+        {body}
+    }}
+    0
+}}"
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
+            "{body}: the referent may outlive the block; got {errors:?}"
+        );
+    }
+}
+
+/// The prelude's two fallible enums, as `prelude.nr` spells them.
+const FALLIBLE_DECLS: &str = "
+enum Option<T> { Some(T), None }
+enum Result<T, E> { Ok(T), Err(E) }
+";
+
+/// LIM-071: a `?` leaves every open pool the way a `return` does, so the error it
+/// carries is held to the same rule.
+#[test]
+fn a_question_mark_carrying_an_arena_value_out_of_a_pool_is_rejected() {
+    let errors = semantic_errors(&format!(
+        "{FALLIBLE_DECLS}
+func parse(i: i32) -> Result<i32, string> {{
+    pool {{
+        val r: Result<i32, string> = Result::Err(\"bad \" + \"{{i}}\")
+        val n = r?
+    }}
+    Result::Ok(1)
+}}
+func main() -> i32 {{ 0 }}"
+    ));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::PoolControlFlowEscapes { keyword, .. } if keyword == "?"
+        )),
+        "the error may live in the arena the exit releases; got {errors:?}"
+    );
+}
+
+/// An `Option`'s failure carries no value and a scalar error no address, whatever the
+/// success payload holds.
+#[test]
+fn a_question_mark_carrying_a_scalar_or_nothing_may_leave_a_pool() {
+    let errors = semantic_errors(&format!(
+        "{FALLIBLE_DECLS}
+func pick(v: Option<string>) -> Option<string> {{
+    pool {{
+        val s = v?
+    }}
+    Option::None
+}}
+func parse(r: Result<string, i32>) -> Result<string, i32> {{
+    pool {{
+        val s = r?
+    }}
+    Result::Err(0)
+}}
+func main() -> i32 {{ 0 }}"
+    ));
+    assert!(
+        errors.is_empty(),
+        "nothing here can point into the arena; got {errors:?}"
+    );
+}

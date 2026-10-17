@@ -10,7 +10,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 /// The panic a `.step(n)` whose run-time stride is zero or negative aborts with.
-pub(super) const RANGE_STEP_NOT_POSITIVE: &str = "range step must be positive";
+pub(crate) const RANGE_STEP_NOT_POSITIVE: &str = "range step must be positive";
 
 /// Everything a counted range loop needs but its body.
 ///

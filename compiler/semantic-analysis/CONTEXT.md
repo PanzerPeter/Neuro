@@ -120,8 +120,10 @@ module per declaration kind beside it. `tests/` is split by subject.
   `$kernel_arg<i>` of its parameter's written type, and lowering rewrites the call the same way.
   `check_function` sets `in_kernel` for a `@kernel` body, where `thread_id` and `block_id` not
   shadowed by a local read as `u32` through `.x` / `.y` / `.z` (`check_grid_position`, called
-  first in field access) and are refused read whole; anywhere else they are undefined names
-  like any other. It also records the `KernelOut` parameters (`enter_kernel_outs`); the
+  first in field access). Read whole, either is `Type::GridPosition`, which only a `val`
+  without annotation may bind (`check_grid_binding`, before the initializer is checked) and
+  whose locals are read through the same fields; any other whole read is refused
+  (`refuse_whole_grid_name`). Anywhere else they are undefined names like any other. It also records the `KernelOut` parameters (`enter_kernel_outs`); the
   identifier arm refuses any read of one (`check_kernel_out_read`) except as the object of an
   index, which `check_index_base` marks, and `settle_captures` refuses a closure capturing one.
   That index, read or written (`val x = out[i]`, `out[i] = v`, `out[i] += v`), is refused outside
@@ -558,18 +560,29 @@ loop may run zero times, so the binding still owns its value on the path past th
 validates the argument list against `DERIVABLE_TRAITS` (all five): anything else is
 `UnknownDerive`, and a repeat is `DuplicateDerive`. Nothing is silently ignored. Pass 1b checks
 every field of a Copy struct is itself Copy (`CopyDeriveNonCopyField`, also for a hand-written
-`impl Copy`) and every field of a `Debug` / `PartialEq` / `Hashable` struct is renderable /
-comparable / hashable by the derived rules (`DeriveFieldUnsupported`, `is_debug_renderable` /
-`is_derived_comparable` / `is_derived_hashable`: a scalar (an integer, `bool` or `char` for a
-hash), `string`, or another struct carrying the same derive, since the generated code reaches
-inside a field no other way, and the rule runs before any impl is registered). A `Clone` struct that is
-not `Copy` gets the same check through `is_derived_cloneable`: the backend's derived clone copies
-the struct's bytes, so a field must be `Copy`, a `Clone` struct, or an array, tuple or newtype of
-those. A field that owns a buffer (`string`, a tensor, a collection, `StringBuilder`) would end up
-shared by the original and the copy, so it is refused. A struct field without `Clone` is refused
-with the "derive it too" remedy instead, as for `Debug` and `PartialEq`. A generic template's
-fields are type parameters, which no derive rule can judge, so the check runs again per
-monomorphized instance in `instantiate_generic_struct`. Copy implies Clone.
+`impl Copy`). Pass 2d, once every impl is registered, checks every field of a `Debug` /
+`PartialEq` / `Hashable` struct is renderable / comparable / hashable (`DeriveFieldUnsupported`,
+`is_debug_renderable` / `is_derived_comparable` / `is_derived_hashable`: a scalar (an integer,
+`bool` or `char` for a hash), `string`, or another struct carrying the same derive), or is a
+struct or enum implementing the trait by hand (`implements_by_hand`; for `PartialEq`, an impl
+comparing the type with itself), whose own method the generated code calls. A `Clone` struct that
+is not `Copy` gets the same check through `is_derived_cloneable`: the derived clone copies the
+struct's bytes except where a field has a `clone` of its own, which it calls, so a field must be
+`Copy`, a `Clone` struct, a type with a hand-written `Clone`, or an array, tuple or newtype of the
+first two. An array, tuple or newtype is copied by its bytes, so a struct inside one must be too:
+one whose derived clone calls a field's `clone` (`derived_clone_calls`, which counts an
+`impl Clone`, not an inherent method named `clone`, the rule lowering's `clone_calls_fields`
+applies) is refused there (`clones_by_bytes`), with its own reason
+(`byte_copy_skips_a_clone`). A `Copy` struct's clone stays a copy of the whole value, as every `Copy`
+type's `.clone()` is, hand-written field clones included. A field that owns a buffer (`string`, a
+tensor, a collection, `StringBuilder`) would end up shared by the original and the copy, so it is
+refused. A struct field with neither the derive nor an impl is refused with the "derive it too"
+remedy instead, as for `Debug` and `PartialEq`. A refused operator impl
+(`OperatorTraitRequiresCopy`) is still recorded in `trait_impls`, so the field rule does not
+report it missing a second time. A generic template's fields
+are type parameters, which no derive rule can judge, so the check runs again per monomorphized
+instance in `instantiate_generic_struct`; an instance made before pass 2d waits for it in
+`deferred_instance_derives`. Copy implies Clone.
 
 **Derived `Debug` and `PartialEq`.** Neither routes through a method: that is what separates a
 derive from a hand-written `impl PartialEq`, which lands in `operator_binary_impls` and dispatches.
@@ -1394,7 +1407,12 @@ The checks hang off the statement arms that already know the types: every assign
 `check_pool_ref_store` with the referent type and the value (the place behind a reference is not
 resolved here, so the referent type stands in for it), and `Return` / `Break` call the
 control-flow pair with the type of the value they carry: leaving a pool releases it on the way
-out, so only a number, `bool` or `char` (or no value) may travel with the jump. A sixth, `check_pool_retention`, hangs off the `Expr::Call` arm instead,
+out, so only a number, `bool` or `char` (or no value) may travel with the jump. The jump rule
+reads only the pools above `jump_pool_floor`, which a closure body raises to the pools already
+open where the closure is written: a jump in the body leaves the closure, never one of those
+(the store and call rules still read every open pool). A `?` is the
+same exit, so `check_try_expr` calls `check_pool_return` with the `Err` payload of a `Result`
+operand and the keyword `?` (an `Option`'s `None` carries no value). A sixth, `check_pool_retention`, hangs off the `Expr::Call` arm instead,
 because what it watches is not a store the block writes at all. All six are inert when
 `pool_stack` is empty, which is every program that writes no `pool`.
 
@@ -1432,7 +1450,10 @@ the value holds no arena memory:
   function this program DECLARES (a free function found in `functions`, or an associated
   function / method found through `impl_methods`) is always provable: its body is emitted with
   the backend's pool depth back at zero, so what it allocates comes from libc. The operand walk
-  is what rules out its handing back arena memory it was given;
+  is what rules out its handing back arena memory it was given. A callee that is a function
+  VALUE, a binding, is provable only when the binding itself passes
+  (`binding_carries_no_arena`): a closure the block built may return a capture the arena
+  holds, which no routing can move;
 - under `Emission::Routed`, a nullary `.clone()` or `.to_string()` that is the builtin one
   (`is_builtin_copy`: no `impl` in the program declares a method of that name, and no vtable),
   whatever the receiver holds. The copy is the routed allocation. A tensor or `string` clone and
@@ -1481,6 +1502,13 @@ reference is read under `Emission::InPlace`, because that is where the backend e
 retention rule has the same gap and the same answer: `outliving_root` counts a receiver or `&mut`
 argument reached through a `&mut` (`reaches_through_mut`) as outliving, however recently the
 reference was made. Both had compiled and left an arena tensor in the borrowed place.
+One reference is exempt from both: a `val r = &mut x` initialized in a pool, where `x` reaches no
+storage but its own (`self_contained`: no reference, function value, trait object or type
+parameter anywhere in its type). `note_block_referent` records the scope that defines `x` on
+`r`'s own `SymbolInfo` (`block_referent`), so a shadow of either name never inherits it, and
+`borrows_block_local` admits `r` when that scope is inside the innermost open pool: every write
+through `r` then lands in storage that dies with the block. A `mut` reference, one a call
+returned, one to a field, and one made in an enclosing pool are not tracked and stay refused.
 
 Dynamic dispatch is the one exclusion neither emission rescues, and the language rule names it: behind a
 vtable the implementation is not known until runtime and neither is what it allocates.
@@ -1490,7 +1518,8 @@ call fails the routed reading as well as the in-place one.
 The store rules above see only places the block's own text writes. A store a CALLEE performs
 is written in the callee, so `check_pool_retention` covers it separately: a call inside a pool
 is refused when an argument fails the in-place reading AND the call gives the callee write access to a
-place declared before the outermost open pool. Write access is read from the SIGNATURE, never
+place declared before the INNERMOST open pool (the argument is emitted in the innermost arena, so a
+place an enclosing pool declared outlives its release, as the store rule reads it). Write access is read from the SIGNATURE, never
 from the callee's body: a `&mut self` receiver (found in `mut_self_methods`) and a `&mut T`
 parameter are the complete set of channels a callee has back into its caller, and whether the
 body actually stores through one is not asked. That over-approximates in the same direction
@@ -1516,6 +1545,25 @@ plus the routed relaxation above. Note the two rules want OPPOSITE conservatism 
 allocate arena memory (safe) but cannot be shown to retain any (unsafe). That is why every
 callee the retention rule can name has to be resolvable: a generic template and a nested
 receiver were once unnameable, and each let a callee keep arena memory unchecked.
+
+The retention rule therefore resolves wider than `callee_key`, through `retention_key`: a
+receiver reached through an index or a tuple field (`arr[0].set(..)`, `p.0.set(..)`), or of
+enum or newtype type, is typed by `projection_type` and its method looked up like a struct's.
+`callee_key` itself stays narrow, since the borrow and `@grad` rules hold a borrow on the
+receiver's root and read it the same way. `declared_params` also reads the signature off a
+function value's own type (a closure binding, or a struct field of function type), and
+`root_binding` walks a tuple field. A method dispatched through a trait (a `dyn` receiver, or
+a type parameter one of whose bounds declares it) has no body in view, so `trait_method_sig`
+reads the trait's signature: the receiver is a channel only for a `&mut self` method, each
+`&mut` parameter is one, and the parameter list feeds the pointerless-parameter skip. A
+signature whose parameters are `Self` placeholders (`resolved_per_use`) gives no list, so every
+argument that is itself a `&mut` is taken as a channel. What is left without a channel is a
+builtin, which keeps an argument only through the collection surface below.
+
+`retaining_places` collects every channel. With exactly one, an argument rooted at that same
+place (`put(&mut a, v)`) is not judged as a value handed over: the callee can only store it
+back into itself. With two, each is judged, since the callee could move one's
+enclosing-arena memory into the other.
 
 One asymmetry the parameter walk has to handle: an instance method's signature in `functions`
 carries the implicit `self` as `params[0]`, as the bare struct type rather than a reference, so

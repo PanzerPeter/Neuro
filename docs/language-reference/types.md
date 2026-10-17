@@ -412,17 +412,20 @@ Rules:
   value without moving the receiver. The derived copy does not yet clone a field that owns a
   buffer (`string`, a tensor, a collection, `StringBuilder`, or an array of them), so such a
   field makes the derive a `DeriveFieldUnsupported` error ([BUG-098](../BUGS.md)); write
-  `impl Clone` by hand instead.
+  `impl Clone` by hand instead. A field whose type has a hand-written `Clone` is cloned by it,
+  unless the struct being cloned is `Copy`: a `Copy` value's `.clone()` is always a copy.
 - `@derive(Debug)` gives the struct its `{value:?}` rendering: the struct's name followed by
   each field in declaration order, e.g. `Point { x: 1, y: 2 }`. A field-less struct renders as
-  its bare name. Every field must itself be renderable (a scalar, `string`, `char`, `bool`, or
-  another struct that derives `Debug`). Otherwise the derive is a `DeriveFieldUnsupported` error.
+  its bare name. Every field must itself be renderable (a scalar, `string`, `char`, `bool`,
+  another struct that derives `Debug`, or a type whose `Debug` is written by hand, which renders
+  through its own `fmt_debug`). Otherwise the derive is a `DeriveFieldUnsupported` error.
   A struct has no *display* form, so `"{p}"` stays an error even with the derive; write `"{p:?}"`.
 - `@derive(PartialEq)` gives the struct `==` and `!=`, compared field by field. The same field
-  rule applies: a nested struct must derive `PartialEq` too.
+  rule applies: a nested struct must derive `PartialEq` or implement it by hand, and a
+  hand-written one is compared by its own `eq`.
 - `@derive(Hashable)` gives the struct a hash of its fields, taken in declaration order. Each
-  field must be an integer, `bool`, `char`, `string`, or a struct that derives `Hashable`; a
-  float is refused. A struct deriving `PartialEq` and `Hashable` is a `HashMap` key.
+  field must be an integer, `bool`, `char`, `string`, or a type that derives or implements
+  `Hashable`; a float is refused. A struct deriving `PartialEq` and `Hashable` is a `HashMap` key.
 - The derivable set is exactly `Copy`, `Clone`, `Debug`, `PartialEq`, `Hashable`. Any other
   name in a `@derive` list is `UnknownDerive`, never a silent no-op, and a repeated name is
   `DuplicateDerive`. Deriving a trait and also writing its `impl` for the same struct is

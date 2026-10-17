@@ -107,7 +107,9 @@ call's input arguments in `&` (`borrow_kernel_inputs`), so the HIR of a kernel a
 the plain reference form. A call with a temporary input first becomes the checker's block,
 binding every argument that is not a place to a `$kernel_arg<i>` (`kernel_call_binding_temporaries`). `lower_function_body` marks the body so that
 `thread_id.x` / `block_id.z` lower to `HirExprKind::GridPosition` (`expressions/grid.rs`) unless a
-local of that name shadows it. A kernel call inside a `@grad` body is refused like a `@gpu` one.
+local of that name shadows it. `val t = thread_id` (or `= u` for another such local) lowers to an
+empty statement and records `t` in `grid_aliases` with its scope depth (`grid_binding`), so `t.x`
+is the same `GridPosition`; a later local of that name in that scope, or a deeper one, hides it. A kernel call inside a `@grad` body is refused like a `@gpu` one.
 In a kernel body, `out.partition(closure)` on a `&mut Tensor` lowers to
 `HirExprKind::KernelPartition` (`lower_kernel_partition`): the closure's body is lowered in place
 over `base: u64` and `slice: &mut [T]` locals with the loop stack cleared, and nothing is lifted.
@@ -315,10 +317,20 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   same way over a builtin, a derive and an impl. The other direction is
   `debug_hole_through_impl`: a `{x:?}` hole on a struct, enum or newtype with a hand-written
   `Debug` (`trait_impls` plus its own `fmt_debug`) calls `Type__fmt_debug$string`, a helper
-  emitted once per type into `mono_items` (`debug_string_helpers`), which builds a
+  emitted once per type into `mono_items` (`derive_helpers`), which builds a
   `StringBuilder`, calls `fmt_debug` into it and returns its text; the hole then prints that
   `string` under the default spec, since `:?` would quote it. `$` cannot appear in a source name,
-  and every return path of the helper allocates, so the hole owns the result.
+  and every return path of the helper allocates, so the hole owns the result. A `@derive(Debug)`
+  struct rendered by a hole or a supplied `fmt_debug` gets the same helper for every field, at any
+  depth through derived structs, whose `Debug` is written by hand (`emit_field_debug_helpers`):
+  the backend's field-by-field rendering calls it. `.clone()` on a non-`Copy` struct deriving
+  `Clone` with a field that has an `impl Clone` (not an inherent `clone`), directly or through a
+  nested such struct (`clone_calls_fields`, the checker's `derived_clone_calls` rule), calls `S__clone$derived`, the impl a programmer would have written,
+  `S { h: self.h.clone(), n: self.n }`, emitted once per type by `emit_derived_clone` as an
+  inherent `&self` method (`derive_helpers`). The call lends it the receiver exactly as it lends
+  one to a hand-written `clone`, so a borrowed, indexed or temporary receiver is never taken
+  over. Every other derived clone, a `Copy` struct's included, stays the backend's copy of the
+  whole value.
 - **`val-else`** (`val_else.rs`). `lower_val_else` reuses `pattern_test` / `pattern_bindings` from
   `expressions/matches.rs` for the success test and bindings, lowers the `else` branch in a pushed
   scope with its own binding, and only then defines the pattern's bindings in the **enclosing**

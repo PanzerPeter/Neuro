@@ -392,7 +392,7 @@ The launchers go through a pipeline of their own: outlining, the vendor conversi
 shared descent to the `llvm` dialect, without the bufferization prefix. Their buffers are the
 caller's from the start, and the deallocation pass that follows bufferization refuses a body that
 branches in a loop. The two modules are translated to LLVM IR separately and linked into one.
-A construct the body lowering does not cover (a function call, a slice, a `match`) is
+A construct the body lowering does not cover (a function call, a slice, a tuple) is
 `KernelBodiesNotLowered`, with the construct's span and what it is.
 
 The same per-thread lowering runs the outlined operations `linalg` cannot express: a compound

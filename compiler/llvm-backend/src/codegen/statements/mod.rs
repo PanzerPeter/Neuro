@@ -10,6 +10,8 @@ use super::context::CodegenContext;
 
 mod loops;
 
+pub(crate) use loops::RANGE_STEP_NOT_POSITIVE;
+
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a variable declaration statement.
     ///
@@ -49,9 +51,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let collecting = init
             .is_some_and(Self::is_aggregate_literal)
             .then(Default::default);
+        // A holder built through a branch takes each arm's position ownership the same
+        // way, through slots its arms store into.
+        let branch_slots = match init {
+            Some(expr) => self.open_branch_string_slots(expr, &Type::from_hir(ty))?,
+            None => None,
+        };
         let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
         self.forwarded_string_owner = None;
+        self.branch_string_slots = branch_slots.clone();
         let init_val = init.map(|expr| self.codegen_expr(expr)).transpose();
+        self.branch_string_slots = None;
         let literal_moves = std::mem::replace(&mut self.literal_string_moves, outer)
             .map(|moves| moves.flags)
             .unwrap_or_default();
@@ -138,6 +148,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
                 self.store_held_string_flags(name, &moved_position_flags)?;
                 self.store_held_string_flags(name, &literal_moves)?;
+                if let Some(slots) = &branch_slots {
+                    let branch_moves = self.load_branch_string_slots(slots)?;
+                    self.store_held_string_flags(name, &branch_moves)?;
+                }
             }
         }
 
@@ -212,9 +226,12 @@ impl<'ctx> CodegenContext<'ctx> {
     /// and get released.
     pub(crate) fn codegen_assignment(&mut self, name: &str, value: &HirExpr) -> CodegenResult<()> {
         let collecting = Self::is_aggregate_literal(value).then(Default::default);
+        let branch_slots = self.open_branch_string_slots(value, &Type::from_hir(&value.ty))?;
         let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
         self.forwarded_string_owner = None;
+        self.branch_string_slots = branch_slots.clone();
         let val = self.codegen_expr(value);
+        self.branch_string_slots = None;
         let literal_moves = std::mem::replace(&mut self.literal_string_moves, outer)
             .map(|moves| moves.flags)
             .unwrap_or_default();
@@ -271,6 +288,10 @@ impl<'ctx> CodegenContext<'ctx> {
             self.arm_stored_string_positions(name, &[], value)?;
             self.store_held_string_flags(name, &moved_position_flags)?;
             self.store_held_string_flags(name, &literal_moves)?;
+            if let Some(slots) = &branch_slots {
+                let branch_moves = self.load_branch_string_slots(slots)?;
+                self.store_held_string_flags(name, &branch_moves)?;
+            }
         }
 
         Ok(())
@@ -344,7 +365,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // Returning a place moves it out, so it must not be dropped; every other
             // live `Drop` binding in the function is destroyed before control leaves.
             self.mark_moved_for_drop(expr)?;
-            self.emit_exit_through(0, outlives_arena(&expr.ty))?;
+            self.emit_exit_through(0, holds_no_address(expr))?;
             self.builder
                 .build_return(Some(&ret_val))
                 .map_err(|e| CodegenError::LlvmError(format!("failed to build return: {}", e)))?;
@@ -660,6 +681,20 @@ impl<'ctx> CodegenContext<'ctx> {
         // emitting a load: consts are values, not memory locations.
         self.const_values.insert(def.name.clone(), val);
         Ok(())
+    }
+}
+
+/// Whether the value `expr` builds holds no address, so no arena release can leave it
+/// dangling: a scalar, or any variant construction whose payload fields are all scalars.
+/// It applies to any returned variant, and outside a pool the answer changes nothing. Inside
+/// one the checker lets a `return` carry only a scalar, so the variants that reach a pool
+/// exit are `?` residuals (`None`, or an `Err` over a number).
+fn holds_no_address(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::EnumConstruct { payload, .. } => {
+            payload.iter().all(|field| outlives_arena(&field.ty))
+        }
+        _ => outlives_arena(&expr.ty),
     }
 }
 

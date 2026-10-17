@@ -93,6 +93,40 @@ fn a_local_named_like_a_grid_position_is_an_ordinary_variable() {
     );
 }
 
+/// A local bound to a grid position whole is an alias its fields read through: the binding
+/// lowers to nothing, and `u.y` is the axis read, here through a second alias and past a
+/// shadowing scalar local of the same name in an inner block.
+#[test]
+fn a_grid_position_bound_whole_reads_its_axes() {
+    let program = lower(&PROGRAM.replace(
+        "    val row = thread_id.x\n",
+        "    val t = block_id\n    val u = t\n    val t2 = {\n        val t = 7u32\n        t\n    }\n    val row = u.y\n",
+    ));
+    let name = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Function(f) if f.name.starts_with("fill") => Some(f.name.clone()),
+            _ => None,
+        })
+        .expect("an instance of `fill`");
+    let body = function_body(&program, &name);
+    let init = binding_init(body, "row");
+    assert_eq!(
+        init.kind,
+        HirExprKind::GridPosition {
+            of: HirGridIndex::Block,
+            axis: 1
+        }
+    );
+    assert!(
+        !body.iter().any(
+            |stmt| matches!(stmt, HirStmt::VarDecl { name, .. } if name == "t" || name == "u")
+        ),
+        "an alias is no local: {body:?}"
+    );
+}
+
 /// A kernel takes each tensor as the reference its caller lends: a bare `Tensor` input is
 /// `&Tensor`, borrowed at the call, and `KernelOut<Tensor>` is `&mut Tensor`.
 #[test]

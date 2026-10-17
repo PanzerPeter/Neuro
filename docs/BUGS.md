@@ -5,6 +5,75 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-118: calling a function-valued field in parentheses fails to build
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`, call lowering of a parenthesized callee
+- **Severity**: major. A program the checker accepts fails to build with an internal codegen
+  error
+
+**Minimal repro**
+
+```neuro
+struct K { f: (i32) -> i32 }
+func double(x: i32) -> i32 { x * 2 }
+func main() -> i32 {
+    val k = K { f: double }
+    (k.f)(21)
+}
+```
+
+Expected: the program builds and exits with 42, as `val g = k.f` then `g(21)` does. Observed:
+`Code generation error: undefined function: K__f`. The indexed form `(ks[0].f)(21)` fails the
+same way.
+
+**Root cause**: not yet confirmed in the code. The call is lowered as a method call `K__f` on the
+receiver rather than as an indirect call through the field's value.
+
+**Workaround**: bind the field first: `val g = k.f` then `g(21)`.
+
+**Fix sketch**: when a call's callee is a parenthesized field access whose field is
+function-typed, read the field and call through the value, as a call through a local does.
+
+## BUG-117: a closure written before a `pool` and called inside it can keep the pool's memory
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`, the `pool` retention rule for a call through a closure value
+- **Severity**: critical. Silent wrong answer: the outer value reads memory the arena has
+  already handed to a later pool
+
+**Minimal repro**
+
+```neuro
+struct Holder { t: Tensor<f32, [1024]> }
+func main() -> i32 {
+    mut out = 0.0f32
+    mut h = Holder { t: Tensor::<f32, [1024]>::zeros() }
+    {
+        val f = |n: Tensor<f32, [1024]>| { h.t = n }
+        pool { f(Tensor::<f32, [1024]>::ones()) }
+    }
+    pool { val z = Tensor::<f32, [1024]>::zeros()
+           out = z.sum() }
+    out = out + h.t.sum()
+    (out / 8.0f32) as i32
+}
+```
+
+Expected: 128 (1024 ones summed, divided by 8), or a refusal of the call, as `h.t = ...` written
+directly in the pool is routed off the arena. Observed: 0. The tensor built in the first pool's
+arena is stored into `h` through the closure's mutable capture, the arena is released at the
+pool's exit, and the second pool reuses that memory.
+
+**Root cause**: not yet confirmed in the code. The retention rule reads what a call can store
+from the callee's parameters; a closure's captures are a second channel it does not see.
+
+**Workaround**: assign the field directly inside the pool, or build the value outside it.
+
+**Fix sketch**: treat a call through a closure that captures a binding declared before the pool
+by mutable borrow as able to store each argument into that binding, and judge it like a `&mut`
+argument.
+
 ## BUG-110: an `impl` bounded by `Copy` or `Clone` emits nothing for a primitive argument
 
 - **Status**: open, confirmed

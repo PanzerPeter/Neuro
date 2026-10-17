@@ -87,6 +87,7 @@ pub enum BodyGuardKind {
     DivisionByZero,
     RemainderByZero,
     ShiftOverflow,
+    RangeStep,
 }
 
 /// Where an external body's buffers live, which decides what its wrapper passes it.
@@ -340,6 +341,7 @@ fn build_module<'ctx>(
     // validated both shapes.
     let mut drop_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut pool_aware_types: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut partial_eq_impls: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Alongside them, the methods that consume their receiver, so a call site clears the
     // receiver's drop flag and hands ownership to the callee.
     let mut consuming_self_methods: std::collections::HashSet<String> =
@@ -352,6 +354,9 @@ fn build_module<'ctx>(
                 }
                 Some("PoolAware") => {
                     pool_aware_types.insert(impl_def.type_name.clone());
+                }
+                Some("PartialEq") => {
+                    partial_eq_impls.insert(impl_def.type_name.clone());
                 }
                 _ => {}
             }
@@ -372,6 +377,7 @@ fn build_module<'ctx>(
     codegen_ctx.set_enum_variants(enum_variants);
     codegen_ctx.set_drop_types(drop_types);
     codegen_ctx.set_pool_aware_types(pool_aware_types);
+    codegen_ctx.partial_eq_impls = partial_eq_impls;
     codegen_ctx.set_consuming_self_methods(consuming_self_methods);
     // Read the two call-boundary facts about owned `string` buffers off the whole
     // program: they cannot be derived at a call site, where the callee's body is out of

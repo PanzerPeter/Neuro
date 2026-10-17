@@ -103,6 +103,8 @@ impl TypeChecker {
         // `break` cannot leave the closure to reach it, and letting the enclosing
         // loops stay visible passed the program to codegen, which has no such target.
         let saved_loops = std::mem::take(&mut self.loop_stack);
+        // A jump in the body leaves the closure, never a pool the closure was written in.
+        let saved_pool_floor = std::mem::replace(&mut self.jump_pool_floor, self.pool_stack.len());
 
         self.symbols.push_scope();
         // The parameter scope is fresh, so a failed define is a repeated parameter name.
@@ -150,6 +152,7 @@ impl TypeChecker {
         self.current_function_return_type = saved_return;
         self.inferring_closure_return = saved_inferring;
         self.loop_stack = saved_loops;
+        self.jump_pool_floor = saved_pool_floor;
 
         // The body's own statements ended its borrows as they went, and with them any
         // the enclosing statement had in flight; what the closure borrows is added below.

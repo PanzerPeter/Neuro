@@ -794,15 +794,12 @@ func main() -> i32 {
 }
 
 /// What has no device form refuses a device tensor at the operation: a traversal whose
-/// function shifts an integer (no device form) or is reached through a local.
+/// function builds a tuple (no device form) or is reached through a local.
 #[cfg(unix)]
 #[test]
 fn what_has_no_device_form_refuses_a_device_tensor() {
     for (operation, column) in [
-        (
-            "val r = g.map(|x: f32| -> f32 { (x as i32).shr(1) as f32 })",
-            13,
-        ),
+        ("val r = g.map(|x: f32| -> f32 { (x, 1.0f32).0 })", 13),
         ("val r = g.map(f)", 13),
     ] {
         let source = format!(

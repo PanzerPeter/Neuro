@@ -45,8 +45,14 @@ caches.
   lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
   returns nothing and launches the body once per thread. A `<<` checks its amount against the
   operand's width on the debug tier (`GuardKind::ShiftOverflow`, the host's `shift overflow`) and
-  masks it from `-O1` up; a local `const` is a scalar local, and a scalar module constant read by
-  name lowers to its value (`module_constant`). A body construct the kernel lowering
+  masks it from `-O1` up, and so does `.shr(n)`; `.wrapping_*`, `.saturating_*` and `.is_nan()`
+  are the LLVM backend's arithmetic (`scalar_method`). A local `const` is a scalar local, and a scalar module constant read by
+  name lowers to its value (`module_constant`). A `for` walks `.rev()` and `.step(n)` as the host
+  does: an ascending induction mirrored onto the binding, the exit tested on the distance left,
+  and a stride that is not positive failing on every tier (`GuardKind::RangeStep`, the host's
+  `range step must be positive`). A `loop` with a value and a `match` on an integer, `bool` or
+  `char` store their value through a slot; a `char` is an `i32` local (`value_type`), never a
+  parameter. A body construct the kernel lowering
   lacks is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
   function. A body calling a math function needs the vendor's device math library; without it
   (probed once, see Notes) a `FollowsOperands` one keeps its host body, a `@gpu` one is
@@ -216,7 +222,13 @@ lane's run positions (`lane + k * REDUCE_LANES`, read with `tensor.extract`, the
 element seeding it and a position past the run's end keeping the accumulator), and the seed and
 fold below then reduce the lane axis. The lane axis is innermost, so a whole-tensor reduction's
 warp reads contiguous memory. The generic has no input, so `linalg-fuse-elementwise-ops` cannot
-fold it into the lane fold and put it back on one thread. The destination is seeded first: `-0.0` for a sum
+fold it into the lane fold and put it back on one thread. That shape is the device's; the host
+(`build_host_lanes`) runs the same per-lane order with the loops nested the other way: a whole-tensor
+source is collapsed to rank 1, a first generic seeds every lane from row 0 and folds row 1, an
+`scf.for` over the remaining full rows carries the partials through one all-parallel generic per
+row, and a last generic folds a ragged tail. Its partials keep the source's layout (the lane axis
+in the reduced axis's place, or the lanes alone for a whole tensor), so every row pass reads the
+source contiguously and the fold below reduces that axis as any host axis reduction. The destination is seeded first: `-0.0` for a sum
 (the additive identity, signed zeros included), the run's first element for `.max()` / `.min()`,
 whose fold keeps the element when it is a number that sorts before the accumulator or the
 accumulator is NaN (the LLVM backend's sorting comparator). A mean divides by the run length in

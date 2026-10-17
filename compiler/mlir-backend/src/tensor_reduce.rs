@@ -16,6 +16,11 @@
 // The lane generic reads the source with `tensor.extract` at a position it computes, so it
 // has no input for the elementwise fusion to fold into the next generic.
 //
+// The host takes the same lane order nested the other way (`build_host_lanes`): an `scf.for`
+// over the run's rows of lanes outside one all-parallel generic per row over every lane, the
+// partials in the source's own layout, so its inner loop folds adjacent elements into
+// independent accumulators and vectorizes.
+//
 // The destination is seeded before the fold, because a reduction reads it at every point:
 // with `-0.0` for a sum (the one float that adds as nothing, signed zeros included), and
 // with the run's first element for `.max()` / `.min()`, which the fold then meets again
@@ -32,8 +37,8 @@ use crate::{
     lower::map_type,
     tensor_arithmetic::{
         Generic, OperandAxes, build_expression, cast_elements, empty_tensor, fill_block,
-        generic_op, half_precision, indexing_maps, iterator_types, iterators, tensor_parts,
-        with_element,
+        generic_op, half_precision, indexing_maps, iterator_types, iterators, parse_attribute,
+        tensor_parts, with_element,
     },
     tensor_layout::linalg_index,
     tensor_sort::precedes,
@@ -44,7 +49,7 @@ use melior::{
     Context,
     dialect::arith::{self, CmpiPredicate},
     ir::{
-        Block, BlockLike, Location, Region, RegionLike, Type, Value,
+        Block, BlockLike, Identifier, Location, Region, RegionLike, Type, Value,
         attribute::{FloatAttribute, IntegerAttribute},
         operation::OperationBuilder,
         r#type::RankedTensorType,
@@ -121,9 +126,25 @@ pub(crate) fn build_reduce<'c, 'a>(
     };
     let (source, layout) = match layout.lanes {
         Some(ref run) if length > REDUCE_LANES && kind == Element::Float => {
-            let partials = build_lanes(context, location, block, source, run, &fold, element_type)?;
-            let Some(lanes) = ReduceLayout::new(&run.partials(), extents, Some(run.result_rank))
-            else {
+            let lanes = Lanes {
+                context,
+                location,
+                source,
+                run,
+                fold: &fold,
+                element_type,
+            };
+            let (partials, (shape, axis)) = match lowering.side {
+                Side::Host => (
+                    build_host_lanes(block, lanes)?,
+                    (run.host_partials(), run.axis),
+                ),
+                Side::Device => (
+                    build_lanes(block, &lanes)?,
+                    (run.partials(), Some(run.result_rank)),
+                ),
+            };
+            let Some(lanes) = ReduceLayout::new(&shape, extents, axis) else {
                 return Ok(None);
             };
             (partials, lanes)
@@ -274,6 +295,18 @@ impl Run {
         extents.push(Some(REDUCE_LANES));
         extents
     }
+
+    /// The host's partials tensor: the source's shape with a lane axis in the reduced axis's
+    /// place, or the lanes alone for a whole-tensor reduction. Reducing it along that axis is
+    /// then the source's own reduction, its loops walking the lanes in order.
+    fn host_partials(&self) -> Vec<Option<usize>> {
+        let Some(axis) = self.axis else {
+            return vec![Some(REDUCE_LANES)];
+        };
+        let mut extents: Vec<Option<usize>> = self.extents.iter().copied().map(Some).collect();
+        extents[axis] = Some(REDUCE_LANES);
+        extents
+    }
 }
 
 impl ReduceLayout {
@@ -327,33 +360,97 @@ impl ReduceLayout {
     }
 }
 
-/// Fold a long run's lanes into a partials tensor of the result's axes and a lane axis.
-/// Lane `l` starts at run position `l` (inside the run, which is longer than the lanes) and
-/// folds `l + k * REDUCE_LANES` for `k` from 1 while that is inside the run, the order the
-/// LLVM backend's lanes take.
-fn build_lanes<'c, 'a>(
+/// One long run's lanes: the source they read and the fold they run.
+struct Lanes<'r, 'c, 'v> {
     context: &'c Context,
     location: Location<'c>,
-    block: &'a Block<'c>,
-    source: Value<'c, 'a>,
-    run: &Run,
-    fold: &Fold<'_, 'c, '_>,
+    source: Value<'c, 'v>,
+    run: &'r Run,
+    fold: &'r Fold<'r, 'c, 'v>,
     element_type: Type<'c>,
+}
+
+impl<'c> Lanes<'_, 'c, '_> {
+    /// The type of a partials tensor of extents `shape`.
+    fn partials_type(&self, shape: &[Option<usize>]) -> Type<'c> {
+        // Every extent is static: `ReduceLayout::new` admits only a static source.
+        let dimensions: Vec<u64> = shape
+            .iter()
+            .map(|extent| extent.map_or(0, |extent| extent as u64))
+            .collect();
+        RankedTensorType::new(&dimensions, self.element_type, None).into()
+    }
+
+    /// How many elements one run folds.
+    fn length(&self) -> usize {
+        match self.run.axis {
+            Some(axis) => self.run.extents[axis],
+            None => self.run.extents.iter().product(),
+        }
+    }
+
+    /// Run position `row * REDUCE_LANES + lane` folded into `carried`. A `ragged` row may
+    /// end before the lanes do: past the run's end the lane reads its own first element and
+    /// keeps `carried`.
+    fn fold_row<'b>(
+        &self,
+        block: &'b Block<'c>,
+        kept: &[Value<'c, '_>],
+        lane: Value<'c, '_>,
+        row: Value<'c, '_>,
+        carried: Value<'c, '_>,
+        ragged: bool,
+    ) -> Result<Value<'c, 'b>, MlirError> {
+        let (context, location) = (self.context, self.location);
+        let width = index_constant(context, location, block, REDUCE_LANES)?;
+        let scaled = append(block, arith::muli(row, width, location))?;
+        let position = append(block, arith::addi(scaled, lane, location))?;
+        let read = |at| {
+            read_run(
+                context,
+                location,
+                block,
+                self.source,
+                self.run,
+                kept,
+                at,
+                self.element_type,
+            )
+        };
+        if !ragged {
+            return fold_step(
+                context,
+                location,
+                block,
+                self.fold,
+                read(position)?,
+                carried,
+            );
+        }
+        let end = index_constant(context, location, block, self.length())?;
+        let inside = append(
+            block,
+            arith::cmpi(context, CmpiPredicate::Ult, position, end, location),
+        )?;
+        let at = append(block, arith::select(inside, position, lane, location))?;
+        let folded = fold_step(context, location, block, self.fold, read(at)?, carried)?;
+        append(block, arith::select(inside, folded, carried, location))
+    }
+}
+
+/// Fold a long run's lanes into a partials tensor of the result's axes and a lane axis,
+/// one GPU thread per lane. Lane `l` starts at run position `l` (inside the run, which is
+/// longer than the lanes) and folds `l + k * REDUCE_LANES` for `k` from 1 while that is
+/// inside the run, the order the LLVM backend's lanes take.
+fn build_lanes<'c, 'a>(
+    block: &'a Block<'c>,
+    lanes: &Lanes<'_, 'c, '_>,
 ) -> Result<Value<'c, 'a>, MlirError> {
+    let (context, location, element_type) = (lanes.context, lanes.location, lanes.element_type);
+    let run = lanes.run;
     let index = Type::index(context);
-    let length = run.extents.iter().product::<usize>();
-    let length = match run.axis {
-        Some(axis) => run.extents[axis],
-        None => length,
-    };
-    // Every extent is static: `ReduceLayout::new` admits only a static source.
-    let dimensions: Vec<u64> = run
-        .partials()
-        .iter()
-        .map(|extent| extent.map_or(0, |extent| extent as u64))
-        .collect();
-    let partials_type = RankedTensorType::new(&dimensions, element_type, None).into();
-    let rank = dimensions.len();
+    let partials_type = lanes.partials_type(&run.partials());
+    let rank = run.result_rank + 1;
     let empty = append(block, empty_tensor(location, partials_type, &[])?)?;
 
     let body = Block::new(&[(element_type, location)]);
@@ -366,40 +463,24 @@ fn build_lanes<'c, 'a>(
         context,
         location,
         &body,
-        source,
+        lanes.source,
         run,
         &kept,
         lane,
         element_type,
     )?;
     let first = index_constant(context, location, &body, 1)?;
-    let rows = index_constant(context, location, &body, length.div_ceil(REDUCE_LANES))?;
+    let rows = index_constant(
+        context,
+        location,
+        &body,
+        lanes.length().div_ceil(REDUCE_LANES),
+    )?;
 
     let step = Block::new(&[(index, location), (element_type, location)]);
     let row: Value = step.argument(0)?.into();
     let carried: Value = step.argument(1)?.into();
-    let width = index_constant(context, location, &step, REDUCE_LANES)?;
-    let scaled = append(&step, arith::muli(row, width, location))?;
-    let position = append(&step, arith::addi(scaled, lane, location))?;
-    let end = index_constant(context, location, &step, length)?;
-    let inside = append(
-        &step,
-        arith::cmpi(context, CmpiPredicate::Ult, position, end, location),
-    )?;
-    // Past the run's end the lane reads its own first element and keeps its accumulator.
-    let at = append(&step, arith::select(inside, position, lane, location))?;
-    let value = read_run(
-        context,
-        location,
-        &step,
-        source,
-        run,
-        &kept,
-        at,
-        element_type,
-    )?;
-    let folded = fold_step(context, location, &step, fold, value, carried)?;
-    let kept_value = append(&step, arith::select(inside, folded, carried, location))?;
+    let kept_value = lanes.fold_row(&step, &kept, lane, row, carried, true)?;
     step.append_operation(
         OperationBuilder::new("scf.yield", location)
             .add_operands(&[kept_value])
@@ -425,6 +506,144 @@ fn build_lanes<'c, 'a>(
         Generic {
             inputs: &[],
             destination: empty,
+            indexing_maps: indexing_maps(context, rank, &[&own])?,
+            iterators: iterator_types(context, rank, 0)?,
+        },
+        partials_type,
+        body,
+    )
+}
+
+/// The host's lanes, in the same order as [`build_lanes`] but nested the other way: the
+/// partials are seeded from the run's first row, then an `scf.for` over the full rows runs
+/// one all-parallel `linalg.generic` over every lane at once, and a last generic folds a
+/// ragged tail. Each lane still folds its own positions in run order, so the bits are the
+/// device's, but the inner loop now walks lanes, independent accumulators over adjacent
+/// elements, which vectorizes where one lane's chain down a 16 KB stride did not.
+///
+/// A whole-tensor source is collapsed to rank 1 first, so a run position is an index rather
+/// than a division and a remainder per axis. An axis reduction's generic keeps the source's
+/// own axis order (the lane in the reduced axis's place), so an outer-axis reduction reads
+/// its rows contiguously, as the host fold below does.
+fn build_host_lanes<'c, 'a>(
+    block: &'a Block<'c>,
+    lanes: Lanes<'_, 'c, 'a>,
+) -> Result<Value<'c, 'a>, MlirError> {
+    let (context, location, element_type) = (lanes.context, lanes.location, lanes.element_type);
+    let length = lanes.length();
+    let flat;
+    let lanes = match lanes.run.axis {
+        None if lanes.run.extents.len() > 1 => {
+            let rank = lanes.run.extents.len();
+            let reassociation = (0..rank).map(|d| d.to_string()).collect::<Vec<_>>();
+            let flat_type = RankedTensorType::new(&[length as u64], element_type, None).into();
+            let source = append(
+                block,
+                OperationBuilder::new("tensor.collapse_shape", location)
+                    .add_operands(&[lanes.source])
+                    .add_attributes(&[(
+                        Identifier::new(context, "reassociation"),
+                        parse_attribute(context, &format!("[[{}]]", reassociation.join(", ")))?,
+                    )])
+                    .add_results(&[flat_type])
+                    .build()?,
+            )?;
+            flat = Run {
+                extents: vec![length],
+                axis: None,
+                result_rank: 1,
+            };
+            Lanes {
+                source,
+                run: &flat,
+                ..lanes
+            }
+        }
+        _ => lanes,
+    };
+    // The run is longer than the lanes, so it has a second row, ragged or not, which the
+    // seed folds in at once rather than writing the partials only to read them back.
+    let full = length / REDUCE_LANES;
+    let ragged = !length.is_multiple_of(REDUCE_LANES);
+    let constant = |value| index_constant(context, location, block, value);
+    let mut partials = host_lane_pass(block, &lanes, None, (constant(1)?, full == 1))?;
+    if full > 2 {
+        let partials_type = lanes.partials_type(&lanes.run.host_partials());
+        let step = Block::new(&[(Type::index(context), location), (partials_type, location)]);
+        let row: Value = step.argument(0)?.into();
+        let carried: Value = step.argument(1)?.into();
+        let folded = host_lane_pass(&step, &lanes, Some(carried), (row, false))?;
+        step.append_operation(
+            OperationBuilder::new("scf.yield", location)
+                .add_operands(&[folded])
+                .build()?,
+        );
+        let region = Region::new();
+        region.append_block(step);
+        partials = append(
+            block,
+            OperationBuilder::new("scf.for", location)
+                .add_operands(&[constant(2)?, constant(full)?, constant(1)?, partials])
+                .add_results(&[partials_type])
+                .add_regions([region])
+                .build()?,
+        )?;
+    }
+    if ragged && full > 1 {
+        partials = host_lane_pass(block, &lanes, Some(partials), (constant(full)?, true))?;
+    }
+    Ok(partials)
+}
+
+/// One host generic over the partials folding run row `row` (`ragged` when it may end
+/// before the lanes do) into each lane of `from`, or into each lane's first element when
+/// there is no `from` yet.
+fn host_lane_pass<'c, 'b>(
+    at: &'b Block<'c>,
+    lanes: &Lanes<'_, 'c, '_>,
+    from: Option<Value<'c, '_>>,
+    (row, ragged): (Value<'c, '_>, bool),
+) -> Result<Value<'c, 'b>, MlirError> {
+    let (context, location, element_type) = (lanes.context, lanes.location, lanes.element_type);
+    let run = lanes.run;
+    let shape = run.host_partials();
+    let rank = shape.len();
+    let partials_type = lanes.partials_type(&shape);
+    // The partials keep the source's axes, so the lane is the reduced axis's dimension and
+    // every other dimension is the source axis it names.
+    let lane_dimension = run.axis.unwrap_or(0);
+    let body = Block::new(&[(element_type, location)]);
+    let kept: Vec<Value> = (0..rank)
+        .filter(|&dimension| dimension != lane_dimension)
+        .map(|dimension| append(&body, linalg_index(context, location, dimension)?))
+        .collect::<Result<_, MlirError>>()?;
+    let lane = append(&body, linalg_index(context, location, lane_dimension)?)?;
+    let (destination, carried) = match from {
+        Some(from) => (from, body.argument(0)?.into()),
+        None => (
+            append(at, empty_tensor(location, partials_type, &[])?)?,
+            read_run(
+                context,
+                location,
+                &body,
+                lanes.source,
+                run,
+                &kept,
+                lane,
+                element_type,
+            )?,
+        ),
+    };
+    let value = lanes.fold_row(&body, &kept, lane, row, carried, ragged)?;
+    yield_value(&body, location, value)?;
+    let own = Some((0..rank).map(Some).collect());
+    apply(
+        context,
+        location,
+        at,
+        Generic {
+            inputs: &[],
+            destination,
             indexing_maps: indexing_maps(context, rank, &[&own])?,
             iterators: iterator_types(context, rank, 0)?,
         },
@@ -769,6 +988,55 @@ mod tests {
         );
         let device = fold(crate::guards::Side::Device);
         assert!(device.contains(r#"["parallel", "reduction"]"#), "{device}");
+    }
+
+    #[test]
+    fn a_long_host_run_folds_row_by_row_over_every_lane() {
+        // The host's lanes: a generic over every lane per row inside an `scf.for` over the
+        // rows, the partials in the source's own layout, and a whole-tensor source flattened
+        // first. The device keeps one thread per lane, its rows a loop inside the thread.
+        let module = |shape: &str, body: &str, side| {
+            let source = format!(
+                "enum Device {{\n    CPU,\n    GPU(i32)\n}}\n\nfunc main() -> i32 {{\n    val m: Tensor<f32, {shape}> = Tensor::ones()\n    val g = m.clone().to(Device::GPU(0))\n{body}\n    return 0\n}}\n"
+            );
+            let ast = syntax_parsing::parse(&source).expect("the program parses");
+            let program = hir_lowering::lower_program(&ast).expect("the program lowers to HIR");
+            let context = crate::context::new_context();
+            let (module, _) = crate::lower::build_linkable_module(
+                &context,
+                &program,
+                (crate::Overflow::Checked, side),
+                &|function| function.target == HirTarget::FollowsOperands,
+            )
+            .expect("the body builds");
+            module.as_operation().to_string()
+        };
+        let host = crate::guards::Side::Host;
+        for (shape, body, partials) in [
+            ("[3, 20000]", "    val r = g.sum(1)", "tensor<3x4096xf32>"),
+            ("[20000, 3]", "    val r = g.max(0)", "tensor<4096x3xf32>"),
+            ("[5, 4000]", "    val r = g.mean()", "tensor<4096xf32>"),
+        ] {
+            let ir = module(shape, body, host);
+            assert!(
+                ir.contains(&format!(") -> ({partials}) {{")),
+                "{shape}: the row loop carries the partials:\n{ir}"
+            );
+            assert!(
+                !ir.contains(") -> (f32) {"),
+                "{shape}: no lane loops down its rows alone:\n{ir}"
+            );
+        }
+        assert!(module("[5, 4000]", "    val r = g.sum()", host).contains("tensor.collapse_shape"));
+        let device = module(
+            "[3, 20000]",
+            "    val r = g.sum(1)",
+            crate::guards::Side::Device,
+        );
+        assert!(
+            device.contains(") -> (f32) {") && !device.contains("tensor.collapse_shape"),
+            "{device}"
+        );
     }
 
     #[test]

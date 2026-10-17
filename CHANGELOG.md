@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.14.4] - 2026-10-17
+
+### Added
+
+- A `@kernel` body, and a device `.map` / `.zip` / `.reduce` closure, lowers `for` over a range
+  with `.rev()` and `.step(n)` (a stride that is not positive panics with the host's message on
+  every tier), `loop` with a value and `break value` (labeled too), `match` on an integer, `bool`
+  or `char` (literal, `|`, range, `_` and binding patterns, guards, as a statement or a value),
+  `.shr(n)`, `.wrapping_*`, `.saturating_*`, `.is_nan()`, and `char` locals.
+- `val t = thread_id` (or `block_id`) binds the whole grid position, and `t.x`, `t.y` and `t.z`
+  read its axes.
+- `@derive(Debug, PartialEq, Hashable, Clone)` accepts a struct or enum field whose trait is
+  written by hand, and calls that field's own method through its trait impl. A `Copy` struct's
+  `.clone()` stays a copy.
+- Inside a `pool`, a store or call through `val r = &mut x` is accepted when `x` is declared in
+  that pool and holds no reference, function value, trait object, type parameter or slice.
+
+### Changed
+
+- A `?` inside a `pool` follows the pool's jump rule, as `return` does: an `Option` `?` and a
+  `Result` `?` whose error is a number, `bool` or `char` leave the pool and restore its arena; one
+  carrying any other error is refused at the `?`. A `?` or `return` inside a closure written in a
+  pool is judged only against the pools that closure opens.
+- A host tensor reduction longer than the lane count folds row by row over every lane, so it
+  vectorizes: a whole-tensor `sum()` of a million `f32` runs about 29 times faster and an outer-axis
+  one up to 16 times. The fold order, and so every result bit, is unchanged.
+- A function whose tail is a `loop` returns an owned `string` when every `break` aimed at that loop
+  allocates, so its caller releases the result. A struct or tuple built by an `if`, a `match`, a
+  block, or a call whose callee fills a position with an allocation on every path owns the
+  `string`s it holds. Each of these used to leak.
+
+### Fixed
+
+- BUG-114: inside nested pools, a call that stores its argument into a place (`a.set(x)`,
+  `put(&mut a, x)`, `v.push(x)`) judged that place against the outermost pool, so a value built in
+  an inner pool's arena could be kept by a binding of an outer pool past the inner pool's exit and
+  read back as another value. The call is now judged against the innermost pool, as a direct store
+  is.
+- BUG-115: the same rule skipped every call whose callee it could not name: an indexed or
+  tuple-field receiver (`arr[0].set(x)`, `p.0.set(x)`), a `&mut dyn` or bounded type-parameter
+  receiver, a closure value with a `&mut` parameter, and a closure built inside the pool and reached
+  through a binding, an index, a tuple field, a deref, a branch or an immediate call. Each could hand
+  out arena memory after the pool released it. A trait method is now read from its trait's
+  signature, and a computed callee from what it holds.
+- BUG-116: a negated minimum literal (`-128i8`) in a `@kernel` body failed the debug-tier overflow
+  check in every thread. It is the constant, as on the host.
+
 ## [5.14.3] - 2026-10-17
 
 ### Fixed

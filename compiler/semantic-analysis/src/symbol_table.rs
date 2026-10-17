@@ -130,6 +130,10 @@ pub(crate) struct SymbolInfo {
     /// Holds a closure that borrows or owns a non-Copy capture, which must not be
     /// stored anywhere that outlives this binding's scope.
     pub(crate) scope_bound: bool,
+    /// Index of the scope defining the binding a `val r = &mut x` borrows whole, set only
+    /// inside a `pool` and only when `x` reaches no storage but its own, so every write
+    /// through `r` lands in `x`. Kept per binding, so a shadow never inherits it.
+    pub(crate) block_referent: Option<usize>,
 }
 
 impl SymbolInfo {
@@ -145,6 +149,7 @@ impl SymbolInfo {
             borrows: Vec::new(),
             grad_loss: None,
             scope_bound: false,
+            block_referent: None,
         }
     }
 }
@@ -365,6 +370,15 @@ impl SymbolTable {
     pub(crate) fn mark_scope_bound(&mut self, holder: &str) {
         if let Some(info) = self.lookup_mut(holder) {
             info.scope_bound = true;
+        }
+    }
+
+    /// Record that `holder` borrows the whole binding `place` names right now. No-op when
+    /// either name is not a live binding.
+    pub(crate) fn set_block_referent(&mut self, holder: &str, place: &str) {
+        let scope = self.defining_depth(place);
+        if let Some(info) = self.lookup_mut(holder) {
+            info.block_referent = scope;
         }
     }
 

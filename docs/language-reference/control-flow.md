@@ -179,7 +179,8 @@ Three rules keep arena memory from outliving the block, all checked at compile t
   or nothing.** Leaving the block by `return`, `break` or `continue` runs its release
   on the way out, so anything that could point into the arena may not travel with
   the jump. A `break` targeting a loop opened *inside* the block stays in it, and
-  carries what it likes.
+  carries what it likes. A `?` leaves the same way, so it may propagate an `Option`'s
+  `None` or a `Result` whose error is a number, `bool` or `char`, and no other error.
 
 ```neuro
 mut total: i32 = 0
@@ -213,7 +214,10 @@ the boundary. An arm that declares a binding of its own is not looked into, and 
 
 An allocation the block keeps for itself is unaffected: `val joined = "a" + "b"` is
 owned by a binding that dies at the closing brace, so it takes the bump path, and a
-reassignment of such a binding does too.
+reassignment of such a binding does too. So does a store or a call through a reference
+the block takes to such a binding (`val r = &mut local`): it writes `local`, which dies
+with the block. Any other reference the block holds (a `mut` one, one a call returned,
+one to a binding declared before the `pool`) is assumed to reach past it.
 
 ### Values a callee builds
 

@@ -339,7 +339,14 @@ impl<'ctx> CodegenContext<'ctx> {
         let HirExprKind::Call { callee, .. } = &peel_newtype(expr).kind else {
             return None;
         };
-        let key = match &callee.kind {
+        let key = self.summary_key(callee)?;
+        self.string_ownership.forwarded_param(&key).map(|_| key)
+    }
+
+    /// The name the ownership summary keys a call to `callee` under: a function, a
+    /// closure's lifted body, or an associated function or method of a user type.
+    pub(super) fn summary_key(&self, callee: &HirExpr) -> Option<String> {
+        Some(match &callee.kind {
             HirExprKind::Variable(name) => self
                 .lifted_closure_name(callee)
                 .unwrap_or_else(|| name.clone()),
@@ -354,8 +361,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
             }
             _ => return None,
-        };
-        self.string_ownership.forwarded_param(&key).map(|_| key)
+        })
     }
 
     /// Whether the buffer the forwarder call `expr` just yielded is owned, when `expr` is

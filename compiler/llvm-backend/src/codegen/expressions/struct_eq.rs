@@ -3,12 +3,16 @@
 // The derive has no `eq` method to dispatch to; the comparison is generated here,
 // straight over the aggregate's fields, which is what separates it from a hand-written
 // `impl PartialEq` (that route lowers to an ordinary method call before reaching codegen).
+// A field whose own `PartialEq` is written by hand is the exception: its `eq` is called.
 
 use inkwell::values::{BasicValueEnum, IntValue};
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
+
+/// The method a hand-written `PartialEq` impl declares.
+const EQ_METHOD: &str = "eq";
 
 /// How deep a derived comparison may recurse through nested struct fields. Field types
 /// must be declared before use, so a cycle is impossible today; the limit turns any
@@ -103,6 +107,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 let lhs = self.load_string_operand(lhs)?;
                 let rhs = self.load_string_operand(rhs)?;
                 self.codegen_string_eq(lhs, rhs)
+            }
+            // A field whose `PartialEq` is written by hand is compared by its own `eq`. The
+            // impl, not an inherent method of that name: semantic analysis admitted the field
+            // through its derive or through the impl, which compares the type with itself.
+            nominal @ (Type::Struct(name) | Type::Enum(name))
+                if self.partial_eq_impls.contains(name) =>
+            {
+                self.call_key_method(nominal, EQ_METHOD, &[lhs, rhs], "eq.field")
             }
             Type::Struct(nested) => self.derived_struct_eq_at_depth(nested, lhs, rhs, depth + 1),
             other if other.is_float() => self

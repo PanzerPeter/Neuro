@@ -415,3 +415,337 @@ func main() -> i32 {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.starts_with("panic: shift overflow at "), "{stderr}");
 }
+
+/// `body`, which computes `acc: i64` from `n: i32`, run once per element in a kernel and once
+/// per element on the host, the program failing at the first element where the two differ.
+#[cfg(target_os = "linux")]
+fn kernel_against_host(body: &str) -> String {
+    let indent = |by: &str| {
+        body.lines()
+            .map(|line| format!("{by}{line}\n"))
+            .collect::<String>()
+    };
+    format!(
+        "@kernel(threads: [8])\nfunc k(a: Tensor<i32, [24]>, out: KernelOut<Tensor<i64, [24]>>) {{\n    val i = thread_id.x\n    if i < 24 {{\n        val n = a[i]\n{}        unsafe {{ out[i] = acc }}\n    }}\n}}\nfunc host(n: i32) -> i64 {{\n{}    acc\n}}\nfunc main() -> i32 {{\n    mut a: Tensor<i32, [24]> = Tensor::zeros()\n    for j in 0..24 {{ a[j] = j as i32 - 4 }}\n    mut r: Tensor<i64, [24]> = Tensor::zeros()\n    k(a, &mut r)\n    for j in 0..24 {{\n        if r[j] != host(j as i32 - 4) {{ return 1 }}\n    }}\n    println(\"ok\")\n    0\n}}\n",
+        indent("        "),
+        indent("    "),
+    )
+}
+
+/// Compiles `source` at `-O level` and runs it, or `None` where no GPU is usable.
+#[cfg(target_os = "linux")]
+fn run_at(
+    test: &CompileTest,
+    name: &str,
+    source: &str,
+    level: &str,
+) -> Option<std::process::Output> {
+    let path = test.write_source(name, source);
+    let exe = path.with_extension(format!("o{level}"));
+    let built = std::process::Command::new(env!("CARGO_BIN_EXE_neurc"))
+        .args(["compile", "-O", level, "-o"])
+        .arg(&exe)
+        .arg(&path)
+        .output()
+        .expect("neurc runs");
+    assert!(built.status.success(), "{built:?}");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    (!String::from_utf8_lossy(&output.stderr).contains("none is usable")).then_some(output)
+}
+
+/// Each body gives the host's answer bit for bit in a kernel, on both tiers.
+#[cfg(target_os = "linux")]
+fn assert_kernel_matches_host(name: &str, body: &str) {
+    let test = CompileTest::new();
+    let source = kernel_against_host(body);
+    for level in ["0", "2"] {
+        let Some(output) = run_at(&test, name, &source, level) else {
+            return;
+        };
+        assert_eq!(
+            (
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout).as_ref()
+            ),
+            (Some(0), "ok\n"),
+            "-O{level}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+/// A kernel body walks a range reversed, stepped, both, and inclusive as the host walks it,
+/// near each type's ends included, and reads `-128i8` as the constant it is.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_kernel_body_walks_reversed_and_stepped_ranges() {
+    assert_kernel_matches_host(
+        "kernel_ranges.nr",
+        "mut acc: i64 = 0
+for x in (0..n % 9).rev() { acc = acc * 3 + x as i64 }
+for x in (n..20).step(3) { acc = acc * 5 + x as i64 }
+for x in (-2..=n).rev().step(2) { acc = acc * 7 + x as i64 }
+for x in (250u8..=255u8).step(2) { acc += x as i64 }
+for x in (0u8..=255u8).rev().step(100) { acc += x as i64 }
+for x in (0u32..((n + 4) as u32 % 5)).rev() { acc += x as i64 }
+for x in (n..=n + 2).rev() {
+    if x == n + 1 { continue }
+    acc = acc * 2 + x as i64
+}
+for x in (120i8..=127i8).step(3) { acc += x as i64 }
+for x in (-128i8..=-120i8).rev().step(4) { acc += x as i64 }
+val s = (n + 5) as u16
+for x in (0u16..=65535u16).rev().step(s * 1000) { acc += x as i64 }
+",
+    );
+}
+
+/// A stride that is not positive stops a kernel on every tier, and fails a device `.map`'s
+/// closure with the host's panic at the stride.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_range_step_that_is_not_positive_fails_on_the_gpu() {
+    use std::os::unix::process::ExitStatusExt;
+    let test = CompileTest::new();
+    let kernel = "@kernel(threads: [4])\nfunc k(a: Tensor<i32, [4]>, out: KernelOut<Tensor<i32, [4]>>) {\n    val i = thread_id.x\n    if i < 4 {\n        mut s = 0\n        for x in (0..10).step(a[i]) { s += x }\n        unsafe { out[i] = s }\n    }\n}\nfunc main() -> i32 {\n    val a: Tensor<i32, [4]> = [1, 2, 0, 3]\n    mut out: Tensor<i32, [4]> = Tensor::zeros()\n    k(a, &mut out)\n    out[1]\n}\n";
+    let traversal = "func main() -> i32 {\n    val a: Tensor<i32, [4]> = [1, 2, -1, 3]\n    val g = a.to(Device::GPU(0))\n    val r = g.map(|x: i32| -> i32 {\n        mut s = 0\n        for k in (0..10).rev().step(x) { s += k }\n        s\n    }).to(Device::CPU)\n    r[0]\n}\n";
+    for level in ["0", "2"] {
+        let Some(output) = run_at(&test, "kernel_step.nr", kernel, level) else {
+            return;
+        };
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.signal(), Some(6), "-O{level}: {stderr}");
+        assert!(stderr.contains("CUDA_ERROR_ASSERT"), "-O{level}: {stderr}");
+
+        let Some(output) = run_at(&test, "map_step.nr", traversal, level) else {
+            return;
+        };
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.starts_with("panic: range step must be positive at ")
+                && stderr.contains("map_step.nr:6:37"),
+            "-O{level}: {stderr}"
+        );
+    }
+    let fixed = traversal.replace("-1, 3", "4, 3");
+    let Some(output) = run_at(&test, "map_step_ok.nr", &fixed, "0") else {
+        return;
+    };
+    assert_eq!(output.status.code(), Some(45), "{output:?}");
+}
+
+/// A `loop` in a kernel body yields its `break` value, a labeled one included, of any
+/// scalar type.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_kernel_body_loop_yields_its_break_value() {
+    assert_kernel_matches_host(
+        "kernel_loop_value.nr",
+        "mut j: i32 = 0
+val first = loop {
+    j += 1
+    if j * j > n + 10 {
+        break j
+    }
+}
+mut total: i64 = 0
+val found = outer: loop {
+    for x in 0..10 {
+        total += x as i64
+        if x == n % 7 {
+            break outer total * 2
+        }
+        if x > 7 { break }
+    }
+    if total > 100 { break total }
+}
+val flag = loop {
+    if n > 3 { break true }
+    break false
+}
+val c = loop { break if flag { 'y' } else { 'n' } }
+mut acc: i64 = first as i64 * 1000 + found
+if flag { acc += 7 }
+if c == 'y' { acc += 1 }
+loop {
+    acc += 1
+    if acc % 3 == 0 { break }
+}
+",
+    );
+}
+
+/// A kernel body matches an integer, `bool` or `char` with literal, range, or-, binding and
+/// `_` patterns and guards, as a value and as a statement.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_kernel_body_matches_on_a_scalar() {
+    assert_kernel_matches_host(
+        "kernel_match.nr",
+        "mut acc: i64 = match n {
+    -4 | -3 => 100,
+    0 => 7,
+    1..=3 => 20 + n as i64,
+    4..8 => {
+        val d = n * 2
+        d as i64
+    }
+    m if m % 2 == 0 => m as i64 * 3,
+    _ => -1,
+}
+val u = (n + 4) as u8 * 11
+acc = acc * 10 + match u {
+    0..=50 => 1,
+    200..=255 => 2,
+    _ => 3,
+}
+val big = (n as u32).wrapping_mul(1000000000u32)
+acc = acc * 10 + match big {
+    0 => 0,
+    3000000000u32..=4294967295u32 => 9,
+    _ => 4,
+}
+val c = ((n + 100) as u8) as char
+acc = acc * 10 + match c {
+    'a'..='f' => 5,
+    'Z' | '`' => 6,
+    _ => 8,
+}
+acc = acc * 10 + match n > 5 {
+    true => 1,
+    false => 2,
+}
+match n % 3 {
+    0 => { acc += 1000 }
+    1 => {}
+    _ => { acc -= 1000 }
+}
+acc = acc * 10 + match (n - 10) as i8 {
+    -128..=-10 => 1,
+    -9..0 => 2,
+    _ => 3,
+}
+if c as u32 > 100u32 { acc += 1 }
+",
+    );
+}
+
+/// The integer methods the host computes as arithmetic, and `.is_nan()`, compute the same
+/// in a kernel body; a `.shr` past the width panics on the debug tier with the host's
+/// message in a device `.map`, and masks its amount from `-O1` up.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_kernel_body_calls_the_scalar_arithmetic_methods() {
+    assert_kernel_matches_host(
+        "kernel_methods.nr",
+        "val w = n * 100000000
+mut acc: i64 = w.wrapping_mul(7) as i64
+acc = acc.wrapping_add(w.wrapping_add(2147483647) as i64)
+acc = acc.wrapping_sub(w.wrapping_sub(-2147483647) as i64)
+acc += w.saturating_add(1500000000) as i64
+acc += w.saturating_sub(1500000000) as i64
+acc += w.saturating_mul(n) as i64
+acc += w.saturating_mul(-n) as i64
+val u = ((n + 4) % 14) as u32 * 300000000u32
+acc += u.saturating_add(3000000000u32) as i64
+acc += u.saturating_sub(3000000000u32) as i64
+acc += u.saturating_mul(5u32) as i64
+acc += (u as u8).saturating_mul(3u8) as i64
+acc += (n as i8).saturating_mul(100i8) as i64
+acc += (n as i64 * 1000000000000).saturating_mul(n as i64 * 100000000) % 1000003
+acc += w.shr(3) as i64
+acc += u.shr(29u32) as i64
+acc += (n as i16 - 100i16).shr(2i16) as i64
+acc += (u as u64).wrapping_mul(u as u64).shr(40u64) as i64
+val f = n as f32 / 0.0
+if f.is_nan() { acc += 1000 }
+if (n as f64).is_nan() { acc += 1 }
+",
+    );
+    let test = CompileTest::new();
+    let source = "func main() -> i32 {\n    val a: Tensor<i32, [4]> = [256, 512, 768, 1024]\n    val r = a.to(Device::GPU(0)).map(|x: i32| -> i32 { x.shr(40) }).to(Device::CPU)\n    r[3]\n}\n";
+    for (level, wanted) in [("0", None), ("2", Some(1024 >> (40 % 32)))] {
+        let Some(output) = run_at(&test, "map_shr.nr", source, level) else {
+            return;
+        };
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        match wanted {
+            None => assert!(
+                stderr.starts_with("panic: shift overflow at ")
+                    && stderr.contains("map_shr.nr:3:56"),
+                "{stderr}"
+            ),
+            Some(code) => assert_eq!(output.status.code(), Some(code), "{stderr}"),
+        }
+    }
+}
+
+/// `thread_id` and `block_id` bound whole by a `val` are read through their fields, in the
+/// body and in a `partition` closure, and an inner local of the same name hides the alias.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_grid_position_bound_whole_is_read_by_its_fields() {
+    let source = r#"
+@kernel(threads: [4, 2])
+func k(out: KernelOut<Tensor<u32, [6, 5]>>, blocks: KernelOut<Tensor<u32, [6, 5]>>) {
+    val t = thread_id
+    val b = block_id
+    val u = t
+    if t.x < 6 && u.y < 5 {
+        val v = {
+            val t = 100u32
+            t + 1
+        }
+        unsafe {
+            out[t.x, t.y] = t.x * 10 + u.y + v + t.z
+            blocks[u.x, t.y] = b.x * 100 + b.y * 10 + b.z
+        }
+    }
+}
+
+@kernel(threads: [4])
+func p(out: KernelOut<Tensor<u32, [8]>>) {
+    val t = thread_id
+    out.partition(|base, slice| {
+        val inner = t
+        slice[0] = inner.x * 2 + base as u32
+    })
+}
+
+func main() -> i32 {
+    mut out: Tensor<u32, [6, 5]> = Tensor::zeros()
+    mut blocks: Tensor<u32, [6, 5]> = Tensor::zeros()
+    k(&mut out, &mut blocks)
+    for i in 0..6 {
+        for j in 0..5 {
+            if out[i, j] != (i * 10 + j + 101) as u32 { return 1 }
+            if blocks[i, j] != ((i / 4) * 100 + (j / 2) * 10) as u32 { return 2 }
+        }
+    }
+    mut q: Tensor<u32, [8]> = Tensor::zeros()
+    p(&mut q)
+    for i in 0..8 {
+        if q[i] != (i * 3) as u32 { return 3 }
+    }
+    println("ok")
+    0
+}
+"#;
+    let test = CompileTest::new();
+    for level in ["0", "2"] {
+        let Some(output) = run_at(&test, "grid_whole.nr", source, level) else {
+            return;
+        };
+        assert_eq!(
+            (
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout).as_ref()
+            ),
+            (Some(0), "ok\n"),
+            "-O{level}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

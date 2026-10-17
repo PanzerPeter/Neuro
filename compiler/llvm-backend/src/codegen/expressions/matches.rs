@@ -62,6 +62,7 @@ impl<'ctx> CodegenContext<'ctx> {
         arms: &[HirMatchArm],
         result_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let slots = self.branch_string_slots.take();
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("match outside function".to_string()))?;
@@ -143,6 +144,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 result_slot,
                 merge_bb,
                 next_bb,
+                slots.as_deref(),
             )?;
         }
 
@@ -246,6 +248,7 @@ impl<'ctx> CodegenContext<'ctx> {
         result_slot: Option<PointerValue<'ctx>>,
         merge_bb: inkwell::basic_block::BasicBlock<'ctx>,
         next_bb: inkwell::basic_block::BasicBlock<'ctx>,
+        slots: Option<&[(Vec<String>, PointerValue<'ctx>)]>,
     ) -> CodegenResult<()> {
         // An arm binding takes its payload BY VALUE out of a scrutinee the match already
         // disowned, so for the arm's duration the binding is the only owner. Its own drop
@@ -272,7 +275,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         match result_slot {
             Some(slot) => {
-                let val = self.codegen_expr(&arm.body)?;
+                let val = self.codegen_branch_tail(&arm.body, slots)?;
                 if !self.current_block_terminated() {
                     self.mark_moved_for_drop(&arm.body)?;
                     self.builder.build_store(slot, val)?;

@@ -402,10 +402,13 @@ func main() -> i32 {
 The derives recurse, and they are generated inline over the fields rather than through a
 method. That has two consequences worth knowing:
 
-- Every field must itself be handled by the same derive: a scalar, `string`, `char`, `bool`, or
-  another struct carrying the same derive (`Hashable` also refuses a float field). A field whose
-  type implements the trait by hand does not qualify. Anything else is a
-  `DeriveFieldUnsupported` error naming the field.
+- Every field must itself be handled by the same derive: a scalar, `string`, `char`, `bool`,
+  another struct carrying the same derive (`Hashable` also refuses a float field), or a struct
+  or enum that implements the trait by hand, whose own `fmt_debug`, `eq`, `hash` or `clone` the
+  derive calls for that field. A newtype field is handled as its inner value, except that a
+  hand-written `Clone` on it is called too. Anything else is a `DeriveFieldUnsupported` error
+  naming the field.
+  A `Copy` struct's `.clone()` is a copy of the whole value, so it calls no field's `clone`.
 - Deriving a trait and also writing its `impl` for the same struct is a
   `DeriveConflictsWithImpl` error. Pick one: the derive for the field-wise behavior, the `impl`
   when it should be something else. `@derive(Copy)` derives `Clone` too.

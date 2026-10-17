@@ -353,6 +353,11 @@ impl TypeChecker {
                 mutable,
                 span,
             } => {
+                if self.in_kernel
+                    && self.check_grid_binding(name, init.as_ref(), (*mutable, ty.is_some()))
+                {
+                    return Some(());
+                }
                 // Resolve declared type if present
                 let declared_ty = if let Some(ty) = ty {
                     self.resolve_type(ty)
@@ -468,6 +473,10 @@ impl TypeChecker {
                     // the binding leaves scope.
                     if let Some((place, exclusive)) = borrow_target_of(init_expr) {
                         self.symbols.attach_borrow(&holder, &place, exclusive);
+                        // A `mut` reference may be pointed elsewhere later.
+                        if exclusive && !*mutable {
+                            self.note_block_referent(&holder, &place);
+                        }
                     } else if let Some(ty) = self.symbols.lookup(&holder).map(|s| s.ty.clone()) {
                         self.hold_carried_borrows(&holder, init_expr, &ty);
                     }
@@ -510,7 +519,7 @@ impl TypeChecker {
                 } else {
                     Type::Void
                 };
-                self.check_pool_return(&return_ty, *span);
+                self.check_pool_return("return", &return_ty, *span);
 
                 // Check against expected return type (skip if return type is unknown)
                 if let Some(expected) = self.current_function_return_type.clone()

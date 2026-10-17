@@ -261,6 +261,10 @@ impl TypeChecker {
                 type_name: struct_name.to_string(),
                 span: def.type_name.span,
             });
+            // The impl is written, only refused: recording it keeps a rule that asks for
+            // it, a derive's field rule among them, from reporting it missing as well.
+            self.trait_impls
+                .insert((trait_name.to_string(), struct_name.to_string()));
             return;
         }
 
