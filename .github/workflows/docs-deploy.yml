@@ -1,0 +1,19 @@
+name: Rebuild docs site
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'docs/**', 'examples/**' ]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger Netlify build hook
+        env:
+          NETLIFY_BUILD_HOOK: ${{ secrets.NETLIFY_BUILD_HOOK }}
+        run: curl -fsS -X POST -d '{}' "$NETLIFY_BUILD_HOOK"
