@@ -61,7 +61,10 @@ module per declaration kind beside it. `tests/` is split by subject.
   `impl_methods` (type → method → mangled key). The target is a struct or an enum
   (`impl_target_type`); on an enum a member sharing a variant's name is refused
   (`ImplMemberNamesVariant`), and a generic enum's impls are also instantiated for any instance
-  built before them in the declaration pass.
+  built before them in the declaration pass. **2a.** A generic struct's instance built before its
+  generic impls were registered (a struct field naming `Wrap<i32>`) receives them through
+  `instantiate_impls_for`, from the instances `deferred_instance_derives` still lists, so the
+  derive field rules of 2d and every later bound see its conformances.
 - **2b. `check_operator_supertraits`** enforces `Comparable: PartialEq` and `Copy: Clone`
   order-independently (`MissingSupertraitImpl`); a derive supplies a supertrait as an impl does.
   **2c. `check_derive_impl_conflicts`** rejects a struct that both derives one of the five
@@ -845,8 +848,10 @@ parameters; `is_checkable_bound` still checks a bound naming it at the call. A b
 through `satisfies_bound`: a type parameter by its own bounds, anything else by
 `implements_without_impl` (a scalar, `string` or a deriving struct, per trait) or by
 `trait_impls`. A reference meets none of the five, because a method call reads through it to the
-referent. `type_implements_trait` stays nominal: it answers `&T` to `&dyn Trait` coercion and
-return-position `impl Trait`, where a derive has no vtable or method to stand behind it. The map
+referent. `type_implements_trait` stays nominal: it answers return-position `impl Trait`, where a
+derive has no method to stand behind it. `&T` to `&dyn Trait` coercion reads `satisfies_bound`,
+since lowering supplies a derived or builtin implementor's vtable; a `&string` is refused there,
+its reference being a fat pointer no trait object can hold. The map
 key rules read `satisfies_bound`, so a derived `PartialEq` + `Hashable` struct is a key, and so is
 a type parameter bounded by the map's traits and `Copy`. `.eq(&rhs)` is typed by
 `check_supplied_trait_method` on a receiver with built-in `==` and no `eq` of its own, and on a

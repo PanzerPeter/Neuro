@@ -28,6 +28,11 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::UndefinedFunction(func_name.to_string()))?;
 
         let forwarded = self.string_ownership.forwarded_param(func_name);
+        let held = self
+            .string_ownership
+            .held_strings_forwarded(func_name)
+            .to_vec();
+        let mut held_owners = Vec::new();
         let mut forwarded_owner = None;
         let mut arg_values = Vec::new();
         let mut passed = Vec::new();
@@ -49,6 +54,7 @@ impl<'ctx> CodegenContext<'ctx> {
             } else if let Some(owner) = self.forwarded_argument_owner(func_name, index, arg) {
                 forwarded_args.push((index, owner));
             }
+            self.read_held_owner(&held, index, arg, &mut held_owners)?;
             // A by-value argument moves an owned `Drop` place into the callee, which
             // now owns it; clearing the flag prevents a double drop here. A
             // borrow (`&x`) is not an identifier place, so it is left untouched.
@@ -80,6 +86,9 @@ impl<'ctx> CodegenContext<'ctx> {
         self.release_forwarded_arguments(&forwarded_args, &passed)?;
         if let Some(owner) = forwarded_owner {
             self.forwarded_string_owner = Some((func_name.to_string(), owner));
+        }
+        if !held_owners.is_empty() {
+            self.forwarded_holder_owners = Some((func_name.to_string(), held_owners));
         }
 
         Ok(call_result.try_as_basic_value().basic())
@@ -165,6 +174,11 @@ impl<'ctx> CodegenContext<'ctx> {
             vec![BasicMetadataValueEnum::from(self_arg)];
 
         let forwarded = self.string_ownership.forwarded_param(mangled_name);
+        let held = self
+            .string_ownership
+            .held_strings_forwarded(mangled_name)
+            .to_vec();
+        let mut held_owners = Vec::new();
         let mut forwarded_owner = None;
         let mut passed = Vec::new();
         let mut forwarded_args = Vec::new();
@@ -175,6 +189,7 @@ impl<'ctx> CodegenContext<'ctx> {
             } else if let Some(owner) = self.forwarded_argument_owner(mangled_name, index, arg) {
                 forwarded_args.push((index, owner));
             }
+            self.read_held_owner(&held, index, arg, &mut held_owners)?;
             // A by-value argument moves an owned `Drop` place into the callee; the
             // receiver's own ownership was settled above. A parameter the callee
             // provably only reads keeps its flag, for the reason the plain-call path
@@ -198,6 +213,9 @@ impl<'ctx> CodegenContext<'ctx> {
         self.release_forwarded_arguments(&forwarded_args, &passed)?;
         if let Some(owner) = forwarded_owner {
             self.forwarded_string_owner = Some((mangled_name.to_string(), owner));
+        }
+        if !held_owners.is_empty() {
+            self.forwarded_holder_owners = Some((mangled_name.to_string(), held_owners));
         }
         // A `&self` receiver built for the call (`make().get()`) is owned by nothing once
         // the call returns. A consuming receiver belongs to the callee, and a `&mut self`

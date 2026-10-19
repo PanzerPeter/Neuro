@@ -32,6 +32,14 @@ impl<'ctx> CodegenContext<'ctx> {
         self.struct_written_names = names;
     }
 
+    /// The newtype struct `name`'s `index`-th field was declared as, if any.
+    pub(crate) fn field_newtype(&self, name: &str, index: usize) -> Option<&str> {
+        self.field_newtypes
+            .get(name)
+            .and_then(|fields| fields.get(index))
+            .and_then(Option::as_deref)
+    }
+
     /// The LLVM struct type for a named struct. Field *names* live in `struct_defs`
     /// (for index lookup); the layout itself comes from the type mapper, so both
     /// paths agree on one aggregate.

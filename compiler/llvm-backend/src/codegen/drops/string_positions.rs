@@ -28,6 +28,32 @@ impl<'ctx> CodegenContext<'ctx> {
         prefix: &[String],
         value: &HirExpr,
     ) -> CodegenResult<()> {
+        // A holder forwarder's positions are owned exactly when the arguments it stored
+        // there were, which the call read before moving them.
+        let forwarded = match &peel_newtype(value).kind {
+            HirExprKind::Call { callee, .. } => self
+                .summary_key(callee)
+                .and_then(|key| match self.forwarded_holder_owners.take() {
+                    Some((called, owners)) if called == key => Some(owners),
+                    _ => None,
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for (path, owner) in forwarded {
+            let path: Vec<String> = prefix.iter().chain(&path).cloned().collect();
+            let flag_ptr = self.live_drop_entry(name).and_then(|entry| {
+                entry
+                    .held
+                    .iter()
+                    .find(|held| held.path == path && matches!(held.target, DropTarget::HeapString))
+                    .map(|held| held.flag_ptr)
+            });
+            if let Some(flag_ptr) = flag_ptr {
+                self.builder.build_store(flag_ptr, owner)?;
+            }
+        }
+
         let mut armed: Vec<Vec<String>> = Vec::new();
         self.collect_armed_positions(value, &mut prefix.to_vec(), &mut armed);
         if armed.is_empty() {

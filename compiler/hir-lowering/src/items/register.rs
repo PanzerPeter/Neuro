@@ -80,7 +80,7 @@ impl Lowerer {
                 }
             }
         }
-        self.register_existing_enum_instance_methods()?;
+        self.register_existing_instance_methods()?;
         for item in items {
             match item {
                 Item::Function(func) => self.register_function(func)?,

@@ -63,6 +63,12 @@ const FOLD_BODY_ARGUMENTS: usize = 2;
 /// The seed of a sum: adding it to any float gives that float back, `-0.0` included.
 const SUM_SEED: f64 = -0.0;
 
+/// The most rows of lanes a host last-axis run may span and still fold lane by lane
+/// ([`build_lanes`]) rather than row by row ([`build_host_lanes`]). Measured: up to 16
+/// rows the lane loop keeps each partial in a register and runs 10 to 40% faster; at 64
+/// it is four times slower.
+const HOST_LANE_ROW_LOOP_MAX_ROWS: usize = 16;
+
 /// Lower `reduce`, a `TensorReduce`, into a tensor of type `result`: the reduction's own
 /// type for an axis, or a one-element tensor for a whole-tensor reduction.
 pub(crate) fn build_reduce<'c, 'a>(
@@ -134,12 +140,16 @@ pub(crate) fn build_reduce<'c, 'a>(
                 fold: &fold,
                 element_type,
             };
+            // A last-axis run of a few rows folds lane by lane on the host too: the same
+            // order, so the same bits, with each partial kept in a register.
+            let few_rows = length.div_ceil(REDUCE_LANES) <= HOST_LANE_ROW_LOOP_MAX_ROWS
+                && run.axis.is_some_and(|axis| axis + 1 == run.extents.len());
             let (partials, (shape, axis)) = match lowering.side {
-                Side::Host => (
+                Side::Host if !few_rows => (
                     build_host_lanes(block, lanes)?,
                     (run.host_partials(), run.axis),
                 ),
-                Side::Device => (
+                Side::Host | Side::Device => (
                     build_lanes(block, &lanes)?,
                     (run.partials(), Some(run.result_rank)),
                 ),
@@ -1013,7 +1023,7 @@ mod tests {
         };
         let host = crate::guards::Side::Host;
         for (shape, body, partials) in [
-            ("[3, 20000]", "    val r = g.sum(1)", "tensor<3x4096xf32>"),
+            ("[3, 70000]", "    val r = g.sum(1)", "tensor<3x4096xf32>"),
             ("[20000, 3]", "    val r = g.max(0)", "tensor<4096x3xf32>"),
             ("[5, 4000]", "    val r = g.mean()", "tensor<4096xf32>"),
         ] {
@@ -1028,6 +1038,9 @@ mod tests {
             );
         }
         assert!(module("[5, 4000]", "    val r = g.sum()", host).contains("tensor.collapse_shape"));
+        // A last-axis run of a few rows folds lane by lane on the host as well.
+        let short = module("[3, 20000]", "    val r = g.sum(1)", host);
+        assert!(short.contains(") -> (f32) {"), "{short}");
         let device = module(
             "[3, 20000]",
             "    val r = g.sum(1)",

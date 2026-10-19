@@ -110,6 +110,14 @@ pub enum LoweringError {
         "instantiating '{name}' nests generic instances more than {limit} deep: a generic that calls itself with a type built from its own parameter needs a new instance at every level"
     )]
     InstantiationTooDeep { name: String, limit: u32 },
+
+    /// A generic body coerces `&T` to `&dyn Trait` and an instance has `T = string`. The
+    /// checker refuses `&string` → `&dyn Trait` written directly, but sees the template
+    /// once, so an instantiation is the path that reaches here.
+    #[error(
+        "a `&string` cannot become a `&dyn {trait_name}`: a `&string` is a fat pointer and a trait object holds a thin one (a type parameter instantiated with `string` reaches this)"
+    )]
+    StringTraitObject { trait_name: String },
 }
 
 /// How many generic instances deep one instantiation chain may run before lowering

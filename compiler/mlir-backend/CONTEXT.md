@@ -228,7 +228,10 @@ source is collapsed to rank 1, a first generic seeds every lane from row 0 and f
 `scf.for` over the remaining full rows carries the partials through one all-parallel generic per
 row, and a last generic folds a ragged tail. Its partials keep the source's layout (the lane axis
 in the reduced axis's place, or the lanes alone for a whole tensor), so every row pass reads the
-source contiguously and the fold below reduces that axis as any host axis reduction. The destination is seeded first: `-0.0` for a sum
+source contiguously and the fold below reduces that axis as any host axis reduction. A
+last-axis run of at most `HOST_LANE_ROW_LOOP_MAX_ROWS` (16) rows of lanes takes the device shape on
+the host too: each lane's partial then stays in a register through its rows, which measured 10 to
+40% faster there and four times slower at 64 rows. The order, and so every bit, is the same. The destination is seeded first: `-0.0` for a sum
 (the additive identity, signed zeros included), the run's first element for `.max()` / `.min()`,
 whose fold keeps the element when it is a number that sorts before the accumulator or the
 accumulator is NaN (the LLVM backend's sorting comparator). A mean divides by the run length in

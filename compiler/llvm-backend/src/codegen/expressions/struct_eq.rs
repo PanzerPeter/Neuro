@@ -67,7 +67,16 @@ impl<'ctx> CodegenContext<'ctx> {
                 index as u32,
                 &format!("eq.r.{}", field_name),
             )?;
-            let field_eq = self.codegen_field_eq(field_ty, a, b, depth)?;
+            // A newtype field with a `PartialEq` of its own compares by its `eq`.
+            let own_eq = self
+                .field_newtype(name, index)
+                .filter(|newtype| self.partial_eq_impls.contains(*newtype));
+            let field_eq = match own_eq {
+                Some(newtype) => self
+                    .call_named_method(newtype, EQ_METHOD, &[a, b], "eq.field")?
+                    .into_int_value(),
+                None => self.codegen_field_eq(field_ty, a, b, depth)?,
+            };
             result = self.builder.build_and(result, field_eq, "eq.and")?;
         }
         Ok(result)

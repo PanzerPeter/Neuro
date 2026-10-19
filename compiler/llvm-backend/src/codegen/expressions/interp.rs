@@ -296,8 +296,28 @@ impl<'ctx> CodegenContext<'ctx> {
                 index as u32,
                 &format!("dbg.{}", field_name),
             )?;
-            let (rendered, owner) =
-                self.render_hole(field_value, field_ty, &field_spec, PieceOwner::Borrowed)?;
+            // A newtype field with a `Debug` of its own renders through it.
+            let own_debug = self
+                .field_newtype(name, index)
+                .filter(|newtype| {
+                    self.functions
+                        .contains_key(&format!("{}__{}", newtype, DEBUG_STRING_METHOD))
+                })
+                .map(str::to_string);
+            let (rendered, owner) = match own_debug {
+                Some(newtype) => (
+                    self.call_named_method(
+                        &newtype,
+                        DEBUG_STRING_METHOD,
+                        &[field_value],
+                        "dbg.impl",
+                    )?,
+                    PieceOwner::Owned,
+                ),
+                None => {
+                    self.render_hole(field_value, field_ty, &field_spec, PieceOwner::Borrowed)?
+                }
+            };
             let (ptr, len) = self.split_string_value(rendered)?;
             pieces.push(Piece { ptr, len, owner });
         }

@@ -204,6 +204,10 @@ pub(crate) struct LiteralStringMoves<'ctx> {
 /// holder, and the slot.
 pub(crate) type BranchStringSlots<'ctx> = Vec<(Vec<String>, PointerValue<'ctx>)>;
 
+/// The owner bit of each `string` position a holder forwarder filled from an argument,
+/// by the position's path.
+pub(crate) type HeldOwners<'ctx> = Vec<(Vec<String>, IntValue<'ctx>)>;
+
 pub(crate) struct DropEntry<'ctx> {
     /// Source binding name, used to clear the flag when the value is moved.
     pub(crate) name: String,
@@ -367,6 +371,12 @@ pub(crate) struct CodegenContext<'ctx> {
     /// Names of the types with an `impl PartialEq for T`, whose `T__eq` a derived `==`
     /// calls for a field of that type. An inherent method named `eq` is not one.
     pub(crate) partial_eq_impls: std::collections::HashSet<String>,
+    /// Names of the types with an `impl Hashable for T`, whose `T__hash` a derived hash
+    /// calls for a newtype field of that type.
+    pub(crate) hashable_impls: std::collections::HashSet<String>,
+    /// Struct key → for each field in order, the newtype it was declared as, if any.
+    /// `struct_defs` holds the erased type, which names no impl of the newtype's own.
+    pub(crate) field_newtypes: HashMap<String, Vec<Option<String>>>,
 
     /// Stack of lexical drop scopes, innermost last. Each scope lists the owned
     /// `Drop`-typed bindings declared in it, in declaration order; on normal scope
@@ -391,6 +401,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// clears it, evaluates its value and takes it only for its own call, so a stale
     /// answer is never read.
     pub(crate) forwarded_string_owner: Option<(String, IntValue<'ctx>)>,
+    /// The owner bits a call to a holder forwarder read off the arguments it stores, by
+    /// the path of the position each fills, keyed by the callee: what the binding the
+    /// statement stores the holder into arms its positions with.
+    pub(crate) forwarded_holder_owners: Option<(String, HeldOwners<'ctx>)>,
 
     /// Whether the body being generated is a `&mut self` method, whose `self` is the
     /// caller's storage rather than a value this frame owns. A store into it displaces a
@@ -497,10 +511,13 @@ impl<'ctx> CodegenContext<'ctx> {
             consuming_self_methods: std::collections::HashSet::new(),
             pool_aware_types: std::collections::HashSet::new(),
             partial_eq_impls: std::collections::HashSet::new(),
+            hashable_impls: std::collections::HashSet::new(),
+            field_newtypes: HashMap::new(),
             drop_scopes: Vec::new(),
             literal_string_moves: None,
             branch_string_slots: None,
             forwarded_string_owner: None,
+            forwarded_holder_owners: None,
             borrowed_self: false,
             name_scopes: Vec::new(),
             enum_variants: HashMap::new(),

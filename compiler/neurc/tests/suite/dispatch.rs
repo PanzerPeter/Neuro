@@ -394,3 +394,94 @@ func main() -> i32 {
         "3 through the dog, 5 through the cat, 30 through the view"
     );
 }
+
+/// A by-value argument moves into a method called through a `&dyn` exactly as into one
+/// called directly. The trait-object call kept the caller's ownership, so a `string` the
+/// method handed back pointed at a buffer the caller then freed (BUG-121), and a value
+/// with a `Drop` impl was destroyed by both sides (BUG-122).
+#[test]
+fn regression_bug_121_a_string_forwarded_through_a_trait_object_outlives_the_caller() {
+    let test = CompileTest::new();
+    let source = r#"
+trait Pass {
+    func pass(&self, s: string) -> string
+}
+
+struct Echo {
+    k: i32
+}
+
+impl Pass for Echo {
+    func pass(&self, s: string) -> string { s }
+}
+
+func keep(d: &dyn Pass) -> string {
+    val s = "hello-" + "world"
+    d.pass(s)
+}
+
+func main() -> i32 {
+    val e = Echo { k: 1 }
+    val r = keep(&e)
+    mut i = 0
+    while i < 50 {
+        val filler = "XXXXXXXXXXXX-{i}"
+        i += 1
+    }
+    if r == "hello-world" {
+        return 0
+    }
+    return 1
+}
+"#;
+    let exit = test
+        .compile_and_run("dyn_forward.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}
+
+#[test]
+fn regression_bug_122_a_drop_value_passed_through_a_trait_object_is_dropped_once() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Probe {
+    id: i32
+}
+
+impl Drop for Probe {
+    func drop(&mut self) { println("drop {self.id}") }
+}
+
+trait Eat {
+    func eat(&self, p: Probe) -> i32
+}
+
+struct A {
+    k: i32
+}
+
+impl Eat for A {
+    func eat(&self, p: Probe) -> i32 { p.id + self.k }
+}
+
+func feed(d: &dyn Eat) -> i32 {
+    val p = Probe { id: 5 }
+    d.eat(p)
+}
+
+func main() -> i32 {
+    val a = A { k: 1 }
+    feed(&a)
+}
+"#;
+    let path = test.write_source("dyn_drop.nr", source);
+    let exe = test.compile(&path).expect("compile failed");
+    let out = std::process::Command::new(&exe)
+        .output()
+        .expect("run executable");
+    assert_eq!(out.status.code(), Some(6));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"),
+        "drop 5\n"
+    );
+}

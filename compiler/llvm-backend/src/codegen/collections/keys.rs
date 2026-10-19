@@ -163,7 +163,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 index as u32,
                 &format!("hash.{}", field_name),
             )?;
-            let field_hash = self.emit_key_hash(field_ty, field)?;
+            // A newtype field with a `Hashable` of its own hashes by its `hash`.
+            let own_hash = self
+                .field_newtype(name, index)
+                .filter(|newtype| self.hashable_impls.contains(*newtype))
+                .map(str::to_string);
+            let field_hash = match own_hash {
+                Some(newtype) => self
+                    .call_named_method(&newtype, HASH_METHOD, &[field], "hash.field")?
+                    .into_int_value(),
+                None => self.emit_key_hash(field_ty, field)?,
+            };
             let mixed = self.builder.build_xor(hash, field_hash, "hash.fold")?;
             hash = self.builder.build_int_mul(
                 mixed,
@@ -289,7 +299,19 @@ impl<'ctx> CodegenContext<'ctx> {
                 key_ty, method
             )));
         };
-        let mangled = format!("{}__{}", struct_name, method);
+        self.call_named_method(struct_name, method, args, name)
+    }
+
+    /// [`Self::call_own_method`] on the type named `type_name`, a newtype included,
+    /// whose name its erased value type no longer carries.
+    pub(crate) fn call_named_method(
+        &self,
+        type_name: &str,
+        method: &str,
+        args: &[BasicValueEnum<'ctx>],
+        name: &str,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let mangled = format!("{}__{}", type_name, method);
         let callee = *self
             .functions
             .get(&mangled)

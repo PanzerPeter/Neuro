@@ -1042,6 +1042,10 @@ measure(&square)   // &Square coerces to &dyn Shape
 measure(&rect)     // &Rect   coerces to &dyn Shape
 ```
 
+A derived or builtin implementor coerces too: a struct with `@derive(Debug)` becomes a
+`&dyn Debug`, and so does `&n` for an `i32`. A `&string` does not yet
+([BUG-126](../BUGS.md)).
+
 Use `dyn` when values of *different* concrete types must be handled behind one
 interface; use `impl Trait` (or a named bound) when each call site has one concrete type.
 

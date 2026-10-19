@@ -1266,3 +1266,216 @@ func main() -> i32 {
     );
     assert!(!err.contains("owns a buffer"), "got: {err}");
 }
+
+/// A derived or builtin implementor coerces to `&dyn Debug` / `&dyn Hashable` like a
+/// hand-written one: the vtable's methods are the ones the compiler supplies, and a
+/// generic body's `&T` coerces per instance.
+#[test]
+fn regression_bug_119_a_derived_or_builtin_implementor_is_a_trait_object() {
+    let source = r#"
+@derive(Debug, Hashable, PartialEq, Copy, Clone)
+struct P {
+    x: i32,
+    y: i32
+}
+
+struct Name {
+    s: string
+}
+
+impl Debug for Name {
+    func fmt_debug(&self, out: &mut StringBuilder) { out.push_str("Name<{self.s}>") }
+}
+
+@derive(Debug)
+struct Outer {
+    n: Name,
+    k: bool
+}
+
+func render(d: &dyn Debug) {
+    mut out = StringBuilder::new()
+    d.fmt_debug(&mut out)
+    println(out.to_string())
+}
+
+func via<T: Debug>(x: &T) { render(x) }
+
+func hd(d: &dyn Hashable) -> u64 { d.hash() }
+
+func main() -> i32 {
+    val p = P { x: 1, y: 2 }
+    val o = Outer { n: Name { s: "z" }, k: true }
+    val n = 42
+    val c = 'q'
+    render(&p)
+    render(&o)
+    render(&n)
+    render(&c)
+    via(&p)
+    via(&n)
+    mut m: HashMap<P, i32> = HashMap::new()
+    m.insert(p, 5)
+    val same = hd(&p) == p.hash() && hd(&n) == n.hash()
+    val marker: &dyn Copy = &p
+    (m.get(p) ?? 0) + same as i32
+}
+"#;
+    assert_eq!(
+        stdout_of("dyn_supplied.nr", source),
+        "P { x: 1, y: 2 }\nOuter { n: Name<z>, k: true }\n42\n'q'\nP { x: 1, y: 2 }\n42\n"
+    );
+    assert_eq!(run("dyn_supplied_exit.nr", source), 6);
+}
+
+/// `fmt_debug` called on a `&dyn Debug` goes through the vtable. It was lowered as the
+/// derive's `{x:?}` rendering of the trait object itself, an internal compiler error.
+#[test]
+fn regression_bug_120_fmt_debug_on_a_trait_object_dispatches() {
+    let source = r#"
+struct Name {
+    s: string
+}
+
+impl Debug for Name {
+    func fmt_debug(&self, out: &mut StringBuilder) { out.push_str("Name<{self.s}>") }
+}
+
+func render(d: &dyn Debug) -> i32 {
+    mut out = StringBuilder::new()
+    d.fmt_debug(&mut out)
+    out.to_string().len() as i32
+}
+
+func main() -> i32 {
+    val n = Name { s: "z" }
+    render(&n)
+}
+"#;
+    assert_eq!(run("dyn_fmt_debug.nr", source), 7);
+}
+
+/// A `&string` is a fat pointer, so it is no trait object's data pointer: refused
+/// written directly, and reported (not an internal error) through a generic instance.
+#[test]
+fn a_string_is_not_a_trait_object() {
+    let direct = rejected(
+        "dyn_string.nr",
+        r#"
+func render(d: &dyn Debug) {}
+func main() -> i32 {
+    val s = "hi"
+    render(&s)
+    0
+}
+"#,
+    );
+    assert!(
+        direct.contains("expected &dyn Debug, found &string"),
+        "got: {direct}"
+    );
+    let generic = rejected(
+        "dyn_string_generic.nr",
+        r#"
+func render(d: &dyn Debug) {}
+func via<T: Debug>(x: &T) { render(x) }
+func main() -> i32 {
+    val s = "hi"
+    via(&s)
+    0
+}
+"#,
+    );
+    assert!(
+        generic.contains("a `&string` cannot become a `&dyn Debug`"),
+        "got: {generic}"
+    );
+}
+
+/// A generic struct's instance named first by a struct field (`w: Wrap<i32>`) is made
+/// before the generic impls are registered. It received none of them, so the derive
+/// refused the field and a bound refused every later use of the same instance.
+#[test]
+fn regression_bug_123_an_instance_named_by_a_field_gets_the_generic_impls() {
+    let source = r#"
+struct Wrap<T> {
+    v: T
+}
+
+impl<T: Debug> Debug for Wrap<T> {
+    func fmt_debug(&self, out: &mut StringBuilder) { out.push_str("W{self.v:?}") }
+}
+
+func show<T: Debug>(x: &T) -> i32 {
+    mut out = StringBuilder::new()
+    x.fmt_debug(&mut out)
+    out.to_string().len() as i32
+}
+
+@derive(Debug)
+struct S {
+    w: Wrap<i32>,
+    k: i32
+}
+
+func main() -> i32 {
+    val s = S { w: Wrap { v: 4 }, k: 5 }
+    println("{s:?}")
+    val w = Wrap { v: 30 }
+    show(&w)
+}
+"#;
+    assert_eq!(
+        stdout_of("field_instance.nr", source),
+        "S { w: W4, k: 5 }\n"
+    );
+    assert_eq!(run("field_instance_exit.nr", source), 3);
+}
+
+/// A newtype field with a `Debug`, `PartialEq` or `Hashable` of its own is rendered,
+/// compared and hashed by it inside a derive, as a struct field is. The backend erases a
+/// newtype to its inner value, so the derive read the inner value instead.
+#[test]
+fn a_newtype_field_impl_is_called_by_the_derive() {
+    let source = r#"
+newtype Celsius = i32
+
+impl Debug for Celsius {
+    func fmt_debug(&self, out: &mut StringBuilder) { out.push_str("{self.0}C") }
+}
+
+impl PartialEq for Celsius {
+    func eq(&self, rhs: &Celsius) -> bool { self.0 / 10 == rhs.0 / 10 }
+}
+
+impl Hashable for Celsius {
+    func hash(&self) -> u64 { (self.0 / 10) as u64 }
+}
+
+newtype Plain = i32
+
+@derive(Debug, PartialEq, Hashable)
+struct Reading {
+    t: Celsius,
+    p: Plain,
+    k: i32
+}
+
+func main() -> i32 {
+    val a = Reading { t: Celsius(21), p: Plain(1), k: 3 }
+    val b = Reading { t: Celsius(25), p: Plain(1), k: 3 }
+    val c = Reading { t: Celsius(31), p: Plain(1), k: 3 }
+    println("{a:?}")
+    mut m: HashMap<Reading, i32> = HashMap::new()
+    m.insert(a, 7)
+    val hit = m.get(b) ?? 0
+    val miss = m.get(c) ?? 0
+    (a == b) as i32 + (a == c) as i32 * 2 + (a.hash() == b.hash()) as i32 * 4 + hit * 8 + miss
+}
+"#;
+    assert_eq!(
+        stdout_of("newtype_field.nr", source),
+        "Reading { t: 21C, p: 1, k: 3 }\n"
+    );
+    assert_eq!(run("newtype_field_exit.nr", source), 61);
+}

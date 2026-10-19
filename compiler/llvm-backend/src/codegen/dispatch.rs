@@ -11,12 +11,15 @@ use inkwell::values::*;
 use neuro_hir::{HirExpr, HirImpl, HirItem, HirSelfParam};
 
 use crate::codegen::context::CodegenContext;
+use crate::codegen::string_ownership::dyn_callee;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 /// Separator between the components of a vtable thunk's symbol name. Distinct from the
 /// `__` method mangle so a thunk can never collide with a user method.
 const THUNK_MARKER: &str = "__vt__";
+/// The suffix hir-lowering puts on a method it supplies for a `&dyn Trait` vtable.
+const SUPPLIED_SUFFIX: &str = "$dyn";
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Emit a vtable for every `impl Trait for Type` whose trait is a declared trait.
@@ -58,10 +61,13 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let mut slots: Vec<BasicValueEnum<'ctx>> = Vec::with_capacity(method_order.len());
         for method_name in &method_order {
+            // A derived or builtin implementor's impl is supplied by lowering, its
+            // methods suffixed so the type keeps no method of the trait's name.
+            let supplied = format!("{}{}", method_name, SUPPLIED_SUFFIX);
             let method = impl_def
                 .methods
                 .iter()
-                .find(|m| &m.name == method_name)
+                .find(|m| &m.name == method_name || m.name == supplied)
                 .ok_or_else(|| {
                     CodegenError::InternalError(format!(
                         "`impl {} for {}` is missing trait method '{}'",
@@ -213,16 +219,12 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // A newtype's name keys its vtable, and `Type::from_hir` would erase it to the
         // inner type, so the HIR type is read first.
+        // A builtin implementor's supplied impl is keyed by the type as written.
         let concrete = Type::from_hir(&value.ty);
         let type_name = match (value.ty.referent(), concrete.referent()) {
             (neuro_hir::HirType::Newtype { name, .. }, _) => name.clone(),
             (_, Type::Struct(name) | Type::Enum(name)) => name.clone(),
-            (_, other) => {
-                return Err(CodegenError::UnsupportedType(format!(
-                    "only a struct or enum can be used as a `dyn {}` trait object, found {:?}",
-                    trait_name, other
-                )));
-            }
+            (other, _) => other.to_string(),
         };
 
         let vtable = *self
@@ -309,10 +311,23 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_load(ptr_ty, slot_ptr, "dyn.fn")?
             .into_pointer_value();
 
+        // The arguments' ownership is a direct call's, with the parameter read only when
+        // every implementor only reads it: otherwise a by-value argument moves into the
+        // callee, which may keep or destroy it.
+        let callee = dyn_callee(trait_name, method);
         let mut call_args: Vec<BasicMetadataValueEnum<'ctx>> = vec![data_ptr.into()];
         let mut param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
-        for arg in args {
+        let mut passed = Vec::new();
+        let mut forwarded_args = Vec::new();
+        for (index, arg) in args.iter().enumerate() {
             let value = self.codegen_expr(arg)?;
+            if let Some(owner) = self.forwarded_argument_owner(&callee, index, arg) {
+                forwarded_args.push((index, owner));
+            }
+            if !self.string_ownership.param_is_read_only(&callee, index) {
+                self.mark_moved_for_drop(arg)?;
+            }
+            passed.push(value);
             param_types.push(value.get_type().into());
             call_args.push(value.into());
         }
@@ -328,6 +343,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let call = self
             .builder
             .build_indirect_call(fn_type, fn_ptr, &call_args, "dyn.call")?;
+        self.release_owned_arguments(&callee, args, &passed)?;
+        self.release_forwarded_arguments(&forwarded_args, &passed)?;
         Ok(call.try_as_basic_value().basic())
     }
 }

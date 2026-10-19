@@ -495,7 +495,13 @@ impl TypeChecker {
             return false;
         }
         match expected_inner.as_ref() {
-            Type::DynObject(trait_name) => self.type_implements_trait(found_inner, trait_name),
+            // A derived or builtin implementor is one like any other: lowering supplies
+            // its vtable. A `&string` is a fat pointer, which is no trait
+            // object's data pointer.
+            Type::DynObject(trait_name) => {
+                !matches!(found_inner.as_ref(), Type::String)
+                    && self.satisfies_bound(found_inner, trait_name)
+            }
             Type::Slice(element) => Self::unsizes_to_slice(found_inner, element),
             _ => false,
         }

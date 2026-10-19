@@ -30,6 +30,8 @@ const TO_OWNED_METHOD: &str = "to_string";
 const CLONE_METHOD: &str = "clone";
 const LEN_METHOD: &str = "len";
 const PUSH_STR_METHOD: &str = "push_str";
+/// The `string` methods that hand back a view into their receiver.
+const VIEW_METHODS: [&str; 2] = ["slice", "char_slice"];
 
 /// The standard-output builtins, which copy the bytes they are handed and keep none.
 const IO_BUILTINS: [&str; 2] = ["print", "println"];
@@ -52,6 +54,10 @@ pub(crate) struct StringOwnership {
     /// of the `string` positions every return path stores a fresh allocation into. A call
     /// to one hands its caller those positions owned.
     holder_returns: HashMap<String, Vec<Vec<String>>>,
+    /// Functions returning a holder, by the name a call site resolves to, with each
+    /// `string` position every return path stores one parameter into unchanged, and that
+    /// parameter's index. The position is owned exactly when the argument was.
+    holder_forwards: HashMap<String, Vec<(Vec<String>, usize)>>,
 }
 
 impl StringOwnership {
@@ -74,6 +80,19 @@ impl StringOwnership {
     pub(crate) fn held_strings_returned(&self, name: &str) -> &[Vec<String>] {
         self.holder_returns.get(name).map_or(&[], Vec::as_slice)
     }
+
+    /// The `string` positions, by path, a call to `name` fills with an argument
+    /// unchanged, each with that argument's index.
+    pub(crate) fn held_strings_forwarded(&self, name: &str) -> &[(Vec<String>, usize)] {
+        self.holder_forwards.get(name).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// The name [`StringOwnership::param_is_read_only`] answers to for a call of `method`
+/// through a `&dyn trait_name`: a parameter is read only there when it is in every
+/// implementor's method. The space keeps it apart from every symbol.
+pub(crate) fn dyn_callee(trait_name: &str, method: &str) -> String {
+    format!("dyn {trait_name}__{method}")
 }
 
 /// Read both summaries off the whole program.
@@ -110,6 +129,7 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
     // another function is read only when that function's parameter is. It starts empty
     // and grows, so a parameter only ever passed around a cycle stays retained.
     let callables = callables(items);
+    let implementors = implementors(items);
     let mut read_only_params: HashSet<(String, usize)> = HashSet::new();
     loop {
         let mut grown = Vec::new();
@@ -124,6 +144,7 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
                     name: param.0,
                     read_only: &read_only_params,
                     shadowed: &shadowed,
+                    implementors: &implementors,
                 };
                 if body.iter().any(|stmt| stmt_retains(stmt, &probe)) {
                     continue;
@@ -136,6 +157,26 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
         }
         read_only_params.extend(grown);
     }
+    // A call through a trait object reaches whichever implementor the vtable holds, so
+    // its argument is read only when every implementor's parameter is.
+    let through_dyn: Vec<(String, usize)> = items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Impl(impl_def) => Some(impl_def),
+            _ => None,
+        })
+        .filter_map(|impl_def| Some((impl_def.trait_name.as_deref()?, impl_def)))
+        .flat_map(|(trait_name, impl_def)| {
+            impl_def.methods.iter().flat_map(move |method| {
+                (0..method.params.len()).map(move |index| (trait_name, &method.name, index))
+            })
+        })
+        .filter(|(trait_name, method, index)| {
+            reads_through_dyn(trait_name, method, *index, &implementors, &read_only_params)
+        })
+        .map(|(trait_name, method, index)| (dyn_callee(trait_name, method), index))
+        .collect();
+    read_only_params.extend(through_dyn);
 
     // A fixpoint so a forward through another forwarder counts; it starts empty and
     // grows, so a function forwarding only around a cycle never enters it.
@@ -199,12 +240,101 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
         }
     }
 
+    // The forwarder summary again, per `string` position of a returned holder. The
+    // parameter may appear nowhere in the body but once in each exit, at the position:
+    // a second copy of its fat pointer anywhere would outlive the release the position
+    // now carries.
+    let mut holder_forwards: HashMap<String, Vec<(Vec<String>, usize)>> = HashMap::new();
+    for (name, exits) in &holder_bodies {
+        if exits.is_empty() || shadowed.contains(name) {
+            continue;
+        }
+        let Some((_, params, body)) = callables.iter().find(|(callable, ..)| callable == name)
+        else {
+            continue;
+        };
+        let mut every: Option<Vec<(Vec<String>, usize)>> = None;
+        for exit in exits {
+            let mut found = Vec::new();
+            forwarded_positions(exit, params, &mut Vec::new(), &mut found);
+            every = Some(match every {
+                None => found,
+                Some(prev) => prev.into_iter().filter(|p| found.contains(p)).collect(),
+            });
+        }
+        let every: Vec<(Vec<String>, usize)> = every
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, index)| {
+                let param = params[*index].0;
+                !binds(body, param) && mention_count(body, param) == exits.len()
+            })
+            .collect();
+        if !every.is_empty() {
+            holder_forwards.insert(name.clone(), every);
+        }
+    }
+
     StringOwnership {
         returns_owned,
         read_only_params,
         forwards,
         holder_returns,
+        holder_forwards,
     }
+}
+
+/// The `string` positions of the holder `expr` builds that hold a bare read of a
+/// `string` parameter, with its index, walked with the segments the drop pass gives them.
+fn forwarded_positions(
+    expr: &HirExpr,
+    params: &[(&str, &HirType)],
+    path: &mut Vec<String>,
+    out: &mut Vec<(Vec<String>, usize)>,
+) {
+    if matches!(Type::from_hir(&expr.ty), Type::String) {
+        if let HirExprKind::Variable(name) = &expr.kind
+            && let Some(index) = params
+                .iter()
+                .position(|(param, ty)| param == name && matches!(ty, HirType::String))
+        {
+            out.push((path.clone(), index));
+        }
+        return;
+    }
+    match &expr.kind {
+        HirExprKind::StructLiteral { fields, .. } => {
+            for field in fields {
+                path.push(field.name.clone());
+                forwarded_positions(&field.value, params, path, out);
+                let _ = path.pop();
+            }
+        }
+        HirExprKind::ArrayLiteral { elements } | HirExprKind::TupleLiteral { elements } => {
+            for (index, element) in elements.iter().enumerate() {
+                path.push(index.to_string());
+                forwarded_positions(element, params, path, out);
+                let _ = path.pop();
+            }
+        }
+        HirExprKind::NewtypeConstruct { value, .. } => {
+            forwarded_positions(value, params, path, out)
+        }
+        _ => {}
+    }
+}
+
+/// How many times `name` is read anywhere in `body`, a closure capturing it included.
+fn mention_count(body: &[HirStmt], name: &str) -> usize {
+    let mut count = 0;
+    walk_stmts(body, &mut |expr| match &expr.kind {
+        HirExprKind::Variable(other) if other == name => count += 1,
+        HirExprKind::Closure { captures, .. } => {
+            count += captures.iter().filter(|c| c.name == name).count();
+        }
+        _ => {}
+    });
+    count
 }
 
 /// The paths of the `string` positions of the holder `expr` builds that it stores a
@@ -621,6 +751,37 @@ fn binds(body: &[HirStmt], name: &str) -> bool {
 /// A method is keyed by the `Type__method` its call site mangles, and its receiver is
 /// not in the parameter list: `self` is passed separately and is never a `string`.
 type Callable<'a> = (String, Vec<(&'a str, &'a HirType)>, &'a [HirStmt]);
+
+/// Each trait's implementors, by the type name their methods are mangled under.
+fn implementors(items: &[HirItem]) -> HashMap<String, Vec<String>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for item in items {
+        if let HirItem::Impl(impl_def) = item
+            && let Some(trait_name) = &impl_def.trait_name
+        {
+            out.entry(trait_name.clone())
+                .or_default()
+                .push(impl_def.type_name.clone());
+        }
+    }
+    out
+}
+
+/// Whether `method`'s `index`-th parameter is read only in every implementor of
+/// `trait_name`, which is what a call through a `&dyn` of it may assume.
+fn reads_through_dyn(
+    trait_name: &str,
+    method: &str,
+    index: usize,
+    implementors: &HashMap<String, Vec<String>>,
+    read_only: &HashSet<(String, usize)>,
+) -> bool {
+    implementors.get(trait_name).is_some_and(|types| {
+        types
+            .iter()
+            .all(|ty| read_only.contains(&(format!("{ty}__{method}"), index)))
+    })
+}
 
 /// Every callable in the program, free functions and `impl` methods alike.
 fn callables(items: &[HirItem]) -> Vec<Callable<'_>> {
@@ -1120,6 +1281,8 @@ struct Param<'a> {
     read_only: &'a HashSet<(String, usize)>,
     /// Top-level names a local binding shadows somewhere, which a call may not trust.
     shadowed: &'a HashSet<String>,
+    /// Each trait's implementors, every one of which a call through a `&dyn` may reach.
+    implementors: &'a HashMap<String, Vec<String>>,
 }
 
 /// A whitelist, not a blacklist: an occurrence of the parameter is safe only in a
@@ -1247,11 +1410,24 @@ fn call_retains(callee: &HirExpr, args: &[HirExpr], name: &Param) -> bool {
                 }
                 _ => None,
             };
+            let through_dyn = match object.ty.referent() {
+                HirType::DynObject(trait_name) => Some(trait_name),
+                _ => None,
+            };
             let arg_is_read = |index: usize| {
                 field == PUSH_STR_METHOD
                     || declared
                         .as_ref()
                         .is_some_and(|key| name.read_only.contains(&(key.clone(), index)))
+                    || through_dyn.is_some_and(|trait_name| {
+                        reads_through_dyn(
+                            trait_name,
+                            field,
+                            index,
+                            name.implementors,
+                            name.read_only,
+                        )
+                    })
             };
             let receiver = if receiver_is_read {
                 read_retains(object, name)
@@ -1286,10 +1462,20 @@ fn call_retains(callee: &HirExpr, args: &[HirExpr], name: &Param) -> bool {
 /// `retains`, for a slot whose direct occupant is read rather than stored: the
 /// parameter itself is fine there, anything built around it is judged on its own.
 fn read_retains(expr: &HirExpr, name: &Param) -> bool {
-    if matches!(&expr.kind, HirExprKind::Variable(other) if other == name.name) {
-        return false;
+    match &expr.kind {
+        HirExprKind::Variable(other) if other == name.name => false,
+        // A view read in the slot that makes it (`s.slice(0..2).len()`) is gone once the
+        // read is, and the parameter outlives the call; only its receiver is in question.
+        HirExprKind::Call { callee, args } => match &callee.kind {
+            HirExprKind::FieldAccess { object, field }
+                if VIEW_METHODS.contains(&field.as_str()) =>
+            {
+                read_retains(object, name) || args.iter().any(|arg| retains(arg, name))
+            }
+            _ => retains(expr, name),
+        },
+        _ => retains(expr, name),
     }
-    retains(expr, name)
 }
 
 /// Whether `name` occurs anywhere in `expr`. The conservative answer for a position
@@ -1565,6 +1751,50 @@ mod tests {
         let hir = hir_lowering::lower_program(&ast).expect("lowering failed");
         let promoted = promote_literal_exits(&hir.items);
         analyze(promoted.as_deref().unwrap_or(&hir.items))
+    }
+
+    #[test]
+    fn a_holder_filled_from_a_parameter_forwards_it_per_position() {
+        let owned = summary(
+            "struct P {\n    name: string,\n    n: i32\n}\nfunc wrap(s: string) -> P { P { name: s, n: 0 } }\nfunc pair(a: string, b: string) -> (string, string) { (a, b) }\nfunc half(s: string, c: bool) -> P {\n    if c { return P { name: s, n: 1 } }\n    P { name: \"lit\", n: 2 }\n}\nfunc echoed(s: string) -> P {\n    println(s)\n    P { name: s, n: 3 }\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        assert_eq!(
+            owned.held_strings_forwarded("wrap"),
+            &[(vec!["name".to_string()], 0)]
+        );
+        assert_eq!(
+            owned.held_strings_forwarded("pair"),
+            &[(vec!["0".to_string()], 0), (vec!["1".to_string()], 1)]
+        );
+        // One exit stores a literal there, so the position is not the argument's.
+        assert!(owned.held_strings_forwarded("half").is_empty());
+        // Any other mention of the parameter may keep a second copy of its pointer.
+        assert!(owned.held_strings_forwarded("echoed").is_empty());
+    }
+
+    #[test]
+    fn a_call_through_a_trait_object_reads_what_every_implementor_reads() {
+        let owned = summary(
+            "trait Sink {\n    func eat(&self, s: string) -> i32\n}\nstruct A { k: i32 }\nstruct B { k: i32 }\nimpl Sink for A {\n    func eat(&self, s: string) -> i32 { s.len() as i32 }\n}\nimpl Sink for B {\n    func eat(&self, s: string) -> i32 {\n        println(s)\n        self.k\n    }\n}\ntrait Pass {\n    func pass(&self, s: string) -> string\n}\nimpl Pass for A {\n    func pass(&self, s: string) -> string { s }\n}\nimpl Pass for B {\n    func pass(&self, s: string) -> string { s + \"\" }\n}\nfunc relay(d: &dyn Sink, s: string) -> i32 { d.eat(s) }\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(owned.param_is_read_only(&dyn_callee("Sink", "eat"), 0));
+        // `A` hands its argument back, so a call through the object may not release it.
+        assert!(!owned.param_is_read_only(&dyn_callee("Pass", "pass"), 0));
+        // A parameter passed on through the object is read, as through a direct call.
+        assert!(owned.param_is_read_only("relay", 1));
+    }
+
+    #[test]
+    fn a_view_read_where_it_is_made_does_not_retain_its_receiver() {
+        let owned = summary(
+            "func first(s: string) -> i32 { s.slice(0..2).len() as i32 }\nfunc shout(s: string) -> string { s.slice(0..2) + \"!\" }\nfunc show(s: string) { println(\"{s.char_slice(1..3)}\") }\nfunc keep(s: string) -> string {\n    val v = s.slice(0..2)\n    v + \"\"\n}\nfunc give(s: string) -> &string { s.slice(0..2) }\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(owned.param_is_read_only("first", 0));
+        assert!(owned.param_is_read_only("shout", 0));
+        assert!(owned.param_is_read_only("show", 0));
+        // A view bound to a local, or handed back, may outlive the read.
+        assert!(!owned.param_is_read_only("keep", 0));
+        assert!(!owned.param_is_read_only("give", 0));
     }
 
     #[test]

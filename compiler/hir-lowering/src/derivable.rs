@@ -29,6 +29,9 @@ const DEBUG_STRING_METHOD: &str = "fmt_debug$string";
 /// The method-shaped helper a derived `.clone()` calls when a field's `clone` is written by
 /// hand: the field-by-field impl the derive stands for. `$` keeps it apart from user names.
 const DERIVED_CLONE_METHOD: &str = "clone$derived";
+/// The suffix on a supplied method a `&dyn Trait` vtable slot calls; the backend's
+/// vtable reads `<method>$dyn` as `<method>`.
+const DYN_SUFFIX: &str = "$dyn";
 
 impl Lowerer {
     /// Lower `object.method(args)` when the receiver implements the method's derivable
@@ -43,7 +46,10 @@ impl Lowerer {
         args: &[Expr],
         span: Span,
     ) -> Result<Option<HirExpr>, LoweringError> {
-        if self.declares_method(object.ty.referent(), method) {
+        // A trait object's call goes through its vtable, whoever implemented the trait.
+        if self.declares_method(object.ty.referent(), method)
+            || matches!(object.ty.referent(), HirType::DynObject(_))
+        {
             return Ok(None);
         }
         let lowered = match method {
@@ -255,9 +261,12 @@ impl Lowerer {
             return;
         }
         for (_, mut field) in self.structs.get(name).cloned().unwrap_or_default() {
-            // The backend renders a newtype as its inner value.
-            while let HirType::Newtype { inner, .. } = field {
-                field = *inner;
+            // A newtype with a `Debug` of its own renders through it; any other renders
+            // as its inner value.
+            while let HirType::Newtype { inner, .. } = &field
+                && self.debug_impl_name(&field).is_none()
+            {
+                field = (**inner).clone();
             }
             match self.debug_impl_name(&field) {
                 Some(field_name) => self.emit_debug_string_helper(&field_name, &field, span),
@@ -335,6 +344,118 @@ impl Lowerer {
             target: HirTarget::Host,
             span,
         }));
+    }
+
+    /// The vtable a `&T` → `&dyn Trait` coercion needs when `T` implements `Trait` with
+    /// no `impl` of its own (a derive, or a builtin): `impl Trait for T` with the methods
+    /// the compiler supplies, emitted once per pair. Each is named `<method>$dyn`, which
+    /// the backend's vtable accepts for `<method>`: a real `T__hash` would make the
+    /// backend take `T` for a hand-written implementor, and `self.hash()` in the body
+    /// would call itself.
+    pub(crate) fn emit_supplied_vtable_impl(
+        &mut self,
+        trait_name: &str,
+        concrete: &HirType,
+        span: Span,
+    ) {
+        let type_name = match nominal_name(concrete) {
+            Some(name) => name.to_string(),
+            None => concrete.to_string(),
+        };
+        if self
+            .trait_impls
+            .contains(&(trait_name.to_string(), type_name.clone()))
+            || self.declares_trait_methods(concrete, trait_name)
+            || !self
+                .derive_helpers
+                .insert(format!("{type_name}__{trait_name}{DYN_SUFFIX}"))
+        {
+            return;
+        }
+        let method_names: Vec<String> = self
+            .traits
+            .get(trait_name)
+            .map(|methods| methods.iter().map(|m| m.name.clone()).collect())
+            .unwrap_or_default();
+        let receiver = HirExpr::new(
+            HirExprKind::Variable(SELF_PARAM.to_string()),
+            concrete.clone(),
+            span,
+        );
+        let mut methods = Vec::new();
+        for method in method_names {
+            let (params, return_type, body) = match method.as_str() {
+                // `out.push_str("{self:?}")`, rendered as a `{x:?}` hole renders it.
+                FMT_DEBUG_METHOD => {
+                    let out_ty = HirType::Reference {
+                        inner: Box::new(HirType::Collection {
+                            kind: HirCollectionKind::StringBuilder,
+                            args: Vec::new(),
+                        }),
+                        mutable: true,
+                    };
+                    let hole = self.debug_hole_through_impl(receiver.clone(), debug_spec());
+                    let rendered = HirExpr::new(
+                        HirExprKind::InterpString { parts: vec![hole] },
+                        HirType::String,
+                        span,
+                    );
+                    let out = HirExpr::new(
+                        HirExprKind::Variable(BUILDER_LOCAL.to_string()),
+                        out_ty.clone(),
+                        span,
+                    );
+                    let params = vec![HirParam {
+                        name: BUILDER_LOCAL.to_string(),
+                        ty: out_ty,
+                        span,
+                    }];
+                    let push =
+                        method_call(out, PUSH_STR_METHOD, vec![rendered], HirType::Void, span);
+                    (params, HirType::Void, vec![HirStmt::Expr(push)])
+                }
+                // The builtin hash the backend also keys maps with.
+                HASH_METHOD => {
+                    let hash = method_call(
+                        receiver.clone(),
+                        HASH_METHOD,
+                        Vec::new(),
+                        HirType::U64,
+                        span,
+                    );
+                    let body = vec![HirStmt::Return {
+                        value: Some(hash),
+                        span,
+                    }];
+                    (Vec::new(), HirType::U64, body)
+                }
+                // The checker admits no other supplied trait with methods.
+                _ => return,
+            };
+            methods.push(HirMethod {
+                name: format!("{method}{DYN_SUFFIX}"),
+                self_param: Some(HirSelfParam::Ref),
+                params,
+                return_type,
+                body,
+                span,
+            });
+        }
+        self.mono_items.push(HirItem::Impl(HirImpl {
+            type_name,
+            self_type: concrete.clone(),
+            trait_name: Some(trait_name.to_string()),
+            methods,
+            span,
+        }));
+    }
+
+    /// Whether `ty` declares every method of `trait_name` itself, as a generic impl's
+    /// instance does, so the coercion reaches a vtable without a supplied one.
+    fn declares_trait_methods(&self, ty: &HirType, trait_name: &str) -> bool {
+        self.traits.get(trait_name).is_some_and(|methods| {
+            !methods.is_empty() && methods.iter().all(|m| self.declares_method(ty, &m.name))
+        })
     }
 
     /// Whether a struct, enum or newtype `ty` has a method `method` of its own.

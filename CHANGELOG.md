@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.14.5] - 2026-10-19
+
+### Changed
+
+- A host reduction along the last axis whose run spans up to 16 rows of lanes folds lane by lane
+  again, so each lane's partial stays in a register: `[64, 16384].sum(axis: 1)` runs about 10%
+  faster, and runs of 5 to 16 rows 25 to 40% faster. The fold order, and so every result bit, is
+  unchanged.
+- A `string` argument to a method called through a `&dyn Trait` is released after the call when
+  every implementor only reads it, and a `.slice()` or `.char_slice()` view read where it is made
+  (`s.slice(0..2).len()`) no longer keeps its receiver's buffer alive. Both used to leak.
+- A struct or tuple returned by a function that stores a `string` parameter unchanged on every
+  path (`func wrap(s: string) -> P { P { name: s } }`, a `P::new(s)` constructor) owns that
+  position exactly when the argument was owned. It used to leak.
+
+### Fixed
+
+- BUG-119: a struct deriving `Debug` or `Hashable`, and a builtin scalar, could not become a
+  `&dyn Debug`, `&dyn Hashable` or `&dyn Copy`, although a derive and a builtin implement the trait
+  as a hand-written impl does. The compiler now emits the impl the vtable needs. A `&string` still
+  cannot (BUG-126).
+- BUG-120: calling `fmt_debug` on a `&dyn Debug` stopped the build with an internal error. It is
+  dispatched through the vtable.
+- BUG-121: a method called through a `&dyn Trait` that returned its `string` argument handed back a
+  buffer the caller then freed, a use after free. A call through a trait object now moves its
+  by-value arguments as a direct call does.
+- BUG-122: for the same reason, a value with a `Drop` impl passed by value to a method called
+  through a `&dyn Trait` was dropped twice.
+- BUG-123: a generic struct instance first named by a struct field (`w: Wrap<i32>`) never received
+  the template's generic impls, so `@derive(Debug)` refused the field and a `T: Debug` bound
+  refused every later use of the same instance.
+- BUG-125: a derive rendered, compared and hashed a newtype field by its inner value even when the
+  newtype had a `Debug`, `PartialEq` or `Hashable` of its own.
+
 ## [5.14.4] - 2026-10-17
 
 ### Added

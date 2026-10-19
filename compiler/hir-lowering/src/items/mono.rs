@@ -179,21 +179,30 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Give every enum instance built before the generic impls were recorded (a field
-    /// or payload naming `Tree<i32>` resolves in the declaration pass) its methods.
-    pub(super) fn register_existing_enum_instance_methods(&mut self) -> Result<(), LoweringError> {
-        let existing: Vec<(String, String)> = self
+    /// Give every struct and enum instance built before the generic impls were recorded
+    /// (a field or payload naming `Tree<i32>` resolves in the declaration pass) its
+    /// methods and trait conformances.
+    pub(super) fn register_existing_instance_methods(&mut self) -> Result<(), LoweringError> {
+        let mut existing: Vec<(String, String, Vec<crate::MonoArg>)> = self
             .enum_instance_base
             .iter()
             .filter(|(_, base)| self.generic_impls.contains_key(*base))
-            .map(|(mangled, base)| (mangled.clone(), base.clone()))
+            .map(|(mangled, base)| {
+                let args = self
+                    .enum_instance_args
+                    .get(mangled)
+                    .cloned()
+                    .unwrap_or_default();
+                (mangled.clone(), base.clone(), args)
+            })
             .collect();
-        for (mangled, base) in existing {
-            let args = self
-                .enum_instance_args
-                .get(&mangled)
-                .cloned()
-                .unwrap_or_default();
+        existing.extend(
+            self.struct_instances
+                .iter()
+                .filter(|(_, (base, _))| self.generic_impls.contains_key(base))
+                .map(|(mangled, (base, args))| (mangled.clone(), base.clone(), args.clone())),
+        );
+        for (mangled, base, args) in existing {
             let (subst, const_subst) = split_mono_args(&self.template_generics(&base), &args);
             self.register_instance_methods(&base, &mangled, &subst, &const_subst)?;
         }

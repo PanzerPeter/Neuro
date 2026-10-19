@@ -295,7 +295,9 @@ Recursion is bounded by `MAX_DERIVE_DEPTH`, insurance against a future self-refe
 A hand-written `impl PartialEq` never arrives here as the operand type: lowering turned it into a
 method call. As a field's type it does, and the field is compared by its own `{Type}__eq`
 (`call_key_method`), but only for a type in `partial_eq_impls` (collected from the HIR impls
-whose trait is `PartialEq`): an inherent method named `eq` is not the type's comparison.
+whose trait is `PartialEq`): an inherent method named `eq` is not the type's comparison. A
+newtype field is erased in `struct_defs`, so `field_newtypes` keeps each field's declared newtype
+and a newtype in `partial_eq_impls` is compared by its `{Newtype}__eq` (`call_named_method`).
 
 `+` is concatenation, routed to `codegen_string_concat` before the numeric coercion: both operands
 are normalized with `load_string_fatptr`, a `len1 + len2` buffer is `malloc`'d, each operand's
@@ -402,12 +404,21 @@ then belongs to the storage, and is tracked one of three ways:
   anywhere (a `match` arm, an inner block) is never a forwarder, since its exit may read that
   binding instead, and a function whose exits mix a forward with anything else is neither a
   forwarder nor a producer.
+- **A holder's position filled from a parameter.** The same answer per position of a returned
+  holder (`held_strings_forwarded`): the positions every exit fills with one `string` parameter
+  unchanged, read only when that parameter appears nowhere else in the body (a closure capture
+  counts), since a second copy of its fat pointer would outlive the position's release. The call
+  reads each such argument's owner bit with `read_held_owner` before its move, and leaves them in
+  `forwarded_holder_owners` under the callee's name; `arm_stored_string_positions` takes them for
+  the binding the statement stores the holder into, as the bare forwarder's answer is taken.
 - **A by-value argument.** The same pass records the `string` parameters whose callee provably only
   READS them, by a whitelist of positions that copy the bytes out (a `print`/`println` argument, an
   interpolation hole, a binary operand, a `.len()` or `.clone()` receiver, a `push_str` argument,
-  anything under an `as` cast, and an argument to another declared function, or to a method a
-  struct or enum receiver resolves to (`Type__method`), whose parameter in that position is itself
-  read only). Every other occurrence is a retention. The last position
+  anything under an `as` cast, an argument to another declared function, or to a method a
+  struct or enum receiver resolves to (`Type__method`), or to one called through a `&dyn Trait`,
+  whose parameter in that position is itself read only (in every implementor, for the last), and
+  the receiver of a `.slice()` / `.char_slice()` view read in one of these slots). Every other
+  occurrence is a retention. The last position
   makes this summary a fixpoint too, growing from empty exactly like the return summary, and it
   trusts no callee name a local binding shadows. `.clone()` qualifies only because a `string`
   clone copies its bytes into a buffer of its own (`copy_string_bytes`) and is an owned producer;
@@ -1222,7 +1233,7 @@ name comes from `struct_written_names` (`HirStruct::written_name`, set by `set_s
 beside `set_struct_defs`), so a monomorphized instance prints `Wrapper`, not `Wrapper$g_i32`. A
 field-less struct renders as its bare name. A field whose `Debug` is written by hand renders
 through the `{Type}__fmt_debug$string` helper lowering emitted for it (`render_through_debug_impl`),
-an owned piece. The pieces reuse the same `PieceOwner` bookkeeping the enclosing literal uses, so
+an owned piece; so does a newtype field with one, named through `field_newtypes`. The pieces reuse the same `PieceOwner` bookkeeping the enclosing literal uses, so
 a nested rendering's scratch buffers are freed once copied out.
 
 ## Closure ABI
@@ -1287,11 +1298,18 @@ user-declared and emits a private constant global `[N x ptr]` per `(trait, type)
 declaration order, filled with per-method **thunks**. A thunk is needed because a `&self` method
 takes its struct by value while a trait object holds only a pointer, so the thunk loads the
 receiver and forwards; a `&mut self` method is already pointer-passed and forwards directly.
+A derived or builtin implementor has no method of the trait's name: hir-lowering emits the impl
+the compiler supplies with each method named `<method>$dyn`, and `emit_vtable_for` takes that
+method for the slot, so `S__hash` never exists to make `derived_key` read `S` as hand-written.
+Its vtable is keyed by the type as written (`i32`, a struct's name), which `codegen_dyn_coerce`
+reads off the HIR type.
 
 `codegen_dyn_coerce` builds the `{ data, vtable }` fat pointer for a `HirExprKind::DynCoerce`, and
 `codegen_dyn_method_call` extracts both words, GEPs the method's fixed slot, and issues an indirect
-call. `CodegenContext` carries `trait_methods` (vtable slot order, via `set_trait_methods`) and
-`vtables`.
+call. Its arguments move and are released as a direct call's are, under the name `dyn_callee`
+gives the `(trait, method)` pair: a parameter is read only there when it is in every implementor,
+so a by-value argument otherwise moves into the callee. `CodegenContext` carries `trait_methods`
+(vtable slot order, via `set_trait_methods`) and `vtables`.
 
 Static dispatch needs nothing here: `impl Trait` is monomorphized away before the HIR arrives.
 
@@ -1562,7 +1580,7 @@ and routed to `{Struct}__{eq,lt,hash}` for struct keys, adapting each argument t
 parameter shape the impl declared. A struct with no such method derives the trait
 (`derived_key`): its equality is `codegen_derived_struct_eq`, and its hash
 (`emit_derived_struct_hash`) is FNV-1a over each field's own key hash, so two keys the derived
-`==` calls equal hash alike. Semantic analysis has already required the traits and rejects raw
+`==` calls equal hash alike. A newtype field in `hashable_impls` contributes its `{Newtype}__hash`. Semantic analysis has already required the traits and rejects raw
 float keys. `.hash()` on a receiver with no `hash` method of its own (a builtin key type, or a
 struct deriving `Hashable`) is `codegen_supplied_hash`, the same `emit_key_hash`, so a map and a
 `T: Hashable` body agree on every hash.

@@ -726,3 +726,48 @@ func main() -> i32 {{
         .expect("compile/run failed");
     assert_eq!(exit, 0);
 }
+
+/// A holder a callee fills from its parameter owns the argument's buffer exactly when the
+/// argument was owned: a fresh concatenation is released with the holder, a literal never
+/// reaches `free`, and a binding's buffer moves into the holder once.
+#[test]
+fn a_holder_filled_from_a_parameter_owns_what_the_argument_owned() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+struct P {{
+    name: string,
+    n: u64
+}}
+
+impl P {{
+    func new(s: string) -> P {{ P {{ name: s, n: 1 }} }}
+}}
+
+func wrap(s: string) -> P {{ P {{ name: s, n: 0 }} }}
+
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        val e = wrap(a + a)
+        val b = a + a
+        val f = P::new(b)
+        val g = wrap("lit")
+        n = n + e.name.len() + f.name.len() + f.n + g.name.len()
+        i = i + 1
+    }}
+    if n != {} {{
+        return 91
+    }}
+    0
+}}
+"#,
+        u64::from(LEAK_ROUNDS) * (WIDTH * 4 + 1 + 3)
+    );
+    let exit = test
+        .compile_and_run("holder_forward.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}

@@ -5,6 +5,77 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-126: a `&string` cannot become a `&dyn Debug` or `&dyn Hashable`
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (the `&T` to `&dyn Trait` coercion) and `llvm-backend`
+  (trait-object construction)
+- **Severity**: minor. A program the language accepts is refused with a clear diagnostic
+
+**Minimal repro**
+
+```neuro
+func render(d: &dyn Debug) {}
+func main() -> i32 {
+    val s = "hi"
+    render(&s)
+    0
+}
+```
+
+Expected: the program builds, since `string` implements `Debug` and `Hashable` with no impl to
+write, and a trait object holds any implementor. Observed: `type mismatch: expected &dyn Debug,
+found &string`. A generic body that coerces `&T` with `T = string` fails in lowering with
+`a &string cannot become a &dyn Debug`. Every other builtin and every derived implementor coerces.
+
+**Root cause**: a `&string` is a `{ ptr, len }` fat pointer, and a trait object's data pointer is a
+thin pointer to the value. `&s` of a `string` binding has a place holding the fat pointer (its
+stack slot), but a `&string` parameter does not, and spilling one to the stack would dangle once
+the function returns the trait object.
+
+**Workaround**: wrap the text in a struct that derives `Debug` (or implement `Debug` for one) and
+coerce a reference to that.
+
+**Fix sketch**: give the coercion the address of the place that holds the fat pointer when the
+operand is a borrow of a `string` binding, and keep refusing a `&string` value that has no place.
+
+## BUG-124: a `for` over an array leaks its last element when it was not built in place
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`, ownership of `string` positions in an array iterated by `for`
+- **Severity**: minor. One buffer leaks per evaluation of the literal; no value is wrong
+
+**Minimal repro**
+
+```neuro
+func q() -> string { "a" + "b" }
+func main() -> i32 {
+    val parts = ["x" + "y", q()]
+    mut total = 0
+    for part in parts {
+        total += part.len() as i32
+    }
+    total
+}
+```
+
+Expected: exit 4 and both buffers released, as `parts[0].len() + parts[1].len()` does with the
+same literal. Observed: exit 4, and LeakSanitizer (`LD_PRELOAD` of `libasan.so`) reports the
+buffer `q()` returned. A moved binding in the last position (`["x" + "y", b]` with
+`val b = q()`) leaks the same way, and so does `[q(), q()]` (one buffer). `[q(), "x" + "y"]`
+and `[q()]` leak nothing.
+
+**Root cause**: not yet confirmed in the code. The element's position is armed when the
+literal is bound (indexing the same binding releases both), so the leak is on the path that
+moves elements out of the array into the loop binding.
+
+**Workaround**: none needed for correctness. Iterating by index (`for i in 0..2` reading
+`parts[i]`) does not leak.
+
+**Fix sketch**: compare the per-element flags the `for` head hands to each iteration's
+binding against the flags the declaration armed, for a last element that was not allocated
+in place.
+
 ## BUG-118: calling a function-valued field in parentheses fails to build
 
 - **Status**: open, confirmed

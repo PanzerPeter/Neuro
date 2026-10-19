@@ -236,6 +236,7 @@ fn build_module<'ctx>(
     // Collect struct definitions first so struct field/parameter types resolve below.
     let mut struct_defs: HashMap<String, Vec<(String, Type)>> = HashMap::new();
     let mut struct_written_names: HashMap<String, String> = HashMap::new();
+    let mut field_newtypes: HashMap<String, Vec<Option<String>>> = HashMap::new();
     for item in items {
         if let HirItem::Struct(def) = item {
             let mut fields = Vec::new();
@@ -244,6 +245,17 @@ fn build_module<'ctx>(
             }
             struct_defs.insert(def.name.clone(), fields);
             struct_written_names.insert(def.name.clone(), def.written_name.clone());
+            // `Type::from_hir` erases a newtype, which a derive still has to call its
+            // own impls through.
+            let newtypes = def
+                .fields
+                .iter()
+                .map(|field| match &field.ty {
+                    neuro_hir::HirType::Newtype { name, .. } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            field_newtypes.insert(def.name.clone(), newtypes);
         }
     }
 
@@ -342,6 +354,7 @@ fn build_module<'ctx>(
     let mut drop_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut pool_aware_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut partial_eq_impls: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut hashable_impls: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Alongside them, the methods that consume their receiver, so a call site clears the
     // receiver's drop flag and hands ownership to the callee.
     let mut consuming_self_methods: std::collections::HashSet<String> =
@@ -357,6 +370,9 @@ fn build_module<'ctx>(
                 }
                 Some("PartialEq") => {
                     partial_eq_impls.insert(impl_def.type_name.clone());
+                }
+                Some("Hashable") => {
+                    hashable_impls.insert(impl_def.type_name.clone());
                 }
                 _ => {}
             }
@@ -378,6 +394,8 @@ fn build_module<'ctx>(
     codegen_ctx.set_drop_types(drop_types);
     codegen_ctx.set_pool_aware_types(pool_aware_types);
     codegen_ctx.partial_eq_impls = partial_eq_impls;
+    codegen_ctx.hashable_impls = hashable_impls;
+    codegen_ctx.field_newtypes = field_newtypes;
     codegen_ctx.set_consuming_self_methods(consuming_self_methods);
     // Read the two call-boundary facts about owned `string` buffers off the whole
     // program: they cannot be derived at a call site, where the callee's body is out of

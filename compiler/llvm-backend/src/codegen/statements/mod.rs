@@ -59,6 +59,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
         self.forwarded_string_owner = None;
+        self.forwarded_holder_owners = None;
         self.branch_string_slots = branch_slots.clone();
         let init_val = init.map(|expr| self.codegen_expr(expr)).transpose();
         self.branch_string_slots = None;
@@ -229,6 +230,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let branch_slots = self.open_branch_string_slots(value, &Type::from_hir(&value.ty))?;
         let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
         self.forwarded_string_owner = None;
+        self.forwarded_holder_owners = None;
         self.branch_string_slots = branch_slots.clone();
         let val = self.codegen_expr(value);
         self.branch_string_slots = None;

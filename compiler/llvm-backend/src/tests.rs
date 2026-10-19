@@ -2570,11 +2570,12 @@ fn an_owned_argument_to_a_reading_parameter_is_released_after_the_call() {
         "a callee that stores the parameter keeps the buffer alive past the call, so \
          the caller must not release it there:\n{body}"
     );
+    // `keep` stores its parameter unchanged on every path, so the holder's position is
+    // owned exactly when the argument was: a fresh concatenation here.
     assert_eq!(
         armed_string_positions(&ir, "main"),
-        0,
-        "nor at the holder it was stored into: the buffer reached the field through a \
-         call, which proves nothing about who owns it:\n{body}"
+        1,
+        "the holder owns the buffer its argument handed over:\n{body}"
     );
 }
 

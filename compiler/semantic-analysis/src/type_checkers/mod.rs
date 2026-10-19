@@ -1187,6 +1187,16 @@ impl TypeChecker {
             }
         }
 
+        // Pass 2a: an instance made before the generic impls were registered, by a struct
+        // field (`w: Wrap<i32>`) or an impl signature, receives them now, so it meets a
+        // bound or a derive's field rule exactly as an instance made later does.
+        for (instance, template, span) in self.deferred_instance_derives.clone().unwrap_or_default()
+        {
+            if let Some((_, args)) = self.struct_instances.get(&instance).cloned() {
+                self.instantiate_impls_for(&template, &instance, &args, span);
+            }
+        }
+
         // Pass 2b: supertrait check, after all impls are registered so
         // `Comparable: PartialEq` and `Copy: Clone` are order-independent.
         self.check_operator_supertraits(items);

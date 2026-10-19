@@ -323,7 +323,8 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   and every return path of the helper allocates, so the hole owns the result. A `@derive(Debug)`
   struct rendered by a hole or a supplied `fmt_debug` gets the same helper for every field, at any
   depth through derived structs, whose `Debug` is written by hand (`emit_field_debug_helpers`):
-  the backend's field-by-field rendering calls it. `.clone()` on a non-`Copy` struct deriving
+  the backend's field-by-field rendering calls it. A newtype field is read through to its inner
+  type only when the newtype has no `Debug` of its own. `.clone()` on a non-`Copy` struct deriving
   `Clone` with a field that has an `impl Clone` (not an inherent `clone`), directly or through a
   nested such struct (`clone_calls_fields`, the checker's `derived_clone_calls` rule), calls `S__clone$derived`, the impl a programmer would have written,
   `S { h: self.h.clone(), n: self.n }`, emitted once per type by `emit_derived_clone` as an
@@ -417,7 +418,9 @@ impl's `type_subst` and `self` bound to the instance. An instance is `Copy` when
 rule, so a closure copies exactly the captures the checker copied. Because these are ordinary struct/impl HIR
 items, the backend needs no generic awareness. A generic enum's impls follow the same path from
 `instantiate_generic_enum` and `emit_mono_enum` (shared `emit_instance_impls`); an instance made
-before the impls were recorded is caught up by `register_existing_enum_instance_methods`. Every
+before the impls were recorded (a struct field or enum payload naming `Wrap<i32>`, resolved in
+the declaration pass) is caught up by `register_existing_instance_methods`, struct and enum alike,
+so its methods and trait conformances match an instance made later. Every
 `HirImpl` carries its receiver as `self_type` (`impl_target_type`: an enum when the name is one,
 a `HirType::Newtype` with its resolved inner type when it names a newtype, a struct otherwise).
 A method call on a newtype receiver resolves through `impl_methods` as an enum's does.
@@ -565,8 +568,14 @@ that order: the canonical vtable slot layout backends need. `resolve_type` deleg
 `apply_unsizing_coercion`. That is the **single site** where both unsizings are inserted:
 `&T` → `&dyn Trait` (`DynCoerce`) and `&[T; N]` / `&Vec<T>` → `&[T]` (`SliceCoerce`), so every
 context supplying an expected type (call arguments, returns, annotated bindings) gets them
-uniformly, and a value that already has the target shape is never re-coerced. A method call on a
-`DynObject` receiver types from the trait declaration, naming no implementor. Return-position
+uniformly, and a value that already has the target shape is never re-coerced. A `DynCoerce`
+whose concrete type implements the trait with no impl (a derive, a builtin) gets the impl the
+compiler supplies from `emit_supplied_vtable_impl`, once per `(trait, type)` pair: `fmt_debug$dyn`
+pushes the `{self:?}` rendering into the builder, `hash$dyn` returns the builtin hash, and a
+marker trait gets an empty impl. A `&string` cannot be a trait object (its reference is a fat
+pointer), which the checker refuses written directly and lowering reports as `StringTraitObject`
+when a generic instance reaches it. A method call on a `DynObject` receiver types from the trait
+declaration, naming no implementor, and `lower_supplied_trait_method` leaves it to the vtable. Return-position
 `impl Trait` resolves to its concrete type through `declared_return_type` /
 `shallow_result_type`.
 

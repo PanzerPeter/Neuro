@@ -332,6 +332,23 @@ impl<'ctx> CodegenContext<'ctx> {
             .unwrap_or_else(|| bool_ty.const_zero()))
     }
 
+    /// Read the owner bit of argument `index` for each position of a holder forwarder's
+    /// result it fills (`held`), before the call's move clears the argument's flag.
+    pub(crate) fn read_held_owner(
+        &mut self,
+        held: &[(Vec<String>, usize)],
+        index: usize,
+        arg: &HirExpr,
+        out: &mut Vec<(Vec<String>, IntValue<'ctx>)>,
+    ) -> CodegenResult<()> {
+        let Some((path, _)) = held.iter().find(|(_, filled)| *filled == index) else {
+            return Ok(());
+        };
+        let owner = self.argument_string_owner(arg)?;
+        out.push((path.clone(), owner));
+        Ok(())
+    }
+
     /// The name a call to a `string` forwarder is summarized under, when `expr` is one.
     /// Keyed the way [`produces_owned_string`](CodegenContext::produces_owned_string)
     /// keys a producer, which is the name the call path lowers the call under.

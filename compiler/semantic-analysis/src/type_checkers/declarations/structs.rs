@@ -549,7 +549,7 @@ impl TypeChecker {
     /// instance `mangled`, substituting the impl's type parameters (mapped positionally
     /// from the impl's type arguments to the struct's concrete arguments) into each
     /// method signature, which turns the receiver's template type into the instance.
-    pub(super) fn instantiate_impls_for(
+    pub(crate) fn instantiate_impls_for(
         &mut self,
         base: &str,
         mangled: &str,

@@ -65,7 +65,19 @@ impl Lowerer {
         expected: Option<&HirType>,
     ) -> Result<HirExpr, LoweringError> {
         let lowered = self.lower_expr_uncoerced(expr, expected)?;
-        Ok(apply_unsizing_coercion(lowered, expected))
+        let coerced = apply_unsizing_coercion(lowered, expected);
+        if let HirExprKind::DynCoerce { value } = &coerced.kind
+            && let HirType::Reference { inner, .. } = &coerced.ty
+            && let HirType::DynObject(trait_name) = inner.as_ref()
+        {
+            if matches!(value.ty.referent(), HirType::String) {
+                return Err(LoweringError::StringTraitObject {
+                    trait_name: trait_name.clone(),
+                });
+            }
+            self.emit_supplied_vtable_impl(trait_name, value.ty.referent(), coerced.span);
+        }
+        Ok(coerced)
     }
 
     /// Lower an expression without applying the unsizing coercions. Every contextual
