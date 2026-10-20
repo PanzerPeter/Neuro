@@ -135,6 +135,44 @@ impl Lowerer {
         args: &[Expr],
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
+        if let Expr::Closure {
+            params,
+            ret,
+            body,
+            is_move,
+            span: literal,
+        } = crate::closures::peel_parens(func)
+            && params.iter().any(|p| p.ty.is_none())
+        {
+            // The arguments are the literal's context, as the checker reads them: each
+            // is lowered first, and an unannotated parameter takes its argument's type.
+            let mut hint = crate::closures::ClosureHint::default();
+            let mut lowered = Vec::with_capacity(args.len());
+            for (index, arg) in args.iter().enumerate() {
+                let written = match params.get(index).and_then(|p| p.ty.as_ref()) {
+                    Some(ty) => Some(self.resolve_type(ty)?),
+                    None => None,
+                };
+                let arg = self.lower_expr(arg, written.as_ref())?;
+                hint.params.push(Some(arg.ty.clone()));
+                lowered.push(arg);
+            }
+            let callee =
+                self.lower_closure(params, ret.as_ref(), body, *is_move, &hint, *literal)?;
+            let HirType::Function { ret, .. } = callee.ty.clone() else {
+                return Err(LoweringError::Malformed {
+                    detail: "a closure literal lowered to a non-function".to_string(),
+                });
+            };
+            return Ok(HirExpr::new(
+                HirExprKind::Call {
+                    callee: Box::new(callee),
+                    args: lowered,
+                },
+                *ret,
+                span,
+            ));
+        }
         let callee = self.lower_expr(func, None)?;
         let HirType::Function { params, ret } = callee.ty.clone() else {
             return Err(LoweringError::Malformed {
@@ -356,19 +394,8 @@ impl Lowerer {
             &mut const_subst,
         )?;
 
-        // Resolve the concrete parameter and return types under the inferred bindings.
-        let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
-        let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
-        let mut param_tys = Vec::with_capacity(template.params.len());
-        for param in &template.params {
-            param_tys.push(self.resolve_type(&param.ty)?);
-        }
-        let ret = match &template.return_type {
-            Some(t) => self.resolve_type(t)?,
-            None => HirType::Void,
-        };
-        self.type_subst = saved_ty;
-        self.const_subst = saved_c;
+        let (param_tys, ret) =
+            self.instance_signature(&template, subst.clone(), const_subst.clone())?;
 
         let mangled = crate::mangle_instance(name, &template.generics, &subst, &const_subst);
         if crate::autodiff::is_grad(&template.attributes) {
@@ -406,6 +433,50 @@ impl Lowerer {
             ret,
             span,
         ))
+    }
+
+    /// The parameter and return types of the generic function `name` at the instance its
+    /// turbofish `type_args` names in full.
+    pub(crate) fn generic_instance_signature(
+        &mut self,
+        name: &str,
+        type_args: &[ast_types::GenericArg],
+    ) -> Result<(Vec<HirType>, HirType), LoweringError> {
+        let template = self.generic_templates.get(name).cloned().ok_or_else(|| {
+            LoweringError::UnresolvedCall {
+                target: name.to_string(),
+            }
+        })?;
+        let mut subst = std::collections::HashMap::new();
+        let mut const_subst = std::collections::HashMap::new();
+        self.seed_turbofish(&template.generics, type_args, &mut subst, &mut const_subst)?;
+        self.instance_signature(&template, subst, const_subst)
+    }
+
+    /// `template`'s concrete parameter and return types under the given bindings.
+    fn instance_signature(
+        &mut self,
+        template: &ast_types::FunctionDef,
+        subst: std::collections::HashMap<String, HirType>,
+        const_subst: std::collections::HashMap<String, u64>,
+    ) -> Result<(Vec<HirType>, HirType), LoweringError> {
+        let saved_ty = std::mem::replace(&mut self.type_subst, subst);
+        let saved_c = std::mem::replace(&mut self.const_subst, const_subst);
+        let resolved = template
+            .params
+            .iter()
+            .map(|param| self.resolve_type(&param.ty))
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|params| {
+                let ret = match &template.return_type {
+                    Some(t) => self.resolve_type(t)?,
+                    None => HirType::Void,
+                };
+                Ok((params, ret))
+            });
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
+        resolved
     }
 
     /// Lower a generic call's arguments, unifying each with its parameter as it goes. An

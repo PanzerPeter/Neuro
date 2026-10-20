@@ -6,6 +6,7 @@
 use super::builtins::TO_CHECKED_METHOD;
 use super::{COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
 use crate::errors::TypeError;
+use crate::type_checkers::closures::closure_context;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
 use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, EQ_METHOD, PARTIAL_EQ_TRAIT};
 use crate::type_checkers::statements::function_value_position;
@@ -1035,6 +1036,8 @@ impl TypeChecker {
                 Some(return_type)
             }
 
+            _ if unannotated_closure(func) => Some(self.check_closure_call(func, args, *span)),
+
             _ => {
                 self.function_value_slot = function_value_position(func);
                 let expr_ty = self.check_expr(func, None).unwrap_or(Type::Unknown);
@@ -1051,6 +1054,56 @@ impl TypeChecker {
                 });
                 Some(Type::Unknown)
             }
+        }
+    }
+
+    /// A closure literal called where it is written, `(|x| x + 1)(4)`: its arguments are
+    /// its context, so a parameter without an annotation takes its argument's type. The
+    /// arguments are checked first for that reason; lowering takes the same order.
+    fn check_closure_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Type {
+        let mut literal = callee;
+        while let Expr::Paren(inner, _) = literal {
+            literal = inner;
+        }
+        let Expr::Closure { params, .. } = literal else {
+            return Type::Unknown;
+        };
+        if args.len() != params.len() {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: params.len(),
+                found: args.len(),
+                span,
+            });
+        }
+        let mut arg_types = Vec::with_capacity(args.len());
+        for (index, arg) in args.iter().enumerate() {
+            let written = params
+                .get(index)
+                .and_then(|p| p.ty.as_ref())
+                .and_then(|ty| self.resolve_type(ty));
+            if matches!(written, Some(Type::Function { .. })) {
+                self.function_value_slot = function_value_position(arg);
+            }
+            let found = self
+                .check_expr(arg, written.as_ref())
+                .unwrap_or(Type::Unknown);
+            self.function_value_slot = None;
+            if let Some(written) = &written {
+                let found = shared_reborrow(found.clone(), written);
+                if !matches!(found, Type::Unknown) && !self.assignable(&found, written) {
+                    self.record_type_mismatch(written, found, arg.span());
+                }
+            }
+            self.record_move(arg);
+            arg_types.push(found);
+        }
+        self.function_value_slot = function_value_position(callee);
+        let context = closure_context(callee, arg_types, Type::Unknown);
+        let ty = self.check_expr(callee, Some(&context));
+        self.function_value_slot = None;
+        match ty {
+            Some(Type::Function { ret, .. }) => *ret,
+            _ => Type::Unknown,
         }
     }
 
@@ -1108,6 +1161,16 @@ fn shared_reborrow(found: Type, expected: &Type) -> Type {
         },
         (found, _) => found,
     }
+}
+
+/// Whether `callee` is a closure literal, through any parentheses, with a parameter
+/// that carries no annotation.
+fn unannotated_closure(callee: &Expr) -> bool {
+    let mut callee = callee;
+    while let Expr::Paren(inner, _) = callee {
+        callee = inner;
+    }
+    matches!(callee, Expr::Closure { params, .. } if params.iter().any(|p| p.ty.is_none()))
 }
 
 /// Whether `arg` is a closure literal, through any parentheses.

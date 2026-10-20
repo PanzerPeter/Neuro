@@ -5,4 +5,5 @@ full(160)    120
 measure(45)  10
 applied      50
 piped        60
+offset(90)   95
 direct       40

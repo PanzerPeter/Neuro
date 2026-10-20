@@ -1045,17 +1045,19 @@ part of it that still holds. `holds_function_value` walks a type through struct 
 payloads, newtypes, arrays and tuples for `hold_carried_borrows`. A callee may keep a function
 value, so `check_pool_retention` judges a closure argument by its captures like any other.
 
-### Composition
-`expressions/compose.rs`. `check_compose` types an `Expr::Compose` as
-`Type::Function { params: [first stage's parameter], ret: last stage's return }`, after resolving
-every name in the chain and checking that each stage's result is assignable to the next stage's
-parameter (`ComposeStageMismatch`). A stage must be a non-generic free function of exactly one
-parameter: `ComposeGenericFunction`, `ComposeArity`, `ComposeUndefined`, and
-`ComposeNotANamedFunction` for a name that resolves to a *binding* instead. That last one is the
-capture rule reaching a new surface rather than a rule of its own: the composed closure calls each
-stage directly, and a stage held in a binding would have to be captured, which the Copy-only
-capture model forbids. Every stage is resolved before any mismatch is reported, so one chain
-reports each bad name it holds.
+### Function values and composition
+`expressions/compose.rs`. `check_instance` types `f::<T>` named as a value: the generic's
+signature under the turbofish, its bounds and `where` predicates checked; anything but a generic
+free function there is `InstanceNotAValue`. A composition reaches the checker as the closure the
+parser built, so captures, modes and the scope-bound rule are the closure rules. `check_closure`
+asks `compose_param` for that closure's parameter type when no context fixes it: the first
+stage's first parameter, read from its signature without checking it (errors from that read are
+dropped, the call in the body reports them). A generic stage without a turbofish, or a bound
+method not declared in its receiver's own `impl`, is `ComposeParamUntyped`, and the body is then
+not checked, since it would only repeat the error. Later stages are ordinary calls, so a generic
+or an unannotated closure there infers from the stage before it. `check_closure_call`
+(`expressions/calls.rs`) checks a closure literal called in place with an unannotated parameter:
+arguments first, then the literal with their types as its context.
 
 ### Fallible types
 `fallible_kind` (`expressions/operators.rs`) is the shared resolver, so `?` and `??` accept exactly

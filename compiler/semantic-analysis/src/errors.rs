@@ -25,7 +25,7 @@ pub enum TypeError {
     InvalidMainSignature { problem: String, span: Span },
 
     #[error(
-        "'{name}' is a generic function, and a bare name picks no instance to be a value of; wrap the call in a closure with annotated parameters, e.g. `|x: T| -> R {{ {name}(x) }}`"
+        "'{name}' is a generic function, and a bare name picks no instance to be a value of; name one with a turbofish, `{name}::<T>`"
     )]
     FunctionUsedAsValue { name: String, span: Span },
 
@@ -864,34 +864,15 @@ pub enum TypeError {
     #[error("cannot call non-function type {ty}")]
     NotCallable { ty: Type, span: Span },
 
-    #[error("`>>` composes named functions: '{name}' names no function in this program")]
-    ComposeUndefined { name: String, span: Span },
+    #[error(
+        "`>>` takes the composed function's parameter type from its first operand, and this one fixes none: name a generic's instance with a turbofish (`f::<T>`), or write the composition where a function type is expected"
+    )]
+    ComposeParamUntyped { span: Span },
 
     #[error(
-        "`>>` composes named functions: '{name}' is a binding, so name the `func` it holds instead"
+        "only a generic function's instance `f::<T>` is a value on its own; an instantiated associated function or method is a `|>` target or a later `>>` stage, where it is called"
     )]
-    ComposeNotANamedFunction { name: String, span: Span },
-
-    #[error(
-        "`>>` cannot compose the generic function '{name}': a composition fixes no type arguments"
-    )]
-    ComposeGenericFunction { name: String, span: Span },
-
-    #[error("`>>` composes functions of one parameter: '{name}' takes {found}")]
-    ComposeArity {
-        name: String,
-        found: usize,
-        span: Span,
-    },
-
-    #[error("'{left}' returns {found}, which '{right}' cannot take: it expects {expected}")]
-    ComposeStageMismatch {
-        left: String,
-        right: String,
-        found: Type,
-        expected: Type,
-        span: Span,
-    },
+    InstanceNotAValue { span: Span },
 
     #[error("variable '{name}' used without initialization")]
     UninitializedVariable { name: String, span: Span },
@@ -1647,11 +1628,8 @@ impl TypeError {
             | Self::MissingReturn { span, .. }
             | Self::UnknownTypeName { span, .. }
             | Self::NotCallable { span, .. }
-            | Self::ComposeUndefined { span, .. }
-            | Self::ComposeNotANamedFunction { span, .. }
-            | Self::ComposeGenericFunction { span, .. }
-            | Self::ComposeArity { span, .. }
-            | Self::ComposeStageMismatch { span, .. }
+            | Self::ComposeParamUntyped { span }
+            | Self::InstanceNotAValue { span }
             | Self::UninitializedVariable { span, .. }
             | Self::VoidBinding { span, .. }
             | Self::AssignToImmutable { span, .. }

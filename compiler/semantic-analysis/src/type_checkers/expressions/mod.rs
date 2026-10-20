@@ -403,7 +403,11 @@ impl TypeChecker {
                 *span,
             )),
 
-            Expr::Compose { functions, span } => Some(self.check_compose(functions, *span)),
+            Expr::Instance {
+                callee,
+                type_args,
+                span,
+            } => self.check_instance(callee, type_args, *span),
         }
     }
 }

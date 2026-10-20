@@ -6,9 +6,9 @@
 //   (`S: Iterator<Item = i32>`) · generic structs monomorphized per instance ·
 //   closures stored in a struct field · `@derive(Copy)` structs with `&mut self`
 //   methods · `Option` + `match` · `Vec<i32>` + `for`-in · string interpolation
-//   with the format mini-language · the pipeline operator `|>` over all three of
-//   its function-value spellings · the composition operator `>>` building a reusable
-//   stage out of two of those same functions.
+//   with the format mini-language · the pipeline operator `|>` and the composition
+//   operator `>>` over every function-value spelling: a function name, an associated
+//   function, a generic function's instance, a bound method and a closure literal.
 //
 // The point is composition: a source, a transform, and a filter are three separate
 // types, each implementing `Iterator`, and a single `for` head drives the whole chain
@@ -52,6 +52,11 @@ impl Readings {
             }
         }
         sum
+    }
+
+    // An associated function: `Readings::cap` is a function value like any other.
+    func cap(total: i32) -> i32 {
+        if total > 99 { 99 } else { total }
     }
 }
 
@@ -139,6 +144,10 @@ func describe(total: i32) -> string {
     "piped total {total}"
 }
 
+func keep<T>(value: T) -> T {
+    value
+}
+
 // A higher-order function taking the composed stage as an ordinary `(i32) -> string`
 // value: nothing in the signature knows the argument was built with `>>`.
 func describe_widest(readings: Readings, summarize: (i32) -> string) -> string {
@@ -218,12 +227,12 @@ func main() -> i32 {
     // The same container driven by the pipeline operator instead of a `for` head.
     // `value |> f` is `f(value)`: the chain reads top to bottom in the order the
     // stages run, where the nested spelling `describe(widen(readings.total_above(4)))`
-    // has to be read inside out. All three spellings of a function value appear:
-    // a bound method, a free function, and a parenthesized closure literal.
+    // has to be read inside out. A closure literal stage takes its parameter type
+    // from the value piped into it, so it needs no annotation.
     val report = 4
         |> readings.total_above
         |> widen
-        |> (|total: i32| -> i32 { total - flagged })
+        |> (|total| total - flagged)
         |> describe
     println("{report}")
 
@@ -235,6 +244,15 @@ func main() -> i32 {
     println("{summarize(raw_total)}")
     println("{summarize(kept_total)}")
     println("{describe_widest(readings, summarize)}")
+
+    // Every function value composes. The first stage, a bound method, fixes the
+    // composed function's parameter type; each later stage is called with the one
+    // before it, so the closure needs no annotation and `keep` no turbofish. The
+    // composition borrows `readings` for the bound method while it lives.
+    val audit = readings.total_above >> Readings::cap >> (|total| total - flagged) >> keep >> describe
+    println("{audit(4)}")
+    val doubled = keep::<i32> >> widen
+    println("{doubled(flagged) |> describe}")
 
     return raw_total + counted + kept_total + remainders + flagged
 }

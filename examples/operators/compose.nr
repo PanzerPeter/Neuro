@@ -4,8 +4,9 @@
 // value through a chain, `>>` names the chain itself, so a pipeline written once can
 // be applied in several places.
 //
-// Both operands are function *names*: a composition is a value, and the closure it
-// becomes calls each stage directly. `>>` binds tighter than `|>` (Appendix B), so
+// An operand is any function value: a function name, an associated function, a
+// generic function's instance `f::<T>`, a bound method or a closure literal. The
+// composition is a closure, and `>>` binds tighter than `|>` (Appendix B), so
 // `x |> f >> g` applies the composed function to `x`.
 //
 // `>>` is not right shift in this language. Shifting is the `.shr(n)` method, which
@@ -61,6 +62,11 @@ func main() -> i32 {
         |> normalize
         |> clamp_low >> amplify
     println("piped        {piped}")
+
+    // A closure literal composes too. A stage after the first takes its parameter
+    // type from the stage before it, so this one needs no annotation.
+    val offset = clamp_low >> (|reading| reading + 5)
+    println("offset(90)   {offset(90)}")
 
     // A composition called where it is written needs no name at all.
     val direct = (normalize >> amplify)(120)

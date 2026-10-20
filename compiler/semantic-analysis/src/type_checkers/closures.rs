@@ -8,7 +8,7 @@
 //! capture by value. The strongest use decides the closure's call mode.
 use std::collections::{HashMap, HashSet};
 
-use ast_types::{ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
+use ast_types::{COMPOSE_PARAM, ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
 use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
@@ -65,6 +65,15 @@ impl TypeChecker {
                     param_types.push(self.resolve_type(ty).unwrap_or(Type::Unknown))
                 }
                 (None, Some(fixed)) => param_types.push(fixed.clone()),
+                (None, None) if p.name.name == COMPOSE_PARAM => {
+                    let reported = self.errors.len();
+                    match self.compose_param(body, span) {
+                        Some(first) => param_types.push(first),
+                        // The untyped composition was reported; its body would repeat it.
+                        None if self.errors.len() > reported => return Type::Unknown,
+                        None => param_types.push(Type::Unknown),
+                    }
+                }
                 (None, None) => {
                     self.record_error(TypeError::ClosureParamNeedsType {
                         name: p.name.name.clone(),
@@ -701,8 +710,8 @@ fn collect_loop_body(
 
 fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
     match expr {
-        // A composition names functions, and a function is not a capturable binding.
-        Expr::Literal(_, _) | Expr::Path { .. } | Expr::Compose { .. } => {}
+        Expr::Literal(_, _) | Expr::Path { .. } => {}
+        Expr::Instance { callee, .. } => collect_expr(callee, fv),
         Expr::Identifier(ident) => fv.read(&ident.name, ident.span),
         Expr::Binary { left, right, .. } => {
             collect_expr(left, fv);

@@ -303,10 +303,8 @@ impl Walker<'_, '_> {
         }
 
         match expr {
-            Expr::Literal(_, _)
-            | Expr::Identifier(_)
-            | Expr::Path { .. }
-            | Expr::Compose { .. } => {}
+            Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Path { .. } => {}
+            Expr::Instance { callee, .. } => self.expr(callee),
             Expr::Binary { left, right, .. } => {
                 self.expr(left);
                 self.expr(right);

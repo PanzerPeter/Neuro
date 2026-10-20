@@ -1,4 +1,4 @@
-use super::expr_infix::{apply_compose, as_compose};
+use super::expr_infix::{apply_composition, is_compose};
 use lexical_analysis::TokenKind;
 use shared_types::{Identifier, Span};
 
@@ -376,17 +376,23 @@ pub(super) fn finish_call(
     span: Span,
 ) -> Expr {
     let applied = arg_labels.is_empty() && args.len() == 1;
-    match as_compose(&callee) {
-        Some(functions) if applied => {
-            let functions = functions.to_vec();
-            apply_compose(&functions, args.remove(0), span)
-        }
-        _ => Expr::Call {
-            func: Box::new(callee),
-            type_args: Vec::new(),
-            args,
-            arg_labels,
-            span,
-        },
+    if applied && is_composition(&callee) {
+        return apply_composition(callee, args.remove(0));
+    }
+    Expr::Call {
+        func: Box::new(callee),
+        type_args: Vec::new(),
+        args,
+        arg_labels,
+        span,
+    }
+}
+
+/// Whether `callee`, through any parentheses, is a composition `f >> g`.
+fn is_composition(callee: &Expr) -> bool {
+    match callee {
+        Expr::Paren(inner, _) => is_composition(inner),
+        Expr::Closure { params, .. } => is_compose(params),
+        _ => false,
     }
 }

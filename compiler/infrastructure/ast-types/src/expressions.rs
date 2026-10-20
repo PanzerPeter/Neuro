@@ -5,6 +5,10 @@ use shared_types::{FormatSpec, Identifier, Literal, Span};
 use super::statements::Stmt;
 use super::types::GenericArg;
 
+/// The parameter name of the closure a composition `f >> g` is parsed to. The `$` keeps
+/// it out of every program's namespace, since no identifier token can contain one.
+pub const COMPOSE_PARAM: &str = "$compose";
+
 /// A single field initializer in a struct literal: `field_name: expr`
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldInit {
@@ -242,6 +246,10 @@ pub enum Expr {
     /// enclosing scope. `ret` is `None` when the return type is inferred from the
     /// body; `body` is a single expression (a bare block for the multi-statement
     /// form). `is_move` records the `move` keyword, which forces by-value capture.
+    ///
+    /// A composition `f >> g` is parsed to this node too: one parameter named
+    /// [`COMPOSE_PARAM`] and the body `g(f(param))`. A parameter of that name that
+    /// nothing else types takes the parameter type of the first stage it is passed to.
     Closure {
         params: Vec<ClosureParam>,
         ret: Option<crate::Type>,
@@ -249,16 +257,12 @@ pub enum Expr {
         is_move: bool,
         span: Span,
     },
-    /// Function composition `f >> g >> h`: the function value that applies its
-    /// argument to `f`, that result to `g`, and so on left to right.
-    ///
-    /// The chain is flattened by the parser, so `functions` is never shorter than two
-    /// and the node holds no sub-expressions: composition takes *named* functions, never
-    /// an arbitrary function-valued expression. That is also why the operands are
-    /// [`Identifier`]s rather than boxed [`Expr`]s: a walker over expressions has
-    /// nothing here to descend into.
-    Compose {
-        functions: Vec<Identifier>,
+    /// An instantiated generic named as a value, `convert::<u8>`: a turbofish with no
+    /// argument list after it. `callee` is the generic's name or path; applied to
+    /// arguments, the pair becomes the [`Expr::Call`] it stands for.
+    Instance {
+        callee: Box<Expr>,
+        type_args: Vec<GenericArg>,
         span: Span,
     },
     /// Error propagation `operand?`: unwraps an `Option<T>` / `Result<T, E>` to its
@@ -459,7 +463,7 @@ impl Expr {
             Expr::ArrayRest { span, .. } => *span,
             Expr::Match { span, .. } => *span,
             Expr::Closure { span, .. } => *span,
-            Expr::Compose { span, .. } => *span,
+            Expr::Instance { span, .. } => *span,
             Expr::Try { span, .. } => *span,
             Expr::InterpString { span, .. } => *span,
         }

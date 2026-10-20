@@ -3,10 +3,10 @@
 // `x |> f` is `f(x)`. It exists to turn a nest of calls, which has to be read from
 // the inside out, into a chain read top to bottom in the order the stages run.
 //
-// The thing on the right of `|>` is a function *value*, never a call. Three
-// spellings produce one: a function name, a bound method `receiver.method`, and a
-// parenthesized closure literal. A binding of function type is a name like any
-// other, so it works too. `|>` binds looser than every other operator, so the whole
+// The thing on the right of `|>` is a function *value*, never a call: a function
+// name, an associated function `Type::function`, a generic function's instance
+// `f::<T>`, a bound method `receiver.method`, or a parenthesized closure literal. A
+// binding of function type is a name like any other, so it works too. `|>` binds looser than every other operator, so the whole
 // expression to its left is what gets piped.
 
 struct Scaler {
@@ -55,10 +55,11 @@ func main() -> i32 {
         |> scaler.apply
     println("scaled  {scaled}")
 
-    // A closure literal parenthesized inline, for a stage not worth naming.
+    // A closure literal parenthesized inline, for a stage not worth naming. It takes
+    // its parameter type from the piped value.
     val adjusted = 110
         |> normalize
-        |> (|value: i32| -> i32 { value * value })
+        |> (|value| value * value)
     println("adjusted {adjusted}")
 
     // A closure bound to a name pipes exactly like a function does.

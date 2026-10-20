@@ -1210,7 +1210,8 @@ func main() -> i32 {
 ```
 
 A parameter that nothing types is an error, so `val f = |x| x + 1` alone is refused: a later
-call does not type it. Annotate the parameter, or give the binding a function type. A block
+call does not type it. A literal called where it is written takes its parameter types from the
+arguments, so `(|x| x + 1)(4)` needs none. Annotate the parameter, or give the binding a function type. A block
 body that takes its return type from its last expression may not `return`; write the return
 type if it needs to.
 
@@ -1231,8 +1232,10 @@ func main() -> i32 {
 ```
 
 A function's own name is a value of its function type too, so `apply(5, double)` passes
-`func double(x: i32) -> i32` directly, and `val f = double` binds it. A generic function
-has no single type until its type arguments are named, so its bare name is refused.
+`func double(x: i32) -> i32` directly, and `val f = double` binds it. An associated function is
+one through its path, `val s = Point::scale`. A generic function has no single type until its
+type arguments are named, so its bare name is refused; name the instance with a turbofish
+instead, `val f = identity::<i32>`.
 
 A higher-order function may be generic. The closure passed to it takes part in inferring its
 type parameters: it is typed after the call's other arguments, so it sees what they bound, and
@@ -1308,7 +1311,8 @@ function-typed parameter, or a closure holding either), so it lives only as long
   beside what the method walks. A literal that only reads what it borrows goes there directly,
   and a `for` head's literal keeps its borrows until the loop ends.
 - A closure without `move` taking a capture by value because its body moves it out.
-- A closure literal as a `|>` stage without annotations, since nothing gives it a context there.
+- An instantiated associated function or generic method as a value on its own
+  (`val f = Cell::new::<i32>`); it works as a `|>` target and as a later `>>` stage.
 
 ## References
 

@@ -109,12 +109,13 @@ walkers.
   `FunctionMode::{Shared, Mut, Once}` for `(T) -> U`, `mut (T) -> U` and `once (T) -> U`. The
   variants are ordered weakest first, so `a <= b` reads "a value of mode `a` fits a slot of mode
   `b`", which is the whole assignability rule the checker applies.
-- `Expr::Compose { functions, span }` is the composition chain `f >> g >> h`. It carries
-  `Vec<Identifier>`, not operand expressions: composition takes named functions, and a name is
-  not a value in this language. The chain is flattened by the parser, so the node holds two or
-  more names and no sub-expression, and an expression walker has nothing here to descend into.
-  Module resolution is the one pass that must still reach the names, because an import may
-  rename them; it hands each one to its visitor as the identifier expression it stands for.
+- A composition `f >> g >> h` has no node of its own: the parser builds the `Expr::Closure`
+  it stands for, one parameter named `COMPOSE_PARAM` (`$compose`, which no identifier token
+  can spell) and the body `h(g(f($compose)))`. Checker and lowering give that parameter the
+  first stage's parameter type when no context types it; everything else is closure rules.
+- `Expr::Instance { callee, type_args, span }` is a turbofish with no argument list,
+  `convert::<u8>`: an instantiated generic named as a value. Applied by `|>` or `>>`, it
+  becomes the `Expr::Call` carrying the same `type_args`.
 - `Expr::Try { operand, span }` (postfix `?`) is a node of its own rather than a `BinaryOp`: it
   has one operand, and its type comes from that operand's success payload while its *failure*
   path is typed by the enclosing function's return type.

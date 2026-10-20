@@ -671,8 +671,18 @@ fn rewrite_expr(expr: &mut Expr, resolved: &HashMap<String, Type>) {
             }
             rewrite_expr(body, resolved);
         }
+        Expr::Instance {
+            callee, type_args, ..
+        } => {
+            rewrite_expr(callee, resolved);
+            for arg in type_args.iter_mut() {
+                if let ast_types::GenericArg::Type(ty) = arg {
+                    rewrite_type(ty, resolved);
+                }
+            }
+        }
         Expr::Path { type_name, .. } => rename_self(type_name, resolved),
-        Expr::Literal(_, _) | Expr::Identifier(_) | Expr::Compose { .. } => {}
+        Expr::Literal(_, _) | Expr::Identifier(_) => {}
     }
 }
 

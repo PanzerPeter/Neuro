@@ -6,7 +6,7 @@
 // would otherwise have to know about the operator and does not.
 
 use shared_types::Literal;
-use syntax_parsing::{BinaryOp, Expr, Stmt, parse_expr};
+use syntax_parsing::{BinaryOp, Expr, parse_expr};
 
 /// The callee and single argument of a desugared pipeline stage.
 fn call_parts(expr: &Expr) -> (&Expr, &Expr) {
@@ -103,59 +103,30 @@ fn a_leading_operator_continues_the_previous_line() {
 }
 
 #[test]
-fn a_closure_target_is_bound_to_a_temporary_first() {
-    // A call whose callee is a closure *literal* is not a shape any later stage
-    // accepts, so the parser binds it and calls the binding.
-    let expr = parse_expr("x |> (|y: i32| -> i32 { y })")
-        .expect("a parenthesized closure target should parse");
-    let Expr::Block { stmts, .. } = &expr else {
-        panic!("expected a block, got {:?}", expr);
-    };
-    assert_eq!(stmts.len(), 2);
-    let name = match &stmts[0] {
-        Stmt::VarDecl {
-            name,
-            init,
-            mutable,
-            ..
-        } => {
-            assert!(!mutable, "the pipeline temporary is immutable");
-            assert!(matches!(init, Some(Expr::Closure { .. })));
-            name.name.clone()
-        }
-        other => panic!("expected the temporary's declaration, got {:?}", other),
-    };
-    match &stmts[1] {
-        Stmt::Expr(call) => {
-            let (func, arg) = call_parts(call);
-            assert_eq!(ident_name(func), name);
-            assert_eq!(ident_name(arg), "x");
-        }
-        other => panic!("expected the call, got {:?}", other),
-    }
+fn a_closure_target_is_called_in_place() {
+    // The literal is the callee: called where it is written, it takes its parameter's
+    // type from the piped value, so `x |> (|y| y * 2)` needs no annotation.
+    let expr = parse_expr("x |> (|y| y * 2)").expect("a parenthesized closure target should parse");
+    let (func, arg) = call_parts(&expr);
+    assert!(matches!(func, Expr::Closure { .. }), "got {:?}", func);
+    assert_eq!(ident_name(arg), "x");
 }
 
 #[test]
-fn two_closure_targets_get_distinct_temporaries() {
-    let expr = parse_expr("x |> (|y: i32| -> i32 { y }) |> (|z: i32| -> i32 { z })")
-        .expect("two closure stages should parse");
-    let Expr::Block { stmts, .. } = &expr else {
-        panic!("expected a block, got {:?}", expr);
+fn an_instance_target_carries_its_turbofish() {
+    let expr = parse_expr("x |> convert::<u8>").expect("an instance target should parse");
+    let Expr::Call {
+        func,
+        type_args,
+        args,
+        ..
+    } = &expr
+    else {
+        panic!("expected a call, got {:?}", expr);
     };
-    let Stmt::VarDecl { name: outer, .. } = &stmts[0] else {
-        panic!("expected the outer temporary");
-    };
-    let Stmt::Expr(call) = &stmts[1] else {
-        panic!("expected the outer call");
-    };
-    let (_, arg) = call_parts(call);
-    let Expr::Block { stmts: inner, .. } = arg else {
-        panic!("expected the inner stage's block, got {:?}", arg);
-    };
-    let Stmt::VarDecl { name: nested, .. } = &inner[0] else {
-        panic!("expected the inner temporary");
-    };
-    assert_ne!(outer.name, nested.name);
+    assert_eq!(ident_name(func), "convert");
+    assert_eq!(type_args.len(), 1);
+    assert_eq!(ident_name(&args[0]), "x");
 }
 
 #[test]

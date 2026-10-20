@@ -96,23 +96,24 @@ no types.
 - **Struct literal shorthand and functional update**: a field with no `: value` desugars to
   `field: field`; a trailing `..expr` sets `StructLiteral.base` and ends the field list.
 - **The pipeline operator**: `value |> target` becomes the call `target` already
-  stands for, so `|>` reaches no other stage and needs no AST node. `pipe_into`
-  (`parser/expr_infix.rs`) matches the target: an `Identifier` or `Path` becomes a plain
-  `Expr::Call`, a `FieldAccess` becomes the ordinary method call `receiver.method(value)`,
-  and a `Paren` is peeled and retried. A **closure literal** is the one target that cannot
-  be a callee directly: a call whose `func` is an `Expr::Closure` is a shape no later stage
-  accepts, so it is bound to a `__pipe_N` temporary in an `Expr::Block` and the binding is
-  called instead. Any other target is `ParseError::NotAPipelineTarget`, which is what keeps
-  `x |> f(a)` a diagnostic about `|>` rather than a type error about calling a non-callable
-  further down the pipeline.
+  stands for, so `|>` reaches no other stage and needs no AST node. `apply_stage`
+  (`parser/expr_infix.rs`) builds it: an `Identifier`, `Path` or `FieldAccess` target becomes
+  the call written with it, an `Expr::Instance` the call carrying its turbofish, and a closure
+  literal a call of the literal in place. Any other target is `ParseError::NotAPipelineTarget`,
+  which keeps `x |> f(a)` a diagnostic about `|>` rather than a type error about calling a
+  non-callable further down.
 
-- **The composition operator**: `f >> g >> h` becomes one flat `Expr::Compose` node holding the
-  names, built by `compose_operand` (`parser/expr_infix.rs`), which peels a `Paren`, accepts an
-  `Identifier`, and splices a nested `Compose` into its parent so a chain never nests. Any other
-  operand is `ParseError::NotAComposeOperand`, which is what makes `1 >> 2` a diagnostic about
-  composition rather than a stray comparison. A composition that is *applied* where it is written
-  never becomes a node at all: `apply_compose` folds it into the nested calls it stands for, both
-  for `(f >> g)(x)` (in the call arm, via `finish_call`) and for `x |> f >> g` (in `pipe_into`).
+- **The composition operator**: `f >> g` becomes the closure `|$compose| g(f($compose))`
+  (`ast_types::COMPOSE_PARAM`), each stage applied by `apply_stage`. A composition operand is
+  applied by substituting into its body, so a chain stays one closure, and a composition applied
+  where it is written (`(f >> g)(x)` via `finish_call`, `x |> f >> g` via `pipe_into`) is just
+  the nested calls. The body evaluates each stage per call, which matches a composition's own
+  semantics for every spelling but two, both refused here: a bound method on a non-place
+  receiver (`ComposeReceiverNotAPlace`) and a `move` closure (`ComposeMoveClosure`). Any other
+  non-function-value operand is `NotAComposeOperand`, which makes `1 >> 2` a diagnostic about
+  composition rather than a stray comparison.
+- **Instances**: a turbofish with no `(` after it is `Expr::Instance`, the generic named as a
+  value.
 
 `newtype` is the deliberate counter-example: unlike a `type` alias it is a distinct nominal type,
 so it stays an `Item::Newtype`. Construction `Name(value)` reuses the call parse and `.0` reuses

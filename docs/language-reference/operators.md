@@ -544,19 +544,24 @@ val result = reading                            // the same thing, read downward
 
 The piped value becomes the **first** argument of the function on the right, so a stage taking further arguments needs one of the spellings below rather than a partially applied call.
 
-**The right-hand side is a function value, never a call.** Three spellings produce one:
+**The right-hand side is a function value, never a call.** Five spellings produce one:
 
 ```neuro
 val a = reading |> normalize                       // a function name
-val b = reading |> scaler.apply                    // a bound method: scaler.apply(reading)
-val c = reading |> (|v: i32| -> i32 { v * v })     // a parenthesized closure literal
+val b = reading |> Scaler::halve                   // an associated function
+val c = reading |> convert::<u8>                   // a generic function's instance
+val d = reading |> scaler.apply                    // a bound method: scaler.apply(reading)
+val e = reading |> (|v| v * v)                     // a parenthesized closure literal
 ```
 
-A binding of function type is a name like any other, so `val halve = |v: i32| -> i32 { v / 2 }` then `x |> halve` works too. Anything else is rejected where it is written:
+A closure target takes its parameter type from the piped value, so it needs no annotation. A
+generic target without a turbofish takes its type arguments from the piped value, as a call
+would. A binding of function type is a name like any other, so `x |> halve` works for a
+`val halve = |v: i32| v / 2` too. Anything else is rejected where it is written:
 
 ```text
-error: the right of `|>` must be a function value: a function name, a bound method
-       `receiver.method`, or a parenthesized closure `(|x: T| ...)`
+error: the right of `|>` must be a function value: a function name, a path `Type::function`,
+       an instance `f::<T>`, a bound method `receiver.method`, or a parenthesized closure `(|x| ...)`
 ```
 
 **Associativity**: left to right. `x |> f |> g` is `g(f(x))`, so each stage sees what the previous one produced.
@@ -580,19 +585,37 @@ val ready = prepare(reading)                  // applied here
 val batch = other |> prepare                  // and here
 ```
 
-**Both operands are function names.** A composition calls each stage directly, so the operand is a `func` in scope, not a value holding one:
+**Both operands are function values**, spelled the five ways a `|>` target is, and a binding of
+function type is one too:
 
-```text
-error: `>>` composes named functions: 'held' is a binding, so name the `func` it holds instead
+```neuro
+val ready = Point::scale >> convert::<i64> >> (|v| v + 1) >> scaler.apply >> held
 ```
 
-A closure literal, a bound method `receiver.method`, an associated path `Type::member` and a generic function are all rejected the same way. Each stage takes exactly one parameter, and each stage's result type must be what the next one accepts:
+A composition is a closure, and it captures what its operands hold by the closure rules: a
+binding or a bound method's receiver is borrowed for as long as the composition lives, so such a
+composition stays in the scope it was built in, while one over function names and `Copy` captures
+can be returned. Each operand takes one parameter, and each stage's result must be what the next
+one accepts; a mismatch is reported at the stage that produced it:
 
 ```text
-error: 'label' returns string, which 'double' cannot take: it expects i32
+error: type mismatch: expected i32, found string
 ```
 
-The types need not stay the same along the chain: `label >> width` composes `(i32) -> string` with `(string) -> i32` into `(i32) -> i32`.
+The types need not stay the same along the chain: `label >> width` composes `(i32) -> string` with
+`(string) -> i32` into `(i32) -> i32`.
+
+**The first operand types the composition.** The composed function takes what its first stage
+takes. A later stage is called with the stage before it, so a generic one infers its type
+arguments and a closure literal its parameter types from there. The first operand has nothing
+before it: a generic function there needs a turbofish (`identity::<i32> >> double`), a closure
+literal there annotates its parameter, unless the composition is written where a function type
+is expected (`val g: (i32) -> i32 = identity >> double`).
+
+Two spellings are refused as operands. A bound method's receiver must be a variable or a field
+of one, since a call's result cannot be borrowed past its expression. A `move` closure must be
+bound with `val` first and composed by name: the composition runs its stages afresh on each call,
+so a literal there could not keep what it owns.
 
 **The result is an ordinary function value.** It binds to a `val`, passes to a `(T) -> U` parameter, and is called as many times as needed.
 

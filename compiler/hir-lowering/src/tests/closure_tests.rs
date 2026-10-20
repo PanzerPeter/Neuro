@@ -267,3 +267,44 @@ fn a_closure_argument_infers_a_generic_instance() {
     );
     assert_eq!(args[1].ty, HirType::I32);
 }
+
+/// A composition is lowered as the closure it is parsed to: a bound-method stage borrows
+/// its receiver, a named stage is called directly, and the parameter takes the first
+/// stage's type.
+#[test]
+fn a_composition_lowers_to_a_closure_over_its_stages() {
+    let program = lower(
+        "struct P { x: i32 }
+impl P { func shift(&self, v: i64) -> i64 { v + self.x as i64 } }
+func double(v: i64) -> i64 { v * 2 }
+func main() -> i32 { val p = P { x: 1 }
+ val g = p.shift >> double
+ g(2) as i32 }",
+    );
+    let body = function_body(&program, "main");
+    let init = binding_init(body, "g");
+    let HirExprKind::Closure { captures, .. } = &init.kind else {
+        panic!("expected a closure value, got {:?}", init.kind);
+    };
+    assert_eq!(captures.len(), 1);
+    assert_eq!(captures[0].name, "p");
+    assert!(captures[0].borrowed, "the receiver is borrowed");
+    assert_eq!(
+        init.ty,
+        HirType::Function {
+            params: vec![HirType::I64],
+            ret: Box::new(HirType::I64),
+        }
+    );
+}
+
+/// A closure literal called in place takes an unannotated parameter's type from its
+/// argument.
+#[test]
+fn a_closure_called_in_place_is_typed_by_its_argument() {
+    let program =
+        lower("func main() -> i32 { val w: i64 = 3\n val r = (|x| x + 1)(w)\n r as i32 }");
+    let body = function_body(&program, "main");
+    let init = binding_init(body, "r");
+    assert_eq!(init.ty, HirType::I64);
+}

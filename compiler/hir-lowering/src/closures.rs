@@ -10,7 +10,9 @@
 //! backend sees a closure over a reference and nothing new.
 use std::collections::HashSet;
 
-use ast_types::{ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
+use ast_types::{
+    COMPOSE_PARAM, ClosureParam, Expr, GenericArg, InterpPart, Place, Stmt, TensorIndexArg,
+};
 use neuro_hir::{
     HirCapture, HirClosure, HirExpr, HirExprKind, HirItem, HirParam, HirStmt, HirType,
 };
@@ -18,9 +20,6 @@ use shared_types::{Identifier, Span};
 
 use crate::{Lowerer, LoweringError};
 
-/// The name of the parameter the composed closure binds its argument to. Not
-/// spellable in source, so it can never collide with a name the body reads.
-const COMPOSE_PARAM: &str = "__compose_arg";
 /// Prefix of the parameters of the closure a function named as a value lowers to; the
 /// `__` keeps them apart from every name a program can declare.
 const FUNCTION_VALUE_PARAM: &str = "__fn_value_arg";
@@ -46,6 +45,7 @@ impl Lowerer {
             let ty = match (&p.ty, hint.params.get(index).cloned().flatten()) {
                 (Some(t), _) => self.resolve_type(t)?,
                 (None, Some(fixed)) => fixed,
+                (None, None) if p.name.name == COMPOSE_PARAM => self.compose_param(body)?,
                 // The checker refuses a parameter nothing types, so a missing one here is
                 // a frontend inconsistency rather than a user error.
                 (None, None) => {
@@ -327,66 +327,24 @@ impl Lowerer {
                 .is_some_and(|fields| fields.iter().all(|(_, ty)| self.is_copy(ty)))
     }
 
-    /// Lower `f >> g >> h` to the capture-free closure that applies each stage in turn.
-    ///
-    /// The chain is a function *value*, so it becomes a lifted closure item exactly as
-    /// a closure literal does. Its body is the nested call the chain stands for, built
-    /// as AST and lowered through the ordinary call path so composition needs no
-    /// lowering rules of its own. It captures nothing: every stage is a named function,
-    /// which the backend references directly.
-    pub(crate) fn lower_compose(
-        &mut self,
-        functions: &[Identifier],
-        span: Span,
-    ) -> Result<HirExpr, LoweringError> {
-        let first = functions.first().ok_or_else(|| LoweringError::Malformed {
-            detail: "a composition reached lowering with no functions".to_string(),
-        })?;
-        let param_ty = self
-            .functions
-            .get(&first.name)
-            .and_then(|(params, _)| params.first())
-            .cloned()
-            .ok_or_else(|| LoweringError::UnresolvedType {
-                name: format!("the parameter of '{}'", first.name),
-            })?;
-
-        let argument = Expr::Identifier(Identifier {
-            name: COMPOSE_PARAM.to_string(),
-            span,
-        });
-        let body = functions
-            .iter()
-            .fold(argument, |value, function| Expr::Call {
-                func: Box::new(Expr::Identifier(function.clone())),
-                type_args: Vec::new(),
-                args: vec![value],
-                arg_labels: Vec::new(),
-                span,
-            });
-        self.lift_capture_free(vec![(COMPOSE_PARAM.to_string(), param_ty)], &body, span)
-    }
-
-    /// Lower a function named as a value (`val f = square`) to the capture-free closure
-    /// that forwards its arguments to it, the same shape a one-stage composition has.
+    /// Lower a function named as a value, `callee` with its turbofish `type_args`, to the
+    /// capture-free closure that forwards its `params` to it: `val f = square`,
+    /// `val s = Point::scale`, `val c = convert::<u8>`.
     pub(crate) fn lower_function_value(
         &mut self,
-        function: &Identifier,
+        callee: &Expr,
+        type_args: &[GenericArg],
+        param_types: Vec<HirType>,
     ) -> Result<HirExpr, LoweringError> {
-        let span = function.span;
-        let (param_types, _) = self.functions.get(&function.name).cloned().ok_or_else(|| {
-            LoweringError::UnresolvedBinding {
-                name: function.name.clone(),
-            }
-        })?;
+        let span = callee.span();
         let params: Vec<(String, HirType)> = param_types
             .into_iter()
             .enumerate()
             .map(|(i, ty)| (format!("{FUNCTION_VALUE_PARAM}{i}"), ty))
             .collect();
         let body = Expr::Call {
-            func: Box::new(Expr::Identifier(function.clone())),
-            type_args: Vec::new(),
+            func: Box::new(callee.clone()),
+            type_args: type_args.to_vec(),
             args: params
                 .iter()
                 .map(|(name, _)| {
@@ -400,6 +358,57 @@ impl Lowerer {
             span,
         };
         self.lift_capture_free(params, &body, span)
+    }
+
+    /// The parameter type of the composition whose body is `body`, read as the checker
+    /// reads it: the first parameter of the stage the composition's argument goes to.
+    fn compose_param(&mut self, body: &Expr) -> Result<HirType, LoweringError> {
+        let unresolved = || LoweringError::UnresolvedType {
+            name: "the parameter of a composition".to_string(),
+        };
+        let (stage, type_args) = first_stage(body).ok_or_else(unresolved)?;
+        let params = match stage {
+            Expr::Closure { params, .. } => {
+                let written = params
+                    .first()
+                    .and_then(|p| p.ty.as_ref())
+                    .ok_or_else(unresolved)?;
+                return self.resolve_type(written);
+            }
+            Expr::Identifier(ident) if !type_args.is_empty() => {
+                self.generic_instance_signature(&ident.name, type_args)?.0
+            }
+            Expr::Identifier(ident) => match self.lookup_local(&ident.name) {
+                Some(HirType::Function { params, .. }) => params,
+                Some(_) => return Err(unresolved()),
+                None => {
+                    let (params, _) = self.functions.get(&ident.name).ok_or_else(unresolved)?;
+                    params.clone()
+                }
+            },
+            Expr::Path {
+                type_name, member, ..
+            } => self.assoc_signature(&type_name.name, &member.name)?.0,
+            Expr::FieldAccess { object, field, .. } => {
+                let receiver =
+                    crate::expressions::coercion::auto_deref(self.lower_expr(object, None)?);
+                let owner = match receiver.ty.referent() {
+                    HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } => {
+                        name.clone()
+                    }
+                    _ => return Err(unresolved()),
+                };
+                let key = self
+                    .impl_methods
+                    .get(&owner)
+                    .and_then(|methods| methods.get(&field.name))
+                    .ok_or_else(unresolved)?;
+                let (params, _) = self.functions.get(key).ok_or_else(unresolved)?;
+                params.iter().skip(1).cloned().collect()
+            }
+            _ => return Err(unresolved()),
+        };
+        params.into_iter().next().ok_or_else(unresolved)
     }
 
     /// Lift `body`, over `params`, into a closure item that captures nothing, and hand
@@ -536,6 +545,25 @@ impl ClosureHint {
 pub(crate) fn closure_param_unannotated(callee: &Expr, index: usize) -> bool {
     matches!(peel_parens(callee), Expr::Closure { params, .. }
         if params.get(index).is_some_and(|p| p.ty.is_none()))
+}
+
+/// The stage a composition's parameter is first passed to, with its turbofish: the
+/// innermost call of the chain the parser built, the one whose argument is the parameter.
+fn first_stage(body: &Expr) -> Option<(&Expr, &[GenericArg])> {
+    let Expr::Call {
+        func,
+        type_args,
+        args,
+        ..
+    } = body
+    else {
+        return None;
+    };
+    match args.as_slice() {
+        [Expr::Identifier(param)] if param.name == COMPOSE_PARAM => Some((func, type_args)),
+        [inner] => first_stage(inner),
+        _ => None,
+    }
 }
 
 pub(crate) fn peel_parens(expr: &Expr) -> &Expr {
@@ -798,9 +826,8 @@ fn collect_tensor_indices(indices: &[TensorIndexArg], fv: &mut FreeVars) {
 
 fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
     match expr {
-        // A composition names functions, and a function is referenced directly rather
-        // than captured.
-        Expr::Literal(_, _) | Expr::Path { .. } | Expr::Compose { .. } => {}
+        Expr::Literal(_, _) | Expr::Path { .. } => {}
+        Expr::Instance { callee, .. } => collect_expr(callee, fv),
         Expr::Identifier(ident) => fv.read(&ident.name),
         Expr::Binary { left, right, .. } => {
             collect_expr(left, fv);

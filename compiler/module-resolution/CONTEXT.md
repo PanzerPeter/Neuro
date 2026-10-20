@@ -140,10 +140,8 @@ Reads `.nr` files from disk; writes nothing.
   be a type or a trait (a struct literal's, an `impl` block's type and trait, a trait bound,
   `impl` / `dyn` types), so an `as` rename reaches each; discovery and rewriting are
   the same traversal with different callbacks, so a new position cannot be handled by one
-  and forgotten by the other. The composition operator's names are the one position that
-  is not an `Expr`: `Expr::Compose` holds bare `Identifier`s, so the walk offers each as the
-  identifier expression it stands for and writes back what the visitor leaves. Without that,
-  `use m::f as g` would rename the item everywhere except inside `g >> h`.
+  and forgotten by the other. A composition `g >> h` reaches the walk as the closure it
+  is parsed to, so its names are ordinary call sites there.
 - **Rewriting does not track locals.** A bare name is replaced when an import bound it,
   whether or not a local of the same name is in scope. Shadowing an imported name is
   therefore not supported: rename the import with `as`.

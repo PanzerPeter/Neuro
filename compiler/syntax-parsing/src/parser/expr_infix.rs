@@ -1,7 +1,7 @@
 //! Infix position: binary operators by precedence, calls, the pipe `|>` and the
 //! composition `>>` operators.
 
-use ast_types::{BinaryOp, Expr, Stmt};
+use ast_types::{BinaryOp, COMPOSE_PARAM, ClosureParam, Expr};
 use lexical_analysis::{Token, TokenKind};
 use shared_types::{Identifier, Span};
 
@@ -12,38 +12,142 @@ use super::Parser;
 use super::expr_index::IndexArguments;
 use super::expressions::finish_call;
 
-/// The function names one operand of `>>` contributes to the chain.
-///
-/// Composition takes *named* functions: a bare name is not a value in this language,
-/// so the operand is validated here rather than left to produce a type error about a
-/// callee that is not callable. An operand that is already a `Compose` is the left of
-/// `f >> g >> h`, and flattening it there is what keeps the chain one node.
-pub(super) fn compose_operand(operand: Expr) -> ParseResult<Vec<Identifier>> {
-    match operand {
-        Expr::Paren(inner, _) => compose_operand(*inner),
-        Expr::Identifier(name) => Ok(vec![name]),
-        Expr::Compose { functions, .. } => Ok(functions),
-        other => Err(ParseError::NotAComposeOperand { span: other.span() }),
-    }
-}
-
-/// The composed function chain `functions`, applied to `arg`: `h(g(f(arg)))`.
-pub(super) fn apply_compose(functions: &[Identifier], arg: Expr, span: Span) -> Expr {
-    functions.iter().fold(arg, |value, function| Expr::Call {
-        func: Box::new(Expr::Identifier(function.clone())),
-        type_args: Vec::new(),
+/// `stage` applied to `value`: the call a pipeline stage or a composition stage stands
+/// for. A function name, a path or a bound method `receiver.method` becomes the call
+/// written with it, an instance `f::<T>` the call carrying its turbofish, and a closure
+/// literal a call of the literal in place. A composition is applied by putting `value`
+/// where its parameter was, so `x |> f >> g` and `(f >> g)(x)` build no function value.
+/// Anything else is refused with its span.
+pub(super) fn apply_stage(stage: Expr, value: Expr) -> Result<Expr, Span> {
+    let span = stage.span();
+    let (func, type_args) = match stage {
+        Expr::Paren(inner, _) => return apply_stage(*inner, value),
+        Expr::Closure { params, body, .. } if is_compose(&params) => {
+            return Ok(substitute_compose_param(*body, value));
+        }
+        Expr::Instance {
+            callee, type_args, ..
+        } => (callee, type_args),
+        stage @ (Expr::Identifier(_)
+        | Expr::Path { .. }
+        | Expr::FieldAccess { .. }
+        | Expr::Closure { .. }) => (Box::new(stage), Vec::new()),
+        other => return Err(other.span()),
+    };
+    Ok(Expr::Call {
+        func,
+        type_args,
         args: vec![value],
         arg_labels: Vec::new(),
         span,
     })
 }
 
-/// The composition chain `callee` names, seen through any parentheses around it.
-pub(super) fn as_compose(callee: &Expr) -> Option<&[Identifier]> {
+/// Build the call a `value |> target` pipeline stands for, as [`apply_stage`] does.
+/// Rejecting any other target here is what keeps `x |> f(a)` a diagnostic about `|>`
+/// rather than a type error about calling a non-callable.
+fn pipe_into(value: Expr, target: Expr) -> ParseResult<Expr> {
+    let span = value.span().merge(target.span());
+    let applied =
+        apply_stage(target, value).map_err(|span| ParseError::NotAPipelineTarget { span })?;
+    Ok(match applied {
+        Expr::Call {
+            func,
+            type_args,
+            args,
+            arg_labels,
+            ..
+        } => Expr::Call {
+            func,
+            type_args,
+            args,
+            arg_labels,
+            span,
+        },
+        applied => applied,
+    })
+}
+
+/// Whether a closure's parameter list is the one a composition is parsed to.
+pub(super) fn is_compose(params: &[ClosureParam]) -> bool {
+    matches!(params, [param] if param.name.name == COMPOSE_PARAM)
+}
+
+/// The composition `callee` applied to `value`: its body with `value` in place of its
+/// parameter. Any other callee is called with `value`.
+pub(super) fn apply_composition(callee: Expr, value: Expr) -> Expr {
     match callee {
-        Expr::Paren(inner, _) => as_compose(inner),
-        Expr::Compose { functions, .. } => Some(functions),
-        _ => None,
+        Expr::Paren(inner, _) => apply_composition(*inner, value),
+        Expr::Closure { params, body, .. } if is_compose(&params) => {
+            substitute_compose_param(*body, value)
+        }
+        other => {
+            let span = other.span();
+            Expr::Call {
+                func: Box::new(other),
+                type_args: Vec::new(),
+                args: vec![value],
+                arg_labels: Vec::new(),
+                span,
+            }
+        }
+    }
+}
+
+/// A composition body with `value` in place of its parameter. The body is the chain of
+/// one-argument calls `apply_stage` built, so the parameter is the innermost argument.
+fn substitute_compose_param(body: Expr, value: Expr) -> Expr {
+    match body {
+        Expr::Call {
+            func,
+            type_args,
+            mut args,
+            arg_labels,
+            span,
+        } if args.len() == 1 => {
+            let inner = args.remove(0);
+            Expr::Call {
+                func,
+                type_args,
+                args: vec![substitute_compose_param(inner, value)],
+                arg_labels,
+                span,
+            }
+        }
+        _ => value,
+    }
+}
+
+/// Whether `receiver` names a place: a variable, or a field or element of one. A bound
+/// method in a composition borrows it, and only a place outlives the expression.
+fn is_named_place(receiver: &Expr) -> bool {
+    match receiver {
+        Expr::Identifier(_) => true,
+        Expr::Paren(inner, _)
+        | Expr::FieldAccess { object: inner, .. }
+        | Expr::TupleIndex { object: inner, .. } => is_named_place(inner),
+        _ => false,
+    }
+}
+
+/// Reject an operand whose stage the composition's body cannot stand for. The body
+/// evaluates each stage on every call, which is the composition's own behaviour for every
+/// spelling but two: a bound method on a temporary would evaluate the temporary again,
+/// and a `move` closure would be rebuilt with nothing left to own.
+fn check_compose_operand(operand: &Expr) -> ParseResult<()> {
+    match operand {
+        Expr::Paren(inner, _) => check_compose_operand(inner),
+        Expr::FieldAccess { object, .. } if !is_named_place(object) => {
+            Err(ParseError::ComposeReceiverNotAPlace {
+                span: object.span(),
+            })
+        }
+        Expr::Closure {
+            is_move: true,
+            span,
+            ..
+        } => Err(ParseError::ComposeMoveClosure { span: *span }),
+        _ => Ok(()),
     }
 }
 
@@ -65,12 +169,25 @@ impl Parser {
             }
 
             // Turbofish `callee::<T, N>(args)`: explicit generic arguments before a
-            // call. Only valid immediately before a call, so a `(` argument list must
-            // follow the `>`.
+            // call. Without an argument list it names the instance as a value.
             TokenKind::ColonColon => {
-                self.advance(); // consume '::'
+                let colons = self.advance().map(|t| t.span);
                 let type_args = self.parse_turbofish_args()?;
-                self.consume(TokenKind::LeftParen, "'(' after turbofish `::<...>`")?;
+                if !self.check(&TokenKind::LeftParen) {
+                    let end = self
+                        .tokens
+                        .get(self.current.saturating_sub(1))
+                        .map(|t| t.span)
+                        .or(colons)
+                        .unwrap_or_else(|| left.span());
+                    let span = left.span().merge(end);
+                    return Ok(Expr::Instance {
+                        callee: Box::new(left),
+                        type_args,
+                        span,
+                    });
+                }
+                self.advance(); // consume '('
                 let (args, arg_labels) = self.parse_call_arguments()?;
                 let close = self.consume(TokenKind::RightParen, "')'")?;
                 let span = left.span().merge(close.span);
@@ -192,22 +309,41 @@ impl Parser {
                 self.advance(); // consume '|>'
                 self.skip_newlines();
                 let target = self.parse_expr(Precedence::Pipeline)?;
-                self.pipe_into(left, target)
+                pipe_into(left, target)
             }
 
             // Composition `left >> right`, lexed as two adjacent `>`: see
             // `at_compose`. The right operand is parsed at `Compose` precedence, which
-            // makes the operator left-associative the way `|>` is, and the chain is
-            // flattened as it is built so `f >> g >> h` is one node.
+            // makes the operator left-associative the way `|>` is. The composition is the
+            // closure `|p| right(left(p))`, and a composition operand is applied by
+            // substitution, so `f >> g >> h` is one closure over the nested calls.
             TokenKind::Greater if self.at_compose() => {
                 self.advance(); // consume the first '>'
                 self.advance(); // consume the second '>'
                 self.skip_newlines();
                 let right = self.parse_expr(Precedence::Compose)?;
                 let span = left.span().merge(right.span());
-                let mut functions = compose_operand(left)?;
-                functions.extend(compose_operand(right)?);
-                Ok(Expr::Compose { functions, span })
+                check_compose_operand(&left)?;
+                check_compose_operand(&right)?;
+                let param = Identifier {
+                    name: COMPOSE_PARAM.to_string(),
+                    span,
+                };
+                let not_an_operand = |span| ParseError::NotAComposeOperand { span };
+                let inner =
+                    apply_stage(left, Expr::Identifier(param.clone())).map_err(not_an_operand)?;
+                let body = apply_stage(right, inner).map_err(not_an_operand)?;
+                Ok(Expr::Closure {
+                    params: vec![ClosureParam {
+                        name: param,
+                        ty: None,
+                        span,
+                    }],
+                    ret: None,
+                    body: Box::new(body),
+                    is_move: false,
+                    span,
+                })
             }
 
             // Type casts
@@ -309,73 +445,6 @@ impl Parser {
                 span: token.span,
             }),
         }
-    }
-
-    /// Build the call a `value |> target` pipeline stands for.
-    ///
-    /// The language admits exactly three spellings of `target`, and each is already a
-    /// callee shape the rest of the pipeline understands: a function name or
-    /// associated path becomes a plain call, a bound method `receiver.method`
-    /// becomes the ordinary method call `receiver.method(value)`, and a closure
-    /// literal is bound to a temporary first, because a call whose callee is a
-    /// closure *literal* is not a form any later stage accepts. Rejecting anything
-    /// else here is what keeps `x |> f(a)` a diagnostic about `|>` rather than a
-    /// type error about calling a non-callable.
-    pub(super) fn pipe_into(&mut self, value: Expr, target: Expr) -> ParseResult<Expr> {
-        let span = value.span().merge(target.span());
-        match target {
-            Expr::Paren(inner, _) => self.pipe_into(value, *inner),
-
-            // `x |> f >> g` applies the composition rather than binding it, and
-            // applying it is the nested call it stands for. `>>` binds tighter than
-            // `|>` (Appendix B rows 16 and 17), which is what puts the whole chain
-            // here as one target.
-            Expr::Compose { functions, .. } => Ok(apply_compose(&functions, value, span)),
-
-            Expr::Identifier(_) | Expr::Path { .. } | Expr::FieldAccess { .. } => Ok(Expr::Call {
-                func: Box::new(target),
-                type_args: Vec::new(),
-                args: vec![value],
-                arg_labels: Vec::new(),
-                span,
-            }),
-
-            Expr::Closure { .. } => {
-                let tmp = Identifier {
-                    name: format!("__pipe_{}", self.next_pipe_id()),
-                    span: target.span(),
-                };
-                let call = Expr::Call {
-                    func: Box::new(Expr::Identifier(tmp.clone())),
-                    type_args: Vec::new(),
-                    args: vec![value],
-                    arg_labels: Vec::new(),
-                    span,
-                };
-                Ok(Expr::Block {
-                    stmts: vec![
-                        Stmt::VarDecl {
-                            name: tmp,
-                            ty: None,
-                            init: Some(target),
-                            mutable: false,
-                            span,
-                        },
-                        Stmt::Expr(call),
-                    ],
-                    span,
-                })
-            }
-
-            other => Err(ParseError::NotAPipelineTarget { span: other.span() }),
-        }
-    }
-
-    /// Allocate a unique id for a pipeline temporary.
-    pub(super) fn next_pipe_id(&mut self) -> usize {
-        let id = self.pipe_counter;
-        self.pipe_counter += 1;
-        id
     }
 
     /// Whether the cursor sits on `>>`, the composition operator.

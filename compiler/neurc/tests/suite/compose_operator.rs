@@ -2,8 +2,9 @@
 //
 // A composition is a *value*: it is bound, passed, and called later, which is what
 // separates it from `|>`. So what these prove is that the closure the chain lowers to
-// behaves like any other function value, and that the diagnostics reject the operand
-// spellings the closure model cannot carry yet.
+// behaves like any other function value, and that a mistyped chain is reported at the
+// stage that breaks it. The operand spellings beyond a function name are in
+// `function_values.rs`.
 
 use crate::compile_harness::CompileTest;
 
@@ -173,7 +174,7 @@ func main() -> i32 {
         .check("compose_mismatch.nr", source)
         .expect_err("a stage mismatch should be reported");
     assert!(
-        error.contains("cannot take"),
+        error.contains("expected i32, found string"),
         "expected a stage mismatch, got: {}",
         error
     );
@@ -195,38 +196,16 @@ func main() -> i32 {
         .check("compose_arity.nr", source)
         .expect_err("a two-parameter stage should be reported");
     assert!(
-        error.contains("one parameter"),
+        error.contains("expected 2, found 1"),
         "expected an arity diagnostic, got: {}",
         error
     );
 }
 
 #[test]
-fn a_function_typed_binding_is_rejected_by_name() {
-    let test = CompileTest::new();
-    // Composing a *value* would capture it, and a function type is not Copy: the
-    // diagnostic points at the `func` instead of letting the capture rule report it.
-    let source = r#"
-func double(x: i32) -> i32 { x * 2 }
-
-func main() -> i32 {
-    val held = |x: i32| -> i32 { x + 1 }
-    val broken = held >> double
-    broken(1)
-}
-"#;
-    let error = test
-        .check("compose_binding.nr", source)
-        .expect_err("a bound function value should be reported");
-    assert!(
-        error.contains("is a binding"),
-        "expected a binding diagnostic, got: {}",
-        error
-    );
-}
-
-#[test]
-fn a_generic_stage_is_rejected() {
+fn a_generic_first_stage_needs_its_instance_named() {
+    // The first stage fixes the composed function's parameter type, and a bare generic
+    // name fixes none. A later stage is called, so it infers like a call.
     let test = CompileTest::new();
     let source = r#"
 func identity<T>(value: T) -> T { value }
@@ -239,10 +218,15 @@ func main() -> i32 {
 "#;
     let error = test
         .check("compose_generic.nr", source)
-        .expect_err("a generic stage should be reported");
+        .expect_err("a generic first stage should be reported");
     assert!(
-        error.contains("generic function"),
-        "expected a generic diagnostic, got: {}",
+        error.contains("turbofish (`f::<T>`)"),
+        "expected the untyped-composition diagnostic, got: {}",
+        error
+    );
+    assert!(
+        !error.contains("cannot be inferred"),
+        "the body should not repeat the diagnostic: {}",
         error
     );
 }

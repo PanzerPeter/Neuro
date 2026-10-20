@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.15.0] - 2026-10-20
+
+### Added
+
+- A generic function's instance is a function value: `val f = convert::<u8>`, passed as an
+  argument, or used as a `|>` target (`x |> convert::<u8>`).
+- An associated function is a function value through its path: `val s = Point::scale` binds it
+  and `apply(3, Point::scale)` passes it. It used to stop the build with an internal error.
+- `>>` composes any function value: a function name, an associated function, an instance
+  `f::<T>`, a bound method `receiver.method`, a closure literal, or a binding of function type.
+  The composition is a closure, so a binding or a bound method's receiver is borrowed while it
+  lives. A later stage is typed by the stage before it, so a generic function there needs no
+  turbofish and a closure literal no annotation. A composition written where a function type is
+  expected takes its parameter type from there.
+- A closure literal called where it is written takes its parameter types from its arguments:
+  `x |> (|v| v * 2)` and `(|x| x + 1)(4)` need no annotations.
+
+### Changed
+
+- A `>>` chain whose stages do not fit is reported as an ordinary type or argument-count error at
+  the stage that broke it. A generic first stage without a turbofish is refused with the fix
+  named, as are a bound method on a temporary and a `move` closure as an operand.
+
 ## [5.14.5] - 2026-10-19
 
 ### Changed

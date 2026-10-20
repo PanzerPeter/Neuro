@@ -111,14 +111,24 @@ pub enum ParseError {
     NotAPlace { op: String, span: Span },
 
     #[error(
-        "the right of `|>` must be a function value: a function name, a bound method `receiver.method`, or a parenthesized closure `(|x: T| ...)`"
+        "the right of `|>` must be a function value: a function name, a path `Type::function`, an instance `f::<T>`, a bound method `receiver.method`, or a parenthesized closure `(|x| ...)`"
     )]
     NotAPipelineTarget { span: Span },
 
     #[error(
-        "the operands of `>>` must be function names: `f >> g` composes them into the function `|x| g(f(x))`"
+        "the operands of `>>` must be function values: a function name, a path `Type::function`, an instance `f::<T>`, a bound method `receiver.method`, or a parenthesized closure `(|x| ...)`"
     )]
     NotAComposeOperand { span: Span },
+
+    #[error(
+        "a bound method in `>>` borrows its receiver for as long as the composed function lives, so the receiver must be a variable or one of its fields: bind it with `val` first"
+    )]
+    ComposeReceiverNotAPlace { span: Span },
+
+    #[error(
+        "a `move` closure in `>>` would be built again on every call of the composed function, so it could not keep what it owns: bind it with `val` first and compose the binding"
+    )]
+    ComposeMoveClosure { span: Span },
 
     #[error("lexical error: {0}")]
     LexError(#[from] LexError),
@@ -155,7 +165,9 @@ impl ParseError {
             | ParseError::TensorTypeArity { span }
             | ParseError::NotAPlace { span, .. }
             | ParseError::NotAPipelineTarget { span }
-            | ParseError::NotAComposeOperand { span } => Some(*span),
+            | ParseError::NotAComposeOperand { span }
+            | ParseError::ComposeReceiverNotAPlace { span }
+            | ParseError::ComposeMoveClosure { span } => Some(*span),
         }
     }
 }

@@ -56,6 +56,7 @@ mod float_int_cast_saturation;
 mod float_methods;
 mod float_suffixes;
 mod forward_references;
+mod function_values;
 mod functions;
 mod generic_methods;
 mod generic_structs;

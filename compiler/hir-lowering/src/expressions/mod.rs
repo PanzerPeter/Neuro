@@ -122,12 +122,15 @@ impl Lowerer {
             }
             Expr::Identifier(ident) => match self.lookup(&ident.name) {
                 Some(ty) => Ok(self.binding_value(&ident.name, ty, ident.span)),
-                None if self.functions.contains_key(&ident.name) => {
-                    self.lower_function_value(ident)
-                }
-                None => Err(LoweringError::UnresolvedBinding {
-                    name: ident.name.clone(),
-                }),
+                None => match self.functions.get(&ident.name) {
+                    Some((params, _)) => {
+                        let params = params.clone();
+                        self.lower_function_value(expr, &[], params)
+                    }
+                    None => Err(LoweringError::UnresolvedBinding {
+                        name: ident.name.clone(),
+                    }),
+                },
             },
 
             Expr::Binary {
@@ -313,7 +316,18 @@ impl Lowerer {
                 *span,
             ),
 
-            Expr::Compose { functions, span } => self.lower_compose(functions, *span),
+            Expr::Instance {
+                callee, type_args, ..
+            } => {
+                let Expr::Identifier(ident) = callee.as_ref() else {
+                    return Err(LoweringError::Malformed {
+                        detail: "an instantiated method or associated function as a value"
+                            .to_string(),
+                    });
+                };
+                let (params, _) = self.generic_instance_signature(&ident.name, type_args)?;
+                self.lower_function_value(callee, type_args, params)
+            }
 
             // A bare path is a unit-variant enum construction `E::V` when the
             // type names an enum, else an associated-function reference.
@@ -328,23 +342,10 @@ impl Lowerer {
             }
 
             Expr::Path {
-                type_name,
-                member,
-                span,
+                type_name, member, ..
             } => {
-                let (params, ret) = self.assoc_signature(&type_name.name, &member.name)?;
-                let ty = HirType::Function {
-                    params,
-                    ret: Box::new(ret),
-                };
-                Ok(HirExpr::new(
-                    HirExprKind::Path {
-                        type_name: type_name.name.clone(),
-                        member: member.name.clone(),
-                    },
-                    ty,
-                    *span,
-                ))
+                let (params, _) = self.assoc_signature(&type_name.name, &member.name)?;
+                self.lower_function_value(expr, &[], params)
             }
 
             Expr::StructLiteral {

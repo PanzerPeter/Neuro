@@ -79,7 +79,7 @@ refused (`RUN_TIME_TARGET`): that is how a target chosen by a branch or a loop i
 `.map` / `.zip` / `.reduce` is unrolled (`traverse`): one literal-position element read and one
 inlined call per element, in row-major order, the results rebuilt by a tensor literal; over
 `MAX_UNROLLED_ELEMENTS` or a dynamic axis it is refused (`ponytail:` on `traverse`). A plain block
-value is linearized in a scope of its own, which is what `x |> |v| ...` desugars to. Recursion (a
+value is linearized in a scope of its own. Recursion (a
 callee already being inlined), a method or builtin call and a callee returning nothing are
 refused.
 
@@ -508,14 +508,15 @@ parameter takes its annotation, else the hint. A block body with a return type l
 `lower_ident_call` dispatches a call on a local function-typed binding indirectly (the callee is
 a `HirExprKind::Variable` of `HirType::Function`).
 
-`lower_compose` (same file) lowers `Expr::Compose` to a capture-free closure item of the same
-shape: its parameter is the first stage's, named `__compose_arg`, and its body is the nested call
-the chain stands for, built as AST and lowered through the ordinary call path. So composition adds
-no HIR node, no backend arm, and nothing the closure machinery did not already do; it captures
-nothing because every stage is a named function the backend references directly.
-`lower_function_value` does the same for a function named as a value (`val f = square`, BUG-071):
-an identifier that is no local but names a function becomes a closure forwarding its
-`__fn_value_argN` parameters to it. Both share `lift_capture_free`.
+A composition arrives as the closure the parser built (`ast_types::COMPOSE_PARAM`); the only
+lowering of its own is `compose_param`, which types that parameter from the first stage's
+signature when the hint leaves it open, as the checker's `compose_param` does.
+`lower_function_value` lowers a function named as a value (`val f = square`, BUG-071), an
+associated path (`Point::scale`) and an instance (`convert::<u8>`, typed by
+`generic_instance_signature`) to a capture-free closure forwarding its `__fn_value_argN`
+parameters, through `lift_capture_free`. A closure literal called in place with an unannotated
+parameter (`lower_value_call`) lowers its arguments first and hands their types to the literal
+as its hint, the order the checker checks them in.
 
 ### Tensor operations
 `tensor_ops.rs` runs last in `lower_program`, after the derivatives, in every program. It
