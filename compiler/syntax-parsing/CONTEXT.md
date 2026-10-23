@@ -442,9 +442,15 @@ a positional argument, since a trait's own generic parameters are not bindable i
 bounds into the matching parameter and collects value predicates. `parse_type`'s reference branch
 parses an optional lifetime after `&` and before `mut` (`&'a T` / `&'a mut T`).
 
-`parse_enum_def` takes an optional generic parameter list, but rejects a lifetime parameter with
-`ParseError::EnumLifetimeParam`: enum payloads are scalars this phase, so there is nothing for a
-lifetime to annotate.
+Every item that declares lifetimes (function, method, struct, enum, `impl`) pushes them onto
+`Parser::lifetime_scope` in `parse_generic_params` and truncates it back when the item ends, so
+a method sees its impl's lifetimes and the next item sees none. A lifetime argument in a type
+application (`View<'a>`, `Pick<'a, i32>`, the impl header's `S<'a>`) is consumed by
+`skip_lifetime_arg`: `'_` always passes, any other name must be in that scope or the parse fails
+with `UndeclaredLifetime`, and the argument is then dropped, since lifetimes are erased and
+nothing past the parser reads one. An application left with no type argument is a plain
+`Type::Named`. A parse error ends the parse, so a scope an early return leaves behind is never
+read.
 
 `Type::Generic`'s span covers its **closing `>`**: `parse_generic_type_args` returns the closing
 token's span alongside the arguments. When it ended at the last argument instead, every

@@ -46,6 +46,7 @@ fn enum_decl(name: &str, exported: bool) -> Item {
         name: ident(name),
         exported,
         generics: Vec::new(),
+        lifetimes: Vec::new(),
         variants: Vec::new(),
         span: Span::new(0, 0),
     })

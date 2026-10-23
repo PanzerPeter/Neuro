@@ -67,6 +67,7 @@ mod gpu_fallback;
 mod gradient_control;
 mod gradient_slot;
 mod half_precision;
+mod held_borrows;
 mod higher_order_derivatives;
 mod hir_lowering;
 mod if_block_expressions;

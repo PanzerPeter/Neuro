@@ -53,6 +53,10 @@ pub(crate) struct Parser {
     /// (`val (a, b) = e`) desugars to. Each `__destructure_N` name is unique
     /// within a parse so nested or repeated destructures never collide.
     pub(super) destructure_counter: usize,
+    /// Lifetime names the enclosing items declare, outermost first. A lifetime argument
+    /// in a type application (`Ref<'a>`) is checked against it and then dropped, since
+    /// nothing past the parser reads one.
+    pub(super) lifetime_scope: Vec<String>,
 }
 
 impl Parser {
@@ -66,6 +70,7 @@ impl Parser {
             delimiter_depth: 0,
             active_labels: Vec::new(),
             destructure_counter: 0,
+            lifetime_scope: Vec::new(),
         }
     }
 

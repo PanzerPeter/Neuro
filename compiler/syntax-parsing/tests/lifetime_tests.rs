@@ -149,3 +149,60 @@ fn regression_lim_205_amp_amp_is_two_borrows_in_prefix_position() {
         Expr::Binary { .. }
     ));
 }
+
+fn param_type(source: &str, index: usize) -> Type {
+    let items = parse(source).expect("should parse");
+    let Some(Item::Function(func)) = items.into_iter().last() else {
+        panic!("expected the last item to be a function");
+    };
+    func.params[index].ty.clone()
+}
+
+#[test]
+fn lifetime_arguments_are_checked_then_dropped() {
+    let decls = "struct H<'a> { r: &'a string }\nstruct P<'a, T> { r: &'a T }\n";
+    // Lifetimes alone leave a plain named type.
+    let only = param_type(&format!("{decls}func f<'a>(h: H<'a>) -> i32 {{ 0 }}"), 0);
+    assert!(
+        matches!(&only, Type::Named(id) if id.name == "H"),
+        "{only:?}"
+    );
+    // Mixed with a type argument, the type argument alone stays.
+    let mixed = param_type(
+        &format!("{decls}func f<'a>(p: P<'a, i32>) -> i32 {{ 0 }}"),
+        0,
+    );
+    let Type::Generic { args, .. } = &mixed else {
+        panic!("expected a generic application, got {mixed:?}");
+    };
+    assert_eq!(args.len(), 1);
+    // The anonymous lifetime needs no declaration.
+    let anonymous = param_type(&format!("{decls}func f(h: &H<'_>) -> i32 {{ 0 }}"), 0);
+    assert!(matches!(anonymous, Type::Reference { .. }));
+}
+
+#[test]
+fn lifetime_argument_resolves_through_impl_and_method_scopes() {
+    let source = "struct H<'a> { r: &'a string }
+impl<'a> H<'a> {
+    func pick<'b>(&self, other: H<'b>) -> H<'a> { H { r: self.r } }
+}";
+    let items = parse(source).expect("should parse");
+    let Item::Impl(def) = &items[1] else {
+        panic!("expected an impl item");
+    };
+    assert!(def.type_args.is_empty(), "{:?}", def.type_args);
+}
+
+#[test]
+fn undeclared_lifetime_argument_is_rejected() {
+    let err = parse("struct H<'a> { r: &'a string }\nfunc f(h: H<'z>) -> i32 { 0 }")
+        .expect_err("an undeclared lifetime argument must be rejected")
+        .to_string();
+    assert!(err.contains("undeclared lifetime `'z`"), "{err}");
+    // A lifetime a finished item declared is out of scope in the next one.
+    let err = parse("func g<'a>(s: &'a string) -> i32 { 0 }\nstruct H<'a> { r: &'a string }\nfunc f(h: H<'a>) -> i32 { 0 }")
+        .expect_err("a lifetime from an earlier item must be out of scope")
+        .to_string();
+    assert!(err.contains("undeclared lifetime `'a`"), "{err}");
+}

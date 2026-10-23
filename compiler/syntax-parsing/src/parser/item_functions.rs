@@ -42,6 +42,7 @@ impl Parser {
         };
 
         // Optional generic parameter list `<'a, T, U: Bound + Bound>`.
+        let lifetime_mark = self.lifetime_scope.len();
         let (mut generics, lifetimes) = self.parse_generic_params()?;
 
         self.consume(TokenKind::LeftParen, "'('")?;
@@ -84,6 +85,7 @@ impl Parser {
         rekind_shape_params(&params, return_type.as_ref(), &mut generics);
 
         let body = self.parse_block()?;
+        self.lifetime_scope.truncate(lifetime_mark);
 
         let end_span = self.previous_span(start.span);
 
@@ -316,6 +318,9 @@ impl Parser {
         // An empty `<>` is impossible here: the first `consume` above already requires
         // a type-parameter name, so reaching this point means at least one was parsed.
         self.consume(TokenKind::Greater, "'>'")?;
+        // The caller truncates this back when its item ends.
+        self.lifetime_scope
+            .extend(lifetimes.iter().map(|lt| lt.name.clone()));
 
         Ok((generics, lifetimes))
     }
@@ -454,6 +459,7 @@ impl Parser {
         };
 
         // A method's own parameters, on top of its impl's: `func map<U>(self, ...)`.
+        let lifetime_mark = self.lifetime_scope.len();
         let (mut generics, lifetimes) = self.parse_generic_params()?;
 
         self.consume(TokenKind::LeftParen, "'('")?;
@@ -494,6 +500,7 @@ impl Parser {
         }
         rekind_shape_params(&params, return_type.as_ref(), &mut generics);
         let body = self.parse_block()?;
+        self.lifetime_scope.truncate(lifetime_mark);
 
         let end_span = self.previous_span(start.span);
 

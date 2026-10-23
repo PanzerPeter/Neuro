@@ -105,7 +105,7 @@ token-level failures (`UnexpectedToken`, `UnexpectedEof`, a wrapped `LexError`, 
 `MaxDepthExceeded`, which stops runaway nesting of expressions, statements, types, patterns
 and module blocks, counted together, rather than overflowing the stack) plus the
 grammar rules that are cheapest to enforce while parsing: `DuplicateParameter`,
-`DuplicateTypeAlias`, `TypeAliasShadowsBuiltin`, `CyclicTypeAlias`, `EnumLifetimeParam`,
+`DuplicateTypeAlias`, `TypeAliasShadowsBuiltin`, `CyclicTypeAlias`, `UndeclaredLifetime`,
 `ExportNotAllowed`, and `MisplacedNoPrelude`. Each carries the span of the offending token,
 not the start of the enclosing construct, except `UnexpectedEof` and `MaxDepthExceeded`, which
 have no single token to point at.

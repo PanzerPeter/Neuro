@@ -4,7 +4,7 @@
 // Cumulative integration example combining:
 //   `impl Drop` destructors running at scope exit (reverse declaration order)
 //   · a labeled `break` leaving a nested loop from the inside
-//   · mutable borrows `&mut i32` shared by the guards
+//   · mutable borrows `&mut i32` held in struct fields, one counter per guard
 //   · structs with `&self` methods · @derive(Copy)
 //   · fixed-size arrays with indexed reads · `match` with range and `_` patterns
 //   · if-expressions and implicit returns
@@ -46,15 +46,17 @@ func classify(value: i32) -> i32 {
 }
 
 func main() -> i32 {
-    mut closed: i32 = 0
+    mut outer_closed: i32 = 0
+    mut inner_closed: i32 = 0
     mut score: i32 = 0
     mut ticks: i32 = 0
 
     {
-        // Two guards over the same counter; both must fire at the end of this
-        // block, including on the labeled-break path below.
-        val outer_log = ScanLog { closed: &mut closed }
-        val inner_log = ScanLog { closed: &mut closed }
+        // Two guards, each holding its own counter: a `&mut` is exclusive, so two
+        // live guards cannot share one. Both must fire at the end of this block,
+        // including on the labeled-break path below.
+        val outer_log = ScanLog { closed: &mut outer_closed }
+        val inner_log = ScanLog { closed: &mut inner_closed }
 
         val sensor = Sensor { base: 2, gain: 8 }
         val limits = [4, 12, 30]
@@ -88,6 +90,7 @@ func main() -> i32 {
     // The three counters are packed into one exit code: 100 + 50 + 10 = 160. The
     // multipliers are kept small deliberately: a process exit status is 8 bits,
     // so any total of 256 or more would wrap and silently mis-report the result.
+    val closed = outer_closed + inner_closed
     println("guards closed = {closed}   (destructors ran on the break path)")
     println("score         = {score}")
     println("ticks         = {ticks}")

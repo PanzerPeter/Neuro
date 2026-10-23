@@ -37,6 +37,7 @@ impl Parser {
 
         self.skip_newlines();
         // Optional generic parameter list `<'a, T, U: Bound>`.
+        let lifetime_mark = self.lifetime_scope.len();
         let (mut generics, lifetimes) = self.parse_generic_params()?;
         self.skip_newlines();
         // Optional `where` clause before the field block.
@@ -94,6 +95,7 @@ impl Parser {
         }
 
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        self.lifetime_scope.truncate(lifetime_mark);
 
         Ok(StructDef {
             name,

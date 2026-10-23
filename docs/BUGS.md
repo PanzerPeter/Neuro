@@ -5,6 +5,50 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-128: a method's reference into a local receiver can be returned
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; `check_escaping_borrows` in `type_checkers/statements/returns.rs`
+- **Severity**: major. A silent use after free: the program compiles and reads released memory
+
+**Minimal repro**
+
+```neuro
+struct B { s: string }
+
+impl B {
+    func head(&self) -> &string { self.s.slice(0..1) }
+}
+
+func first() -> &string {
+    val b = B { s: "x" + "y" }
+    b.head()
+}
+
+func main() -> i32 {
+    first().len() as i32
+}
+```
+
+Expected: a compile error, as for `b.s.slice(0..1)` written as the tail. Observed: it compiles,
+`b`'s buffer is released when `first` returns, and the caller reads it.
+
+**Root cause**: confirmed in the code. The returned-value walk follows a method call's arguments
+and what its receiver holds, but never the receiver itself. Under elision a method's returned
+reference borrows `self`, so an owned local receiver is a local the result points into. The walk
+cannot simply report it: a method whose result names the impl's lifetime
+(`func source(&self) -> &'a string`) returns what the receiver borrows, not the receiver, and
+lifetime arguments in a type application (`-> View<'a>`) are dropped by the parser, so the
+checker cannot tell the two apart for every return type.
+
+**Workaround**: none in the compiler; return the receiver itself, or a borrow of a parameter.
+
+**Fix sketch**: record, per method, whether its result borrows `self` (an elided output lifetime)
+or only the impl's lifetimes, which needs the lifetime arguments of a type application kept in
+the AST. Then report an owned local receiver of a `self`-borrowing method in the returned-value
+walk. Regression tests: the repro, and the same call on a method returning `&'a string` from a
+field, which must keep compiling.
+
 ## BUG-127: a borrow passed to an inner call blocks a move in the enclosing call
 
 - **Status**: open, confirmed
@@ -216,82 +260,6 @@ checker's `satisfies_bound` grants it, and the impl's functions are never emitte
 types (scalars, `char`, `bool`, and tuples and arrays of such), or record which bounds the
 checker found satisfied per instance. Regression test: the repro above, plus the same with a
 `(i32, i32)` argument.
-
-## BUG-109: a reference assigned inside a block may outlive what it borrows
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; the assignment path that makes a `mut` reference binding hold
-  its new borrow (`attach_borrow` in `type_checkers/statements/places.rs`)
-- **Severity**: major. A silent use after free: the program compiles and reads released memory
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val t: Vec<i32> = Vec::new()
-    mut b: &Vec<i32> = &t
-    {
-        mut v: Vec<i32> = Vec::new()
-        v.push(41)
-        b = &v
-    }
-    return b[0]
-}
-```
-
-Expected: a compile error, since `v` dies at the end of the block while `b` still borrows it.
-Observed: it compiles, `v`'s buffer is released at the brace, and `b[0]` reads it (the run exits
-with a garbage value, not 41).
-
-**Root cause**: confirmed in the code. The assignment makes `b` hold a borrow of `v`, but nothing
-compares the two bindings' scopes: a borrow is checked for conflicts while both live, never for a
-holder declared outside the borrowee's scope.
-
-**Workaround**: declare the reference inside the block that owns what it borrows.
-
-**Fix sketch**: refuse an assignment that makes a binding hold a borrow of a place declared in a
-deeper scope than the binding itself (the `BorrowProvenance::scope` the symbol table already
-records gives both depths). Regression test: the repro above, and the same assignment where `v`
-is declared beside `b`, which must keep compiling.
-
-## BUG-099: a struct returned through a binding may hold a borrow of its locals
-
-- **Status**: open, confirmed. Narrowed: a struct, enum or tuple literal, an enum variant
-  constructor or an array returned directly is now checked, field by field, and so is each arm of
-  a tail `if`; borrowing a local that way is the "cannot return a reference" error
-- **Area**: `semantic-analysis`; `check_returned_reference` in `type_checkers/statements/returns.rs`
-- **Severity**: major. A silent use after free: the program compiles and reads released memory
-
-**Minimal repro**
-
-```neuro
-struct H { r: &string }
-
-func make() -> H {
-    val s = "he" + "llo"
-    val h = H { r: &s }
-    h
-}
-
-func main() -> i32 {
-    val h = make()
-    h.r.len() as i32
-}
-```
-
-Expected: a compile error, as for `H { r: &s }` written as the tail. Observed: it compiles, `s` is
-released when `make` returns, and `h.r` reads the freed buffer.
-
-**Root cause**: confirmed in the code. The check walks the returned expression down to each
-`&place`. A binding is a name at that point, and the borrow model records no borrow held inside a
-struct binding, so there is nothing to follow.
-
-**Workaround**: return the literal itself, or borrow only from parameters.
-
-**Fix sketch**: track the borrows a struct or enum binding holds, which is the work of the
-"References in struct fields and enum payloads" roadmap item, and close this with it. Regression
-test: the repro above, its enum form, and a binding that borrows a parameter, which must keep
-compiling.
 
 ## BUG-098: `@derive(Clone)` refuses a struct with a field that owns a buffer
 

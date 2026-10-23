@@ -1,4 +1,4 @@
-use ast_types::{Expr, Stmt};
+use ast_types::{BinaryOp, Expr, Stmt};
 
 use crate::errors::TypeError;
 use crate::symbol_table::pending_key;
@@ -115,29 +115,63 @@ fn tail_borrow_targets<'a>(
                 block_tail_borrow_targets(block, blocks, followed, out, live);
             }
         }
-        Expr::Match { arms, .. } => {
+        // An arm may yield what its pattern bound, a part of the scrutinee.
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            tail_borrow_targets(scrutinee, blocks, followed, out, live);
             for arm in arms {
                 tail_borrow_targets(&arm.body, blocks, followed, out, live);
             }
         }
         // A part of a value carries that value's borrows: a destructuring `val (a, b) = e`
         // reaches its parts through a generated binding and `.0` / `.1`.
-        Expr::TupleIndex { object, .. } | Expr::FieldAccess { object, .. } => {
+        Expr::TupleIndex { object, .. }
+        | Expr::FieldAccess { object, .. }
+        | Expr::Index { object, .. } => {
             tail_borrow_targets(object, blocks, followed, out, live);
         }
-        Expr::TupleLiteral { elements, .. } => {
+        Expr::Try { operand, .. } => tail_borrow_targets(operand, blocks, followed, out, live),
+        Expr::Binary {
+            left,
+            op: BinaryOp::NullCoalesce,
+            right,
+            ..
+        } => {
+            tail_borrow_targets(left, blocks, followed, out, live);
+            tail_borrow_targets(right, blocks, followed, out, live);
+        }
+        // A value built around a borrow holds it: `H { r: &s }`, `(&s, 1)`, `[&s]`.
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
             for element in elements {
                 tail_borrow_targets(element, blocks, followed, out, live);
             }
         }
-        // A returned reference borrows one of the call's borrowed inputs (lifetime
-        // elision), so each is a candidate, as `hold_returned_borrows` takes them.
+        Expr::StructLiteral { fields, base, .. } => {
+            for field in fields {
+                tail_borrow_targets(&field.value, blocks, followed, out, live);
+            }
+            if let Some(base) = base {
+                tail_borrow_targets(base, blocks, followed, out, live);
+            }
+        }
+        Expr::EnumStructLiteral { fields, .. } => {
+            for field in fields {
+                tail_borrow_targets(&field.value, blocks, followed, out, live);
+            }
+        }
+        // A call's result may hold any borrow its arguments hand it (lifetime elision),
+        // `Some(&s)` and `wrap(&s)` alike, and a method's may hold its receiver's: both a
+        // borrow of the receiver and whatever the receiver itself holds.
         Expr::Call { func, args, .. } => {
-            out.extend(args.iter().filter_map(borrow_target_of));
+            for arg in args {
+                tail_borrow_targets(arg, blocks, followed, out, live);
+            }
             if let Expr::FieldAccess { object, .. } = func.as_ref()
                 && let Some(root) = TypeChecker::place_root_name(object)
             {
-                out.push((root, false));
+                out.push((root.clone(), false));
+                live.push(root);
             }
         }
         Expr::Identifier(id) => follow_binding(&id.name, blocks, followed, out, live),
@@ -182,16 +216,6 @@ fn follow_binding<'a>(
     }
 }
 
-/// Whether a value of `ty` holds a reference anywhere a tail could hand one out.
-pub(crate) fn carries_borrow(ty: &Type) -> bool {
-    match ty {
-        Type::Reference { .. } => true,
-        Type::Tuple(elements) => elements.iter().any(carries_borrow),
-        Type::Array { element, .. } => carries_borrow(element),
-        _ => false,
-    }
-}
-
 fn block_tail_borrow_targets<'a>(
     stmts: &'a [Stmt],
     blocks: &mut Vec<&'a [Stmt]>,
@@ -219,36 +243,17 @@ fn slice_receiver_of(expr: &Expr) -> Option<String> {
 }
 
 impl TypeChecker {
-    /// Make `holder`, a binding of reference type `ty` that `init` just initialized,
-    /// hold the borrows a call's returned reference may come from.
-    ///
-    /// The returned reference borrows one of the call's borrowed inputs (lifetime elision),
-    /// and a body may return any of its reference parameters, so each `&place` /
-    /// `&mut place` argument is a candidate, and so is a borrowed receiver. Without this
-    /// the borrow reached the binding attached to nothing, and the borrowee rules let the
-    /// source be moved or freed while the reference still read it.
-    /// Make `holder` hold the borrows a block, `if` or `match` value, a copied binding,
-    /// or a closure carries into it. Each is a way for a reference to outlive the
-    /// binding that took it: the block's binding dies with the block, and an inner
-    /// reference copied (or captured) into an outer binding dies before it.
-    pub(super) fn hold_carried_borrows(&mut self, holder: &str, value: &Expr, ty: &Type) {
-        if !carries_borrow(ty) && !self.holds_function_value(ty) {
+    /// Make `holder` hold the borrows `value`, of type `ty`, carries into it: a struct,
+    /// enum, tuple or array built around a borrow, a call's result, a block, `if` or
+    /// `match` value, a copied binding, or a closure. Each is a way for a borrow to
+    /// outlive the binding or the statement that took it: the block's binding dies with
+    /// the block, and an inner reference copied (or captured) into an outer binding dies
+    /// before it.
+    pub(crate) fn hold_carried_borrows(&mut self, holder: &str, value: &Expr, ty: &Type) {
+        if !self.type_holds_reference(ty) && !self.holds_function_value(ty) {
             return;
         }
-        let mut value = value;
-        while let Expr::Paren(inner, _) = value {
-            value = inner;
-        }
-        if !matches!(
-            value,
-            Expr::Block { .. }
-                | Expr::If { .. }
-                | Expr::Match { .. }
-                | Expr::Identifier(_)
-                | Expr::Closure { .. }
-        ) {
-            return;
-        }
+        let value = peel_parens(value);
         if let Expr::Closure { span, .. } = value
             && let Some(borrows) = self.scope_bound_closures.get(span).cloned()
         {
@@ -257,13 +262,28 @@ impl TypeChecker {
             }
         }
         let (mut targets, mut live) = (Vec::new(), Vec::new());
-        tail_borrow_targets(
-            value,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut targets,
-            &mut live,
-        );
+        match value {
+            // `hold_returned_borrows` takes the receiver of a call returning a
+            // reference, by how the method takes it.
+            Expr::Call { args, .. } if matches!(ty, Type::Reference { .. }) => {
+                for arg in args {
+                    tail_borrow_targets(
+                        arg,
+                        &mut Vec::new(),
+                        &mut Vec::new(),
+                        &mut targets,
+                        &mut live,
+                    );
+                }
+            }
+            _ => tail_borrow_targets(
+                value,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut targets,
+                &mut live,
+            ),
+        }
         for (place, exclusive) in targets {
             self.symbols.attach_borrow(holder, &place, exclusive);
         }
@@ -288,22 +308,21 @@ impl TypeChecker {
         }
     }
 
+    /// Make `holder`, a binding of reference type `ty` that `init` just initialized,
+    /// hold a borrow of the receiver a method call's returned reference may come from.
+    ///
+    /// The returned reference borrows one of the call's borrowed inputs (lifetime
+    /// elision): `hold_carried_borrows` takes the arguments, and this the receiver, as
+    /// shared or exclusive as the method takes it. Without this the borrow reached the
+    /// binding attached to nothing, and the borrowee rules let the source be moved or
+    /// freed while the reference still read it.
     pub(crate) fn hold_returned_borrows(&mut self, holder: &str, init: &Expr, ty: &Type) {
         if !matches!(ty, Type::Reference { .. }) {
             return;
         }
-        let mut call = init;
-        while let Expr::Paren(inner, _) = call {
-            call = inner;
-        }
-        let Expr::Call { func, args, .. } = call else {
+        let Expr::Call { func, .. } = peel_parens(init) else {
             return;
         };
-        for arg in args {
-            if let Some((place, exclusive)) = borrow_target_of(arg) {
-                self.symbols.attach_borrow(holder, &place, exclusive);
-            }
-        }
         let Expr::FieldAccess { object, .. } = func.as_ref() else {
             return;
         };
@@ -836,15 +855,21 @@ impl TypeChecker {
                 self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
-                if let Some(element_ty) = element_ty
-                    && let Err(duplicate_name) =
-                        self.symbols
-                            .define(iterator.name.clone(), element_ty, false)
-                {
-                    self.record_error(TypeError::VariableAlreadyDefined {
-                        name: duplicate_name,
-                        span: iterator.span,
-                    });
+                if let Some(element_ty) = element_ty {
+                    match self
+                        .symbols
+                        .define(iterator.name.clone(), element_ty.clone(), false)
+                    {
+                        // Each element is a part of the iterable, so it holds what the
+                        // iterable borrows: `&v` itself, or what a `[&T; N]` was built from.
+                        Ok(()) => self.hold_carried_borrows(&iterator.name, iterable, &element_ty),
+                        Err(duplicate_name) => {
+                            self.record_error(TypeError::VariableAlreadyDefined {
+                                name: duplicate_name,
+                                span: iterator.span,
+                            })
+                        }
+                    }
                 }
 
                 for stmt in body {

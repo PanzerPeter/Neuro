@@ -27,6 +27,9 @@ pub(super) const SELF_TYPE_NAME: &str = "Self";
 /// The contextual word that makes a function type `FnOnce`: `once (T) -> U`.
 const ONCE_MODE: &str = "once";
 
+/// The name `'_`, the anonymous lifetime, lexes to: the one lifetime no item declares.
+const ANONYMOUS_LIFETIME: &str = "_";
+
 impl Parser {
     /// The call mode a `mut` or `once` written ahead of a parenthesized type list asks
     /// for. `once` is not a keyword: it means a mode only directly before `(`, where no
@@ -268,6 +271,10 @@ impl Parser {
                     if let Some((dims, shape_span)) = shape {
                         return Self::build_tensor_type(ident, args, dims, shape_span, span);
                     }
+                    // `Ref<'a>` applies lifetimes only, which leave a plain named type.
+                    if args.is_empty() {
+                        return Ok(Type::Named(ident));
+                    }
                     return Ok(Type::Generic {
                         name: ident,
                         args,
@@ -370,7 +377,9 @@ impl Parser {
         let mut args = Vec::new();
         let mut shape: Option<ShapeArg> = None;
         loop {
-            if self.shape_argument_ahead(symbolic_extents) {
+            if self.skip_lifetime_arg()? {
+                // Checked and dropped: a lifetime argument names no part of the type.
+            } else if self.shape_argument_ahead(symbolic_extents) {
                 let parsed = self.parse_shape_argument()?;
                 let parsed_span = parsed.1;
                 // A second shape argument cannot be a tensor's, and `build_tensor_type`
@@ -406,6 +415,24 @@ impl Parser {
         }
         let close = self.consume(TokenKind::Greater, "'>' to close type arguments")?;
         Ok((args, shape, close.span))
+    }
+
+    /// Consume a lifetime argument at the cursor, if one is there, refusing a name no
+    /// enclosing item declares. `'_` is the anonymous lifetime and always allowed.
+    pub(super) fn skip_lifetime_arg(&mut self) -> ParseResult<bool> {
+        let Some(TokenKind::Lifetime(name)) = self.peek_kind().cloned() else {
+            return Ok(false);
+        };
+        let span = self
+            .advance()
+            .map(|t| t.span)
+            .ok_or_else(|| ParseError::UnexpectedEof {
+                expected: "lifetime".to_string(),
+            })?;
+        if name != ANONYMOUS_LIFETIME && !self.lifetime_scope.contains(&name) {
+            return Err(ParseError::UndeclaredLifetime { name, span });
+        }
+        Ok(true)
     }
 
     /// Whether the argument at the cursor is a `[d0, d1, ...]` shape rather than an

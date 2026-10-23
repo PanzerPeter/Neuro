@@ -442,13 +442,38 @@ impl SymbolTable {
         self.set_grad_loss(holder, GradLoss::Done);
     }
 
-    /// The place `holder` borrows, if `holder` is a reference binding created by a
-    /// direct `&place` initializer (`val holder = &place`). Lets the
-    /// returned-reference check trace a returned local reference back to the place
-    /// it points into and reject it when that place is itself function-local.
-    pub(crate) fn borrow_provenance(&self, holder: &str) -> Option<String> {
+    /// Every place `holder` borrows: what a reference binding points at, and what a
+    /// struct, enum, tuple or array value it holds was built around. Lets the
+    /// returned-reference check trace a returned value back to the places it points
+    /// into and reject it when one of them is itself function-local.
+    pub(crate) fn borrowed_places(&self, holder: &str) -> Vec<String> {
         self.lookup(holder)
-            .and_then(|info| info.borrows.first().map(|prov| prov.place.clone()))
+            .map(|info| info.borrows.iter().map(|prov| prov.place.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// How many borrows `holder` holds. Paired with [`SymbolTable::borrows_outliving`] to
+    /// judge only the borrows one store added.
+    pub(crate) fn borrow_count(&self, holder: &str) -> usize {
+        self.lookup(holder).map_or(0, |info| info.borrows.len())
+    }
+
+    /// The places among `holder`'s borrows from index `from` on that are declared in a
+    /// scope nested inside `holder`'s own: they die while `holder` still points at them.
+    pub(crate) fn borrows_outliving(&self, holder: &str, from: usize) -> Vec<String> {
+        let Some(depth) = self.defining_depth(holder) else {
+            return Vec::new();
+        };
+        self.lookup(holder)
+            .map(|info| {
+                info.borrows
+                    .iter()
+                    .skip(from)
+                    .filter(|prov| prov.scope > depth)
+                    .map(|prov| prov.place.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Release the persistent borrow held by `holder`, if any: used before a

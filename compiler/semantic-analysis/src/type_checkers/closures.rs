@@ -12,7 +12,6 @@ use ast_types::{COMPOSE_PARAM, ClosureParam, Expr, InterpPart, Place, Stmt, Tens
 use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
-use super::statements::carries_borrow;
 use crate::errors::TypeError;
 use crate::symbol_table::MoveState;
 use crate::types::{FunctionMode, Type};
@@ -352,8 +351,8 @@ impl TypeChecker {
             }
             // A reference taken by copy is still a borrow the closure holds, and a value
             // that may itself borrow keeps whatever holds it in its scope too.
-            copies_reference |= carries_borrow(&ty);
-            scope_bound |= carries_borrow(&ty)
+            copies_reference |= self.type_holds_reference(&ty);
+            scope_bound |= self.type_holds_reference(&ty)
                 || self
                     .symbols
                     .lookup(name)
@@ -382,7 +381,7 @@ impl TypeChecker {
             let held_bound = fv.reads.iter().any(|(name, _)| {
                 self.symbols
                     .lookup(name)
-                    .is_some_and(|info| info.scope_bound && !carries_borrow(&info.ty))
+                    .is_some_and(|info| info.scope_bound && !self.type_holds_reference(&info.ty))
             });
             if copies_reference && borrows.is_empty() && !held_bound {
                 self.reference_closures.insert(span);

@@ -333,6 +333,10 @@ pub struct EnumDef {
     /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
     pub exported: bool,
     pub generics: Vec<GenericParam>,
+    /// Explicit lifetime parameters, the `'a` names in `enum E<'a> { ... }`.
+    /// Distinct from `generics` (see [`FunctionDef::lifetimes`]); erased after
+    /// borrow-check.
+    pub lifetimes: Vec<Identifier>,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
 }

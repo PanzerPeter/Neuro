@@ -9,7 +9,7 @@ use crate::errors::TypeError;
 use crate::type_checkers::closures::closure_context;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
 use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, EQ_METHOD, PARTIAL_EQ_TRAIT};
-use crate::type_checkers::statements::function_value_position;
+use crate::type_checkers::statements::{borrow_target_of, function_value_position};
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::{BoundInfo, GenericFnSig};
 use crate::types::{CollectionKind, FunctionMode, Type};
@@ -249,6 +249,76 @@ impl TypeChecker {
             self.record_move(arg);
         }
         self.check_reborrow_exclusivity(receiver, args, visible_params);
+        self.hold_argument_stores(receiver, args, visible_params, span);
+    }
+
+    /// A callee may store any borrow it is handed into a `&mut` argument whose referent
+    /// can hold one (`func set(h: &mut H, s: &string) { h.r = s }`), and nothing in an
+    /// erased signature says which, so the binding behind each such argument holds every
+    /// borrow the call's other inputs carry: a borrowed argument, what an argument value
+    /// holds, and a borrow of the receiver with whatever it holds.
+    fn hold_argument_stores(
+        &mut self,
+        receiver: Option<(&ast_types::Expr, bool)>,
+        args: &[ast_types::Expr],
+        params: &[Type],
+        span: Span,
+    ) {
+        // Each holder with the argument it came in as; `None` is the receiver.
+        let mut holders: Vec<(Option<usize>, Vec<String>)> = Vec::new();
+        for (index, (arg, param)) in args.iter().zip(params).enumerate() {
+            if let Type::Reference {
+                inner,
+                mutable: true,
+            } = param
+                && self.type_holds_reference(inner)
+            {
+                holders.push((Some(index), self.store_target_bindings(arg)));
+            }
+        }
+        let receiver_root = receiver.and_then(|(expr, _)| Self::place_root_name(expr));
+        if let Some((expr, true)) = receiver
+            && self
+                .projection_type(expr)
+                .is_some_and(|ty| self.type_holds_reference(ty.referent()))
+        {
+            holders.push((None, self.store_target_bindings(expr)));
+        }
+        for (own, targets) in holders {
+            for holder in targets {
+                let before = self.symbols.borrow_count(&holder);
+                for (index, (arg, param)) in args.iter().zip(params).enumerate() {
+                    if Some(index) != own {
+                        self.hold_carried_borrows(&holder, arg, param);
+                    }
+                }
+                if own.is_some()
+                    && let Some(root) = &receiver_root
+                    && *root != holder
+                {
+                    self.symbols.attach_borrow(&holder, root, false);
+                    self.symbols.inherit_borrows(&holder, root);
+                }
+                self.refuse_outliving_borrows(&holder, before, span);
+            }
+        }
+    }
+
+    /// The bindings a store through `arg`, handed to a `&mut` parameter, writes into:
+    /// the place `&mut place` names, or what a `&mut` binding passed on borrows. A
+    /// parameter or `self` reached that way is the caller's storage, so it is not one.
+    fn store_target_bindings(&self, arg: &ast_types::Expr) -> Vec<String> {
+        if let Some((place, _)) = borrow_target_of(arg) {
+            return vec![place];
+        }
+        let Some(root) = Self::place_root_name(arg) else {
+            return Vec::new();
+        };
+        match self.symbols.lookup(&root).map(|info| &info.ty) {
+            Some(Type::Reference { .. }) => self.symbols.borrowed_places(&root),
+            Some(_) => vec![root],
+            None => Vec::new(),
+        }
     }
 
     /// The `&mut` binding `arg` names bare. A call reborrows such a binding rather than
@@ -499,6 +569,7 @@ impl TypeChecker {
             self.record_move(arg);
         }
         self.check_reborrow_exclusivity(receiver, args, &sig.params);
+        self.hold_argument_stores(receiver, args, &sig.params, span);
 
         // Every parameter must be bound, by inference or turbofish. A type argument is
         // unconstrained: the body was move-checked against an abstract `T` that is

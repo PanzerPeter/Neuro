@@ -52,10 +52,10 @@ impl TypeChecker {
         {
             return;
         }
-        let variants = if def.generics.is_empty() {
+        let variants = if def.generics.is_empty() && def.lifetimes.is_empty() {
             self.resolve_variants(def)
         } else {
-            self.enter_generic_scope(&def.generics, &[]);
+            self.enter_generic_scope(&def.generics, &def.lifetimes);
             let variants = self.resolve_variants(def);
             self.exit_generic_scope();
             variants

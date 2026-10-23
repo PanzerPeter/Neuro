@@ -70,12 +70,13 @@ fn two_owned_values_drop_twice() {
     let source = format!(
         r#"{PROBE}
 func main() -> i32 {{
-    mut count: i32 = 0
+    mut first: i32 = 0
+    mut second: i32 = 0
     {{
-        val a = Probe {{ sink: &mut count }}
-        val b = Probe {{ sink: &mut count }}
+        val a = Probe {{ sink: &mut first }}
+        val b = Probe {{ sink: &mut second }}
     }}
-    return count
+    return first + second
 }}
 "#
     );
@@ -195,13 +196,14 @@ fn reassignment_after_a_move_drops_only_the_new_value() {
     let source = format!(
         r#"{PROBE}
 func main() -> i32 {{
-    mut count: i32 = 0
+    mut first: i32 = 0
+    mut second: i32 = 0
     {{
-        mut p = Probe {{ sink: &mut count }}
+        mut p = Probe {{ sink: &mut first }}
         val q = p
-        p = Probe {{ sink: &mut count }}
+        p = Probe {{ sink: &mut second }}
     }}
-    return count
+    return first + second
 }}
 "#
     );
@@ -623,26 +625,28 @@ fn a_match_arm_that_binds_nothing_leaves_the_payload_to_the_scrutinee() {
 enum Two {{ A(Probe), B(Probe), C }}
 
 func main() -> i32 {{
-    mut count: i32 = 0
+    mut first: i32 = 0
+    mut second: i32 = 0
+    mut third: i32 = 0
     {{
-        val t = Two::B(Probe {{ sink: &mut count }})
+        val t = Two::B(Probe {{ sink: &mut first }})
         val n = match t {{
             Two::A(x) => 0,
             Two::B(_) => 1,
             Two::C => 2
         }}
-        val u = Two::B(Probe {{ sink: &mut count }})
+        val u = Two::B(Probe {{ sink: &mut second }})
         val m = match u {{
             Two::A(x) => 0,
             _ => 1
         }}
-        val v = Two::A(Probe {{ sink: &mut count }})
+        val v = Two::A(Probe {{ sink: &mut third }})
         val k = match v {{
             Two::A(x) => 0,
             _ => 1
         }}
     }}
-    return count
+    return first + second + third
 }}
 "#
     );
@@ -662,15 +666,16 @@ fn a_match_arm_that_moves_the_payload_out_does_not_release_it() {
 enum Slot {{ Full(Probe), Empty }}
 
 func main() -> i32 {{
-    mut count: i32 = 0
+    mut full: i32 = 0
+    mut empty: i32 = 0
     {{
-        val s = Slot::Full(Probe {{ sink: &mut count }})
+        val s = Slot::Full(Probe {{ sink: &mut full }})
         val kept = match s {{
             Slot::Full(p) => p,
-            Slot::Empty => Probe {{ sink: &mut count }}
+            Slot::Empty => Probe {{ sink: &mut empty }}
         }}
     }}
-    return count
+    return full + empty
 }}
 "#
     );

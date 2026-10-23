@@ -369,6 +369,7 @@ impl TypeChecker {
             .unwrap_or(Type::Unknown);
         // Storing the value into the place moves it out of its source.
         self.record_move(value);
+        self.hold_stored_borrows(place, value, &value_ty, span);
         if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(place_ty) {
             self.record_error(TypeError::Mismatch {
                 expected: place_ty.clone(),
@@ -377,6 +378,59 @@ impl TypeChecker {
             });
         }
         Some(())
+    }
+
+    /// A value written into part of a binding stays there as long as the binding does,
+    /// so the binding holds what the value borrows: `h.r = &s` freezes `s` for `h`'s
+    /// life, as `val h = H { r: &s }` does. Written through a reference, the value lands
+    /// in what that reference borrows instead, and through a parameter or `self`, in the
+    /// caller's frame, which none of this function's locals outlive.
+    fn hold_stored_borrows(&mut self, place: &Place, value: &Expr, value_ty: &Type, span: Span) {
+        if !self.type_holds_reference(value_ty) {
+            return;
+        }
+        let Some(root) = place.root().map(|root| root.name.clone()) else {
+            return;
+        };
+        if !self.reached_through_reference(place) {
+            self.hold_value_borrows(&root, value, value_ty, span);
+            return;
+        }
+        if self.current_fn_outliving.contains(&root) {
+            self.check_stored_through_reference(value);
+        }
+        for holder in self.symbols.borrowed_places(&root) {
+            self.hold_value_borrows(&holder, value, value_ty, span);
+        }
+    }
+
+    /// Make `holder` hold the borrows `value` carries, refusing any of them whose place
+    /// dies before `holder` does.
+    pub(crate) fn hold_value_borrows(
+        &mut self,
+        holder: &str,
+        value: &Expr,
+        value_ty: &Type,
+        span: Span,
+    ) {
+        let before = self.symbols.borrow_count(holder);
+        match borrow_target_of(value) {
+            Some((place, exclusive)) => self.symbols.attach_borrow(holder, &place, exclusive),
+            None => self.hold_carried_borrows(holder, value, value_ty),
+        }
+        self.refuse_outliving_borrows(holder, before, span);
+    }
+
+    /// Report each borrow `holder` took from index `before` on whose place is declared
+    /// in a scope `holder` outlives: once that scope closes, `holder` points at nothing.
+    pub(crate) fn refuse_outliving_borrows(&mut self, holder: &str, before: usize, span: Span) {
+        for place in self.symbols.borrows_outliving(holder, before) {
+            self.record_error(TypeError::BorrowOutlivesPlace {
+                place,
+                holder: holder.to_string(),
+                span,
+            });
+        }
     }
 
     /// Refuse a write into any part of a binding while a borrow of it is live. It is as
@@ -514,6 +568,8 @@ impl TypeChecker {
             self.symbols.attach_borrow(&target.name, &place, false);
         }
         self.hold_returned_borrows(&target.name, value, &value_ty);
+        // The release above left the target holding only what this store gave it.
+        self.refuse_outliving_borrows(&target.name, 0, span);
 
         let symbol_info = self.symbols.lookup(&target.name)?;
         if !matches!(value_ty, Type::Unknown) && !value_ty.is_compatible_with(&symbol_info.ty) {

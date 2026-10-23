@@ -61,16 +61,19 @@ impl TypeChecker {
 
         // Binding the scrutinee moves it, exactly as an ordinary `val` does.
         self.record_move(value);
+        // A binding is a part of the scrutinee, so it holds what the scrutinee borrows.
         for (name, ty, binding_span) in bindings {
             if matches!(ty, Type::Unknown) {
                 continue;
             }
-            if let Err(duplicate) = self.symbols.define(name, ty, false) {
+            if let Err(duplicate) = self.symbols.define(name.clone(), ty.clone(), false) {
                 self.record_error(TypeError::VariableAlreadyDefined {
                     name: duplicate,
                     span: binding_span,
                 });
+                continue;
             }
+            self.hold_carried_borrows(&name, value, &ty);
         }
         Some(())
     }

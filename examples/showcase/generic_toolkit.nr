@@ -176,10 +176,13 @@ func main() -> i32 {
 
     // Two guards cross the same boundary in opposite directions: one is consumed by the
     // callee, one is returned to a fresh owner here. Both destructors run exactly once.
+    // Each holds `&mut dropped` until its block closes, so each gets a block of its own.
     mut dropped: i32 = 0
     {
         val g1 = Guard { sink: &mut dropped }
         val gone = swallow(g1)             // swallow<Guard>: dropped in the callee
+    }
+    {
         val g2 = Guard { sink: &mut dropped }
         val back = identity(g2)            // identity<Guard>: dropped at this scope's end
     }

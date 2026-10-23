@@ -208,12 +208,12 @@ walkers.
 - **Generic methods.** `MethodDef` carries its own `generics`, `lifetimes` and
   `where_predicates`, the same three a `FunctionDef` does, declared after the method's name and
   on top of its impl's. `TraitMethod` has none: a trait method declares no type parameters.
-- **Lifetimes.** `lifetimes: Vec<Identifier>` on `FunctionDef` / `StructDef` / `ImplDef` /
-  `MethodDef` and
-  `lifetime: Option<Identifier>` on `Type::Reference` are kept apart from `generics` because
-  lifetimes are a distinct namespace and do not drive monomorphization. Both are validated and
-  then erased: a reference type's identity does not depend on its lifetime. `EnumDef` has no
-  `lifetimes` field at all; the parser rejects a lifetime parameter on an enum.
+- **Lifetimes.** `lifetimes: Vec<Identifier>` on `FunctionDef` / `StructDef` / `EnumDef` /
+  `ImplDef` / `MethodDef` and `lifetime: Option<Identifier>` on `Type::Reference` are kept apart
+  from `generics` because lifetimes are a distinct namespace and do not drive monomorphization.
+  Both are validated and then erased: a reference type's identity does not depend on its
+  lifetime. A lifetime argument in a type application (`View<'a>`) has no node: the parser
+  checks it and drops it, so `Type::Generic` carries type and const arguments only.
 - **Attributes.** `Attribute { name, args, named, span }` on `FunctionDef` / `MethodDef` /
   `StructDef`: `args` are the bare identifiers (`@derive(Copy, Clone)`), `named` the
   `AttributeNamedArg { label, value: Expr, span }` pairs (`@grad(wrt: [w, self.head.w])`). A

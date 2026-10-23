@@ -641,7 +641,6 @@ the prelude's `Result`; a program with its own `Option` loses `Result::ok` the s
 - **No `impl Drop` on an enum** (`InvalidDropImpl`): only a struct runs a user destructor.
 - **A generic enum's tuple variant is not a function value.** `Error::Io` passes as a function,
   but `Option::Some` has no instance until its payload is known; write `|x| Option::Some(x)`.
-- **No lifetime parameters on an enum**; `enum E<'a, T>` is a parse error.
 
 ### Type Errors
 
@@ -917,8 +916,9 @@ func dangle() -> &i32 {
 ```
 
 The check follows a returned reference through a local reference binding (`val r = &local; r` is
-also rejected) and into the arms of a returned `if`/`else`. The diagnostic is
-`cannot return a reference to '<name>'`.
+also rejected), through a value holding one (see
+[References held in values](#references-held-in-values)), and into the arms of a returned
+`if`/`else` or `match`. The diagnostic is `cannot return a reference to '<name>'`.
 
 #### Explicit lifetime annotations
 
@@ -937,8 +937,50 @@ the annotation is then **erased**, `&'a T` and `&T` are the same type, so a life
 at runtime and never changes which values a signature accepts. The elision rules above still do the
 real outlives checking; explicit lifetimes do not tighten or relax it. Lifetime parameters may be
 mixed with type and const parameters (`func f<'a, T>(...)`); only the type/const parameters drive
-monomorphization. Lifetime **bounds** (`'a: 'b`) and struct-field references are not part of this
-surface yet.
+monomorphization. Lifetime **bounds** (`'a: 'b`) are not part of the language.
+
+#### References held in values
+
+A struct field, an enum or `Option` payload, and a tuple or array element may hold a reference.
+The struct or enum may declare lifetime parameters for it, and so may an `impl` block for the
+type:
+
+```neuro
+struct View<'a> { text: &'a string, from: u64 }
+enum Pick<'a, T> { Borrowed(&'a T), Owned(T) }
+
+impl<'a> View<'a> {
+    func source(&self) -> &'a string { self.text }
+}
+
+func view<'a>(text: &'a string, from: u64) -> View<'a> {
+    View { text: text, from: from }
+}
+```
+
+A use of the type names its lifetimes before its type arguments (`View<'a>`, `Pick<'a, i32>`),
+writes the anonymous `'_`, or leaves them out. As on a reference, a named lifetime must be
+declared and is then erased.
+
+The binding that holds such a value holds its borrows, just as `val r = &s` holds one. While
+it lives, the borrowee cannot be moved, assigned or borrowed `&mut`. The value takes the borrows
+written into it, the borrows of the holder it was copied from or is a part of (including a
+`match` or `for` binding), and, for a call's result, the borrows of every argument and the
+receiver, since under elision the result may hold any of them. A holder keeps its borrows until
+its own scope ends, even after its value has moved on, so two holders of `&mut x` need separate
+blocks.
+
+Three stores are refused:
+
+| Store | Diagnostic |
+|---|---|
+| A borrow put into a binding declared outside the borrowee's scope: `r = &s`, `h = H { r: &s }`, `h.r = &s`, or `set(&mut h, &s)` from an inner block | `'s' does not live long enough` |
+| A value holding a borrow of a local, returned | `cannot return a reference to 's'` |
+| The same value stored through a `&mut` parameter or `self` | `cannot store a borrow of 's' through a reference` |
+
+A call is judged conservatively: a signature does not say what the callee keeps, so a `&mut`
+argument whose type can hold a reference takes every borrow the call's other arguments carry.
+[`borrowed_records.nr`](../../examples/showcase/borrowed_records.nr) puts these rules together.
 
 ### String Slices (`&string`)
 

@@ -1,6 +1,6 @@
-drop #1
-drop #2
-drop #3
-drop #4
-drop #5
+drop guard 3
+drop guard 2
+drop guard 1
+drop guard 5
+drop guard 4
 destructors run: 5

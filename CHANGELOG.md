@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.17.0] - 2026-10-23
+
+### Added
+
+- Structs and enums may declare lifetime parameters for the references they hold:
+  `struct View<'a> { text: &'a string }`, `enum Pick<'a, T> { Borrowed(&'a T), Owned(T) }`,
+  `impl<'a> View<'a> { ... }`. A type names its lifetimes before its type arguments
+  (`View<'a>`, `Pick<'a, i32>`), writes `'_`, or leaves them out. A lifetime argument must be
+  declared, and like the `'a` in `&'a T` it is erased, so it costs nothing at run time.
+- A struct field, an enum or `Option` payload, a newtype, and a tuple or array element that
+  holds a reference is now tracked like a reference binding: the binding holding the value
+  keeps its borrowee from being moved, assigned or borrowed `&mut` until that binding's scope
+  ends. A value takes the borrows written into it, those of the holder it was copied from or
+  is a part of (a field, an element, a `match`, `val ... else` or `for` binding), and those of
+  a call's arguments and receiver when it is the call's result. `Option<&T>` returned from a
+  function works end to end.
+- A holder may not outlive its borrowee: storing a borrow into a binding declared outside the
+  borrowee's scope is `'s' does not live long enough`, whether the store is `r = &s`,
+  `h = H { r: &s }`, `h.r = &s`, or a call that takes `&mut h` beside `&s`.
+- Storing a value that holds a borrow of a local through a `&mut` parameter or `self` is
+  refused (`cannot store a borrow of 's' through a reference`), as returning one is.
+
+### Changed
+
+- Programs that relied on the old gaps are now refused. Two live values holding `&mut` to
+  the same place (two guards over one counter) need separate counters or separate blocks.
+  A value that was moved keeps its borrow until its scope ends. Returning a call's result now
+  checks the call's arguments, so `pick(param, &local)` is refused even when the signature
+  ties the result to `param` alone.
+
+### Fixed
+
+- A struct returned through a binding could hold a borrow of the function's locals and be read
+  after they were freed (BUG-099). Now the binding's borrows are checked like a returned
+  reference's.
+- A reference assigned inside a block could outlive what it borrowed (BUG-109).
+- Returning `s.slice(range)` of a local `s`, or a call's result built from a borrow of a local
+  (`id(&s)`), compiled and read freed memory. So did copying a reference out of a `match` arm
+  into an outer binding when the scrutinee borrowed a block's local.
+
 ## [5.16.0] - 2026-10-23
 
 ### Added

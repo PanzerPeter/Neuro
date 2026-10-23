@@ -40,9 +40,9 @@ pub enum ParseError {
     CyclicTypeAlias { name: String, span: Span },
 
     #[error(
-        "enum '{name}' may not declare lifetime parameters yet; write the payload's reference without one"
+        "undeclared lifetime `'{name}`; declare it in the generic parameter list, e.g. `func f<'{name}>(...)`"
     )]
-    EnumLifetimeParam { name: String, span: Span },
+    UndeclaredLifetime { name: String, span: Span },
 
     #[error("`export` cannot be applied to {what}")]
     ExportNotAllowed { what: String, span: Span },
@@ -147,7 +147,7 @@ impl ParseError {
             | ParseError::DuplicateTypeAlias { span, .. }
             | ParseError::TypeAliasShadowsBuiltin { span, .. }
             | ParseError::CyclicTypeAlias { span, .. }
-            | ParseError::EnumLifetimeParam { span, .. }
+            | ParseError::UndeclaredLifetime { span, .. }
             | ParseError::ExportNotAllowed { span, .. }
             | ParseError::MisplacedNoPrelude { span }
             | ParseError::EmptyInterpolationHole { span }

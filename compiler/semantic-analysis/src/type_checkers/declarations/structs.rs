@@ -28,12 +28,14 @@ impl TypeChecker {
             return None;
         }
 
+        self.enter_generic_scope(&[], &def.lifetimes);
         let mut fields: Vec<(String, Type)> = Vec::new();
         for field in &def.fields {
             if let Some(ty) = self.resolve_type(&field.ty) {
                 fields.push((field.name.name.clone(), ty));
             }
         }
+        self.exit_generic_scope();
 
         self.struct_defs.insert(def.name.name.clone(), fields);
         self.record_visibility(def);

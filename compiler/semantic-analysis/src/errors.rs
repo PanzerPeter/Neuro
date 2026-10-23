@@ -1102,6 +1102,20 @@ pub enum TypeError {
     ReturnsReferenceToLocal { name: String, span: Span },
 
     #[error(
+        "'{place}' does not live long enough: '{holder}' is declared outside the scope that owns '{place}' and would still hold a borrow of it once '{place}' is dropped; declare '{holder}' in that scope, or keep '{place}' alive as long as '{holder}'"
+    )]
+    BorrowOutlivesPlace {
+        place: String,
+        holder: String,
+        span: Span,
+    },
+
+    #[error(
+        "cannot store a borrow of '{name}' through a reference: '{name}' is local to this function and does not outlive the call, while the reference's target does; store a borrow derived from a parameter instead"
+    )]
+    StoresReferenceToLocal { name: String, span: Span },
+
+    #[error(
         "a range expression `a..b` is only valid as the argument to `.slice()` or `.char_slice()`"
     )]
     RangeNotAllowed { span: Span },
@@ -1676,6 +1690,8 @@ impl TypeError {
             | Self::CannotMoveWhileBorrowed { span, .. }
             | Self::CannotAssignWhileBorrowed { span, .. }
             | Self::ReturnsReferenceToLocal { span, .. }
+            | Self::BorrowOutlivesPlace { span, .. }
+            | Self::StoresReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::SliceExpectsRange { span, .. }
             | Self::NotIndexable { span, .. }

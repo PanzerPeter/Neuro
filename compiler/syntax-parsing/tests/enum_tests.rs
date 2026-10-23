@@ -102,9 +102,12 @@ fn plain_enum_has_no_generic_parameters() {
 }
 
 #[test]
-fn generic_enum_rejects_a_lifetime_parameter() {
-    let err = parse("enum Holder<'a, T> { One(T) }")
-        .expect_err("should be rejected")
-        .to_string();
-    assert!(err.contains("may not declare lifetime parameters"), "{err}");
+fn generic_enum_declares_a_lifetime_parameter() {
+    let items = parse("enum Holder<'a, T> { One(&'a T), Two(T) }").expect("program should parse");
+    let Item::Enum(def) = &items[0] else {
+        panic!("expected an enum");
+    };
+    assert_eq!(def.lifetimes.len(), 1);
+    assert_eq!(def.lifetimes[0].name, "a");
+    assert_eq!(def.generics.len(), 1);
 }

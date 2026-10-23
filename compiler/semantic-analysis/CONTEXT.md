@@ -633,16 +633,35 @@ to that binding, never to whatever the name resolves to later: once an inner sha
 name means the outer binding again. A `val` / `mut` may reuse a name its block already binds
 (`define_pending` opens an implicit scope that `pop_scope` closes with the block), and the new
 binding is held under `__pending_<name>` until its initializer's moves and borrows are recorded,
-so `val x = x` moves and `val x = &x` borrows the binding it shadows. A block, `if` or `match`
-value, a bare binding or a closure whose type carries a reference or a function value
-(`hold_carried_borrows`, run for a `val` / `mut` initializer and for a whole-binding store alike)
-has its value-yielding tails walked (`tail_borrow_targets`, through block bindings, destructured
-parts, call arguments and a closure's captures), and the holder takes each borrow found, as it
-would for the same borrow written directly. A name the walk cannot follow to a block declaration
-is a live binding the value copies, and the holder inherits every borrow that binding holds
-(`inherit_borrows`). Without the store half, `r = rm` or `g = |x| rm.push(x)` from an inner
-block left the outer holder pointing at `v` once `rm` died, and `val w = v` compiled and freed
-the buffer twice.
+so `val x = x` moves and `val x = &x` borrows the binding it shadows.
+
+**Values that hold borrows.** Any value whose type can hold a reference (`type_holds_reference`:
+a reference, or a tuple, array, struct, enum or newtype with one inside, `Option<&T>` included)
+or a function value makes its binding a holder (`hold_carried_borrows`). The value is walked
+(`tail_borrow_targets`): `&place` and `.slice` views in it, struct, struct-variant, tuple and
+array literals, a call's arguments (variant constructors among them) and its receiver, a part of
+a value (`.field`, `.0`, `[i]`), `?`, both sides of `??`, a `match` scrutinee and its arms, the
+tails of blocks and `if`s, a closure's captures, and block bindings back to their initializers.
+The holder takes each borrow found, as it would for the same borrow written directly. A name the
+walk cannot follow to a block declaration is a live binding the value copies or is a part of, and
+the holder inherits every borrow that binding holds (`inherit_borrows`). The walk runs for every
+place a value lands: a `val` / `mut` initializer and a whole-binding store, a store into part of
+a binding (`hold_stored_borrows`, where the root binding is the holder), a pattern binding of a
+`match` arm or `val ... else` (the scrutinee is the value), and a `for` element (the iterable
+is). A holder keeps its borrows until its scope ends, even once its value has moved: releasing
+at the move would have to follow the move state's per-arm snapshots and restores.
+
+Three rules use what holders hold. A store may not leave its holder pointing at a binding that
+dies first: `refuse_outliving_borrows` compares each newly held borrow's scope index with the
+holder's (`borrows_outliving`), and a deeper one is `BorrowOutlivesPlace`. Before this, `b = &v`
+inside a block with `b` declared outside compiled (BUG-109), and so did `out = r` from a `match`
+arm. A call is a store too (`hold_argument_stores` in `expressions/calls.rs`, run by every call
+path beside the reborrow check): an erased signature does not say what a callee keeps, so the
+binding behind each `&mut` argument whose referent can hold a reference, or a `&mut self`
+receiver of such a type, holds every borrow the call's other arguments and receiver carry. A
+store through a reference writes into what the reference borrows (`borrowed_places` of the
+root); through a parameter or `self` it writes into the caller's frame, so the value may hold no
+borrow of a local (`check_stored_through_reference`, `StoresReferenceToLocal`).
 
 A `&mut` binding passed bare to a call is a reborrow, not a borrow expression, so the counts
 never see it. `check_reborrow_exclusivity` (in `expressions/calls.rs`, run by every call path)
@@ -673,12 +692,10 @@ borrow is live, because the read rule has already reported that name.
 
 This is **lexical, not NLL**: a borrow held by a binding freezes its borrowee for that binding's
 whole scope, so code reads back through the borrow or confines it to a block. Persistent borrows
-come from a direct `&place` / `&mut place` initializer, a `.slice` view, and a call that returns a
-reference (`hold_returned_borrows`): a reference-typed binding initialized or reassigned from a
-call holds every `&place` / `&mut place` argument of that call and its borrowed receiver, since a
-body may return any of its reference parameters. Blocks, branches, copies and closures are
-followed by `hold_carried_borrows` above; a struct or enum value holding a borrow is not
-(BUG-099).
+come from a direct `&place` / `&mut place` initializer, a `.slice` view, a value holding borrows
+(above), and a call that returns a reference: its arguments go through `hold_carried_borrows`,
+and `hold_returned_borrows` takes the receiver, shared or exclusive as the method takes it,
+since under elision a body may return any of its reference inputs.
 
 **Returned-reference outlives** (lifetime elision; `declarations/` + `statements/returns.rs`). A
 function or method whose declared return type is a `Type::Reference` must not return a reference
@@ -686,22 +703,26 @@ borrowing a place that dies with the call. `current_fn_outliving` holds the name
 call: reference-typed parameters (single-input elision applies the input lifetime to outputs)
 plus `self` for an instance method. It is rebuilt per function/method and cleared on exit. At each
 `return` and trailing implicit return whose type is a reference, `check_returned_reference` walks
-the returned expression: a `&place` whose root place is local emits `ReturnsReferenceToLocal`; a
-returned reference *binding* is flagged when its `borrow_provenance` is local; `if`/`else` arms,
-bare and `unsafe` blocks, and `match` arm bodies are followed into their tails. The check also
-runs when the return type only *holds* a reference (`type_holds_reference`: a struct, enum, tuple
-or array with one inside), walking struct and enum literals, variant constructors
-(`is_variant_constructor`), tuples and arrays down to each `&place`. A trailing `if` used as the
-tail is reached through `tail_expr`, so each of its arms is checked. A struct binding returned by
-name is not followed: the borrow model records no borrow held inside one.
-`is_local_to_function` treats an absent name (a constant, an out-of-scope place) as non-local, so
-a valid program is never rejected.
+the returned expression (`check_escaping_borrows`, shared with the store-through-reference
+check): a `&place` or `.slice` view whose root place is local emits `ReturnsReferenceToLocal`;
+a returned binding is flagged when any place it holds a borrow of (`borrowed_places`) is local.
+The walk follows `if`/`else` arms, bare and `unsafe` blocks, `match` scrutinees and arm bodies,
+parts of a value, `?`, `??`, struct and enum literals, tuples, arrays, and a call's arguments
+and what its receiver holds. It runs when the return type only *holds* a reference too
+(`type_holds_reference`). A trailing `if` used as the tail is reached through `tail_expr`, so
+each of its arms is checked. A method call's receiver is not itself reported: whether a result
+borrows `self` or the impl's lifetimes is not recorded (BUG-128). `is_local_to_function` treats
+an absent name (a constant, an out-of-scope place) as non-local, so a valid program is never
+rejected.
 
 Explicit lifetime annotations are validated and then **erased**: `lifetime_scope` is populated by
-`enter_generic_scope` from each definition's `lifetimes`, an unknown name in a `Type::Reference` is
-`UndeclaredLifetime`, and `&'a T` and `&T` remain the same semantic type. No outlives logic rides
-on them: the elision rule above already accepts returning a borrowed parameter, which is exactly
-the `longest<'a>` case.
+`enter_generic_scope` from each definition's `lifetimes` (a function's, a struct's, an enum's,
+and an `impl` block's through `enter_impl_assoc`), an unknown name in a `Type::Reference` is
+`UndeclaredLifetime`, and `&'a T` and `&T` remain the same semantic type. A lifetime argument in
+a type application (`View<'a>`) never reaches this slice: the parser checks and drops it. No
+outlives logic rides on lifetimes: every borrow a value holds is tracked by the holder rules
+above, and the elision rule accepts returning a borrowed parameter, which is exactly the
+`longest<'a>` case.
 
 ### Generics
 **Functions.** A generic `FunctionDef` is registered in `generic_funcs` (not `functions`) with a
@@ -1010,7 +1031,7 @@ them as they go), then each borrowed capture takes its borrow (`borrow_capture`)
 
 A value that may borrow is scope-bound (`scope_bound_closures`, keyed by the literal's span, and
 `SymbolInfo::scope_bound` on a binding holding one): a closure that borrows a capture or holds a
-reference by copy (`carries_borrow`), a function-typed parameter of a function, method or closure
+reference by copy (`type_holds_reference` on the capture), a function-typed parameter of a function, method or closure
 (`bind_function_param`: its caller may have passed a borrowing closure), and a closure capturing
 either, `move` or not. It may be checked only in `function_value_slot`: the whole initializer of a
 binding, or a whole argument to a function-typed parameter (`check_receiver_call_args`,

@@ -225,7 +225,10 @@ impl TypeChecker {
     ///
     /// The bindings are resolved before they are installed, so a binding cannot name
     /// another one: an associated type stands for a concrete type, not for a chain.
+    /// The block's own lifetimes (`impl<'a> S<'a>`) come into scope here too, for the
+    /// signatures and bodies of its methods.
     pub(super) fn enter_impl_assoc(&mut self, def: &ImplDef) -> HashMap<String, Type> {
+        self.lifetime_scope = def.lifetimes.iter().map(|lt| lt.name.clone()).collect();
         let mut bindings = HashMap::new();
         for (name, ty) in &def.assoc_types {
             if let Some(resolved) = self.resolve_type(ty) {

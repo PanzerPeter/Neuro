@@ -79,7 +79,7 @@ impl TypeChecker {
         for arm in arms {
             self.symbols.restore_moves(&move_snapshot);
             self.symbols.set_transient_borrows(&borrow_snapshot);
-            let (arm_ty, binds_owner) = self.check_arm(arm, &pattern_ty, hint.as_ref());
+            let (arm_ty, binds_owner) = self.check_arm(arm, scrutinee, &pattern_ty, hint.as_ref());
             arm_borrows.extend(self.symbols.transient_borrows());
             if !expr_diverges(&arm.body) {
                 fell_through.push(self.symbols.snapshot_moves());
@@ -131,6 +131,7 @@ impl TypeChecker {
     fn check_arm(
         &mut self,
         arm: &MatchArm,
+        scrutinee: &Expr,
         scrut_ty: &Type,
         expected: Option<&Type>,
     ) -> (Type, bool) {
@@ -155,13 +156,16 @@ impl TypeChecker {
             .iter()
             .any(|(_, ty, _)| self.is_type_move_tracked(ty));
         // The arm's scope is fresh, so a failed define is a name the pattern binds twice.
+        // A binding is a part of the scrutinee, so it holds what the scrutinee borrows.
         for (name, ty, span) in &bindings {
             if let Err(duplicate) = self.symbols.define(name.clone(), ty.clone(), false) {
                 self.record_error(TypeError::VariableAlreadyDefined {
                     name: duplicate,
                     span: *span,
                 });
+                continue;
             }
+            self.hold_carried_borrows(name, scrutinee, ty);
         }
 
         if let Some(guard) = &arm.guard {

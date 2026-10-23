@@ -24,6 +24,7 @@ impl Parser {
     pub(crate) fn parse_impl_def(&mut self) -> ParseResult<ImplDef> {
         let start = self.consume(TokenKind::Impl, "'impl'")?;
         // Optional impl-level generic parameters `impl<'a, T, U> ...`.
+        let lifetime_mark = self.lifetime_scope.len();
         let (mut generics, lifetimes) = self.parse_generic_params()?;
         self.skip_newlines();
 
@@ -96,6 +97,7 @@ impl Parser {
         }
 
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        self.lifetime_scope.truncate(lifetime_mark);
 
         Ok(ImplDef {
             module: 0,
@@ -122,7 +124,9 @@ impl Parser {
         self.skip_newlines();
         let mut args = Vec::new();
         loop {
-            args.push(self.parse_type()?);
+            if !self.skip_lifetime_arg()? {
+                args.push(self.parse_type()?);
+            }
             self.skip_newlines();
             if !self.check(&TokenKind::Comma) {
                 break;

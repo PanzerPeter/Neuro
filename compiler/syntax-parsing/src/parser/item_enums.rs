@@ -5,7 +5,7 @@
 use lexical_analysis::TokenKind;
 use shared_types::Identifier;
 
-use crate::errors::{ParseError, ParseResult};
+use crate::errors::ParseResult;
 use crate::precedence::Precedence;
 use ast_types::{EnumDef, EnumVariant, Expr, FieldDef, FieldInit, VariantPayload};
 
@@ -25,13 +25,8 @@ impl Parser {
         let name = self.consume_identifier("enum name")?;
 
         self.skip_newlines();
+        let lifetime_mark = self.lifetime_scope.len();
         let (generics, lifetimes) = self.parse_generic_params()?;
-        if let Some(lt) = lifetimes.first() {
-            return Err(ParseError::EnumLifetimeParam {
-                name: name.name,
-                span: lt.span,
-            });
-        }
 
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
@@ -50,11 +45,13 @@ impl Parser {
         }
 
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
+        self.lifetime_scope.truncate(lifetime_mark);
 
         Ok(EnumDef {
             name,
             exported: false,
             generics,
+            lifetimes,
             variants,
             span: start.span.merge(close.span),
         })
