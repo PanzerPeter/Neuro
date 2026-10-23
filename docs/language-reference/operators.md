@@ -475,6 +475,14 @@ For a `Result`, the error payload is **discarded**: `??` states "I do not care w
 
 **Fallback type**: the right-hand side must produce the payload type `T`, not another `Option`/`Result`. A mismatch is an ordinary type error.
 
+**Diverging fallback**: the right-hand side may leave instead of producing a value. `?? panic("...")` is how a value is unwrapped, and `return`, `break` and `continue` work unbraced:
+
+```neuro
+val config = load() ?? panic("no config")   // the payload, or stop the program
+val first = lookup(key) ?? return 0         // leave the function
+val value = parse(line) ?? continue         // skip this iteration
+```
+
 **Associativity**: right-to-left. `a ?? b ?? c` parses as `a ?? (b ?? c)`, so each fallback is evaluated only when every left-hand side up to it has produced the absent / error variant. Left-to-right would force the middle fallback even when the chain succeeds early, defeating the short-circuit contract. In a chain, every operand but the last must itself be fallible:
 
 ```neuro
@@ -518,7 +526,7 @@ val half = match halve(n) {
 error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32
 ```
 
-**No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. When the types differ, convert first with a `match` that rebuilds the `Err`; `.map_err` is not available yet.
+**No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. When the types differ, convert first with `.map_err`, which takes a closure or a tuple variant: `read(path).map_err(AppError::Io)?`.
 
 **Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine: the unwrapped `bool` is used locally, not returned.
 
@@ -554,6 +562,7 @@ val d = reading |> scaler.apply                    // a bound method: scaler.app
 val e = reading |> (|v| v * v)                     // a parenthesized closure literal
 ```
 
+A path may also name a non-generic enum's tuple variant, which constructs it: `5 |> Wrapped::Num`.
 A closure target takes its parameter type from the piped value, so it needs no annotation. A
 generic target without a turbofish takes its type arguments from the piped value, as a call
 would. A binding of function type is a name like any other, so `x |> halve` works for a

@@ -103,6 +103,7 @@ mod null_coalesce;
 mod operator_traits;
 mod operators;
 mod option_result;
+mod option_result_methods;
 mod panic_runtime;
 mod pattern_matching;
 mod pipeline_operator;

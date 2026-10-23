@@ -1,10 +1,11 @@
 // End-to-end tests for function values as `|>` targets and `>>` operands.
 //
-// Five spellings produce a function value: a function name, a path to an associated
+// Five spellings produce a function value here: a function name, a path to an associated
 // function, an instantiated generic `f::<T>`, a closure literal and a bound method
 // `receiver.method`. Each is a value on its own (the bound method only inside the two
 // operators), a pipeline target, and a composition stage. A composition is a closure, so
-// a stage that is a value is captured by §3.12's rules.
+// a stage that is a value is captured by the closure capture rules. A tuple variant named
+// as its constructor is tested with `.map_err` in `option_result_methods.rs`.
 
 use crate::compile_harness::CompileTest;
 

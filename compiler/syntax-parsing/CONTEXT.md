@@ -292,9 +292,10 @@ the tuple-index parse, so it needs no expression grammar of its own.
 - **Nested generics close cleanly.** `>` closes an argument list one token at a time; nested
   `Foo<Bar<T>>` lexes as two separate `>` tokens, never a `>>`. The `::<` turbofish check wins at
   every step, so `f::<i32>(x)` and `math::helper::<i32>(x)` both parse.
-- **A valueless `return`/`break` may end at a comma.** `parse_match_arm` dispatches
-  `Return`/`Break`/`Continue` to `parse_stmt` and wraps the result in `Expr::Block`: exactly the
-  node a braced arm already produced, so nothing downstream sees a new shape. A `Comma` therefore
+- **A valueless `return`/`break` may end at a comma.** A match arm body and a `??` fallback
+  both go through `parse_expr_or_exit`, which dispatches `Return`/`Break`/`Continue` to
+  `parse_stmt` and wraps the result in `Expr::Block`: exactly the node a braced arm already
+  produced, so nothing downstream sees a new shape. A `Comma` therefore
   has to end a valueless `return`/`break`, which is safe because a comma cannot begin an
   expression (BUG-012).
 

@@ -383,6 +383,37 @@ fn test_try_is_postfix_and_binds_tighter_than_arithmetic() {
     assert!(matches!(*operand, Expr::Call { .. }));
 }
 
+/// A `??` fallback may leave the scope: an unbraced `return` / `break` / `continue`
+/// reaches the expression as the one-statement block its braced spelling produces.
+#[test]
+fn test_null_coalesce_fallback_may_be_a_scope_exit() {
+    use syntax_parsing::{BinaryOp, Expr, Stmt, parse_expr};
+
+    for (source, is_exit) in [
+        (
+            "o ?? return 7",
+            (|s: &Stmt| matches!(s, Stmt::Return { .. })) as fn(&Stmt) -> bool,
+        ),
+        ("o ?? break", |s: &Stmt| matches!(s, Stmt::Break { .. })),
+        ("o ?? continue", |s: &Stmt| {
+            matches!(s, Stmt::Continue { .. })
+        }),
+    ] {
+        let expr = parse_expr(source).expect("parse should succeed");
+        let Expr::Binary { op, right, .. } = expr else {
+            panic!("expected a `??` expression for {source}, got {expr:?}");
+        };
+        assert_eq!(op, BinaryOp::NullCoalesce);
+        let Expr::Block { stmts, .. } = *right else {
+            panic!("the fallback of {source} must be a block, got {right:?}");
+        };
+        assert!(
+            stmts.len() == 1 && is_exit(&stmts[0]),
+            "{source}: {stmts:?}"
+        );
+    }
+}
+
 #[test]
 fn test_try_chains_with_field_access() {
     use syntax_parsing::{Expr, parse_expr};

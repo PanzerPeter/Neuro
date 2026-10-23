@@ -142,13 +142,13 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         // The body owns none of its captures: what the environment owns, its release
-        // frees. A function value it is handed carries a count the caller took for it,
-        // which the body gives back. Locals register themselves in the body's own scope.
+        // frees. Its by-value parameters it owns as a free function does: the caller
+        // moved each one in, and a function value it is handed carries a count the
+        // caller took for it, which the body gives back. Locals register themselves in
+        // the body's own scope.
         self.push_drop_scope();
         for (name, alloca, sem_ty) in &params {
-            if self.holds_function(sem_ty) {
-                self.register_owned_binding(name, *alloca, sem_ty)?;
-            }
+            self.register_owned_binding(name, *alloca, sem_ty)?;
         }
         let ret_ty = Type::from_hir(&closure.return_type);
         let emitted = self.codegen_body(&closure.body, &ret_ty);

@@ -1274,8 +1274,8 @@ over. A holder that owns anything else keeps the plain move, which the checker g
 call result called in place (`codegen_indirect_call`), and an outlined tensor operation's function
 argument, for which `codegen_call` takes no count since MLIR's body gives none back. A `match` arm
 binding a function payload takes a count unless the arm disowned the scrutinee
-(`ArmOwnership::Arm { shares }`). A closure body registers its parameters that hold a function
-value, which every caller counted. `codegen_call_dispatch` routes a call whose callee is a local variable to
+(`ArmOwnership::Arm { shares }`). A closure body registers every by-value parameter, as a free
+function does: the caller moved each one in, and a function value it holds was counted. `codegen_call_dispatch` routes a call whose callee is a local variable to
 `codegen_indirect_call`, which extracts both pointers and issues an indirect call with the
 environment as the hidden first argument.
 

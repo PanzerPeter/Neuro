@@ -5,6 +5,42 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-127: a borrow passed to an inner call blocks a move in the enclosing call
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`reject_move_of_borrowee` in `type_checkers/moves.rs`)
+- **Severity**: minor. A valid program is rejected; binding the inner result first compiles
+
+**Minimal repro**
+
+```neuro
+func len_of(s: &string) -> u64 { s.len() }
+func take(n: u64, s: string) -> u64 { n + s.len() }
+
+func main() -> i32 {
+    val key = "abc"
+    val n = take(len_of(&key), key)
+    n as i32
+}
+```
+
+Expected: exit 6. `len_of` returns a `u64`, so the borrow of `key` ends when it returns, before
+`key` is moved as the second argument. Observed: "cannot move out of 'key' while it is
+borrowed". A method chain hits the same check: `lookup(&key).ok_or(Missing(key))`.
+
+**Root cause**: confirmed in the code. A call's argument borrows are transient, counted while
+the call's operands are checked, and `reject_move_of_borrowee` counts every transient borrow on
+purpose (a `&mut` in flight beside a move of the same name is a real dangling borrow). The
+inner call's borrows are still counted when the enclosing call's next operand is checked,
+although the inner call has returned and its result holds no reference.
+
+**Workaround**: bind the inner call's result with `val` first.
+
+**Fix sketch**: release a call's transient argument borrows once the call is checked, unless
+its result type can hold a reference, in which case they pass to the result as they do today.
+Regression tests: the repro, the method-chain form, and a `&mut key` passed beside a move of
+`key` in the same call (must still be rejected).
+
 ## BUG-126: a `&string` cannot become a `&dyn Debug` or `&dyn Hashable`
 
 - **Status**: open, confirmed

@@ -67,21 +67,8 @@ impl Parser {
         self.skip_newlines();
         self.consume(TokenKind::FatArrow, "'=>' after match pattern")?;
         self.skip_newlines();
-        // `return` / `break` / `continue` are statements, not expressions, so an
-        // unbraced one has to reach the body as the single-statement block a braced
-        // arm already produces. The braces carry no information and the spec's own
-        // `val-else` example writes bare `return` arm bodies.
-        let body = match self.peek_kind() {
-            Some(TokenKind::Return | TokenKind::Break | TokenKind::Continue) => {
-                let stmt = self.parse_stmt()?;
-                let span = stmt_span(&stmt);
-                Expr::Block {
-                    stmts: vec![stmt],
-                    span,
-                }
-            }
-            _ => self.parse_expr(Precedence::Lowest)?,
-        };
+        // The spec's own `val-else` example writes bare `return` arm bodies.
+        let body = self.parse_expr_or_exit(Precedence::Lowest)?;
         let span = start_span.merge(body.span());
 
         Ok(MatchArm {
@@ -90,6 +77,24 @@ impl Parser {
             body: Box::new(body),
             span,
         })
+    }
+
+    /// An expression where a scope exit may stand in for a value: a match arm body or a
+    /// `??` fallback. `return` / `break` / `continue` are statements, not expressions, so
+    /// an unbraced one reaches the expression as the single-statement block its braced
+    /// spelling already produces. The braces carry no information.
+    pub(super) fn parse_expr_or_exit(&mut self, precedence: Precedence) -> ParseResult<Expr> {
+        match self.peek_kind() {
+            Some(TokenKind::Return | TokenKind::Break | TokenKind::Continue) => {
+                let stmt = self.parse_stmt()?;
+                let span = stmt_span(&stmt);
+                Ok(Expr::Block {
+                    stmts: vec![stmt],
+                    span,
+                })
+            }
+            _ => self.parse_expr(precedence),
+        }
     }
 
     /// Parse a single pattern: a wildcard, binding, literal, range, or enum

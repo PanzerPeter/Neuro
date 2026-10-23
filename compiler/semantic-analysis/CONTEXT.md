@@ -797,7 +797,11 @@ The three construction checkers (`check_enum_unit_path`, `check_enum_tuple_call`
 `check_enum_struct_literal`) take the expected type: the instance comes from the expected type
 when there is one, else the payload is unified against the template and any parameter still
 unbound is taken from the enclosing function's return instance (`enum_return_type_args`, the only
-context a tail `if` branch has), else `GenericEnumNotInferable`. An enum pattern written with the
+context a tail `if` branch has), else `GenericEnumNotInferable`. A tuple variant of a
+non-generic enum named without arguments (`Error::Io`) is its constructor:
+`check_enum_unit_path` types it as a function from the payload to the enum, so it passes as a
+function value. A generic enum's has no instance until its payload is known and stays an
+`EnumVariantFormMismatch`. An enum pattern written with the
 base name matches the scrutinee's instance and binds payloads at the instance's concrete types.
 `Option` / `Result` are **not** special-cased anywhere here: `neurc` injects their declarations.
 
@@ -1070,6 +1074,8 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
   `NullCoalesceOnNonFallible`. The `Result` error payload is deliberately unconstrained: `??`
   discards it. A mistyped fallback is an ordinary `Mismatch`. The left operand is moved: `??`
   yields the payload itself, so an owning `Option` read twice through it is `UseOfMovedValue`.
+  A fallback that diverges (`expr_diverges`: `panic`, `unreachable`, a block ending in `return`,
+  `break` or `continue`) types the expression as the payload, which is how a value is unwrapped.
 - **`?`** (`expressions/try_expr.rs`) types `Expr::Try` as the operand's success payload after two
   checks. The operand must be fallible (else `TryOnNonFallible`), and
   `current_function_return_type` must be an instance of the SAME fallible enum, since that is

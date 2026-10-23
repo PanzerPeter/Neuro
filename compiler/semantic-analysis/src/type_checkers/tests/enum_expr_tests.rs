@@ -68,6 +68,49 @@ func main() -> i32 {
     );
 }
 
+/// Named without arguments, a tuple variant is its constructor, a function value from
+/// its payload to the enum, so it passes wherever a function of that shape is expected.
+#[test]
+fn tuple_variant_without_arguments_is_a_function_value() {
+    let errors = semantic_errors(
+        r#"
+enum Msg { Move(i32, i32), Quit }
+func apply(f: (i32, i32) -> Msg) -> Msg { f(1, 2) }
+func main() -> i32 {
+    val make: (i32, i32) -> Msg = Msg::Move
+    val m = apply(Msg::Move)
+    val n = make(3, 4)
+    0
+}
+"#,
+    );
+    assert!(
+        errors.is_empty(),
+        "a tuple variant is a function value; got {errors:?}"
+    );
+}
+
+/// A generic enum's variant has no instance to name until its payload is known, so it
+/// is refused as a value, once, rather than typed as a function.
+#[test]
+fn generic_tuple_variant_without_arguments_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+enum Wrap<T> { Held(T), Empty }
+func apply(f: (i32) -> Wrap<i32>) -> Wrap<i32> { f(1) }
+func main() -> i32 {
+    val w = apply(Wrap::Held)
+    0
+}
+"#,
+    );
+    let form_errors = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::EnumVariantFormMismatch { .. }))
+        .count();
+    assert_eq!(form_errors, 1, "{errors:?}");
+}
+
 #[test]
 fn enum_tuple_variant_arity_mismatch_is_rejected() {
     let errors = semantic_errors(

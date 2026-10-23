@@ -151,6 +151,7 @@ One line each. The program's own header comment is the full description.
 - [`scan_guard.nr`](showcase/scan_guard.nr): deterministic `Drop` and labeled loop exit together
 - [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` / `Result` over structs, methods, arrays and generics
 - [`sensor_windows.nr`](showcase/sensor_windows.nr): windowed sensor readings behind one slice signature
+- [`settings_loader.nr`](showcase/settings_loader.nr): typed settings read from raw text, where a lookup's `Option` becomes a `Result` with `.ok_or`, a parse error is wrapped by passing an enum variant to `.map_err`, both propagate with `?`, results are rendered through `.map` / `.map_err`, and `??` takes a default, skips a loop iteration with `continue`, or unwraps with `panic`
 - [`shape_traits.nr`](showcase/shape_traits.nr): trait declarations and both dispatch forms together, plus a trait whose methods return `Self`, called through a two-trait bound
 - [`simulation.nr`](showcase/simulation.nr): a tiny bit-flag state machine
 - [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings

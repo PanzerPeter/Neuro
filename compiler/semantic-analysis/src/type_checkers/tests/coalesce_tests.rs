@@ -146,3 +146,34 @@ func main() -> i32 {{
         "the second `??` reads a moved value; got {errors:?}"
     );
 }
+
+/// A diverging fallback produces no value, so `??` is the unwrap: the expression is the
+/// payload. Every spelling of a scope exit counts.
+#[test]
+fn coalesce_with_a_diverging_fallback_types_to_the_payload() {
+    let errors = semantic_errors(&format!(
+        "{FALLIBLE_DECLS}
+func maybe(n: i32) -> Option<i32> {{ Option::Some(n) }}
+
+func first(o: Option<i32>) -> i32 {{
+    val v: i32 = o ?? return 0
+    v
+}}
+
+func main() -> i32 {{
+    val a: i32 = maybe(1) ?? panic(\"absent\")
+    val b: i32 = maybe(2) ?? unreachable()
+    mut t = 0
+    for i in 0..3 {{
+        val c: i32 = maybe(i) ?? continue
+        val d: i32 = maybe(i) ?? {{ break }}
+        t = t + c + d
+    }}
+    a + b + t + first(maybe(3))
+}}"
+    ));
+    assert!(
+        errors.is_empty(),
+        "a diverging fallback unwraps; got {errors:?}"
+    );
+}

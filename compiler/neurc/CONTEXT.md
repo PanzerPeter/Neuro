@@ -146,7 +146,10 @@ body compiled against a type that is no longer there. `PRELUDE_DEPENDENCIES` rec
 edges (`Chars` needs `Option` and `Iterator`; `PoolAware` needs `PoolHandle`), and
 `dropped_declarations` closes over them.
 `is_dropped` also drops an `impl` block extending a displaced type: those methods belong to the
-prelude's type, not to whatever the program put in its place.
+prelude's type, not to whatever the program put in its place. A method naming another prelude
+type is withdrawn alone (`PRELUDE_METHOD_DEPENDENCIES`, applied by `withdraw_methods`):
+`Option::ok_or` builds a `Result` and `Result::ok` an `Option`, so a program declaring its own
+`Result` keeps `Option::map` and the `is_*` tests.
 
 `prepend` stamps every prelude declaration with `PRELUDE_MODULE` (`ModuleId::MAX`), an id no
 loaded file can hold. The prelude is prepended *after* module resolution has numbered the

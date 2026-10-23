@@ -338,7 +338,12 @@ impl Lowerer {
             } if self.enums.contains_key(&type_name.name)
                 || self.is_generic_enum(&type_name.name) =>
             {
-                self.lower_enum_construct(&type_name.name, &member.name, expected, *span)
+                match self.variant_constructor_signature(&type_name.name, &member.name) {
+                    Some((params, _)) => self.lower_function_value(expr, &[], params),
+                    None => {
+                        self.lower_enum_construct(&type_name.name, &member.name, expected, *span)
+                    }
+                }
             }
 
             Expr::Path {
@@ -786,7 +791,27 @@ impl Lowerer {
         self.functions
             .get(&mangled)
             .cloned()
+            .or_else(|| self.variant_constructor_signature(type_name, member))
             .ok_or(LoweringError::UnresolvedCall { target: mangled })
+    }
+
+    /// The signature of a tuple variant named as a function value, `Error::Io`: its
+    /// payload types in, the enum out. `None` for a unit variant, which is a value
+    /// itself, and for a generic enum's variant, which the checker refuses as a value.
+    fn variant_constructor_signature(
+        &self,
+        type_name: &str,
+        member: &str,
+    ) -> Option<(Vec<HirType>, HirType)> {
+        if self.is_generic_enum(type_name) {
+            return None;
+        }
+        let (_, fields) = self.enum_variant(type_name, member).ok()?;
+        if fields.is_empty() {
+            return None;
+        }
+        let params = fields.into_iter().map(|(_, ty)| ty).collect();
+        Some((params, HirType::Enum(type_name.to_string())))
     }
 }
 

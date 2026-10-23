@@ -512,7 +512,8 @@ A composition arrives as the closure the parser built (`ast_types::COMPOSE_PARAM
 lowering of its own is `compose_param`, which types that parameter from the first stage's
 signature when the hint leaves it open, as the checker's `compose_param` does.
 `lower_function_value` lowers a function named as a value (`val f = square`, BUG-071), an
-associated path (`Point::scale`) and an instance (`convert::<u8>`, typed by
+associated path (`Point::scale`), a non-generic enum's tuple variant (`Error::Io`, signature from
+`variant_constructor_signature`, which `assoc_signature` falls back to) and an instance (`convert::<u8>`, typed by
 `generic_instance_signature`) to a capture-free closure forwarding its `__fn_value_argN`
 parameters, through `lift_capture_free`. A closure literal called in place with an unannotated
 parameter (`lower_value_call`) lowers its arguments first and hands their types to the literal

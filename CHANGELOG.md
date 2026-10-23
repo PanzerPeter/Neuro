@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.16.0] - 2026-10-23
+
+### Added
+
+- `Option` and `Result` methods: `.map(f)` on both, `.map_err(f)` and `.ok()` on `Result`,
+  `.ok_or(e)` on `Option`, and the `.is_some()` / `.is_none()` / `.is_ok()` / `.is_err()` tests.
+  Each consumes its receiver except the tests, which borrow it. They are ordinary generic
+  methods in the prelude.
+- A non-generic enum's tuple variant named without arguments is its constructor, a function
+  value: `read(path).map_err(AppError::Io)?` wraps an error, and `x |> Wrapped::Num` and
+  `Wrapped::Num >> unwrap` pipe and compose it.
+- `??` takes a fallback that diverges: `opt ?? panic("absent")` unwraps or stops the program,
+  and `opt ?? return 0`, `?? break` and `?? continue` leave instead of producing a value.
+
+### Fixed
+
+- A closure now releases a value moved into one of its by-value parameters when the call
+  returns, as a function does. A `StringBuilder`, `Vec` or `Drop` value passed to a closure
+  used to leak, and its destructor never ran.
+
 ## [5.15.0] - 2026-10-20
 
 ### Added

@@ -7,6 +7,7 @@ use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::type_checkers::collections::OPTION_ENUM;
 use crate::type_checkers::literals::{float_suffix_to_type, suffix_to_type};
+use crate::type_checkers::val_else::expr_diverges;
 use crate::types::Type;
 use crate::warnings::{Warning, WarningCode};
 use ast_types::{BinaryOp, Expr, UnaryOp};
@@ -385,6 +386,11 @@ impl TypeChecker {
         let right_ty = self
             .check_expr(right, Some(&payload))
             .unwrap_or(Type::Unknown);
+        // A diverging fallback (`?? panic(..)`, `?? return x`) never produces a value,
+        // so the expression is the payload: this is the language's unwrap.
+        if expr_diverges(right) {
+            return Some(payload);
+        }
         if matches!(right_ty, Type::Unknown) {
             return Some(Type::Unknown);
         }

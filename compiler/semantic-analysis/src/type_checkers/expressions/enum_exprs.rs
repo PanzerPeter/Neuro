@@ -6,7 +6,7 @@
 use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
 use crate::types::Type;
-use ast_types::{Expr, FieldInit};
+use ast_types::{Expr, FieldInit, FunctionMode};
 use shared_types::{Identifier, Span};
 use std::collections::HashMap;
 
@@ -76,13 +76,30 @@ impl TypeChecker {
         };
         match info.form {
             VariantForm::Unit => {}
-            VariantForm::Tuple => self.record_error(TypeError::EnumVariantFormMismatch {
-                enum_name: enum_name.clone(),
-                variant: variant.to_string(),
-                expected: "tuple".to_string(),
-                hint: "construct it with arguments, e.g. `E::V(...)`".to_string(),
-                span,
-            }),
+            // Named without arguments, a tuple variant is its constructor: a function value
+            // like `Point::scale`, so `.map_err(Error::Io)` needs no closure. A generic
+            // enum's variant has no instance to name until its payload is known, so it
+            // stays an error.
+            VariantForm::Tuple if !self.is_generic_enum(enum_name) => {
+                return Type::Function {
+                    params: info.fields.iter().map(|(_, ty)| ty.clone()).collect(),
+                    ret: Box::new(recovery),
+                    mode: FunctionMode::Shared,
+                };
+            }
+            VariantForm::Tuple => {
+                self.record_error(TypeError::EnumVariantFormMismatch {
+                    enum_name: enum_name.clone(),
+                    variant: variant.to_string(),
+                    expected: "tuple".to_string(),
+                    hint: "a generic enum's variant is not a function value, so wrap it in a \
+                           closure, e.g. `|x| E::V(x)`"
+                        .to_string(),
+                    span,
+                });
+                // Inferring the instance would only report the missing payload again.
+                return Type::Unknown;
+            }
             VariantForm::Struct => self.record_error(TypeError::EnumVariantFormMismatch {
                 enum_name: enum_name.clone(),
                 variant: variant.to_string(),

@@ -607,13 +607,40 @@ val absent: Option<i32> = Option::None
 
 Variants may be written qualified (`Option::Some`, `Result::Err`) or, because the implicit prelude imports `Some`, `None`, `Ok`, and `Err` into every file without `@no_prelude`, unqualified (`Some(x)`). The [`??` operator](operators.md#nullerror-coalescing-operator-) unwraps either type with a fallback, the [`?` operator](operators.md#error-propagation-operator-) unwraps one or hands the failure to the caller, and [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) unwraps one or exits the scope.
 
+#### Methods
+
+Both enums carry a few methods, written as ordinary Neuro source in the prelude. Each one
+consumes its receiver, except the `is_*` tests, which borrow it.
+
+| Method | On | Result |
+|---|---|---|
+| `.map(f)` | `Option<T>`, `Result<T, E>` | `f: (T) -> U` applied to the `Some` / `Ok` payload |
+| `.map_err(f)` | `Result<T, E>` | `f: (E) -> F` applied to the `Err` payload |
+| `.ok()` | `Result<T, E>` | `Option<T>`, the error discarded |
+| `.ok_or(e)` | `Option<T>` | `Result<T, E>`, with `e` for `None` |
+| `.is_some()` / `.is_none()` | `Option<T>` | `bool` |
+| `.is_ok()` / `.is_err()` | `Result<T, E>` | `bool` |
+
+```neuro
+val doubled = find(2).map(|v| v * 2) ?? 0
+val checked: Result<i32, string> = find(0).ok_or("not found")
+val code = divide(1, 0).map_err(|msg| msg.len())
+if checked.is_err() { println("missing") }
+```
+
+`f` takes any closure or function value, so a tuple variant can wrap an error in one step:
+`read(path).map_err(AppError::Io)?`. There is no `.unwrap()`: `?? panic("...")` unwraps.
+A program that declares its own `Result` keeps `Option`'s methods except `.ok_or`, which builds
+the prelude's `Result`; a program with its own `Option` loses `Result::ok` the same way.
+
 ### Limitations
 
 - **Payloads must be sized.** Any sized type is admissible, `Copy` or not: a `string`, a struct, an array, a tuple, another enum. `void` and the unsized types (`dyn Trait`, `[T]`) are rejected (`UnsupportedEnumPayload`), because a payload slot has to have a width.
 - **No enum that holds itself inline**, directly or through a struct, array, tuple or another
   enum: it would have no finite size.
 - **No `impl Drop` on an enum** (`InvalidDropImpl`): only a struct runs a user destructor.
-- **No `.map_err` or other `Option` / `Result` helper methods yet.**
+- **A generic enum's tuple variant is not a function value.** `Error::Io` passes as a function,
+  but `Option::Some` has no instance until its payload is known; write `|x| Option::Some(x)`.
 - **No lifetime parameters on an enum**; `enum E<'a, T>` is a parse error.
 
 ### Type Errors

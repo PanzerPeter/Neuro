@@ -18,6 +18,69 @@ export enum Result<T, E> {
     Err(E)
 }
 
+// The method surface that keeps a `match` out of the common cases. Each method consumes
+// its receiver except the `is_*` tests, which only look at the tag. A callback is
+// `once` because each is called at most one time, so any closure is accepted.
+impl<T> Option<T> {
+    func map<U>(self, f: once (T) -> U) -> Option<U> {
+        match self {
+            Option::Some(v) => Option::Some(f(v)),
+            Option::None => Option::None
+        }
+    }
+    func ok_or<E>(self, e: E) -> Result<T, E> {
+        match self {
+            Option::Some(v) => Result::Ok(v),
+            Option::None => Result::Err(e)
+        }
+    }
+    func is_some(&self) -> bool {
+        match self {
+            Option::Some(_) => true,
+            Option::None => false
+        }
+    }
+    func is_none(&self) -> bool {
+        match self {
+            Option::Some(_) => false,
+            Option::None => true
+        }
+    }
+}
+
+impl<T, E> Result<T, E> {
+    func map<U>(self, f: once (T) -> U) -> Result<U, E> {
+        match self {
+            Result::Ok(v) => Result::Ok(f(v)),
+            Result::Err(e) => Result::Err(e)
+        }
+    }
+    func map_err<F>(self, f: once (E) -> F) -> Result<T, F> {
+        match self {
+            Result::Ok(v) => Result::Ok(v),
+            Result::Err(e) => Result::Err(f(e))
+        }
+    }
+    func ok(self) -> Option<T> {
+        match self {
+            Result::Ok(v) => Option::Some(v),
+            Result::Err(_) => Option::None
+        }
+    }
+    func is_ok(&self) -> bool {
+        match self {
+            Result::Ok(_) => true,
+            Result::Err(_) => false
+        }
+    }
+    func is_err(&self) -> bool {
+        match self {
+            Result::Ok(_) => false,
+            Result::Err(_) => true
+        }
+    }
+}
+
 // The derivable traits. `@derive` writes each of these impls field by field; a program
 // may write one by hand instead and name any of them as a bound. The scalars, `string`,
 // and a struct carrying the derive implement them with no impl block here.

@@ -78,6 +78,7 @@ impl Prelude {
             .items
             .into_iter()
             .filter(|item| !is_dropped(item, &dropped))
+            .map(|item| withdraw_methods(item, &dropped))
             .map(stamp_prelude_module)
             .collect();
         combined.extend(items);
@@ -91,6 +92,12 @@ const PRELUDE_DEPENDENCIES: &[(&str, &[&str])] = &[
     ("Chars", &["Option", "Iterator"]),
     ("PoolAware", &["PoolHandle"]),
 ];
+
+/// Prelude methods written against another prelude type, as (owner, method, needed
+/// type). The conversions between `Option` and `Result` name both enums, so a program that
+/// replaces one keeps the other's remaining methods and loses only the conversion.
+const PRELUDE_METHOD_DEPENDENCIES: &[(&str, &str, &str)] =
+    &[("Option", "ok_or", "Result"), ("Result", "ok", "Option")];
 
 /// Every prelude name a program's own declarations displace: the names it declares
 /// outright, plus the prelude declarations written against those.
@@ -112,6 +119,22 @@ fn is_dropped(item: &Item, dropped: &[String]) -> bool {
         return dropped.iter().any(|name| name == &def.type_name.name);
     }
     item_name(item).is_some_and(|name| dropped.iter().any(|d| d == name))
+}
+
+/// Remove from a prelude `impl` block every method whose signature names a displaced type.
+fn withdraw_methods(mut item: Item, dropped: &[String]) -> Item {
+    if let Item::Impl(def) = &mut item {
+        def.methods.retain(|method| {
+            !PRELUDE_METHOD_DEPENDENCIES
+                .iter()
+                .any(|(owner, name, needs)| {
+                    *owner == def.type_name.name
+                        && *name == method.name.name
+                        && dropped.iter().any(|d| d == needs)
+                })
+        });
+    }
+    item
 }
 
 /// Mark a prelude declaration as belonging to the prelude's own module.
@@ -174,6 +197,24 @@ mod tests {
             .filter(|item| matches!(item, Item::Enum(def) if def.name.name == "Option"))
             .count();
         assert_eq!(options, 1);
+    }
+
+    /// `Option::ok_or` builds a `Result`, so a program with its own `Result` keeps
+    /// `Option::map` and loses only the conversion.
+    #[test]
+    fn shadowing_one_fallible_enum_withdraws_only_the_conversion_into_it() {
+        let program = syntax_parsing::parse("enum Result { Fine }").expect("program parses");
+        let combined = load().expect("the prelude parses").prepend(program);
+        let option_methods: Vec<&str> = combined
+            .iter()
+            .filter_map(|item| match item {
+                Item::Impl(def) if def.type_name.name == "Option" => Some(def),
+                _ => None,
+            })
+            .flat_map(|def| def.methods.iter().map(|m| m.name.name.as_str()))
+            .collect();
+        assert!(option_methods.contains(&"map"), "{option_methods:?}");
+        assert!(!option_methods.contains(&"ok_or"), "{option_methods:?}");
     }
 
     /// `Chars::next` answers `Option<char>`, so a program that brings its own `Option`

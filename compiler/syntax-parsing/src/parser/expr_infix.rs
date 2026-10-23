@@ -372,7 +372,12 @@ impl Parser {
                 } else {
                     precedence
                 };
-                let right = self.parse_expr(right_prec)?;
+                // A `??` fallback may leave the scope instead: `opt ?? return 0`.
+                let right = if matches!(op, BinaryOp::NullCoalesce) {
+                    self.parse_expr_or_exit(right_prec)?
+                } else {
+                    self.parse_expr(right_prec)?
+                };
                 let span = left.span().merge(right.span());
 
                 Ok(Expr::Binary {
