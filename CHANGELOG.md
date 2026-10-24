@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.18.1] - 2026-10-24
+
+### Fixed
+
+- `showcase/incident_desk.nr` exited with 267, which Linux truncates to 11 and
+  Windows reports in full, so the examples test failed on Windows CI. Its exit
+  total now stays under 256 and reads 33 on every platform.
+
 ## [5.18.0] - 2026-10-24
 
 ### Added

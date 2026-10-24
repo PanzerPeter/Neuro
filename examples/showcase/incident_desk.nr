@@ -140,5 +140,7 @@ func main() -> i32 {
     println("hours:          ada {ada_hours}, cy {cy_hours}")
     println("end of shift:")
 
-    severe * 100 + score * 10 + ada_load + ada_hours + cy_hours
+    // A process exit status is 8 bits on Linux and 32 on Windows, so the total stays
+    // under 256 to read the same everywhere.
+    severe * 10 + score + ada_load + ada_hours + cy_hours
 }

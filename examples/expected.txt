@@ -179,7 +179,7 @@ showcase/heat_diffusion.nr           100  gpu
 showcase/gradient_loss.nr            45
 showcase/grid_update.nr              50
 showcase/held_destruction.nr         5
-showcase/incident_desk.nr            11
+showcase/incident_desk.nr            33
 showcase/inventory_ledger.nr         181
 showcase/job_queue.nr                139
 showcase/log_builder.nr              64
