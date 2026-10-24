@@ -17,6 +17,18 @@ const OPTION_ENUM: &str = "Option";
 /// The associated function that builds an empty collection.
 pub(crate) const COLLECTION_CTOR: &str = "new";
 
+/// The `Vec` constructor that allocates room for a given number of elements up front.
+const VEC_WITH_CAPACITY: &str = "with_capacity";
+
+/// Whether `type_name::member` is a standard collection's constructor.
+pub(crate) fn is_collection_ctor(type_name: &str, member: &str) -> bool {
+    match collection_kind(type_name) {
+        Some(HirCollectionKind::Vec) => member == COLLECTION_CTOR || member == VEC_WITH_CAPACITY,
+        Some(_) => member == COLLECTION_CTOR,
+        None => false,
+    }
+}
+
 /// The collection named by `name`, or `None` when it is not a standard collection.
 pub(crate) fn collection_kind(name: &str) -> Option<HirCollectionKind> {
     match name {
@@ -44,6 +56,7 @@ impl Lowerer {
     pub(crate) fn lower_collection_new(
         &mut self,
         kind: HirCollectionKind,
+        capacity: Option<Box<HirExpr>>,
         expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
@@ -52,12 +65,18 @@ impl Lowerer {
                 kind,
                 args: Vec::new(),
             };
-            return Ok(HirExpr::new(HirExprKind::CollectionNew, ty, span));
+            return Ok(HirExpr::new(
+                HirExprKind::CollectionNew { capacity },
+                ty,
+                span,
+            ));
         }
         match expected {
-            Some(ty @ HirType::Collection { kind: k, .. }) if *k == kind => {
-                Ok(HirExpr::new(HirExprKind::CollectionNew, ty.clone(), span))
-            }
+            Some(ty @ HirType::Collection { kind: k, .. }) if *k == kind => Ok(HirExpr::new(
+                HirExprKind::CollectionNew { capacity },
+                ty.clone(),
+                span,
+            )),
             _ => Err(LoweringError::Malformed {
                 detail: format!("`{}::new()` reached lowering without a target type", {
                     kind.name()
@@ -87,18 +106,24 @@ impl Lowerer {
             (_, "clear") => (vec![], HirType::Void),
             (HirCollectionKind::Vec, "push") => (vec![value], HirType::Void),
             (HirCollectionKind::Vec, "pop") => (vec![], self.option_of(value)?),
-            (HirCollectionKind::Vec, "get") => (vec![HirType::U64], self.option_of(value)?),
+            (HirCollectionKind::Vec, "get") => {
+                (vec![HirType::U64], self.option_of(borrow_of(value, false))?)
+            }
+            (HirCollectionKind::Vec, "remove" | "swap_remove") => (vec![HirType::U64], value),
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "insert") => {
-                (vec![key, value], HirType::Void)
+                (vec![key, value.clone()], self.option_of(value)?)
             }
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "get") => {
-                (vec![key], self.option_of(value)?)
+                (vec![key], self.option_of(borrow_of(value, false))?)
+            }
+            (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "get_mut") => {
+                (vec![key], self.option_of(borrow_of(value, true))?)
             }
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "contains_key") => {
                 (vec![key], HirType::Bool)
             }
             (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "remove") => {
-                (vec![key], HirType::Bool)
+                (vec![key], self.option_of(value)?)
             }
             (HirCollectionKind::StringBuilder, "push_str") => {
                 (vec![HirType::String], HirType::Void)
@@ -138,5 +163,13 @@ impl Lowerer {
     pub(crate) fn option_of(&mut self, inner: HirType) -> Result<HirType, LoweringError> {
         let mangled = self.instantiate_generic_enum(OPTION_ENUM, &[MonoArg::Type(inner)])?;
         Ok(HirType::Enum(mangled))
+    }
+}
+
+/// The `&T` / `&mut T` a borrowing reader lends out of a slot.
+fn borrow_of(inner: HirType, mutable: bool) -> HirType {
+    HirType::Reference {
+        inner: Box::new(inner),
+        mutable,
     }
 }

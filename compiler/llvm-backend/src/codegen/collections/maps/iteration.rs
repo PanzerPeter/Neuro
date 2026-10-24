@@ -7,7 +7,6 @@ use inkwell::IntPredicate;
 use inkwell::values::FunctionValue;
 
 use super::STATE_FULL;
-use crate::codegen::collections::elements::SlotTransfer;
 use crate::codegen::collections::{FIELD_CAP, FIELD_LEN};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -104,9 +103,6 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(take_bb);
         let key = self.load_slot_key(kind, header, key_ty, value_ty, slot)?;
-        // The snapshot is a `Vec<K>` of its own, released by whoever binds it, so a
-        // `string` key is copied rather than aliased out of the map's slot.
-        let key = self.value_from_collection_slot(key, key_ty, SlotTransfer::Copied)?;
         let out_index = self
             .builder
             .build_load(i64_ty, out_slot, "out.val")?
@@ -119,6 +115,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_in_bounds_gep(key_llvm, out, &[out_index], "out.slot")?
         };
         self.builder.build_store(dst, key)?;
+        // The snapshot is a `Vec<K>` of its own, released by whoever binds it, so every
+        // `string` of a key is copied rather than aliased out of the map's slot.
+        self.own_strings_stored_through_borrow(dst, key_ty, &[])?;
         let out_next =
             self.builder
                 .build_int_add(out_index, i64_ty.const_int(1, false), "out.next")?;

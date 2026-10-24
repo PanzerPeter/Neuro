@@ -429,30 +429,35 @@ then belongs to the storage, and is tracked one of three ways:
   disarm for a read-only parameter, because the callee retains nothing past the call and a place
   disarmed there would reach no release at all.
 
-- **A collection slot** (a `Vec` element, a map key or value). A slot's fat pointer says no more
-  about ownership than any other, so the boundary decides it instead: every `string` that enters a
-  slot is copied into a buffer the collection owns (`value_for_collection_slot`, which adopts
-  rather than copies when `produces_owned_string` proves the operand was built for this store),
-  and every `string` read out of one is copied back out (`value_from_collection_slot`). The
-  collection then releases its live slots before freeing its buffer, through one
-  per-instantiation `__neuro_<kind>_drop_elems_<args>` helper that `emit_collection_free` and
-  `clear()` both call; `remove` and an overwriting `insert` or `v[i] =` release just the slot they
-  give up. `pop` is the one read that transfers instead of copying, because the slot is gone by
-  the time the reader sees it. `collections/elements.rs` owns the value helpers and the `Vec`
-  walk, `collections/maps/release.rs` the two map walks.
+- **A collection slot** (a `Vec` element, a map key or value). A slot has no flag, so an
+  invariant stands in for one: every `string` position of a slot's value owns its bytes. The
+  store makes it true. `value_for_collection_slot` (`collections/elements.rs`) reads
+  `stored_string_owners` before the move, stages the value and runs
+  `own_strings_stored_through_borrow`, which adopts each owned position and copies the rest (a
+  `.rodata` literal, a borrowed view), then moves the operand out (`mark_moved_for_drop`). `push`,
+  both operands of `insert` and `v[i] =` go through it. Reads never copy: `v[i]` loads the slot,
+  `get` / `get_mut` lend its address (the fat pointer itself for a shared `&string`, via
+  `slot_borrow`), and `pop`, `remove`, `swap_remove` and a displacing `insert` hand the value over
+  with its ownership. `drop_slot_value` destroys a slot's value: `emit_value_destructor` for typed
+  owners plus a release of every `string` position (an enum payload's are not reached). The
+  per-instantiation `__neuro_<kind>_drop_elems_<args>` helper walks the live slots with it for
+  `emit_collection_free` and `clear()` (the `Vec` one from a start index); an overwrite, a map
+  `remove`'s key and a duplicate `insert`'s incoming key are dropped through it directly.
 
-  Reads then re-enter the machinery above: `produces_owned_string` answers `true` for a collection
-  index, so `val s = v[0]` is a `DropTarget::HeapString` binding and `println(v[0])` is released
-  at the consumer. A `for`-in binding is registered inside the loop body's own scope, so each
-  pass releases its copy. A payload the fallible readers hand out inside an `Option` is registered
-  by the `match` arm that binds it (`produces_owned_option_payload`), which is the only arm shape
-  where a `string` payload can be proven owned.
+  Ownership leaving a slot: `produces_owned_string` answers `true` for `Vec::remove` /
+  `swap_remove` on a `string` element; `produces_owned_option_payload` for `OPTION_TAKERS` (`pop`,
+  a map's `remove`, `insert`), so a `match` arm binding the payload registers it;
+  `collect_armed_positions` arms every `string` position of a struct bound straight from
+  `remove` / `swap_remove`; a consuming `for` registers each pass's binding through
+  `register_slot_owner`. A taker's result a statement discards is dropped by
+  `drop_discarded_slot_value`, which leaves typed owners to `drop_unbound_temporary` when that
+  path runs too (`temporary_drops_its_owners`).
 
 **Known limits**: among the covered positions, three shapes stay unproven
 and leak: a position a callee fills from a parameter or on only some paths, a function with one
-literal-returning path, and a parameter the callee may store. A collection read carried into a
-view-producing method (`v[0].slice(...)`, `.chars()`) leaks its copy, as any other anonymous
-string does there.
+literal-returning path, and a parameter the callee may store. An anonymous owned string carried
+into a view-producing method (`(a + b).slice(...)`, `.chars()`) leaks. A struct taken out of a
+slot through an `Option` payload or a function's return owns none of its `string` positions.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:
@@ -1425,10 +1430,10 @@ bounds-guarded GEP.
 
 What IS shared is resolving the HOLDER, and that is `held_place_ptr` (`codegen/structs.rs`): a
 binding, a struct field at any depth, an array element, a tuple element, a dereference, or an
-aggregate element of a `Vec` or a borrowed slice (`vec_element_place` / `slice_element_place`,
-bounds-checked like the element read), returning `None` for anything that is a temporary rather
-than storage. A `string` slot is never a holder: its read copies the bytes out, and handing its
-address on would let a consumer release the collection's own copy. It loads through a
+element of a `Vec` (any element type, since a slot is read in place) or an aggregate element of
+a borrowed slice (`vec_element_place` / `slice_element_place`, bounds-checked like the element
+read), returning `None` for anything that is a temporary rather than storage. `codegen_reference`
+uses it for a borrow of a sub-place (`&p.name`, `&v[i]`). It loads through a
 binding's slot when that slot holds an address, which covers a borrow of an aggregate and the
 `self` of a `&mut self` method; a borrowed slice is excluded because its slot holds the fat
 pointer by value, which is why the LLVM representation and not the semantic type alone decides.
@@ -1586,8 +1591,19 @@ struct deriving `Hashable`) is `codegen_supplied_hash`, the same `emit_key_hash`
 `T: Hashable` body agree on every hash.
 
 `v[i]` is bounds-checked in **every** build, unlike `[T; N]`: a `Vec`'s length is not a
-compile-time constant the optimizer can fold away. `pop` / `get` build their `Option<T>` with
-`codegen_enum_value`.
+compile-time constant the optimizer can fold away, and so are `remove(i)` (a `memmove` of the
+tail) and `swap_remove(i)` (the last element moved in). `pop`, `get`, `get_mut`, a map's `remove`
+and `insert` build their `Option` with `codegen_enum_value`; the insert helper returns whether it
+displaced and writes the displaced value through an out-pointer. `Vec::with_capacity(n)`
+(`CollectionNew { capacity }`) `realloc`s the buffer up front, so growth stays on libc.
+
+**A consuming `for` over a `Vec`** whose elements own something takes the header into a
+loop-owned copy (`take_vec_for_loop`), zeroes the owner's so its own drop frees nothing, and
+registers the copy as `DropTarget::VecRemainder` in a scope around the loop. The header's `used`
+field, otherwise idle for a `Vec`, counts the elements handed to bindings, so the release at the
+loop's exit, a `break` or a `return` drops exactly the untaken slots and then the buffer. A
+borrowed head binds each element's bits and registers nothing: the checker forbids moving out of
+that binding.
 
 A collection binding is registered in the drop scope with `DropTarget::Collection`, so scope exit
 `free`s field 0 under the same runtime drop flag that user `Drop` types use: a moved-out
@@ -1596,7 +1612,7 @@ registered the same way under a synthetic `__`-containing name that no source bi
 with; without that, the only route to map iteration would leak. A collection read out of a place
 another binding holds (`b.items.len()`) is not such a temporary: the copy aliases the holder's
 buffer, which the holder's own drop releases, so `reads_a_held_place` suppresses the registration. This is also what frees a `StringBuilder`'s
-buffer, since it is registered as an ordinary collection. A `string` slot is released by the
+buffer, since it is registered as an ordinary collection. A slot's value is released by the
 collection's per-instantiation drop helper (see the collection-slot bullet under Heap-string
 ownership).
 

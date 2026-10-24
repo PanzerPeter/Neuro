@@ -2620,51 +2620,49 @@ fn a_copy_element_collection_emits_no_element_release() {
     );
 }
 
-/// An element read hands back a copy, which makes the reader its owner: the binding is
-/// registered for release the same way a concatenation's result is, and the collection
-/// keeps the slot it still holds.
+/// An element read names the slot in place: a receiver reads the slot's own bytes, so
+/// nothing is copied out and the collection's release is the only one.
 #[test]
-fn an_element_read_is_owned_by_the_reader() {
+fn an_element_read_reads_the_slot_in_place() {
     let source = r#"
         func main() -> i32 {
             mut v: Vec<string> = Vec::new()
             v.push("one")
-            val s = v[0]
-            return s.len() as i32
+            return v[0].len() as i32
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
     let body = function_body(&ir, "main");
+    let after_push = body.split("vec.len1").nth(1).unwrap_or_default();
     assert!(
-        body.contains("str.dup"),
-        "the read copies the bytes out of the slot:\n{body}"
+        !after_push.contains("str.dup"),
+        "the read copies nothing out of the slot:\n{body}"
     );
     assert_eq!(
         body.matches("call void @__neuro_release(").count(),
-        2,
-        "the copy and the collection's buffer are each released once, and the element \
-         walk releases the slot through its own helper:\n{body}"
+        1,
+        "only the collection's buffer is released here; the element walk releases the \
+         slot through its own helper:\n{body}"
     );
 }
 
-/// An insertion of a binding copies rather than taking the binding's buffer, which is
-/// what leaves the source usable afterwards and keeps a `.rodata` literal out of the
-/// release path.
+/// An insertion moves its operand in, and a `.rodata` literal is not a buffer the slot
+/// can own, so the slot takes a copy of a binding holding one.
 #[test]
-fn an_insertion_copies_instead_of_taking_the_operand() {
+fn an_insertion_copies_a_literal_operand() {
     let source = r#"
         func main() -> i32 {
             val a = "one"
             mut v: Vec<string> = Vec::new()
             v.push(a)
-            return a.len() as i32
+            return v.len() as i32
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
     let body = function_body(&ir, "main");
     assert!(
         body.contains("str.dup"),
-        "the slot takes a copy of the operand's bytes:\n{body}"
+        "the slot takes a copy of the literal's bytes:\n{body}"
     );
 }
 
@@ -2741,36 +2739,34 @@ fn test_bug_063_forwarding_a_producer_called_with_arguments_hands_the_buffer_on(
 }
 
 /// A map lookup compares its key and keeps none of it, so a key built for the call has no
-/// reader left once the lookup returns. `insert` released such a key; `get`,
-/// `contains_key` and `remove` did not, so each lookup leaked one buffer. All three share
-/// one lookup path; `get` is left out only because its `Option` needs the prelude.
+/// reader left once the lookup returns. `get`, `contains_key` and `remove` share one
+/// lookup path; `contains_key` stands for all three because the other two return an
+/// `Option`, which needs the prelude.
 #[test]
 fn test_bug_064_a_map_lookup_releases_a_key_built_for_it() {
-    for method in ["contains_key", "remove"] {
-        let lookup = |key: &str| {
-            format!(
-                r#"
-                func main() -> i32 {{
-                    mut m: HashMap<string, i32> = HashMap::new()
-                    val k = "a"
-                    val hit = m.{method}({key})
-                    return 0
-                }}
-                "#
-            )
-        };
-        let bound = free_calls(
-            &module_ir(&lookup("k"), OptimizationLevelSetting::O0),
-            "main",
-        );
-        let built_ir = module_ir(&lookup(r#"k + "b""#), OptimizationLevelSetting::O0);
-        assert_eq!(
-            free_calls(&built_ir, "main"),
-            bound + 1,
-            "`m.{method}(k + \"b\")` releases the key it built:\n{}",
-            function_body(&built_ir, "main")
-        );
-    }
+    let lookup = |key: &str| {
+        format!(
+            r#"
+            func main() -> i32 {{
+                mut m: HashMap<string, i32> = HashMap::new()
+                val k = "a"
+                val hit = m.contains_key({key})
+                return 0
+            }}
+            "#
+        )
+    };
+    let bound = free_calls(
+        &module_ir(&lookup("k"), OptimizationLevelSetting::O0),
+        "main",
+    );
+    let built_ir = module_ir(&lookup(r#"k + "b""#), OptimizationLevelSetting::O0);
+    assert_eq!(
+        free_calls(&built_ir, "main"),
+        bound + 1,
+        "`m.contains_key(k + \"b\")` releases the key it built:\n{}",
+        function_body(&built_ir, "main")
+    );
 }
 
 /// A slice copies its receiver's elements into a buffer of its own, and a shape cast or

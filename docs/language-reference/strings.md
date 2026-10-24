@@ -37,9 +37,9 @@ operand, a `.len()` receiver, a `push_str` argument, a `println` argument, an in
 or a statement whose value nothing reads. One STORED into a position that outlives the
 expression is released by the holder instead: a struct field, an array or tuple element, a
 function's return value, and an argument to a parameter the callee only reads. A collection slot
-is different again: it owns a copy of the bytes rather than the operand's buffer, an element read
-copies back out, and the collection releases its slots when it is destroyed; see the
-[memory model](memory-model.md). A
+is different again: an insertion moves the `string` in (a literal is copied, so the slot always
+owns its bytes), a read names the slot without copying, and the collection releases its slots
+when it is destroyed; see the [memory model](memory-model.md). A
 [`StringBuilder`](#growable-strings-stringbuilder) is different: it *is* a tracked binding, so its
 buffer is freed at scope exit.
 

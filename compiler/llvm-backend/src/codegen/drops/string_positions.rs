@@ -187,6 +187,18 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The address of every `string` position of a `ty` value at `base_ptr`, the value
+    /// itself included when it is one.
+    pub(crate) fn string_positions_of(
+        &mut self,
+        base_ptr: PointerValue<'ctx>,
+        ty: &Type,
+    ) -> CodegenResult<Vec<PointerValue<'ctx>>> {
+        let mut positions = Vec::new();
+        self.string_position_ptrs(base_ptr, ty, &mut Vec::new(), &mut positions)?;
+        Ok(positions.into_iter().map(|(_, ptr)| ptr).collect())
+    }
+
+    /// The address of every `string` position of a `ty` value at `base_ptr`, the value
     /// itself included when it is one, keyed by the paths [`plan_held_drops`] uses.
     fn string_position_ptrs(
         &mut self,
@@ -444,6 +456,13 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::NewtypeConstruct { value: inner, .. } => {
                 self.collect_armed_positions(inner, path, out)
             }
+            // A value taken out of a collection slot owns every `string` position, as
+            // the slot did.
+            HirExprKind::Call { callee, .. } if takes_vec_element(callee) => {
+                for position in self.string_position_paths(&Type::from_hir(&value.ty)) {
+                    out.push(path.iter().chain(&position).cloned().collect());
+                }
+            }
             // A call hands over the positions its callee stored an allocation into on
             // every return path, which the ownership summary read off its body.
             HirExprKind::Call { callee, .. } => {
@@ -464,7 +483,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `build_struct_gep` refuses an array pointee, so an array indexes through a
     /// two-step GEP instead. Every index reaching here is a constant read off the
     /// holder's own layout.
-    pub(super) fn aggregate_position_ptr(
+    pub(crate) fn aggregate_position_ptr(
         &self,
         holder_llvm: BasicTypeEnum<'ctx>,
         base_ptr: PointerValue<'ctx>,
@@ -491,4 +510,20 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map_err(CodegenError::from)
         }
     }
+}
+
+/// Whether `callee` is `v.remove` / `v.swap_remove` on a `Vec`, which hand an element out
+/// of its slot.
+fn takes_vec_element(callee: &HirExpr) -> bool {
+    let HirExprKind::FieldAccess { object, field } = &callee.kind else {
+        return false;
+    };
+    super::owned_strings::VEC_TAKERS.contains(&field.as_str())
+        && matches!(
+            Type::from_hir(&object.ty).referent(),
+            Type::Collection {
+                kind: crate::types::CollectionKind::Vec,
+                ..
+            }
+        )
 }

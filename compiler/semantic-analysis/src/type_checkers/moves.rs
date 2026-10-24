@@ -103,10 +103,39 @@ impl TypeChecker {
         if Self::place_root_name(place).is_some_and(|root| local.contains(&root)) {
             return;
         }
+        if let Some((slot_ty, behind_borrow)) = self.slot_place_type(place)
+            && self.is_type_move_tracked(&slot_ty)
+        {
+            let name = Self::place_root_name(place).unwrap_or_else(|| "value".to_string());
+            self.record_error(match behind_borrow {
+                true => TypeError::CannotMoveOutOfBorrow {
+                    name,
+                    span: place.span(),
+                },
+                false => TypeError::CannotMoveOutOfCollection {
+                    ty: slot_ty,
+                    span: place.span(),
+                },
+            });
+            return;
+        }
 
         // A constant is a value, not an owner, so it cannot be moved from.
         if let Expr::Identifier(ident) = place {
-            let binding_ty = self.symbols.lookup(&ident.name).map(|info| info.ty.clone());
+            let binding = self
+                .symbols
+                .lookup(&ident.name)
+                .map(|info| (info.ty.clone(), info.lent));
+            if let Some((ty, true)) = &binding
+                && self.is_type_move_tracked(ty)
+            {
+                self.record_error(TypeError::CannotMoveOutOfBorrow {
+                    name: ident.name.clone(),
+                    span: ident.span,
+                });
+                return;
+            }
+            let binding_ty = binding.map(|(ty, _)| ty);
 
             if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
                 self.reject_move_of_borrowee(&ident.name, ident.span);
@@ -205,6 +234,48 @@ impl TypeChecker {
         }
     }
 
+    /// The type of `place` when it is a `Vec` or slice element, or a field or tuple
+    /// element of one, with whether the element sits behind a borrow (a slice). `None`
+    /// for every other place, a temporary collection's element included only when its
+    /// index was checked, which every index expression is before it is moved.
+    fn slot_place_type(&self, place: &Expr) -> Option<(Type, bool)> {
+        match place {
+            Expr::Paren(inner, _) => self.slot_place_type(inner),
+            Expr::Index { object, span, .. } => match self.slot_reads.get(span) {
+                Some(slot) => Some(slot.clone()),
+                // An array inside a slot is part of the slot.
+                None => {
+                    let (object_ty, behind_borrow) = self.slot_place_type(object)?;
+                    match object_ty.referent() {
+                        Type::Array { element, .. } => Some(((**element).clone(), behind_borrow)),
+                        _ => None,
+                    }
+                }
+            },
+            Expr::FieldAccess { object, field, .. } => {
+                let (object_ty, behind_borrow) = self.slot_place_type(object)?;
+                let Type::Struct(name) = object_ty.referent() else {
+                    return None;
+                };
+                self.struct_defs
+                    .get(name)?
+                    .iter()
+                    .find(|(n, _)| n == &field.name)
+                    .map(|(_, ty)| (ty.clone(), behind_borrow))
+            }
+            Expr::TupleIndex { object, index, .. } => {
+                let (object_ty, behind_borrow) = self.slot_place_type(object)?;
+                match object_ty.referent() {
+                    Type::Tuple(elements) => {
+                        elements.get(*index).map(|ty| (ty.clone(), behind_borrow))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Record the move of the receiver of a consuming (`self`) method call, or reject
     /// the call when the receiver is not the caller's to give away.
     ///
@@ -215,8 +286,13 @@ impl TypeChecker {
     /// simply consumed, which is why no place root is required here.
     pub(crate) fn record_consumed_receiver(&mut self, object: &Expr, obj_ty: &Type, span: Span) {
         let root = Self::place_root_name(object);
+        let lent_root = root
+            .as_deref()
+            .and_then(|name| self.symbols.lookup(name))
+            .is_some_and(|info| info.lent);
         if matches!(obj_ty, Type::Reference { .. })
             || (root.as_deref() == Some(SELF_RECEIVER) && !self.self_is_owned)
+            || lent_root
         {
             self.record_error(TypeError::CannotMoveOutOfBorrow {
                 name: root.unwrap_or_else(|| "value".to_string()),
@@ -282,7 +358,7 @@ impl TypeChecker {
             Expr::Paren(inner, _) => self.place_origin(inner),
             Expr::Identifier(ident) => self.symbols.lookup(&ident.name).map(|info| {
                 let borrowed_receiver = ident.name == SELF_RECEIVER && !self.self_is_owned;
-                (info.ty.clone(), borrowed_receiver)
+                (info.ty.clone(), borrowed_receiver || info.lent)
             }),
             Expr::Deref { operand, .. } => match self.place_origin(operand)?.0 {
                 Type::Reference { inner, .. } => Some((*inner, true)),

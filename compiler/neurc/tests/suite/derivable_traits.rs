@@ -434,7 +434,7 @@ func main() -> i32 { 0 }
 }
 
 #[test]
-fn an_unbounded_parameter_neither_renders_nor_fills_a_vec() {
+fn an_unbounded_parameter_does_not_render_but_fills_a_vec() {
     let err = rejected(
         "unbounded.nr",
         r#"
@@ -454,7 +454,7 @@ func main() -> i32 { 0 }
         err.contains("a value of type T cannot be interpolated"),
         "got: {err}"
     );
-    assert!(err.contains("T cannot be stored in a `Vec`"), "got: {err}");
+    assert!(!err.contains("cannot be stored"), "got: {err}");
 }
 
 #[test]
@@ -1466,11 +1466,12 @@ func main() -> i32 {
     val b = Reading { t: Celsius(25), p: Plain(1), k: 3 }
     val c = Reading { t: Celsius(31), p: Plain(1), k: 3 }
     println("{a:?}")
+    val score = (a == b) as i32 + (a == c) as i32 * 2 + (a.hash() == b.hash()) as i32 * 4
     mut m: HashMap<Reading, i32> = HashMap::new()
     m.insert(a, 7)
     val hit = m.get(b) ?? 0
     val miss = m.get(c) ?? 0
-    (a == b) as i32 + (a == c) as i32 * 2 + (a.hash() == b.hash()) as i32 * 4 + hit * 8 + miss
+    score + hit * 8 + miss
 }
 "#;
     assert_eq!(

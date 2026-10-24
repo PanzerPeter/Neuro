@@ -7,17 +7,15 @@
 //   string · place expressions (`self.bytes += n`, `names[i] = ...`) ·
 //   the owned string a holder stores · and the collection slots below.
 //
-// The rule this program leans on: a collection never shares a buffer across its
-// own boundary. `push` and `insert` copy the bytes INTO a slot the collection
-// owns, so the argument is read rather than taken and the binding it came from
-// is still usable; `v[i]`, `for x in v`, `m.get(k)` and `m.keys()` copy back
-// OUT, so what a read hands over stays valid after the collection is gone. Only
-// `pop` transfers, because the slot goes with it.
+// The rule this program leans on: a collection owns what its slots hold. `push`
+// and `insert` move their argument into a slot, so the binding it came from is
+// gone afterwards; `v[i]` and `m.get(k)` read the slot in place, as a borrow;
+// `pop` hands the slot's own value over, because the slot goes with it. To keep
+// a value and also store it, `.clone()` it first.
 //
-// That is what makes `first_name` below sound. It returns a read of a `Vec` its
-// own caller destroys on the next line; under an aliasing read the returned
-// value would point into a freed buffer, and the comparison after it would be
-// reading someone else's memory.
+// That is what makes `first_name` below sound. It returns a copy of an element
+// of a `Vec` its own caller still owns, so the returned value is independent of
+// the collection and stays valid whatever happens to it.
 //
 // The counts are what the program asserts, and they only come out right if each
 // buffer was intact when it was read. The loop keeps the heap flat only if each
@@ -51,10 +49,9 @@ func tagged(kind: &string, id: i32) -> string {
     return kind + "-" + "{id}"
 }
 
-// The read outlives the collection: the `Vec` this borrows from is destroyed by
-// the caller straight after, and the returned buffer is the reader's own.
+// A slot is read in place, so a value that must outlive the read is a copy of it.
 func first_name(names: &Vec<string>) -> string {
-    return names[0]
+    return names[0].clone()
 }
 
 func main() -> i32 {
@@ -67,12 +64,12 @@ func main() -> i32 {
     mut notes: BTreeMap<string, string> = BTreeMap::new()
 
     val bolt: string = kind + "-bolt"
-    names.push(bolt)
+    names.push(bolt.clone())
     names.push(tagged(&kind, 2))
     names.push("plain")
 
-    // `push` read `bolt` instead of taking it, so the binding is still live and
-    // still released by its own scope.
+    // `push` took a copy of `bolt`, so the binding is still live and still
+    // released by its own scope, and the slot reads back the same text in place.
     if bolt != "sku-bolt" {
         return 91
     }
@@ -80,6 +77,7 @@ func main() -> i32 {
         return 92
     }
 
+    // This insertion moves `bolt` itself into the map: nothing reads it after.
     index.insert(bolt, 0)
     index.insert(tagged(&kind, 2), 1)
     notes.insert("first", kind + "-note")
@@ -87,7 +85,8 @@ func main() -> i32 {
     // the one it displaced.
     notes.insert("first", kind + "-revised")
 
-    for name in names {
+    // A borrowed head reads each element where it lies.
+    for name in &names {
         catalog.record(name.len())
     }
 
@@ -96,10 +95,9 @@ func main() -> i32 {
     names[2] = tagged(&kind, 3)
     catalog.record(names[2].len())
 
-    // The fallible readers hand their payload out inside an `Option`; the arm
-    // that binds it owns what it took.
-    match index.get(bolt) {
-        Option::Some(at) => { catalog.record(at as u64) }
+    // `get` lends the slot inside an `Option`: the arm reads through the borrow.
+    match index.get("sku-bolt") {
+        Option::Some(at) => { catalog.record(*at as u64) }
         Option::None => { return 93 }
     }
     match notes.get("first") {
@@ -122,7 +120,7 @@ func main() -> i32 {
     while i < ROUNDS {
         mut round: Vec<string> = Vec::new()
         round.push(tagged(&kind, i))
-        round.push(bolt)
+        round.push(names[0].clone())
         catalog.record(round[0].len())
 
         mut seen: HashMap<string, string> = HashMap::new()
@@ -132,6 +130,7 @@ func main() -> i32 {
             Option::None => { return 96 }
         }
 
+        // `pop` hands the slot's own buffer to the arm, which releases it.
         match round.pop() {
             Option::Some(last) => { catalog.record(last.len()) }
             Option::None => { return 97 }
@@ -140,8 +139,7 @@ func main() -> i32 {
         i = i + 1
     }
 
-    // A builder fed from collection reads, to show the copies are ordinary
-    // owned strings once they leave the slot.
+    // A builder fed from a copy and from a slot read in place.
     mut report = StringBuilder::new()
     report.push_str(first_name(&names))
     report.push_str(";")

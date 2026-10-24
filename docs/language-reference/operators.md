@@ -475,6 +475,8 @@ For a `Result`, the error payload is **discarded**: `??` states "I do not care w
 
 **Fallback type**: the right-hand side must produce the payload type `T`, not another `Option`/`Result`. A mismatch is an ordinary type error.
 
+**Borrowed payload**: when the payload is a borrow of a `Copy` type, as a collection's `get` lends, and the fallback is a value rather than a borrow, `??` reads the payload through and the expression is the value: `counts.get(k) ?? 0` is an `i32`. A fallback that is itself a borrow keeps the expression a borrow.
+
 **Diverging fallback**: the right-hand side may leave instead of producing a value. `?? panic("...")` is how a value is unwrapped, and `return`, `break` and `continue` work unbraced:
 
 ```neuro

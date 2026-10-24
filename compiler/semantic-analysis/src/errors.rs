@@ -1042,7 +1042,12 @@ pub enum TypeError {
     CannotMoveOutOfBorrow { name: String, span: Span },
 
     #[error(
-        "cannot borrow this expression: `&` requires a place (a variable); bind it to a `val` first"
+        "cannot move a `{ty}` out of a `Vec` slot: the slot cannot be left empty. Borrow it with `&v[i]`, copy it with `v[i].clone()`, or take it out with `v.remove(i)` / `v.swap_remove(i)`"
+    )]
+    CannotMoveOutOfCollection { ty: Type, span: Span },
+
+    #[error(
+        "cannot borrow this expression: `&` requires a place (a variable, a field or an element of one); bind it to a `val` first"
     )]
     CannotBorrowValue { span: Span },
 
@@ -1170,7 +1175,9 @@ pub enum TypeError {
     )]
     CollectionTypeNotInferable { name: String, span: Span },
 
-    #[error("{ty} cannot be stored in a `{collection}`: elements must be `Copy` or `string`")]
+    #[error(
+        "{ty} cannot be stored in a `{collection}`: an element must be a sized value that holds no reference or function"
+    )]
     InvalidCollectionElement {
         collection: String,
         ty: Type,
@@ -1678,6 +1685,7 @@ impl TypeError {
             | Self::UseOfMovedValue { span, .. }
             | Self::MovedInLoopBody { span, .. }
             | Self::CannotMoveOutOfBorrow { span, .. }
+            | Self::CannotMoveOutOfCollection { span, .. }
             | Self::CannotBorrowValue { span, .. }
             | Self::CannotBorrowMutably { span, .. }
             | Self::CannotDereference { span, .. }

@@ -46,12 +46,13 @@ pub(crate) fn block_tail_closure(value: &Expr) -> Option<shared_types::Span> {
     }
 }
 
-/// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, or a
-/// `x.slice(range)` view into `x`), return that place's name and whether the borrow is
-/// exclusive. A borrow wrapped in any other expression (a block, an `if`, a call result)
-/// is not tracked as persistent: only a direct initializer creates a held borrow,
-/// which keeps the analysis free of false positives at the cost of missing some
-/// borrows that escape through compound expressions.
+/// If `expr` is a direct borrow of a named place (`&x` / `&mut x`, a borrow of a field or
+/// an element rooted in `x`, or a `x.slice(range)` view into `x`), return the root
+/// binding's name and whether the borrow is exclusive. A borrow of a part of `x` borrows
+/// `x`, as moving out of a part of it moves it. A borrow wrapped in any other expression
+/// (a block, an `if`, a call result) is not tracked as persistent: only a direct
+/// initializer creates a held borrow, which keeps the analysis free of false positives
+/// at the cost of missing some borrows that escape through compound expressions.
 pub(crate) fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
     let mut outer = expr;
     while let Expr::Paren(inner, _) = outer {
@@ -73,6 +74,9 @@ pub(crate) fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
     }
     match place {
         Expr::Identifier(ident) => Some((ident.name.clone(), *mutable)),
+        Expr::FieldAccess { .. } | Expr::Index { .. } | Expr::TupleIndex { .. } => {
+            TypeChecker::place_root_name(place).map(|root| (root, *mutable))
+        }
         _ => None,
     }
 }
@@ -317,15 +321,23 @@ impl TypeChecker {
     /// binding attached to nothing, and the borrowee rules let the source be moved or
     /// freed while the reference still read it.
     pub(crate) fn hold_returned_borrows(&mut self, holder: &str, init: &Expr, ty: &Type) {
-        if !matches!(ty, Type::Reference { .. }) {
-            return;
-        }
         let Expr::Call { func, .. } = peel_parens(init) else {
             return;
         };
-        let Expr::FieldAccess { object, .. } = func.as_ref() else {
+        let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
             return;
         };
+        // `m.get_mut(k)` hands out a `&mut` inside its `Option`, so the receiver is held
+        // exclusively, not by the shared borrow every method result carries.
+        if self.collection_lends_mutably(object, &field.name)
+            && let Some(root) = Self::place_root_name(object)
+        {
+            self.symbols.attach_borrow(holder, &root, true);
+            return;
+        }
+        if !matches!(ty, Type::Reference { .. }) {
+            return;
+        }
         // A consuming receiver is gone once the call returns, so nothing borrows it.
         let (Some(key), Some(root)) = (self.callee_key(func), Self::place_root_name(object)) else {
             return;
@@ -344,6 +356,20 @@ impl TypeChecker {
             // A shared borrow of a reference binding borrows nothing the frame owns.
             (false, true) => {}
         }
+    }
+
+    /// The binding type of a counted loop over an array, slice or `Vec` of `element`.
+    ///
+    /// A by-value head hands the loop the elements: each iteration's binding owns the
+    /// one it holds and destroys it, which is what codegen disowns the source for. The
+    /// head is therefore a consuming position and owns nothing after the loop. A
+    /// borrowed head moves nothing; its binding holds a non-`Copy` element without
+    /// owning it, which the caller records by marking the binding lent.
+    fn counted_loop_item(&mut self, iterable: &Expr, iterable_ty: &Type, element: Type) -> Type {
+        if self.is_type_move_tracked(&element) && !matches!(iterable_ty, Type::Reference { .. }) {
+            self.record_move(iterable);
+        }
+        element
     }
 
     /// Check a statement, then drop any transient borrows it took.
@@ -789,22 +815,11 @@ impl TypeChecker {
                     None => self.check_expr(iterable, None).unwrap_or(Type::Unknown),
                 };
                 let element_ty = match self.collection_element(&iterable_ty) {
-                    Some(element) => Some(element),
+                    Some(element) => Some(self.counted_loop_item(iterable, &iterable_ty, element)),
                     None => match iterable_ty.referent() {
-                        Type::Array { element, .. } | Type::Slice(element) => {
-                            // A by-value head hands the loop the array's elements: each
-                            // iteration's binding owns the one it holds and destroys it,
-                            // which is what codegen already disowns the source for. The
-                            // head is therefore a consuming position and the binding
-                            // owns nothing after the loop. `for x in &arr` borrows and
-                            // moves nothing.
-                            if !matches!(iterable_ty, Type::Reference { .. })
-                                && self.is_type_move_tracked(element)
-                            {
-                                self.record_move(iterable);
-                            }
-                            Some((**element).clone())
-                        }
+                        Type::Array { element, .. } | Type::Slice(element) => Some(
+                            self.counted_loop_item(iterable, &iterable_ty, (**element).clone()),
+                        ),
                         Type::Unknown => None,
                         other => match self.iteration_item(other) {
                             // A nominal head is iterable exactly when the protocol says
@@ -862,7 +877,16 @@ impl TypeChecker {
                     {
                         // Each element is a part of the iterable, so it holds what the
                         // iterable borrows: `&v` itself, or what a `[&T; N]` was built from.
-                        Ok(()) => self.hold_carried_borrows(&iterator.name, iterable, &element_ty),
+                        Ok(()) => {
+                            self.hold_carried_borrows(&iterator.name, iterable, &element_ty);
+                            // A borrowed head's binding is the element's bits, still owned
+                            // in place: moving them out would leave two owners.
+                            if matches!(iterable_ty, Type::Reference { .. })
+                                && self.is_type_move_tracked(&element_ty)
+                            {
+                                self.symbols.mark_lent(&iterator.name);
+                            }
+                        }
                         Err(duplicate_name) => {
                             self.record_error(TypeError::VariableAlreadyDefined {
                                 name: duplicate_name,

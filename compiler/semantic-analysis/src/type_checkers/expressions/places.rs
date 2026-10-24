@@ -29,7 +29,7 @@ impl TypeChecker {
     /// Whether `expr` is exactly a binding (an identifier, possibly parenthesised),
     /// as opposed to a sub-place like a field access. Borrow tracking is keyed by
     /// binding, so only a bare binding registers a tracked borrow.
-    pub(super) fn is_bare_binding(expr: &Expr) -> bool {
+    pub(crate) fn is_bare_binding(expr: &Expr) -> bool {
         match expr {
             Expr::Identifier(_) => true,
             Expr::Paren(inner, _) => Self::is_bare_binding(inner),
@@ -76,9 +76,9 @@ impl TypeChecker {
         mutable: bool,
         span: &Span,
     ) -> Option<Type> {
-        // Only a live binding (`val`/`mut`/parameter) is a borrowable place. A
-        // `const` is an inlined value with no address, and temporaries
-        // (literals, calls, operator results) are not places.
+        // A live binding (`val`/`mut`/parameter) is a borrowable place, and so is a
+        // field or an element of one. A `const` is an inlined value with no address, and
+        // temporaries (literals, calls, operator results) are not places.
         let mut place = operand;
         while let Expr::Paren(inner, _) = place {
             place = inner;
@@ -88,6 +88,8 @@ impl TypeChecker {
                 .symbols
                 .lookup(&ident.name)
                 .map(|info| (ident.name.clone(), info.mutable)),
+            _ if self.is_borrowable_sub_place(place) => Self::place_root_name(place)
+                .and_then(|root| self.symbols.lookup(&root).map(|info| (root, info.mutable))),
             _ => None,
         };
         let Some((name, is_mut_binding)) = binding else {
@@ -95,15 +97,23 @@ impl TypeChecker {
             let _ = self.check_borrow_operand(operand);
             return Some(Type::Unknown);
         };
-        // `&mut` demands a `mut` binding: you cannot acquire write access
-        // through a reference to a value you may not write directly.
-        if mutable && !is_mut_binding {
-            self.record_error(TypeError::CannotBorrowMutably { name, span: *span });
-            let _ = self.check_borrow_operand(operand);
-            return Some(Type::Unknown);
-        }
         let inner = self.check_borrow_operand(operand)?;
         if matches!(inner, Type::Unknown) {
+            return Some(Type::Unknown);
+        }
+        // `&mut` demands a writable place: a `mut` binding, or a sub-place reached
+        // through a `&mut`, which is as writable as that reference whatever its root
+        // was declared. You cannot acquire write access through a reference to a value
+        // you may not write directly.
+        let writable = match place {
+            Expr::Identifier(_) => is_mut_binding,
+            _ => self
+                .nearest_reference(place, &inner)
+                .filter(|_| !matches!(inner, Type::Reference { .. }))
+                .unwrap_or(is_mut_binding),
+        };
+        if mutable && !writable {
+            self.record_error(TypeError::CannotBorrowMutably { name, span: *span });
             return Some(Type::Unknown);
         }
 
@@ -136,6 +146,40 @@ impl TypeChecker {
             inner: Box::new(inner),
             mutable,
         })
+    }
+
+    /// Whether `place` is a field or an element reached from a binding through fields,
+    /// array, slice or `Vec` elements, tuple elements and dereferences: storage with an
+    /// address of its own, which a borrow can point at. A tensor coordinate is not one,
+    /// since a tensor element is read out of its buffer rather than named in place, and a
+    /// bare `*r` is `r` itself.
+    fn is_borrowable_sub_place(&self, place: &Expr) -> bool {
+        match place {
+            Expr::Paren(inner, _) => self.is_borrowable_sub_place(inner),
+            Expr::FieldAccess { object, .. } | Expr::TupleIndex { object, .. } => {
+                self.is_place_chain(object)
+            }
+            Expr::Index { object, .. } => {
+                self.is_place_chain(object)
+                    && self.projection_type(object).is_some_and(|ty| {
+                        self.collection_element(&ty).is_some()
+                            || matches!(ty.referent(), Type::Array { .. } | Type::Slice(_))
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    /// The object chain below a borrowed sub-place: a binding, or another link of the
+    /// chain [`Self::is_borrowable_sub_place`] accepts, possibly dereferenced.
+    fn is_place_chain(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier(_) => true,
+            Expr::Paren(inner, _) | Expr::Deref { operand: inner, .. } => {
+                self.is_place_chain(inner)
+            }
+            other => self.is_borrowable_sub_place(other),
+        }
     }
 
     /// Type the operand of a borrow without treating it as an access to the borrowee.
@@ -217,12 +261,17 @@ impl TypeChecker {
         }
 
         if let Some(element) = self.collection_element(&obj_ty) {
+            self.slot_reads.insert(*span, (element.clone(), false));
             return Some(element);
         }
         match obj_ty.referent() {
             // A slice indexes exactly like the array or `Vec` it borrows; the only
             // difference is that its bound is a runtime length, not a constant.
-            Type::Array { element, .. } | Type::Slice(element) => Some((**element).clone()),
+            Type::Slice(element) => {
+                self.slot_reads.insert(*span, ((**element).clone(), true));
+                Some((**element).clone())
+            }
+            Type::Array { element, .. } => Some((**element).clone()),
             other => {
                 self.record_error(TypeError::NotIndexable {
                     found: other.clone(),

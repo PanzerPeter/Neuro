@@ -49,9 +49,13 @@ pub(super) const TO_OWNED_METHOD: &str = "to_string";
 /// `string.clone()`, which copies the bytes into a buffer of their own.
 pub(super) const STRING_CLONE_METHOD: &str = "clone";
 
-/// The collection readers that hand their result out inside an `Option`. Matched by
-/// name against a collection receiver, the way the builder's `to_string` is.
-pub(super) const FALLIBLE_READERS: [&str; 2] = ["get", "pop"];
+/// The collection methods that move a slot's value out inside an `Option`: `pop`, a map's
+/// `remove`, and the value `insert` displaced. Matched by name against a collection
+/// receiver, the way the builder's `to_string` is.
+pub(super) const OPTION_TAKERS: [&str; 3] = ["pop", "remove", "insert"];
+
+/// The `Vec` methods that move one element out and return it bare.
+pub(super) const VEC_TAKERS: [&str; 2] = ["remove", "swap_remove"];
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Whether evaluating `expr` always yields a freshly `malloc`'d string buffer
@@ -68,18 +72,6 @@ impl<'ctx> CodegenContext<'ctx> {
     /// body in the program to say which functions allocate on every return path.
     pub(crate) fn produces_owned_string(&self, expr: &HirExpr) -> bool {
         match &expr.kind {
-            // A `string` read out of a collection slot is copied out of it
-            // ([`value_from_collection_slot`](CodegenContext::value_from_collection_slot)),
-            // so the reader owns the copy and the collection keeps its own. An ARRAY index
-            // is deliberately not this shape: an array's `string` position is owned by the
-            // holder's own drop entry and a read of it aliases that buffer.
-            HirExprKind::Index { object, .. } => {
-                matches!(Type::from_hir(&expr.ty), Type::String)
-                    && matches!(
-                        Type::from_hir(&object.ty).referent(),
-                        Type::Collection { .. }
-                    )
-            }
             // `codegen_interp_string` concatenates every piece into one fresh buffer,
             // and does so unconditionally: even a hole-free interpolation allocates.
             HirExprKind::InterpString { .. } => true,
@@ -132,7 +124,18 @@ impl<'ctx> CodegenContext<'ctx> {
                     // `string.clone()` copies the bytes into a buffer of their own.
                     let string_clone =
                         field == STRING_CLONE_METHOD && matches!(receiver.referent(), Type::String);
-                    args.is_empty() && (builder_copy || string_clone)
+                    // `v.remove(i)` / `v.swap_remove(i)` hand the slot's own buffer out with
+                    // it, and a slot always owns its bytes.
+                    let taken = VEC_TAKERS.contains(&field.as_str())
+                        && matches!(Type::from_hir(&expr.ty), Type::String)
+                        && matches!(
+                            receiver.referent(),
+                            Type::Collection {
+                                kind: CollectionKind::Vec,
+                                ..
+                            }
+                        );
+                    taken || (args.is_empty() && (builder_copy || string_clone))
                 }
                 // A function whose every return path allocates hands the buffer to its
                 // caller, which is the one storing position that no expression shape
@@ -157,10 +160,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Whether `expr` yields an `Option` whose `string` payload the binding that takes it
     /// out owns.
     ///
-    /// A collection's fallible readers are the shapes that qualify, and for the two
-    /// reasons the boundary rule gives: `get` copies the slot's bytes into a buffer of
-    /// their own, and `pop` takes the slot's buffer with it by shrinking past the slot.
-    /// Either way the collection no longer reaches what the payload holds.
+    /// The collection methods that move a slot's value out are the shapes that qualify: a
+    /// slot owns its bytes, and the value leaves the collection with them, so nothing
+    /// else reaches what the payload holds. `get` lends a borrow instead and is not one.
     pub(crate) fn produces_owned_option_payload(&self, expr: &HirExpr) -> bool {
         let HirExprKind::Call { callee, .. } = &expr.kind else {
             return false;
@@ -168,7 +170,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let HirExprKind::FieldAccess { object, field } = &callee.kind else {
             return false;
         };
-        if !FALLIBLE_READERS.contains(&field.as_str()) {
+        if !OPTION_TAKERS.contains(&field.as_str()) {
             return false;
         }
         matches!(

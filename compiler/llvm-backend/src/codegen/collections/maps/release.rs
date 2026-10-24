@@ -1,5 +1,5 @@
-// Generated `drop_elems(header)` helper for both map shapes: release the `string`
-// buffers the live slots own.
+// Generated `drop_elems(header)` helper for both map shapes: release what the live slots
+// own.
 //
 // One of the map-codegen modules under `maps`; each adds methods to the same
 // `impl CodegenContext` block.
@@ -16,7 +16,7 @@ use crate::types::{CollectionKind, Type};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Call the instantiation's slot-release helper, building it on first use.
-    pub(in crate::codegen::collections) fn emit_map_string_release(
+    pub(in crate::codegen::collections) fn emit_map_slot_release(
         &mut self,
         kind: CollectionKind,
         header: PointerValue<'ctx>,
@@ -36,7 +36,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Body of the slot-release helper: walk the slots this shape can hold live entries
-    /// in and release each one's `string` fields.
+    /// in and release what each one's key and value own.
     fn emit_map_release_body(
         &mut self,
         func: inkwell::values::FunctionValue<'ctx>,
@@ -96,7 +96,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_conditional_branch(live, take_bb, step_bb)?;
 
         self.builder.position_at_end(take_bb);
-        self.release_slot_strings(kind, header, key_ty, value_ty, slot)?;
+        self.release_slot_entry(kind, header, key_ty, value_ty, slot, true)?;
         self.builder.build_unconditional_branch(step_bb)?;
 
         self.builder.position_at_end(step_bb);
@@ -111,22 +111,27 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Release whichever of a live slot's key and value is a `string`. Shared with
-    /// `remove`, which gives up one slot rather than all of them.
-    pub(super) fn release_slot_strings(
+    /// Release what a live slot's key owns, and its value too when `with_value`. Shared
+    /// with `remove`, which gives up one slot's key while moving its value out.
+    pub(super) fn release_slot_entry(
         &mut self,
         kind: CollectionKind,
         header: PointerValue<'ctx>,
         key_ty: &Type,
         value_ty: &Type,
         slot: inkwell::values::IntValue<'ctx>,
+        with_value: bool,
     ) -> CodegenResult<()> {
-        for (field_ty, field) in [(key_ty, SlotField::Key), (value_ty, SlotField::Value)] {
-            if !matches!(field_ty, Type::String) {
+        let mut fields = vec![(key_ty, SlotField::Key)];
+        if with_value {
+            fields.push((value_ty, SlotField::Value));
+        }
+        for (field_ty, field) in fields {
+            if !self.slot_needs_release(field_ty) {
                 continue;
             }
             let field_ptr = self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, field)?;
-            self.release_slot_string(field_ptr)?;
+            self.drop_slot_value(field_ptr, field_ty)?;
         }
         Ok(())
     }

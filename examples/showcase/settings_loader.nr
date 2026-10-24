@@ -27,7 +27,7 @@ struct Setting {
 func lookup(settings: &[Setting; 4], key: &string) -> Option<string> {
     for setting in settings {
         if setting.key == key {
-            return Some(setting.value)
+            return Some(setting.value.clone())
         }
     }
     None

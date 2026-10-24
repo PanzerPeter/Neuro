@@ -406,6 +406,7 @@ fn derived_hashable_accepts_a_derived_struct_field() {
 fn derived_partial_eq_and_hashable_make_a_map_key() {
     assert_clean(
         r#"
+        enum Option<T> { Some(T), None }
         @derive(PartialEq, Hashable)
         struct K { a: i32, b: string }
         func main() -> i32 {
@@ -454,18 +455,19 @@ fn vec_of_a_copy_bounded_parameter_is_storable() {
 }
 
 #[test]
-fn vec_of_an_unbounded_parameter_is_refused() {
+fn vec_of_an_unbounded_parameter_is_accepted() {
     let errors = errors_with_traits(
         r#"
         func filled<T>(v: T) -> Vec<T> {
             mut out: Vec<T> = Vec::new()
+            out.push(v)
             out
         }
         func main() -> i32 { 0 }
         "#,
     );
     assert!(
-        errors
+        !errors
             .iter()
             .any(|e| matches!(e, TypeError::InvalidCollectionElement { .. })),
         "got {errors:?}"

@@ -594,18 +594,17 @@ built-in scalar equality, and lowering leaves it a binary node for the backend t
 field-wise. A `debug_structs` struct is the one type whose renderability depends on the specifier:
 it has no display form, so `{x:?}` renders it and `{x}` does not (`UnrenderableStruct`).
 
-**Places, borrows, and derefs.** The `Expr::Reference` arm requires a *place*
-(`is_place_expr`: an identifier or a parenthesised identifier, else `CannotBorrowValue`) and
-yields `&T` **without** moving the operand: borrowing never consumes. `&mut` of a non-`mut`
-binding is `CannotBorrowMutably`. `Expr::Deref` types `*r` to the referent, else
+**Places, borrows, and derefs.** The `Expr::Reference` arm requires a *place*: a binding, or a
+field, tuple element, or array / slice / `Vec` element chain rooted in one, possibly through a
+deref (`is_borrowable_sub_place`; a temporary or a tensor coordinate is `CannotBorrowValue`). It
+yields `&T` **without** moving the operand: borrowing never consumes. The borrow counts against
+the ROOT binding, and `borrow_target_of` returns that root for a sub-place, so holders, returns
+and stores treat `&p.name` as a borrow of `p`. `&mut` needs a `mut` binding, or a sub-place
+reached through a `&mut` (`nearest_reference`), else `CannotBorrowMutably`. `Expr::Deref` types `*r` to the referent, else
 `CannotDereference`. `Place::Deref` requires `pointer: &mut T` (an immutable reference is
 `CannotAssignThroughRef` and a non-reference is `CannotDereference`), and the stored value is
 checked against the referent and move-recorded. Flow-sensitive aliasing exclusivity is deferred to
 lifetime inference.
-
-Note the asymmetry, which is `docs/BUGS.md` BUG-033: an assignment TARGET is a full `Place`
-(a field, an element, a tensor coordinate), while the operand of `&` is still only a bare
-binding. The two notions of place are not yet the same one.
 
 **Assignment targets** (`check_assign` / `resolve_place` in `type_checkers/statements/places.rs`).
 `resolve_place` returns the type of the LOCATION and reports the place's own errors; a single
@@ -1097,6 +1096,10 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
   yields the payload itself, so an owning `Option` read twice through it is `UseOfMovedValue`.
   A fallback that diverges (`expr_diverges`: `panic`, `unreachable`, a block ending in `return`,
   `break` or `continue`) types the expression as the payload, which is how a value is unwrapped.
+  A payload that is a borrow of a `Copy` type, beside a fallback that is not a `Reference`
+  expression, is read through: the fallback is checked against the referent, and when it is one,
+  the expression is that value (`m.get(k) ?? 0` is an `i32`). Lowering mirrors the rule with a
+  `Deref` of the arm binding.
 - **`?`** (`expressions/try_expr.rs`) types `Expr::Try` as the operand's success payload after two
   checks. The operand must be fallible (else `TryOnNonFallible`), and
   `current_function_return_type` must be an instance of the SAME fallible enum, since that is
@@ -1366,20 +1369,31 @@ compiler-known nominal type, never `Copy` and always move-tracked.
 `type_checkers/collections.rs` owns the rules:
 
 - `resolve_collection` resolves the generic application from `resolve_type`, validating storable
-  elements (`Copy`, a type parameter bounded by `Copy` included, or `string`) and map keys; a program declaring its own generic type of that
-  name shadows the builtin. `string` is storable because the collection takes a copy of the bytes
-  rather than the operand's fat pointer: the slot owns what it holds, an element read copies back
-  out, and the collection releases its slots when it is destroyed.
-- `check_collection_new` types `Vec::new()` from the expected type, else
-  `CollectionTypeNotInferable`.
+  elements and map keys; a program declaring its own generic type of that name shadows the
+  builtin. Any sized value is storable (`check_storable`): a slot owns what it holds. A type that
+  holds a reference or a function value is refused (`InvalidCollectionElement`, LIM in the
+  register), as are `dyn` and the non-values.
+- `check_collection_new` types `Vec::new()` and `Vec::with_capacity(n)` (one integer argument)
+  from the expected type, else `CollectionTypeNotInferable`.
 - `resolve_collection_method` types the method surface, requiring a mutable receiver for the
-  mutating half. No collection method moves its arguments: every one of them is read, like a
-  `==` operand, because an insertion copies the bytes rather than taking the operand's buffer.
-  Fallible readers instantiate the prelude `Option<T>`.
+  mutating half. `push` and `insert` MOVE their key and value arguments (`record_move`). `get`
+  lends `Option<&T>` (`ResultShape::OptionBorrow`) and takes a transient shared borrow of a bare
+  receiver, so a mutation inside the `match` it heads is refused; a map's `get_mut` lends
+  `Option<&mut T>` and is held exclusively (`collection_lends_mutably`, read by
+  `hold_returned_borrows`). `pop`, a map's `remove` and `insert` hand a value back as `Option<T>`;
+  `Vec::remove` / `swap_remove` return `T`.
+- **A slot is never emptied.** `check_index_expr` records each `Vec` / slice index's element type
+  in `slot_reads` by span; `record_move_outside` asks `slot_place_type` (a recorded index, or a
+  field / tuple / array element below one), and a move-tracked result is
+  `CannotMoveOutOfCollection` naming `&v[i]`, `v[i].clone()` and `v.remove(i)` /
+  `v.swap_remove(i)` (a slice element is `CannotMoveOutOfBorrow`).
 - Raw float keys are rejected toward `OrderedF32` / `OrderedF64` (IEEE-754 `<` is a partial
   order); a struct key requires `PartialEq` plus `Hashable` (hashed), derived or by hand, or
   `PartialEq` plus `impl Comparable` (ordered).
-- Indexing, index assignment, and `for`-in accept a `Vec` alongside an array.
+- Indexing, index assignment, and `for`-in accept a `Vec` alongside an array. A by-value head
+  over move-tracked elements consumes the iterable (`counted_loop_item`); a borrowed head binds
+  each such element by value but marks the binding `lent` (`SymbolTable::mark_lent`), and a move
+  out of a lent binding, or a consuming method on it, is `CannotMoveOutOfBorrow`.
 
 `StringBuilder` is a fourth, **nullary** kind (`arity() == 0`), so `Collection { kind: StringBuilder, args: [] }`
 reuses every existing collection rule with no new `Type` variant. The bare name resolves as a
@@ -1390,7 +1404,8 @@ returns the type directly rather than demanding an annotation. `ParamSlot::Text`
 `ResultShape::OwnedString` back `push_str` and `to_string`; `len` / `clear` fall out of the
 existing kind-agnostic entries. `Type`'s `Display` omits `<>` for a nullary collection.
 
-Errors: `CollectionTypeNotInferable`, `InvalidCollectionElement`, `InvalidCollectionKey`.
+Errors: `CollectionTypeNotInferable`, `InvalidCollectionElement`, `InvalidCollectionKey`,
+`CannotMoveOutOfCollection`.
 
 ### String interpolation
 `type_checkers/expressions/interpolation.rs`. Each hole's expression is checked, its type

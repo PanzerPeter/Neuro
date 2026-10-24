@@ -1,0 +1,8 @@
+first:  parser (7h)
+second: lexer, 1 tag
+removed parser, 2 left
+bo had a list before: false
+hours:  lexer 2, tests 0
+drain:  lexer
+drain:  release notes
+total:  4

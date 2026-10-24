@@ -1,5 +1,5 @@
 // End-to-end tests for the `string` values a collection stores: the collection owns its
-// slots, an element read copies out of them, and an insertion copies into them.
+// slots, an insertion moves into them, and a read names the slot in place.
 //
 // A leak has no exit code, so the shapes that used to leak run a few hundred thousand
 // times over a payload wide enough that the unreleased buffers would be tens of
@@ -114,10 +114,10 @@ func main() -> i32 {{
     assert_eq!(exit, 0);
 }
 
-/// The loop binding is a copy of the element, released at the end of each pass, so an
-/// iteration over a long-lived collection does not accumulate.
+/// A borrowed head reads each element in place, so an iteration over a long-lived
+/// collection copies nothing and accumulates nothing.
 #[test]
-fn iterating_a_string_collection_releases_each_element_copy() {
+fn iterating_a_borrowed_string_collection_copies_nothing() {
     let test = CompileTest::new();
     let source = format!(
         r#"
@@ -129,7 +129,7 @@ func main() -> i32 {{
     mut i: u32 = 0
     mut n: u64 = 0
     while i < {} {{
-        for s in v {{
+        for s in &v {{
             n = n + s.len()
         }}
         i = i + 1
@@ -149,19 +149,55 @@ func main() -> i32 {{
     assert_eq!(exit, 0);
 }
 
-/// The whole point of the copy: a read carried past the collection's own scope is the
-/// reader's buffer, so the collection's release cannot reach it.
+/// A by-value head consumes the collection: each pass's binding owns the element it
+/// holds, and a `break` releases the elements no pass reached along with the buffer.
 #[test]
-fn an_element_read_outlives_the_collection_it_came_from() {
+fn a_consuming_loop_releases_taken_and_untaken_elements() {
+    let test = CompileTest::new();
+    let source = format!(
+        r#"
+func main() -> i32 {{
+    val a = "{PAYLOAD}"
+    mut i: u32 = 0
+    mut n: u64 = 0
+    while i < {LEAK_ROUNDS} {{
+        mut v: Vec<string> = Vec::new()
+        v.push(a + a)
+        v.push(a + a)
+        v.push(a + a)
+        for s in v {{
+            n = n + s.len()
+            if n % 3 == 0 {{ break }}
+        }}
+        i = i + 1
+    }}
+    if n == 0 {{
+        return 91
+    }}
+    0
+}}
+"#
+    );
+    let exit = test
+        .compile_and_run("consuming_loop.nr", &source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}
+
+/// A value taken out of a slot is the taker's: it outlives the collection it came from,
+/// whose release no longer reaches it.
+#[test]
+fn a_removed_element_outlives_the_collection_it_came_from() {
     let test = CompileTest::new();
     let source = r#"
 func first(words: Vec<string>) -> string {
-    return words[0]
+    mut words = words
+    return words.remove(0)
 }
 
 func main() -> i32 {
     mut v: Vec<string> = Vec::new()
-    v.push("alpha")
+    v.push("alpha" + "")
     v.push("beta")
     val kept = first(v)
     if kept != "alpha" {
@@ -176,31 +212,43 @@ func main() -> i32 {
     assert_eq!(exit, 5);
 }
 
-/// An insertion reads its argument rather than taking it, so the binding it came from is
-/// still usable afterwards and is still released by its own scope.
+/// An insertion moves its argument into the slot, so the binding it came from cannot be
+/// read afterwards; a `.clone()` keeps an independent copy.
 #[test]
-fn an_insertion_leaves_its_argument_usable() {
+fn an_insertion_moves_its_argument() {
     let test = CompileTest::new();
+    let err = test
+        .check(
+            "argument_moved.nr",
+            r#"
+func main() -> i32 {
+    val b = "one" + "!"
+    mut v: Vec<string> = Vec::new()
+    v.push(b)
+    b.len() as i32
+}
+"#,
+        )
+        .expect_err("a pushed binding is moved");
+    assert!(err.contains("use of moved value 'b'"), "got: {err}");
+
     let source = r#"
 func main() -> i32 {
     val a = "one"
     val b = a + "!"
     mut v: Vec<string> = Vec::new()
     mut m: HashMap<string, i32> = HashMap::new()
-    v.push(b)
+    v.push(b.clone())
     m.insert(b, 7)
-    if b != "one!" {
+    if v[0] != "one!" {
         return 91
     }
-    if v[0] != b {
-        return 92
-    }
-    val found = m.get(b) ?? -1
-    found + (b.len() as i32)
+    val found = m.get("one!") ?? -1
+    found + (v[0].len() as i32)
 }
 "#;
     let exit = test
-        .compile_and_run("argument_usable.nr", source)
+        .compile_and_run("argument_cloned.nr", source)
         .expect("compile/run failed");
     assert_eq!(exit, 11);
 }
@@ -238,9 +286,9 @@ func main() -> i32 {{
     assert_eq!(exit, 0);
 }
 
-/// The canonical read: a `match` over a fallible reader. The arm's binding owns what the
-/// reader handed it (a copy from `get`, the slot's own buffer from `pop`), so a loop
-/// that reads does not accumulate.
+/// The canonical read: a `match` over a fallible reader. `get` lends the slot and `pop`
+/// hands the slot's own buffer to the arm's binding, so a loop that reads does not
+/// accumulate.
 #[test]
 fn a_match_over_a_fallible_reader_owns_the_payload_it_binds() {
     let test = CompileTest::new();
@@ -329,9 +377,9 @@ fn main_string_releases(test: &CompileTest, filename: &str, source: &str) -> usi
         .count()
 }
 
-/// `val Some(s) = v.get(0) else { ... }` takes the same copied payload a `match` arm
+/// `val Some(s) = v.pop() else { ... }` takes the same owned payload a `match` arm
 /// does, and releases it the same way. The success binding registered no owner, and the
-/// copy `get` made leaked once per evaluation.
+/// payload leaked once per evaluation.
 #[test]
 fn a_val_else_string_payload_is_released_like_a_match_arms() {
     let test = CompileTest::new();
@@ -339,7 +387,7 @@ fn a_val_else_string_payload_is_released_like_a_match_arms() {
 func main() -> i32 {
     mut v: Vec<string> = Vec::new()
     v.push("x")
-    val Some(s) = v.get(0) else {
+    val Some(s) = v.pop() else {
         return 2
     }
     return s.len() as i32
@@ -349,7 +397,7 @@ func main() -> i32 {
 func main() -> i32 {
     mut v: Vec<string> = Vec::new()
     v.push("x")
-    return match v.get(0) {
+    return match v.pop() {
         Some(s) => s.len() as i32,
         None => 2
     }

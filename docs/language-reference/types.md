@@ -746,8 +746,11 @@ func main() -> i32 {
 - `&&T` is a borrow of a borrow, the same type as `& &T`, and `&&x` borrows `&x`.
 - Every built-in operator reads a borrowed operand: see
   [Reading through a borrow](#reading-through-a-borrow).
-- Only a **place** (a `val`/`mut`/parameter binding) can be borrowed. Borrowing a
-  temporary (a literal or a call result) or a `const` (an inlined value, not a memory location) is a `CannotBorrowValue` error.
+- Only a **place** can be borrowed: a `val`/`mut`/parameter binding, or a field, a tuple
+  element, or an array, slice or `Vec` element reached from one (`&p.name`, `&arr[i]`,
+  `&v[i]`). A borrow of a part borrows the whole binding, so `p` may not be moved while
+  `&p.name` is live. Borrowing a temporary (a literal or a call result), a tensor element,
+  or a `const` (an inlined value, not a memory location) is a `CannotBorrowValue` error.
 
 ```neuro
 struct Point { x: i64, y: i64 }
@@ -1562,31 +1565,52 @@ mut a: Vec<i32> = Vec::new()
 val b: Vec<i32> = a       // moves; `a` is invalid from here
 ```
 
-A collection owns what its slots hold, not what its arguments named. A `string`
-handed to `push` or `insert` is copied into the slot, so the argument is *read*
-rather than moved and the binding it came from stays usable; a `string` read back
-out of a slot is copied too, so it outlives the collection it came from. The one
-exception is `pop`, which hands over the slot's own buffer because the slot goes
-with it.
+A collection owns what its slots hold, and an element may be any sized value: a
+scalar, a `string`, a struct, a tensor, another collection. The ownership rules
+are the ones for any other place:
+
+- Insertion moves: `v.push(x)` and `m.insert(k, x)` take their arguments, so
+  the bindings they came from are invalid afterwards. To keep a value and also
+  store it, `.clone()` it first.
+- Indexing names a place: `v[i]` is the slot itself: `v[i] = x` writes it,
+  `v[i].field` and `v[i].method()` work on it in place, and `&v[i]` / `&mut v[i]`
+  borrow it. Using a non-`Copy` `v[i]` by value is a compile error, because a
+  slot cannot be left empty; the error names the three ways out: `&v[i]`,
+  `v[i].clone()`, and `v.remove(i)` / `v.swap_remove(i)`.
+- Lookup borrows: `get` lends `Option<&T>` and `get_mut` lends
+  `Option<&mut T>`, and the collection stays borrowed while the result lives.
+  `pop`, `remove` and a displacing `insert` hand the value over.
+- A slot that is overwritten, removed or cleared drops what it held,
+  and the collection drops its live slots when it is dropped.
 
 ```neuro
 val name: string = "ada" + "!"
 mut names: Vec<string> = Vec::new()
-names.push(name)          // copies; `name` is still usable
-val first = names[0]      // a copy of its own, valid after `names` is gone
+names.push(name)          // moves; `name` is invalid from here
+val first = &names[0]     // a borrow of the slot
+val kept = names[0].clone()
+val taken = names.remove(0)   // takes the element out
 ```
 
 ### `Vec<T>`
 
 | Operation | Result | Notes |
 | --- | --- | --- |
-| `v.push(x)` | nothing | Appends; grows the buffer as needed |
-| `v.pop()` | `Option<T>` | `None` when empty |
-| `v.get(i)` | `Option<T>` | The checked read |
-| `v[i]` / `v[i] = x` | `T` / nothing | Panics out of range, in **every** build |
+| `Vec::with_capacity(n)` | `Vec<T>` | Allocates room for `n` elements up front |
+| `v.push(x)` | nothing | Appends, moving `x` in; grows the buffer as needed |
+| `v.pop()` | `Option<T>` | Takes the last element out; `None` when empty |
+| `v.get(i)` | `Option<&T>` | The checked borrow |
+| `v.remove(i)` | `T` | Takes element `i` out and shifts the tail down |
+| `v.swap_remove(i)` | `T` | Takes element `i` out and moves the last element into its slot |
+| `v[i]` / `v[i] = x` | the slot / nothing | Panics out of range, in **every** build |
 | `v.len()` | `u64` | Live element count |
-| `v.clear()` | nothing | Empties without releasing the buffer |
+| `v.clear()` | nothing | Drops every element, keeping the buffer |
 | `for x in v` | nothing | Iterates the live elements in order |
+
+`for x in v` over elements that are not `Copy` consumes `v`: each pass owns the
+element it is handed, and leaving the loop early drops the ones it did not reach.
+`for x in &v` binds each element without taking it, so nothing may be moved out
+of the loop binding.
 
 A `Vec` index is checked in every build, like an array's; a `Vec`'s length is only
 known at run time, so the optimizer can rarely prove the check redundant.
@@ -1597,10 +1621,11 @@ Both share one surface:
 
 | Operation | Result | Notes |
 | --- | --- | --- |
-| `m.insert(k, v)` | nothing | Overwrites the value of an existing key |
-| `m.get(k)` | `Option<V>` | `None` when absent |
+| `m.insert(k, v)` | `Option<V>` | Moves both in; an existing key keeps its slot and hands back the value it held |
+| `m.get(k)` | `Option<&V>` | `None` when absent |
+| `m.get_mut(k)` | `Option<&mut V>` | Holds the map exclusively while the result lives |
 | `m.contains_key(k)` | `bool` | |
-| `m.remove(k)` | `bool` | `true` when a key was removed |
+| `m.remove(k)` | `Option<V>` | Takes the value out, dropping the key |
 | `m.len()` | `u64` | Live entry count |
 | `m.clear()` | nothing | |
 | `m.keys()` | `Vec<K>` | A fresh `Vec`, so a map is iterated via `for k in m.keys()` |
@@ -1611,8 +1636,8 @@ that ordering is the reason to choose it.
 
 ### Element and key types
 
-- **Elements and values** must be `Copy` (any integer, float, `bool`, `char`,
-  `Copy` struct, enum, tuple, or array) or `string`.
+- **Elements and values** may be any sized value except one that holds a
+  reference or a function value.
 - **Keys** additionally need equality and, per map, a hash or a total order. The
   compiler supplies both for integer, `bool`, `char`, and `string` keys. A
   struct key needs `PartialEq` plus `Hashable` (`HashMap`), derived or written
@@ -1651,10 +1676,12 @@ returns the hash the map uses for that key.
 
 ### Current limits
 
-- A collection element must be `Copy` or `string`, so a `Vec` of `StringBuilder`s
-  or of non-`Copy` structs is rejected where an array of them is accepted. There is no
-  capacity control (`with_capacity`, `shrink_to_fit`), `insert` does not return the
-  displaced value, and `keys()` builds a `Vec` rather than an iterator.
+- An element may not hold a reference or a function value.
+- `keys()` builds a `Vec` holding a copy of every key rather than an iterator over
+  borrows, and there is no `values()`.
+- `for x in &v` binds each element by value without owning it, not as a `&T`, so a
+  `for x in &mut v` cannot write through `x`; and `for x in v` over `Copy`
+  elements leaves `v` usable.
 - `Vec<T>` does not go through the `IntoIterator` / `Iterator` protocol
   ([control flow](control-flow.md#the-iteration-protocol)): `for x in v` lowers to
   a counted loop, exactly as `for x in arr` does, and so does

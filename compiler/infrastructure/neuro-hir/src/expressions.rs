@@ -369,10 +369,14 @@ pub enum HirExprKind {
         arms: Vec<HirMatchArm>,
     },
     /// Construction of an empty standard collection: `Vec::new()`,
-    /// `HashMap::new()`, `BTreeMap::new()`, `StringBuilder::new()`. The expression's `ty` is the
-    /// [`HirType::Collection`] being built; backends emit a zero-capacity header with
-    /// no allocation (the first insertion allocates).
-    CollectionNew,
+    /// `HashMap::new()`, `BTreeMap::new()`, `StringBuilder::new()`, and
+    /// `Vec::with_capacity(n)`. The expression's `ty` is the [`HirType::Collection`]
+    /// being built. Without a `capacity` backends emit a zero-capacity header with no
+    /// allocation (the first insertion allocates); with one, the buffer is allocated for
+    /// that many elements up front.
+    CollectionNew {
+        capacity: Option<Box<HirExpr>>,
+    },
     /// A closure value: a reference to a lifted [`crate::HirClosure`] item by
     /// `name`, plus the enclosing variables to snapshot into its environment (in the
     /// closure item's capture-layout order). The expression's type is the

@@ -222,6 +222,11 @@ pub(crate) struct TypeChecker {
     /// order to borrow it is not an access to it, so the borrowee-access rule is
     /// suppressed there and the borrow-site exclusivity rules apply instead.
     in_borrow_operand: bool,
+    /// The element type of every `Vec` or slice index expression checked so far, keyed by
+    /// its span, and whether the element sits behind a borrow (a slice) rather than in a
+    /// `Vec` slot. A slot is never left empty, so a consuming position naming one, or a
+    /// part of one, is refused by the move check, which sees only the expression.
+    slot_reads: HashMap<shared_types::Span, (Type, bool)>,
     /// Set while an inner link of a place chain (`t.a` inside `t.a.b`) is being typed.
     /// A partially moved binding is still readable through its intact sub-places, so
     /// the whole-binding rule is checked once, at the outermost link, against that
@@ -510,6 +515,7 @@ impl TypeChecker {
             pool_stack: Vec::new(),
             jump_pool_floor: 0,
             in_borrow_operand: false,
+            slot_reads: HashMap::new(),
             in_sub_place: false,
             scope_bound_closures: HashMap::new(),
             inferring_closure_return: false,

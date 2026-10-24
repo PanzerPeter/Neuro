@@ -1155,10 +1155,6 @@ fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
             tail_exits(expr, &mut tails) && tails.iter().all(|tail| allocates(tail, producers))
         }
         HirExprKind::NewtypeConstruct { value, .. } => allocates(value, producers),
-        // A collection copies a `string` out of its slot, so the read owns the copy.
-        HirExprKind::Index { object, .. } => {
-            matches!(expr.ty, HirType::String) && indexes_a_collection(&object.ty)
-        }
         HirExprKind::Binary {
             op: ast_types::BinaryOp::Add,
             ..
@@ -1178,10 +1174,15 @@ fn allocates(expr: &HirExpr, producers: &HashSet<String>) -> bool {
                 // own. The receiver's type is what identifies it: a user type that
                 // declares its own `to_string` may return a `.rodata` literal, and reading
                 // that as an allocation would hand `.rodata` to `free`.
-                args.is_empty()
-                    && ((field == TO_OWNED_METHOD && is_builder(&object.ty))
-                        || (field == CLONE_METHOD
-                            && matches!(object.ty.referent(), HirType::String)))
+                // `v.remove(i)` / `v.swap_remove(i)` hand the slot's own buffer out.
+                let taken = matches!(field.as_str(), "remove" | "swap_remove")
+                    && matches!(expr.ty, HirType::String)
+                    && indexes_a_collection(&object.ty);
+                taken
+                    || (args.is_empty()
+                        && ((field == TO_OWNED_METHOD && is_builder(&object.ty))
+                            || (field == CLONE_METHOD
+                                && matches!(object.ty.referent(), HirType::String))))
             }
             _ => false,
         },
@@ -1534,7 +1535,10 @@ fn walk<'a>(expr: &'a HirExpr, visit: &mut impl FnMut(&'a HirExpr)) {
         | HirExprKind::Path { .. }
         | HirExprKind::GridPosition { .. }
         | HirExprKind::TensorIdentity
-        | HirExprKind::CollectionNew => {}
+        | HirExprKind::CollectionNew { capacity: None } => {}
+        HirExprKind::CollectionNew {
+            capacity: Some(capacity),
+        } => walk(capacity, visit),
         HirExprKind::Closure { .. } => {}
         HirExprKind::Binary { left, right, .. } => {
             walk(left, visit);

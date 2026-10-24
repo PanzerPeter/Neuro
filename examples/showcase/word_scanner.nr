@@ -91,7 +91,7 @@ func main() -> i32 {
 
     mut wide = 0
     mut letters = 0
-    for (position, w) in words.enumerate() {
+    for (position, w) in (&words).enumerate() {
         val token = Token::of(w.slice(0..w.len()))
         letters = letters + token.scalars
         if token.is_wide() {
@@ -108,7 +108,7 @@ func main() -> i32 {
     }
     println("accented    = {accented}")
 
-    val third = words[2]
+    val third = &words[2]
     println("third       = {third}")
 
     val total = letters + wide + accented + (third.len() as i32)

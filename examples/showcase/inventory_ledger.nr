@@ -86,7 +86,7 @@ func main() -> i32 {
     // Look a line item up by name, through the index.
     mut girder_weight: i32 = 0
     match index.get("girder") {
-        Option::Some(at) => { girder_weight = items[at].weight() }
+        Option::Some(at) => { girder_weight = items[*at].weight() }
         Option::None => { girder_weight = -1 }
     }
     // girder_weight == 45

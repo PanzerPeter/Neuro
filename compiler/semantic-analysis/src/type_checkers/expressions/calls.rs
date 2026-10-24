@@ -4,7 +4,7 @@
 // here adds methods to the same `impl TypeChecker` block.
 
 use super::builtins::TO_CHECKED_METHOD;
-use super::{COLLECTION_CTOR, TypeChecker, declarations, eval_const_predicate};
+use super::{COLLECTION_CTOR, TypeChecker, VEC_WITH_CAPACITY, declarations, eval_const_predicate};
 use crate::errors::TypeError;
 use crate::type_checkers::closures::closure_context;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
@@ -1012,11 +1012,19 @@ impl TypeChecker {
                 // `Vec::new()` and friends: a compiler-known constructor, unless
                 // the program declares its own type of that name.
                 if let Some(kind) = CollectionKind::from_name(&type_name.name)
-                    && member.name == COLLECTION_CTOR
+                    && (member.name == COLLECTION_CTOR
+                        || (member.name == VEC_WITH_CAPACITY && kind == CollectionKind::Vec))
                     && !self.struct_defs.contains_key(&type_name.name)
                     && !self.enum_defs.contains_key(&type_name.name)
                 {
-                    return Some(self.check_collection_new(kind, args, expected, *path_span));
+                    let with_capacity = member.name == VEC_WITH_CAPACITY;
+                    return Some(self.check_collection_new(
+                        kind,
+                        with_capacity,
+                        args,
+                        expected,
+                        *path_span,
+                    ));
                 }
                 // A member name is never both a variant and an associated function (the
                 // impl registration rejects the pair), so a registered function wins here.

@@ -207,8 +207,8 @@ func main() -> i32 {
     mut acc: i32 = 0
     if m.contains_key(1) { acc = acc + 1 }
     if m.contains_key(9) { acc = acc + 100 }
-    if m.remove(1) { acc = acc + 2 }
-    if m.remove(1) { acc = acc + 100 }
+    if m.remove(1).is_some() { acc = acc + 2 }
+    if m.remove(1).is_some() { acc = acc + 100 }
     if m.contains_key(1) { acc = acc + 100 }
     acc + m.len() as i32
 }
@@ -233,7 +233,7 @@ func main() -> i32 {
     mut j: i32 = 0
     while j < 200 {
         if j % 2 == 0 {
-            if !m.remove(j) { return 91 }
+            if m.remove(j).is_none() { return 91 }
         }
         j = j + 1
     }
@@ -298,8 +298,8 @@ func main() -> i32 {
         t.insert(63 - i, i)
         i = i + 1
     }
-    if !t.remove(0) { return 91 }
-    if !t.remove(63) { return 92 }
+    if t.remove(0).is_none() { return 91 }
+    if t.remove(63).is_none() { return 92 }
     mut bad: i32 = 0
     mut j: i32 = 1
     while j < 63 {

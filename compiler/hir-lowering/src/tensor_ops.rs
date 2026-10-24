@@ -806,8 +806,11 @@ impl Outliner {
             | HirExprKind::Path { .. }
             | HirExprKind::GridPosition { .. }
             | HirExprKind::TensorIdentity
-            | HirExprKind::CollectionNew
+            | HirExprKind::CollectionNew { capacity: None }
             | HirExprKind::Closure { .. } => {}
+            HirExprKind::CollectionNew {
+                capacity: Some(capacity),
+            } => self.rewrite(capacity),
             HirExprKind::Binary { left, right, .. } => {
                 self.rewrite(left);
                 self.rewrite(right);

@@ -64,11 +64,11 @@ impl Lowerer {
                 self.lower_tensor_construction(&member.name, type_args, args, expected, span)
             }
             // `Vec::new()` and friends build an empty standard collection, unless the
-            // program declares its own type of that name.
+            // program declares its own type of that name; `Vec::with_capacity(n)` also
+            // reserves room for `n` elements.
             Expr::Path {
                 type_name, member, ..
-            } if member.name == crate::collections::COLLECTION_CTOR
-                && crate::collections::collection_kind(&type_name.name).is_some()
+            } if crate::collections::is_collection_ctor(&type_name.name, &member.name)
                 && !self.structs.contains_key(&type_name.name)
                 && !self.enums.contains_key(&type_name.name) =>
             {
@@ -78,7 +78,11 @@ impl Lowerer {
                             name: type_name.name.clone(),
                         }
                     })?;
-                self.lower_collection_new(kind, expected, span)
+                let capacity = match args.first() {
+                    Some(arg) => Some(Box::new(self.lower_expr(arg, Some(&HirType::U64))?)),
+                    None => None,
+                };
+                self.lower_collection_new(kind, capacity, expected, span)
             }
             Expr::Path {
                 type_name, member, ..

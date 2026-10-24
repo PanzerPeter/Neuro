@@ -269,7 +269,9 @@ impl<'ctx> CodegenContext<'ctx> {
             }
 
             // `Vec::new()` / `HashMap::new()` / `BTreeMap::new()`.
-            HirExprKind::CollectionNew => self.codegen_collection_new(),
+            HirExprKind::CollectionNew { capacity } => {
+                self.codegen_collection_new(capacity.as_deref(), &Type::from_hir(&expr.ty))
+            }
 
             // Tuple literal `(e0, ...)` and element access `object.N`.
             HirExprKind::TupleLiteral { elements } => {
@@ -534,10 +536,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.builder.build_store(cell, handle)?;
                 Ok(cell.into())
             }
-            other => Err(CodegenError::InternalError(format!(
-                "borrow of a non-place expression reached codegen: {:?}",
-                other
-            ))),
+            // A field or an element: the address of its storage inside the holder.
+            other => match self.held_place_ptr(operand)? {
+                Some(ptr) => Ok(ptr.into()),
+                None => Err(CodegenError::InternalError(format!(
+                    "borrow of a non-place expression reached codegen: {:?}",
+                    other
+                ))),
+            },
         }
     }
 

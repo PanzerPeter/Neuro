@@ -44,7 +44,30 @@ impl Lowerer {
             payload.clone(),
             span,
         );
-        let fallback = self.lower_expr(right, Some(&payload))?;
+        // Mirrors the checker: a borrowed `Copy` payload beside a fallback of the value
+        // type is read through, and the whole expression is that value.
+        let read_through = match &payload {
+            HirType::Reference { inner, .. }
+                if !matches!(right, Expr::Reference { .. }) && self.is_copy(inner) =>
+            {
+                Some((**inner).clone())
+            }
+            _ => None,
+        };
+        let fallback = self.lower_expr(right, Some(read_through.as_ref().unwrap_or(&payload)))?;
+        let (unwrapped, result_ty) = match read_through {
+            Some(value) if fallback.ty == value => (
+                HirExpr::new(
+                    HirExprKind::Deref {
+                        operand: Box::new(unwrapped),
+                    },
+                    value.clone(),
+                    span,
+                ),
+                value,
+            ),
+            _ => (unwrapped, payload.clone()),
+        };
 
         Ok(HirExpr::new(
             HirExprKind::Match {
@@ -68,7 +91,7 @@ impl Lowerer {
                     },
                 ],
             },
-            payload,
+            result_ty,
             span,
         ))
     }

@@ -2,8 +2,9 @@
 //
 // All three are heap-backed library types. They are not Copy (assignment moves
 // them) and each frees its buffer when its owner leaves scope. The fallible
-// readers (`pop`, `get`) return `Option<T>`, so a miss is a value to match on
-// rather than a trap.
+// readers return an `Option`, so a miss is a value to match on rather than a
+// trap: `get` lends the element as `Option<&T>`, while `pop` and a map's
+// `remove` hand it over as `Option<T>`.
 
 func main() -> i32 {
     // --- Vec<T>: growable, indexable, iterable ---------------------------
@@ -47,7 +48,7 @@ func main() -> i32 {
     if stock.contains_key("nut") {
         sum = sum + 1                                 // -> 67
     }
-    if stock.remove("nut") {
+    if stock.remove("nut").is_some() {
         sum = sum + 1                                 // -> 68
     }
     println("Map  get/contains/rm  -> {sum}")

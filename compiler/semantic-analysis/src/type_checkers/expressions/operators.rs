@@ -383,8 +383,19 @@ impl TypeChecker {
 
         // `??` yields the payload itself, so the fallible value is given up.
         self.record_move(left);
+        // A borrowed `Copy` payload is read through when the fallback is the value rather
+        // than a borrow of one, as every built-in operator reads a borrowed operand:
+        // `m.get(k) ?? 0` is an `i32`, where `0` has no address to lend.
+        let read_through = match &payload {
+            Type::Reference { inner, .. }
+                if !matches!(right, Expr::Reference { .. }) && self.is_type_copy(inner) =>
+            {
+                Some((**inner).clone())
+            }
+            _ => None,
+        };
         let right_ty = self
-            .check_expr(right, Some(&payload))
+            .check_expr(right, Some(read_through.as_ref().unwrap_or(&payload)))
             .unwrap_or(Type::Unknown);
         // A diverging fallback (`?? panic(..)`, `?? return x`) never produces a value,
         // so the expression is the payload: this is the language's unwrap.
@@ -395,16 +406,18 @@ impl TypeChecker {
             return Some(Type::Unknown);
         }
 
-        if !payload.is_compatible_with(&right_ty) {
-            self.record_error(TypeError::Mismatch {
-                expected: payload,
-                found: right_ty,
-                span: *span,
-            });
-            return Some(Type::Unknown);
+        if payload.is_compatible_with(&right_ty) {
+            return Some(payload);
         }
-
-        Some(payload)
+        if let Some(value) = read_through.filter(|value| value.is_compatible_with(&right_ty)) {
+            return Some(value);
+        }
+        self.record_error(TypeError::Mismatch {
+            expected: payload,
+            found: right_ty,
+            span: *span,
+        });
+        Some(Type::Unknown)
     }
 
     /// The payload type `??` unwraps out of a fallible enum: `Option`'s `Some` or

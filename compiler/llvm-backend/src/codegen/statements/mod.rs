@@ -655,6 +655,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 if let Some(value) = value {
                     self.release_string_temporary(expr, value)?;
                     self.drop_unbound_temporary(expr, value)?;
+                    self.drop_discarded_slot_value(expr, value)?;
                     // A tensor nothing binds is released here for the same reason.
                     if let (
                         HirType::Tensor { .. },

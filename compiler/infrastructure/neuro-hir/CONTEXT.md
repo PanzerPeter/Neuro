@@ -221,10 +221,10 @@ lower straight through, so backends erase the wrapper entirely.
 
 **Collections are a type, not a family of nodes.** `HirType::Collection { kind, args }` with
 `HirCollectionKind::{Vec, HashMap, BTreeMap, StringBuilder}` (Display renders `Vec<i32>`), plus
-`HirExprKind::CollectionNew`: the typed mirror of `Vec::new()` and its siblings, whose `ty` is
-the collection being built. Collection *methods* need no node: they reach backends as an
+`HirExprKind::CollectionNew { capacity }`: the typed mirror of `Vec::new()` and its siblings,
+whose `ty` is the collection being built, with `capacity` set for `Vec::with_capacity(n)`. Collection *methods* need no node: they reach backends as an
 ordinary `Call` with a `FieldAccess` callee whose `ty` carries the call's resolved result (the
-`Option<T>` a fallible reader returns, the `Vec<K>` `keys()` builds).
+`Option<T>` or `Option<&T>` a reader returns, the `Vec<K>` `keys()` builds).
 
 `StringBuilder` is the one **nullary** kind: its buffer is a byte run, so it carries no type
 arguments and needs no new `HirType` variant: `Collection { kind: StringBuilder, args: [] }` is the

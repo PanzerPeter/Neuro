@@ -205,8 +205,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 | HirExprKind::Closure { .. }
         );
         let ty = Type::from_hir(&expr.ty);
-        if !fresh || self.pool_depth > 0 || !(self.holds_user_drop(&ty) || self.holds_function(&ty))
-        {
+        if !fresh || self.pool_depth > 0 || !self.temporary_drops_its_owners(&ty) {
             return Ok(());
         }
         if self.current_block_terminated() {
@@ -244,6 +243,13 @@ impl<'ctx> CodegenContext<'ctx> {
         self.emit_drops_through(depth)?;
         self.pop_drop_scope();
         Ok(())
+    }
+
+    /// Whether an unbound fresh temporary of `ty` has its typed owners destroyed by
+    /// [`Self::drop_unbound_temporary`]: a value that runs a user destructor or holds a
+    /// function value.
+    pub(crate) fn temporary_drops_its_owners(&self, ty: &Type) -> bool {
+        self.holds_user_drop(ty) || self.holds_function(ty)
     }
 
     /// Destroy the value of type `ty` at `place_ptr` that a store through a borrow is

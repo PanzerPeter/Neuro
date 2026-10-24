@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.18.0] - 2026-10-24
+
+### Added
+
+- A `Vec`, `HashMap` or `BTreeMap` element may be any sized value: a struct, a
+  `StringBuilder`, a tensor, another collection (`Vec<Task>`, `Vec<Vec<i32>>`,
+  `HashMap<string, Vec<string>>`). The collection owns what its slots hold. A reference or a
+  function value is still refused.
+- `v[i]` names the slot in place: `v[i] = x` writes it, `v[i].field = y` and `v[i].method()`
+  work on it, and `v[i][j]` reaches into a nested collection. Overwriting, removing or
+  clearing a slot drops what it held.
+- `&` and `&mut` accept a field or an element: `&p.name`, `&arr[i]`, `&v[i]`,
+  `&mut p.scores[1]`, `&pair.1`. The borrow holds the whole binding it is rooted in, and
+  `&mut` needs a `mut` binding or a `&mut` on the way there. Closes BUG-033.
+- `Vec::remove(i)` and `Vec::swap_remove(i)` take an element out (out of range panics),
+  `Vec::with_capacity(n)` allocates up front, and `m.get_mut(k)` lends `Option<&mut V>`.
+- `opt ?? fallback` reads a borrowed `Copy` payload through when the fallback is a value:
+  `m.get(k) ?? 0` is an `i32`.
+
+### Changed
+
+- `push` and `insert` move their arguments in, so the binding they came from cannot be used
+  afterwards; `.clone()` it to keep a copy. Using a non-`Copy` `v[i]` by value is an error
+  naming `&v[i]`, `v[i].clone()` and `v.remove(i)` / `v.swap_remove(i)`.
+- `get` lends instead of copying: `Vec::get` and a map's `get` return `Option<&T>` and hold the
+  collection borrowed while the result lives. A map's `remove` returns the removed
+  `Option<V>` instead of `bool`, and `insert` returns the value it displaced as `Option<V>`.
+- `for x in v` over non-`Copy` elements consumes `v`: each pass owns its element, and a
+  `break` or `return` drops the ones no pass reached. `for x in &v` (and over a borrowed
+  array or slice) still binds each non-`Copy` element by value but owns nothing, so it cannot
+  be moved out of the loop binding.
+
+### Fixed
+
+- `for x in &arr` over non-`Copy` elements let the loop binding be moved, which freed the
+  array's element twice.
+
 ## [5.17.0] - 2026-10-23
 
 ### Added

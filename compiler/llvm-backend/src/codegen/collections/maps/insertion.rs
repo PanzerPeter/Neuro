@@ -4,7 +4,7 @@
 // `impl CodegenContext` block.
 
 use inkwell::IntPredicate;
-use inkwell::values::FunctionValue;
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 
 use super::probing::{ProbeCursor, helper_params};
 use super::{STATE_EMPTY, STATE_FULL, SlotField};
@@ -14,8 +14,10 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Emit the insertion helper: `insert(header, key, value)`. An existing key is
-    /// overwritten in place; a new key grows the table first if the load factor demands.
+    /// Emit the insertion helper: `insert(header, key, value, displaced) -> i1`. An
+    /// existing key keeps its slot: the value it held is written to `displaced`, the new
+    /// one takes its place, the incoming key is dropped, and the helper returns `true`. A
+    /// new key grows the table first if the load factor demands, and returns `false`.
     pub(super) fn build_map_insert_helper(
         &mut self,
         kind: CollectionKind,
@@ -26,10 +28,15 @@ impl<'ctx> CodegenContext<'ctx> {
         let key_llvm = self.collection_value_type(key_ty)?;
         let value_llvm = self.collection_value_type(value_ty)?;
         let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = self
-            .context
-            .void_type()
-            .fn_type(&[ptr_ty.into(), key_llvm.into(), value_llvm.into()], false);
+        let fn_type = self.context.bool_type().fn_type(
+            &[
+                ptr_ty.into(),
+                key_llvm.into(),
+                value_llvm.into(),
+                ptr_ty.into(),
+            ],
+            false,
+        );
         let key_ty = key_ty.clone();
         let value_ty = value_ty.clone();
 
@@ -52,13 +59,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let probe_bb = self.context.append_basic_block(func, "probe");
         let place_bb = self.context.append_basic_block(func, "place");
         let advance_bb = self.context.append_basic_block(func, "advance");
-        let exit_bb = self.context.append_basic_block(func, "exit");
         self.builder.position_at_end(entry);
 
         let (header, key) = helper_params(func)?;
-        let value = func
-            .get_nth_param(2)
-            .ok_or_else(|| CodegenError::InternalError("map insert arity".into()))?;
+        let (value, displaced) = insert_params(func)?;
 
         // An existing key keeps its slot, so neither the length nor the load factor moves.
         let find = self.build_map_find_helper(CollectionKind::HashMap, key_ty, value_ty)?;
@@ -82,13 +86,10 @@ impl<'ctx> CodegenContext<'ctx> {
             existing,
             SlotField::Value,
         )?;
-        // The entry keeps its key and gives up its value, so only the value is released;
-        // the caller's key copy is never stored on this path.
-        if matches!(value_ty, Type::String) {
-            self.release_slot_string(value_ptr)?;
-        }
-        self.builder.build_store(value_ptr, value)?;
-        self.builder.build_unconditional_branch(exit_bb)?;
+        self.displace_slot_value(value_ptr, value_ty, value, displaced)?;
+        self.drop_incoming_key(key, key_ty)?;
+        self.builder
+            .build_return(Some(&self.context.bool_type().const_int(1, false)))?;
 
         self.builder.position_at_end(fresh_bb);
         self.emit_hashed_grow_if_needed(header, key_ty, value_ty)?;
@@ -120,9 +121,6 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(probe_bb)?;
 
         self.builder.position_at_end(place_bb);
-        // A new entry is where the map takes ownership of the key, so this is where the
-        // bytes are copied; the caller still holds the operand it was handed.
-        let key = self.key_for_new_slot(key_ty, key)?;
         // Only an EMPTY slot consumes new capacity; reusing a tombstone does not.
         let was_empty = self.builder.build_int_compare(
             IntPredicate::EQ,
@@ -138,27 +136,36 @@ impl<'ctx> CodegenContext<'ctx> {
         let used_next = self.builder.build_int_add(used, used_delta, "used.next")?;
         self.store_header_field(header, FIELD_USED, used_next)?;
         self.bump_len(header)?;
-        self.builder.build_unconditional_branch(exit_bb)?;
-
-        self.builder.position_at_end(exit_bb);
-        self.builder.build_return(None)?;
+        self.builder
+            .build_return(Some(&self.context.bool_type().const_zero()))?;
         Ok(())
     }
 
-    /// The key value a brand-new slot stores: the map's own copy of a `string` key, and
-    /// the operand unchanged for every `Copy` key.
-    ///
-    /// Only the fresh paths call it. An existing entry keeps the key it already owns, so
-    /// copying there would allocate a buffer nothing ever stores.
-    fn key_for_new_slot(
+    /// Hand the value at `value_ptr` to the caller through `displaced` and store `value`
+    /// in its place: an overwrite gives the old value back rather than dropping it.
+    fn displace_slot_value(
         &mut self,
-        key_ty: &Type,
-        key: inkwell::values::BasicValueEnum<'ctx>,
-    ) -> CodegenResult<inkwell::values::BasicValueEnum<'ctx>> {
-        if !matches!(key_ty, Type::String) {
-            return Ok(key);
+        value_ptr: PointerValue<'ctx>,
+        value_ty: &Type,
+        value: BasicValueEnum<'ctx>,
+        displaced: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let value_llvm = self.collection_value_type(value_ty)?;
+        let old = self.builder.build_load(value_llvm, value_ptr, "old")?;
+        self.builder.build_store(displaced, old)?;
+        self.builder.build_store(value_ptr, value)?;
+        Ok(())
+    }
+
+    /// Drop a key the caller moved in that an existing entry already has: the entry
+    /// keeps the key it holds, so the incoming one has no owner left.
+    fn drop_incoming_key(&mut self, key: BasicValueEnum<'ctx>, key_ty: &Type) -> CodegenResult<()> {
+        if !self.slot_needs_release(key_ty) {
+            return Ok(());
         }
-        self.copy_string_bytes(key)
+        let staged = self.entry_alloca(key.get_type(), "key.dropped")?;
+        self.builder.build_store(staged, key)?;
+        self.drop_slot_value(staged, key_ty)
     }
 
     /// Body of the ordered insert: overwrite in place, or memmove the tail up and place
@@ -173,13 +180,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let entry = self.context.append_basic_block(func, "entry");
         let update_bb = self.context.append_basic_block(func, "update");
         let fresh_bb = self.context.append_basic_block(func, "fresh");
-        let exit_bb = self.context.append_basic_block(func, "exit");
         self.builder.position_at_end(entry);
 
         let (header, key) = helper_params(func)?;
-        let value = func
-            .get_nth_param(2)
-            .ok_or_else(|| CodegenError::InternalError("map insert arity".into()))?;
+        let (value, displaced) = insert_params(func)?;
 
         let find = self.build_map_find_helper(CollectionKind::BTreeMap, key_ty, value_ty)?;
         let existing = self
@@ -202,11 +206,10 @@ impl<'ctx> CodegenContext<'ctx> {
             existing,
             SlotField::Value,
         )?;
-        if matches!(value_ty, Type::String) {
-            self.release_slot_string(value_ptr)?;
-        }
-        self.builder.build_store(value_ptr, value)?;
-        self.builder.build_unconditional_branch(exit_bb)?;
+        self.displace_slot_value(value_ptr, value_ty, value, displaced)?;
+        self.drop_incoming_key(key, key_ty)?;
+        self.builder
+            .build_return(Some(&self.context.bool_type().const_int(1, false)))?;
 
         self.builder.position_at_end(fresh_bb);
         self.emit_ordered_grow_if_needed(header, key_ty, value_ty)?;
@@ -233,7 +236,6 @@ impl<'ctx> CodegenContext<'ctx> {
             at,
             SlotField::Key,
         )?;
-        let key = self.key_for_new_slot(key_ty, key)?;
         self.builder.build_store(key_ptr, key)?;
         let value_ptr = self.map_slot_field_ptr(
             CollectionKind::BTreeMap,
@@ -245,10 +247,22 @@ impl<'ctx> CodegenContext<'ctx> {
         )?;
         self.builder.build_store(value_ptr, value)?;
         self.bump_len(header)?;
-        self.builder.build_unconditional_branch(exit_bb)?;
-
-        self.builder.position_at_end(exit_bb);
-        self.builder.build_return(None)?;
+        self.builder
+            .build_return(Some(&self.context.bool_type().const_zero()))?;
         Ok(())
     }
+}
+
+/// The value and displaced-value parameters of an insertion helper.
+fn insert_params<'ctx>(
+    func: FunctionValue<'ctx>,
+) -> CodegenResult<(BasicValueEnum<'ctx>, PointerValue<'ctx>)> {
+    let value = func
+        .get_nth_param(2)
+        .ok_or_else(|| CodegenError::InternalError("map insert arity".into()))?;
+    let displaced = func
+        .get_nth_param(3)
+        .ok_or_else(|| CodegenError::InternalError("map insert arity".into()))?
+        .into_pointer_value();
+    Ok((value, displaced))
 }

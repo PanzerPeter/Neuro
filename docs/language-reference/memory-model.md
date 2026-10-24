@@ -22,7 +22,7 @@ for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `poo
 | A heap `string` stored into a struct field, array element or tuple element | With the holder, when the store into that position provably allocated or moved in a buffer its source binding owned |
 | A heap `string` a function returns | By the caller, when every one of the function's return paths allocates |
 | A heap `string` passed by value to a parameter the callee only reads | At the call it was built for |
-| A `string` in a collection slot | By the collection, which owns a copy of the bytes rather than the operand's buffer |
+| A value in a collection slot | By the collection; every `string` inside a slot owns its bytes, and a `.rodata` literal is copied on the way in |
 
 An anonymous heap `string` (what `+`, interpolation and `StringBuilder::to_string` produce) belongs to
 no binding, so it is released at the consumer that reads and discards it: a `+` or `==` operand,
@@ -30,12 +30,12 @@ a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolati
 statement whose value nothing reads. A loop that formats output holds a flat heap rather than a
 growing one.
 
-A collection never shares a buffer across its own boundary. `v.push(s)` and `m.insert(k, v)`
-copy the bytes into slots of their own, which is why they read their arguments rather than moving
-them and why the binding they came from is still usable afterwards; `v[i]`, `for x in v`,
-`m.get(k)` and `m.keys()` copy back out, so a value read from a collection outlives it. `v.pop()`
-is the one read that hands over the slot's own buffer, because the slot is gone with it. A slot
-that is overwritten, removed, or cleared releases what it held.
+A collection owns what its slots hold. `v.push(x)` and `m.insert(k, v)` move their arguments in;
+a `string` the argument owned is adopted, and a literal is copied, so every `string` in a slot owns
+its bytes. Reads do not copy: `v[i]` names the slot, and `get` / `get_mut` lend it. `pop`,
+`remove`, `swap_remove`, a displacing `insert` and a consuming `for x in v` hand a value over with
+its ownership. A slot that is overwritten, removed, or cleared drops what it held, and the
+collection drops its live slots when it is dropped.
 
 ## What still leaks
 
@@ -51,9 +51,13 @@ Three shapes it cannot prove, each leaking one buffer rather than dangling one:
 Freeing a `.rodata` literal, or a buffer something else still holds, is a worse failure than
 holding one, so every unproven case answers the same way.
 
-A `string` a collection read hands into a view-producing method (`v[0].slice(...)`, `.chars()`)
-leaks its copy, as any other anonymous string does there. `.clone()` is not such a method: it
-copies the bytes into a buffer of its own.
+An anonymous `string` handed into a view-producing method (`(a + b).slice(...)`, `.chars()`)
+leaks, because the release belongs at the end of the view's life, which nothing tracks yet.
+`.clone()` is not such a method: it copies the bytes into a buffer of its own.
+
+A struct taken out of a collection through an `Option` (`match v.pop()`, a map's `remove`) or
+returned from a function that took it out does not release its `string` fields; one bound
+straight from `v.remove(i)` does.
 
 A `match` arm that binds part of an enum payload disowns the whole scrutinee, so a part of that
 variant the arm did not bind is not destroyed. An arm that binds nothing leaves the scrutinee

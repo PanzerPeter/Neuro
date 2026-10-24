@@ -754,3 +754,113 @@ func main() -> i32 {
     );
     assert!(errors.is_empty(), "expected no errors, got {errors:?}");
 }
+
+#[test]
+fn a_field_or_an_element_is_a_borrowable_place() {
+    let errors = semantic_errors(
+        r#"
+struct P { name: string, tags: [string; 2] }
+func main() -> i32 {
+    mut p = P { name: "a", tags: ["x", "y"] }
+    val n: &string = &p.name
+    val t: &string = &p.tags[1]
+    val both: (i32, string) = (1, "b")
+    val second: &string = &both.1
+    return 0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+#[test]
+fn a_borrowed_field_freezes_its_root_binding() {
+    let errors = semantic_errors(
+        r#"
+struct P { name: string, n: i32 }
+func main() -> i32 {
+    mut p = P { name: "a", n: 1 }
+    val n = &p.name
+    val q = p
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotMoveWhileBorrowed { .. })),
+        "moving the root of a held field borrow must be rejected; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_mutable_sub_place_borrow_needs_a_writable_root() {
+    let errors = semantic_errors(
+        r#"
+struct P { n: i32 }
+func main() -> i32 {
+    val p = P { n: 1 }
+    val r = &mut p.n
+    return 0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotBorrowMutably { .. })),
+        "got {errors:?}"
+    );
+}
+
+#[test]
+fn a_mutable_field_borrow_through_a_mut_reference_is_writable() {
+    let errors = semantic_errors(
+        r#"
+struct P { n: i32 }
+func bump(p: &mut P) {
+    val r = &mut p.n
+    *r += 1
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+#[test]
+fn a_temporary_or_a_tensor_coordinate_is_not_a_borrowable_place() {
+    let errors = semantic_errors(
+        r#"
+struct P { n: i32 }
+func make() -> P { P { n: 1 } }
+func main() -> i32 {
+    val r = &make().n
+    val t: Tensor<i32, [2]> = [1, 2]
+    val e = &t[0]
+    return 0
+}
+"#,
+    );
+    let refused = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::CannotBorrowValue { .. }))
+        .count();
+    assert_eq!(refused, 2, "got {errors:?}");
+}
+
+#[test]
+fn returning_a_borrow_of_a_local_field_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+struct P { name: string }
+func name_of() -> &string {
+    val p = P { name: "a" }
+    return &p.name
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(returns_ref_to_local(&errors), "got {errors:?}");
+}

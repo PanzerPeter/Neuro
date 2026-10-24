@@ -142,18 +142,14 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Whether reading `expr` leaves its holder owning everything it owned: a `Copy`
-    /// value is copied out, and a collection's `string` element is copied into a buffer
-    /// of the reader's own.
+    /// value is copied out, and a collection slot, or a part of one, is never moved out
+    /// of (the checker refuses it), so a read of one is a read in place.
     pub(super) fn read_moves_nothing(&self, expr: &HirExpr) -> bool {
-        let ty = Type::from_hir(&expr.ty);
-        if !matches!(ty, Type::String) {
-            return self.drop_target_of(&ty).is_none();
+        if reads_through_collection_slot(expr) {
+            return true;
         }
-        matches!(
-            &expr.kind,
-            HirExprKind::Index { object, .. }
-                if matches!(Type::from_hir(&object.ty).referent(), Type::Collection { .. })
-        )
+        let ty = Type::from_hir(&expr.ty);
+        !matches!(ty, Type::String) && self.drop_target_of(&ty).is_none()
     }
 
     /// Whether `expr` reads a value out of a position another binding already owns, so
@@ -212,5 +208,21 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_store(*flag_ptr, bool_ty.const_zero())?;
         }
         Ok(saved)
+    }
+}
+
+/// Whether `expr` names a collection slot or a field, tuple or array element inside one.
+fn reads_through_collection_slot(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::Index { object, .. } => {
+            matches!(
+                Type::from_hir(&object.ty).referent(),
+                Type::Collection { .. }
+            ) || reads_through_collection_slot(object)
+        }
+        HirExprKind::FieldAccess { object, .. } | HirExprKind::TupleIndex { object, .. } => {
+            reads_through_collection_slot(object)
+        }
+        _ => false,
     }
 }

@@ -278,6 +278,10 @@ pub(crate) enum DropTarget {
     /// A function value: give back the count it holds of its closure's environment,
     /// which the last count releases.
     FunctionValue,
+    /// The `Vec` header a consuming `for` loop took over, whose elements below its `used`
+    /// count have been handed to the loop's bindings: release the rest, then the buffer.
+    /// Carries the element type.
+    VecRemainder(Type),
 }
 
 /// Central state container for LLVM IR code generation.

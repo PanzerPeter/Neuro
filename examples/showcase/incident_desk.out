@@ -1,0 +1,16 @@
+severe tickets: 2
+title widths:   14 and 0
+replace #3:
+  closed #3 typo on banner, notes: 0
+assign:
+ada's noted:    1
+reassign bo:
+bo had a list:  true
+drain:
+  closed #1 login slow, notes: 0
+  closed #5 cert expiring, notes: 0
+score:          6
+hours:          ada 6, cy 0
+end of shift:
+  closed #2 db replica lag, notes: 1
+  closed #4 payments down, notes: 2

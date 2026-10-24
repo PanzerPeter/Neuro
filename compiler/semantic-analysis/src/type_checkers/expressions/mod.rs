@@ -28,6 +28,8 @@ pub(crate) const CLONE_METHOD: &str = "clone";
 
 /// The associated function that builds an empty standard collection.
 pub(crate) const COLLECTION_CTOR: &str = "new";
+/// The `Vec` constructor that allocates room for a given number of elements up front.
+pub(crate) const VEC_WITH_CAPACITY: &str = "with_capacity";
 
 impl TypeChecker {
     /// Check an expression and return its type.

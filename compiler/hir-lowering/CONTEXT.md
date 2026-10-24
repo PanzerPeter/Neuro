@@ -55,7 +55,7 @@ a free variable. The receiver is a constant: a field chain rooted in a struct th
 (`self`, a parameter, or the caller's value an inlined callee's parameter stands for;
 `rebase_place` renames the root) is read into an inactive entry, by value for a number, `bool`
 or `char`, and as a `.clone()` for a tensor (`field_copy`), since the primal can only read a
-tensor field in place and `&self.field` is not a place yet (BUG-033). A literal array position
+tensor field in place and the tape does not yet bind a borrow of a field (LIM-132). A literal array position
 (`self.heads[1]`) is a step of the chain like a field; a computed one is refused. Any other field
 is refused. A `wrt:` field path is the exception to "constant": `derive_method_reverses` builds
 its place (`field_place`, typed from `Lowerer::structs`), `linearize` copies it once ahead of the
@@ -291,6 +291,9 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   nested coalesces cannot shadow each other); arm 1 is a `Wildcard` whose body is the fallback.
   The fallback's laziness comes free from the per-arm basic-block chain codegen already emits, and
   it lowers with the payload type as its expected type, which is what types a bare literal.
+  Mirroring the checker, a payload that borrows a `Copy` type beside a non-`Reference` fallback
+  lowers the fallback against the referent; when it comes out that type, arm 0's body is a
+  `Deref` of the binding and the `Match` is typed as the referent.
   `binary_result_type`'s `NullCoalesce` arm is unreachable by construction and says so.
   `success_variant`, `not_fallible`, and `fallible_base` are shared with the `?` desugar.
 - **Operator traits** (`operator_traits.rs` holds the table: `Add`, `Sub`, …, `MatMul`,
@@ -740,9 +743,12 @@ compiler bug, not a diagnostic.
   function exactly as the checker does; `.0` on a newtype-typed object lowers to `NewtypeAccess`.
   No `HirItem` is emitted: the backends erase the wrapper.
 - **Collections** (`collections.rs`): `lower_collection_new` lowers `Vec::new()` and its siblings
-  to `HirExprKind::CollectionNew` typed from the annotated target, and `lower_collection_method`
+  to `HirExprKind::CollectionNew` typed from the annotated target (`Vec::with_capacity(n)`, matched
+  by `is_collection_ctor`, carries its lowered `n` as `capacity`), and `lower_collection_method`
   re-derives each method's argument and result types, instantiating `Option<T>` through the
-  ordinary generic-enum path so backends see a real `HirItem::Enum`. `resolve_type` maps the
+  ordinary generic-enum path so backends see a real `HirItem::Enum`: `get` / `get_mut` yield
+  `Option<&T>` / `Option<&mut T>` (`borrow_of`), `insert` and a map's `remove` `Option<V>`, and
+  `Vec::remove` / `swap_remove` the element type. `resolve_type` maps the
   `Vec` / `HashMap` / `BTreeMap` generic application to `HirType::Collection` rather than
   monomorphizing a nominal instance (a user-declared type of that name still shadows it), and
   indexing, an index place, and `for`-in resolve a `Vec` element alongside an array's.

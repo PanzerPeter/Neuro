@@ -310,7 +310,11 @@ impl Lowerer {
             HirStmt::VarDecl {
                 name: BUILDER_LOCAL.to_string(),
                 ty: builder_ty.clone(),
-                init: Some(HirExpr::new(HirExprKind::CollectionNew, builder_ty, span)),
+                init: Some(HirExpr::new(
+                    HirExprKind::CollectionNew { capacity: None },
+                    builder_ty,
+                    span,
+                )),
                 mutable: true,
                 span,
             },

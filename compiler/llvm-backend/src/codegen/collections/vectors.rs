@@ -8,14 +8,17 @@ use inkwell::IntPredicate;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirStmt};
 
-use super::elements::SlotTransfer;
-use super::{FIELD_CAP, FIELD_LEN, collection_arg, initial_capacity};
+use super::{FIELD_CAP, FIELD_LEN, FIELD_USED, collection_arg, initial_capacity};
 use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 /// The shared capacity-growth helper: `__neuro_vec_reserve(header, elem_size)`.
 const RESERVE_HELPER: &str = "__neuro_vec_reserve";
+
+/// The drop-scope name of the header a consuming loop takes over. It contains `__`, which
+/// semantic analysis rejects in any declared name, so no move site can reach the entry.
+const CONSUMED_VEC: &str = "__consumed_vec";
 
 impl<'ctx> CodegenContext<'ctx> {
     /// `v.push(x)`, which grows if the buffer is full, then store at index `len` and bump it.
@@ -76,8 +79,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_select(present, last, i64_ty.const_zero(), "vec.pop.idx")?
             .into_int_value();
-        let value =
-            self.load_vec_element_or_zero(header, element_ty, index, present, SlotTransfer::Moved)?;
+        let value = self.read_vec_slot(header, element_ty, index, present, None)?;
 
         let shrunk = self
             .builder
@@ -88,8 +90,8 @@ impl<'ctx> CodegenContext<'ctx> {
         self.build_option_value(result_ty, present, value, element_ty)
     }
 
-    /// `v.get(i)`, which is `Some(element)` when `i < len`, else `None`. The checked
-    /// counterpart to `v[i]`, which panics instead.
+    /// `v.get(i)`, which is `Some(&element)` when `i < len`, else `None`. The checked
+    /// counterpart to `&v[i]`, which panics instead.
     pub(crate) fn codegen_vec_get(
         &mut self,
         header: PointerValue<'ctx>,
@@ -117,14 +119,59 @@ impl<'ctx> CodegenContext<'ctx> {
                 "vec.get.idx",
             )?
             .into_int_value();
-        let value = self.load_vec_element_or_zero(
-            header,
-            element_ty,
-            clamped,
-            present,
-            SlotTransfer::Copied,
-        )?;
-        self.build_option_value(result_ty, present, value, element_ty)
+        let value = self.read_vec_slot(header, element_ty, clamped, present, Some(false))?;
+        let borrow_ty = Type::Reference {
+            inner: Box::new(element_ty.clone()),
+            mutable: false,
+        };
+        self.build_option_value(result_ty, present, value, &borrow_ty)
+    }
+
+    /// `v.remove(i)`, which takes element `i` out and shifts the tail down over it, or
+    /// `v.swap_remove(i)`, which moves the last element into its slot instead. Either
+    /// panics when `i` is outside `0..len`.
+    pub(crate) fn codegen_vec_remove(
+        &mut self,
+        header: PointerValue<'ctx>,
+        element_ty: &Type,
+        args: &[HirExpr],
+        swap: bool,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let index_expr = args.first().ok_or_else(|| {
+            CodegenError::InternalError("Vec::remove reached codegen without an index".into())
+        })?;
+        let index = self.checked_vec_index(header, index_expr, index_expr.span.start)?;
+        let slot = self.vec_slot_ptr(header, element_ty, index)?;
+        let elem_llvm = self.collection_value_type(element_ty)?;
+        let value = self.builder.build_load(elem_llvm, slot, "vec.removed")?;
+
+        let i64_ty = self.context.i64_type();
+        let one = i64_ty.const_int(1, false);
+        let len = self.load_header_field(header, FIELD_LEN, "vec.len")?;
+        let last = self.builder.build_int_sub(len, one, "vec.last")?;
+        if swap {
+            // Moving the last element onto itself is a no-op, so `i == len - 1` needs no
+            // branch.
+            let last_slot = self.vec_slot_ptr(header, element_ty, last)?;
+            let moved = self
+                .builder
+                .build_load(elem_llvm, last_slot, "vec.last.val")?;
+            self.builder.build_store(slot, moved)?;
+        } else {
+            let next = self.builder.build_int_add(index, one, "vec.next")?;
+            let next_slot = self.vec_slot_ptr(header, element_ty, next)?;
+            let tail = self.builder.build_int_sub(last, index, "vec.tail")?;
+            let stride = self.size_of_type(elem_llvm)?;
+            let tail_bytes = self.builder.build_int_mul(tail, stride, "vec.tail.bytes")?;
+            let memmove = self.get_or_declare_memmove();
+            self.builder.build_call(
+                memmove,
+                &[slot.into(), next_slot.into(), tail_bytes.into()],
+                "",
+            )?;
+        }
+        self.store_header_field(header, FIELD_LEN, last)?;
+        Ok(value)
     }
 
     /// `v[i]` read, bounds-checked in every build, panicking on violation.
@@ -142,8 +189,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let header = self.collection_place_ptr(object, obj_ty)?;
         let slot = self.checked_vec_slot(header, &element_ty, index, offset)?;
         let elem_llvm = self.collection_value_type(&element_ty)?;
-        let value = self.builder.build_load(elem_llvm, slot, "vec.idx")?;
-        self.value_from_collection_slot(value, &element_ty, SlotTransfer::Copied)
+        // The slot keeps what it holds: a non-`Copy` element is only ever read in place,
+        // as a borrow, a receiver or an operand, never moved out (the checker refuses it).
+        self.builder
+            .build_load(elem_llvm, slot, "vec.idx")
+            .map_err(CodegenError::from)
     }
 
     /// `v[i] = x`, a bounds-checked element store into a `Vec` place.
@@ -163,19 +213,23 @@ impl<'ctx> CodegenContext<'ctx> {
         let val = self.value_for_collection_slot(value, val, &element_ty)?;
         let header = self.collection_place_ptr(object, target_ty)?;
         let slot = self.checked_vec_slot(header, &element_ty, index, index.span.start)?;
-        // The slot gives up what it held, and it is read on the way there: `v[i] = v[i]`
-        // would otherwise release the buffer the new value is, so the release follows the
-        // incoming value's own copy.
-        if matches!(element_ty, Type::String) {
-            self.release_slot_string(slot)?;
+        // The slot gives up what it held once the new value exists.
+        if self.slot_needs_release(&element_ty) {
+            self.drop_slot_value(slot, &element_ty)?;
         }
         self.builder.build_store(slot, val)?;
         Ok(())
     }
 
-    /// `for x in v` / `for x in &v`, a counted loop over the live elements, binding
-    /// `iterator` to a copy of each in turn. The bound is re-read every iteration, so a
-    /// body that pushes or pops observes the current length.
+    /// `for x in v` / `for x in &v`, a counted loop over the live elements. The bound is
+    /// re-read every iteration, so a body that pushes or pops observes the current length.
+    ///
+    /// A borrowed head binds each element's bits without its ownership (the checker lets
+    /// nothing move out of the binding), and so does a by-value head over elements that
+    /// own nothing. A by-value head over elements that do consumes them: the loop takes
+    /// the buffer from its owner, each pass's binding owns the element it holds, and
+    /// whatever no pass reached is released with the buffer when the loop is left, by
+    /// `break` and `return` as much as by running out.
     pub(crate) fn codegen_vec_for_each(
         &mut self,
         label: Option<&str>,
@@ -189,7 +243,14 @@ impl<'ctx> CodegenContext<'ctx> {
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
         let element_ty = collection_arg(collection_args(obj_ty)?, 0)?;
-        let header = self.collection_place_ptr(iterable, obj_ty)?;
+        let owner_header = self.collection_place_ptr(iterable, obj_ty)?;
+        let consumes =
+            !matches!(obj_ty, Type::Reference { .. }) && self.slot_needs_release(&element_ty);
+        let header = if consumes {
+            self.take_vec_for_loop(owner_header, &element_ty)?
+        } else {
+            owner_header
+        };
         let elem_llvm = self.collection_value_type(&element_ty)?;
         let i64_ty = self.context.i64_type();
 
@@ -228,18 +289,21 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(body_bb);
         let slot = self.vec_slot_ptr(header, &element_ty, i_val)?;
         let elem_val = self.builder.build_load(elem_llvm, slot, "veach.elem")?;
-        let elem_val =
-            self.value_from_collection_slot(elem_val, &element_ty, SlotTransfer::Copied)?;
         self.builder.build_store(elem_alloca, elem_val)?;
+        if consumes {
+            // The element now belongs to this pass's binding, so the remainder the loop
+            // still owns starts past it.
+            let taken =
+                self.builder
+                    .build_int_add(i_val, i64_ty.const_int(1, false), "veach.taken")?;
+            self.store_header_field(header, FIELD_USED, taken)?;
+        }
         self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();
         self.push_drop_scope();
-        // The binding holds a copy of the element, not a view into the buffer, so it is
-        // the iteration that owns it: registered inside the body scope, its flag re-armed
-        // by every pass, and released before the next element is read.
-        if matches!(element_ty, Type::String) {
-            self.register_local_drop(iterator, elem_alloca, DropTarget::HeapString)?;
+        if consumes {
+            self.register_slot_owner(iterator, elem_alloca, &element_ty)?;
         }
         self.loop_targets.push(LoopTargets {
             label: label.map(str::to_string),
@@ -279,6 +343,10 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(exit_bb);
         self.unbind_loop_index(index_binding);
+        if consumes {
+            self.emit_top_scope_drops()?;
+            self.pop_drop_scope();
+        }
 
         match previous_var {
             Some(p) => {
@@ -296,6 +364,48 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.variable_types.remove(&iter_name);
             }
         }
+        Ok(())
+    }
+
+    /// Move the `Vec` at `owner_header` into a header the consuming loop about to run
+    /// owns, leaving its owner an empty one to release, and open the scope that releases
+    /// whatever the loop does not take. The `used` field, which a `Vec` does not
+    /// otherwise use, counts the elements taken so far.
+    fn take_vec_for_loop(
+        &mut self,
+        owner_header: PointerValue<'ctx>,
+        element_ty: &Type,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let header_ty = self.collection_header_type();
+        let taken = self.entry_alloca(header_ty, "veach.src")?;
+        let value = self
+            .builder
+            .build_load(header_ty, owner_header, "veach.src.val")?;
+        self.builder.build_store(taken, value)?;
+        self.builder
+            .build_store(owner_header, header_ty.const_zero())?;
+        self.store_header_field(taken, FIELD_USED, self.context.i64_type().const_zero())?;
+        self.push_drop_scope();
+        self.register_local_drop(
+            CONSUMED_VEC,
+            taken,
+            DropTarget::VecRemainder(element_ty.clone()),
+        )?;
+        Ok(taken)
+    }
+
+    /// Release what a consuming loop over a `Vec` of `element_ty` has not taken, then its
+    /// buffer: the [`DropTarget::VecRemainder`] release.
+    pub(crate) fn emit_vec_remainder_free(
+        &mut self,
+        header: PointerValue<'ctx>,
+        element_ty: &Type,
+    ) -> CodegenResult<()> {
+        let start = self.load_header_field(header, FIELD_USED, "veach.rest")?;
+        self.emit_vec_slot_release(header, std::slice::from_ref(element_ty), start)?;
+        let buffer = self.load_header_buffer(header)?;
+        let free_fn = self.release_fn()?;
+        self.builder.build_call(free_fn, &[buffer.into()], "")?;
         Ok(())
     }
 
@@ -345,11 +455,9 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// The slot of `v[index]` as a place, when the element is an aggregate a longer
-    /// place projects into (`v[i].x = ...`, `v[i][j] = ...`). A `string` slot is never
-    /// one: a read of it copies the bytes out, and handing its address on would let a
-    /// consumer release the collection's own copy. `None` when the `Vec` itself has no
-    /// storage, so a write would land in a temporary.
+    /// The slot of `v[index]` as a place: what `&v[i]` borrows, a receiver reads in
+    /// place, and a longer place projects into (`v[i].x = ...`, `v[i][j] = ...`). `None`
+    /// when the `Vec` itself has no storage, so a write would land in a temporary.
     pub(crate) fn vec_element_place(
         &mut self,
         object: &HirExpr,
@@ -357,12 +465,6 @@ impl<'ctx> CodegenContext<'ctx> {
         index: &HirExpr,
     ) -> CodegenResult<Option<PointerValue<'ctx>>> {
         let element_ty = collection_arg(collection_args(obj_ty)?, 0)?;
-        if !matches!(
-            element_ty,
-            Type::Struct(_) | Type::Array { .. } | Type::Tuple(_)
-        ) {
-            return Ok(None);
-        }
         let header = if matches!(obj_ty, Type::Reference { .. }) {
             self.codegen_expr(object)?.into_pointer_value()
         } else {
@@ -383,6 +485,17 @@ impl<'ctx> CodegenContext<'ctx> {
         index: &HirExpr,
         offset: usize,
     ) -> CodegenResult<PointerValue<'ctx>> {
+        let widened = self.checked_vec_index(header, index, offset)?;
+        self.vec_slot_ptr(header, element_ty, widened)
+    }
+
+    /// Evaluate `index` as an `i64` position, panicking when it is outside `0..len`.
+    fn checked_vec_index(
+        &mut self,
+        header: PointerValue<'ctx>,
+        index: &HirExpr,
+        offset: usize,
+    ) -> CodegenResult<IntValue<'ctx>> {
         let index_sem = Type::from_hir(&index.ty);
         let raw = self.codegen_expr(index)?.into_int_value();
         let widened = self.widen_collection_index(raw, &index_sem)?;
@@ -391,26 +504,34 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_int_compare(IntPredicate::ULT, widened, len, "vec.bounds")?;
         self.codegen_guard_or_panic(ok, "Vec index out of bounds", offset)?;
-        self.vec_slot_ptr(header, element_ty, widened)
+        Ok(widened)
     }
 
-    /// Load element `index`, or a zero value when `present` is false. The buffer may be
-    /// null on an empty collection, so the load itself is predicated.
-    fn load_vec_element_or_zero(
+    /// Read element `index` when `present`, else a zero value: the element itself,
+    /// moved out, or with `borrow` a `&T` / `&mut T` to it in place. The buffer may be
+    /// null on an empty collection, so even the address is only formed when present.
+    fn read_vec_slot(
         &mut self,
         header: PointerValue<'ctx>,
         element_ty: &Type,
         index: IntValue<'ctx>,
         present: IntValue<'ctx>,
-        transfer: SlotTransfer,
+        borrow: Option<bool>,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
-        let elem_llvm = self.collection_value_type(element_ty)?;
-        let slot_alloca = self.entry_alloca(elem_llvm, "vec.read")?;
+        let read_ty = match borrow {
+            Some(mutable) => Type::Reference {
+                inner: Box::new(element_ty.clone()),
+                mutable,
+            },
+            None => element_ty.clone(),
+        };
+        let read_llvm = self.collection_value_type(&read_ty)?;
+        let slot_alloca = self.entry_alloca(read_llvm, "vec.read")?;
         self.builder
-            .build_store(slot_alloca, elem_llvm.const_zero())?;
+            .build_store(slot_alloca, read_llvm.const_zero())?;
 
         let read_bb = self.context.append_basic_block(parent_fn, "vec.read.do");
         let done_bb = self.context.append_basic_block(parent_fn, "vec.read.done");
@@ -419,16 +540,19 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(read_bb);
         let slot = self.vec_slot_ptr(header, element_ty, index)?;
-        let value = self.builder.build_load(elem_llvm, slot, "vec.elem")?;
-        // Inside the guarded block: an absent element is the zero fat pointer, whose null
-        // buffer a copy must never read.
-        let value = self.value_from_collection_slot(value, element_ty, transfer)?;
+        let value = match borrow {
+            Some(mutable) => self.slot_borrow(slot, element_ty, mutable)?,
+            None => {
+                let elem_llvm = self.collection_value_type(element_ty)?;
+                self.builder.build_load(elem_llvm, slot, "vec.elem")?
+            }
+        };
         self.builder.build_store(slot_alloca, value)?;
         self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
         self.builder
-            .build_load(elem_llvm, slot_alloca, "vec.read.val")
+            .build_load(read_llvm, slot_alloca, "vec.read.val")
             .map_err(CodegenError::from)
     }
 

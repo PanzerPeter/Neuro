@@ -94,6 +94,7 @@ tensors/kernel_partition.nr           36  gpu
 
 # --- ownership: moves, borrows, exclusivity, lifetimes, Drop ----------------
 ownership/borrow_exclusivity.nr  31
+ownership/collection_elements.nr 41
 ownership/consuming_self.nr      33
 ownership/copy_clone.nr          14
 ownership/drop.nr                5
@@ -178,6 +179,7 @@ showcase/heat_diffusion.nr           100  gpu
 showcase/gradient_loss.nr            45
 showcase/grid_update.nr              50
 showcase/held_destruction.nr         5
+showcase/incident_desk.nr            11
 showcase/inventory_ledger.nr         181
 showcase/job_queue.nr                139
 showcase/log_builder.nr              64

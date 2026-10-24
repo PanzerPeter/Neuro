@@ -45,9 +45,20 @@ const INITIAL_CAPACITY: u64 = 8;
 impl<'ctx> CodegenContext<'ctx> {
     /// Lower `Vec::new()` / `HashMap::new()` / `BTreeMap::new()` / `StringBuilder::new()`: a
     /// header with a null buffer and zero counts. Nothing is allocated until the first
-    /// insertion, so an empty collection costs no heap traffic.
-    pub(crate) fn codegen_collection_new(&mut self) -> CodegenResult<BasicValueEnum<'ctx>> {
-        Ok(self.collection_header_type().const_zero().into())
+    /// insertion, so an empty collection costs no heap traffic. `Vec::with_capacity(n)`
+    /// allocates its buffer up front instead.
+    pub(crate) fn codegen_collection_new(
+        &mut self,
+        capacity: Option<&HirExpr>,
+        ty: &Type,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let Some(capacity) = capacity else {
+            return Ok(self.collection_header_type().const_zero().into());
+        };
+        let element_ty = collection_arg(vectors::collection_args(ty)?, 0)?;
+        let raw = self.codegen_expr(capacity)?.into_int_value();
+        let count = self.widen_collection_index(raw, &Type::from_hir(&capacity.ty))?;
+        self.vec_header_with_capacity(&element_ty, count)
     }
 
     /// Dispatch a method call on a collection receiver.
@@ -100,6 +111,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 result_ty,
                 args,
             )?)),
+            (CollectionKind::Vec, "remove" | "swap_remove") => Ok(Some(self.codegen_vec_remove(
+                header,
+                &collection_arg(&params, 0)?,
+                args,
+                method == "swap_remove",
+            )?)),
             (CollectionKind::StringBuilder, "push_str") => {
                 self.codegen_string_push_str(header, args)?;
                 Ok(None)
@@ -121,14 +138,13 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Emitted at the owner's scope exit; a never-allocated collection holds a null
     /// buffer, which `free` accepts.
     ///
-    /// `ty` is the collection's own type, which is what says whether a slot holds a
-    /// `string` the collection owns; every other element type is `Copy` and owns nothing.
+    /// `ty` is the collection's own type, which is what says what a slot owns.
     pub(crate) fn emit_collection_free(
         &mut self,
         header: PointerValue<'ctx>,
         ty: &Type,
     ) -> CodegenResult<()> {
-        self.emit_collection_string_release(header, ty)?;
+        self.emit_collection_slot_release(header, ty)?;
         let buffer = self.load_header_buffer(header)?;
         let free_fn = self.release_fn()?;
         self.builder
@@ -153,7 +169,7 @@ impl<'ctx> CodegenContext<'ctx> {
         slot_stride: IntValue<'ctx>,
         ty: &Type,
     ) -> CodegenResult<()> {
-        self.emit_collection_string_release(header, ty)?;
+        self.emit_collection_slot_release(header, ty)?;
         let zero = self.context.i64_type().const_zero();
         self.store_header_field(header, FIELD_LEN, zero)?;
         self.store_header_field(header, FIELD_USED, zero)?;

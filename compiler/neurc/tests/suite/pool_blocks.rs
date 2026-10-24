@@ -1065,7 +1065,7 @@ func main() -> i32 {{
         }}
     }}
 {CLOBBER_POOL}
-    match m.get(7) {{ Some(x) => x, None => 99 }}
+    match m.get(7) {{ Some(x) => *x, None => 99 }}
 }}
 "#
     );

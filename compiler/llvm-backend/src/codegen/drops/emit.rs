@@ -140,7 +140,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The flagged path is the one bindings take; this is for a position no flag can
     /// guard, namely an enum payload slot, where the tag the caller switched on has
     /// already established that the value is live.
-    pub(super) fn emit_value_destructor(
+    pub(crate) fn emit_value_destructor(
         &mut self,
         storage_ptr: PointerValue<'ctx>,
         ty: &Type,
@@ -326,6 +326,10 @@ impl<'ctx> CodegenContext<'ctx> {
             DropTarget::EnumPayload(enum_name) => {
                 let enum_name = enum_name.clone();
                 self.emit_enum_payload_drop(storage_ptr, &enum_name)?
+            }
+            DropTarget::VecRemainder(element_ty) => {
+                let element_ty = element_ty.clone();
+                self.emit_vec_remainder_free(storage_ptr, &element_ty)?
             }
             DropTarget::Captured(ty) => {
                 let ty = ty.clone();

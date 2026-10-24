@@ -16,7 +16,6 @@ use inkwell::types::StructType;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::HirExpr;
 
-use super::elements::SlotTransfer;
 use super::{FIELD_LEN, collection_arg};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -76,30 +75,57 @@ impl<'ctx> CodegenContext<'ctx> {
             "insert" => {
                 let key = self.lower_map_argument(args, 0, &key_ty)?;
                 let value = self.lower_map_argument(args, 1, &value_ty)?;
-                // The value reaches exactly one store on either path, so the slot's copy
-                // is made here. The KEY is stored only when the entry is new, so its copy
-                // is made inside the helper, where that is known.
+                // Both operands move into the map, so each is made to own its bytes here.
+                // The helper stores the key only for a new entry and drops it otherwise.
+                let key = match args.first() {
+                    Some(expr) => self.value_for_collection_slot(expr, key, &key_ty)?,
+                    None => key,
+                };
                 let value = match args.get(1) {
                     Some(expr) => self.value_for_collection_slot(expr, value, &value_ty)?,
                     None => value,
                 };
-                let insert = self.build_map_insert_helper(kind, &key_ty, &value_ty)?;
+                let value_llvm = self.collection_value_type(&value_ty)?;
+                let displaced = self.entry_alloca(value_llvm, "map.displaced")?;
                 self.builder
-                    .build_call(insert, &[header.into(), key.into(), value.into()], "")?;
-                // The helper has copied whatever bytes it kept by the time it returns, so
-                // a key built for this call has no reader left.
-                if let Some(expr) = args.first() {
-                    self.release_string_temporary(expr, key)?;
-                }
-                Ok(None)
+                    .build_store(displaced, value_llvm.const_zero())?;
+                let insert = self.build_map_insert_helper(kind, &key_ty, &value_ty)?;
+                let replaced = self
+                    .builder
+                    .build_call(
+                        insert,
+                        &[header.into(), key.into(), value.into(), displaced.into()],
+                        "map.replaced",
+                    )?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| CodegenError::InternalError("map insert returned void".into()))?
+                    .into_int_value();
+                let old = self
+                    .builder
+                    .build_load(value_llvm, displaced, "map.displaced.val")?;
+                Ok(Some(
+                    self.build_option_value(result_ty, replaced, old, &value_ty)?,
+                ))
             }
-            "get" => {
+            "get" | "get_mut" => {
                 let slot = self.emit_map_find(kind, header, &key_ty, &value_ty, args)?;
                 let present = self.slot_found(slot)?;
-                let value =
-                    self.load_slot_value(kind, header, &key_ty, &value_ty, slot, present)?;
+                let mutable = method == "get_mut";
+                let borrow_ty = Type::Reference {
+                    inner: Box::new(value_ty.clone()),
+                    mutable,
+                };
+                let value = self.read_slot_value(
+                    kind,
+                    header,
+                    (&key_ty, &value_ty),
+                    slot,
+                    present,
+                    Some(mutable),
+                )?;
                 Ok(Some(self.build_option_value(
-                    result_ty, present, value, &value_ty,
+                    result_ty, present, value, &borrow_ty,
                 )?))
             }
             "contains_key" => {
@@ -108,10 +134,13 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             "remove" => {
                 let slot = self.emit_map_find(kind, header, &key_ty, &value_ty, args)?;
-                Ok(Some(
-                    self.emit_map_remove(kind, header, &key_ty, &value_ty, slot)?
-                        .into(),
-                ))
+                let present = self.slot_found(slot)?;
+                let value =
+                    self.read_slot_value(kind, header, (&key_ty, &value_ty), slot, present, None)?;
+                self.emit_map_remove(kind, header, &key_ty, &value_ty, slot)?;
+                Ok(Some(self.build_option_value(
+                    result_ty, present, value, &value_ty,
+                )?))
             }
             "keys" => Ok(Some(self.emit_map_keys(kind, header, &key_ty, &value_ty)?)),
             _ => Err(CodegenError::InternalError(format!(
@@ -193,23 +222,31 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(CodegenError::from)
     }
 
-    /// Load the value out of slot `slot`, predicated on the lookup having hit. The
-    /// buffer may be null, so the load itself must be guarded.
-    fn load_slot_value(
+    /// Read slot `slot`'s value, predicated on the lookup having hit: the value itself,
+    /// moved out, or with `borrow` a `&V` / `&mut V` to it in place. The buffer may be
+    /// null, so even the address is only formed on the hit path.
+    fn read_slot_value(
         &mut self,
         kind: CollectionKind,
         header: PointerValue<'ctx>,
-        key_ty: &Type,
-        value_ty: &Type,
+        (key_ty, value_ty): (&Type, &Type),
         slot: IntValue<'ctx>,
         present: IntValue<'ctx>,
+        borrow: Option<bool>,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
-        let value_llvm = self.collection_value_type(value_ty)?;
-        let out = self.entry_alloca(value_llvm, "map.read")?;
-        self.builder.build_store(out, value_llvm.const_zero())?;
+        let read_ty = match borrow {
+            Some(mutable) => Type::Reference {
+                inner: Box::new(value_ty.clone()),
+                mutable,
+            },
+            None => value_ty.clone(),
+        };
+        let read_llvm = self.collection_value_type(&read_ty)?;
+        let out = self.entry_alloca(read_llvm, "map.read")?;
+        self.builder.build_store(out, read_llvm.const_zero())?;
 
         let read_bb = self.context.append_basic_block(parent_fn, "map.read.do");
         let done_bb = self.context.append_basic_block(parent_fn, "map.read.done");
@@ -219,22 +256,26 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(read_bb);
         let value_ptr =
             self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, SlotField::Value)?;
-        let value = self.builder.build_load(value_llvm, value_ptr, "map.val")?;
-        // Inside the guarded block: a miss reads no slot at all, so a copy is only ever
-        // made of bytes that exist.
-        let value = self.value_from_collection_slot(value, value_ty, SlotTransfer::Copied)?;
+        let value = match borrow {
+            Some(mutable) => self.slot_borrow(value_ptr, value_ty, mutable)?,
+            None => {
+                let value_llvm = self.collection_value_type(value_ty)?;
+                self.builder.build_load(value_llvm, value_ptr, "map.val")?
+            }
+        };
         self.builder.build_store(out, value)?;
         self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
         self.builder
-            .build_load(value_llvm, out, "map.read.val")
+            .build_load(read_llvm, out, "map.read.val")
             .map_err(CodegenError::from)
     }
 
-    /// `m.remove(k)`, which is `true` when the key was present. The hashed map leaves a
-    /// tombstone (its `used` count is unchanged, so the slot is still probed through);
-    /// the ordered map closes the gap so the slots stay sorted and dense.
+    /// Give up slot `slot` when the lookup hit, after its value has been moved out: the
+    /// key is released, the hashed map leaves a tombstone (its `used` count is unchanged,
+    /// so the slot is still probed through), and the ordered map closes the gap so the
+    /// slots stay sorted and dense.
     fn emit_map_remove(
         &mut self,
         kind: CollectionKind,
@@ -242,7 +283,7 @@ impl<'ctx> CodegenContext<'ctx> {
         key_ty: &Type,
         value_ty: &Type,
         slot: IntValue<'ctx>,
-    ) -> CodegenResult<IntValue<'ctx>> {
+    ) -> CodegenResult<()> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
@@ -253,9 +294,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_conditional_branch(present, do_bb, done_bb)?;
 
         self.builder.position_at_end(do_bb);
-        // The slot's own buffers go with the entry: after the tombstone or the shift,
-        // nothing can name them again.
-        self.release_slot_strings(kind, header, key_ty, value_ty, slot)?;
+        // The key goes with the entry: after the tombstone or the shift, nothing can name
+        // it again. The value has already left with the caller.
+        self.release_slot_entry(kind, header, key_ty, value_ty, slot, false)?;
         match kind {
             CollectionKind::HashMap => {
                 let state_ptr = self.hashed_slot_state_ptr(header, key_ty, value_ty, slot)?;
@@ -276,7 +317,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
-        Ok(present)
+        Ok(())
     }
 
     /// `m.keys()`, a fresh `Vec<K>` of the live keys, in slot order. For the ordered
