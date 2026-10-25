@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.18.2] - 2026-10-25
+
+### Fixed
+
+- Two `collection_elements` tests failed on Windows CI. The drop-order test
+  compared raw stdout, which carries `\r\n` line endings on Windows; it now
+  normalizes them like the rest of the suite. The readers-and-takers test
+  exited with 3344, which Windows reports in full; the program now reduces its
+  total modulo 256 so every platform reads 16.
+
 ## [5.18.1] - 2026-10-24
 
 ### Fixed

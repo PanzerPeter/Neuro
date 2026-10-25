@@ -20,7 +20,7 @@ fn stdout_of(filename: &str, source: &str) -> String {
     let output = std::process::Command::new(&exe)
         .output()
         .expect("run the compiled program");
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
 }
 
 fn rejected(filename: &str, source: &str) -> String {
@@ -167,7 +167,7 @@ func main() -> i32 {
     v.push(5)
     val lent = v.get(0) ?? 0
     val missing = v.get(9) ?? -1
-    old_len * 1000 + lent_len * 100 + gone_len * 10 + lent + missing + m.len() as i32
+    (old_len * 1000 + lent_len * 100 + gone_len * 10 + lent + missing + m.len() as i32) % 256
 }
 "#;
     assert_eq!(
