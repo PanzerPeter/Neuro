@@ -183,8 +183,6 @@ func main() -> i32 {
     );
 }
 
-// --- Newtype declarations ---------------------------------------------
-
 /// Reading a moved binding through a path is one use and one error. The root name and
 /// the outermost link of the path each reported the whole-binding move, so the error
 /// count doubled for every such read.

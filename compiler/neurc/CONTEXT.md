@@ -87,8 +87,7 @@ does: `sm_NN` is NVIDIA (`GpuTarget::Nvidia`, `GpuVendor::Nvidia`), `gfxNNN` is 
 checked by `mlir-backend`, which splices it into a pass pipeline. Unset, it is `sm_60`
 (`DEFAULT_GPU_CHIP`): NVIDIA kernels ship as PTX the driver JITs for any newer GPU, so the floor
 is what matters. AMD gets no default, because a code object runs on exactly its chip. The
-vendor also reaches the LLVM backend without MLIR, since a `.to(Device::GPU(0))` links the GPU
-runtime on either build.
+vendor also reaches the LLVM backend, since a `.to(Device::GPU(0))` links the GPU runtime.
 
 ### `--emit`
 `--emit obj` stops the pipeline one step earlier and writes the object file to the output path

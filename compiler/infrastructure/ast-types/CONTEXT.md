@@ -22,8 +22,9 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
 ## Notes
 These types live in infrastructure rather than in `syntax-parsing` so that `semantic-analysis`,
 `hir-lowering`, and `llvm-backend` can consume the tree without a cross-slice dependency on the
-parser. `syntax-parsing/src/ast/mod.rs` re-exports them so parser-internal code can keep saying
-`crate::ast::…`; it is a naming convenience, not a compatibility shim.
+parser. `syntax-parsing` imports them from here directly and re-exports the common ones from its
+`lib.rs`, so a caller that only wants the parser's surface does not need this crate in its own
+manifest.
 
 Node *shapes* are self-describing in the source. What follows is only what the definitions
 cannot state.

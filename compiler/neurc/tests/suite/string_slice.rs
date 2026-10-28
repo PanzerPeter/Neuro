@@ -155,8 +155,6 @@ func main() -> i32 {
     assert!(success, "&i32 == i32 compares the referent; got: {stderr}");
 }
 
-// --- string.slice(range) ------------------------------------------
-
 /// Compile + run, asserting the process did NOT exit cleanly (a panic aborts via
 /// SIGABRT, so `status.code()` is `None`, surfaced as a non-zero/`-1` code).
 fn run_expecting_abort(source: &str) {

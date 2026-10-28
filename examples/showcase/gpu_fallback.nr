@@ -8,7 +8,7 @@
 //
 // Both layers carry `fallback: true`, so the program picks their bodies once at startup:
 // the GPU kernels where an NVIDIA GPU is usable, the same arithmetic on the CPU where
-// none is (or where neurc was built without MLIR). The output is identical either way.
+// none is. The output is identical either way.
 // Each batch is also computed inline on the host, and a `Verdict` says whether the two
 // agree. Every batch runs inside a `pool`.
 

@@ -1,6 +1,5 @@
-# MLIR Backend (Experimental)
+# MLIR Backend
 
-**Status**: experimental, built into every compiler
 **Crate**: `compiler/mlir-backend`
 **Library**: melior 0.28.2 (Rust MLIR bindings, LLVM/MLIR 23)
 

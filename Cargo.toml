@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "5.19.0"
+version = "5.19.1"
 edition = "2024"
 rust-version = "1.98.1"
 authors = ["Neuro Contributors"]
@@ -52,12 +52,11 @@ logos = "0.16"
 inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "e27198562729488a493e8110b4d925875eb917cb", default-features = false, features = ["llvm23-1", "target-x86"] }
 
 # MLIR Backend (Phase 1.8+)
-# Rust MLIR bindings for the tensor lowering path, behind mlir-backend's `mlir`
-# feature. melior 0.28.x is the MLIR 23 line (via mlir-sys 230). mlir-sys finds
-# MLIR through `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR must be installed
-# into the same prefix as the LLVM that LLVM_SYS_231_PREFIX names: `bridge.rs`
-# hands an `LLVMContextRef` from MLIR's libLLVM to inkwell, so both must load one
-# libLLVM 23. TABLEGEN_230_PREFIX names the same prefix for mlir-tblgen.
+# Rust MLIR bindings for the tensor lowering path. melior 0.28.x is the MLIR 23
+# line (via mlir-sys 230). mlir-sys finds MLIR through
+# `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR must be installed into the same
+# prefix as the LLVM that LLVM_SYS_231_PREFIX names: `bridge.rs` hands an
+# `LLVMContextRef` from MLIR's libLLVM to inkwell, so both must load one libLLVM 23. TABLEGEN_230_PREFIX names the same prefix for mlir-tblgen.
 melior = "0.28.2"
 
 # melior does not wrap `mlirTranslateModuleToLLVMIR`, so the MLIR -> LLVM IR

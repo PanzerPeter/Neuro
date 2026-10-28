@@ -101,35 +101,33 @@ several features at once.
 | Requirement | Version | Notes |
 |---|---|---|
 | **Rust** | 1.98.1+ | Install via [rustup](https://rustup.rs/) |
-| **LLVM 23** | 23.x with dev libraries | Per-platform commands below |
+| **LLVM 23 and MLIR 23** | 23.x with dev libraries, in one prefix | Per-platform commands below |
 | **C linker** | any | `gcc` / `clang` on Linux and macOS, MSVC on Windows |
 
-### 1. LLVM 23
+### 1. LLVM 23 and MLIR 23
 
-This is the only step that differs between systems. Put the `export` in your shell profile
-(`~/.bashrc`, `~/.zshrc`) so it survives a new terminal.
+This is the only step that differs between systems. Every build compiles the MLIR backend, so
+MLIR must sit in the same prefix as LLVM, and three variables name that prefix. Put the
+`export` in your shell profile (`~/.bashrc`, `~/.zshrc`) so it survives a new terminal.
 
 ```bash
-# Arch Linux / CachyOS
-sudo pacman -S llvm
-export LLVM_SYS_231_PREFIX=/usr
-
 # Ubuntu / Debian
 wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 23
-sudo apt-get install -y llvm-23-dev libpolly-23-dev
-export LLVM_SYS_231_PREFIX=/usr/lib/llvm-23
+sudo apt-get install -y llvm-23-dev libpolly-23-dev libmlir-23-dev mlir-23-tools \
+  libclang-23-dev libclang-common-23-dev
+prefix=/usr/lib/llvm-23
 
 # macOS (Homebrew)
 brew install llvm
-export LLVM_SYS_231_PREFIX="$(brew --prefix llvm)"
+prefix="$(brew --prefix llvm)"
+
+export LLVM_SYS_231_PREFIX=$prefix MLIR_SYS_230_PREFIX=$prefix TABLEGEN_230_PREFIX=$prefix
 ```
 
-Windows needs the MSVC toolchain and LLVM's **full development archive**,
-`clang+llvm-23.*-x86_64-pc-windows-msvc.tar.xz`: the `.exe` installer ships Clang and `LLVM-C.dll`
-but no `llvm-config.exe`, no headers and no static libraries, so `llvm-sys` cannot build against it. The PowerShell walkthrough is in the
-[installation guide](docs/getting-started/installation.md#windows-msvc), and
-[troubleshooting](docs/guides/troubleshooting.md) covers the errors that follow from getting it
-wrong.
+Arch Linux / CachyOS and Windows have no MLIR package that fits, so both build LLVM and MLIR from
+source into one prefix. The recipes are in the [installation guide](docs/getting-started/installation.md),
+and [troubleshooting](docs/guides/troubleshooting.md) covers the errors that follow from getting
+it wrong.
 
 ### 2. Build
 

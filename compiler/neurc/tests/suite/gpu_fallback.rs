@@ -2,9 +2,8 @@
 // the same body on the host where it does not.
 //
 // Unlike bare `@gpu`, a fallback program runs on every build and every machine, so its
-// answers are pinned everywhere: on a GPU, on CI's GPU-less MLIR job, with every device
-// hidden by `CUDA_VISIBLE_DEVICES`, and on a neurc without MLIR, which builds only the host
-// body and says so.
+// answers are pinned everywhere: on a GPU, on CI's GPU-less jobs, and with every device
+// hidden by `CUDA_VISIBLE_DEVICES`.
 
 use std::process::{Command, Output};
 

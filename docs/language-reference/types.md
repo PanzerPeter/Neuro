@@ -764,7 +764,7 @@ func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through i
 A returned `&T` is checked against what it points into; see
 [Lifetimes](#lifetimes-returned-references).
 
-#### Reading through a borrow
+### Reading through a borrow
 
 Arithmetic, comparison, bitwise and logical operators accept a borrowed operand wherever they
 accept an owned one, and so do `+` and `==` on strings, every tensor operator, compound

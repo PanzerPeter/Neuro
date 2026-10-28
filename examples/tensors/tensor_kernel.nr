@@ -23,7 +23,7 @@
 // `break`, `continue` and `return`, and tensor elements. It cannot call functions yet.
 //
 // A KERNEL REQUIRES A GPU. With no usable NVIDIA GPU the program stops at startup, before
-// `main` runs. Compiling one needs a `neurc` built with the MLIR backend (`--features mlir`).
+// `main` runs. Compiling one needs a Linux `neurc`.
 
 // One thread per output element: add, then clamp at zero.
 @kernel(threads: [16, 16])

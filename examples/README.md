@@ -8,9 +8,9 @@ two ways, and the test harness checks both:
 - whatever the program writes to **standard output** is fixed byte for byte in a
   sibling `.out` file: `basics/hello.nr` is pinned by `basics/hello.out`.
 
-Every example currently prints, so every one has a `.out` file. The rule still runs
-the other way too: a program that prints nothing has no `.out` file, and that absence
-is itself the expectation: its output must stay empty.
+Every program with a `main` currently prints, so every one has a `.out` file. The rule
+still runs the other way too: a program that prints nothing has no `.out` file, and that
+absence is itself the expectation: its output must stay empty.
 
 Each program explains itself in a header comment. This file says where things are,
 not what each one does.
@@ -38,10 +38,9 @@ compiled as part of the root that reaches into them, so only the root has output
 of its own to pin.
 
 A program with bare `@gpu` or `@kernel` functions carries `gpu` after its exit code. Only a compiler
-built with the MLIR backend can compile it, and only a machine with an NVIDIA GPU
-can run it, so the harness checks what each setup can: both pins where a GPU runs
-it, the startup abort where none is usable, and a type check on a build without
-MLIR.
+on Linux can compile it, and only a machine with an NVIDIA GPU can run it, so the
+harness checks what each setup can: both pins where a GPU runs it, the startup abort
+where none is usable, and a type check off Linux.
 
 ## Compiling and running
 

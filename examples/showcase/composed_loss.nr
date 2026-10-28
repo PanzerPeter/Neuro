@@ -7,7 +7,7 @@
 //   tensor argument's shape · 2C's `@` contraction · 2D's `pool` arena around each
 //   evaluation · a struct and a `Vec` collecting the results · string
 //   interpolation with the format mini-language · Phase 4's MLIR routing: a
-//   compiler built with the `mlir` feature computes `residual`'s straight-line tensor
+//   compiler computes `residual`'s straight-line tensor
 //   arithmetic through MLIR and links it in, and every call site stays as it is.
 //
 // The compiler derives the gradient of each `@grad` function beside it at compile

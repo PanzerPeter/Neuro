@@ -234,3 +234,23 @@ func main() -> i32 { 0 }
         "{stderr}"
     );
 }
+
+#[test]
+fn copy_bounded_impl_emits_for_scalar_and_tuple_arguments() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Box2<T: Copy> { v: T }
+impl<T: Copy> Box2<T> {
+    func make(v: T, w: T) -> Box2<T> { Box2 { v: w } }
+}
+func main() -> i32 {
+    val a = Box2::make(2, 3)
+    val b = Box2::make((1, 2), (3, 4))
+    a.v + b.v.0 + b.v.1 * 10
+}
+"#;
+    let exit_code = test
+        .compile_and_run("copy_bounded_impl.nr", source)
+        .expect("a `T: Copy` impl must be emitted for scalar and tuple arguments");
+    assert_eq!(exit_code, 46);
+}

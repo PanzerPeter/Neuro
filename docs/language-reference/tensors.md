@@ -161,7 +161,7 @@ A transfer needs a usable GPU of the vendor the program was built for (NVIDIA un
 whose only GPU use is `.to` looks for one at its first transfer, not at startup, and if none is
 usable the transfer aborts with ``panic: `Device::GPU` needs an NVIDIA GPU, and none is usable:``
 (or `an AMD GPU`) followed by the reason. `Device::GPU(n)` for a GPU the machine does not have
-aborts with ``panic: `Device::GPU(n)` names no GPU: this machine has <count>``. Transfers need no MLIR backend, so any `neurc` compiles them, but on Windows a
+aborts with ``panic: `Device::GPU(n)` names no GPU: this machine has <count>``. Any `neurc` compiles a transfer, but on Windows a
 transfer to a GPU aborts.
 [examples/tensors/tensor_device.nr](../../examples/tensors/tensor_device.nr) runs the snippet
 above and checks it against the host.
@@ -1182,7 +1182,7 @@ kernel in a debug build (`-O0`) and wraps from `-O1` up. Anything else, such as 
 that construct.
 
 The attribute goes on a free function, never beside `@gpu` or `@grad`, and a kernel needs a GPU
-and a `neurc` built with the MLIR backend, exactly as bare `@gpu` does.
+and a Linux `neurc`, exactly as bare `@gpu` does.
 [examples/tensors/tensor_kernel.nr](../../examples/tensors/tensor_kernel.nr) runs the first
 snippet above, [examples/tensors/kernel_partition.nr](../../examples/tensors/kernel_partition.nr)
 the second, and [examples/showcase/heat_diffusion.nr](../../examples/showcase/heat_diffusion.nr) steps

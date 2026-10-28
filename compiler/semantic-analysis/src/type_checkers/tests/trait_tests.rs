@@ -128,8 +128,6 @@ func main() -> i32 {
     );
 }
 
-// ---- Operator traits ----
-
 /// A `Vec2` with the arithmetic, unary, and comparison operator impls used below.
 const VEC2_OPS: &str = r#"
 @derive(Copy, Clone)

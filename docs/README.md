@@ -64,7 +64,7 @@ Design goals:
 - [Semantic Analysis](compiler/components/semantic-analysis.md): type checking
 - [HIR Lowering](compiler/components/hir-lowering.md): AST to typed High-Level IR (`neuro-hir`)
 - [LLVM Backend](compiler/components/llvm-backend.md): native code generation from HIR
-- [MLIR Backend](compiler/components/mlir-backend.md): experimental HIR to MLIR linalg and GPU path
+- [MLIR Backend](compiler/components/mlir-backend.md): HIR to MLIR linalg and GPU kernels, the tensor path
 
 The typed High-Level IR (`neuro-hir`) is the backend-agnostic contract: every backend lowers from
 it. Each slice also keeps a `CONTEXT.md` beside its source, which is the authority on that slice's

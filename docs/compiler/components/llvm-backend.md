@@ -12,18 +12,11 @@ expression, so the backend reads types inline instead of re-deriving them. It us
 [inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 23) to produce
 optimized machine code for the host platform.
 
-**Entry points:**
-```rust
-pub fn compile(program: &HirProgram, optimization: OptimizationLevelSetting,
-               source: &str, source_path: &str,
-               external: &[ExternalBodies]) -> CodegenResult<Vec<u8>>
-pub fn compile_to_ir(program: &HirProgram, optimization: OptimizationLevelSetting,
-                     source: &str, source_path: &str,
-                     external: &[ExternalBodies]) -> CodegenResult<String>
-```
-
+The entry points are `compile` and `compile_to_ir`, both in
+[`lib.rs`](../../../compiler/llvm-backend/src/lib.rs). Each takes the HIR program, an
+`OptimizationLevelSetting`, the source text and path, and the `external` bodies.
 `compile` returns object code; `compile_to_ir` stops after the pass pipeline and returns the
-textual module (`neurc compile --emit llvm-ir`). `source` / `source_path` are carried through for
+textual module (`neurc compile --emit llvm-ir`). The source text and path are carried through for
 located runtime-panic diagnostics (array bounds, slice boundaries, integer overflow).
 `external` names function bodies another backend computed; see [MLIR bodies](#mlir-bodies).
 

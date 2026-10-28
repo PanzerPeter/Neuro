@@ -164,8 +164,6 @@ func main() -> i32 {
     );
 }
 
-// --- Generics ---
-
 /// A newtype takes `impl` blocks and trait impls as a struct does: methods, associated
 /// functions, operator traits and user traits through a bound.
 #[test]

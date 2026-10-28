@@ -15,7 +15,7 @@
 //
 // The element count has to divide evenly among the grid's threads, and the compiler
 // refuses a partition where it does not. Like any kernel, this needs a GPU and a
-// `neurc` built with `--features mlir`.
+// Linux `neurc`.
 
 // One thread per row of `m`: the grid tensor is `totals`, 6 rows in blocks of 4, so the
 // last 2 threads of the second block own nothing. A thread's run of `scaled` is its

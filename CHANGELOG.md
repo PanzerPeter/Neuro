@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.19.1] - 2026-10-28
+
+### Fixed
+
+- The README install steps predated MLIR being built into every compiler. The Ubuntu and
+  macOS recipes now install the MLIR packages and export all three prefixes, and Arch and
+  Windows point to the installation guide's source build.
+- Comments and docs still said a kernel needed a `neurc` built with `--features mlir`, a
+  feature that no longer exists. They now say a Linux `neurc`, which is what the example
+  harness checks. The MLIR backend page also dropped its "Experimental" title.
+- The `ast-types` context note named a re-export module in `syntax-parsing` that does not
+  exist, and the LLVM backend page pasted two function signatures instead of linking them.
+- `docs/BUGS.md` listed a `Copy`-bounded generic impl that emitted nothing for a scalar or
+  tuple argument. It builds and runs, so the entry is gone and a regression test pins both
+  argument shapes.
+- Four section-divider comments in test files are removed.
+
 ## [5.19.0] - 2026-10-28
 
 ### Added
