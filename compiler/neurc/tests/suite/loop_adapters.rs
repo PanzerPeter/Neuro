@@ -110,7 +110,7 @@ func main() -> i32 {
     val xs: [i32; 5] = [1, 2, 3, 4, 5]
     val window = xs.slice(1..4)
     mut total = 0
-    for v in window.map(|x: i32| -> i32 { x * 10 }) {
+    for v in window.map(|x: &i32| -> i32 { x * 10 }) {
         total += v
     }
     total

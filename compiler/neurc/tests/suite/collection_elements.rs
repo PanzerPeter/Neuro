@@ -279,7 +279,7 @@ func keep(p: P) -> i32 { 0 }
 func main() -> i32 {
     val arr: [P; 1] = [P { name: "a" }]
     for p in &arr {
-        keep(p)
+        keep(*p)
     }
     0
 }

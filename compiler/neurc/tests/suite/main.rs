@@ -81,6 +81,7 @@ mod integer_literal_bounds;
 mod integer_methods;
 mod integer_overflow;
 mod integer_suffixes;
+mod iteration_by_reference;
 mod iterator_protocol;
 mod kernel_attribute;
 mod kernel_partition;

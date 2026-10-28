@@ -15,7 +15,7 @@ func main() -> i32 {
     counts[0] = 4
 
     mut sum: i32 = 0
-    for c in counts {
+    for c in &counts {
         sum = sum + c
     }
     // sum == 16

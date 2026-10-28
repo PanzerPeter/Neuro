@@ -922,7 +922,7 @@ mod tests {
             func main() -> i32 {
                 mut v: Vec<P> = Vec::new()
                 for p in &v {
-                    keep(p)
+                    keep(*p)
                 }
                 return 0
             }

@@ -1,5 +1,6 @@
 // Fixed-size arrays `[T; N]`: literals, indexing, element assignment,
-// `.len()`, by-value iteration, and borrowed iteration `for x in &arr`.
+// `.len()`, by-value iteration, borrowed iteration `for x in &arr` (each `x` is a
+// `&i32`), and mutating iteration `for x in &mut arr` (each `x` is a `&mut i32`).
 
 func sum(xs: [i32; 5]) -> i32 {
     mut total: i32 = 0
@@ -25,7 +26,12 @@ func main() -> i32 {
     }
     println("for x in &data -> {borrowed}")
 
-    // data[2] = 3, n = 5; the two correction terms are 0 when total and the
-    // borrowed sum are computed correctly. Exit code: 3 + 5 = 8.
+    for x in &mut data {
+        *x = *x * 2              // writes the element in place
+    }
+    println("after for x in &mut data: {data[0]}, {data[1]}, {data[2]}, {data[3]}, {data[4]}")
+
+    // data[2] = 6, n = 5; the two correction terms are 0 when total and the
+    // borrowed sum are computed correctly. Exit code: 6 + 5 = 11.
     return data[2] + (n as i32) + (total - 24) + (borrowed - 24)
 }

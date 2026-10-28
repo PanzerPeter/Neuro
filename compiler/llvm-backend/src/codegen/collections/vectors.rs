@@ -224,9 +224,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// `for x in v` / `for x in &v`, a counted loop over the live elements. The bound is
     /// re-read every iteration, so a body that pushes or pops observes the current length.
     ///
-    /// A borrowed head binds each element's bits without its ownership (the checker lets
-    /// nothing move out of the binding), and so does a by-value head over elements that
-    /// own nothing. A by-value head over elements that do consumes them: the loop takes
+    /// A borrowed head binds each element's address, and a by-value head over elements
+    /// that own nothing binds their bits, leaving the buffer to its owner's release. A
+    /// by-value head over elements that do own something consumes them: the loop takes
     /// the buffer from its owner, each pass's binding owns the element it holds, and
     /// whatever no pass reached is released with the buffer when the loop is left, by
     /// `break` and `return` as much as by running out.
@@ -253,16 +253,16 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let elem_llvm = self.collection_value_type(&element_ty)?;
         let i64_ty = self.context.i64_type();
+        let (binding_ty, binding_llvm) = self.loop_binding_type(obj_ty, &element_ty)?;
 
         let idx_alloca = self.entry_alloca(i64_ty, "veach.i")?;
         self.builder.build_store(idx_alloca, i64_ty.const_zero())?;
-        let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
+        let elem_alloca = self.entry_alloca(binding_llvm, iterator)?;
 
-        self.type_env
-            .insert(iterator.to_string(), element_ty.clone());
+        self.type_env.insert(iterator.to_string(), binding_ty);
         let iter_name = iterator.to_string();
         let previous_var = self.variables.insert(iter_name.clone(), elem_alloca);
-        let previous_ty = self.variable_types.insert(iter_name.clone(), elem_llvm);
+        let previous_ty = self.variable_types.insert(iter_name.clone(), binding_llvm);
         let index_binding = self.bind_loop_index(index)?;
 
         let cond_bb = self.context.append_basic_block(parent_fn, "veach.cond");
@@ -288,8 +288,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(body_bb);
         let slot = self.vec_slot_ptr(header, &element_ty, i_val)?;
-        let elem_val = self.builder.build_load(elem_llvm, slot, "veach.elem")?;
-        self.builder.build_store(elem_alloca, elem_val)?;
+        self.store_loop_element(binding_llvm, elem_alloca, slot, elem_llvm)?;
         if consumes {
             // The element now belongs to this pass's binding, so the remainder the loop
             // still owns starts past it.

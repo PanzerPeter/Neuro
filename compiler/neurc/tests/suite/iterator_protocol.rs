@@ -298,8 +298,9 @@ func main() -> i32 {{
     );
 }
 
-/// A borrow of a protocol type is not a `for` head: the checker rejects it with a span
-/// rather than letting it reach HIR lowering, which has no path for that head.
+/// A shared borrow of a protocol type is not a `for` head (`next` needs `&mut self`, and
+/// no impl names `&Counter`): the checker rejects it with a span rather than letting it
+/// reach HIR lowering, which has no path for that head.
 #[test]
 fn regression_borrowed_protocol_head_is_rejected_by_the_checker() {
     let test = CompileTest::new();
@@ -321,7 +322,7 @@ impl Iterator for Counter {
 func main() -> i32 {
     mut c = Counter { n: 0 }
     mut total = 0
-    for v in &mut c {
+    for v in &c {
         total = total + v
     }
     return total
@@ -332,7 +333,7 @@ func main() -> i32 {
         .compile(&path)
         .expect_err("a borrowed protocol head must be rejected");
     assert!(
-        error.contains("cannot iterate over a value of type &mut Counter"),
+        error.contains("cannot iterate over a value of type &Counter"),
         "the diagnostic must name the borrowed head type; got {error}"
     );
     assert!(

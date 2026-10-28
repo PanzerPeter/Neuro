@@ -61,7 +61,7 @@ impl Drop for Ticket {
 func count_where<T>(items: &Vec<T>, keep: (&T) -> bool) -> i32 {
     mut n = 0
     for item in items {
-        if keep(&item) {
+        if keep(item) {
             n += 1
         }
     }

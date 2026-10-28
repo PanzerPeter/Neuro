@@ -1139,7 +1139,7 @@ pub enum TypeError {
     NotIterable { found: Type, span: Span },
 
     #[error(
-        "cannot iterate over a value of type {found}: the `IntoIterator` / `Iterator` protocol is implemented on the owned type, and a borrow of it is not a `for` head; iterate the value itself"
+        "cannot iterate over a value of type {found}: the `IntoIterator` / `Iterator` protocol is implemented on the owned type; iterate the value itself, or write `&mut` to drive an `Iterator` in place"
     )]
     BorrowedIterableHead { found: Type, span: Span },
 

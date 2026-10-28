@@ -462,15 +462,18 @@ nor a slice falls through to `iteration_item`, which answers what one step binds
   container's. That is also what enforces `IntoIterator::Iter: Iterator`: a bound on an
   associated-type declaration has no syntax, so the requirement is checked on the type
   `into_iter` actually returned.
-- The head is a consuming position: the loop takes the value as its iterator, so it is
-  `record_move`d like any other by-value placement.
+- A by-value head is a consuming position: the loop takes the value as its iterator, so it is
+  `record_move`d like any other by-value placement (`protocol_loop_item`).
+- `&mut it` over a type with its own `impl Iterator` drives `it` in place and moves nothing; the
+  Item is that impl's even when the type also implements `IntoIterator`. The loop binding holds
+  the `&mut` borrow for the whole body, whatever the Item holds, so the body cannot touch `it`.
 - A head implementing neither trait is `TypeError::NotIterable`, which replaced the
   `NotIndexable` this arm used to reuse: iterating and indexing are no longer the same question.
-- A BORROW of a protocol type is `TypeError::BorrowedIterableHead`. The referent peel that
-  auto-derefs `&T` receivers makes `&c` / `&mut c` look resolvable against the impl on the owned
-  type, and lowering has no path for that head; the arm rejects it here so the diagnostic keeps
-  its span instead of surfacing as a lowering error. Arrays, `Vec`s and slices are unaffected:
-  they are matched off the referent before this arm is reached.
+- Any other BORROW of a protocol type (`&it`, or `&c` / `&mut c` over an `IntoIterator`) is
+  `TypeError::BorrowedIterableHead`: the impl names the owned type, and an impl on `&C` has no
+  syntax. The referent peel that auto-derefs `&T` receivers makes such a head look resolvable,
+  so the arm rejects it here, where the diagnostic keeps its span. Arrays, `Vec`s and slices are
+  unaffected: they are matched off the referent before this arm is reached.
 
 `char_indices_receiver` (same module) recognises the `text.char_indices()` head form ahead of
 the ordinary `check_expr` on the iterable, and `check_char_indices_head` types it as the same
@@ -1158,10 +1161,10 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   (`ArrayLengthTooLarge`: LLVM counts array elements in 32 bits, so the backend would truncate
   it); `check_expr` handles array literals (homogeneous,
   length vs annotation) and indexing (`NotIndexable` / `IndexNotInteger`); `array.len()` is `u64`;
-  `Stmt::ForEach` binds the element type, and a BY-VALUE head over a move-tracked element type
-  records a move of the iterable: the loop takes the elements over, which is what codegen already
-  disowns the array for, so the array owns nothing after the loop. `for x in &arr` borrows and
-  moves nothing. `Stmt::IndexAssignment` requires a mutable target.
+  `Stmt::ForEach` binds by the head's receiver mode (`counted_loop_item`): a BY-VALUE
+  head binds the element and, when the head is move-tracked, records a move of it, so the array
+  owns nothing after the loop; `for x in &arr` binds `&T` and `for x in &mut arr` `&mut T`, for
+  every element type, and the binding holds the head's borrow for the whole body. `Stmt::IndexAssignment` requires a mutable target.
   `Expr::ArrayRest { array, start, exact }` requires an array source and yields the
   `[T; N - start]` remainder, with `exact` demanding `N == start`
   (`ArrayPatternLengthMismatch`). Other errors: `ArrayLengthMismatch`, `CannotInferEmptyArray`.
@@ -1391,9 +1394,8 @@ compiler-known nominal type, never `Copy` and always move-tracked.
   order); a struct key requires `PartialEq` plus `Hashable` (hashed), derived or by hand, or
   `PartialEq` plus `impl Comparable` (ordered).
 - Indexing, index assignment, and `for`-in accept a `Vec` alongside an array. A by-value head
-  over move-tracked elements consumes the iterable (`counted_loop_item`); a borrowed head binds
-  each such element by value but marks the binding `lent` (`SymbolTable::mark_lent`), and a move
-  out of a lent binding, or a consuming method on it, is `CannotMoveOutOfBorrow`.
+  consumes the `Vec` whatever its element type (`counted_loop_item`); a borrowed one binds `&T` /
+  `&mut T`, so a move out of the element is the ordinary `CannotMoveOutOfBorrow` of a `*x`.
 
 `StringBuilder` is a fourth, **nullary** kind (`arity() == 0`), so `Collection { kind: StringBuilder, args: [] }`
 reuses every existing collection rule with no new `Type` variant. The bare name resolves as a

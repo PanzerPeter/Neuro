@@ -110,8 +110,8 @@ func main() -> i32 {
     println("scored total               = {total}")
 
     mut settled: i32 = 0
-    for points in accepted {
-        settled = settled + settle(points)
+    for points in &accepted {
+        settled = settled + settle(*points)
     }
     println("settled (val-else |verdict|) = {settled}")
     // 4 -> Accept 4, 24 -> Accept 24, 45 -> Accept 45  => settled 73

@@ -28,7 +28,7 @@ impl Window {
         mut peak: i32 = samples[0]
         for s in samples {
             total = total + s
-            if s > peak { peak = s }
+            if s > peak { peak = *s }
         }
         Window { count: samples.len(), total: total, peak: peak }
     }

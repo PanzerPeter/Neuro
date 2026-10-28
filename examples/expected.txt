@@ -39,7 +39,7 @@ basics/named_arguments.nr      40
 basics/type_inference.nr       42
 
 # --- types: primitives, literals, casts, arrays, slices, tuples, newtypes ---
-types/arrays.nr                     8
+types/arrays.nr                     11
 types/assoc_bounds.nr               50
 types/collections.nr                101
 types/constants.nr                  51

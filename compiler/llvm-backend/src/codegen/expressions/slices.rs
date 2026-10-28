@@ -156,8 +156,8 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Lower `for x in xs` over a slice: a counted loop to the slice's runtime length,
-    /// binding `iterator` to a copy of each element. Mirrors the array and `Vec` forms;
-    /// only the source of the bound differs.
+    /// binding `iterator` to each element's address, since a slice is a borrow. Mirrors
+    /// the array and `Vec` forms; only the source of the bound differs.
     pub(crate) fn codegen_slice_for_each(
         &mut self,
         label: Option<&str>,
@@ -173,16 +173,16 @@ impl<'ctx> CodegenContext<'ctx> {
         let (base, element_ty, len) = self.slice_source(iterable, obj_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let i64_ty = self.context.i64_type();
+        let (binding_ty, binding_llvm) = self.loop_binding_type(obj_ty, &element_ty)?;
 
         let idx_alloca = self.entry_alloca(i64_ty, "sleach.i")?;
         self.builder.build_store(idx_alloca, i64_ty.const_zero())?;
-        let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
+        let elem_alloca = self.entry_alloca(binding_llvm, iterator)?;
 
-        self.type_env
-            .insert(iterator.to_string(), element_ty.clone());
+        self.type_env.insert(iterator.to_string(), binding_ty);
         let iter_name = iterator.to_string();
         let previous_var = self.variables.insert(iter_name.clone(), elem_alloca);
-        let previous_ty = self.variable_types.insert(iter_name.clone(), elem_llvm);
+        let previous_ty = self.variable_types.insert(iter_name.clone(), binding_llvm);
         let index_binding = self.bind_loop_index(index)?;
 
         let cond_bb = self.context.append_basic_block(parent_fn, "sleach.cond");
@@ -212,8 +212,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder
                 .build_in_bounds_gep(elem_llvm, base, &[i_val], "sleach.slot")?
         };
-        let elem_val = self.builder.build_load(elem_llvm, slot, "sleach.elem")?;
-        self.builder.build_store(elem_alloca, elem_val)?;
+        self.store_loop_element(binding_llvm, elem_alloca, slot, elem_llvm)?;
         self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();

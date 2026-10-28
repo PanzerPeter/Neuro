@@ -675,7 +675,8 @@ than assuming the prelude's declaration order.
   borrow pointer first. Tuples flow through parameters and returns.
 - **Arrays**: `map_type` → LLVM `[N x T]`. `expressions/arrays.rs` lowers array literals, index
   read/write (with a bounds guard through `codegen_guard_or_panic`, in every build), and
-  `for x in arr` / `for x in &arr`. `BuiltinMethod::ArrayLen` is a compile-time `u64`.
+  `for x in arr` / `for x in &arr` / `for x in &mut arr`. `BuiltinMethod::ArrayLen` is a
+  compile-time `u64`.
   `coerce_if_needed` has an element-wise array arm for typed `[i64; N] = [..]` literals.
 - **Array rest**: `codegen_array_rest` builds a fresh `[T; N - start]` aggregate by loading
   elements `start..N` of the source (via `array_place_ptr`) and `insert_value`-ing them. A
@@ -1002,8 +1003,12 @@ labeled one scans `loop_targets` from innermost out for the matching label, an u
 the top. Label validity is guaranteed by semantic analysis, so an unresolved label is an
 `InternalError`.
 
-The three counted loops: `codegen_for_range` (`statements/loops.rs`), `codegen_for_each`
-(`expressions/arrays.rs`), and `codegen_vec_for_each` (`collections/vectors.rs`). Each takes an
+The counted loops: `codegen_for_range` (`statements/loops.rs`), `codegen_for_each`
+(`expressions/arrays.rs`), `codegen_slice_for_each` (`expressions/slices.rs`) and
+`codegen_vec_for_each` (`collections/vectors.rs`). The three sequence loops bind by the head's
+type (`loop_binding_type` / `store_loop_element`): a by-value head stores each element, a
+borrowed one (`&arr`, `&mut v`, any slice) its slot address, except that a `&string` binding is
+the element's own fat pointer, held by value as every `&string` is. Each takes an
 `index: Option<&str>`, the `u64` position binding of `for (i, x) in xs.enumerate()`. `loop_index.rs`
 owns its scope bookkeeping: `bind_loop_index` opens a slot and shadows the name across
 `variables` / `variable_types` / `type_env`, `store_loop_index` refreshes it at the top of the
@@ -1602,8 +1607,9 @@ loop-owned copy (`take_vec_for_loop`), zeroes the owner's so its own drop frees 
 registers the copy as `DropTarget::VecRemainder` in a scope around the loop. The header's `used`
 field, otherwise idle for a `Vec`, counts the elements handed to bindings, so the release at the
 loop's exit, a `break` or a `return` drops exactly the untaken slots and then the buffer. A
-borrowed head binds each element's bits and registers nothing: the checker forbids moving out of
-that binding.
+borrowed head binds each slot's address and registers nothing. A by-value head over elements
+that own nothing binds their bits and leaves the buffer to its owner's scope-exit release; the
+checker refuses any use of the owner after the loop.
 
 A collection binding is registered in the drop scope with `DropTarget::Collection`, so scope exit
 `free`s field 0 under the same runtime drop flag that user `Drop` types use: a moved-out

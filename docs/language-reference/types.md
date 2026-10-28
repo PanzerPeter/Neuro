@@ -1447,8 +1447,9 @@ val c = sum(&grown)                  // Vec, same signature
 - **Indexing** is bounds-checked exactly as on the owning container: an out-of-range index
   panics in every build. `xs[i] = v` requires a `&mut [T]`; the
   write reaches the buffer, so the owner sees it.
-- **Iteration**: `for x in xs` binds each element by value, and `.enumerate()` works on a
-  slice like it does on an array.
+- **Iteration**: a slice is a borrow, so `for x in xs` binds each element as a `&T`, or as a
+  `&mut T` over a `&mut [T]`, which writes the element in place (`*x += 1`). `.enumerate()`
+  works on a slice like it does on an array.
 - **Borrow rules** are the ordinary ones. A live view counts as a shared borrow of the place
   it came from, so a `&mut` of that place while the view is alive is rejected, and returning a
   view of a function-local buffer is rejected as a dangling reference.
@@ -1605,12 +1606,14 @@ val taken = names.remove(0)   // takes the element out
 | `v[i]` / `v[i] = x` | the slot / nothing | Panics out of range, in **every** build |
 | `v.len()` | `u64` | Live element count |
 | `v.clear()` | nothing | Drops every element, keeping the buffer |
-| `for x in v` | nothing | Iterates the live elements in order |
+| `for x in v` | nothing | Iterates the live elements in order, consuming `v` |
+| `for x in &v` / `&mut v` | nothing | Iterates the elements as `&T` / `&mut T`, leaving `v` usable |
 
-`for x in v` over elements that are not `Copy` consumes `v`: each pass owns the
-element it is handed, and leaving the loop early drops the ones it did not reach.
-`for x in &v` binds each element without taking it, so nothing may be moved out
-of the loop binding.
+`for x in v` consumes `v`, whatever its element type: each pass owns the element it
+is handed, and leaving the loop early drops the ones it did not reach. `for x in &v`
+binds each element as a `&T`, read in place (`total += x`, `x.len()`), and
+`for x in &mut v` as a `&mut T` that writes the slot (`*x += 1`, `x.count = 0`).
+Either way `v` stays borrowed for the whole loop, so the body cannot push to it.
 
 A `Vec` index is checked in every build, like an array's; a `Vec`'s length is only
 known at run time, so the optimizer can rarely prove the check redundant.
@@ -1679,9 +1682,6 @@ returns the hash the map uses for that key.
 - An element may not hold a reference or a function value.
 - `keys()` builds a `Vec` holding a copy of every key rather than an iterator over
   borrows, and there is no `values()`.
-- `for x in &v` binds each element by value without owning it, not as a `&T`, so a
-  `for x in &mut v` cannot write through `x`; and `for x in v` over `Copy`
-  elements leaves `v` usable.
 - `Vec<T>` does not go through the `IntoIterator` / `Iterator` protocol
   ([control flow](control-flow.md#the-iteration-protocol)): `for x in v` lowers to
   a counted loop, exactly as `for x in arr` does, and so does

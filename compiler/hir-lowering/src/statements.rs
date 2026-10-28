@@ -249,10 +249,10 @@ impl Lowerer {
                 }
                 let iterable = self.lower_expr(iterable, None)?;
                 let element_ty = match Self::collection_element(&iterable.ty) {
-                    Some(element) => element,
+                    Some(element) => borrowed_element(&iterable.ty, element),
                     None => match iterable.ty.referent() {
                         HirType::Array { element, .. } | HirType::Slice(element) => {
-                            (**element).clone()
+                            borrowed_element(&iterable.ty, (**element).clone())
                         }
                         // A nominal head has no counted-loop form; it iterates through
                         // the protocol, which desugars to nodes already in the HIR.
@@ -578,4 +578,17 @@ fn unsuffixed_integer(expr: &Expr) -> bool {
         expr,
         Expr::Literal(shared_types::Literal::Integer(_, None), _)
     )
+}
+
+/// What a counted loop over `iterable_ty` binds per element: the element itself for a
+/// by-value head, and a borrow of it, of the head's own mutability, for a borrowed one.
+/// The backend reads the same distinction off the head's type.
+fn borrowed_element(iterable_ty: &HirType, element: HirType) -> HirType {
+    match iterable_ty {
+        HirType::Reference { mutable, .. } => HirType::Reference {
+            inner: Box::new(element),
+            mutable: *mutable,
+        },
+        _ => element,
+    }
 }

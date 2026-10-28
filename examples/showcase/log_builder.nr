@@ -2,7 +2,7 @@
 //
 // Integration example combining the growable `StringBuilder` with the features that
 // feed it:
-//   `Vec<T>` + `for x in v` · struct + `impl` methods (`&self` and a consuming
+//   `Vec<T>` + `for x in &v` · struct + `impl` methods (`&self` and a consuming
 //   `self`) · enum with a payload + `match` · string interpolation with the
 //   format mini-language (:>W, :.N, :+d) · `&mut StringBuilder` parameters ·
 //   `@derive(Copy, Clone)`.
@@ -89,8 +89,8 @@ func main() -> i32 {
     events.push(Event { code: 4095, load: 91.25 })
 
     mut transcript = StringBuilder::new()
-    for event in events {
-        append_event(&mut transcript, event)
+    for event in &events {
+        append_event(&mut transcript, *event)
     }
 
     // A trailing summary line pads its label into a fixed column. A hole may not

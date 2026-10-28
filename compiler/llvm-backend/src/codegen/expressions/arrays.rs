@@ -181,9 +181,48 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// What a counted loop over `obj_ty` binds per element, and its storage: the
+    /// element for a by-value head, the element's address for a borrowed one.
+    /// Lowering types the binding by the same rule.
+    pub(crate) fn loop_binding_type(
+        &self,
+        obj_ty: &Type,
+        element_ty: &Type,
+    ) -> CodegenResult<(Type, BasicTypeEnum<'ctx>)> {
+        let binding_ty = match obj_ty {
+            Type::Reference { mutable, .. } => Type::Reference {
+                inner: Box::new(element_ty.clone()),
+                mutable: *mutable,
+            },
+            _ => element_ty.clone(),
+        };
+        let llvm = self.get_any_llvm_type(&binding_ty)?;
+        Ok((binding_ty, llvm))
+    }
+
+    /// Fill a counted loop's element binding from the element at `slot`, by the rule
+    /// [`Self::loop_binding_type`] states. A borrow that maps to a pointer takes the
+    /// slot's address; a fat one (`&string`) is the element's own bits, held by value.
+    pub(crate) fn store_loop_element(
+        &mut self,
+        binding_llvm: BasicTypeEnum<'ctx>,
+        binding: PointerValue<'ctx>,
+        slot: PointerValue<'ctx>,
+        elem_llvm: BasicTypeEnum<'ctx>,
+    ) -> CodegenResult<()> {
+        if binding_llvm.is_pointer_type() {
+            self.builder.build_store(binding, slot)?;
+            return Ok(());
+        }
+        let value = self.builder.build_load(elem_llvm, slot, "foreach.elem")?;
+        self.builder.build_store(binding, value)?;
+        Ok(())
+    }
+
     /// Lower `for x in arr` / `for x in &arr`: a counted loop over the array
-    /// storage, binding `iterator` to a copy of each element in turn. Mirrors
-    /// `codegen_for_range` minus the user-visible bound expressions.
+    /// storage, binding `iterator` to each element in turn, or to its address under a
+    /// borrowed head. Mirrors `codegen_for_range` minus the user-visible bound
+    /// expressions.
     ///
     /// `index` names the position binding of `arr.enumerate()`, which is the
     /// induction variable this loop already steps.
@@ -213,19 +252,19 @@ impl<'ctx> CodegenContext<'ctx> {
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let arr_llvm = elem_llvm.array_type(size as u32);
         let i64t = self.context.i64_type();
+        let (binding_ty, binding_llvm) = self.loop_binding_type(&obj_ty, &element_ty)?;
 
         // Induction variable `i` and the element binding `x`, both stack slots.
         let idx_alloca = self.entry_alloca(i64t, "foreach.i")?;
         self.builder.build_store(idx_alloca, i64t.const_zero())?;
-        let elem_alloca = self.entry_alloca(elem_llvm, iterator)?;
+        let elem_alloca = self.entry_alloca(binding_llvm, iterator)?;
 
         // Record the element binding's resolved type so a place statement in the body
         // (e.g. indexing a struct/array element) can recover its nominal type.
-        self.type_env
-            .insert(iterator.to_string(), element_ty.clone());
+        self.type_env.insert(iterator.to_string(), binding_ty);
         let iter_name = iterator.to_string();
         let previous_var = self.variables.insert(iter_name.clone(), elem_alloca);
-        let previous_var_type = self.variable_types.insert(iter_name.clone(), elem_llvm);
+        let previous_var_type = self.variable_types.insert(iter_name.clone(), binding_llvm);
         let index_binding = self.bind_loop_index(index)?;
 
         let cond_bb = self.context.append_basic_block(parent_fn, "foreach.cond");
@@ -261,10 +300,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "foreach.elem.ptr",
             )?
         };
-        let elem_val = self
-            .builder
-            .build_load(elem_llvm, elem_ptr, "foreach.elem")?;
-        self.builder.build_store(elem_alloca, elem_val)?;
+        self.store_loop_element(binding_llvm, elem_alloca, elem_ptr, elem_llvm)?;
         self.store_loop_index(&index_binding, i_val)?;
 
         let body_scope_index = self.drop_scopes.len();

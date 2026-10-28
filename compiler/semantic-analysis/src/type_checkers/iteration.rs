@@ -121,7 +121,7 @@ impl TypeChecker {
     /// This is also what enforces `IntoIterator::Iter: Iterator`: the bound has no
     /// syntax on an associated-type declaration, so the requirement is checked here, on
     /// the type `into_iter` actually returned.
-    fn iterator_item(&self, ty: &Type) -> Option<Type> {
+    pub(crate) fn iterator_item(&self, ty: &Type) -> Option<Type> {
         let name = nominal_name(ty)?;
         self.impl_assoc
             .get(&(ITERATOR_TRAIT.to_string(), name))

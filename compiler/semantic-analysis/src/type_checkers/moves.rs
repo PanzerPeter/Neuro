@@ -122,20 +122,7 @@ impl TypeChecker {
 
         // A constant is a value, not an owner, so it cannot be moved from.
         if let Expr::Identifier(ident) = place {
-            let binding = self
-                .symbols
-                .lookup(&ident.name)
-                .map(|info| (info.ty.clone(), info.lent));
-            if let Some((ty, true)) = &binding
-                && self.is_type_move_tracked(ty)
-            {
-                self.record_error(TypeError::CannotMoveOutOfBorrow {
-                    name: ident.name.clone(),
-                    span: ident.span,
-                });
-                return;
-            }
-            let binding_ty = binding.map(|(ty, _)| ty);
+            let binding_ty = self.symbols.lookup(&ident.name).map(|info| info.ty.clone());
 
             if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
                 self.reject_move_of_borrowee(&ident.name, ident.span);
@@ -286,13 +273,8 @@ impl TypeChecker {
     /// simply consumed, which is why no place root is required here.
     pub(crate) fn record_consumed_receiver(&mut self, object: &Expr, obj_ty: &Type, span: Span) {
         let root = Self::place_root_name(object);
-        let lent_root = root
-            .as_deref()
-            .and_then(|name| self.symbols.lookup(name))
-            .is_some_and(|info| info.lent);
         if matches!(obj_ty, Type::Reference { .. })
             || (root.as_deref() == Some(SELF_RECEIVER) && !self.self_is_owned)
-            || lent_root
         {
             self.record_error(TypeError::CannotMoveOutOfBorrow {
                 name: root.unwrap_or_else(|| "value".to_string()),
@@ -358,7 +340,7 @@ impl TypeChecker {
             Expr::Paren(inner, _) => self.place_origin(inner),
             Expr::Identifier(ident) => self.symbols.lookup(&ident.name).map(|info| {
                 let borrowed_receiver = ident.name == SELF_RECEIVER && !self.self_is_owned;
-                (info.ty.clone(), borrowed_receiver || info.lent)
+                (info.ty.clone(), borrowed_receiver)
             }),
             Expr::Deref { operand, .. } => match self.place_origin(operand)?.0 {
                 Type::Reference { inner, .. } => Some((*inner, true)),

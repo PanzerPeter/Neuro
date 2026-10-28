@@ -44,9 +44,9 @@ export func summarize(samples: [i32; 5]) -> Summary {
 
     mut total: i32 = 0
     mut peak: i32 = 0
-    for value in buffer {
+    for value in &buffer {
         total += value
-        peak = pick(value > peak, value, peak)
+        peak = pick(value > peak, *value, peak)
     }
 
     Summary::new(buffer.len() as i32, total, peak)

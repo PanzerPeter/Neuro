@@ -7,4 +7,5 @@ index.get(rivet)  -> miss  = 1
 ?? rivet, then washer      = 2
 surcharges                 = 9
 BTreeMap heaviest key      = 45
+restocked weight           = 165
 total                      = 181

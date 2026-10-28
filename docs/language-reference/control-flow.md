@@ -497,6 +497,41 @@ func sum_first_five() -> i32 {
 }
 ```
 
+### Iterating a Collection: `xs`, `&xs` and `&mut xs`
+
+A fixed-size array, a `Vec<T>` and a slice iterate element by element. How the head
+is written decides what the loop variable is, the same three receiver modes a method
+has:
+
+```neuro
+mut scores: Vec<i32> = Vec::new()
+scores.push(1)
+scores.push(2)
+
+mut total = 0
+for s in &scores {          // s: &i32, scores stays usable
+    total += s
+}
+for s in &mut scores {      // s: &mut i32, writes the element in place
+    *s += 10
+}
+for s in scores {           // s: i32, scores is consumed
+    println("{s}")
+}
+```
+
+- `for x in &xs` binds a `&T` to each element. Operators and method calls read
+  through it, so `total += x` and `x.len()` need no `*`; a `val n: i32 = x` does.
+- `for x in &mut xs` binds a `&mut T`. `*x = v`, `*x += v`, `x.field = v` and a
+  `&mut self` method call all reach the element. The head must be a `mut` binding.
+- `for x in xs` moves each element out to `x` and consumes `xs`. A `Vec` is gone
+  after the loop whatever its element type; an array of `Copy` elements is itself
+  `Copy`, so the loop walks a copy and the array stays usable.
+
+A slice is already a borrow, so `for x in xs` over a `&[T]` binds `&T`, and over a
+`&mut [T]` binds `&mut T`. A borrowed head stays borrowed for the whole loop, so the
+body cannot push to the `Vec` it walks, or read it while a `&mut` loop is running.
+
 ### Iterating Backwards: `.rev()`
 
 `.rev()` on a range walks the same bounds from the top down. Like `.enumerate()`,
@@ -657,6 +692,24 @@ for n in c {
 Implement `IntoIterator` when the container and the cursor are different types,
 which is what lets a container be walked more than once, since each `for` head
 asks it for a fresh cursor.
+
+`for x in &mut it` drives an iterator in place instead of consuming it: `next`
+takes `&mut self` either way. A `break` leaves `it` where it stopped, and the next
+loop over it carries on from there:
+
+```neuro
+mut it = Countdown { remaining: 5 }
+for n in &mut it {
+    if n == 3 { break }     // 4, 3
+}
+for n in it {
+    println("{n}")          // 2, 1, 0
+}
+```
+
+A shared borrow `&it` is not a head, since `next` cannot run through it, and
+neither is a borrow of a type that only implements `IntoIterator`: its impl names
+the owned type.
 
 The loop variable's type is the `Item` the iterator's own `impl Iterator` bound,
 `break` and `continue` work as they do in any other loop (a label lands on the

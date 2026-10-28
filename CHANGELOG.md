@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.19.0] - 2026-10-28
+
+### Added
+
+- `for x in &xs` binds each element as a `&T`, and `for x in &mut xs` as a `&mut T` that
+  writes the element in place: `*x += 1`, `x.count = 0` and a `&mut self` method call on
+  `x` all reach the array, `Vec` or slice being walked. This holds for every element type.
+  A slice head binds `&T` over a `&[T]` and `&mut T` over a `&mut [T]`. The head stays
+  borrowed for the whole loop, so the body cannot push to the `Vec` it walks.
+- `for x in &mut it` drives a protocol `Iterator` in place. A `break` leaves `it` where it
+  stopped, and a later loop over it carries on from there.
+
+### Changed
+
+- `for x in v` consumes a `Vec` whatever its element type, so `v` cannot be used after the
+  loop; write `for x in &v` to keep it. An array of `Copy` elements is itself `Copy`, so
+  a by-value loop over one still leaves it usable.
+- A borrowed loop variable is a reference, not a copy of the element. Operators and method
+  calls read through it, but code that passes it on where a `T` is expected now needs `*x`.
+  An adapter's function over a borrowed head takes `&T` (`(&v).map(|x: &i32| ..)`).
+- `examples/showcase/inventory_ledger.nr` restocks its items in place through
+  `&mut items` and prints the restocked weight. `examples/types/arrays.nr` doubles its
+  elements through `&mut data` and exits with 11.
+
 ## [5.18.2] - 2026-10-25
 
 ### Fixed

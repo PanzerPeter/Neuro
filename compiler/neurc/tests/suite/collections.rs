@@ -16,7 +16,7 @@ func main() -> i32 {
     v.push(20)
     v.push(30)
     mut total: i32 = 0
-    for x in v {
+    for x in &v {
         total = total + x
     }
     total + v.len() as i32

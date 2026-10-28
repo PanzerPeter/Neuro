@@ -4,7 +4,8 @@
 // `HashMap<string, i32>` name index, a key-ordered `BTreeMap<i32, i32>` report,
 // an enum + `match` classifier, an `impl` block with `&self` methods, `Option`
 // matching on the fallible reads, `??` for the reads that only want a default,
-// and `for`-in iteration over collections.
+// and `for` over collections in all three receiver modes: `for x in v` consumes
+// the names, `for x in &v` reads items in place, `for x in &mut v` restocks them.
 
 @derive(Copy, Clone)
 struct Item {
@@ -76,7 +77,7 @@ func main() -> i32 {
     // Total weight, and a weight-keyed report the ordered map keeps sorted.
     mut by_weight: BTreeMap<i32, i32> = BTreeMap::new()
     mut total_weight: i32 = 0
-    for item in items {
+    for item in &items {
         val w = item.weight()
         total_weight = total_weight + w
         by_weight.insert(w, item.quantity)
@@ -106,7 +107,7 @@ func main() -> i32 {
 
     // Surcharges, driven by the enum classifier.
     mut fees: i32 = 0
-    for item in items {
+    for item in &items {
         fees = fees + surcharge(item.shelf())
     }
     // bulk(3) + heavy(5) + light(1) = 9
@@ -117,6 +118,19 @@ func main() -> i32 {
         heaviest = w
     }
     // heaviest == 45
+
+    // Restock in place: `&mut items` lends each slot, so the write lands in the Vec
+    // itself, and `&items` reads the result back without consuming it.
+    for item in &mut items {
+        if !item.is_bulk() {
+            item.quantity += 2
+        }
+    }
+    mut restocked: i32 = 0
+    for item in &items {
+        restocked += item.weight()
+    }
+    // bolt 24, girder 3 x 45 = 135, washer 6 x 1 = 6 -> 165
 
     val lines = items.len() as i32                    // 3
     val indexed = index.len() as i32                  // 3
@@ -130,6 +144,7 @@ func main() -> i32 {
     println("?? rivet, then washer      = {rivet_at}")
     println("surcharges                 = {fees}")
     println("BTreeMap heaviest key      = {heaviest}")
+    println("restocked weight           = {restocked}")
 
     // 73 + 45 + 1 + 9 + 45 + 3 + 3 + 0 + 2 = 181
     val total = total_weight + girder_weight + missing + fees + heaviest + lines +

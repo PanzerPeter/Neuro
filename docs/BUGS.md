@@ -5,6 +5,85 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-130: a reference into `self` returned from a `&self` method dangles
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; the `&self` receiver ABI of struct methods
+- **Severity**: major. A silent use after return: the program compiles and reads a dead frame
+
+**Minimal repro**
+
+```neuro
+struct Bag { xs: [i32; 3] }
+struct View<'a> { xs: &'a [i32; 3] }
+
+impl Bag {
+    func view(&self) -> View { View { xs: &self.xs } }
+}
+
+func noise(a: i32, b: i32) -> i32 {
+    val arr = [a, b, a, b]
+    arr[0] + arr[3]
+}
+
+func main() -> i32 {
+    val b = Bag { xs: [1, 2, 3] }
+    val v = b.view()
+    val n = noise(70, 80)
+    v.xs[1] * 10 + v.xs[2]
+}
+```
+
+Expected: exit 23. Observed: the elements read back as whatever `noise` left on the stack.
+An iterator built this way (`func iter(&self) -> BagIter { BagIter { xs: &self.xs, at: 0 } }`)
+yields its first element and then garbage.
+
+**Root cause**: confirmed in the emitted IR. `Bag__view` takes the struct by value
+(`{ [3 x i32] } %0`), stores it into its own `alloca`, and `&self.xs` is the address of that
+slot, which dies when the method returns. The checker accepts the program, because by the
+language's rules the result borrows `b`.
+
+**Workaround**: build the view at the call site (`View { xs: &b.xs }`), or take the field by
+a parameter: `func view(xs: &[i32; 3]) -> View`.
+
+**Fix sketch**: pass a `&self` / `&mut self` receiver as the address of the caller's place,
+as a `&T` parameter already is, at least for a method whose result can hold a reference.
+Regression tests: the repro, and the iterator form driven by a `for` loop.
+
+## BUG-129: a generic function taking `&[T]` accepts no argument
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`; generic call checking, `unsizes_to_slice` in `type_checkers/resolution.rs`
+- **Severity**: major. A documented signature, `func sort<T: Comparable>(xs: &mut [T])`, cannot be called
+
+**Minimal repro**
+
+```neuro
+func first<T: Copy>(xs: &[T]) -> T { xs[0] }
+
+func main() -> i32 {
+    val a = [4, 5]
+    first(&a)
+}
+```
+
+Expected: exit 4. Observed: `type mismatch: expected &[T], found &[i32; 2]`. The same error
+follows for `first::<i32>(&a)` and for an argument that is already a slice (`a.slice(0..2)`,
+`found &[i32]`), so neither inference nor a turbofish reaches the parameter.
+
+**Root cause**: suspected, not traced end to end. The argument is checked against the
+declared `&[T]` with `T` still a generic, and the unsizing rule compares element types with
+`is_compatible_with`, which does not bind or substitute a type parameter. A non-generic
+`func f(xs: &[i32])` accepts `&a`.
+
+**Workaround**: write the function for the concrete element type, or take `&[T; N]` with a
+const parameter.
+
+**Fix sketch**: unify the slice element with the argument's element (array, `Vec` or slice)
+when inferring the call's type arguments, and check the argument against the substituted
+parameter type. Regression tests: the repro, the turbofish form, a `Vec` argument and a
+`&mut [T]` parameter written through.
+
 ## BUG-128: a method's reference into a local receiver can be returned
 
 - **Status**: open, confirmed

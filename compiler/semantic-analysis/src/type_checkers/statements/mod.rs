@@ -360,16 +360,67 @@ impl TypeChecker {
 
     /// The binding type of a counted loop over an array, slice or `Vec` of `element`.
     ///
-    /// A by-value head hands the loop the elements: each iteration's binding owns the
-    /// one it holds and destroys it, which is what codegen disowns the source for. The
-    /// head is therefore a consuming position and owns nothing after the loop. A
-    /// borrowed head moves nothing; its binding holds a non-`Copy` element without
-    /// owning it, which the caller records by marking the binding lent.
+    /// The head's receiver mode is the binding's: a by-value head hands the loop
+    /// the elements, so it is a consuming position and owns nothing after the loop (a
+    /// `Vec` of `Copy` elements included; an array of them is itself `Copy` and is
+    /// copied). A borrowed head moves nothing and binds `&T`, or `&mut T` through a
+    /// mutable borrow, for every element type, so a generic body and its instances
+    /// agree on what the loop binds.
     fn counted_loop_item(&mut self, iterable: &Expr, iterable_ty: &Type, element: Type) -> Type {
-        if self.is_type_move_tracked(&element) && !matches!(iterable_ty, Type::Reference { .. }) {
-            self.record_move(iterable);
+        match iterable_ty {
+            Type::Reference { mutable, .. } => Type::Reference {
+                inner: Box::new(element),
+                mutable: *mutable,
+            },
+            _ => {
+                if self.is_type_move_tracked(iterable_ty) {
+                    self.record_move(iterable);
+                }
+                element
+            }
         }
-        element
+    }
+
+    /// What one step of a `for` over the nominal type `head` binds, through the
+    /// `IntoIterator` / `Iterator` protocol.
+    ///
+    /// A by-value head is consumed into the loop's iterator. `&mut it` over an `Iterator`
+    /// drives `it` in place, as `next(&mut self)` already would, and leaves it usable
+    /// after the loop. Any other borrow has no protocol impl to resolve against: one on
+    /// `&Items` has no syntax yet.
+    fn protocol_loop_item(
+        &mut self,
+        iterable: &Expr,
+        iterable_ty: &Type,
+        head: &Type,
+    ) -> Option<Type> {
+        let item = match iterable_ty {
+            Type::Reference { mutable: true, .. } => self.iterator_item(head),
+            Type::Reference { .. } => None,
+            _ => self.iteration_item(head),
+        };
+        if let Some(item) = item {
+            if !matches!(iterable_ty, Type::Reference { .. }) {
+                self.record_move(iterable);
+            }
+            return Some(item);
+        }
+        // The referent peel is what makes a borrow of a protocol type look resolvable,
+        // so a borrowed head that misses names the borrow rather than the type.
+        let error = match iterable_ty {
+            Type::Reference { .. } if self.iteration_item(head).is_some() => {
+                TypeError::BorrowedIterableHead {
+                    found: iterable_ty.clone(),
+                    span: iterable.span(),
+                }
+            }
+            _ => TypeError::NotIterable {
+                found: head.clone(),
+                span: iterable.span(),
+            },
+        };
+        self.record_error(error);
+        None
     }
 
     /// Check a statement, then drop any transient borrows it took.
@@ -821,34 +872,10 @@ impl TypeChecker {
                             self.counted_loop_item(iterable, &iterable_ty, (**element).clone()),
                         ),
                         Type::Unknown => None,
-                        other => match self.iteration_item(other) {
-                            // A nominal head is iterable exactly when the protocol says
-                            // so; the head is consumed into the loop's iterator, so it
-                            // moves like any other by-value placement.
-                            Some(item) => {
-                                // The protocol is declared on the OWNED type, and the
-                                // referent peel above is what makes a borrow of it look
-                                // resolvable. Lowering has no path for that head, so
-                                // reject it here where the span is still available.
-                                if matches!(iterable_ty, Type::Reference { .. }) {
-                                    self.record_error(TypeError::BorrowedIterableHead {
-                                        found: iterable_ty.clone(),
-                                        span: iterable.span(),
-                                    });
-                                    None
-                                } else {
-                                    self.record_move(iterable);
-                                    Some(item)
-                                }
-                            }
-                            None => {
-                                self.record_error(TypeError::NotIterable {
-                                    found: other.clone(),
-                                    span: iterable.span(),
-                                });
-                                None
-                            }
-                        },
+                        other => {
+                            let other = other.clone();
+                            self.protocol_loop_item(iterable, &iterable_ty, &other)
+                        }
                     },
                 };
 
@@ -877,15 +904,15 @@ impl TypeChecker {
                     {
                         // Each element is a part of the iterable, so it holds what the
                         // iterable borrows: `&v` itself, or what a `[&T; N]` was built from.
+                        // A borrowed head is held for the whole loop even when what a step
+                        // yields holds nothing (`&mut it` over an iterator of `i32`): the
+                        // loop goes on reading the head between steps.
                         Ok(()) => {
-                            self.hold_carried_borrows(&iterator.name, iterable, &element_ty);
-                            // A borrowed head's binding is the element's bits, still owned
-                            // in place: moving them out would leave two owners.
-                            if matches!(iterable_ty, Type::Reference { .. })
-                                && self.is_type_move_tracked(&element_ty)
-                            {
-                                self.symbols.mark_lent(&iterator.name);
-                            }
+                            let held = match iterable_ty {
+                                Type::Reference { .. } => &iterable_ty,
+                                _ => &element_ty,
+                            };
+                            self.hold_carried_borrows(&iterator.name, iterable, held);
                         }
                         Err(duplicate_name) => {
                             self.record_error(TypeError::VariableAlreadyDefined {

@@ -134,9 +134,6 @@ pub(crate) struct SymbolInfo {
     /// inside a `pool` and only when `x` reaches no storage but its own, so every write
     /// through `r` lands in `x`. Kept per binding, so a shadow never inherits it.
     pub(crate) block_referent: Option<usize>,
-    /// Bound to an element of a collection or array a `for` head borrows: the binding
-    /// holds the element's bits but not its ownership, so nothing may be moved out of it.
-    pub(crate) lent: bool,
 }
 
 impl SymbolInfo {
@@ -153,7 +150,6 @@ impl SymbolInfo {
             grad_loss: None,
             scope_bound: false,
             block_referent: None,
-            lent: false,
         }
     }
 }
@@ -371,12 +367,6 @@ impl SymbolTable {
     }
 
     /// Mark `holder` as holding a scope-bound closure.
-    pub(crate) fn mark_lent(&mut self, name: &str) {
-        if let Some(info) = self.lookup_mut(name) {
-            info.lent = true;
-        }
-    }
-
     pub(crate) fn mark_scope_bound(&mut self, holder: &str) {
         if let Some(info) = self.lookup_mut(holder) {
             info.scope_bound = true;

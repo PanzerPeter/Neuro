@@ -2,7 +2,7 @@
 //
 // Integration example combining the features that feed a printing loop:
 //   struct + `@derive(Copy, Clone)` + `impl` methods (`&self`) · `Vec<T>` +
-//   `for x in v` · the growable `StringBuilder` + `push_str` · string interpolation
+//   `for x in &v` · the growable `StringBuilder` + `push_str` · string interpolation
 //   with the format mini-language (:>W, :.N) · `while` loop · `%` and `as`.
 //
 // The point of this example is the volume. `println` copies its bytes into a
@@ -42,7 +42,7 @@ func main() -> i32 {
     }
 
     mut peaks: i32 = 0
-    for reading in readings {
+    for reading in &readings {
         if reading.at_peak() {
             peaks = peaks + 1
         }

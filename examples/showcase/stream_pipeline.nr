@@ -185,7 +185,7 @@ func main() -> i32 {
     }
 
     mut kept_total = 0
-    for value in kept {
+    for value in &kept {
         println("kept {value}")
         kept_total = kept_total + value
     }

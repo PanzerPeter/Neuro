@@ -166,7 +166,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | Feature | Summary |
 |---|---|
 | **Types and inference** | `i8` through `u64`, `f16` / `bf16` / `f32` / `f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
-| **Control flow** | `if` / `else if` / `else`, `while`, `loop`, range-`for`, labelled `break` / `continue`, block-as-value, `for` over any type implementing the prelude's iterator protocol |
+| **Control flow** | `if` / `else if` / `else`, `while`, `loop`, range-`for`, labelled `break` / `continue`, block-as-value, `for x in xs` / `&xs` / `&mut xs` over arrays, slices and `Vec`s, `for` over any type implementing the prelude's iterator protocol |
 | **Functions** | Recursion, forward references, implicit returns, named arguments with external labels, higher-order functions, `\|>` pipelines, `>>` composition |
 | **Generics and traits** | Generic functions, structs, impls and methods, nested at their own parameters (`Option<T>`), const generics, `where` clauses, turbofish; required and default methods, `Self`, associated types, operator traits, `impl Trait` and `dyn Trait` dispatch. Fully monomorphized |
 | **Closures** | `\|x\| x * x` typed by its context, captures by copy, `&`, `&mut` or `move`, `(T) -> R` / `mut (T) -> R` / `once (T) -> R` function types, passed to generic higher-order functions, returned and stored with a shared counted environment |

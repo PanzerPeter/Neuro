@@ -265,7 +265,15 @@ impl Lowerer {
     /// `impl<I: Iterator> IntoIterator for I` stated as a rule, since a blanket impl has
     /// no syntax yet. `IntoIterator` is consulted first, so a container implementing
     /// both still hands out its dedicated iterator.
+    ///
+    /// `&mut it` is the iterator itself, driven in place through the borrow: `next`
+    /// takes `&mut self` either way, and the checker admits that head only over an
+    /// `Iterator`.
     fn iterator_of(&self, head: HirExpr, span: Span) -> Result<(HirType, HirExpr), LoweringError> {
+        if matches!(head.ty, HirType::Reference { mutable: true, .. }) {
+            let ty = head.ty.clone();
+            return Ok((ty, head));
+        }
         let Some(name) = nominal_name(&head.ty) else {
             return Err(Self::not_iterable(&head.ty));
         };
@@ -321,7 +329,7 @@ impl Lowerer {
 
     /// The `Option` instance `iter_ty`'s `next` returns.
     fn next_return_type(&self, iter_ty: &HirType) -> Result<HirType, LoweringError> {
-        let Some(name) = nominal_name(iter_ty) else {
+        let Some(name) = nominal_name(iter_ty.referent()) else {
             return Err(Self::not_iterable(iter_ty));
         };
         self.method_return_type(&name, NEXT_METHOD)

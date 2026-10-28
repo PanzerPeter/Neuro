@@ -282,3 +282,91 @@ func main() -> i32 {
         "expected UnknownTypeName for Chars, got {errors:?}"
     );
 }
+
+/// A borrowed head binds `&T` for every element type, so the element is not
+/// interchangeable with an owned `i32`.
+#[test]
+fn a_borrowed_head_binds_a_reference_to_each_element() {
+    let errors = semantic_errors(&program(
+        r#"
+    val xs = [1, 2, 3]
+    mut total = 0
+    for x in &xs {
+        total += x
+        val owned: i32 = x
+    }
+    total
+"#,
+    ));
+    assert!(
+        matches!(errors.as_slice(), [TypeError::Mismatch { .. }]),
+        "reading through `&i32` passes and binding it as `i32` must not; got {errors:?}"
+    );
+}
+
+#[test]
+fn a_mutably_borrowed_head_writes_through_its_binding() {
+    let errors = semantic_errors(&program(
+        r#"
+    mut xs = [1, 2, 3]
+    for x in &mut xs {
+        *x += 10
+    }
+    xs[0]
+"#,
+    ));
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+/// The borrow is the loop's, not one statement's: the head stays frozen for the body.
+#[test]
+fn a_borrowed_head_is_held_for_the_whole_loop() {
+    let errors = semantic_errors(&program(
+        r#"
+    mut xs = [1, 2, 3]
+    for x in &mut xs {
+        xs[0] = 0
+    }
+    0
+"#,
+    ));
+    assert!(
+        !errors.is_empty(),
+        "writing the head inside its loop must be refused"
+    );
+}
+
+#[test]
+fn a_mutable_borrow_of_an_iterator_drives_it_in_place() {
+    let errors = semantic_errors(&program(
+        r#"
+    mut it = CountIter { at: 0, end: 3 }
+    mut total = 0
+    for v in &mut it {
+        total = total + v
+    }
+    total + it.at
+"#,
+    ));
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+/// `next` takes `&mut self`, and an `IntoIterator` impl names the owned type, so
+/// neither a shared borrow of an iterator nor any borrow of a container resolves.
+#[test]
+fn other_borrows_of_a_protocol_type_are_rejected() {
+    let errors = semantic_errors(&program(
+        r#"
+    mut it = CountIter { at: 0, end: 3 }
+    mut c = Count { end: 3 }
+    for v in &it { }
+    for v in &mut c { }
+    0
+"#,
+    ));
+    let rejected = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::BorrowedIterableHead { .. }))
+        .count();
+    assert_eq!(rejected, 2, "got {errors:?}");
+}

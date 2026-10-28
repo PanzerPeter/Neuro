@@ -345,7 +345,7 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   nominal type carrying an `IntoIterator` or `Iterator` impl (`trait_impls`, this slice's own
   copy of the checker's table) becomes a `HirStmt::Expr` wrapping a `Block`: a mutable
   `__iter_N` binding initialized from `head.into_iter()` (or from the head itself, when it is
-  already an `Iterator`) followed by a `while true` whose single statement is a two-arm
+  already an `Iterator` or is `&mut it`, which `next` then drives through the borrow) followed by a `while true` whose single statement is a two-arm
   `Match` on `__iter_N.next()`. Arm 0 tests the `Some` tag and binds payload slot 0 to the loop
   variable; arm 1 is a `Wildcard` whose body breaks, exactly as the `?` desugar's failure arm
   terminates its block. The label rides on the emitted `while`, so `break`/`continue`, labeled
@@ -359,7 +359,9 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   yielding arm, so a `continue` cannot skip the advance and repeat an index.
   The built-in sequence heads never reach this path: a range, an array, a `Vec`, and a borrowed
   slice keep their `HirStmt::ForRange` / `ForEach` counted-loop nodes, which is what leaves
-  their generated code unchanged.
+  their generated code unchanged. A borrowed counted head defines its element binding as
+  `&T` / `&mut T` of the head's own mutability (`borrowed_element`), adapters included; the
+  backend reads the same rule off the head's type.
   A `LoopPosition` picks where the position binding's value comes from. `Step` is the counter
   above; `ByteOffset` is what a `text.char_indices()` head takes (`char_indices_receiver`
   recognises it on the AST iterable, ahead of lowering it): the loop samples the iterator's own
