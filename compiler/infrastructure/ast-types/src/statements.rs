@@ -289,3 +289,56 @@ pub enum Stmt {
     },
     Expr(Expr),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared_types::Literal;
+
+    fn ident(name: &str) -> Identifier {
+        Identifier::new(name.to_string(), Span::new(0, 1))
+    }
+
+    fn var(name: &str) -> Box<Expr> {
+        Box::new(Expr::Identifier(ident(name)))
+    }
+
+    #[test]
+    fn root_peels_parens_tuple_index_and_deref() {
+        // (*p).0.field = v
+        let object = Expr::TupleIndex {
+            object: Box::new(Expr::Paren(
+                Box::new(Expr::Deref {
+                    operand: var("p"),
+                    span: Span::new(0, 1),
+                }),
+                Span::new(0, 1),
+            )),
+            index: 0,
+            span: Span::new(0, 1),
+        };
+        let place = Place::Field {
+            object: Box::new(object),
+            field: ident("field"),
+            span: Span::new(0, 1),
+        };
+        assert_eq!(place.root().map(|i| i.name.as_str()), Some("p"));
+    }
+
+    #[test]
+    fn root_of_a_temporary_is_none() {
+        // make()[0] = v
+        let place = Place::Index {
+            object: Box::new(Expr::Call {
+                func: var("make"),
+                type_args: vec![],
+                args: vec![],
+                arg_labels: vec![],
+                span: Span::new(0, 1),
+            }),
+            index: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(0, 1))),
+            span: Span::new(0, 1),
+        };
+        assert!(place.root().is_none());
+    }
+}

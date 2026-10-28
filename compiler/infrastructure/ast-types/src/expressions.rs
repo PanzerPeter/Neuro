@@ -594,3 +594,48 @@ impl fmt::Display for UnaryOp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ident(name: &str) -> Identifier {
+        Identifier::new(name.to_string(), Span::new(0, 1))
+    }
+
+    #[test]
+    fn binding_names_walk_nested_payloads_in_order() {
+        // Pair::Two(Some(a), Shape::Circle { radius: r, center: _ })
+        let span = Span::new(0, 1);
+        let pattern = Pattern::Enum {
+            enum_name: ident("Pair"),
+            variant: ident("Two"),
+            payload: EnumPatternPayload::Tuple(vec![
+                Pattern::UnqualifiedEnum {
+                    variant: ident("Some"),
+                    payload: EnumPatternPayload::Tuple(vec![Pattern::Binding(ident("a"))]),
+                    span,
+                },
+                Pattern::Enum {
+                    enum_name: ident("Shape"),
+                    variant: ident("Circle"),
+                    payload: EnumPatternPayload::Struct(vec![
+                        FieldPattern {
+                            field: ident("radius"),
+                            pattern: Pattern::Binding(ident("r")),
+                            span,
+                        },
+                        FieldPattern {
+                            field: ident("center"),
+                            pattern: Pattern::Wildcard(span),
+                            span,
+                        },
+                    ]),
+                    span,
+                },
+            ]),
+            span,
+        };
+        assert_eq!(pattern.binding_names(), vec!["a", "r"]);
+    }
+}

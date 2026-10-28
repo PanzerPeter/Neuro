@@ -123,6 +123,28 @@ mod tests {
     }
 
     #[test]
+    fn tensor_types_compare_equal_whatever_their_axis_names() {
+        // Axis names ride along outside type identity; a derived PartialEq would break this.
+        let tensor = |names: Vec<Option<&str>>| HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![Some(2), Some(3)],
+            names: AxisNames(names.into_iter().map(|n| n.map(str::to_string)).collect()),
+        };
+        assert_eq!(
+            tensor(vec![Some("rows"), Some("cols")]),
+            tensor(vec![None, Some("width")])
+        );
+        assert_ne!(
+            tensor(vec![]),
+            HirType::Tensor {
+                element: Box::new(HirType::F32),
+                shape: vec![Some(3), Some(2)],
+                names: AxisNames::default(),
+            }
+        );
+    }
+
+    #[test]
     fn program_assembles_a_typed_function() {
         // func answer() -> i32 { return 42 }
         let body = vec![HirStmt::Return {

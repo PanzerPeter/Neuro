@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.19.2] - 2026-10-28
+
+### Added
+
+- Unit tests for the shared AST and HIR helpers whose contracts are easy to break
+  silently: `Place::root` through parens, tuple indices and dereferences (and `None` for
+  a temporary), `Pattern::binding_names` order across nested payloads, and tensor type
+  equality ignoring axis names.
+
 ## [5.19.1] - 2026-10-28
 
 ### Fixed
