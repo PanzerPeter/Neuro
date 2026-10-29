@@ -188,7 +188,7 @@ impl TypeChecker {
     /// address of its own, which a borrow can point at. A tensor coordinate is not one,
     /// since a tensor element is read out of its buffer rather than named in place, and a
     /// bare `*r` is `r` itself.
-    fn is_borrowable_sub_place(&self, place: &Expr) -> bool {
+    pub(super) fn is_borrowable_sub_place(&self, place: &Expr) -> bool {
         match place {
             Expr::Paren(inner, _) => self.is_borrowable_sub_place(inner),
             Expr::FieldAccess { object, .. } | Expr::TupleIndex { object, .. } => {

@@ -9,4 +9,6 @@ generic fold      |acc, x| acc + x   = 10
 generic fold      widest as i64      = 4
 returned closure  shift(2) + square(3) = 12
 owned capture     word.len()         = 4
-total                                = 173
+lent closure      feed(data, tally)  = 30
+moved closure     tally read(10)     = 60
+total                                = 203

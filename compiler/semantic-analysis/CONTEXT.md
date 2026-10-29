@@ -21,7 +21,8 @@ compilation.
 
 `type_checkers/expressions/` holds the `check_expr` dispatch (`mod.rs`) plus `calls`,
 `enum_exprs`, `struct_exprs`, `operators`, `blocks`, `places`, `sequences`, `builtins`,
-`const_predicates`, `interpolation`, and `try_expr`. `type_checkers/declarations/` holds the
+`const_predicates`, `interpolation`, `try_expr`, `compose`, and `lending` (the borrow a call takes
+of a function value it calls or hands to a function-typed parameter). `type_checkers/declarations/` holds the
 reserved-name pass, generic scope, and generic unification/substitution in `mod.rs`, with one
 module per declaration kind beside it. `tests/` is split by subject.
 

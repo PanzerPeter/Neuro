@@ -115,6 +115,9 @@ impl TypeChecker {
         let saved_pool_floor = std::mem::replace(&mut self.jump_pool_floor, self.pool_stack.len());
 
         self.symbols.push_scope();
+        // The enclosing statement's borrows in flight meet the captures once, in
+        // `settle_captures`, so a single-expression body must not meet them too.
+        self.symbols.clear_transient_borrows();
         // The parameter scope is fresh, so a failed define is a repeated parameter name.
         for (p, ty) in params.iter().zip(param_types.iter()) {
             if let Err(duplicate) = self.symbols.define(p.name.name.clone(), ty.clone(), false) {
@@ -331,7 +334,15 @@ impl TypeChecker {
                 continue;
             };
             let copy = self.is_type_copy(&ty);
-            let writes = mutated(name);
+            // A `mut` function value is only ever called or lent, both exclusively, or moved.
+            let writes = mutated(name)
+                || matches!(
+                    ty,
+                    Type::Function {
+                        mode: FunctionMode::Mut,
+                        ..
+                    }
+                );
             if self.in_kernel {
                 self.refuse_kernel_capture(name, ty, copy, writes, *use_span);
                 continue;
@@ -963,6 +974,36 @@ func main() -> i32 {
 }",
         );
         assert!(accepted.is_empty(), "{accepted:?}");
+    }
+
+    /// Calling a captured `mut` function value writes its environment, so the closure is
+    /// `mut` too and holds the value exclusively while it lives.
+    #[test]
+    fn a_called_mut_capture_makes_the_closure_mut() {
+        let errors = semantic_errors(
+            "func want(f: () -> void) { f() }
+func main() -> i32 {
+    mut c = 0
+    val f = || -> void { c += 1 }
+    val h = || -> void { f() }
+    want(h)
+    f()
+    h()
+    0
+}",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::Mismatch { .. })),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(
+                |e| matches!(e, TypeError::CannotMutablyBorrowWhileBorrowed { name, .. } if name == "f")
+            ),
+            "{errors:?}"
+        );
     }
 
     /// A `Copy` value the body only reads is copied, so the binding stays free to change.

@@ -9,6 +9,7 @@ mod compose;
 pub(crate) mod const_predicates;
 mod enum_exprs;
 mod interpolation;
+mod lending;
 mod operators;
 mod places;
 mod sequences;

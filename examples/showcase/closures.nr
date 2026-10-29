@@ -13,6 +13,8 @@
 //     handed to, whose type parameters they help infer
 //   · escaping closures: built inside a function and returned in a struct, kept in an
 //     `Option` and matched back out, and a `move` closure returned with the `string` it owns
+//   · lending and moving: a returned `mut` closure is lent to a `mut (..)` parameter, so the
+//     caller still holds it afterwards, then moves into a struct field and out again
 //
 // The results are composed into a single deterministic exit code.
 
@@ -71,6 +73,30 @@ func pick_transform(offset: i32, squared: bool) -> Transform {
 // A `move` closure owns the `string` it captured, so it may be returned as well.
 func length_of(word: string) -> () -> u64 {
     move || word.len()
+}
+
+// A running tally that owns its `string` and writes its own total: a `mut` closure.
+func tally_of(unit: string) -> mut (i32) -> u64 {
+    mut total: u64 = 0
+    move |x: i32| -> u64 {
+        total += unit.len() * (x as u64)
+        total
+    }
+}
+
+// Feed every element to `f` and keep its last answer. The call borrows `f` exclusively
+// while it runs and hands it back when it returns.
+func feed(xs: [i32; 4], f: mut (i32) -> u64) -> u64 {
+    mut last: u64 = 0
+    for i in 0..4 {
+        last = f(xs[i])
+    }
+    last
+}
+
+struct Meter {
+    label: string,
+    read: mut (i32) -> u64
 }
 
 struct Scaler {
@@ -151,7 +177,19 @@ func main() -> i32 {
     println("returned closure  {chosen.label}(2) + square(3) = {escaped}")
     println("owned capture     word.len()         = {owned}")
 
+    // Lending and moving: `feed` borrows the tally and hands it back, so the same total keeps
+    // growing. The struct field takes it by move: from there on `tally` names nothing.
+    val tally = tally_of("abc")
+    val fed = feed(data, tally)                                                // 3 * 10 = 30
+    val meter = Meter { label: "tally", read: tally }
+    val read = meter.read
+    val grown = read(10)                                                       // 30 + 30 = 60
+
+    println("lent closure      feed(data, tally)  = {fed}")
+    println("moved closure     {meter.label} read(10)     = {grown}")
+
     val inferred = summed + (widest as i32) + escaped + owned
-    println("total                                = {total + inferred}")
-    total + inferred                                 // 143 + 10 + 4 + 12 + 4 = 173
+    val lent = (grown - fed) as i32
+    println("total                                = {total + inferred + lent}")
+    total + inferred + lent                          // 143 + 10 + 4 + 12 + 4 + 30 = 203
 }

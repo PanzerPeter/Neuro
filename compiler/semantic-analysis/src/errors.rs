@@ -1102,6 +1102,11 @@ pub enum TypeError {
     CannotUseWhileMutablyBorrowed { name: String, span: Span },
 
     #[error(
+        "cannot call or lend the `mut` function value in '{name}' through a shared `&` borrow: its call may write the environment it carries, so it needs the value itself or a `&mut` borrow"
+    )]
+    MutFunctionThroughSharedBorrow { name: String, span: Span },
+
+    #[error(
         "cannot move out of '{name}' while it is borrowed: the borrow would be left pointing at a value '{name}' no longer owns; end the borrow first, or move a `.clone()`"
     )]
     CannotMoveWhileBorrowed { name: String, span: Span },
@@ -1707,6 +1712,7 @@ impl TypeError {
             | Self::CannotMutablyBorrowWhileBorrowed { span, .. }
             | Self::CannotBorrowWhileMutablyBorrowed { span, .. }
             | Self::CannotUseWhileMutablyBorrowed { span, .. }
+            | Self::MutFunctionThroughSharedBorrow { span, .. }
             | Self::CannotMoveWhileBorrowed { span, .. }
             | Self::CannotAssignWhileBorrowed { span, .. }
             | Self::ReturnsReferenceToLocal { span, .. }

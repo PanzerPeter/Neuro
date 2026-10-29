@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.21.0] - 2026-10-29
+
+### Changed
+
+- A `mut` or `once` function value moves instead of copying: after `val g = f`, a use of `f`
+  is a use of a moved value. Only a plain `(T) -> U` value still copies. Copies of a `mut`
+  closure used to share one environment, so a call through one copy could write it again,
+  through another copy, while the first call was still running.
+- A function value passed to a plain or `mut` function-typed parameter is lent for the call
+  and the caller keeps it: `apply(f, 1); f(2); apply(f, 3)` compiles for a `mut` closure, and
+  every write lands in the same environment. A `once` parameter still consumes its argument.
+- Calling a `mut` function value, or lending it to a `mut` parameter, borrows it exclusively
+  until the call returns. `f(|| f())` and `twice(f, f)` are refused; `f(f(1))` is accepted,
+  since the inner call returns first. A closure that calls or lends a `mut` value it captured
+  is `mut` itself and holds that value exclusively while it lives.
+- A `mut` function value reached through a shared `&` borrow, such as a field read through
+  `&self`, is refused when called or lent (`MutFunctionThroughSharedBorrow`).
+
 ## [5.20.2] - 2026-10-29
 
 ### Fixed

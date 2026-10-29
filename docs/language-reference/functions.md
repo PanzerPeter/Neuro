@@ -1185,8 +1185,9 @@ func main() -> i32 {
 ```
 
 A closure that writes a capture passed where a plain `(T) -> U` is asked, or a `once` closure
-where a `mut` one is, is a type mismatch. Calling a `once` value a second time, or copying it, is
-a use of a moved value. `once` is a mode only in front of a function type; elsewhere it is an
+where a `mut` one is, is a type mismatch. Calling a `once` value a second time is a use of a
+moved value. A `mut` or `once` value moves rather than copies; passing one to a plain or `mut`
+parameter lends it for the call instead (see [Moving and lending](#moving-and-lending)). `once` is a mode only in front of a function type; elsewhere it is an
 ordinary name.
 
 ### Inference
@@ -1261,7 +1262,7 @@ it is written, `(|x: i32| -> i32 { x + 1 })(3)`, or a function chosen by an `if`
 ### Returning and storing closures
 
 A closure that borrows nothing owns its environment, so it can be returned, stored in a struct
-or an enum, and copied like any other value:
+or an enum, and moved like any other value. A plain `(T) -> U` value is also copied freely:
 
 ```neuro
 struct Scaler { apply: (f32) -> f32 }
@@ -1286,7 +1287,43 @@ func main() -> i32 {
 Each closure compiles to a `{ function pointer, environment pointer }` value; a call dispatches
 indirectly through it. The environment is a heap block every copy shares (a closure with no
 captures has none), freed with the last copy along with whatever a `move` closure moved into it.
-Because the copies share it, every copy of an `FnMut` closure sees the writes any of them makes.
+
+### Moving and lending
+
+Only a plain `(T) -> U` value copies, because its calls never write its environment. A `mut` or
+`once` value moves: `val g = f` hands the closure to `g`, and a later use of `f` is a use of a
+moved value. If copies of a `mut` closure shared one environment, a call through one copy could
+run a call through another and write that environment while the first call was still using it.
+
+Passing a function value to a function-typed parameter does not move it. The call borrows it,
+shared for a plain parameter and exclusive for a `mut` one, and the caller has it back when the
+call returns. A `once` parameter takes the value for good:
+
+```neuro
+func twice(f: mut () -> void) {
+    f()
+    f()
+}
+
+func main() -> i32 {
+    mut count = 0
+    {
+        val bump = || -> void { count += 1 }
+        twice(bump)                     // lent, not moved
+        bump()                          // still ours
+        val other = bump                // moved
+        twice(other)
+    }
+    count                               // 5
+}
+```
+
+Calling a `mut` value borrows it exclusively too, so nothing else may reach it during the call:
+`f(|| f())` and `twice(f, f)` with two `mut` parameters are refused. The borrow starts once the
+arguments are evaluated, so `f(f(1))` is fine: the inner call has returned before the outer one
+starts. A closure that calls or lends a `mut` value it captured writes that capture: the closure
+is `mut` itself and holds the value exclusively while it lives. A `mut` value reached through a
+shared `&` borrow, such as a field read through `&self`, can be neither called nor lent.
 
 A value that may borrow lives only in the scope that made it:
 

@@ -817,11 +817,10 @@ impl TypeChecker {
             Type::Collection { .. } => true,
             Type::Tensor { .. } => true,
             // Calling a `once` value may consume what it captured, so a second call must
-            // be refused, and so must a copy that could make it.
-            Type::Function {
-                mode: FunctionMode::Once,
-                ..
-            } => true,
+            // be refused, and so must a copy that could make it. Copies of a `mut` value
+            // would share an environment its calls write, so one copy's running call could
+            // write it again through another. Only an `Fn` value copies.
+            Type::Function { mode, .. } => *mode != FunctionMode::Shared,
             // An aggregate is tracked exactly when it holds something tracked: the
             // owner of a `[string; 3]` is the array binding, and duplicating it would
             // duplicate every buffer inside it.

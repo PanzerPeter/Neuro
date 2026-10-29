@@ -339,6 +339,18 @@ impl SymbolTable {
         }
     }
 
+    /// End one transient borrow of `place` before its statement does: a function value
+    /// lent to a call, or borrowed by its own call, is free again once the call returns.
+    pub(crate) fn release_transient_borrow(&mut self, place: &str, exclusive: bool) {
+        if let Some(info) = self.lookup_mut(place) {
+            if exclusive {
+                info.exclusive_transient = info.exclusive_transient.saturating_sub(1);
+            } else {
+                info.shared_transient = info.shared_transient.saturating_sub(1);
+            }
+        }
+    }
+
     /// Promote the transient borrow of `place` taken while checking an
     /// initializer into a persistent borrow held by `holder` (`val holder = &place`).
     /// The borrow is released when `holder` leaves scope (see [`pop_scope`]).

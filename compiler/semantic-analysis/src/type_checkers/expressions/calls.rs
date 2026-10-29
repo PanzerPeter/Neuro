@@ -4,6 +4,7 @@
 // here adds methods to the same `impl TypeChecker` block.
 
 use super::builtins::TO_CHECKED_METHOD;
+use super::lending::Lend;
 use super::{COLLECTION_CTOR, TypeChecker, VEC_WITH_CAPACITY, declarations, eval_const_predicate};
 use crate::errors::TypeError;
 use crate::type_checkers::closures::closure_context;
@@ -70,10 +71,9 @@ impl TypeChecker {
         if let Some(Type::Function { params, ret, mode }) =
             self.symbols.lookup(func_name).map(|info| info.ty.clone())
         {
-            if mode == FunctionMode::Once {
-                self.consume_once_callee(func_name, span);
-            }
             self.check_call_args(args, &params, span);
+            let lend = self.call_bound_function(func_name, mode, span);
+            self.end_lends(lend.into_iter().collect());
             return Some(*ret);
         }
 
@@ -184,9 +184,10 @@ impl TypeChecker {
         None
     }
 
-    /// Call a `once` binding: the call may consume what the closure captured, so it uses
-    /// the binding up, and a call after that is a use of a moved value.
-    fn consume_once_callee(&mut self, name: &str, span: Span) {
+    /// Call a function value a binding holds. A `once` call may consume what the closure
+    /// captured, so it uses the binding up, and a call after that is a use of a moved
+    /// value. Any other call borrows the binding until it returns, which the caller ends.
+    fn call_bound_function(&mut self, name: &str, mode: FunctionMode, span: Span) -> Option<Lend> {
         let callee = ast_types::Expr::Identifier(Identifier {
             name: name.to_string(),
             span,
@@ -202,7 +203,11 @@ impl TypeChecker {
                 moved_at,
             });
         }
+        if mode != FunctionMode::Once {
+            return self.lend_function_value(&callee, mode == FunctionMode::Mut);
+        }
         self.record_move(&callee);
+        None
     }
 
     /// Validate a call's arguments against the callee's visible parameter types: arity,
@@ -234,6 +239,7 @@ impl TypeChecker {
                 span,
             });
         }
+        let mut lent = Vec::new();
         for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
             // A function-typed parameter only calls what it is given, and the callee
             // returns before the caller's scope ends, so a scope-bound closure may go in.
@@ -250,8 +256,10 @@ impl TypeChecker {
                     self.record_type_mismatch(expected_ty, arg_ty, arg.span());
                 }
             }
-            self.record_move(arg);
+            self.pass_argument(arg, expected_ty, &mut lent);
         }
+        let lends = self.lend_arguments(lent);
+        self.end_lends(lends);
         self.check_reborrow_exclusivity(receiver, args, visible_params);
         self.hold_argument_stores(receiver, args, visible_params, span);
     }
@@ -558,6 +566,7 @@ impl TypeChecker {
                     .zip(sig.params.iter())
                     .filter(|(arg, param)| deferred(arg, param)),
             );
+        let mut lent = Vec::new();
         for (arg, param) in order {
             // A scalar parameter, written as one or a type parameter the turbofish or an
             // earlier argument has bound, types its argument as a non-generic call's does,
@@ -605,8 +614,10 @@ impl TypeChecker {
                 }
             }
             // A by-value argument moves a non-Copy binding into the callee.
-            self.record_move(arg);
+            self.pass_argument(arg, param, &mut lent);
         }
+        let lends = self.lend_arguments(lent);
+        self.end_lends(lends);
         self.check_reborrow_exclusivity(receiver, args, &sig.params);
         self.hold_argument_stores(receiver, args, &sig.params, span);
 
@@ -1162,8 +1173,13 @@ impl TypeChecker {
                 self.function_value_slot = None;
                 // Any expression of function type is callable, a closure literal called in
                 // place included: the value is the same one a binding would hold.
-                if let Type::Function { params, ret, .. } = expr_ty {
+                if let Type::Function { params, ret, mode } = expr_ty {
                     self.check_call_args(args, &params, *span);
+                    let lend = match mode {
+                        FunctionMode::Once => None,
+                        _ => self.lend_function_value(func, mode == FunctionMode::Mut),
+                    };
+                    self.end_lends(lend.into_iter().collect());
                     return Some(*ret);
                 }
                 self.record_error(TypeError::NotCallable {
@@ -1194,6 +1210,7 @@ impl TypeChecker {
             });
         }
         let mut arg_types = Vec::with_capacity(args.len());
+        let mut lent = Vec::new();
         for (index, arg) in args.iter().enumerate() {
             let written = params
                 .get(index)
@@ -1212,13 +1229,16 @@ impl TypeChecker {
                     self.record_type_mismatch(written, found, arg.span());
                 }
             }
-            self.record_move(arg);
+            self.pass_argument(arg, written.as_ref().unwrap_or(&found), &mut lent);
             arg_types.push(found);
         }
+        let lends = self.lend_arguments(lent);
         self.function_value_slot = function_value_position(callee);
         let context = closure_context(callee, arg_types, Type::Unknown);
         let ty = self.check_expr(callee, Some(&context));
         self.function_value_slot = None;
+        // The literal runs while its arguments are lent, so its captures meet the lends.
+        self.end_lends(lends);
         match ty {
             Some(Type::Function { ret, .. }) => *ret,
             _ => Type::Unknown,
