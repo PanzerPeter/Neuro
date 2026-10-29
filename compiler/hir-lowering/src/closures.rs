@@ -205,6 +205,16 @@ impl Lowerer {
                 is_move,
                 span,
             } => self.lower_closure(params, ret.as_ref(), body, *is_move, hint, *span),
+            // A generic enum's tuple variant takes the parameters the call has fixed.
+            Expr::Path {
+                type_name, member, ..
+            } if self.is_generic_tuple_variant(&type_name.name, &member.name) => {
+                let params = hint.params.iter().cloned().collect::<Option<Vec<_>>>();
+                let params = params.ok_or_else(|| LoweringError::UnresolvedType {
+                    name: format!("{}::{}", type_name.name, member.name),
+                })?;
+                self.lower_function_value(arg, &[], params)
+            }
             _ => self.lower_expr(arg, None),
         }
     }

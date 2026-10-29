@@ -536,13 +536,18 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.builder.build_store(cell, handle)?;
                 Ok(cell.into())
             }
-            // A field or an element: the address of its storage inside the holder.
-            other => match self.held_place_ptr(operand)? {
+            // A field or an element: the address of its storage inside the holder. Anything
+            // else is a `Copy` temporary passed to a call, which the checker allows only
+            // where the borrow ends with the statement, so a stack slot holding the value
+            // outlives it.
+            _ => match self.held_place_ptr(operand)? {
                 Some(ptr) => Ok(ptr.into()),
-                None => Err(CodegenError::InternalError(format!(
-                    "borrow of a non-place expression reached codegen: {:?}",
-                    other
-                ))),
+                None => {
+                    let value = self.codegen_expr(operand)?;
+                    let slot = self.entry_alloca(value.get_type(), "borrow.temp")?;
+                    self.builder.build_store(slot, value)?;
+                    Ok(slot.into())
+                }
             },
         }
     }

@@ -540,6 +540,12 @@ same suppression for `Expr::ArrayRest`, whose `exact` node is an arity assertion
 the leading projections have already taken. And a loop body's `moves_since` compares part maps,
 not just the whole span, so a partial move a second iteration would repeat is still reported.
 
+A store into a sub-place refills it (`check_assign`). Its object is checked with the root's move
+state narrowed to the whole binding and the place's strict ancestors
+(`narrow_moves_to_ancestors`), since the store writes past the place's own moves and its
+siblings', and once the store is checked `clear_moved_within` drops every move at or below the
+place's path. A moved whole binding or ancestor still makes the store a use of a moved value.
+
 A `match` does the same for transient borrows (`transient_borrows` / `set_transient_borrows`):
 each arm starts from the counts the scrutinee left, so `1 => v.push(1), _ => v.push(2)` is not a
 conflict between arms that never both run, and past the `match` each binding keeps the largest
@@ -549,7 +555,9 @@ Each arm of an `if` (statement or expression) or a `match` snapshots and restore
 so a move in one arm is not seen by its siblings. Past the region, `SymbolTable::join_moves` adds
 back the moves of every arm that falls through (one `stmts_diverge` / `expr_diverges` does not
 call divergent), because any of them may have run: reading a binding one arm moved is a use of
-a moved value. An arm that ends in `return`, `break`, `continue` or a `panic` contributes nothing.
+a moved value. When the arms cover every path (an `if` with an `else`, a `match`),
+`settle_moves` sets the state to the join of those arms alone, so a place every arm refilled
+is owned again; an `if` without an `else` keeps the pre-branch state in the join. An arm that ends in `return`, `break`, `continue` or a `panic` contributes nothing.
 A `while` / `for` body is restored plainly after the loop, since it may run zero times.
 
 A loop body is the exception to the plain restore. `report_loop_body_moves` runs after the body
@@ -599,7 +607,12 @@ it has no display form, so `{x:?}` renders it and `{x}` does not (`UnrenderableS
 
 **Places, borrows, and derefs.** The `Expr::Reference` arm requires a *place*: a binding, or a
 field, tuple element, or array / slice / `Vec` element chain rooted in one, possibly through a
-deref (`is_borrowable_sub_place`; a temporary or a tensor coordinate is `CannotBorrowValue`). It
+deref (`is_borrowable_sub_place`; a temporary or a tensor coordinate is `CannotBorrowValue`). The
+one exception is a shared borrow of a `Copy` temporary that is a whole call argument
+(`temporary_borrow_slot`, set by the argument loops): it is accepted and recorded in
+`call_temporary_borrows`, and the call refuses it as `TemporaryBorrowEscapes` when its result can
+hold a reference or a function value (`refuse_escaping_temporary_borrows`) or a `&mut` argument
+may store it (`refuse_stored_temporary_borrows`). It
 yields `&T` **without** moving the operand: borrowing never consumes. The borrow counts against
 the ROOT binding, and `borrow_target_of` returns that root for a sub-place, so holders, returns
 and stores treat `&p.name` as a borrow of `p`. `&mut` needs a `mut` binding, or a sub-place
@@ -825,7 +838,9 @@ unbound is taken from the enclosing function's return instance (`enum_return_typ
 context a tail `if` branch has), else `GenericEnumNotInferable`. A tuple variant of a
 non-generic enum named without arguments (`Error::Io`) is its constructor:
 `check_enum_unit_path` types it as a function from the payload to the enum, so it passes as a
-function value. A generic enum's has no instance until its payload is known and stays an
+function value. A generic enum's names its instance from the function type expected of it
+(`generic_variant_function`): the expected return when it names an instance, else the payload
+template unified with the expected parameters. With no function type expected it stays an
 `EnumVariantFormMismatch`. An enum pattern written with the
 base name matches the scrutinee's instance and binds payloads at the instance's concrete types.
 `Option` / `Result` are **not** special-cased anywhere here: `neurc` injects their declarations.

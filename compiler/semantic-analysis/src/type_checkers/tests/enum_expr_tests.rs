@@ -90,16 +90,32 @@ func main() -> i32 {
     );
 }
 
-/// A generic enum's variant has no instance to name until its payload is known, so it
-/// is refused as a value, once, rather than typed as a function.
+/// A generic enum's variant names its instance from the function type expected of it,
+/// so it passes to a function-typed parameter.
 #[test]
-fn generic_tuple_variant_without_arguments_is_rejected() {
+fn generic_tuple_variant_takes_its_instance_from_the_expected_function_type() {
     let errors = semantic_errors(
         r#"
 enum Wrap<T> { Held(T), Empty }
 func apply(f: (i32) -> Wrap<i32>) -> Wrap<i32> { f(1) }
 func main() -> i32 {
     val w = apply(Wrap::Held)
+    0
+}
+"#,
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// With no function type expected, a generic enum's variant has no instance to name, so
+/// it is refused as a value, once, rather than typed as a function.
+#[test]
+fn generic_tuple_variant_without_arguments_or_context_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+enum Wrap<T> { Held(T), Empty }
+func main() -> i32 {
+    val f = Wrap::Held
     0
 }
 "#,

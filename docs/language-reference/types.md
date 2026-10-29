@@ -639,8 +639,12 @@ the prelude's `Result`; a program with its own `Option` loses `Result::ok` the s
 - **No enum that holds itself inline**, directly or through a struct, array, tuple or another
   enum: it would have no finite size.
 - **No `impl Drop` on an enum** (`InvalidDropImpl`): only a struct runs a user destructor.
-- **A generic enum's tuple variant is not a function value.** `Error::Io` passes as a function,
-  but `Option::Some` has no instance until its payload is known; write `|x| Option::Some(x)`.
+- **A generic enum's tuple variant is a function value only where a function type is
+  expected.** `Error::Io` passes as a function anywhere. `Option::Some` names no instance until
+  something says which, so it needs a function type from its context: an annotation
+  (`val f: (i32) -> Option<i32> = Option::Some`), a parameter (`apply(Wrap::Two)`), or a
+  generic call whose earlier inputs fixed its parameters (`o.map(Option::Some)` with
+  `o: Option<i32>`). Bare, `val f = Option::Some` is an error; write `|x| Option::Some(x)`.
 
 ### Type Errors
 
@@ -752,8 +756,14 @@ func main() -> i32 {
 - Only a **place** can be borrowed: a `val`/`mut`/parameter binding, or a field, a tuple
   element, or an array, slice or `Vec` element reached from one (`&p.name`, `&arr[i]`,
   `&v[i]`). A borrow of a part borrows the whole binding, so `p` may not be moved while
-  `&p.name` is live. Borrowing a temporary (a literal or a call result), a tensor element,
-  or a `const` (an inlined value, not a memory location) is a `CannotBorrowValue` error.
+  `&p.name` is live. Borrowing a tensor element or a `const` (an inlined value, not a
+  memory location) anywhere else is a `CannotBorrowValue` error.
+- A **temporary** (a literal, an operator or call result, a `const`) lives until the end
+  of its statement, so a shared borrow of one may be passed straight to a call:
+  `id(&1)`, `norm(&Point { x: 3, y: 4 })`. Only a `Copy` value may be borrowed this way
+  for now. The borrow may not be bound (`val r = &5`), and a call that could keep it, in
+  a result that holds a reference or through a `&mut` argument, refuses it
+  (`TemporaryBorrowEscapes`).
 
 ```neuro
 struct Point { x: i64, y: i64 }
@@ -1530,6 +1540,20 @@ val t = Two { a: "x", b: "y" }
 val first = t.a
 // consume(t)           // ERROR: use of moved value 't'
 ```
+
+**A store puts an element back.** Assigning to a moved-out place refills it, and the
+aggregate is whole again once every place that left has been refilled:
+
+```neuro
+mut t = Two { a: "x", b: "y" }
+val first = t.a
+t.a = "z"               // `t.a` is owned again
+consume(t)              // fine: nothing is missing
+```
+
+A place refilled on only some paths (one arm of an `if` without an `else`) may still be
+moved where the paths meet. A place whose aggregate, or an enclosing field, left as a whole
+has nothing to refill: assign the aggregate instead.
 
 An index the compiler cannot evaluate names no particular element, so a move through one
 takes the whole binding: `a[0]` moves element `0`, while `a[i]` moves `a`. Use

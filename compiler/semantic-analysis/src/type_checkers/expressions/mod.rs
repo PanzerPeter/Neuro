@@ -217,7 +217,9 @@ impl TypeChecker {
                 if let Some(bound) = self.kernel_call_binding_temporaries(func, args, *span) {
                     return self.check_expr(&bound, expected);
                 }
+                let lent = self.call_temporary_borrows.len();
                 let ty = self.check_call_expr(func, type_args, args, span, expected);
+                self.refuse_escaping_temporary_borrows(lent, ty.as_ref());
                 // A call inside a pool hands the block a value it now owns, so the
                 // `Drop`-only rejection applies here and names the callee.
                 if let Some(ty) = &ty {
@@ -316,7 +318,7 @@ impl TypeChecker {
                 operand,
                 mutable,
                 span,
-            } => self.check_reference_expr(operand, *mutable, span),
+            } => self.check_reference_expr(operand, *mutable, span, expected),
 
             // Dereference `*operand`: the result is the referent type `T`. The
             // operand must have a reference type; dereferencing anything else is an

@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.20.2] - 2026-10-29
+
+### Fixed
+
+- A store into a moved-out field, tuple element or literal array element refills it
+  (BUG-133): `val s = p.name` then `p.name = v` compiles, and `p` may be read whole again
+  once every place that left is back. A store into the place of a moved holder, or below a
+  moved field, is still a use of a moved value. An `if` with an `else`, or a `match`, whose
+  every arm refills a place leaves it owned; one arm alone does not.
+- A `string` binding stored into a field, tuple element or array element (`e.label = s`)
+  hands its ownership to the position instead of leaking its buffer (BUG-131).
+- A holder moved out of a field (`val inner = o.inner`) takes ownership of its `string`
+  positions instead of leaking them.
+- A `string` built by a branch with a literal arm (`val s = if c { a + b } else { "lit" }`)
+  releases its buffer when the allocating arm ran; it used to leak it.
+- A shared borrow of a `Copy` temporary may be passed to a call (`id(&1)`,
+  `norm(&Point { x: 3, y: 4 })`), as the language reference allows. A call that could keep
+  the borrow, in its result or through a `&mut` argument, refuses it with the new
+  `TemporaryBorrowEscapes` diagnostic. BUG-132 stays open, narrowed to owning temporaries.
+
+### Changed
+
+- A generic enum's tuple variant is a function value wherever a function type is expected
+  of it: `o.map(Option::Some)`, `apply(Wrap::Two)`,
+  `val f: (i32) -> Option<i32> = Option::Some`. With no function type to name its instance,
+  `val f = Option::Some` is still an error.
+
 ## [5.20.1] - 2026-10-29
 
 ### Fixed

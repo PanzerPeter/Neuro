@@ -75,6 +75,7 @@ impl TypeChecker {
         operand: &Expr,
         mutable: bool,
         span: &Span,
+        expected: Option<&Type>,
     ) -> Option<Type> {
         // A live binding (`val`/`mut`/parameter) is a borrowable place, and so is a
         // field or an element of one. A `const` is an inlined value with no address, and
@@ -93,6 +94,9 @@ impl TypeChecker {
             _ => None,
         };
         let Some((name, is_mut_binding)) = binding else {
+            if !mutable && self.temporary_borrow_slot == Some(*span) {
+                return self.check_temporary_borrow(operand, *span, expected);
+            }
             self.record_error(TypeError::CannotBorrowValue { span: *span });
             let _ = self.check_borrow_operand(operand);
             return Some(Type::Unknown);
@@ -145,6 +149,37 @@ impl TypeChecker {
         Some(Type::Reference {
             inner: Box::new(inner),
             mutable,
+        })
+    }
+
+    /// A shared borrow of a temporary passed as a whole call argument. The temporary lives
+    /// until the end of its statement, so the borrow may go in as long as the call keeps
+    /// none of it, which the call checks once its result is known.
+    ///
+    /// Only a `Copy` value qualifies: an owning temporary needs a release once the call
+    /// returns, which nothing emits yet.
+    fn check_temporary_borrow(
+        &mut self,
+        operand: &Expr,
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        let expected = match expected {
+            Some(Type::Reference { inner, .. }) => Some(inner.as_ref()),
+            _ => None,
+        };
+        let inner = self.check_expr(operand, expected)?;
+        if matches!(inner, Type::Unknown) {
+            return Some(Type::Unknown);
+        }
+        if !self.is_type_copy(&inner) {
+            self.record_error(TypeError::CannotBorrowValue { span });
+            return Some(Type::Unknown);
+        }
+        self.call_temporary_borrows.push(span);
+        Some(Type::Reference {
+            inner: Box::new(inner),
+            mutable: false,
         })
     }
 

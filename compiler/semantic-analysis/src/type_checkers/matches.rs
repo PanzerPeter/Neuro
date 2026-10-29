@@ -91,7 +91,7 @@ impl TypeChecker {
             arm_types.push(arm_ty);
         }
         self.symbols.restore_moves(&move_snapshot);
-        self.symbols.join_moves(&fell_through);
+        self.symbols.settle_moves(&fell_through);
         self.symbols.set_transient_borrows(&arm_borrows);
         if takes_owner {
             self.take_from_scrutinee(scrutinee, &written_ty, span);

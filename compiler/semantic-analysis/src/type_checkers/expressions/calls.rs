@@ -9,7 +9,9 @@ use crate::errors::TypeError;
 use crate::type_checkers::closures::closure_context;
 use crate::type_checkers::declarations::traits::collect_self_assoc;
 use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, EQ_METHOD, PARTIAL_EQ_TRAIT};
-use crate::type_checkers::statements::{borrow_target_of, function_value_position};
+use crate::type_checkers::statements::{
+    borrow_target_of, function_value_position, temporary_borrow_position,
+};
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::{BoundInfo, GenericFnSig};
 use crate::types::{CollectionKind, FunctionMode, Type};
@@ -238,8 +240,10 @@ impl TypeChecker {
             if matches!(expected_ty, Type::Function { .. }) {
                 self.function_value_slot = function_value_position(arg);
             }
+            self.temporary_borrow_slot = temporary_borrow_position(arg);
             let checked = self.check_expr(arg, Some(expected_ty));
             self.function_value_slot = None;
+            self.temporary_borrow_slot = None;
             if let Some(arg_ty) = checked {
                 let arg_ty = shared_reborrow(arg_ty, expected_ty);
                 if !self.assignable(&arg_ty, expected_ty) {
@@ -250,6 +254,36 @@ impl TypeChecker {
         }
         self.check_reborrow_exclusivity(receiver, args, visible_params);
         self.hold_argument_stores(receiver, args, visible_params, span);
+    }
+
+    /// Refuse every borrow of a temporary among `args`: the call may store it into a
+    /// `&mut` argument, which outlives the statement the temporary dies with.
+    fn refuse_stored_temporary_borrows(&mut self, args: &[ast_types::Expr]) {
+        for span in args.iter().filter_map(temporary_borrow_position) {
+            if let Some(at) = self.call_temporary_borrows.iter().position(|s| *s == span) {
+                self.call_temporary_borrows.remove(at);
+                self.record_error(TypeError::TemporaryBorrowEscapes { span });
+            }
+        }
+    }
+
+    /// Refuse the borrows of temporaries a call's arguments took from index `before` on
+    /// when its result of type `result` may hold one: binding the result would keep the
+    /// borrow past the statement its temporary dies with.
+    pub(crate) fn refuse_escaping_temporary_borrows(
+        &mut self,
+        before: usize,
+        result: Option<&Type>,
+    ) {
+        let lent = self.call_temporary_borrows.split_off(before);
+        let keeps =
+            result.is_some_and(|ty| self.type_holds_reference(ty) || self.holds_function_value(ty));
+        if !keeps {
+            return;
+        }
+        for span in lent {
+            self.record_error(TypeError::TemporaryBorrowEscapes { span });
+        }
     }
 
     /// A callee may store any borrow it is handed into a `&mut` argument whose referent
@@ -283,6 +317,9 @@ impl TypeChecker {
                 .is_some_and(|ty| self.type_holds_reference(ty.referent()))
         {
             holders.push((None, self.store_target_bindings(expr)));
+        }
+        if !holders.is_empty() {
+            self.refuse_stored_temporary_borrows(args);
         }
         for (own, targets) in holders {
             for holder in targets {
@@ -543,8 +580,10 @@ impl TypeChecker {
             if matches!(param, Type::Function { .. }) {
                 self.function_value_slot = function_value_position(arg);
             }
+            self.temporary_borrow_slot = temporary_borrow_position(arg);
             let checked = self.check_expr(arg, expected.as_ref());
             self.function_value_slot = None;
+            self.temporary_borrow_slot = None;
             let arg_ty = shared_reborrow(checked.unwrap_or(Type::Unknown), param);
             if !matches!(arg_ty, Type::Unknown) && !self.unify_generic(param, &arg_ty, &mut subst) {
                 // A shape parameter this argument contradicts is reported by name: the

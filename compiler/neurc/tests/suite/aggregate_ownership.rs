@@ -595,3 +595,252 @@ func main() -> i32 {
 "#;
     assert_eq!(exit_under_memory_cap("call_holder.nr", source), Some(0));
 }
+
+/// BUG-133: a store into a moved-out field, tuple element or literal array element
+/// refills it, and the holder may be read whole again once every place that left is
+/// back. Each round below moves a megabyte out of every position and stores a fresh one
+/// in, so a store that leaked the incoming value or released the moved-out one twice
+/// would run out of memory or abort.
+#[cfg(target_os = "linux")]
+#[test]
+fn regression_bug_133_a_store_refills_a_moved_out_place() {
+    let source = r#"
+struct H { s: string, v: Vec<i32>, n: i32 }
+struct Outer { inner: H, tag: string }
+func take(v: Vec<i32>) -> i64 { v.len() as i64 }
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut h = H { s: p + "", v: Vec::new(), n: 1 }
+    mut t: (string, i32) = (p + "", 2)
+    mut a: [string; 2] = [p + "", p + ""]
+    mut o = Outer { inner: H { s: p + "", v: Vec::new(), n: 3 }, tag: p + "" }
+    mut total: i64 = 0
+    for i in 0..200 {
+        val s = h.s
+        val v = h.v
+        total += s.len() as i64 + take(v)
+        h.s = p + ""
+        h.v = Vec::new()
+        h.v.push(i)
+        val e = t.0
+        total += e.len() as i64
+        t.0 = p + ""
+        val first = a[0]
+        total += first.len() as i64
+        a[0] = p + ""
+        val inner = o.inner
+        total += inner.s.len() as i64
+        if i % 2 == 0 { o.inner = inner } else { o.inner = H { s: p + "", v: Vec::new(), n: 4 } }
+    }
+    val whole = h
+    val pair = t
+    val held = a
+    val outer = o
+    total += whole.v.len() as i64 + pair.0.len() as i64 + held[1].len() as i64
+    total += outer.tag.len() as i64
+    if total == 803 * 1048576 + 200 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(exit_under_memory_cap("bug_133_refill.nr", source), Some(0));
+}
+
+/// BUG-133, through a destructor: a `Drop` value moved out of a field and replaced is
+/// destroyed once by whoever took it, and the replacement once by the holder.
+#[test]
+fn regression_bug_133_a_refilled_drop_field_is_destroyed_once() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Noisy { id: i32 }
+
+impl Drop for Noisy {
+    func drop(&mut self) {
+        println("drop {self.id}")
+    }
+}
+
+struct Pair { left: Noisy, right: Noisy }
+
+func main() -> i32 {
+    mut p = Pair { left: Noisy { id: 1 }, right: Noisy { id: 2 } }
+    val taken = p.left
+    p.left = Noisy { id: 3 }
+    val whole = p
+    taken.id + whole.left.id
+}
+"#;
+    let exe = test
+        .compile(&test.write_source("bug_133_drop.nr", source))
+        .expect("compile failed");
+    let run = std::process::Command::new(&exe)
+        .output()
+        .expect("run executable");
+    assert_eq!(run.status.code(), Some(4));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    for id in [1, 2, 3] {
+        assert_eq!(
+            stdout.matches(&format!("drop {id}")).count(),
+            1,
+            "value {id} must be destroyed exactly once, got:\n{stdout}"
+        );
+    }
+}
+
+/// BUG-133: a place refilled on only one path out of an `if` may still be moved where the
+/// paths meet, and a place whose holder or ancestor left with it has nothing to refill.
+#[test]
+fn regression_bug_133_a_refill_that_may_not_have_run_is_rejected() {
+    let test = CompileTest::new();
+    let cases = [
+        (
+            "one_branch",
+            r#"
+struct P { name: string, n: i32 }
+func main() -> i32 {
+    val k: string = "x"
+    mut p = P { name: k + "a", n: 1 }
+    val s = p.name
+    if s.len() > 1 { p.name = k + "b" }
+    val q = p
+    0
+}
+"#,
+        ),
+        (
+            "whole_moved",
+            r#"
+struct P { name: string, n: i32 }
+func main() -> i32 {
+    val k: string = "x"
+    mut p = P { name: k + "a", n: 1 }
+    val q = p
+    p.name = k + "b"
+    0
+}
+"#,
+        ),
+        (
+            "ancestor_moved",
+            r#"
+struct I { name: string }
+struct P { inner: I, n: i32 }
+func main() -> i32 {
+    val k: string = "x"
+    mut p = P { inner: I { name: k + "a" }, n: 1 }
+    val q = p.inner
+    p.inner.name = k + "b"
+    0
+}
+"#,
+        ),
+        (
+            "compound",
+            r#"
+struct P { name: string, n: i32 }
+func main() -> i32 {
+    val k: string = "x"
+    mut p = P { name: k + "a", n: 1 }
+    val s = p.name
+    p.name += "z"
+    0
+}
+"#,
+        ),
+    ];
+    for (name, source) in cases {
+        let error = test
+            .check(&format!("bug_133_{name}.nr"), source)
+            .expect_err(name);
+        assert!(error.contains("use of moved value 'p'"), "{name}: {error}");
+    }
+}
+
+/// BUG-131: a `string` binding stored into a field, a tuple element or an array element
+/// (at a literal or a run-time position) hands its ownership to the position. Each store
+/// below leaked a megabyte.
+#[cfg(target_os = "linux")]
+#[test]
+fn regression_bug_131_a_string_binding_stored_into_a_position_is_released() {
+    let source = r#"
+struct Entry { label: string, weight: i32 }
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..200 {
+        mut e = Entry { label: "a", weight: 1 }
+        val s = p + ""
+        e.label = s
+        mut t: (string, i32) = ("b", 2)
+        val u = p + ""
+        t.0 = u
+        mut a: [string; 2] = ["c", "d"]
+        val w = p + ""
+        a[0] = w
+        val z = p + ""
+        a[i % 2] = z
+        total += (e.label.len() + t.0.len() + a[0].len()) as i64
+    }
+    if total == 600 * 1048576 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(
+        exit_under_memory_cap("bug_131_position.nr", source),
+        Some(0)
+    );
+}
+
+/// A `string` an `if`, `match` or block builds owns its buffer when the arm that ran
+/// built one, and owns nothing when that arm yields a literal: mixing the two used to
+/// leave the binding owning nothing, and each owned arm leaked a megabyte.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_string_built_by_a_branch_with_a_literal_arm_is_released() {
+    let source = r#"
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..1000 {
+        val held: string = p + ""
+        val a: string = if i % 2 == 0 { p + "" } else { "lit" }
+        val b = match i % 3 {
+            0 => held,
+            _ => "m",
+        }
+        mut c: string = "start"
+        c = if i % 2 == 1 { p + "" } else { "lit" }
+        total += (a.len() + b.len() + c.len()) as i64
+    }
+    if total == 1398804050 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(exit_under_memory_cap("branch_string.nr", source), Some(0));
+}
+
+/// A holder moved out of a field (`val inner = o.inner`) takes the ownership of its
+/// `string` positions with it, as a holder moved out of a binding does; each move leaked
+/// a megabyte.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_holder_moved_out_of_a_field_releases_its_strings() {
+    let source = r#"
+struct H { s: string, n: i32 }
+struct Outer { inner: H, tag: i32 }
+func main() -> i32 {
+    mut p = "0123456789abcdef"
+    for k in 0..16 { p = p + p }
+    mut total: i64 = 0
+    for i in 0..1000 {
+        val o = Outer { inner: H { s: p + "", n: 1 }, tag: 2 }
+        val inner = o.inner
+        total += inner.s.len() as i64
+    }
+    if total == 1000 * 1048576 { 0 } else { 1 }
+}
+"#;
+    assert_eq!(
+        exit_under_memory_cap("held_holder_move.nr", source),
+        Some(0)
+    );
+}

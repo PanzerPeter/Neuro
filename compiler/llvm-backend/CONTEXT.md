@@ -340,8 +340,10 @@ binding that may ever own a buffer carries a `HeapString` entry: one whose initi
 moved from a binding that may own, and every `mut` one (its flag starts clear for a literal, so
 `mut s = "x"` then `s = a + b` has a flag for the assignment to arm). An immutable binding holding
 a literal can never own and carries none. A holder moved whole does the same per position:
-`load_held_string_flags` reads every `string` position's flag off the source and
-`store_held_string_flags` writes them into the target's matching positions. A holder built from a
+`load_held_string_flags` reads every `string` position's flag off the source, a binding or a
+statically named place inside one (`val inner = o.inner`, keyed below that place: exactly the
+flags `mark_moved_for_drop` then clears), and `store_held_string_flags` writes them into the
+target's matching positions. A holder built from a
 literal collects the same thing per position while the declaration or assignment evaluates it
 (`literal_string_moves`): `codegen_literal_position` reads the flag of a `string` binding moved
 into a struct, tuple or array literal position (`Entry { label: t }`, nested literals included,
@@ -355,7 +357,10 @@ them at once, so a condition, a scrutinee, a guard or an arm's earlier statement
 and `codegen_branch_tail` stores what the taken arm's tail hands over: armed for a provable
 allocation, a moved binding's flag (the holder whole, or a `string` moved into a literal
 position), nothing for a literal. A tail that is itself a branch passes the slots on; a diverging
-arm stores nothing. The declaration or assignment then reads the slots into its positions.
+arm stores nothing. The declaration or assignment then reads the slots into its positions. A
+bare `string` built through a branch is its own one position (path `[]`): the tail stores
+`argument_string_owner`, and `branch_string_owner` hands the slot to the binding's own flag, so
+`val s = if c { a + b } else { "lit" }` owns its buffer exactly when the first arm ran.
 
 A third kind of consumer STORES the fat pointer somewhere that outlives the expression. Ownership
 then belongs to the storage, and is tracked one of three ways:
@@ -858,7 +863,9 @@ direct free, so the release a scope exit performs is provably the one a foreign 
 of a block it had already freed would be a use-after-free.
 
 `codegen_reference` returns the borrowed place's storage pointer: mutability is compile-time
-only. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
+only. An operand `held_place_ptr` finds no storage for is a `Copy` temporary the checker let
+through as a call argument; it is stored into an entry-block slot (`borrow.temp`) and the slot's
+address is lent, which outlives the borrow because the borrow ends with the statement. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
 is what `HirPlace::Deref` lowers to.
 **Auto-deref is value-driven**: a borrowed receiver lowers to a `PointerValue`, so
 `string_receiver_struct`, `StructClone`, `codegen_method_call`, and `get_struct_ptr_and_type` load
@@ -1352,7 +1359,10 @@ copies. Disarming the holder there left every owner in it unreleased. That is al
 the parser desugars it to a temporary plus one projection per leaf. A store into a field or an
 array element releases the displaced position and re-arms it (`displace_held_position`, at any
 depth; `displace_array_element` at a run-time index, which compares the written address against
-each tracked element). Until BUG-075 only a field of a named binding did, so a nested field or an
+each tracked element). A moved binding or held place stored there hands its `string` flags to the
+position (`moved_in_string_flags`, read before the release), so `e.label = s` makes the position
+own what `s` owned. The position's own move clears its flag first, which is what lets a store
+refill a moved-out place without a second release. Until BUG-075 only a field of a named binding did, so a nested field or an
 element lost its old value without a destructor.
 
 A place reached through a borrow (`reached_through_borrow`: a reference-typed object, a `*r`, a

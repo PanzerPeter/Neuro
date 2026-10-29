@@ -1233,8 +1233,9 @@ func main() -> i32 {
 
 A function's own name is a value of its function type too, so `apply(5, double)` passes
 `func double(x: i32) -> i32` directly, and `val f = double` binds it. An associated function is
-one through its path, `val s = Point::scale`, and so is a non-generic enum's tuple variant, its
-constructor: `val wrap = Error::Io`. A generic function has no single type until its
+one through its path, `val s = Point::scale`, and so is an enum's tuple variant, its
+constructor: `val wrap = Error::Io`. A generic enum's variant needs a function type from its
+context to name its instance (`o.map(Option::Some)`, `val f: (i32) -> Option<i32> = Option::Some`). A generic function has no single type until its
 type arguments are named, so its bare name is refused; name the instance with a turbofish
 instead, `val f = identity::<i32>`.
 

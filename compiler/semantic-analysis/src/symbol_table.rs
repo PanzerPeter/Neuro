@@ -583,6 +583,43 @@ impl SymbolTable {
         }
     }
 
+    /// Clear the moves of `name` at or below the sub-place `path`: a store into the
+    /// place refills what left it. A move of the whole binding or of an ancestor of
+    /// `path` stays, since the place itself left with it.
+    pub(crate) fn clear_moved_within(&mut self, name: &str, path: &str) {
+        if let Some(info) = self.lookup_mut(name) {
+            info.moves
+                .parts
+                .retain(|moved, _| !(moved == path || moved.starts_with(&format!("{}.", path))));
+        }
+    }
+
+    /// Narrow the moves of `name` to the ones a store into its sub-place `path` cannot
+    /// write past, the whole binding and the ancestors of `path`, handing back the prior
+    /// state. The place's own moves are what the store refills, and a sibling's are
+    /// storage the store does not touch.
+    pub(crate) fn narrow_moves_to_ancestors(
+        &mut self,
+        name: &str,
+        path: &str,
+    ) -> Option<MoveState> {
+        let info = self.lookup_mut(name)?;
+        let prior = info.moves.clone();
+        info.moves
+            .parts
+            .retain(|moved, _| path.starts_with(&format!("{}.", moved)));
+        Some(prior)
+    }
+
+    /// Put back a move state [`narrow_moves_to_ancestors`] handed out.
+    ///
+    /// [`narrow_moves_to_ancestors`]: SymbolTable::narrow_moves_to_ancestors
+    pub(crate) fn restore_moved(&mut self, name: &str, moves: MoveState) {
+        if let Some(info) = self.lookup_mut(name) {
+            info.moves = moves;
+        }
+    }
+
     /// The span of the move that makes reading sub-place `path` of `name` invalid,
     /// or `None` when that storage is still owned. An empty `path` reads the whole
     /// binding, which any outstanding move conflicts with.
@@ -650,6 +687,18 @@ impl SymbolTable {
                 idx += 1;
             }
         }
+    }
+
+    /// Set the move state to the join of a conditional region's arms alone, for a region
+    /// whose arms cover every path (an `if` with an `else`, a `match`): one of them ran,
+    /// so a place every arm refilled is owned again. With no arm falling through, the
+    /// region's end is unreachable and the state is left as it is.
+    pub(crate) fn settle_moves(&mut self, arms: &[Vec<MoveState>]) {
+        let Some((first, rest)) = arms.split_first() else {
+            return;
+        };
+        self.restore_moves(first);
+        self.join_moves(rest);
     }
 
     /// Restore moved-state captured by [`snapshot_moves`]. Entries beyond the

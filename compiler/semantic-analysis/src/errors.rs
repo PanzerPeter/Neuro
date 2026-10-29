@@ -1057,6 +1057,11 @@ pub enum TypeError {
     CannotBorrowValue { span: Span },
 
     #[error(
+        "this borrow of a temporary may outlive its statement: the call may keep it in its result or in a `&mut` argument; bind the value to a `val` first"
+    )]
+    TemporaryBorrowEscapes { span: Span },
+
+    #[error(
         "cannot mutably borrow '{name}': `&mut` requires a `mut` binding; declare it with `mut`"
     )]
     CannotBorrowMutably { name: String, span: Span },
@@ -1693,6 +1698,7 @@ impl TypeError {
             | Self::CannotMoveOutOfBorrow { span, .. }
             | Self::CannotMoveOutOfCollection { span, .. }
             | Self::CannotBorrowValue { span, .. }
+            | Self::TemporaryBorrowEscapes { span }
             | Self::CannotBorrowMutably { span, .. }
             | Self::CannotDereference { span, .. }
             | Self::CannotAssignThroughRef { span, .. }

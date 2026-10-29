@@ -25,7 +25,39 @@ impl TypeChecker {
         value: &Expr,
         span: Span,
     ) -> Option<()> {
-        let place_ty = self.resolve_place(place, span)?;
+        // A store into a sub-place writes past the moves of that place and its siblings:
+        // its object is checked against only the moves it cannot write past, and the
+        // place's own moves are refilled once the store is checked.
+        let refill = match place {
+            Place::Var(_) => None,
+            _ => place
+                .root()
+                .map(|root| root.name.clone())
+                .zip(Self::place_path(&place.to_expr())),
+        };
+        let prior = refill
+            .as_ref()
+            .and_then(|(root, path)| self.symbols.narrow_moves_to_ancestors(root, path));
+        let place_ty = self.resolve_place(place, span);
+        if let (Some((root, _)), Some(prior)) = (&refill, prior) {
+            self.symbols.restore_moved(root, prior);
+        }
+        let stored = self.check_store(place, place_ty?, op, value, span);
+        if let Some((root, path)) = &refill {
+            self.symbols.clear_moved_within(root, path);
+        }
+        stored
+    }
+
+    /// The store half of [`check_assign`](Self::check_assign), into a resolved place.
+    fn check_store(
+        &mut self,
+        place: &Place,
+        place_ty: Type,
+        op: Option<BinaryOp>,
+        value: &Expr,
+        span: Span,
+    ) -> Option<()> {
         match op {
             // The operator-trait dispatch rule: a type implementing the matching
             // `*Assign` trait updates in place; everything else desugars and allocates

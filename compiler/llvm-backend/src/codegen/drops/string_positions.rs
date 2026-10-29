@@ -81,13 +81,17 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The current flags of the `string` positions the holder `expr` names, keyed by
-    /// path: which of them own their buffer at this point of the run. Empty unless `expr`
-    /// is a bare binding, the one holder whose positions a move hands over whole.
+    /// path below `expr`: which of them own their buffer at this point of the run. `expr`
+    /// is a binding or a statically named place inside one (`o.inner`), whose positions a
+    /// move hands over whole: these are the flags [`mark_moved_for_drop`] then clears.
+    /// Empty for anything else.
+    ///
+    /// [`mark_moved_for_drop`]: CodegenContext::mark_moved_for_drop
     pub(crate) fn load_held_string_flags(
         &mut self,
         expr: &HirExpr,
     ) -> CodegenResult<Vec<(Vec<String>, IntValue<'ctx>)>> {
-        let HirExprKind::Variable(name) = &peel_newtype(expr).kind else {
+        let Some((name, Some(prefix))) = Self::moved_place(peel_newtype(expr)) else {
             return Ok(Vec::new());
         };
         let positions: Vec<(Vec<String>, PointerValue<'ctx>)> = self
@@ -97,7 +101,12 @@ impl<'ctx> CodegenContext<'ctx> {
                     .held
                     .iter()
                     .filter(|held| matches!(held.target, DropTarget::HeapString))
-                    .map(|held| (held.path.clone(), held.flag_ptr))
+                    .filter_map(|held| {
+                        let below = held.path.strip_prefix(prefix.as_slice())?;
+                        // The place itself is a `string` position, which hands over its
+                        // own flag by another path; only positions inside a holder count.
+                        (!below.is_empty()).then(|| (below.to_vec(), held.flag_ptr))
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -229,6 +238,21 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// The runtime flags of the `string` positions a stored `value` moves in, keyed by
+    /// path below the position it lands in: a `string` binding or held position brings
+    /// its own flag, a holder binding the flags of each of its positions. Read before the
+    /// store's move clears them.
+    pub(crate) fn moved_in_string_flags(
+        &mut self,
+        value: &HirExpr,
+    ) -> CodegenResult<Vec<(Vec<String>, IntValue<'ctx>)>> {
+        let mut flags = self.load_held_string_flags(value)?;
+        if let Some(owns) = self.load_owned_string_flag(value)? {
+            flags.push((Vec::new(), owns));
+        }
+        Ok(flags)
+    }
+
     /// Store flags [`load_held_string_flags`] read off a moved holder into the same
     /// positions of `name`, the holder that took the value.
     pub(crate) fn store_held_string_flags(
@@ -310,7 +334,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// One cleared slot per `string` position of `ty`, for the arms of the branch `value`
     /// to store their positions' ownership into (`None` unless `value` is a branch
-    /// building a holder of `string` positions). A literal or a value of unproven origin
+    /// building a `string` or a holder of `string` positions). A literal or a value of unproven origin
     /// in an arm leaves its slot clear, so it is never released.
     pub(crate) fn open_branch_string_slots(
         &mut self,
@@ -320,7 +344,12 @@ impl<'ctx> CodegenContext<'ctx> {
         if !Self::is_branch(value) {
             return Ok(None);
         }
-        let paths = self.string_position_paths(ty);
+        // A bare `string` is its own one position.
+        let paths = if matches!(ty, Type::String) {
+            vec![Vec::new()]
+        } else {
+            self.string_position_paths(ty)
+        };
         if paths.is_empty() {
             return Ok(None);
         }
@@ -350,6 +379,27 @@ impl<'ctx> CodegenContext<'ctx> {
             flags.push((path.clone(), owns));
         }
         Ok(flags)
+    }
+
+    /// What the taken arm of a branch building a bare `string` left in its one slot:
+    /// whether the value owns its buffer. `None` without slots.
+    pub(crate) fn branch_string_owner(
+        &mut self,
+        slots: Option<&[(Vec<String>, PointerValue<'ctx>)]>,
+    ) -> CodegenResult<Option<IntValue<'ctx>>> {
+        let Some(slot) = slots.and_then(|slots| {
+            slots
+                .iter()
+                .find(|(path, _)| path.is_empty())
+                .map(|(_, slot)| *slot)
+        }) else {
+            return Ok(None);
+        };
+        let owns = self
+            .builder
+            .build_load(self.context.bool_type(), slot, "branch.str.owned")?
+            .into_int_value();
+        Ok(Some(owns))
     }
 
     /// Evaluate `expr`, the tail an arm of a holder-building branch yields, and store
@@ -387,6 +437,9 @@ impl<'ctx> CodegenContext<'ctx> {
         let armed = self.context.bool_type().const_int(1, false);
         owners.extend(proven.into_iter().map(|path| (path, armed)));
         owners.extend(self.load_held_string_flags(expr)?);
+        if matches!(Type::from_hir(&expr.ty), Type::String) {
+            owners.push((Vec::new(), self.argument_string_owner(expr)?));
+        }
         for (path, slot) in slots {
             if let Some((_, owns)) = owners.iter().find(|(owned, _)| owned == path) {
                 self.builder.build_store(*slot, *owns)?;

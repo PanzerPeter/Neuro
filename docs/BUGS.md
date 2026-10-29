@@ -5,123 +5,40 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-133: a moved-out field or tuple element cannot be assigned back
+## BUG-132: a borrow of an owning temporary is refused
 
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; `resolve_place` in `type_checkers/statements/places.rs`
-- **Severity**: minor. A valid program is refused; nothing miscompiles
-
-**Minimal repro**
-
-```neuro
-struct P { name: string, n: i32 }
-
-func main() -> i32 {
-    val k: string = "x"
-    mut p = P { name: k + "a", n: 1 }
-    val s = p.name
-    p.name = k + "bcd"
-    s.len() as i32 + p.name.len() as i32
-}
-```
-
-Expected: exit 6. A store into a moved-out place refills it, as assigning the whole binding
-does. Observed: "use of moved value 'p'" at the store. A tuple element (`t.0 = v` after
-`val s = t.0`) is refused the same way. Assigning the whole holder (`p = P { ... }`) works.
-
-**Root cause**: confirmed in the code. `resolve_place` types the place's object with
-`check_expr`, which reads `p` as a whole, and a partially moved binding may not be read whole.
-Nothing clears the moved path after the store either.
-
-**Workaround**: rebuild and assign the whole holder.
-
-**Fix sketch**: when the place is a field or tuple-index path rooted in a binding, check the
-object without the whole-binding move conflict for moves at or below the place's own path,
-then drop those paths from the binding's move state after the store. The backend side re-arms
-the position's drop flag on a store (`displace_held_position`); confirm it for every owning
-position type (`string`, `Vec`, a `Drop` struct, a tensor). Regression tests: the repro under
-ASan, a tuple element, a store in only one `if` branch (still moved after the join), and a
-loop body that moves and refills the field each iteration.
-
-## BUG-132: a borrow of a temporary is refused
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`check_reference_expr`); `llvm-backend` (`codegen_reference`)
+- **Status**: open, confirmed. Narrowed: a shared borrow of a `Copy` temporary passed to a
+  call (`id(&1)`, `norm(&Point { x: 3, y: 4 })`) now compiles
+- **Area**: `semantic-analysis` (`check_temporary_borrow`); `llvm-backend` (`codegen_reference`)
 - **Severity**: minor. A valid program is refused with a clear diagnostic and a workaround
 
 **Minimal repro**
 
 ```neuro
-func id(x: &i32) -> i32 { *x }
-func sq(x: i32) -> i32 { x * x }
-
-func main() -> i32 {
-    val a = 3
-    id(&1) + id(&(a + 1)) + id(&sq(2))
-}
-```
-
-Expected: exit 9. The operand of `&` may be a temporary (a literal, a call, an operator
-result) that lives until the end of its statement, so its borrow may be passed to a call.
-Observed: each of the three borrows is "cannot borrow this expression: `&` requires a place".
-
-**Root cause**: confirmed in the code. `check_reference_expr` accepts only a binding or a
-sub-place of one, and `codegen_reference` has no path for any other operand except a tensor
-(which gets a fresh cell) and `&string` (passed by value).
-
-**Workaround**: bind the value to a `val` first and borrow the binding.
-
-**Fix sketch**: accept a non-place operand in `check_reference_expr` only where the borrow
-cannot outlive the statement (a call argument, an operator operand), and keep refusing it as a
-binding's initializer or a stored value. In the backend, store the value into an entry-block
-alloca and pass its address. An owning temporary (`&make_string()`, `&build_vec()`) must be
-released after the call returns, which needs the statement-end release the backend already
-runs for anonymous strings extended to the other owning types. Regression tests: the repro,
-an owning temporary under ASan, and `val r = &f()` still refused.
-
-## BUG-131: a `string` binding stored into a field or element by assignment leaks
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; the store into a held position (`store_held_position` and the array element store)
-- **Severity**: minor. One buffer leaks per store; nothing is freed early or twice
-
-**Minimal repro**
-
-```neuro
-struct Entry { label: string, weight: i32 }
+func size(s: &string) -> i32 { s.len() as i32 }
 
 func main() -> i32 {
     val k: string = "x"
-    mut i = 0
-    while i < 100 {
-        mut e = Entry { label: k + "a", weight: 1 }
-        val s: string = k + "dddd"
-        e.label = s
-        mut t: (string, i32) = (k + "a", 1)
-        val u: string = k + "eeee"
-        t.0 = u
-        i += 1
-    }
-    0
+    size(&(k + "yz"))
 }
 ```
 
-Expected: no leak. Observed under `LD_PRELOAD` of `libasan.so`: the buffers of `s` and `u` are
-reported lost, about one per round each. Storing a fresh allocation in place
-(`e.label = k + "b"`) or a literal is clean, and the same holds for an array element
-(`a[0] = s`).
+Expected: exit 3. The operand of `&` may be a temporary that lives until the end of its
+statement, so its borrow may be passed to a call. Observed: "cannot borrow this expression: `&`
+requires a place".
 
-**Root cause**: suspected, not traced end to end. The store releases the displaced value and
-arms the position only for a value that provably allocated (`arm_stored_string_positions`), then
-`mark_moved_for_drop` disarms the source binding. A binding moved into a literal position hands
-its own flag over instead; this store path does not, so nobody owns the buffer.
+**Root cause**: confirmed in the code. `check_temporary_borrow` accepts only a `Copy` operand,
+because an owning temporary (`&make_string()`, `&build_vec()`) must be released once the call
+returns, and nothing emits that release: `codegen_reference` stores the value into a stack slot
+and lends its address, with no drop entry for the slot.
 
-**Workaround**: store the expression that builds the string (`e.label = k + "dddd"`) rather
-than a binding holding it.
+**Workaround**: bind the value to a `val` first and borrow the binding.
 
-**Fix sketch**: before marking the source moved, load its drop flag and store it into the
-position's flag, as `codegen_assignment` does for a whole binding (`moved_string_flag`).
-Regression test: the repro under ASan, for a field, a tuple element and an array element.
+**Fix sketch**: register the slot `codegen_reference` fills as an owner released at the end of
+the statement (the statement-end release the backend runs for anonymous strings, extended to the
+other owning types), and drop the `Copy` restriction. A `&string` is passed by value, so its
+temporary needs the same release with no slot. Regression tests: the repro under ASan, a `Vec`
+and a `Drop` temporary, and `val r = &f()` still refused.
 
 ## BUG-130: a reference into `self` returned from a `&self` method dangles
 

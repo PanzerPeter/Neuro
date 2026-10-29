@@ -340,6 +340,17 @@ impl Lowerer {
             {
                 match self.variant_constructor_signature(&type_name.name, &member.name) {
                     Some((params, _)) => self.lower_function_value(expr, &[], params),
+                    // A generic enum's tuple variant as a value: the checker settled its
+                    // instance from the function type expected of it, whose parameters
+                    // the constructor takes.
+                    None if self.is_generic_tuple_variant(&type_name.name, &member.name) => {
+                        let Some(HirType::Function { params, .. }) = expected else {
+                            return Err(LoweringError::UnresolvedType {
+                                name: format!("{}::{}", type_name.name, member.name),
+                            });
+                        };
+                        self.lower_function_value(expr, &[], params.clone())
+                    }
                     None => {
                         self.lower_enum_construct(&type_name.name, &member.name, expected, *span)
                     }
@@ -793,6 +804,16 @@ impl Lowerer {
             .cloned()
             .or_else(|| self.variant_constructor_signature(type_name, member))
             .ok_or(LoweringError::UnresolvedCall { target: mangled })
+    }
+
+    /// Whether `member` is a tuple variant of the generic enum `type_name`.
+    pub(crate) fn is_generic_tuple_variant(&self, type_name: &str, member: &str) -> bool {
+        self.generic_enums.get(type_name).is_some_and(|template| {
+            template.variants.iter().any(|variant| {
+                variant.name.name == member
+                    && matches!(variant.payload, ast_types::VariantPayload::Tuple(_))
+            })
+        })
     }
 
     /// The signature of a tuple variant named as a function value, `Error::Io`: its

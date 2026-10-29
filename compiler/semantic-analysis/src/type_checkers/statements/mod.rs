@@ -30,6 +30,15 @@ pub(crate) fn function_value_position(value: &Expr) -> Option<shared_types::Span
     }
 }
 
+/// The span of the borrow a call argument is, when it is one: the position a borrow of a
+/// temporary may take.
+pub(crate) fn temporary_borrow_position(arg: &Expr) -> Option<shared_types::Span> {
+    match peel_parens(arg) {
+        borrow @ Expr::Reference { .. } => Some(borrow.span()),
+        _ => None,
+    }
+}
+
 /// The span of the closure literal a block yields as its last expression, through nested
 /// blocks: a binding's initializer may end in a closure that only copies references, whose
 /// borrows `hold_carried_borrows` follows out of the block.
@@ -715,8 +724,11 @@ impl TypeChecker {
                         fell_through.push(self.symbols.snapshot_moves());
                     }
                     self.symbols.restore_moves(&move_snapshot);
+                    // Every path ran one arm, so the arms alone say what is moved.
+                    self.symbols.settle_moves(&fell_through);
+                } else {
+                    self.symbols.join_moves(&fell_through);
                 }
-                self.symbols.join_moves(&fell_through);
 
                 Some(())
             }

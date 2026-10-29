@@ -518,7 +518,10 @@ lowering of its own is `compose_param`, which types that parameter from the firs
 signature when the hint leaves it open, as the checker's `compose_param` does.
 `lower_function_value` lowers a function named as a value (`val f = square`, BUG-071), an
 associated path (`Point::scale`), a non-generic enum's tuple variant (`Error::Io`, signature from
-`variant_constructor_signature`, which `assoc_signature` falls back to) and an instance (`convert::<u8>`, typed by
+`variant_constructor_signature`, which `assoc_signature` falls back to), a generic enum's tuple
+variant (`is_generic_tuple_variant`; its parameters are the expected function type's, or, as a
+generic call's argument, the `ClosureHint` the call has fixed, in `lower_function_arg`) and an
+instance (`convert::<u8>`, typed by
 `generic_instance_signature`) to a capture-free closure forwarding its `__fn_value_argN`
 parameters, through `lift_capture_free`. A closure literal called in place with an unannotated
 parameter (`lower_value_call`) lowers its arguments first and hands their types to the literal

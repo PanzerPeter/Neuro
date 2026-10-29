@@ -248,6 +248,12 @@ pub(crate) struct TypeChecker {
     /// initializer of a binding, or a whole argument to a function-typed parameter.
     /// Anywhere else it could be stored past the bindings it reads.
     function_value_slot: Option<shared_types::Span>,
+    /// The one position a borrow of a temporary may be checked in next: a whole argument
+    /// of a call, where the temporary outlives the borrow.
+    temporary_borrow_slot: Option<shared_types::Span>,
+    /// Every borrow of a temporary passed to a call that is still being checked, for the
+    /// call to refuse if it may keep one past the statement.
+    call_temporary_borrows: Vec<shared_types::Span>,
     /// Every binding a `&mut self` method call takes as its receiver, in order: how a
     /// closure body's mutation of a capture through a method is seen.
     mut_receivers: Vec<String>,
@@ -522,6 +528,8 @@ impl TypeChecker {
             reference_closures: std::collections::HashSet::new(),
             block_tail_slot: None,
             function_value_slot: None,
+            temporary_borrow_slot: None,
+            call_temporary_borrows: Vec::new(),
             mut_receivers: Vec::new(),
         }
     }

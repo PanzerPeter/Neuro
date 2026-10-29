@@ -78,8 +78,8 @@ impl TypeChecker {
             VariantForm::Unit => {}
             // Named without arguments, a tuple variant is its constructor: a function value
             // like `Point::scale`, so `.map_err(Error::Io)` needs no closure. A generic
-            // enum's variant has no instance to name until its payload is known, so it
-            // stays an error.
+            // enum's variant names an instance only once the function type expected of it
+            // says which; with none it stays an error.
             VariantForm::Tuple if !self.is_generic_enum(enum_name) => {
                 return Type::Function {
                     params: info.fields.iter().map(|(_, ty)| ty.clone()).collect(),
@@ -88,12 +88,21 @@ impl TypeChecker {
                 };
             }
             VariantForm::Tuple => {
+                if let Some(Type::Function { params, ret, .. }) = expected {
+                    let fields: Vec<Type> = info.fields.iter().map(|(_, ty)| ty.clone()).collect();
+                    if let Some(constructor) = self
+                        .generic_variant_function(enum_name, variant, &fields, params, ret, span)
+                    {
+                        return constructor;
+                    }
+                }
                 self.record_error(TypeError::EnumVariantFormMismatch {
                     enum_name: enum_name.clone(),
                     variant: variant.to_string(),
                     expected: "tuple".to_string(),
-                    hint: "a generic enum's variant is not a function value, so wrap it in a \
-                           closure, e.g. `|x| E::V(x)`"
+                    hint: "a generic enum's variant is a function value only where a function \
+                           type is expected, so annotate it or wrap it in a closure, e.g. \
+                           `|x| E::V(x)`"
                         .to_string(),
                     span,
                 });
@@ -117,6 +126,50 @@ impl TypeChecker {
                 .unwrap_or(Type::Unknown);
         }
         recovery
+    }
+
+    /// The constructor of tuple variant `variant` of the generic enum `base` (template
+    /// payload `fields`) as a function value of the expected type `(params) -> ret`. The
+    /// instance is the expected return when that names one, else the one unifying the
+    /// payload with `params` picks. `None` when neither settles it.
+    fn generic_variant_function(
+        &mut self,
+        base: &str,
+        variant: &str,
+        fields: &[Type],
+        params: &[Type],
+        ret: &Type,
+        span: Span,
+    ) -> Option<Type> {
+        let instance = match self.enum_instance_from_expected(base, Some(ret)) {
+            Some(instance) => instance,
+            None => {
+                if fields.len() != params.len() {
+                    return None;
+                }
+                let mut subst: HashMap<String, Type> = HashMap::new();
+                for (field, param) in fields.iter().zip(params) {
+                    if !self.unify_generic(field, param, &mut subst) {
+                        return None;
+                    }
+                }
+                match self.instantiate_inferred_enum(base, &subst, span)? {
+                    Type::Enum(instance) => instance,
+                    _ => return None,
+                }
+            }
+        };
+        let payload = self
+            .lookup_enum_variant(&instance, variant)?
+            .fields
+            .iter()
+            .map(|(_, ty)| ty.clone())
+            .collect();
+        Some(Type::Function {
+            params: payload,
+            ret: Box::new(Type::Enum(instance)),
+            mode: FunctionMode::Shared,
+        })
     }
 
     /// Type-check a tuple-variant enum construction `E::V(args)`: the variant

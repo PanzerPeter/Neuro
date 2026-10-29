@@ -259,20 +259,53 @@ func main() -> i32 {
     assert!(err.contains("no method 'ok'"), "{err}");
 }
 
+/// A generic enum's tuple variant is a function value wherever a function type is
+/// expected of it: the expected return names the instance, or the parameters a call has
+/// already fixed do (`o.map(Option::Some)` with `o: Option<i32>`).
 #[test]
-fn generic_variant_is_not_a_function_value() {
+fn generic_variant_is_a_function_value_where_a_function_type_is_expected() {
+    let test = CompileTest::new();
+    let source = r#"
+enum Wrap<T> { One(T), Two(T, T) }
+func apply(f: (i32, i32) -> Wrap<i32>) -> i32 {
+    match f(2, 3) {
+        Wrap::One(v) => v,
+        Wrap::Two(a, b) => a * b,
+    }
+}
+func make() -> (i32) -> Option<i32> { Option::Some }
+func main() -> i32 {
+    val o: Option<i32> = Some(4)
+    val nested = o.map(Option::Some)
+    val f: (i32) -> Option<i32> = Option::Some
+    val r: Result<i32, string> = Result::Ok(5)
+    val wrapped = r.map(Option::Some)
+    val from_result = match wrapped {
+        Result::Ok(inner) => inner ?? 0,
+        Result::Err(_) => 0,
+    }
+    ((nested ?? None) ?? 0) + (f(10) ?? 0) + apply(Wrap::Two) + (make()(20) ?? 0) + from_result
+}
+"#;
+    let exit = test
+        .compile_and_run("generic_variant_value.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 4 + 10 + 6 + 20 + 5);
+}
+
+#[test]
+fn generic_variant_with_no_expected_function_type_is_rejected() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    val o: Option<i32> = Some(1)
-    val p = o.map(Option::Some)
+    val f = Option::Some
     0
 }
 "#;
     let err = test
-        .check("generic_variant_value.nr", source)
-        .expect_err("a generic enum's variant has no instance to name");
-    assert!(err.contains("not a function value"), "{err}");
+        .check("generic_variant_bare.nr", source)
+        .expect_err("nothing names the instance");
+    assert!(err.contains("function value only where"), "{err}");
 }
 
 /// A program that brings its own `Result` keeps `Option`'s methods; only `.ok_or`, which

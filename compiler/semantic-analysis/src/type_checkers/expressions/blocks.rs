@@ -87,7 +87,7 @@ impl TypeChecker {
             fell_through.push(self.symbols.snapshot_moves());
         }
         self.symbols.restore_moves(&move_snapshot);
-        self.symbols.join_moves(&fell_through);
+        self.symbols.settle_moves(&fell_through);
 
         // All arms must agree on type. The result is the first arm that carries one:
         // a divergent arm (a `panic`, an `unreachable`, a `return`) is `Unknown`, the

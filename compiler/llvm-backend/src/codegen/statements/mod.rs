@@ -35,9 +35,16 @@ impl<'ctx> CodegenContext<'ctx> {
         // that can never own a buffer (an immutable one holding neither) carries none; a
         // `mut` one always does, because a later reassignment may hand it a buffer
         // whatever it started out holding.
+        // A holder built through a branch takes each arm's position ownership through
+        // slots its arms store into, and a `string` built through one its flag.
+        let branch_slots = match init {
+            Some(expr) => self.open_branch_string_slots(expr, &Type::from_hir(ty))?,
+            None => None,
+        };
         let owns_initial_string = init.is_some_and(|expr| self.produces_owned_string(expr));
         let may_own_string = owns_initial_string
             || mutable
+            || branch_slots.is_some()
             || init.is_some_and(|expr| {
                 self.names_an_owned_string(expr) || self.forwarding_callee(expr).is_some()
             });
@@ -51,12 +58,6 @@ impl<'ctx> CodegenContext<'ctx> {
         let collecting = init
             .is_some_and(Self::is_aggregate_literal)
             .then(Default::default);
-        // A holder built through a branch takes each arm's position ownership the same
-        // way, through slots its arms store into.
-        let branch_slots = match init {
-            Some(expr) => self.open_branch_string_slots(expr, &Type::from_hir(ty))?,
-            None => None,
-        };
         let outer = std::mem::replace(&mut self.literal_string_moves, collecting);
         self.forwarded_string_owner = None;
         self.forwarded_holder_owners = None;
@@ -90,7 +91,10 @@ impl<'ctx> CodegenContext<'ctx> {
             let moved_string_flag = match init {
                 Some(expr) if !owns_initial_string => match self.take_forwarded_owner(expr) {
                     Some(owner) => Some(owner),
-                    None => self.load_owned_string_flag(expr)?,
+                    None => match self.load_owned_string_flag(expr)? {
+                        Some(owns) => Some(owns),
+                        None => self.branch_string_owner(branch_slots.as_deref())?,
+                    },
                 },
                 _ => None,
             };
@@ -266,7 +270,10 @@ impl<'ctx> CodegenContext<'ctx> {
             Some((_, DropTarget::HeapString)) if !self.produces_owned_string(value) => {
                 match self.take_forwarded_owner(value) {
                     Some(owner) => Some(owner),
-                    None => self.load_owned_string_flag(value)?,
+                    None => match self.load_owned_string_flag(value)? {
+                        Some(owns) => Some(owns),
+                        None => self.branch_string_owner(branch_slots.as_deref())?,
+                    },
                 }
             }
             _ => None,

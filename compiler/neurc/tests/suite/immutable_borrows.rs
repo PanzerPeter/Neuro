@@ -133,6 +133,62 @@ func main() -> i32 {
     );
 }
 
+/// BUG-132: a temporary lives until the end of its statement, so a shared borrow of a
+/// `Copy` one may be passed to a call: a literal, an operator result, a call result, a
+/// struct or tuple literal, as a function, method or generic argument.
+#[test]
+fn regression_bug_132_a_borrowed_temporary_may_be_passed_to_a_call() {
+    let source = r#"
+@derive(Copy, Clone)
+struct Pt { x: i64, y: i64 }
+impl Pt {
+    func dot(&self, o: &Pt) -> i64 { self.x * o.x + self.y * o.y }
+}
+func id(x: &i32) -> i32 { *x }
+func sq(x: i32) -> i32 { x * x }
+func norm(p: &Pt) -> i64 { p.x * p.x + p.y * p.y }
+func first(t: &(i32, i32)) -> i32 { t.0 }
+func apply<T: Copy>(a: &T, f: (T) -> i64) -> i64 { f(*a) }
+func main() -> i32 {
+    val a = 3
+    val p = Pt { x: 1, y: 2 }
+    val small = id(&1) + id(&(a + 1)) + id(&sq(2)) + first(&(a, 9))
+    val big = norm(&Pt { x: 2, y: 0 }) + p.dot(&Pt { x: 3, y: 1 }) + apply(&(a as i64), |v: i64| -> i64 { v })
+    small + big as i32
+}
+"#;
+    // 1 + 4 + 4 + 3 = 12, then 4 + 5 + 3 = 12.
+    run_expecting(source, 24);
+}
+
+/// BUG-132: a borrowed temporary may not be bound, kept in a call's result, or stored
+/// through a `&mut` argument, and `&mut` of a temporary would only write a copy.
+#[test]
+fn regression_bug_132_a_borrowed_temporary_may_not_outlive_its_statement() {
+    for (source, expected) in [
+        (
+            "func main() -> i32 {\n    val r = &5\n    *r\n}\n",
+            "cannot borrow",
+        ),
+        (
+            "func keep(x: &i32) -> &i32 { x }\nfunc main() -> i32 {\n    val r = keep(&5)\n    *r\n}\n",
+            "may outlive its statement",
+        ),
+        (
+            "struct H<'a> { r: &'a i32 }\nfunc set<'a>(h: &mut H<'a>, v: &'a i32) { h.r = v }\nfunc main() -> i32 {\n    val n = 1\n    mut h = H { r: &n }\n    set(&mut h, &5)\n    *h.r\n}\n",
+            "may outlive its statement",
+        ),
+        (
+            "func bump(x: &mut i32) { *x += 1 }\nfunc main() -> i32 {\n    bump(&mut 5)\n    0\n}\n",
+            "cannot borrow",
+        ),
+    ] {
+        let (success, stderr) = check_source(source);
+        assert!(!success, "should be rejected:\n{source}");
+        assert!(stderr.contains(expected), "{source}\ngot: {stderr}");
+    }
+}
+
 #[test]
 fn borrowing_a_const_is_rejected() {
     // A `const` is an inlined value, not an addressable place.

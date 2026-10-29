@@ -99,11 +99,13 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok(());
         };
         let root = root.to_string();
+        let moved_in = self.moved_in_string_flags(value)?;
         self.drop_displaced_held_value(&root, &path)?;
         // A `string` position the store hands a fresh buffer takes ownership of it here:
         // the release above left every such position disarmed, because the type says
-        // nothing about what the incoming value owns.
-        self.arm_stored_string_positions(&root, &path, value)
+        // nothing about what the incoming value owns. A moved binding hands its flags over.
+        self.arm_stored_string_positions(&root, &path, value)?;
+        self.store_held_string_flags(&root, &under(&path, &moved_in))
     }
 
     /// Whether the place `expr` names is reached through a reference: a `&mut` binding
@@ -156,6 +158,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if tracked.is_empty() {
             return Ok(());
         }
+        let moved_in = self.moved_in_string_flags(value)?;
 
         let parent_fn = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("element store emitted outside a function".to_string())
@@ -198,6 +201,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.position_at_end(release_bb);
             self.drop_displaced_held_value(&root, &path)?;
             self.arm_stored_string_positions(&root, &path, value)?;
+            self.store_held_string_flags(&root, &under(&path, &moved_in))?;
             self.builder.build_unconditional_branch(next_bb)?;
             self.builder.position_at_end(next_bb);
         }
@@ -268,4 +272,13 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         Ok(())
     }
+}
+
+/// `flags`, keyed by path below a position, re-keyed by path below the holder that
+/// position sits at `prefix` in.
+fn under<T: Copy>(prefix: &[String], flags: &[(Vec<String>, T)]) -> Vec<(Vec<String>, T)> {
+    flags
+        .iter()
+        .map(|(path, flag)| (prefix.iter().chain(path).cloned().collect(), *flag))
+        .collect()
 }
