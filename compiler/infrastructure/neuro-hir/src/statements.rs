@@ -21,6 +21,12 @@ pub enum HirPlace {
         field: String,
         ty: HirType,
     },
+    /// A tuple element: `object.0`.
+    TupleIndex {
+        object: Box<HirExpr>,
+        index: usize,
+        ty: HirType,
+    },
     /// One element of an array, slice, `Vec`, or rank-1 tensor: `object[index]`.
     Index {
         object: Box<HirExpr>,
@@ -49,6 +55,14 @@ impl HirPlace {
                 HirExprKind::FieldAccess {
                     object: object.clone(),
                     field: field.clone(),
+                },
+                ty.clone(),
+                span,
+            ),
+            HirPlace::TupleIndex { object, index, ty } => HirExpr::new(
+                HirExprKind::TupleIndex {
+                    object: object.clone(),
+                    index: *index,
                 },
                 ty.clone(),
                 span,
@@ -84,6 +98,7 @@ impl HirPlace {
         match self {
             HirPlace::Var { ty, .. }
             | HirPlace::Field { ty, .. }
+            | HirPlace::TupleIndex { ty, .. }
             | HirPlace::Index { ty, .. }
             | HirPlace::TensorIndex { ty, .. }
             | HirPlace::Deref { ty, .. } => ty,

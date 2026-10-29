@@ -692,6 +692,7 @@ fn rewrite_place(place: &mut Place, resolved: &HashMap<String, Type>) {
     match place {
         Place::Var(_) => {}
         Place::Field { object, .. }
+        | Place::TupleIndex { object, .. }
         | Place::Deref {
             pointer: object, ..
         } => rewrite_expr(object, resolved),

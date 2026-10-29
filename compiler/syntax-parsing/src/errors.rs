@@ -107,7 +107,9 @@ pub enum ParseError {
     )]
     TensorTypeArity { span: Span },
 
-    #[error("the left of `{op}` must be a place: a variable, a field, an element, or `*reference`")]
+    #[error(
+        "the left of `{op}` must be a place: a variable, a field, an element (`v[i]`, `pair.0`), or `*reference`"
+    )]
     NotAPlace { op: String, span: Span },
 
     #[error(

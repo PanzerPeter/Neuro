@@ -29,6 +29,7 @@ impl<'ctx> CodegenContext<'ctx> {
         match place {
             HirPlace::Var { name, .. } => Some(name),
             HirPlace::Field { object, .. }
+            | HirPlace::TupleIndex { object, .. }
             | HirPlace::Index { object, .. }
             | HirPlace::TensorIndex { object, .. } => {
                 Self::moved_place(object).map(|(root, _)| root)

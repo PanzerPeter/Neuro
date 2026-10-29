@@ -842,6 +842,7 @@ fn collect_place(place: &Place, fv: &mut FreeVars) {
     match place {
         Place::Var(_) => {}
         Place::Field { object, .. }
+        | Place::TupleIndex { object, .. }
         | Place::Deref {
             pointer: object, ..
         } => collect_expr(object, fv),

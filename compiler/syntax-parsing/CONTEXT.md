@@ -45,7 +45,7 @@ are a subset of the shapes that can be read, so the classification is a match ov
 parser has already built.
 
 The consequence worth knowing: adding a new assignable form means adding an arm to
-`place_from_expr` and nothing else. There is no lookahead table to keep in sync, and a form the
+`place_from_expr` and nothing else (`Expr::TupleIndex` became `Place::TupleIndex` that way). There is no lookahead table to keep in sync, and a form the
 classifier does not know reports `ParseError::NotAPlace` naming what a place is, rather than
 falling through to an expression statement that leaves `=` unconsumed.
 

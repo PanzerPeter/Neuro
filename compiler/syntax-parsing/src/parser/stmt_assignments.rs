@@ -92,6 +92,15 @@ fn place_from_expr(expr: Expr, op: &str) -> ParseResult<Place> {
             field,
             span,
         }),
+        Expr::TupleIndex {
+            object,
+            index,
+            span,
+        } => Ok(Place::TupleIndex {
+            object,
+            index,
+            span,
+        }),
         Expr::Index {
             object,
             index,

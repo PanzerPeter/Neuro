@@ -487,6 +487,31 @@ impl Lowerer {
                 })
             }
 
+            Place::TupleIndex { object, index, .. } => {
+                let object =
+                    crate::expressions::coercion::auto_deref(self.lower_expr(object, None)?);
+                let HirType::Tuple(elements) = object.ty.referent() else {
+                    return Err(LoweringError::Malformed {
+                        detail: format!("tuple element assignment into '{}'", object.ty),
+                    });
+                };
+                let ty = elements
+                    .get(*index)
+                    .cloned()
+                    .ok_or_else(|| LoweringError::Malformed {
+                        detail: format!(
+                            "tuple index {} out of range for arity {}",
+                            index,
+                            elements.len()
+                        ),
+                    })?;
+                Ok(HirPlace::TupleIndex {
+                    object: Box::new(object),
+                    index: *index,
+                    ty,
+                })
+            }
+
             Place::Index { object, index, .. } => {
                 let object = self.lower_expr(object, None)?;
                 // A rank-1 tensor is indexed with one argument, which parses as the

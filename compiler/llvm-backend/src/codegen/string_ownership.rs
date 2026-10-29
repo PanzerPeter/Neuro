@@ -1509,7 +1509,7 @@ fn place_mentions(place: &HirPlace, name: &str) -> bool {
 fn walk_place<'a>(place: &'a HirPlace, visit: &mut impl FnMut(&'a HirExpr)) {
     match place {
         HirPlace::Var { .. } => {}
-        HirPlace::Field { object, .. } => walk(object, visit),
+        HirPlace::Field { object, .. } | HirPlace::TupleIndex { object, .. } => walk(object, visit),
         HirPlace::Index { object, index, .. } => {
             walk(object, visit);
             walk(index, visit);

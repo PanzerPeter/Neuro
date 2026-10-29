@@ -313,6 +313,7 @@ fn walk_place(place: &mut Place, f: SiteFn) -> Result<(), ModuleError> {
     match place {
         Place::Var(_) => Ok(()),
         Place::Field { object, .. }
+        | Place::TupleIndex { object, .. }
         | Place::Deref {
             pointer: object, ..
         } => walk_expr(object, f),

@@ -83,7 +83,8 @@ express is the outermost step.
 
 `Place::root()` is the binding the place bottoms out at, or `None` when the root is a temporary.
 Mutability, borrow tracking, move state and pool residency are all keyed by binding, so every
-consumer asks for it. `Place::to_expr()` rebuilds the read form, which is how a compound
+consumer asks for it. `Place::TupleIndex` holds a constant `index: usize`, like `Expr::TupleIndex`;
+the parser builds it for a newtype's `.0` too, and the checker refuses that one. `Place::to_expr()` rebuilds the read form, which is how a compound
 assignment desugars and how a stage that wants the place's type gets one without a second
 traversal.
 

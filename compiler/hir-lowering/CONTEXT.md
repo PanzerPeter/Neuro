@@ -596,7 +596,8 @@ is not object-safe. Inside an `impl` no `Self` reaches lowering: the parser repl
 
 ### Places
 `lower_place` resolves `ast_types::Place` to `HirPlace`, giving each form the type of the
-LOCATION: a binding's own type, a struct field's declared type, the element an indexable yields,
+LOCATION: a binding's own type, a struct field's declared type, a tuple's element type (the
+object auto-dereferenced to one `&`, as for a field), the element an indexable yields,
 a tensor's element type, or a reference's referent. The base of each projecting form is lowered
 as an ordinary expression, because reaching a location is a read of everything up to its last
 step. A one-argument index over a tensor receiver becomes `HirPlace::TensorIndex` with a single

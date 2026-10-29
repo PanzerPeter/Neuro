@@ -5,6 +5,50 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-131: a `string` binding stored into a field or element by assignment leaks
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`; the store into a held position (`store_held_position` and the array element store)
+- **Severity**: minor. One buffer leaks per store; nothing is freed early or twice
+
+**Minimal repro**
+
+```neuro
+struct Entry { label: string, weight: i32 }
+
+func main() -> i32 {
+    val k: string = "x"
+    mut i = 0
+    while i < 100 {
+        mut e = Entry { label: k + "a", weight: 1 }
+        val s: string = k + "dddd"
+        e.label = s
+        mut t: (string, i32) = (k + "a", 1)
+        val u: string = k + "eeee"
+        t.0 = u
+        i += 1
+    }
+    0
+}
+```
+
+Expected: no leak. Observed under `LD_PRELOAD` of `libasan.so`: the buffers of `s` and `u` are
+reported lost, about one per round each. Storing a fresh allocation in place
+(`e.label = k + "b"`) or a literal is clean, and the same holds for an array element
+(`a[0] = s`).
+
+**Root cause**: suspected, not traced end to end. The store releases the displaced value and
+arms the position only for a value that provably allocated (`arm_stored_string_positions`), then
+`mark_moved_for_drop` disarms the source binding. A binding moved into a literal position hands
+its own flag over instead; this store path does not, so nobody owns the buffer.
+
+**Workaround**: store the expression that builds the string (`e.label = k + "dddd"`) rather
+than a binding holding it.
+
+**Fix sketch**: before marking the source moved, load its drop flag and store it into the
+position's flag, as `codegen_assignment` does for a whole binding (`moved_string_flag`).
+Regression test: the repro under ASan, for a field, a tuple element and an array element.
+
 ## BUG-130: a reference into `self` returned from a `&self` method dangles
 
 - **Status**: open, confirmed

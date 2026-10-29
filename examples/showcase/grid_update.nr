@@ -3,7 +3,9 @@
 // This is an integration example: it exercises several features *together*
 // rather than in isolation:
 //   2E's place expressions, which are what let every update below name the
-//   storage it writes to · structs with `&mut self` methods, whose bodies are
+//   storage it writes to, tuple elements among them (`bounds.0 = v`), reached
+//   through a field, a `&mut` parameter and a closure's capture · structs with
+//   `&mut self` methods, whose bodies are
 //   now written `self.field += ...` instead of restating the field · arrays and
 //   nested arrays · 2B's static tensors, indexed coordinate by coordinate ·
 //   1G's `Vec` · `for` over ranges · and 1H's string interpolation with the
@@ -39,14 +41,20 @@ impl Tally {
 // A grid of readings plus the tally over them. `cells` is reached as
 // `self.cells[r]`: a field of `self`, then an element of that field, which is a
 // two-step place.
+// `bounds` is the lowest and highest cell, a tuple whose elements are written
+// one at a time as places, the way a struct's fields are.
 struct Grid {
     cells: [[i32; 4]; 3],
-    tally: Tally
+    tally: Tally,
+    bounds: (i32, i32)
 }
 
 impl Grid {
     func raise(&mut self, row: i32, column: i32, delta: i32) {
         self.cells[row][column] += delta
+        if self.cells[row][column] > self.bounds.1 {
+            self.bounds.1 = self.cells[row][column]
+        }
     }
 
     func row_total(&self, row: i32) -> i32 {
@@ -55,6 +63,16 @@ impl Grid {
             sum += self.cells[row][column]
         }
         return sum
+    }
+}
+
+// A tuple element written through a `&mut` borrow: the caller's tuple changes.
+func widen(span: &mut (i32, i32), sample: i32) {
+    if sample < span.0 {
+        span.0 = sample
+    }
+    if sample > span.1 {
+        span.1 = sample
     }
 }
 
@@ -81,7 +99,8 @@ func main() -> i32 {
             [2, 2, 2, 2],
             [3, 3, 3, 3]
         ],
-        tally: Tally { total: 0, peak: 0 }
+        tally: Tally { total: 0, peak: 0 },
+        bounds: (1, 3)
     }
 
     // A field of a field: the tally lives inside the grid and is raised through it.
@@ -90,16 +109,31 @@ func main() -> i32 {
     grid.tally.record(4)
     grid.tally.scale(2)
 
-    grid.raise(0, 3, 10)
-    grid.raise(2, 0, 7)
+    // A closure that counts the raises in a tuple it captures by `&mut`; the block
+    // ends that borrow before `steps` is read.
+    mut steps = (0, 0)
+    {
+        mut raise = |row: i32, column: i32, delta: i32| {
+            grid.raise(row, column, delta)
+            steps.0 += 1
+            steps.1 += delta
+        }
+        raise(0, 3, 10)
+        raise(2, 0, 7)
+    }
+    println("{steps.0} raises adding {steps.1}")
+    println("grid bounds {grid.bounds.0}..{grid.bounds.1}")
 
     println("grid rows")
     mut totals: Vec<i32> = Vec::new()
+    mut seen = (100, 0)
     for row in 0..3 {
         val total = grid.row_total(row)
         totals.push(total)
+        widen(&mut seen, total)
         println("  row {row} total {total}")
     }
+    println("  totals span {seen.0}..{seen.1}")
 
     // An element of a `Vec` is a place too, so the correction is applied in place.
     totals[1] += 100

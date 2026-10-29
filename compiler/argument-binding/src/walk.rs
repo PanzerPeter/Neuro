@@ -242,6 +242,7 @@ impl Walker<'_, '_> {
         match place {
             Place::Var(_) => {}
             Place::Field { object, .. }
+            | Place::TupleIndex { object, .. }
             | Place::Deref {
                 pointer: object, ..
             } => self.expr(object),

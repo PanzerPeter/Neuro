@@ -113,8 +113,8 @@ it the *typed* contract:
    expression during lowering, so a backend that ignores this variant loses tensors and
    nothing else.
 **One assignment statement, over a place.** `HirStmt::Assign { place, value, span }` is the only
-store, and `HirPlace` mirrors `ast_types::Place`: a binding, a struct field, an element, a tensor
-coordinate, or a referent. Each variant carries the type of the LOCATION, which is the type a
+store, and `HirPlace` mirrors `ast_types::Place`: a binding, a struct field, a tuple element, an
+element, a tensor coordinate, or a referent. Each variant carries the type of the LOCATION, which is the type a
 stored value must have, and the base of each projecting form is an `HirExpr` rather than a nested
 `HirPlace`, for the reason `ast-types/CONTEXT.md` records. `HirPlace::to_expr(span)` rebuilds the
 read expression, which is how a backend that already lowers a read of that shape reaches the same

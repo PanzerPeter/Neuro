@@ -1431,7 +1431,10 @@ escapes into a position able to store it is released by nobody.
 `codegen_place_store` has one arm per `HirPlace` form rather than one address computation,
 because the indexable types do not share one: a `Vec` slot sits behind a header, a slice slot
 behind a fat pointer, a tensor element behind a DLPack handle, an array element behind a
-bounds-guarded GEP.
+bounds-guarded GEP. A struct field and a tuple element share their ownership tail,
+`store_held_position`: displace and re-arm the position's flags in a frame-owned holder, or
+release and re-own through a borrow, then store and mark the value moved. The position is a
+segment of the drop path, a field name or the element's index.
 
 What IS shared is resolving the HOLDER, and that is `held_place_ptr` (`codegen/structs.rs`): a
 binding, a struct field at any depth, an array element, a tuple element, a dereference, or an

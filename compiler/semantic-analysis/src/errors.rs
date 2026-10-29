@@ -350,6 +350,11 @@ pub enum TypeError {
     AssignToTensorSlice { span: Span },
 
     #[error(
+        "cannot assign to the inner value of newtype '{name}': `.0` reads it but is not a place; rebuild the whole value instead, e.g. `x = {name}(v)`"
+    )]
+    AssignToNewtypeInner { name: String, span: Span },
+
+    #[error(
         "tensor dimension '{name}' is not a known extent; use a non-negative integer, or declare it as a shape parameter of the enclosing function, e.g. `func f<{name}>(t: Tensor<f32, [{name}]>)`"
     )]
     UnknownTensorDimension { name: String, span: Span },
@@ -1579,6 +1584,7 @@ impl TypeError {
             | Self::TensorSliceOutOfRange { span, .. }
             | Self::TensorIndexOnNonTensor { span, .. }
             | Self::AssignToTensorSlice { span }
+            | Self::AssignToNewtypeInner { span, .. }
             | Self::UnknownTensorDimension { span, .. }
             | Self::TensorShapeParamConflict { span, .. }
             | Self::DuplicateTensorAxisName { span, .. }

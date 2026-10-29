@@ -630,6 +630,9 @@ fn test_assignment_targets_parse_as_places() {
         ("x += 1", "Var"),
         ("p.x = 1", "Field"),
         ("p.inner.x -= 1", "Field"),
+        ("pair.0 = 1", "TupleIndex"),
+        ("pair.1 += 1", "TupleIndex"),
+        ("(t.0).1 = 1", "TupleIndex"),
         ("arr[0] = 1", "Index"),
         ("arr[0] *= 2", "Index"),
         ("t[0, 1] = 1", "TensorIndex"),
@@ -644,6 +647,7 @@ fn test_assignment_targets_parse_as_places() {
         let actual = match place {
             Place::Var(_) => "Var",
             Place::Field { .. } => "Field",
+            Place::TupleIndex { .. } => "TupleIndex",
             Place::Index { .. } => "Index",
             Place::TensorIndex { .. } => "TensorIndex",
             Place::Deref { .. } => "Deref",

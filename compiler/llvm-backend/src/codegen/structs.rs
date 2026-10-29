@@ -1,6 +1,6 @@
 use inkwell::types::*;
 use inkwell::values::*;
-use neuro_hir::{HirExpr, HirExprKind, HirFieldInit};
+use neuro_hir::{HirExpr, HirExprKind, HirFieldInit, HirType};
 use std::collections::HashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -265,10 +265,6 @@ impl<'ctx> CodegenContext<'ctx> {
             &format!("{}.ptr", field_name),
         )?;
 
-        // Ordered as a binding's reassignment is: the field may be read on the way to
-        // replacing itself, so its prior value loses its owner only once the new one
-        // has been built.
-        self.displace_held_position(object, field_name, value)?;
         // A place a borrow reaches belongs to whoever lent it, so no flag of this frame
         // tracks what the store displaces or what it leaves there.
         let borrowed = match self.reached_through_borrow(object) {
@@ -279,18 +275,81 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map(|(_, ty)| ty.clone()),
             false => None,
         };
+        self.store_held_position(object, field_name, field_ptr, borrowed, val, value)
+    }
+
+    /// Store a value into an element of a tuple place, `object.index = value`.
+    ///
+    /// A tuple lowers to an anonymous LLVM struct, so the element is a field GEP and the
+    /// store takes the same ownership steps a field store does.
+    pub(crate) fn codegen_tuple_element_assignment(
+        &mut self,
+        object: &HirExpr,
+        index: usize,
+        element_ty: &HirType,
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        // The value first, as for a field: the holder may sit in a `Vec` the value grows.
+        let val = self.codegen_expr(value)?;
+        let Some(base) = self.held_place_ptr(object)? else {
+            return Err(CodegenError::UnsupportedType(format!(
+                "the holder of tuple element {} is not a place",
+                index
+            )));
+        };
+        let tuple_llvm = self.get_any_llvm_type(&Type::from_hir(object.ty.referent()))?;
+        if !tuple_llvm.is_struct_type() {
+            return Err(CodegenError::InternalError(format!(
+                "tuple element {} stored into a non-tuple '{}'",
+                index, object.ty
+            )));
+        }
+        let element_ptr = self.builder.build_struct_gep(
+            tuple_llvm.into_struct_type(),
+            base,
+            index as u32,
+            "tup.ptr",
+        )?;
+        let borrowed = self
+            .reached_through_borrow(object)
+            .then(|| Type::from_hir(element_ty));
+        self.store_held_position(
+            object,
+            &index.to_string(),
+            element_ptr,
+            borrowed,
+            val,
+            value,
+        )
+    }
+
+    /// The store shared by a field and a tuple element: `segment` names the position
+    /// inside `object`, and `borrowed` carries its type when a borrow reaches it.
+    fn store_held_position(
+        &mut self,
+        object: &HirExpr,
+        segment: &str,
+        slot: PointerValue<'ctx>,
+        borrowed: Option<Type>,
+        val: BasicValueEnum<'ctx>,
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        // Ordered as a binding's reassignment is: the position may be read on the way to
+        // replacing itself, so its prior value loses its owner only once the new one
+        // has been built.
+        self.displace_held_position(object, segment, value)?;
         let owners = match &borrowed {
-            Some(field_ty) => {
-                self.drop_displaced_through_borrow(field_ptr, field_ty)?;
-                self.stored_string_owners(value, field_ty)?
+            Some(slot_ty) => {
+                self.drop_displaced_through_borrow(slot, slot_ty)?;
+                self.stored_string_owners(value, slot_ty)?
             }
             None => Vec::new(),
         };
         self.builder
-            .build_store(field_ptr, val)
+            .build_store(slot, val)
             .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;
-        if let Some(field_ty) = &borrowed {
-            self.own_strings_stored_through_borrow(field_ptr, field_ty, &owners)?;
+        if let Some(slot_ty) = &borrowed {
+            self.own_strings_stored_through_borrow(slot, slot_ty, &owners)?;
         }
         self.mark_moved_for_drop(value)?;
         Ok(())

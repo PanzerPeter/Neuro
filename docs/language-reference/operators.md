@@ -387,6 +387,7 @@ through any number of projections.
 |------|---------|
 | A binding | `x = 1` |
 | A struct field, at any depth | `p.x += 1`, `self.inner.count = 0` |
+| A tuple element | `pair.0 = 7`, `(t.0).1 += 1` |
 | An array, slice, or `Vec` element | `arr[i] -= 5`, `xs[0] = 9` |
 | An element of a nested array | `grid[row][column] += 1` |
 | A field of an element | `cells[i].load *= 2` |
@@ -418,7 +419,8 @@ The rules:
   write into a temporary.
 - A tensor index that leaves an axis standing (`t[0, ..]`) produces a *fresh* tensor
   rather than naming storage, so it cannot be assigned to. Name every axis.
-- A tuple element (`pair.0 = v`) is not yet a place.
+- A newtype's `.0` reads its inner value but is not a place. Rebuild the whole value
+  instead: `m = Meters(v)`.
 
 ### On tensors: in place, no reallocation
 

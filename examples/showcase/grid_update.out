@@ -1,7 +1,10 @@
+2 raises adding 17
+grid bounds 1..11
 grid rows
   row 0 total 14
   row 1 total 8
   row 2 total 19
+  totals span 8..19
   row 1 corrected to 108
 heat corners
   [0, 0] = 0

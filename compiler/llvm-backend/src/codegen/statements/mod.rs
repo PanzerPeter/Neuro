@@ -315,6 +315,9 @@ impl<'ctx> CodegenContext<'ctx> {
             HirPlace::Field { object, field, .. } => {
                 self.codegen_field_assignment(object, field, value)
             }
+            HirPlace::TupleIndex { object, index, ty } => {
+                self.codegen_tuple_element_assignment(object, *index, ty, value)
+            }
             HirPlace::Deref { pointer, .. } => self.codegen_deref_assignment(pointer, value),
             HirPlace::TensorIndex { object, axes, .. } => {
                 self.codegen_tensor_index_assignment(object, axes, value, span.start)

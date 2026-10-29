@@ -749,7 +749,9 @@ impl Outliner {
     fn rewrite_place(&mut self, place: &mut HirPlace) {
         match place {
             HirPlace::Var { .. } => {}
-            HirPlace::Field { object, .. } => self.rewrite(object),
+            HirPlace::Field { object, .. } | HirPlace::TupleIndex { object, .. } => {
+                self.rewrite(object)
+            }
             HirPlace::Index { object, index, .. } => {
                 self.rewrite(object);
                 self.rewrite(index);

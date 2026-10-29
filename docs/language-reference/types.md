@@ -707,6 +707,9 @@ impl Meters {
 
 `.0` reads the inner value through a borrow too, so `m.0` works on `m: &Meters`.
 
+`.0` is read-only. Assigning to it is an error even on a `mut` binding; replace the
+whole value instead, `m = Meters(5)`.
+
 ### Type Errors
 
 | Error | Cause |
@@ -1479,7 +1482,8 @@ val ((p, q), r) = ((1, 2), 3)       // nested destructuring
   not a one-element tuple. A tuple literal needs at least two elements.
 - **Index access**: `t.0`, `t.1`, … read by a constant index; an out-of-range
   index is a compile error. (Because `t.0.1` lexes as the float `0.1`, write a
-  nested access as `(t.0).1`.)
+  nested access as `(t.0).1`.) An element of a `mut` tuple is a place:
+  `pair.0 = 7`, `pair.1 += 1`, `(t.0).1 = 9`.
 - **Destructuring**: `val (a, b) = t` binds each position; `_` is a wildcard, and
   patterns nest. It is a binding form, not a new value, it desugars to ordinary
   bindings.

@@ -616,7 +616,9 @@ rather than collapsing into one, because they genuinely differ: a slice takes it
 permission from the borrow rather than the binding (`&mut [T]` is writable through an immutable
 binding, and a `mut` `&[T]` binding is not), a private field is rejected, and a tensor index that
 leaves an axis standing is `AssignToTensorSlice` because a slice is a fresh tensor and not
-storage. Everything else inherits the mutability of `Place::root()`, the binding the place bottoms
+storage. A tuple element is peeled to one `&` like a field; a newtype's `.0` reads but is
+`AssignToNewtypeInner` as a target, since the language rebuilds a newtype rather than writing
+into it. Everything else inherits the mutability of `Place::root()`, the binding the place bottoms
 out at.
 
 **Borrow exclusivity** (`symbol_table.rs` plus the `Expr::Reference` arm). Each binding tracks

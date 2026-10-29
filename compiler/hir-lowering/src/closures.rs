@@ -791,7 +791,7 @@ fn place_root(expr: &Expr) -> Option<&Identifier> {
 fn collect_place(place: &Place, fv: &mut FreeVars) {
     match place {
         Place::Var(ident) => fv.read(&ident.name),
-        Place::Field { object, .. } => collect_expr(object, fv),
+        Place::Field { object, .. } | Place::TupleIndex { object, .. } => collect_expr(object, fv),
         Place::Index { object, index, .. } => {
             collect_expr(object, fv);
             collect_expr(index, fv);

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.20.0] - 2026-10-29
+
+### Added
+
+- A tuple element is an assignment target: `pair.0 = 7` and `pair.1 += 1` write a `mut`
+  tuple in place, at any depth (`(t.0).1 = 9`), held in a struct field, an array or a
+  `Vec` (`cells[i].0 = v`), and through a `&mut (A, B)` parameter (`r.0 += 1`). A closure
+  that assigns one captures the tuple like a field write does. A `string` element releases
+  the value it displaces.
+
+### Changed
+
+- Assigning to a newtype's `.0` is now a type error that says to rebuild the whole value
+  (`m = Meters(v)`). Before, it was a parse error. The parse error for a target that is not
+  a place lists `pair.0` among the forms that are.
+- `examples/showcase/grid_update.nr` tracks the grid's lowest and highest cell in a tuple
+  field, widens a `(min, max)` tuple through a `&mut` parameter, and counts its raises in a
+  tuple captured by a closure.
+
 ## [5.19.2] - 2026-10-28
 
 ### Added

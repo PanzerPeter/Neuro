@@ -118,6 +118,48 @@ impl TypeChecker {
                 Some(field_ty)
             }
 
+            Place::TupleIndex {
+                object,
+                index,
+                span: index_span,
+            } => {
+                // Peeled like a field place, so `r.0` on a `&mut (A, B)` writes the tuple.
+                let obj_ty = self.check_expr(object, None)?.auto_deref();
+                let element = match obj_ty.referent() {
+                    Type::Tuple(elements) => match elements.get(*index) {
+                        Some(element) => element.clone(),
+                        None => {
+                            self.record_error(TypeError::TupleIndexOutOfBounds {
+                                index: *index,
+                                arity: elements.len(),
+                                span: *index_span,
+                            });
+                            return None;
+                        }
+                    },
+                    Type::Newtype(name) => {
+                        self.record_error(TypeError::AssignToNewtypeInner {
+                            name: name.clone(),
+                            span: *index_span,
+                        });
+                        return None;
+                    }
+                    Type::Unknown => return None,
+                    other => {
+                        self.record_error(TypeError::NotATuple {
+                            found: other.clone(),
+                            span: *index_span,
+                        });
+                        return None;
+                    }
+                };
+                if !self.place_is_writable(&obj_ty, place) {
+                    self.report_immutable_place(place);
+                    return None;
+                }
+                Some(element)
+            }
+
             Place::Index {
                 object,
                 index,
@@ -238,6 +280,7 @@ impl TypeChecker {
     pub(super) fn place_is_writable(&self, object_ty: &Type, place: &Place) -> bool {
         let through = match place {
             Place::Field { object, .. }
+            | Place::TupleIndex { object, .. }
             | Place::Index { object, .. }
             | Place::TensorIndex { object, .. } => self.nearest_reference(object, object_ty),
             Place::Var(_) | Place::Deref { .. } => None,
@@ -458,6 +501,7 @@ impl TypeChecker {
             Place::Var(_) => return false,
             Place::Deref { .. } => return true,
             Place::Field { object, .. }
+            | Place::TupleIndex { object, .. }
             | Place::Index { object, .. }
             | Place::TensorIndex { object, .. } => object,
         };

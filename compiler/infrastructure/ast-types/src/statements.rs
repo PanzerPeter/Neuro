@@ -45,6 +45,12 @@ pub enum Place {
         field: Identifier,
         span: Span,
     },
+    /// A tuple element: `object.0`.
+    TupleIndex {
+        object: Box<Expr>,
+        index: usize,
+        span: Span,
+    },
     /// One element of an array, slice, `Vec`, or rank-1 tensor: `object[index]`.
     Index {
         object: Box<Expr>,
@@ -66,6 +72,7 @@ impl Place {
         match self {
             Place::Var(ident) => ident.span,
             Place::Field { span, .. }
+            | Place::TupleIndex { span, .. }
             | Place::Index { span, .. }
             | Place::TensorIndex { span, .. }
             | Place::Deref { span, .. } => *span,
@@ -79,6 +86,7 @@ impl Place {
         match self {
             Place::Var(ident) => Some(ident),
             Place::Field { object, .. }
+            | Place::TupleIndex { object, .. }
             | Place::Index { object, .. }
             | Place::TensorIndex { object, .. }
             | Place::Deref {
@@ -99,6 +107,15 @@ impl Place {
             } => Expr::FieldAccess {
                 object: object.clone(),
                 field: field.clone(),
+                span: *span,
+            },
+            Place::TupleIndex {
+                object,
+                index,
+                span,
+            } => Expr::TupleIndex {
+                object: object.clone(),
+                index: *index,
                 span: *span,
             },
             Place::Index {
@@ -340,5 +357,24 @@ mod tests {
             span: Span::new(0, 1),
         };
         assert!(place.root().is_none());
+    }
+
+    #[test]
+    fn a_tuple_element_place_reads_back_as_the_same_projection() {
+        // pair.1 += v desugars through the read `pair.1`
+        let place = Place::TupleIndex {
+            object: var("pair"),
+            index: 1,
+            span: Span::new(0, 6),
+        };
+        assert_eq!(place.root().map(|i| i.name.as_str()), Some("pair"));
+        assert_eq!(
+            place.to_expr(),
+            Expr::TupleIndex {
+                object: var("pair"),
+                index: 1,
+                span: Span::new(0, 6),
+            }
+        );
     }
 }
