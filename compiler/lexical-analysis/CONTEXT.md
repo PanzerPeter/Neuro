@@ -54,6 +54,9 @@ Several tokens depend on that and will silently regress if reordered:
   stripping the leading `'`. A char literal carries a closing quote and is therefore a strictly
   longer match, which is the only thing keeping `'a'` a char and `'a` a lifetime.
 - `"""` always outranks the two-quote empty-string match, so `""` and `"""` never collide.
+- The float regex wins `0.1` in `t.0.1`, so `tokenize` splits a plain `digits.digits` float
+  that directly follows a `.` back into `Integer` `.` `Integer` (`split_tuple_indices`). A
+  float with an exponent or a separator there is left whole, and the parser reports it.
 
 Underscore digit separators need no separate rule: every numeric regex carries `_` in its
 character class (`[0-9_]*`, `[01_]*`, `[0-7_]*`, `[0-9a-fA-F_]*`) and each `parse_*` helper

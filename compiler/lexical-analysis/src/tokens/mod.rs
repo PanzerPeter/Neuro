@@ -18,6 +18,8 @@ use numbers::{
 };
 use strings::{decode_string_literal, decode_triple_quoted_string};
 
+pub(crate) use numbers::split_tuple_indices;
+
 mod numbers;
 mod strings;
 

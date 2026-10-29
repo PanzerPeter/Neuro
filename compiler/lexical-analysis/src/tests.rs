@@ -1099,3 +1099,26 @@ fn plain_literal_fast_path_matches_the_decoder() {
     assert_eq!(plain_string(&result[1].kind), "café");
     assert_eq!(plain_string(&result[2].kind), "a\tb");
 }
+
+/// `t.0.1` matches the float regex after the `.`, so a chained tuple index used to be
+/// `t` `.` `0.1` and a parse error. A plain `digits.digits` float directly after a `.`
+/// is two indices; anywhere else, and with an exponent, it stays a float.
+#[test]
+fn regression_chained_tuple_index_lexes_as_two_indices() {
+    let result = tokenize("t.0.12 x = 0.5 t.1.0e3").unwrap();
+    let kinds: Vec<_> = result.iter().map(|t| t.kind.clone()).collect();
+    assert!(matches!(kinds[0], TokenKind::Identifier(_)));
+    assert!(matches!(kinds[1], TokenKind::Dot));
+    assert!(matches!(kinds[2], TokenKind::Integer(0)));
+    assert!(matches!(kinds[3], TokenKind::Dot));
+    assert!(matches!(kinds[4], TokenKind::Integer(12)));
+    assert_eq!(
+        result[2..5]
+            .iter()
+            .map(|t| (t.span.start, t.span.end))
+            .collect::<Vec<_>>(),
+        vec![(2, 3), (3, 4), (4, 6)]
+    );
+    assert!(matches!(kinds[7], TokenKind::Float(f) if (f - 0.5).abs() < 1e-10));
+    assert!(matches!(kinds[10], TokenKind::Float(_)));
+}

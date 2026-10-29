@@ -55,6 +55,31 @@ func main() -> i32 {
     assert_eq!(exit_code, 52);
 }
 
+/// `t.0.1` once lexed its indices as the float `0.1`; it reads and writes the same
+/// element as `(t.0).1`, and a float after an `=` still lexes as a float.
+#[test]
+fn regression_a_chained_tuple_index_needs_no_parentheses() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Holder { t: ((i32, i32), f64) }
+
+func main() -> i32 {
+    mut t = ((1, 2), 3)
+    t.0.1 = 9
+    t.0.0 *= 4
+    t.1 += t.0.1
+    mut h = Holder { t: ((0, 0), 0.5) }
+    h.t.0.1 = 7
+    h.t.1 += 1.5
+    return t.0.0 * 10 + t.1 + h.t.0.1 + h.t.1 as i32
+}
+"#;
+    let exit_code = test
+        .compile_and_run("tuple_element_chained.nr", source)
+        .expect("compilation failed");
+    assert_eq!(exit_code, 61);
+}
+
 #[test]
 fn test_a_tuple_element_held_in_a_field_an_array_and_a_vec() {
     let test = CompileTest::new();

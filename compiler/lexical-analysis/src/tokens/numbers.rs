@@ -7,7 +7,7 @@ use shared_types::{FloatSuffix, IntSuffix, Span};
 
 use crate::errors::LexError;
 
-use super::{FloatSuffixToken, IntegerSuffixToken, TokenKind};
+use super::{FloatSuffixToken, IntegerSuffixToken, Token, TokenKind};
 
 /// The digits of a literal with its `_` separators removed. Borrows when there are
 /// none, so the common literal parses without an allocation.
@@ -26,6 +26,30 @@ pub(super) fn parse_float(lex: &mut logos::Lexer<TokenKind>) -> Result<f64, LexE
         text: lex.slice().to_string(),
         span: Span::new(lex.span().start, lex.span().end),
     })
+}
+
+/// The two tuple indices a float lexeme stands for when it directly follows a `.`:
+/// `t.0.1` matches the float regex as `0.1`, and a field position never holds a float.
+/// Only plain `digits.digits` qualifies; an exponent or a separator keeps the float,
+/// which the parser then reports where it stands.
+pub(crate) fn split_tuple_indices(slice: &str, start: usize) -> Option<[Token; 3]> {
+    let (first, second) = slice.split_once('.')?;
+    let is_index = |digits: &str| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+    if !is_index(first) || !is_index(second) {
+        return None;
+    }
+    let dot = start + first.len();
+    Some([
+        Token::new(
+            TokenKind::Integer(first.parse().ok()?),
+            Span::new(start, dot),
+        ),
+        Token::new(TokenKind::Dot, Span::new(dot, dot + 1)),
+        Token::new(
+            TokenKind::Integer(second.parse().ok()?),
+            Span::new(dot + 1, start + slice.len()),
+        ),
+    ])
 }
 
 /// Helper function to parse decimal integer literals

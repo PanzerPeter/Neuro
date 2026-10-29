@@ -202,8 +202,8 @@ impl Parser {
 
             // Field access `expr.field` or tuple index `expr.0`. A numeric
             // token after the dot is a constant tuple index; an identifier names a
-            // struct field. (Chained `t.0.1` is lexed as `t` `.` `0.1`(float), so a
-            // nested tuple element is accessed as `(t.0).1`.)
+            // struct field. (The lexer splits the float in chained `t.0.1` back into
+            // two indices.)
             TokenKind::Dot => {
                 self.advance(); // consume '.'
                 if let Some(TokenKind::Integer(_)) = self.peek_kind() {

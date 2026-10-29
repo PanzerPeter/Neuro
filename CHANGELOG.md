@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.20.1] - 2026-10-29
+
+### Fixed
+
+- A chained tuple index needs no parentheses: `t.0.1` reads and writes element `1` of
+  element `0`, as `(t.0).1` does. The lexer took `0.1` as a float and the parser stopped
+  with "expected field name". A plain `digits.digits` float right after a `.` now lexes as
+  two indices; anywhere else it is still a float.
+
+### Changed
+
+- `docs/BUGS.md` lists two new open defects: BUG-132, a borrow of a temporary passed to a
+  call (`id(&sq(2))`) is refused, and BUG-133, a moved-out field or tuple element cannot be
+  assigned back. BUG-077 also notes that a `string` stored through a `&mut` is copied and
+  the copy leaks.
+
 ## [5.20.0] - 2026-10-29
 
 ### Added

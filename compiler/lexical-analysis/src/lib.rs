@@ -61,6 +61,18 @@ pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
     for (kind, range) in TokenKind::lexer(source).spanned() {
         let span = Span::new(range.start, range.end);
         let kind = kind.map_err(|err| classify_error(source, err, span))?;
+        let after_dot = tokens
+            .last()
+            .is_some_and(|t: &Token| t.kind == TokenKind::Dot);
+        if after_dot
+            && matches!(kind, TokenKind::Float(_))
+            && let Some(split) = source
+                .get(range.clone())
+                .and_then(|slice| crate::tokens::split_tuple_indices(slice, range.start))
+        {
+            tokens.extend(split);
+            continue;
+        }
         tokens.push(Token::new(kind, span));
     }
 

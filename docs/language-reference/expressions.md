@@ -193,8 +193,8 @@ val b = pair.1            // 30
 ```
 
 A single parenthesized expression `(x)` is grouping, not a one-element tuple.
-Tuple index `t.N` binds like field access; because `t.0.1` lexes as the float
-`0.1`, write a nested access as `(t.0).1`. Tuple destructuring (`val (a, b) = t`)
+Tuple index `t.N` binds like field access and chains like it: `t.0.1` is element `1`
+of element `0`. Tuple destructuring (`val (a, b) = t`)
 is a binding form covered under [Variables](variables.md) and [Types](types.md).
 
 ### If Expressions
