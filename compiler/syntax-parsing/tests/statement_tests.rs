@@ -454,10 +454,10 @@ fn test_parse_statement_with_multiline_expression() {
 fn test_parse_labeled_for_with_labeled_break() {
     let source = r#"
         func test() {
-            outer: for i in 0..10 {
+            'outer: for i in 0..10 {
                 for j in 0..10 {
                     if i * j > 5 {
-                        break outer
+                        break 'outer
                     }
                 }
             }
@@ -483,7 +483,7 @@ fn test_parse_labeled_for_with_labeled_break() {
             then_block.first(),
             Some(ast_types::Stmt::Break { label: Some(l), .. }) if l.name == "outer"
         ),
-        "expected `break outer`, got {:?}",
+        "expected `break 'outer`, got {:?}",
         then_block.first()
     );
 }
@@ -492,11 +492,11 @@ fn test_parse_labeled_for_with_labeled_break() {
 fn test_parse_labeled_loop_and_while() {
     let source = r#"
         func test() {
-            search: loop {
-                continue search
+            'search: loop {
+                continue 'search
             }
-            spin: while true {
-                break spin
+            'spin: while true {
+                break 'spin
             }
         }
     "#;
@@ -513,6 +513,92 @@ fn test_parse_labeled_loop_and_while() {
         func.body.get(1),
         Some(ast_types::Stmt::While { label: Some(l), .. }) if l.name == "spin"
     ));
+}
+
+/// The quote is what marks a label, so an identifier after `break` is always a value,
+/// even when a loop label of the same name is in scope.
+#[test]
+fn test_break_identifier_is_a_value_beside_a_same_named_label() {
+    let source = r#"
+        func test() -> i32 {
+            val outer = 1
+            'outer: loop {
+                break outer
+            }
+        }
+    "#;
+    let items = parse(source).expect("a same-named label and value should parse");
+    let Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    let Some(Stmt::Expr(ast_types::Expr::Loop { label, body, .. })) = func.body.get(1) else {
+        panic!("second statement should be a labeled loop");
+    };
+    assert_eq!(label.as_ref().map(|l| l.name.as_str()), Some("outer"));
+    assert!(
+        matches!(
+            body.first(),
+            Some(Stmt::Break {
+                label: None,
+                value: Some(_),
+                ..
+            })
+        ),
+        "`break outer` carries the value `outer`, got {:?}",
+        body.first()
+    );
+}
+
+#[test]
+fn test_labeled_loop_in_value_position_carries_its_label() {
+    let source = r#"
+        func test() -> i32 {
+            val r = 'outer:
+                loop { break 'outer 3 }
+            r
+        }
+    "#;
+    let items = parse(source).expect("a labeled value loop should parse");
+    let Item::Function(func) = &items[0] else {
+        panic!("expected a function item");
+    };
+    let Some(Stmt::VarDecl {
+        init: Some(ast_types::Expr::Loop { label, body, .. }),
+        ..
+    }) = func.body.first()
+    else {
+        panic!("first statement should bind a labeled loop");
+    };
+    assert_eq!(label.as_ref().map(|l| l.name.as_str()), Some("outer"));
+    assert!(matches!(
+        body.first(),
+        Some(Stmt::Break { label: Some(l), value: Some(_), .. }) if l.name == "outer"
+    ));
+}
+
+#[test]
+fn test_unquoted_loop_label_is_rejected_with_the_quoted_spelling() {
+    let error = parse("func test() {\n    outer: for i in 0..3 { }\n}")
+        .expect_err("a label without its quote must not parse");
+    assert!(
+        matches!(&error, syntax_parsing::ParseError::UnquotedLoopLabel { name, .. } if name == "outer"),
+        "got {error:?}"
+    );
+    assert!(error.to_string().contains("`'outer:`"), "got {error}");
+}
+
+#[test]
+fn test_label_on_a_non_loop_is_rejected() {
+    let error = parse("func test() {\n    'a: if true { }\n}")
+        .expect_err("a label names a loop and nothing else");
+    assert!(
+        matches!(
+            error,
+            syntax_parsing::ParseError::UnexpectedToken { ref expected, .. }
+                if expected.contains("after a loop label")
+        ),
+        "got {error:?}"
+    );
 }
 
 #[test]

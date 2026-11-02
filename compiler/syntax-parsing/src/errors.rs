@@ -44,6 +44,11 @@ pub enum ParseError {
     )]
     UndeclaredLifetime { name: String, span: Span },
 
+    #[error(
+        "a loop label is written with a leading quote, like a lifetime: `'{name}:`, and named as `break '{name}`"
+    )]
+    UnquotedLoopLabel { name: String, span: Span },
+
     #[error("`export` cannot be applied to {what}")]
     ExportNotAllowed { what: String, span: Span },
 
@@ -150,6 +155,7 @@ impl ParseError {
             | ParseError::TypeAliasShadowsBuiltin { span, .. }
             | ParseError::CyclicTypeAlias { span, .. }
             | ParseError::UndeclaredLifetime { span, .. }
+            | ParseError::UnquotedLoopLabel { span, .. }
             | ParseError::ExportNotAllowed { span, .. }
             | ParseError::MisplacedNoPrelude { span }
             | ParseError::EmptyInterpolationHole { span }

@@ -151,9 +151,9 @@ fn a_reversed_range_is_breakable_and_labelable() {
     let source = r#"
 func main() -> i32 {
     mut hits = 0
-    outer: for i in (0..4).rev() {
+    'outer: for i in (0..4).rev() {
         for j in (0..4).rev() {
-            if j < i { continue outer }
+            if j < i { continue 'outer }
             hits = hits + 1
         }
     }

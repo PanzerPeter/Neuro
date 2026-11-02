@@ -157,10 +157,10 @@ fn labeled_break_leaves_an_enumerated_loop() {
     let source = r#"
 func main() -> i32 {
     mut total = 0
-    outer: for (i, x) in [1, 2, 3].enumerate() {
+    'outer: for (i, x) in [1, 2, 3].enumerate() {
         for (j, y) in [10, 20].enumerate() {
             if i == 1 {
-                break outer
+                break 'outer
             }
             total += (j as i32) + x + y
         }

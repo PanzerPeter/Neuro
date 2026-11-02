@@ -53,7 +53,7 @@ fn test_labeled_loop_expression_yields_outer_break_value() {
     let source = r#"
 func main() -> i32 {
     mut acc: i32 = 0
-    val r = outer: loop {
+    val r = 'outer: loop {
         mut k: i32 = 0
         loop {
             k = k + 1
@@ -63,7 +63,7 @@ func main() -> i32 {
             acc = acc + k
         }
         if acc > 5 {
-            break outer acc
+            break 'outer acc
         }
     }
     return r
@@ -73,10 +73,10 @@ func main() -> i32 {
     let exit_code = test
         .compile_and_run("loop_value_labeled.nr", source)
         .expect("Compilation or execution failed");
-    // Inner loop adds 1+2+3 = 6; `break outer acc` carries 6 out of the labeled loop.
+    // Inner loop adds 1+2+3 = 6; `break 'outer acc` carries 6 out of the labeled loop.
     assert_eq!(
         exit_code, 6,
-        "`break outer acc` should yield the outer loop value"
+        "`break 'outer acc` should yield the outer loop value"
     );
 }
 
@@ -181,16 +181,16 @@ func main() -> i32 {
     assert_eq!(exit_code, 30, "break value should coerce to the annotation");
 }
 
-/// The expectation follows the label, not the innermost loop: a `break outer v`
+/// The expectation follows the label, not the innermost loop: a `break 'outer v`
 /// carries the annotation of the loop it actually leaves.
 #[test]
 fn regression_annotation_reaches_labeled_break_value() {
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
-    val t: Tensor<i32, [2]> = outer: loop {
+    val t: Tensor<i32, [2]> = 'outer: loop {
         loop {
-            break outer [3, 4]
+            break 'outer [3, 4]
         }
     }
     return t[0] + t[1]

@@ -187,7 +187,7 @@ fn the_loop_steps_through_a_two_arm_match_on_next() {
     );
 }
 
-/// The label rides on the emitted `while`, which is what a `break outer` inside the
+/// The label rides on the emitted `while`, which is what a `break 'outer` inside the
 /// body resolves against.
 #[test]
 fn a_label_lands_on_the_emitted_loop() {
@@ -195,7 +195,7 @@ fn a_label_lands_on_the_emitted_loop() {
         "{PROTOCOL_DECLS}
          func main() -> i32 {{
             val c = Count {{ end: 3 }}
-            outer: for v in c {{ break outer }}
+            'outer: for v in c {{ break 'outer }}
             0
          }}"
     ));

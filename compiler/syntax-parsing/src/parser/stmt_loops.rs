@@ -71,7 +71,7 @@ impl Parser {
         let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();
 
-        let body = self.parse_labeled_block(label.as_ref())?;
+        let body = self.parse_block()?;
 
         let end_span = self.previous_span(condition.span());
 
@@ -95,7 +95,7 @@ impl Parser {
     ) -> ParseResult<Stmt> {
         self.skip_newlines();
 
-        let body = self.parse_labeled_block(label.as_ref())?;
+        let body = self.parse_block()?;
 
         let end_span = self.previous_span(start_span);
 
@@ -104,24 +104,6 @@ impl Parser {
             body,
             span: start_span.merge(end_span),
         }))
-    }
-
-    /// Parse a loop body, tracking `label` as in-scope for the duration so a
-    /// `break label` inside is recognised as a labeled break rather than a
-    /// value-carrying `break label`. An unlabeled loop parses normally.
-    pub(super) fn parse_labeled_block(
-        &mut self,
-        label: Option<&Identifier>,
-    ) -> ParseResult<Vec<Stmt>> {
-        match label {
-            Some(label) => {
-                self.active_labels.push(label.name.clone());
-                let body = self.parse_block();
-                self.active_labels.pop();
-                body
-            }
-            None => self.parse_block(),
-        }
     }
 
     /// Parse a for statement: `for <head> in <iterable> { ... }`, optionally
@@ -182,7 +164,7 @@ impl Parser {
                 _ => None,
             };
             Self::check_head_agrees(&index, pair_head, iterable.span())?;
-            let body = self.parse_labeled_block(label.as_ref())?;
+            let body = self.parse_block()?;
             let end_span = self.previous_span(iterable.span());
             let span = start_span.merge(end_span);
 
@@ -230,7 +212,7 @@ impl Parser {
         // pair head here and point at the spelling that works.
         Self::check_head_agrees(&index, None, end.span())?;
 
-        let body = self.parse_labeled_block(label.as_ref())?;
+        let body = self.parse_block()?;
 
         let end_span = self.previous_span(end.span());
 
@@ -304,27 +286,14 @@ impl Parser {
         }
     }
 
-    /// Parse a `break` statement after its keyword: an optional in-scope loop
-    /// `label`, then an optional value-producing expression `break v`.
+    /// Parse a `break` statement after its keyword: an optional loop `label`, then an
+    /// optional value-producing expression `break v`.
     ///
-    /// `break label` and `break value` collide syntactically (both a bare token
-    /// after `break`), so a leading identifier is consumed as a label only when it
-    /// names a loop currently in scope ([`Parser::active_labels`]); otherwise it
-    /// begins the value expression. The value, like the label, must sit on the
-    /// same logical line: a `break` at end of line carries neither.
+    /// The quote tells the two apart: `break 'outer` names a loop, and anything else
+    /// begins the value. The value, like the label, must sit on the same logical line:
+    /// a `break` at end of line carries neither.
     pub(super) fn parse_break_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
-        let label = match self.peek_kind() {
-            Some(TokenKind::Identifier(name)) if self.active_labels.iter().any(|l| l == name) => {
-                let name = name.clone();
-                let label_span = self.peek().map(|t| t.span).unwrap_or(start_span);
-                self.advance();
-                Some(Identifier {
-                    name,
-                    span: label_span,
-                })
-            }
-            _ => None,
-        };
+        let label = self.parse_optional_loop_label();
 
         let value = if self.is_at_end()
             || matches!(
@@ -352,13 +321,13 @@ impl Parser {
         })
     }
 
-    /// Parse a trailing loop label on `break` / `continue` (`break outer`).
+    /// Parse a trailing loop label on `break` / `continue` (`break 'outer`).
     ///
     /// The label, when present, sits on the same logical line as the keyword, so
     /// the immediately following token is inspected without skipping newlines:
     /// a `break` at the end of a line is never mistaken for a labeled break.
     pub(super) fn parse_optional_loop_label(&mut self) -> Option<Identifier> {
-        let Some(TokenKind::Identifier(name)) = self.peek_kind() else {
+        let Some(TokenKind::Lifetime(name)) = self.peek_kind() else {
             return None;
         };
         let name = name.clone();
@@ -367,64 +336,54 @@ impl Parser {
         Some(Identifier { name, span })
     }
 
-    /// Parse a labeled loop when the statement begins with `ident : <loop-keyword>`
-    /// (`outer: for ...`). Returns `None` (consuming nothing) when the
-    /// identifier does not introduce a loop label, so the caller falls through to
-    /// its normal identifier-statement handling.
-    pub(super) fn try_parse_labeled_loop(&mut self) -> ParseResult<Option<Stmt>> {
-        if !matches!(
-            self.tokens.get(self.current + 1).map(|t| &t.kind),
-            Some(TokenKind::Colon)
-        ) {
-            return Ok(None);
+    /// True at `ident : <for|while|loop>`, the label spelling without its quote. Nothing
+    /// else opens a statement with an identifier and a single colon, so this only ever
+    /// sharpens an error the statement would hit anyway.
+    pub(super) fn unquoted_label_ahead(&self) -> bool {
+        let kind_at = |i: usize| self.tokens.get(i).map(|t| &t.kind);
+        if !matches!(kind_at(self.current + 1), Some(TokenKind::Colon)) {
+            return false;
         }
-
-        // The token after the colon (skipping newlines) must be a loop keyword.
         let mut keyword_index = self.current + 2;
-        while matches!(
-            self.tokens.get(keyword_index).map(|t| &t.kind),
-            Some(TokenKind::Newline)
-        ) {
+        while matches!(kind_at(keyword_index), Some(TokenKind::Newline)) {
             keyword_index += 1;
         }
-        let keyword = match self.tokens.get(keyword_index).map(|t| &t.kind) {
-            Some(TokenKind::For) | Some(TokenKind::While) | Some(TokenKind::Loop) => {
-                self.tokens[keyword_index].kind.clone()
-            }
-            _ => return Ok(None),
-        };
+        matches!(
+            kind_at(keyword_index),
+            Some(TokenKind::For | TokenKind::While | TokenKind::Loop)
+        )
+    }
 
-        let label_token = self.consume(TokenKind::Identifier(String::new()), "loop label")?;
-        let label = match label_token.kind {
-            TokenKind::Identifier(name) => Identifier {
-                name,
-                span: label_token.span,
-            },
-            other => {
-                return Err(ParseError::UnexpectedToken {
-                    found: other,
-                    expected: "loop label".to_string(),
-                    span: label_token.span,
-                });
-            }
-        };
-        self.consume(TokenKind::Colon, "':'")?;
+    /// Parse a labeled loop statement, `'outer: for ...`, with the cursor on the label.
+    /// A label names a loop and nothing else, so anything but `for`, `while` or `loop`
+    /// after its colon is an error.
+    pub(super) fn parse_labeled_loop(&mut self) -> ParseResult<Stmt> {
+        let label = self
+            .parse_optional_loop_label()
+            .ok_or_else(|| ParseError::UnexpectedEof {
+                expected: "loop label".to_string(),
+            })?;
+        self.consume(TokenKind::Colon, "':' after a loop label")?;
         self.skip_newlines();
-
         let keyword_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
-            expected: "loop keyword".to_string(),
+            expected: LOOP_AFTER_LABEL.to_string(),
         })?;
         let start_span = keyword_token.span;
-
-        let stmt = match keyword {
-            TokenKind::For => self.parse_for_stmt(start_span, Some(label))?,
-            TokenKind::While => self.parse_while_stmt(start_span, Some(label))?,
-            TokenKind::Loop => self.parse_loop_stmt(start_span, Some(label))?,
-            _ => unreachable!("keyword guarded above"),
-        };
-        Ok(Some(stmt))
+        match keyword_token.kind {
+            TokenKind::For => self.parse_for_stmt(start_span, Some(label)),
+            TokenKind::While => self.parse_while_stmt(start_span, Some(label)),
+            TokenKind::Loop => self.parse_loop_stmt(start_span, Some(label)),
+            found => Err(ParseError::UnexpectedToken {
+                found,
+                expected: LOOP_AFTER_LABEL.to_string(),
+                span: start_span,
+            }),
+        }
     }
 }
+
+/// What a loop label must be followed by.
+pub(super) const LOOP_AFTER_LABEL: &str = "`for`, `while` or `loop` after a loop label";
 
 /// The position-binding adapter a `for` head recognises on its iterable.
 const ENUMERATE_METHOD: &str = "enumerate";
@@ -759,7 +718,8 @@ mod tests {
 
     #[test]
     fn labeled_enumerated_loop_keeps_its_label() {
-        let stmt = first_stmt("func main() -> i32 { outer: for (i, x) in xs.enumerate() { }\n 0 }");
+        let stmt =
+            first_stmt("func main() -> i32 { 'outer: for (i, x) in xs.enumerate() { }\n 0 }");
         let Stmt::ForEach { label, index, .. } = stmt else {
             panic!("expected a for-each");
         };

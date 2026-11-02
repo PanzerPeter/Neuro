@@ -235,24 +235,18 @@ impl Parser {
         })
     }
 
-    /// Parse a labeled loop expression `label: loop { ... }`. `label` is the
-    /// already-parsed identifier; the cursor sits on the `:`. The label is tracked
-    /// in scope for the body so a nested `break label v` resolves to it rather than
-    /// being read as a value-carrying `break label`.
+    /// Parse a labeled loop expression `'label: loop { ... }`. `label` is the
+    /// already-parsed label; the cursor sits on the `:`.
     pub(super) fn parse_labeled_loop_expr(
         &mut self,
         label: Identifier,
         start_span: Span,
     ) -> ParseResult<Expr> {
-        self.advance(); // consume ':'
+        self.consume(TokenKind::Colon, "':' after a loop label")?;
         self.skip_newlines();
         self.consume(TokenKind::Loop, "'loop'")?;
         self.skip_newlines();
-
-        self.active_labels.push(label.name.clone());
-        let body = self.parse_block();
-        self.active_labels.pop();
-        let body = body?;
+        let body = self.parse_block()?;
 
         let end_span = self.previous_span(start_span);
         Ok(Expr::Loop {

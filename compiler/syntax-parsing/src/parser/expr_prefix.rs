@@ -45,6 +45,15 @@ impl Parser {
                 parse_interp_string(&chunks, token.span)
             }
             TokenKind::Char(c) => Ok(Expr::Literal(Literal::Char(c), token.span)),
+            // Only a `loop` yields a value, so it is the one loop a label may open in
+            // expression position (`val x = 'outer: loop { ... }`).
+            TokenKind::Lifetime(name) => self.parse_labeled_loop_expr(
+                Identifier {
+                    name,
+                    span: token.span,
+                },
+                token.span,
+            ),
             TokenKind::True => Ok(Expr::Literal(Literal::Boolean(true), token.span)),
             TokenKind::False => Ok(Expr::Literal(Literal::Boolean(false), token.span)),
 
@@ -54,21 +63,6 @@ impl Parser {
                     name,
                     span: token.span,
                 };
-                // Labeled loop expression `label: loop { ... }`: a single `:`
-                // (not `::`) after an identifier followed by `loop` is the only
-                // expression-position use of a bare colon.
-                if self.check(&TokenKind::Colon) {
-                    let mut idx = self.current + 1;
-                    while matches!(
-                        self.tokens.get(idx).map(|t| &t.kind),
-                        Some(TokenKind::Newline)
-                    ) {
-                        idx += 1;
-                    }
-                    if matches!(self.tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Loop)) {
-                        return self.parse_labeled_loop_expr(ident, token.span);
-                    }
-                }
                 // `Tensor::<f32, [3, 3]>::zeros()`: the tensor constructor spelling.
                 // A turbofish is otherwise the callee's own generic arguments and must
                 // be followed by `(`; here it applies to the *type* that qualifies the

@@ -20,6 +20,9 @@
       "include": "#chars"
     },
     {
+      "include": "#labels"
+    },
+    {
       "include": "#lifetimes"
     },
     {
@@ -30,9 +33,6 @@
     },
     {
       "include": "#type_declarations"
-    },
-    {
-      "include": "#labels"
     },
     {
       "include": "#keywords"
@@ -364,16 +364,31 @@
       ]
     },
     "labels": {
-      "comment": "A loop label declaration, `outer: for ...`. A label *use* (`break outer`) is not matched: the parser needs its in-scope label table to tell `break outer` from `break value`, which a regex cannot reproduce.",
-      "match": "\\b([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(:)\\s*(?=for\\b|while\\b|loop\\b)",
-      "captures": {
-        "1": {
-          "name": "entity.name.label.neuro"
+      "comment": "A loop label is spelled like a lifetime (`'outer`), so this precedes `#lifetimes`. It claims a declaration `'outer: for ...` and a use `break 'outer` / `continue 'outer`; every other `'name` is a lifetime.",
+      "patterns": [
+        {
+          "match": "('[_\\p{L}][\\p{L}\\p{N}_]*)\\s*(:)\\s*(?=for\\b|while\\b|loop\\b)",
+          "captures": {
+            "1": {
+              "name": "entity.name.label.neuro"
+            },
+            "2": {
+              "name": "punctuation.separator.label.neuro"
+            }
+          }
         },
-        "2": {
-          "name": "punctuation.separator.label.neuro"
+        {
+          "match": "\\b(break|continue)\\s+('[_\\p{L}][\\p{L}\\p{N}_]*+)(?!')",
+          "captures": {
+            "1": {
+              "name": "keyword.control.neuro"
+            },
+            "2": {
+              "name": "entity.name.label.neuro"
+            }
+          }
         }
-      }
+      ]
     },
     "attributes": {
       "comment": "`@derive(Copy, Clone)`. The `begin` requires an identifier after `@` so a bare `@` is never claimed here.",

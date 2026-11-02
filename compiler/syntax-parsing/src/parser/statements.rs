@@ -218,14 +218,12 @@ impl Parser {
                 let label = self.parse_optional_loop_label();
                 Ok(Stmt::Continue { label, span })
             }
-            TokenKind::Identifier(_) => {
-                // A loop label (`outer: for ...`) is the only statement form
-                // where an identifier is immediately followed by a colon, so it is
-                // unambiguous to dispatch on `ident : <loop-keyword>` here.
-                if let Some(stmt) = self.try_parse_labeled_loop()? {
-                    return Ok(stmt);
-                }
-                self.parse_expr_stmt()
+            TokenKind::Lifetime(_) => self.parse_labeled_loop(),
+            TokenKind::Identifier(name) if self.unquoted_label_ahead() => {
+                Err(ParseError::UnquotedLoopLabel {
+                    name: name.clone(),
+                    span: token.span,
+                })
             }
             _ => self.parse_expr_stmt(),
         }

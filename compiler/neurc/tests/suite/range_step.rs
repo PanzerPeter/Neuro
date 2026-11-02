@@ -134,10 +134,10 @@ fn a_stepped_range_is_breakable_and_labelable() {
     let source = r#"
 func main() -> i32 {
     mut hits = 0
-    outer: for i in (0..9).step(3) {
+    'outer: for i in (0..9).step(3) {
         for j in (0..9).rev().step(2) {
-            if j == 4 { continue outer }
-            if i == 6 { break outer }
+            if j == 4 { continue 'outer }
+            if i == 6 { break 'outer }
             hits = hits + 1
         }
     }

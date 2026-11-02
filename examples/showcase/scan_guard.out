@@ -8,7 +8,8 @@ tick 2 slot 0: value 18 grade 1 score 2
 tick 2 slot 1: value 18 grade 1 score 3
 tick 2 slot 2: value 18 grade 1 score 3
 tick 3 slot 0: value 26 grade 2 score 5
-critical reading -> break sweep
+critical reading -> break 'sweep
+first tick over limits 0 and 1 = 2
 guards closed = 2   (destructors ran on the break path)
 score         = 5
 ticks         = 10

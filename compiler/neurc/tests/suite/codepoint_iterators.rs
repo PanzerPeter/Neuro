@@ -263,8 +263,8 @@ fn a_labelled_break_leaves_the_walk() {
 func main() -> i32 {
     val text = "abcdef"
     mut steps = 0
-    scan: for (off, c) in text.char_indices() {
-        if c == 'd' { break scan }
+    'scan: for (off, c) in text.char_indices() {
+        if c == 'd' { break 'scan }
         steps = steps + 1
     }
     steps

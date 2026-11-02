@@ -909,7 +909,7 @@ pub enum TypeError {
     #[error("'continue' used outside of a loop")]
     ContinueOutsideLoop { span: Span },
 
-    #[error("use of undefined loop label '{name}'")]
+    #[error("use of undefined loop label `'{name}`")]
     UndefinedLabel { name: String, span: Span },
 
     #[error(

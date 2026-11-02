@@ -4,6 +4,7 @@
 // Cumulative integration example combining:
 //   `impl Drop` destructors running at scope exit (reverse declaration order)
 //   · a labeled `break` leaving a nested loop from the inside
+//   · a labeled `loop` as a value: `continue 'search` and `break 'search probe`
 //   · mutable borrows `&mut i32` held in struct fields, one counter per guard
 //   · structs with `&self` methods · @derive(Copy)
 //   · fixed-size arrays with indexed reads · `match` with range and `_` patterns
@@ -61,7 +62,7 @@ func main() -> i32 {
         val sensor = Sensor { base: 2, gain: 8 }
         val limits = [4, 12, 30]
 
-        sweep: for tick in 0..4 {
+        'sweep: for tick in 0..4 {
             for slot in 0..3 {
                 ticks = ticks + 1
 
@@ -76,11 +77,26 @@ func main() -> i32 {
 
                 // Critical reading ends the whole sweep, not just this inner loop.
                 if grade == 2 {
-                    println("critical reading -> break sweep")
-                    break sweep
+                    println("critical reading -> break 'sweep")
+                    break 'sweep
                 }
             }
         }
+
+        // The first tick whose reading clears the first two limits. The inner `for`
+        // gives up on a tick with `continue 'search`, and `break 'search probe`
+        // carries the answer out as the value of the labeled `loop`.
+        mut probe: i32 = 0
+        val first_clear = 'search: loop {
+            for slot in 0..2 {
+                if sensor.reading(probe) <= limits[slot] {
+                    probe = probe + 1
+                    continue 'search
+                }
+            }
+            break 'search probe
+        }
+        println("first tick over limits 0 and 1 = {first_clear}")
     }
 
     // Readings are 2, 10, 18, 26: the last is critical, so the labeled `break`

@@ -149,7 +149,7 @@ One line each. The program's own header comment is the full description.
 - [`robust_fit.nr`](showcase/robust_fit.nr): a `@grad` loss whose body loops a data-dependent number of times and branches on its own error, so the derived gradient follows the path each call takes, evaluated inside a `pool` over three trials collected in a `Vec` of `Copy` structs
 - [`running_stats.nr`](showcase/running_stats.nr): an online mean accumulator
 - [`sample_audit.nr`](showcase/sample_audit.nr): `?` error propagation threaded through earlier features
-- [`scan_guard.nr`](showcase/scan_guard.nr): deterministic `Drop` and labeled loop exit together
+- [`scan_guard.nr`](showcase/scan_guard.nr): deterministic `Drop` and labeled loop exits together, a labeled `for` left from inside and a labeled `loop` whose `break 'search probe` carries a value out past `continue 'search`
 - [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` / `Result` over structs, methods, arrays and generics
 - [`sensor_windows.nr`](showcase/sensor_windows.nr): windowed sensor readings behind one slice signature
 - [`settings_loader.nr`](showcase/settings_loader.nr): typed settings read from raw text, where a lookup's `Option` becomes a `Result` with `.ok_or`, a parse error is wrapped by passing an enum variant to `.map_err`, both propagate with `?`, results are rendered through `.map` / `.map_err`, and `??` takes a default, skips a loop iteration with `continue`, or unwraps with `panic`

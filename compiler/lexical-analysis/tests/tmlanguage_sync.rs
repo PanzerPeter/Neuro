@@ -194,6 +194,18 @@ fn declaration_rules_outrank_the_keyword_rule() {
         "`#chars` must precede `#lifetimes`, or a character literal is scoped as a lifetime."
     );
 
+    // A loop label is spelled like a lifetime, and `#labels` is the only rule that can
+    // tell `'outer:` / `break 'outer` from one, so it runs first. It still follows
+    // `#chars`, whose `'a'` opens the same way.
+    assert!(
+        position_of(&order, "#labels") < position_of(&order, "#lifetimes"),
+        "`#labels` must precede `#lifetimes`, or every loop label is scoped as a lifetime."
+    );
+    assert!(
+        position_of(&order, "#chars") < position_of(&order, "#labels"),
+        "`#chars` must precede `#labels`, or a character literal is scoped as a label."
+    );
+
     // A capitalised name is a type before it is a call target, and an all-caps name is a
     // constant before it is a type.
     assert!(

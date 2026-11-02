@@ -438,12 +438,12 @@ func plain(a: &string, c: bool) -> string {
     }
 }
 func labeled(a: &string, c: bool) -> string {
-    outer: loop {
+    'outer: loop {
         loop {
-            if c { break outer a + "?" }
+            if c { break 'outer a + "?" }
             break
         }
-        break outer a + "!"
+        break 'outer a + "!"
     }
 }
 func mixed(a: &string, c: bool) -> string {

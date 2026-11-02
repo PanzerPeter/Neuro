@@ -378,18 +378,22 @@ written and resolves nothing: matching a label to a parameter needs the callee, 
   rather than tokens (`.2`, `08d`, `<10` are not well-formed token sequences) and parsed into a
   `FormatSpec`. Errors: `EmptyInterpolationHole`, `InvalidFormatSpec`, and
   `InterpolationInPattern`: an interpolated literal is not a constant, so it cannot be a pattern.
-- **Loops and labels.** `try_parse_labeled_loop` dispatches `ident : <for|while|loop>` to the
-  matching loop parser (labels reuse the existing `Identifier` + `Colon` tokens, so no lexer
-  change). `parse_loop_stmt` returns `Stmt::Expr(Expr::Loop { .. })`. In `parse_break_stmt` a
-  trailing identifier is read as a label only when it names an in-scope loop
-  (`Parser::active_labels`), otherwise it begins the value expression; `continue` reads an
-  optional trailing same-line label with no newline skip, so a line-final `break` is never a
-  labeled break.
+- **Loops and labels.** A label takes the lifetime spelling, so it arrives as the lexer's
+  `Lifetime` token and the stored name drops the quote. A statement opening with one goes to
+  `parse_labeled_loop`, which requires `:` and then `for`, `while` or `loop`; in expression
+  position only `'name: loop` is accepted, since only a `loop` yields a value. Labels keep no
+  scope in the parser: `parse_optional_loop_label` takes a same-line `Lifetime` after `break` /
+  `continue` with no newline skip, so a line-final `break` is never labeled, and any other token
+  after `break` begins its value. Whether the label names an enclosing loop is semantic
+  analysis' question. `ident : <for|while|loop>`, the label without its quote, is
+  `UnquotedLoopLabel`, which shows the quoted spelling. `parse_loop_stmt` returns
+  `Stmt::Expr(Expr::Loop { .. })`.
 
 - **Pool blocks.** `parse_pool_expr` reads `pool` then an optional label then a brace block,
   producing `Expr::Pool`. The label follows the keyword instead of preceding it the way a loop
-  label does: a loop label is a jump target `break` has to see in scope, so `Parser::active_labels`
-  tracks it, while a pool label is quoted only in a diagnostic and needs no scope at all. A `pool`
+  label does, and is a bare identifier: a loop label is a jump target `break` names, so it is
+  introduced where a jump can see it and carries the quote that tells it from a value, while a
+  pool label is quoted only in a diagnostic and nothing names it. A `pool`
   in statement position needs no case in `parse_stmt`: it falls through to expression parsing, as
   `unsafe` does.
 

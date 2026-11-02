@@ -408,7 +408,7 @@ loop.
   on a disagreeing later one.
 - **Expected type.** `check_loop_body` carries the loop expression's expected type into its
   `LoopContext`, and the `Stmt::Break` arm reads it back through `break_target_expected`, by
-  label, so a `break outer v` adopts the annotation of the loop it actually leaves. Without it a
+  label, so a `break 'outer v` adopts the annotation of the loop it actually leaves. Without it a
   literal in `break [10, 20]` was typed on its own and then failed against an annotation the
   `if`-arm, `match`-arm and block-tail spellings of the same program all satisfied.
 - **`Expr::Loop`'s type** is its agreed value-break type; unit when only plain `break`s target it;

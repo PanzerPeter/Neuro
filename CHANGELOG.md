@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.22.0] - 2026-11-02
+
+### Changed
+
+- Loop labels take the lifetime spelling: `'outer: for ...`, `break 'outer` and
+  `continue 'outer`, with `break 'outer value` carrying a value out of a labeled `loop`.
+  The bare form `outer: for` / `break outer` is gone, and a label written without its
+  quote is rejected with a message showing the quoted spelling.
+- `break name` is always a value, even inside a loop labeled `'name`: the quote is what
+  marks a label, so a label and a binding may share a name without clashing.
+- An undefined label is reported in its quoted form: ``use of undefined loop label `'b` ``.
+- The editor grammar scopes `'outer:` and `break 'outer` as labels rather than lifetimes.
+
+### Added
+
+- A label on anything but `for`, `while` or `loop` is a parse error. A nested loop may
+  reuse an enclosing label; `break` and `continue` then target the innermost loop carrying
+  it.
+
 ## [5.21.0] - 2026-10-29
 
 ### Changed

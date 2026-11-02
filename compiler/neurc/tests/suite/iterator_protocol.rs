@@ -153,10 +153,10 @@ fn a_labeled_break_leaves_an_outer_protocol_loop() {
         r#"
     val outer_src = Count { end: 4 }
     mut pairs = 0
-    outer: for p in outer_src {
+    'outer: for p in outer_src {
         val inner_src = Count { end: 4 }
         for q in inner_src {
-            if p * q > 2 { break outer }
+            if p * q > 2 { break 'outer }
             pairs = pairs + 1
         }
     }

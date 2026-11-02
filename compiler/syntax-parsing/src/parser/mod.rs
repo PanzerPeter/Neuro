@@ -44,11 +44,6 @@ pub(crate) struct Parser {
     /// statement or match arm began. Inside one a newline never ends the expression,
     /// so a line opening with a token that could begin an expression still continues.
     pub(super) delimiter_depth: u32,
-    /// Loop labels in scope at the current parse position, innermost last.
-    /// `break`/`continue` labels and value-carrying `break v` share bare-identifier
-    /// syntax, so an identifier after `break` is read as a label only when it names
-    /// an in-scope loop; otherwise it begins the break value expression.
-    pub(super) active_labels: Vec<String>,
     /// Monotonic counter for the synthetic temporaries a tuple-destructuring bind
     /// (`val (a, b) = e`) desugars to. Each `__destructure_N` name is unique
     /// within a parse so nested or repeated destructures never collide.
@@ -68,7 +63,6 @@ impl Parser {
             nesting_depth: 0,
             no_struct_lit: false,
             delimiter_depth: 0,
-            active_labels: Vec::new(),
             destructure_counter: 0,
             lifetime_scope: Vec::new(),
         }

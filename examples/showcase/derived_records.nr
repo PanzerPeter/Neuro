@@ -66,10 +66,10 @@ func main() -> i32 {
         // A sample is a duplicate when it equals an earlier one outright. The
         // labeled break stops at the first match: later ones say nothing new.
         mut verdict = Verdict::Fresh
-        scan: for j in 0..i {
+        'scan: for j in 0..i {
             if samples[i] == samples[j] {
                 verdict = Verdict::Duplicate
-                break scan
+                break 'scan
             }
         }
 

@@ -459,8 +459,8 @@ val first_even = loop {
 ```
 
 All value-carrying `break`s for one loop must agree on type. With a label,
-`break outer value` carries the value out of an outer loop, and the labeled loop
-may itself be used in value position (`val x = outer: loop { ... }`).
+`break 'outer value` carries the value out of an outer loop, and the labeled loop
+may itself be used in value position (`val x = 'outer: loop { ... }`).
 
 Only `loop` can yield a value: it is the one loop guaranteed (by the absence of
 a fall-through exit) to leave solely via a `break`. `while` and `for` always
@@ -869,19 +869,19 @@ func valid() -> i32 {
 
 ### Loop Labels
 
-A `for`, `while`, or `loop` may be prefixed with a label, an identifier
-followed by a colon (`outer:`). `break label` and `continue label` then target
-the labeled loop rather than the innermost one, so an inner loop can exit or
-re-enter an outer loop directly:
+A `for`, `while`, or `loop` may be prefixed with a label: a quote, a name and a
+colon (`'outer:`). `break 'outer` and `continue 'outer` then target the labeled
+loop rather than the innermost one, so an inner loop can exit or re-enter an
+outer loop directly:
 
 ```neuro
 func count() -> i32 {
     mut total: i32 = 0
-    outer: for i in 0..5 {
+    'outer: for i in 0..5 {
         for j in 0..5 {
             total = total + 1
             if i + j >= 3 {
-                break outer       // exits BOTH loops
+                break 'outer      // exits BOTH loops
             }
         }
     }
@@ -889,20 +889,23 @@ func count() -> i32 {
 }
 ```
 
-`continue label` re-enters the labeled loop's next iteration:
+`continue 'outer` re-enters the labeled loop's next iteration:
 
 ```neuro
-outer: for i in 0..3 {
+'outer: for i in 0..3 {
     for j in 0..3 {
         if j == 1 {
-            continue outer        // skip to the outer loop's next i
+            continue 'outer       // skip to the outer loop's next i
         }
     }
 }
 ```
 
 A label on `break` / `continue` must name an enclosing loop; an unknown label
-is a compile error (`use of undefined loop label`).
+is a compile error (`use of undefined loop label`). The quote is what marks a
+label, so `break outer` without it carries the value of a binding named
+`outer`, and a label and a binding of the same name never clash. A label
+written without its quote (`outer: for`) is rejected with the quoted spelling.
 
 ## Examples
 

@@ -300,10 +300,10 @@ fn a_labeled_break_carrying_an_arena_value_out_of_the_pool_is_rejected() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
-    val s = outer: loop {
+    val s = 'outer: loop {
         pool {
             for j in 0..3 {
-                break outer "a" + "b"
+                break 'outer "a" + "b"
             }
         }
     }

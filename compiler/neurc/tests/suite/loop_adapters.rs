@@ -217,10 +217,10 @@ fn a_labeled_break_leaves_an_adapted_loop() {
     let source = r#"
 func main() -> i32 {
     mut total = 0
-    outer: for v in (0..20).filter(|x: i32| -> bool { x % 3 == 0 }) {
+    'outer: for v in (0..20).filter(|x: i32| -> bool { x % 3 == 0 }) {
         for inner in 0..3 {
             if v > 9 {
-                break outer
+                break 'outer
             }
         }
         total += v

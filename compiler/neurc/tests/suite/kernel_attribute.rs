@@ -551,11 +551,11 @@ val first = loop {
     }
 }
 mut total: i64 = 0
-val found = outer: loop {
+val found = 'outer: loop {
     for x in 0..10 {
         total += x as i64
         if x == n % 7 {
-            break outer total * 2
+            break 'outer total * 2
         }
         if x > 7 { break }
     }

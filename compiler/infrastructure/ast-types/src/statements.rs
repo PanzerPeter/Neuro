@@ -197,8 +197,8 @@ pub enum Stmt {
     /// While loop statement.
     ///
     /// Executes `body` repeatedly while `condition` evaluates to `true`. An
-    /// optional `label` (`outer: while ...`) names the loop so a nested
-    /// `break label` / `continue label` can target it.
+    /// optional `label` (`'outer: while ...`) names the loop so a nested
+    /// `break 'label` / `continue 'label` can target it.
     While {
         label: Option<Identifier>,
         condition: Expr,
@@ -262,19 +262,19 @@ pub enum Stmt {
         span: Span,
     },
     /// Break out of the nearest enclosing loop, or out of the loop named by
-    /// `label` when present (`break outer`).
+    /// `label` when present (`break 'outer`).
     ///
     /// `value` carries the loop-expression result for a value-producing `break v`:
     /// the targeted `loop` evaluates to it. Only `loop` accepts a value;
     /// `while`/`for` always yield unit, so a value here targeting them is rejected
-    /// in semantic analysis. `None` is a plain `break` / `break label`.
+    /// in semantic analysis. `None` is a plain `break` / `break 'label`.
     Break {
         label: Option<Identifier>,
         value: Option<Expr>,
         span: Span,
     },
     /// Continue the nearest enclosing loop, or the loop named by `label` when
-    /// present (`continue outer`).
+    /// present (`continue 'outer`).
     Continue {
         label: Option<Identifier>,
         span: Span,

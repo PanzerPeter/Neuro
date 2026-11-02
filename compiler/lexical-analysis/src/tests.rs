@@ -744,6 +744,16 @@ fn tokenize_lifetimes() {
 }
 
 #[test]
+fn tokenize_loop_label() {
+    // A loop label takes the lifetime spelling, so the parser meets `Lifetime`, `Colon`.
+    let result = tokenize("'outer: loop { break 'outer }").unwrap();
+    assert!(matches!(&result[0].kind, TokenKind::Lifetime(n) if n == "outer"));
+    assert!(matches!(result[1].kind, TokenKind::Colon));
+    assert!(matches!(result[2].kind, TokenKind::Loop));
+    assert!(matches!(&result[5].kind, TokenKind::Lifetime(n) if n == "outer"));
+}
+
+#[test]
 fn char_literal_wins_over_lifetime() {
     // `'a'` carries a closing quote, so it is a strictly longer match than the
     // lifetime `'a`; logos' longest-match rule keeps it a char literal.

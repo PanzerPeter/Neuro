@@ -62,10 +62,10 @@ func main() -> i32 {
     // A descending scan that stops early. `break` leaves a reversed loop the way
     // it leaves any other.
     mut first_small = -1
-    scan: for i in (0..6).rev() {
+    'scan: for i in (0..6).rev() {
         if replay[i] < 6 {
             first_small = i
-            break scan
+            break 'scan
         }
     }
     println("first below six    = index {first_small}")
