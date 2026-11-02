@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.23.1] - 2026-11-02
+
+### Security
+
+- The benchmark harness lock (`benchmarks/uv.lock`) moves `filelock`, a PyTorch
+  dependency, from 4.0.9 to 4.2.6, past the lock-file race and symlink advisories fixed
+  in 4.2.1.
+
 ## [5.23.0] - 2026-11-02
 
 ### Changed
