@@ -154,7 +154,7 @@ One line each. The program's own header comment is the full description.
 - [`sensor_windows.nr`](showcase/sensor_windows.nr): windowed sensor readings behind one slice signature
 - [`settings_loader.nr`](showcase/settings_loader.nr): typed settings read from raw text, where a lookup's `Option` becomes a `Result` with `.ok_or`, a parse error is wrapped by passing an enum variant to `.map_err`, both propagate with `?`, results are rendered through `.map` / `.map_err`, and `??` takes a default, skips a loop iteration with `continue`, or unwraps with `panic`
 - [`shape_traits.nr`](showcase/shape_traits.nr): trait declarations and both dispatch forms together, plus a trait whose methods return `Self`, called through a two-trait bound
-- [`simulation.nr`](showcase/simulation.nr): a tiny bit-flag state machine
+- [`simulation.nr`](showcase/simulation.nr): a tiny bit-flag state machine whose struct field is set, masked and toggled with `|=`, `&=` and `^=` inside a `while` loop, then walked bit by bit with a `<<=` probe through a `&self` method
 - [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings
 - [`stored_text.nr`](showcase/stored_text.nr): text stored into a struct field, an array or tuple element, a call's argument and a call's return value, each released by whoever stored it
 - [`stream_pipeline.nr`](showcase/stream_pipeline.nr): the iteration protocol with the `|>` and `>>` operators carrying a small stream pipeline; the composition chains a bound method, an associated function, an inferred closure literal and a generic function, and `keep::<i32>` is a generic instance used as a value

@@ -7,4 +7,7 @@ step 5: flags 101
 READ  set = true
 WRITE set = false   (set on step 2, cleared on step 4)
 EXEC  set = true
+bit 001 -> true
+bit 010 -> false
+bit 100 -> true
 popcount  = 2

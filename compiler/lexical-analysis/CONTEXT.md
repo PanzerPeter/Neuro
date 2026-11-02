@@ -33,7 +33,8 @@ matches greedily.
 ### Declaration order and longest-match ties
 Logos resolves overlaps by longest match, then by declaration order and explicit `priority`.
 Several tokens depend on that and will silently regress if reordered:
-- `+=` / `-=` / `*=` / `/=` / `%=` are single tokens, never operator-then-`=`.
+- `+=` / `-=` / `*=` / `/=` / `%=` / `&=` / `|=` / `^=` / `<<=` are single tokens, never
+  operator-then-`=`. `<<=` beats `<<` and `<=` by length alone.
 - `<<` is declared before `<`; `=>` is distinct from `=` then `>`; `??` stays one coalescing
   token, so `a ?? b` never lexes as two `?` propagations.
 - `|>` (pipeline) is declared before `|`, and does not collide with `||`: the three are

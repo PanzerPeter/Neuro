@@ -1,6 +1,6 @@
 // Statement parsing tests
 
-use syntax_parsing::{BinaryOp, Item, Place, Stmt, parse};
+use syntax_parsing::{BinaryOp, Expr, Item, Place, Stmt, parse};
 
 /// Count the statements the first function body desugars to.
 fn first_fn_body_len(source: &str) -> usize {
@@ -753,6 +753,39 @@ fn test_compound_assignment_keeps_its_operator() {
         panic!("not an assignment");
     };
     assert_eq!(op, None);
+}
+
+#[test]
+fn test_bitwise_compound_assignment_keeps_its_operator() {
+    let cases = [
+        ("flags &= m", BinaryOp::BitAnd),
+        ("p.flags |= m", BinaryOp::BitOr),
+        ("arr[0] ^= m", BinaryOp::BitXor),
+        ("*r <<= 2", BinaryOp::Shl),
+    ];
+    for (line, expected) in cases {
+        let source = format!("func test() {{\n    {line}\n}}");
+        let Stmt::Assign { op, .. } = first_stmt(&source) else {
+            panic!("`{line}` did not parse as an assignment");
+        };
+        assert_eq!(op, Some(expected), "`{line}` kept the wrong operator");
+    }
+}
+
+#[test]
+fn test_bitwise_compound_assignment_continues_past_a_newline() {
+    let Stmt::Assign { op, value, .. } = first_stmt("func test() {\n    x |=\n        1 << 3\n}")
+    else {
+        panic!("not an assignment");
+    };
+    assert_eq!(op, Some(BinaryOp::BitOr));
+    assert!(matches!(
+        value,
+        Expr::Binary {
+            op: BinaryOp::Shl,
+            ..
+        }
+    ));
 }
 
 #[test]

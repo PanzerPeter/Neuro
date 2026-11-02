@@ -31,6 +31,10 @@ impl Parser {
             TokenKind::StarEqual => Some(BinaryOp::Multiply),
             TokenKind::SlashEqual => Some(BinaryOp::Divide),
             TokenKind::PercentEqual => Some(BinaryOp::Modulo),
+            TokenKind::AmpEqual => Some(BinaryOp::BitAnd),
+            TokenKind::PipeEqual => Some(BinaryOp::BitOr),
+            TokenKind::CaretEqual => Some(BinaryOp::BitXor),
+            TokenKind::LeftShiftEqual => Some(BinaryOp::Shl),
             found => {
                 return Err(ParseError::UnexpectedToken {
                     found,
@@ -69,6 +73,10 @@ impl Parser {
                     | TokenKind::StarEqual
                     | TokenKind::SlashEqual
                     | TokenKind::PercentEqual
+                    | TokenKind::AmpEqual
+                    | TokenKind::PipeEqual
+                    | TokenKind::CaretEqual
+                    | TokenKind::LeftShiftEqual
             )
         )
     }

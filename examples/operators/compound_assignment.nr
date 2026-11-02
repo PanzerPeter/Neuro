@@ -1,5 +1,5 @@
-// Demonstrates compound assignment operators: +=, -=, *=, /=, %=
-// Each operator desugars to a plain assignment at parse time.
+// Demonstrates compound assignment operators: +=, -=, *=, /=, %=, and the bitwise
+// &=, |=, ^=, <<=. On an integer each one is the plain assignment `x = x OP rhs`.
 //
 // The score is printed after every operator so the desugaring is checkable by
 // reading the output rather than by tracing the arithmetic.
@@ -18,6 +18,17 @@ func main() -> i32 {
     println("/= 5    {score}")
     score %= 13
     println("%= 13   {score}")
+
+    // The bitwise forms, on a byte of flags
+    mut flags: u8 = 0b0000_0011u8
+    flags <<= 2u8
+    println("<<= 2   {flags:08b}")
+    flags |= 0b1000_0001u8
+    println("|= 0x81 {flags:08b}")
+    flags &= 0b1111_0001u8
+    println("&= 0xF1 {flags:08b}")
+    flags ^= 0b1111_1111u8
+    println("^= 0xFF {flags:08b}")
 
     // Typical loop accumulator pattern
     mut sum: i32 = 0

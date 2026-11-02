@@ -550,6 +550,20 @@ fn tokenize_pipeline_operator() {
 }
 
 #[test]
+fn tokenize_bitwise_compound_assignment() {
+    let result = tokenize("&= |= ^= <<= && || |> <= <<").unwrap();
+    assert!(matches!(result[0].kind, TokenKind::AmpEqual));
+    assert!(matches!(result[1].kind, TokenKind::PipeEqual));
+    assert!(matches!(result[2].kind, TokenKind::CaretEqual));
+    assert!(matches!(result[3].kind, TokenKind::LeftShiftEqual));
+    assert!(matches!(result[4].kind, TokenKind::AmpAmp));
+    assert!(matches!(result[5].kind, TokenKind::PipePipe));
+    assert!(matches!(result[6].kind, TokenKind::PipeGreater));
+    assert!(matches!(result[7].kind, TokenKind::LessEqual));
+    assert!(matches!(result[8].kind, TokenKind::LeftShift));
+}
+
+#[test]
 fn tokenize_zero_parameter_closure_is_not_a_pipeline() {
     // `||` still wins over `|`, and neither is disturbed by the new token.
     let result = tokenize("|| 1").unwrap();

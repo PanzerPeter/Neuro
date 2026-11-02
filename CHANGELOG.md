@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.24.0] - 2026-11-02
+
+### Added
+
+- Bitwise compound assignment: `x &= m`, `x |= m`, `x ^= m` and `x <<= n` on any place
+  an arithmetic compound assignment takes (a binding, a field, an element, a tuple element,
+  the referent of a `&mut`). On an integer each is `x = x OP rhs`, and a user type reaches
+  its `BitAnd` / `BitOr` / `BitXor` / `Shl` impl the same way. There is no `>>=`, since `>>`
+  is composition and the right shift is `.shr(n)`.
+  A tensor has no bitwise operators, so the four forms are a type error on a tensor target.
+- The editor grammar highlights the four new operators as compound assignments.
+
 ## [5.23.1] - 2026-11-02
 
 ### Security

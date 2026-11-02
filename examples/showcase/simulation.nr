@@ -1,9 +1,9 @@
 // Showcase: a tiny bit-flag state machine.
 //
 // Integration example combining bitwise operators with struct state:
-//   bit-flag constants via `<<` · set/clear/toggle with `|`, `&`, `^`
-//   · struct holding integer state · &self predicate + popcount methods
-//   · while loop with `break` · `.shr(n)` right shift · nested if.
+//   bit-flag constants via `<<` · set/mask/toggle with `|=`, `&=`, `^=` on a
+//   struct field · a `<<=` probe walking the flag bits · struct holding integer
+//   state · &self predicate + popcount methods · while loop with `break` · `.shr(n)` right shift · nested if.
 //
 // A machine's permission flags are mutated step by step; the final set-bit
 // count is returned as the exit code.
@@ -44,10 +44,11 @@ func main() -> i32 {
     // Step through a sequence of operations, mutating the flag field directly.
     mut step: i32 = 0
     while step < 10 {
-        if step == 1 { m.flags = m.flags | READ }
-        if step == 2 { m.flags = m.flags | WRITE }
-        if step == 3 { m.flags = m.flags | EXEC }
-        if step == 4 { m.flags = m.flags ^ WRITE }   // toggle WRITE back off
+        if step == 1 { m.flags |= READ }
+        if step == 2 { m.flags |= WRITE }
+        if step == 3 { m.flags |= EXEC }
+        if step == 4 { m.flags ^= WRITE }                  // toggle WRITE back off
+        if step == 5 { m.flags &= READ | WRITE | EXEC }    // mask to the known bits
         println("step {step}: flags {m.flags:03b}")
         if step == 5 { break }
         step += 1
@@ -59,6 +60,14 @@ func main() -> i32 {
     println("READ  set = {read_set}")
     println("WRITE set = {write_set}   (set on step 2, cleared on step 4)")
     println("EXEC  set = {exec_set}")
+
+    // Walk the flag bits with a shifting probe.
+    mut probe: i32 = READ
+    while probe <= EXEC {
+        val on = m.has(probe)
+        println("bit {probe:03b} -> {on}")
+        probe <<= 1
+    }
 
     // Final flags: READ | EXEC (WRITE was set then cleared) -> popcount 2.
     if m.has(READ) {

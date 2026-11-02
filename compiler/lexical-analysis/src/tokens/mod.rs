@@ -275,6 +275,14 @@ pub enum TokenKind {
     SlashEqual,
     #[token("%=")]
     PercentEqual,
+    #[token("&=")]
+    AmpEqual,
+    #[token("|=")]
+    PipeEqual,
+    #[token("^=")]
+    CaretEqual,
+    #[token("<<=")]
+    LeftShiftEqual,
 
     // Comparison operators (two-character ops must come before single-character)
     #[token("==")]

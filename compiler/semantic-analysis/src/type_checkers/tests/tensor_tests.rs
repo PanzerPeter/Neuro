@@ -1596,6 +1596,30 @@ func main() -> i32 {
     assert!(errors.is_empty(), "compound broadcast; got {errors:?}");
 }
 
+/// A tensor has no bitwise operators, so the bitwise compound forms are rejected
+/// rather than handed to a lowering that has no element operation for them.
+#[test]
+fn a_bitwise_compound_assignment_on_a_tensor_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut w: Tensor<i32, [3]> = [1, 2, 3]
+    w &= 1
+    w <<= 2
+    return 0
+}
+"#,
+    );
+    let ops: Vec<_> = errors
+        .iter()
+        .filter_map(|e| match e {
+            TypeError::InvalidBinaryOperator { op, .. } => Some(op.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ops, ["&=", "<<="], "got {errors:?}");
+}
+
 /// The in-place update writes back into the target's own buffer, so an operand may be
 /// stretched up to the target's shape but never past it.
 #[test]

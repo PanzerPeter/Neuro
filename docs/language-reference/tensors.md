@@ -368,7 +368,8 @@ On a user type `@` dispatches through the `MatMul` trait, exactly as `+` does th
 The compound assignment operators `+=`, `-=`, `*=`, `/=` and `%=` update a `mut` tensor's
 own buffer element by element. They do not desugar to `w = w OP g` the way they do for
 every other type, so nothing is allocated and the tensor's DLPack handle and `data` pointer
-are unchanged across the statement.
+are unchanged across the statement. The bitwise forms `&=`, `|=`, `^=` and `<<=` are
+errors on a tensor, which has no bitwise operators.
 
 ```neuro
 mut w = Tensor::<f32, [784, 128]>::random_normal(mean: 0.0f32, std: 0.02f32)

@@ -356,6 +356,10 @@ side; a tensor updates its buffer in place instead (see below).
 | `x *= n` | `x = x * n`   | `mul_assign`   |
 | `x /= n` | `x = x / n`   | `div_assign`   |
 | `x %= n` | `x = x % n`   | `rem_assign`   |
+| `x &= n` | `x = x & n`   | not defined    |
+| `x \|= n` | `x = x \| n` | not defined    |
+| `x ^= n` | `x = x ^ n`   | not defined    |
+| `x <<= n` | `x = x << n` | not defined    |
 
 ```neuro
 mut score: i32 = 100
@@ -364,7 +368,16 @@ score -= 25    // 125
 score *= 2     // 250
 score /= 5     // 50
 score %= 13    // 11
+
+mut flags: u8 = 0b0011u8
+flags <<= 2u8           // 0b1100
+flags |= 0b0001u8       // 0b1101
+flags &= 0b1001u8       // 0b1001
+flags ^= 0b1111u8       // 0b0110
 ```
+
+There is no `>>=`: `>>` is function composition, and the right shift is the `.shr(n)`
+method. A tensor has no bitwise operators, so a tensor target rejects the bitwise forms.
 
 ```neuro
 mut sum: i32 = 0

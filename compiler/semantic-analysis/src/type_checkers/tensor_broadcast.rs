@@ -170,6 +170,16 @@ impl TypeChecker {
         else {
             return false;
         };
+        // A tensor has no bitwise operators, so it has no bitwise compound forms either.
+        if !is_tensor_operator(op) {
+            self.record_error(TypeError::InvalidBinaryOperator {
+                op: format!("{op}="),
+                left: target_ty.clone(),
+                right: value_ty.clone(),
+                span,
+            });
+            return false;
+        }
         match classify(value_ty) {
             Some(Operand::Scalar(scalar)) if target_element.is_compatible_with(&scalar) => true,
             Some(Operand::Tensor { element, shape, .. })

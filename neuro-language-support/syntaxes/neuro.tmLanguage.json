@@ -575,6 +575,11 @@
           "match": "::"
         },
         {
+          "comment": "Compound assignment, ahead of the shift, comparison, logical and bitwise rules so `<<=`, `&=`, `|=` and `^=` are claimed whole.",
+          "name": "keyword.operator.compound-assign.neuro",
+          "match": "<<=|[+\\-*/%&|^]="
+        },
+        {
           "name": "keyword.operator.shift.neuro",
           "match": "<<"
         },
@@ -597,10 +602,6 @@
           "match": "&&|\\|\\|"
         },
         {
-          "name": "keyword.operator.compound-assign.neuro",
-          "match": "[+\\-*/%]="
-        },
-        {
           "match": "(&)(?=\\s*\\b(?:mut|self)\\b)",
           "captures": {
             "1": {
@@ -610,7 +611,7 @@
         },
         {
           "name": "keyword.operator.assignment.neuro",
-          "match": "(?<![=!<>+\\-*/%])=(?!=)"
+          "match": "(?<![=!<>+\\-*/%&|^])=(?!=)"
         },
         {
           "name": "keyword.operator.error-propagation.neuro",

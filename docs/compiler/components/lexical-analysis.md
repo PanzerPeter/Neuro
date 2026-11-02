@@ -61,7 +61,7 @@ the dedent rules and their errors.
 ### Operators
 
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`
-- **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`
+- **Compound assignment**: `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`
 - **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - **Logical**: `&&`, `||`, `!`
 - **Bitwise**: `&`, `|`, `^`, `~`, `<<` (right shift is the `.shr(n)` method, because
