@@ -354,8 +354,9 @@ func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tenso
 }
 ```
 
-`@` binds tighter than `*` and `+` and looser than `as`, so `w @ x + b` adds the bias to
-the product: the shape a linear layer is written in, with the `[N]` bias broadcasting down
+`@` shares the precedence row of `*`, `/` and `%`, as in Python, so a mix of them groups
+left to right: `w @ x * s` scales the product, `x * s @ w` the input. It binds tighter than
+`+` and looser than `as`, so `w @ x + b` adds the bias to the product: the shape a linear layer is written in, with the `[N]` bias broadcasting down
 the product's rows under the element-wise rule above. Like every tensor operator it takes
 owned or borrowed operands: `&w @ &x` reads a weight without moving it out of its binding.
 

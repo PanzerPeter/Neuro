@@ -3,8 +3,8 @@
 //
 // `@` is the one tensor operator that is not element-wise. It contracts the operands'
 // inner axis — `[M, K] @ [K, N]` gives `[M, N]` — so unlike `+` it neither broadcasts
-// nor accepts a scalar, and its precedence (Appendix B row 4) is tighter than `*` so
-// that `a @ b * c` scales the product rather than multiplying by a scaled operand.
+// nor accepts a scalar. It shares `*`'s precedence row (Appendix B row 4), so a mix of
+// the two groups left to right: `a @ b * c` scales the product, `a * b @ c` the operand.
 
 use crate::compile_harness::CompileTest;
 
@@ -100,9 +100,10 @@ func main() -> i32 {
     assert_eq!(exit, 8);
 }
 
-/// Appendix B row 4: `@` binds tighter than `*` and `+`, so this is `(a @ b) * two`.
+/// Appendix B row 4: `@` and `*` share a row and group left to right, so this is
+/// `(a @ b) * two`.
 #[test]
-fn the_operator_binds_tighter_than_multiplication() {
+fn a_product_followed_by_multiplication_scales_the_product() {
     let exit = run_program(
         "matmul_precedence.nr",
         r#"
@@ -116,6 +117,48 @@ func main() -> i32 {
 "#,
     );
     assert_eq!(exit, 8);
+}
+
+/// The other half of the shared row: `(a * mask) @ b`, which gives 12. Read as
+/// `a * (mask @ b)` it would be `a * b` here and give 9.
+#[test]
+fn multiplication_followed_by_a_product_scales_the_operand() {
+    let exit = run_program(
+        "matmul_after_multiply.nr",
+        r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val mask: Tensor<i32, [2, 2]> = [[1, 0], [0, 1]]
+    val b: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val product = &a * &mask @ &b
+    return product[1, 0]
+}
+"#,
+    );
+    assert_eq!(exit, 12);
+}
+
+/// Grouping left to right puts the scalar on `@`, which takes no scalar operand. Read as
+/// `a @ (2 * b)` it would type-check.
+#[test]
+fn a_scalar_left_of_a_later_multiplication_is_a_matmul_operand() {
+    let errors = CompileTest::new()
+        .check(
+            "matmul_scalar_operand.nr",
+            r#"
+func main() -> i32 {
+    val a: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val b: Tensor<i32, [2, 2]> = [[1, 0], [0, 1]]
+    val c = &a @ 2 * &b
+    return c[0, 0]
+}
+"#,
+        )
+        .expect_err("`a @ 2 * b` contracts against a scalar");
+    assert!(
+        errors.contains("the operands of `@` do not multiply: &Tensor<i32, [2, 2]> against i32"),
+        "{errors}"
+    );
 }
 
 /// One body, specialized per instantiation, with the repeated `K` checked once.

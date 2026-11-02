@@ -123,9 +123,10 @@ func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tenso
 }
 ```
 
-**Precedence**: tighter than `*` and `+` and looser than `as` (see
-[Operator Precedence](#operator-precedence)), matching
-mathematical convention: `a @ b + c` adds `c` to the product, and `a @ b * s` scales it.
+**Precedence**: the same as `*`, `/` and `%`, as in Python, so a mix of them groups left to
+right (see [Operator Precedence](#operator-precedence)): `a @ b * s` scales the product and
+`a * s @ b` scales the left operand. It binds tighter than `+`, so `a @ b + c` adds `c` to the
+product, and looser than `as`.
 
 On a user type, `@` dispatches through the `MatMul` trait like every other overloadable
 operator. See [Tensors: matrix multiplication](tensors.md#matrix-multiplication).
@@ -646,12 +647,11 @@ From highest to lowest, matching the parser's Pratt ladder:
 
 | Level | Operators | Associativity | Example |
 |-------|-----------|---------------|---------|
-| 18 (highest) | `.` | L-to-R | `p.x` |
-| 17 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
-| 16 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
-| 15 | `as` | L-to-R | `n as f64` |
-| 14 | `@` | L-to-R | `w @ x` |
-| 13 | `*`, `/`, `%` | L-to-R | `a * b`, `n % 2` |
+| 17 (highest) | `.` | L-to-R | `p.x` |
+| 16 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
+| 15 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
+| 14 | `as` | L-to-R | `n as f64` |
+| 13 | `*`, `/`, `%`, `@` | L-to-R | `a * b`, `n % 2`, `w @ x` |
 | 12 | `+`, `-` | L-to-R | `a + b`, `x - y` |
 | 11 | `<<` | L-to-R | `a << 4` |
 | 10 | `&` | L-to-R | `a & mask` |
@@ -677,6 +677,7 @@ a * b + c       // Same as: (a * b) + c
 x & mask == 0   // Same as: (x & mask) == 0
 w @ x + b       // Same as: (w @ x) + b
 w @ x * s       // Same as: (w @ x) * s
+x * s @ w       // Same as: (x * s) @ w
 !a && b         // Same as: (!a) && b
 a || b && c     // Same as: a || (b && c)
 ```

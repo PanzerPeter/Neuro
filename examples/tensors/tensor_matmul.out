@@ -2,3 +2,4 @@
 w @ I           leaves every element alone
 project<M, N, K> [2, 2] @ [2, 3] -> [2, 3], corner 5.0
 w @ x * 2       binds as (w @ x) * 2, giving 1.0
+w * 0.5 @ x     binds as (w * 0.5) @ x, giving 0.25

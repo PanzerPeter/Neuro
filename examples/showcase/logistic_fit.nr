@@ -5,9 +5,10 @@
 //   Phase 3's elementwise math inside a `@grad` body: `.tanh()` builds the sigmoid,
 //   `.log()` the likelihood, `.abs()` and `.pow(2.0)` the penalty, each differentiated
 //   by its own rule · Phase 3's `.backward()` / `.grad()` / `.zero_grad()` training loop
-//   · 2C's `@` contraction and scalar broadcast · 2B's reductions and in-place compound
-//   assignment · a struct recording the run · string interpolation with the format
-//   mini-language, where `.sqrt()` and `.exp()` turn the results into readable numbers.
+//   · 2C's `@` contraction and scalar broadcast, `@` sharing `*`'s precedence row
+//   · 2B's reductions and in-place compound assignment · a struct recording the run
+//   · string interpolation with the format mini-language, where `.sqrt()` and `.exp()`
+//   turn the results into readable numbers.
 //
 // The derivative of every one of those functions is written out by the compiler at
 // compile time. `.abs()` has no slope at 0, and the language picks 0 there, so a weight
@@ -23,7 +24,9 @@ func penalized_loss(w: &mut Tensor<f32, [3, 1]>, l1: f32, l2: f32) -> Tensor<f32
     ]
     val y: Tensor<f32, [6, 1]> = [[1.0], [1.0], [1.0], [0.0], [0.0], [0.0]]
     // sigmoid(z) = (tanh(z / 2) + 1) / 2, which never needs `exp` of a large number.
-    val half = (x @ w) * 0.5
+    // `*` and `@` share a precedence row, so this halves the inputs before contracting.
+    // Halving is exact in binary, so it gives the bits of halving the product.
+    val half = x * 0.5 @ w
     val p = half.tanh() * 0.5 + 0.5
     val likely = &y * p.log()
     val unlikely = (1.0 - y) * (1.0 - p).log()

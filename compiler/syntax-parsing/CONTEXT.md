@@ -154,9 +154,9 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `(2 + 3)` parsed as `f()(2 + 3)`, and a following `[1, 2]` as an index, both of which
   type-checked with a callable on the left. A leading `.` still continues, since it cannot start a
   statement.
-- **`@` (matmul) sits at `Precedence::MatMul`**, between `Product` and `Cast`: Appendix B row 4,
-  tighter than `*` so `a @ b * c` scales the product, looser than `as` so `a @ b as f32` casts the
-  right operand. It is an ordinary left-associative infix in `is_binary_op` /
+- **`@` (matmul) sits at `Precedence::Product`** with `*` `/` `%`: Appendix B row 4, as in PEP
+  465, so a mix groups left to right (`a * b @ c` is `(a * b) @ c`), and looser than `as` so
+  `a @ b as f32` casts the right operand. It is an ordinary left-associative infix in `is_binary_op` /
   `token_to_binary_op`; attributes are read by `parse_attributes` at item level only, so the
   statement-boundary rule above is the whole of the disambiguation.
 - **Associated types are two productions, not one.** `parse_trait_def` reads a bare `type Name`

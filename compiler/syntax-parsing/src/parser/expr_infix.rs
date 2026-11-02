@@ -500,8 +500,9 @@ impl Parser {
             TokenKind::LeftShift => Precedence::Shift,
             TokenKind::QuestionQuestion => Precedence::NullCoalesce,
             TokenKind::Plus | TokenKind::Minus => Precedence::Sum,
-            TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Precedence::Product,
-            TokenKind::At => Precedence::MatMul,
+            TokenKind::Star | TokenKind::Slash | TokenKind::Percent | TokenKind::At => {
+                Precedence::Product
+            }
             TokenKind::DotDot | TokenKind::DotDotEqual => Precedence::Range,
             TokenKind::As => Precedence::Cast,
             TokenKind::LeftParen => Precedence::Call,

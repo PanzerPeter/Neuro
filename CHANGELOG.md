@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.23.0] - 2026-11-02
+
+### Changed
+
+- `@` shares a precedence row with `*`, `/` and `%`, as in Python, so a mix of them
+  groups left to right. `x * 0.5 @ w` now halves `x` and then contracts, where it used to
+  read `x * (0.5 @ w)` and was rejected. `a @ b * c` still scales the product, `a @ b + c`
+  still adds to it, and `a @ b as T` still casts the right operand.
+
 ## [5.22.0] - 2026-11-02
 
 ### Changed

@@ -11,8 +11,10 @@
 // broadcasts nor stretches, so there is no vector form and no scalar form. A shape
 // mismatch is a compile error, not a run-time one.
 //
-// PRECEDENCE: `@` binds tighter than `*` and `+`, matching the convention on paper, so
-// `a @ b + c` adds `c` to the product. It binds looser than `as`.
+// PRECEDENCE: `@` shares the row of `*`, `/` and `%`, as in Python, so a mix of them
+// groups left to right: `a @ b * c` scales the product and `a * b @ c` scales the left
+// operand. It binds tighter than `+`, so `a @ b + c` adds `c` to the product, and looser
+// than `as`.
 //
 // Like every tensor operator it accepts owned or borrowed operands: `&w @ &x` reads a
 // weight without moving it out of the binding that owns it.
@@ -62,7 +64,7 @@ func main() -> i32 {
     assert(first[1, 2] == second[1, 2])
     println("project<M, N, K> [2, 2] @ [2, 3] -> [2, 3], corner {first[1, 2]}")
 
-    // `@` before `*`: the product is formed first, then scaled element-wise.
+    // `@` before `*`: left to right, the product is formed first, then scaled element-wise.
     val doubled: Tensor<f32, [2, 3]> = [
         [2.0, 2.0, 2.0],
         [2.0, 2.0, 2.0]
@@ -70,6 +72,11 @@ func main() -> i32 {
     val scaled = &weights @ &batch * &doubled
     assert(scaled[0, 0] == first[0, 0] * 2.0)
     println("w @ x * 2       binds as (w @ x) * 2, giving {scaled[0, 0]}")
+
+    // `*` before `@`: the same row, so the weight is halved first and then contracted.
+    val halved = &weights * 0.5 @ &batch
+    assert(halved[0, 0] == first[0, 0] * 0.5)
+    println("w * 0.5 @ x     binds as (w * 0.5) @ x, giving {halved[0, 0]}")
 
     return c[1, 1] - 150
 }

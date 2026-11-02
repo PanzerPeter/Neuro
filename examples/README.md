@@ -129,7 +129,7 @@ One line each. The program's own header comment is the full description.
 - [`inventory_ledger.nr`](showcase/inventory_ledger.nr): the standard collections carrying an inventory ledger, walked in all three `for` modes: the names consumed, the items read through `&items` and restocked in place through `&mut items`
 - [`job_queue.nr`](showcase/job_queue.nr): `val-else` early exit carrying a small job queue
 - [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `StringBuilder`, finished by a consuming `self` method
-- [`logistic_fit.nr`](showcase/logistic_fit.nr): logistic regression trained by `.backward()`, its sigmoid built from `.tanh()`, its likelihood from `.log()` and its elastic-net penalty from `.abs()` and `.pow(2.0)`, with `@` and broadcast arithmetic, a struct recording the run, and `.sqrt()` / `.exp()` in the report
+- [`logistic_fit.nr`](showcase/logistic_fit.nr): logistic regression trained by `.backward()`, its sigmoid built from `.tanh()`, its likelihood from `.log()` and its elastic-net penalty from `.abs()` and `.pow(2.0)`, with `@` sharing `*`'s precedence row (`x * 0.5 @ w` halves the inputs first) and broadcast arithmetic, a struct recording the run, and `.sqrt()` / `.exp()` in the report
 - [`mixed_precision.nr`](showcase/mixed_precision.nr): `bf16` updates that round back to their weight beside an `f32` master copy that moves, with a `Copy` struct of `bf16` fields in a `Vec`, a closure through `.map`, `.topk` over `bf16` scores and `.to_checked` with `match`
 - [`model_shapes.nr`](showcase/model_shapes.nr): a network's layer stack declared with real tensor parameters
 - [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`

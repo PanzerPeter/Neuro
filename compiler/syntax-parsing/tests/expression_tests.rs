@@ -793,10 +793,11 @@ fn a_lone_range_index_is_a_tensor_index() {
     assert!(matches!(indices[0], TensorIndexArg::Range { .. }));
 }
 
-// Appendix B row 4: `@` binds tighter than `*` and `+`, looser than `as`.
+// Appendix B row 4: `@` shares the multiplicative row, so a mix of `*` and `@` groups
+// left to right; it binds tighter than `+` and looser than `as`.
 
 #[test]
-fn test_matmul_binds_tighter_than_multiply() {
+fn test_matmul_before_multiply_groups_left() {
     let expr = parse_expr("a @ b * c").expect("`@` before `*` should parse");
     match expr {
         Expr::Binary {
@@ -814,6 +815,23 @@ fn test_matmul_binds_tighter_than_multiply() {
         }
         other => panic!("expected the product to be outermost, got {:?}", other),
     }
+}
+
+#[test]
+fn test_multiplicative_operator_before_matmul_groups_left() {
+    // A tighter `@` would read `x * s @ w` as `x * (s @ w)`.
+    assert_eq!(
+        root_and_left_ops("x * s @ w"),
+        (BinaryOp::MatMul, BinaryOp::Multiply)
+    );
+    assert_eq!(
+        root_and_left_ops("x / n @ w"),
+        (BinaryOp::MatMul, BinaryOp::Divide)
+    );
+    assert_eq!(
+        root_and_left_ops("x % n @ w"),
+        (BinaryOp::MatMul, BinaryOp::Modulo)
+    );
 }
 
 #[test]

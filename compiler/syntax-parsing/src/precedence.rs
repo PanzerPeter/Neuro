@@ -16,8 +16,7 @@ pub(crate) enum Precedence {
     BitwiseAnd,   // &
     Shift,        // <<
     Sum,          // + -
-    Product,      // * / %
-    MatMul,       // @ (Appendix B row 4: tighter than `*`, looser than `as`)
+    Product,      // * / % @ (Appendix B row 4: one row, left-associative, as in PEP 465)
     Cast,         // as
     Unary,        // - ! ~
     Call,         // function calls
