@@ -1093,8 +1093,8 @@ impl<'f> BodyEmitter<'f> {
     }
 
     /// A method of a scalar receiver that the LLVM backend computes as plain arithmetic, as
-    /// it computes it: `.wrapping_add` / `_sub` / `_mul`, `.saturating_add` / `_sub` / `_mul`
-    /// and `.shr(n)` on an integer, and `.is_nan()` on a float. `None`, with nothing
+    /// it computes it: `.wrapping_add` / `_sub` / `_mul`, `.saturating_add` / `_sub` / `_mul`,
+    /// `.shr(n)` and `.abs()` on an integer, and `.is_nan()` on a float. `None`, with nothing
     /// emitted, for any other method.
     fn scalar_method(
         &mut self,
@@ -1112,6 +1112,18 @@ impl<'f> BodyEmitter<'f> {
             return Ok(Some(
                 self.assign(&format!("arith.cmpf uno, {value}, {value} : {mlir}")),
             ));
+        }
+        // `.abs()` on a signed integer, as the host writes it: `0 - x` behind the overflow
+        // guard, so `MIN.abs()` fails as `-MIN` does, selected when `x` is negative.
+        if method == "abs" && args.is_empty() && int_width(ty).is_some() && !is_unsigned(ty) {
+            let value = self.expr(object, exit)?;
+            let zero = self.assign(&format!("arith.constant 0 : {mlir}"));
+            let negated =
+                self.checked_int(BinaryOp::Subtract, (&zero, &value), ty, object.span.start);
+            let negative = self.assign(&format!("arith.cmpi slt, {value}, {zero} : {mlir}"));
+            return Ok(Some(self.assign(&format!(
+                "arith.select {negative}, {negated}, {value} : {mlir}"
+            ))));
         }
         let ([arg], Some(width)) = (args, int_width(ty)) else {
             return Ok(None);

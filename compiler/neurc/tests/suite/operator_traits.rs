@@ -1,5 +1,5 @@
 // End-to-end tests for operator traits: operators on user types are sugar for
-// trait method calls. A `Copy` struct that implements `Add`/`Sub`/…/`Neg`/`Not`/
+// trait method calls. A `Copy` struct that implements `Add`/`Sub`/…/`Neg`/`BitNot`/
 // `PartialEq`/`Comparable` gets the matching operator, dispatched to its impl method and
 // monomorphized to a plain call: no vtable. These exercise the full pipeline:
 // parse → type-check → HIR lowering → LLVM codegen → native run.
@@ -241,4 +241,43 @@ func main() -> i32 {
         .compile_and_run("operator_temporaries.nr", source)
         .expect("compile/run failed");
     assert_eq!(exit, 31);
+}
+
+#[test]
+fn bitwise_complement_dispatches_through_bit_not() {
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct Mask { bits: u8 }
+impl BitNot for Mask { type Output = Mask
+    func bitnot(self) -> Mask { Mask { bits: ~self.bits } } }
+func main() -> i32 {
+    val m = ~Mask { bits: 15u8 }   // 0b1111_0000
+    m.bits as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("op_bitnot.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 240);
+}
+
+#[test]
+fn a_trait_named_not_does_not_overload_the_complement() {
+    // `~` is `BitNot`, and `!` is never overloadable, so `Not` is no operator trait.
+    let test = CompileTest::new();
+    let source = r#"
+@derive(Copy, Clone)
+struct Mask { bits: u8 }
+impl Not for Mask { type Output = Mask
+    func not(self) -> Mask { self } }
+func main() -> i32 {
+    val m = ~Mask { bits: 15u8 }
+    m.bits as i32
+}
+"#;
+    let err = test
+        .compile(&test.write_source("op_not.nr", source))
+        .expect_err("`impl Not` must not provide `~`");
+    assert!(err.contains("unknown trait 'Not'"), "{err}");
 }

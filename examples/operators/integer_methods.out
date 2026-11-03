@@ -3,6 +3,7 @@
 100.saturating_sub(200) = 0
 240.shr(4)              = 15
 (-16).shr(2)            = -4
+(-16).abs()             = 16
 200.checked_add(100)    = None, defaulted to 0
 100.checked_add(100)    = Some(200)
 all intrinsics agree

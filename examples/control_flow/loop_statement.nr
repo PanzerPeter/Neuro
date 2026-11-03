@@ -1,9 +1,9 @@
 // The `loop { ... }` infinite-loop statement.
 //
-// `loop` is the canonical infinite loop: the form the `prefer-loop-over-
-// while-true` lint suggests in place of `while true { ... }`. It has no
-// condition: the only way out is `break`. `continue` re-enters the body
-// from the top.
+// `loop` is the canonical infinite loop: the form the
+// `prefer_loop_over_while_true` lint suggests in place of
+// `while true { ... }`. It has no condition: the only way out is `break`.
+// `continue` re-enters the body from the top.
 //
 // This program sums 1 + 2 + 4 + 5 (skipping 3 via `continue`) and stops
 // once the counter passes 5 via `break`, returning 12. The skip and the exit

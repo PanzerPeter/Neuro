@@ -238,6 +238,9 @@ impl Parser {
                     }
                     let close = p.consume(TokenKind::RightParen, "')' to close tuple literal")?;
                     let span = token.span.merge(close.span);
+                    if elements.len() < 2 {
+                        return Err(ParseError::OneElementTuple { span });
+                    }
                     Ok(Expr::TupleLiteral { elements, span })
                 } else {
                     let close = p.consume(TokenKind::RightParen, "')'")?;

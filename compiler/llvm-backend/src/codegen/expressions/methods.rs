@@ -123,7 +123,32 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::SaturatingSub
             | BuiltinMethod::SaturatingMul
             | BuiltinMethod::Shr => self.codegen_int_intrinsic(kind, recv_ty, receiver, args),
+            BuiltinMethod::Abs => self.codegen_int_abs(receiver),
         }
+    }
+
+    /// `x < 0 ? 0 - x : x`, with the subtraction behind the same overflow guard as `-x`, so
+    /// `MIN.abs()` panics in a debug build and wraps to `MIN` in a release one. Every other
+    /// value negates without overflow, so computing `0 - x` unconditionally is safe.
+    fn codegen_int_abs(&mut self, receiver: &HirExpr) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let BasicValueEnum::IntValue(value) = self.codegen_expr(receiver)? else {
+            return Err(CodegenError::InternalError(
+                "abs receiver did not lower to an integer".to_string(),
+            ));
+        };
+        let zero = value.get_type().const_zero();
+        let negated = self.codegen_int_arith(
+            ast_types::BinaryOp::Subtract,
+            zero,
+            value,
+            false,
+            receiver.span.start,
+            "abs.neg",
+        )?;
+        let negative =
+            self.builder
+                .build_int_compare(IntPredicate::SLT, value, zero, "abs.negative")?;
+        Ok(self.builder.build_select(negative, negated, value, "abs")?)
     }
 
     /// Lower `string.slice(a..b)` / `string.slice(a..=b)` to a borrowed `&string`.
@@ -432,7 +457,8 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::ToChecked
             | BuiltinMethod::CheckedAdd
             | BuiltinMethod::CheckedSub
-            | BuiltinMethod::CheckedMul => {
+            | BuiltinMethod::CheckedMul
+            | BuiltinMethod::Abs => {
                 unreachable!("handled by codegen_builtin_method's other arms")
             }
         };

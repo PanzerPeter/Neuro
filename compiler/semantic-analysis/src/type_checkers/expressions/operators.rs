@@ -528,7 +528,7 @@ impl TypeChecker {
         }
 
         // Operator-trait dispatch on a user type: `-a` via `Neg`, `~a` via
-        // `Not`. The boolean `!a` (`UnaryOp::Not`) is never overloadable.
+        // `BitNot`. The boolean `!a` (`UnaryOp::Not`) is never overloadable.
         if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = operand_ty.referent()
             && let Some(result) = self.operator_unary_impls.get(&(name.clone(), *op)).cloned()
         {

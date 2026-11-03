@@ -70,9 +70,9 @@ pub(crate) fn operator_trait_spec(name: &str) -> Option<OpTraitSpec> {
             unary: &[("neg", UnaryOp::Negate)],
             has_output: true,
         },
-        "Not" => OpTraitSpec {
+        "BitNot" => OpTraitSpec {
             binary: &[],
-            unary: &[("not", UnaryOp::BitNot)],
+            unary: &[("bitnot", UnaryOp::BitNot)],
             has_output: true,
         },
         "PartialEq" => OpTraitSpec {

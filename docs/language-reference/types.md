@@ -128,13 +128,14 @@ val x: u8 = 0u8.wrapping_sub(1u8)   // 255, if the wrap is what you meant
 
 #### Integer Methods
 
-When the overflow behavior matters, request it explicitly with a builtin intrinsic method. These dispatch on any integer receiver and take one same-typed argument. They are compiler-known intrinsics, not user-defined `impl` methods.
+When the overflow behavior matters, request it explicitly with a builtin intrinsic method. These dispatch on any integer receiver and take one same-typed argument, except `.abs()`. They are compiler-known intrinsics, not user-defined `impl` methods.
 
 | Method | Returns | Behavior |
 |--------|---------|----------|
 | `.wrapping_add(rhs)` / `.wrapping_sub(rhs)` / `.wrapping_mul(rhs)` | receiver type | Two's-complement wrap on overflow. Never traps, regardless of build profile. |
 | `.saturating_add(rhs)` / `.saturating_sub(rhs)` / `.saturating_mul(rhs)` | receiver type | Clamp to the type's `MIN` / `MAX` instead of overflowing. |
 | `.checked_add(rhs)` / `.checked_sub(rhs)` / `.checked_mul(rhs)` | `Option<T>` | `Option::Some(result)` when it fits, `Option::None` when it would overflow. |
+| `.abs()` | receiver type | Signed integers only, no argument. The absolute value. `MIN.abs()` does not fit, so it is an ordinary overflow: a panic in a debug build, `MIN` in a release one. |
 | `.shr(n)` | receiver type | Right shift by `n`. Arithmetic (sign-preserving) for signed types, logical for unsigned. Right shift is a method rather than an operator (see [operators.md](operators.md)). |
 
 ```neuro
@@ -1288,7 +1289,7 @@ argument.
 
 A cast whose operand is a compile-time constant (a float literal, a `const`, or arithmetic
 over those) that the target cannot hold is reported as the warning
-`float-cast-out-of-range`. The program still compiles, and the cast still saturates.
+`float_cast_out_of_range`. The program still compiles, and the cast still saturates.
 Silence the warning with `@allow(float_cast_out_of_range)` on the enclosing function or
 method, or on the module-level `const` whose initializer holds the cast:
 
@@ -1488,8 +1489,9 @@ val ((p, q), r) = ((1, 2), 3)       // nested destructuring
 - **Element type**: any sized type. A tuple is `Copy` exactly when every element
   is, and otherwise moves, on the same terms as an array element: see
   [Ownership of an element](#ownership-of-an-element).
-- **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping,
-  not a one-element tuple. A tuple literal needs at least two elements.
+- **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping.
+  There is no one-element tuple: `(x,)` is a compile error, and one value is
+  written as itself. A tuple literal needs at least two elements.
 - **Index access**: `t.0`, `t.1`, … read by a constant index; an out-of-range
   index is a compile error, and indices chain (`t.0.1`). An element of a `mut`
   tuple is a place: `pair.0 = 7`, `pair.1 += 1`, `t.0.1 = 9`.

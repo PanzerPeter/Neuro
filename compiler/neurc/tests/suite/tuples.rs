@@ -158,3 +158,37 @@ func main() -> i32 {
         .expect_err("expected an out-of-range tuple index to be rejected");
     assert!(err.contains("tuple index 5 is out of range"), "{err}");
 }
+
+#[test]
+fn one_element_tuple_literal_is_rejected() {
+    // There is no one-element tuple: one value is written as itself.
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val t = (7,)
+    return 0
+}
+"#;
+    let err = test
+        .compile(&test.write_source("tuple_one.nr", source))
+        .expect_err("`(x,)` must be rejected");
+    assert!(
+        err.contains("a tuple has zero or at least two elements"),
+        "{err}"
+    );
+}
+
+#[test]
+fn trailing_comma_after_two_elements_is_still_a_tuple() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val t = (3, 4,)
+    t.0 + t.1
+}
+"#;
+    let exit = test
+        .compile_and_run("tuple_trailing.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 7);
+}

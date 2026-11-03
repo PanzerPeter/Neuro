@@ -777,6 +777,8 @@ compiler bug, not a diagnostic.
   module but the prelude's, so no gate is repeated here.
 - **`.is_nan()`**: `lower_builtin_method` types it as `HirType::Bool` on any float receiver
   (`is_float`, half precision included), with no arguments to lower.
+- **`.abs()`** on an integer: typed as the receiver, no arguments. The checker has already
+  refused an unsigned receiver; a float one takes the elementwise-math path instead.
 - **`checked_{add,sub,mul}`**: `lower_builtin_method` types these on any integer receiver as
   `Option<T>` over that receiver, reusing `collections.rs`'s `option_of` so the instance is
   materialized as an ordinary `HirItem::Enum` exactly like `Vec::pop`'s.

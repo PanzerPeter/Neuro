@@ -85,6 +85,8 @@ pub(crate) enum BuiltinMethod {
     CheckedSub,
     /// `int.checked_mul(rhs)` → `Option::Some(product)`, or `Option::None` on overflow.
     CheckedMul,
+    /// `int.abs()` on a signed integer → the magnitude; `MIN.abs()` overflows like `-MIN`.
+    Abs,
     /// `array.len()` → the compile-time element count `N` of `[T; N]`, as `u64`.
     ArrayLen,
     /// `seq.slice(a..b)` on an array, `Vec`, or slice → a borrowed `&[T]` view over the
@@ -158,6 +160,7 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
             "checked_add" => Some(BuiltinMethod::CheckedAdd),
             "checked_sub" => Some(BuiltinMethod::CheckedSub),
             "checked_mul" => Some(BuiltinMethod::CheckedMul),
+            "abs" if !recv.is_unsigned_int() => Some(BuiltinMethod::Abs),
             _ => None,
         },
         _ => None,

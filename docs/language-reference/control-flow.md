@@ -394,16 +394,17 @@ while i < 10 {
 // while 42 { }  // Error: expected bool condition
 ```
 
-### `prefer-loop-over-while-true` lint
+### `prefer_loop_over_while_true` lint
 
 `while true { ... }` compiles and runs, but the compiler emits a warning:
 
 ```text
-warning[prefer-loop-over-while-true] at 23..27: `while true { ... }` should
+warning[prefer_loop_over_while_true] at 23..27: `while true { ... }` should
 be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)`
 on the enclosing function
 ```
 
+A lint has one name, in `snake_case`: the warning prints the name `@allow` takes.
 The motivation is style, not safety; both forms produce identical machine
 code. To silence the warning on a function (typically when transcribing code
 from C, Python, or JavaScript), attach the `@allow` attribute:
@@ -428,7 +429,7 @@ flagged. The recommended replacement is the `loop { ... }` statement below.
 
 Use `loop` for an infinite loop. Unlike `while`, it has no condition: the only
 way out is a `break`, and `continue` re-enters the body from the top. This is
-the canonical infinite-loop form the `prefer-loop-over-while-true` lint
+the canonical infinite-loop form the `prefer_loop_over_while_true` lint
 suggests.
 
 ```neuro

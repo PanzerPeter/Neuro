@@ -262,3 +262,52 @@ func main() -> i32 {
         .expect_err("expected compilation to fail for checked_add on a float receiver");
     assert!(err.contains("has no method 'checked_add'"), "{err}");
 }
+
+#[test]
+fn abs_on_signed_integers_returns_the_magnitude() {
+    let test = CompileTest::new();
+    // 5 + 7 + 3 + 0 + 9: every signed width, zero, and a receiver read through a borrow.
+    let source = r#"
+func main() -> i32 {
+    val a: i32 = -5
+    val nine: i32 = -9
+    val r = &nine
+    val sum = a.abs() + (-7i64).abs() as i32 + (-3i8).abs() as i32 + (0i16).abs() as i32
+    return sum + r.abs()
+}
+"#;
+    let exit = test
+        .compile_and_run("abs_signed.nr", source)
+        .expect("signed abs compilation or execution failed");
+    assert_eq!(exit, 24);
+}
+
+#[test]
+fn abs_on_an_unsigned_integer_is_rejected() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val u: u32 = 5
+    return u.abs() as i32
+}
+"#;
+    let err = test
+        .compile(&test.write_source("abs_unsigned.nr", source))
+        .expect_err("an unsigned integer has no `.abs()`");
+    assert!(err.contains("has no method 'abs'"), "{err}");
+}
+
+#[test]
+fn abs_takes_no_arguments() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val a: i32 = -5
+    return a.abs(1)
+}
+"#;
+    let err = test
+        .compile(&test.write_source("abs_arity.nr", source))
+        .expect_err("`.abs()` with an argument must be rejected");
+    assert!(err.contains("expected 0, found 1"), "{err}");
+}

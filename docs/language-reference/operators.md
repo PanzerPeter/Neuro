@@ -294,7 +294,7 @@ val a: i32 = 0
 val r: i32 = ~a       // -1 (all bits set, two's complement)
 ```
 
-**Unary**: takes a single integer operand
+**Unary**: takes a single integer operand, or a user type that implements `BitNot`
 **Returns**: same type as operand
 
 ## Type Casting Operator (`as`)
@@ -855,7 +855,7 @@ if a == b { }   // via PartialEq::eq
 | `/` | `Div` | `div` |
 | `%` | `Rem` | `rem` |
 | `-a` | `Neg` | `neg` |
-| `~a` | `Not` | `not` |
+| `~a` | `BitNot` | `bitnot` |
 | `&` `\|` `^` `<<` | `BitAnd` `BitOr` `BitXor` `Shl` | `bitand` `bitor` `bitxor` `shl` |
 | `@` | `MatMul` | `matmul` |
 | `==` `!=` | `PartialEq` | `eq` `ne` |

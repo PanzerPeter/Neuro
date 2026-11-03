@@ -659,6 +659,7 @@ acc += w.shr(3) as i64
 acc += u.shr(29u32) as i64
 acc += (n as i16 - 100i16).shr(2i16) as i64
 acc += (u as u64).wrapping_mul(u as u64).shr(40u64) as i64
+acc += (n - 7).abs() as i64 + (w as i64 - 900000000).abs() % 1000
 val f = n as f32 / 0.0
 if f.is_nan() { acc += 1000 }
 if (n as f64).is_nan() { acc += 1 }

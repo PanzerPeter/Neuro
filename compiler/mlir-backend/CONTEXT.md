@@ -45,8 +45,8 @@ caches.
   lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
   returns nothing and launches the body once per thread. A `<<` checks its amount against the
   operand's width on the debug tier (`GuardKind::ShiftOverflow`, the host's `shift overflow`) and
-  masks it from `-O1` up, and so does `.shr(n)`; `.wrapping_*`, `.saturating_*` and `.is_nan()`
-  are the LLVM backend's arithmetic (`scalar_method`). A local `const` is a scalar local, and a scalar module constant read by
+  masks it from `-O1` up, and so does `.shr(n)`; `.wrapping_*`, `.saturating_*`, a signed
+  integer's `.abs()` and `.is_nan()` are the LLVM backend's arithmetic (`scalar_method`). A local `const` is a scalar local, and a scalar module constant read by
   name lowers to its value (`module_constant`). A `for` walks `.rev()` and `.step(n)` as the host
   does: an ascending induction mirrored onto the binding, the exit tested on the distance left,
   and a stride that is not positive failing on every tier (`GuardKind::RangeStep`, the host's

@@ -137,6 +137,13 @@ impl Parser {
                         break;
                     }
                     self.advance(); // consume ','
+                    if let ([_], Some(close)) = (elements.as_slice(), self.peek())
+                        && close.kind == TokenKind::RightParen
+                    {
+                        return Err(ParseError::OneElementTuple {
+                            span: open.span.merge(close.span),
+                        });
+                    }
                 }
             }
             let close = self.consume(TokenKind::RightParen, "')' to close type list")?;

@@ -193,6 +193,18 @@ impl TypeChecker {
                 }
                 Some(Type::Bool)
             }
+            // `MIN.abs()` does not fit the type, so it is an integer overflow like `-MIN`.
+            // Unsigned integers have no `.abs()`: it would be the identity.
+            (_, "abs") if recv.is_signed_int() => {
+                if !args.is_empty() {
+                    self.record_error(TypeError::ArgumentCountMismatch {
+                        expected: 0,
+                        found: args.len(),
+                        span: call_span,
+                    });
+                }
+                Some(recv.clone())
+            }
             // Wrapping/saturating arithmetic and the right-shift method.
             // Each takes one same-typed argument and returns the receiver's integer type.
             // Matched on `recv` (not the referent): integer intrinsics require a value

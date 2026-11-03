@@ -144,7 +144,7 @@ pub(crate) struct TypeChecker {
     /// type of the right operand and the operator's result type. Present exactly when
     /// the struct has an operator-trait impl providing that operator.
     operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OperatorDispatch>,
-    /// Operator-trait dispatch for unary operators (`-a` via `Neg`, `~a` via `Not`).
+    /// Operator-trait dispatch for unary operators (`-a` via `Neg`, `~a` via `BitNot`).
     operator_unary_impls: HashMap<(String, ast_types::UnaryOp), Type>,
     /// Trait bounds of the type parameters in scope while a generic definition is checked
     /// Parameter name → its declared bounds. Lets a generic body dispatch
@@ -1301,7 +1301,7 @@ impl TypeChecker {
 
     /// Walk every function and method body emitting lint warnings.
     ///
-    /// Currently implements `prefer-loop-over-while-true`: a
+    /// Currently implements `prefer_loop_over_while_true`: a
     /// `while true { ... }` statement is replaced by `loop { ... }` for
     /// stylistic reasons; the warning is suppressed when the enclosing
     /// function carries `@allow(prefer_loop_over_while_true)`.
@@ -1409,7 +1409,7 @@ fn is_literal_true(expr: &ast_types::Expr) -> bool {
 /// True when the attribute list contains `@allow(<warning>)` for the given
 /// warning code.
 fn attr_allows(attributes: &[Attribute], code: WarningCode) -> bool {
-    let allow_id = code.allow_identifier();
+    let allow_id = code.name();
     attributes
         .iter()
         .filter(|attr| attr.name.name == "allow")

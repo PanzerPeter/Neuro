@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.25.0] - 2026-11-03
+
+### Added
+
+- `.abs()` on a signed integer returns its absolute value as the same type. `MIN.abs()` does
+  not fit, so it overflows exactly as `-MIN` does: a panic in a debug build, `MIN` in a release
+  one. It also works in a `@kernel` body. An unsigned integer has no `.abs()`.
+
+### Changed
+
+- `~a` on a user type dispatches through `impl BitNot` and its `bitnot` method, matching the
+  operator table. The trait used to be `Not` with a `not` method; an `impl Not` is now
+  an unknown trait, since `!` is never overloadable.
+- `(x,)` is a compile error, in an expression and in a type: a tuple has zero or at least two
+  elements, so one value is written as itself. The expression form used to build a tuple of one.
+- A warning prints the lint's `snake_case` name, `warning[prefer_loop_over_while_true]`, the
+  same name `@allow(...)` takes. It used to print a kebab-case spelling `@allow` rejected.
+
 ## [5.24.0] - 2026-11-02
 
 ### Added

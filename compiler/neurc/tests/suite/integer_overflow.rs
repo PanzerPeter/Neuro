@@ -145,6 +145,31 @@ fn an_overflow_says_what_failed_and_where() {
     );
 }
 
+/// `MIN.abs()` does not fit the type, so it overflows exactly as `-MIN` does.
+const ABS_OF_MIN: &str = r#"
+func main() -> i32 {
+    val min: i8 = -128
+    return min.abs() as i32
+}
+"#;
+
+#[test]
+fn abs_of_min_panics_in_debug() {
+    let exe = compile_source(ABS_OF_MIN, "abs_dbg", "0");
+    let stderr = stderr_of(&exe);
+    assert!(
+        stderr.contains("panic: integer overflow at"),
+        "`MIN.abs()` must panic as an overflow, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn abs_of_min_wraps_to_min_in_release() {
+    let exe = compile_source(ABS_OF_MIN, "abs_rel", "2");
+    // -128 as i32, whose low byte is 128.
+    assert_eq!(exit_low_byte(run(&exe)), Some(128));
+}
+
 /// Negating a nonzero unsigned value overflows: the result is negative and `u8` has
 /// no negative values. Written as `0u8 - y` this always panicked on the debug tier,
 /// while `-y` was emitted as a bare `build_int_neg` and wrapped silently.

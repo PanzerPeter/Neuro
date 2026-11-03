@@ -192,7 +192,8 @@ val a = pair.0            // 12
 val b = pair.1            // 30
 ```
 
-A single parenthesized expression `(x)` is grouping, not a one-element tuple.
+A single parenthesized expression `(x)` is grouping. There is no one-element tuple:
+`(x,)` is a compile error.
 Tuple index `t.N` binds like field access and chains like it: `t.0.1` is element `1`
 of element `0`. Tuple destructuring (`val (a, b) = t`)
 is a binding form covered under [Variables](variables.md) and [Types](types.md).

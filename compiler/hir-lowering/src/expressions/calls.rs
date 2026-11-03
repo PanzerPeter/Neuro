@@ -1246,6 +1246,8 @@ impl Lowerer {
             // `float.is_nan()`: nullary, `bool`. A value receiver only, matching the
             // integer intrinsics below.
             (_, "is_nan") if is_float(recv) => Ok((self.lower_args(args, &[])?, HirType::Bool)),
+            // The checker has already refused an unsigned receiver.
+            (_, "abs") if is_integer(recv) => Ok((self.lower_args(args, &[])?, recv.clone())),
             (
                 _,
                 "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"

@@ -613,6 +613,9 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   (signed) / `lshr` (unsigned), its amount through `shift_amount` (see Integer Overflow ABI). `saturating_add`/`sub` → `llvm.{s,u}{add,sub}.sat`;
   `saturating_mul` has no direct intrinsic and becomes `{s,u}mul.with.overflow` + `select`
   (unsigned → MAX; signed → MIN on differing operand signs, else MAX).
+- `.abs()` on a signed integer → `codegen_int_abs`: `x < 0 ? 0 - x : x`, the subtraction through
+  `codegen_int_arith` like `-x`, so `MIN.abs()` panics on the debug tier and wraps to `MIN` from
+  `-O1` up. An unsigned receiver resolves to nothing.
 - `.is_nan()` → `codegen_is_nan`: `fcmp uno x, x` on the receiver value, yielding the `i1` a
   `bool` lowers to. The self-comparison IS the test (NaN is the only value unordered with
   itself), and it is why the check cannot be spelled in source, where `x != x` uses the ordered

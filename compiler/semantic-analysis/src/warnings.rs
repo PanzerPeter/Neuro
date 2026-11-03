@@ -3,9 +3,7 @@
 use shared_types::Span;
 use std::fmt;
 
-/// Stable identifier for a lint warning. The kebab-case rendering is what
-/// users write in `@allow(...)` to suppress the warning, with `-` rewritten
-/// as `_` since `-` is not an identifier character.
+/// Stable identifier for a lint warning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarningCode {
     /// `while true { ... }` should be written as `loop { ... }`.
@@ -16,18 +14,9 @@ pub enum WarningCode {
 }
 
 impl WarningCode {
-    /// The user-facing kebab-case name used in diagnostic output.
+    /// The lint's one name: printed in the warning and accepted by `@allow(...)`, so
+    /// the name a reader sees is the one they write to silence it.
     pub fn name(self) -> &'static str {
-        match self {
-            WarningCode::PreferLoopOverWhileTrue => "prefer-loop-over-while-true",
-            WarningCode::FloatCastOutOfRange => "float-cast-out-of-range",
-        }
-    }
-
-    /// The identifier accepted inside `@allow(...)` to suppress this warning.
-    /// Identifiers cannot contain `-`, so the kebab-case name is mapped to
-    /// snake_case here.
-    pub fn allow_identifier(self) -> &'static str {
         match self {
             WarningCode::PreferLoopOverWhileTrue => "prefer_loop_over_while_true",
             WarningCode::FloatCastOutOfRange => "float_cast_out_of_range",

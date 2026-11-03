@@ -174,10 +174,9 @@ run-time question, as it is for `.grad()`.
 `.zero_grad()` takes the receiver exclusively (`check_mut_self_receiver`). A tensor compound
 assignment now checks the target's borrows before its RHS, as `=` does.
 - **5. lints**: `run_lints` walks bodies collecting non-fatal `Warning`s
-  (`prefer-loop-over-while-true`, silenced by `@allow(prefer_loop_over_while_true)`;
-  parenthesised `while (true)` deliberately not matched). Lints run independently of type errors.
+  (`prefer_loop_over_while_true`; parenthesised `while (true)` deliberately not matched). Lints run independently of type errors.
   One warning is raised during checking instead, because it needs types:
-  `float-cast-out-of-range`, from `check_cast_expr` when a float-to-integer `as` has a constant
+  `float_cast_out_of_range`, from `check_cast_expr` when a float-to-integer `as` has a constant
   operand (`const_float_value`: float literals, `const` names, casts of a constant number to a
   float type, integer `const`s through `fold_const_int`, negation, grouping and arithmetic, each
   step rounded to the type the program computes it in) whose truncation the target cannot hold,
@@ -362,6 +361,8 @@ a wrong count):
 - on any integer receiver, `wrapping_{add,sub,mul}`, `saturating_{add,sub,mul}`, and `.shr(n)`,
   each taking one same-typed argument (`check_unary_int_intrinsic_arg`) and returning the receiver
   type;
+- a signed integer's `abs()`, nullary, returning the receiver type. An unsigned receiver gets
+  `MethodNotFound`; a float one takes the elementwise-math arm;
 - a float's `is_nan()` (nullary, any of the four float types) returns `bool`. A borrowed receiver reaches it already read through by
   `auto_deref`, as it reaches the integer intrinsics;
 - `checked_{add,sub,mul}` take the same argument but return `Option<T>` over the receiver,
@@ -487,7 +488,7 @@ bindings onto every monomorphized instance, substituted. Without that a generic 
 adapter would satisfy `Iterator` under its base name only, and no `for` head over an instance
 of it could find its `Item`.
 
-The `prefer-loop-over-while-true` lint walker descends through `Stmt::Expr(Expr::Loop)`, since
+The `prefer_loop_over_while_true` lint walker descends through `Stmt::Expr(Expr::Loop)`, since
 there is no `Stmt::Loop`.
 
 ### Ownership, borrows, and lifetimes
@@ -952,7 +953,7 @@ same check for return-position `impl Trait<Assoc = U>`.
 - `Drop`: `register_drop_impl` requires exactly the destructor `drop(&mut self)` (no params, no
   return, else `InvalidDropImpl`) and `T` must not be `Copy` (`DropTypeCannotBeCopy`). No Drop
   state is kept on the checker; the backend recomputes the Drop-type set from the AST.
-- The **operator traits** (`Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Not`, `BitAnd`, `BitOr`,
+- The **operator traits** (`Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `BitNot`, `BitAnd`, `BitOr`,
   `BitXor`, `Shl`, `PartialEq`, `Comparable`), defined in `type_checkers/operator_traits.rs`.
   `register_operator_impl` requires a `Copy` receiver (`OperatorTraitRequiresCopy`) and a declared
   `type Output` equal to the method return (`AssociatedTypeMismatch`), and wires each operator's

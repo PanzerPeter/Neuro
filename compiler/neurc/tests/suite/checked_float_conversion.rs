@@ -185,7 +185,7 @@ func main() -> i32 {
 "#,
     );
     assert_eq!(
-        stderr.matches("warning[float-cast-out-of-range]").count(),
+        stderr.matches("warning[float_cast_out_of_range]").count(),
         1,
         "exactly the `LIMIT` cast should warn: {stderr}"
     );
@@ -203,7 +203,7 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(!stderr.contains("float-cast-out-of-range"), "{stderr}");
+    assert!(!stderr.contains("float_cast_out_of_range"), "{stderr}");
 }
 
 #[test]
@@ -222,7 +222,7 @@ func main() -> i32 {
 "#,
     );
     assert_eq!(
-        stderr.matches("float-cast-out-of-range").count(),
+        stderr.matches("warning[float_cast_out_of_range]").count(),
         1,
         "{stderr}"
     );

@@ -10,4 +10,6 @@ EXEC  set = true
 bit 001 -> true
 bit 010 -> false
 bit 100 -> true
+denied    = 010
+gap       = 1
 popcount  = 2

@@ -1,6 +1,6 @@
 // Neuro Programming Language - Integer Primitive Methods
-// Demonstrates the wrapping / saturating / checked arithmetic intrinsics and the
-// right-shift method on builtin integer types. All dispatch through the builtin-method
+// Demonstrates the wrapping / saturating / checked arithmetic intrinsics, the
+// right-shift method and a signed integer's `.abs()` on builtin integer types. All dispatch through the builtin-method
 // path: they are compiler-known intrinsics, not user-defined impl methods.
 //
 // Each intrinsic prints what it produced and the run ends with a verdict line,
@@ -28,6 +28,9 @@ func main() -> i32 {
     val neg: i32 = -16
     val arith: i32 = neg.shr(2)                // -4
 
+    // abs: a signed integer's magnitude. `MIN.abs()` overflows like `-MIN`.
+    val magnitude: i32 = neg.abs()             // 16
+
     // checked_*: the overflow is reported instead of being papered over. The result is
     // an Option<T> over the receiver's type, so it must be deconstructed before use.
     val overflowed: Option<u8> = a.checked_add(b)   // 300 > u8::MAX -> Option::None
@@ -45,6 +48,7 @@ func main() -> i32 {
     println("100.saturating_sub(200) = {floored}")
     println("240.shr(4)              = {shifted}")
     println("(-16).shr(2)            = {arith}")
+    println("(-16).abs()             = {magnitude}")
     println("200.checked_add(100)    = None, defaulted to {checked_none}")
     println("100.checked_add(100)    = Some({checked_some})")
 
@@ -52,7 +56,7 @@ func main() -> i32 {
         if saturated == 255u8 {
             if floored == 0u8 {
                 if shifted == 15u8 {
-                    if arith == -4 {
+                    if arith == -4 && magnitude == 16 {
                         if checked_none == 0u8 {
                             if checked_some == 200u8 {
                                 println("all intrinsics agree")

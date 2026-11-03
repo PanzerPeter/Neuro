@@ -36,6 +36,21 @@ fn test_single_paren_is_grouping_not_tuple() {
 }
 
 #[test]
+fn test_one_element_tuple_is_rejected() {
+    let error = parse_expr("(7,)").expect_err("there is no one-element tuple");
+    assert!(
+        matches!(error, syntax_parsing::ParseError::OneElementTuple { .. }),
+        "got {error:?}"
+    );
+    let error =
+        syntax_parsing::parse("func f(x: (i32,)) { }").expect_err("nor a one-element tuple type");
+    assert!(
+        matches!(error, syntax_parsing::ParseError::OneElementTuple { .. }),
+        "got {error:?}"
+    );
+}
+
+#[test]
 fn test_parse_tuple_index() {
     // A numeric token after `.` is a constant tuple index.
     let expr = parse_expr("pair.1").expect("tuple index should parse");

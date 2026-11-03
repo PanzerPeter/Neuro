@@ -45,8 +45,9 @@ func main() -> i32 {
 "#;
     let (code, _stdout, stderr) = run_check(source);
     assert_eq!(code, 0, "check should succeed; stderr: {}", stderr);
+    // The printed name is the one `@allow` accepts, so a reader can copy it.
     assert!(
-        stderr.contains("prefer-loop-over-while-true"),
+        stderr.contains("warning[prefer_loop_over_while_true]"),
         "expected warning in stderr, got: {}",
         stderr
     );
@@ -68,7 +69,7 @@ func main() -> i32 {
     let (code, _stdout, stderr) = run_check(source);
     assert_eq!(code, 0, "check should succeed; stderr: {}", stderr);
     assert!(
-        !stderr.contains("prefer-loop-over-while-true"),
+        !stderr.contains("prefer_loop_over_while_true"),
         "warning should be suppressed by @allow, but stderr was: {}",
         stderr
     );

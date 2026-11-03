@@ -596,11 +596,11 @@ first and interpolate the name.
 
 The compiler currently emits two warnings. Warnings never block compilation.
 
-### `prefer-loop-over-while-true`
+### `prefer_loop_over_while_true`
 
 **Message**:
 ```text
-warning[prefer-loop-over-while-true] at 24..28: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
+warning[prefer_loop_over_while_true] at 24..28: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
 ```
 
 **Cause**: A `while` loop whose condition is the literal `true`. `loop { ... }` says the same
@@ -622,11 +622,11 @@ loop {
 Silence it with `@allow(prefer_loop_over_while_true)` on the enclosing function when the literal
 form reads better.
 
-### `float-cast-out-of-range`
+### `float_cast_out_of_range`
 
 **Message**:
 ```text
-warning[float-cast-out-of-range] at 42..53: constant `1e20` does not fit `i32` and saturates to its maximum; use `.to_checked::<i32>()` for an `Option`, or silence with `@allow(float_cast_out_of_range)` on the enclosing function or `const`
+warning[float_cast_out_of_range] at 42..53: constant `1e20` does not fit `i32` and saturates to its maximum; use `.to_checked::<i32>()` for an `Option`, or silence with `@allow(float_cast_out_of_range)` on the enclosing function or `const`
 ```
 
 **Cause**: An `as` cast from a float to an integer type whose operand is a constant the target

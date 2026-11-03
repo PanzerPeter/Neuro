@@ -92,10 +92,10 @@ pub(crate) fn operator_trait_spec(name: &str) -> Option<OpTraitSpec> {
             has_output: true,
             supertrait: None,
         },
-        // `Not` maps to the bitwise complement `~a`, not the boolean `!a`.
-        "Not" => OpTraitSpec {
+        // The boolean `!a` has no trait: only the bitwise complement `~a` overloads.
+        "BitNot" => OpTraitSpec {
             binary: &[],
-            unary: &[("not", UnaryOp::BitNot)],
+            unary: &[("bitnot", UnaryOp::BitNot)],
             has_output: true,
             supertrait: None,
         },

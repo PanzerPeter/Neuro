@@ -3,13 +3,23 @@
 // Integration example combining bitwise operators with struct state:
 //   bit-flag constants via `<<` · set/mask/toggle with `|=`, `&=`, `^=` on a
 //   struct field · a `<<=` probe walking the flag bits · struct holding integer
-//   state · &self predicate + popcount methods · while loop with `break` · `.shr(n)` right shift · nested if.
+//   state · &self predicate + popcount methods · while loop with `break` · `.shr(n)` right shift ·
+//   `~` through a `BitNot` impl · a signed integer's `.abs()` · nested if.
 //
 // A machine's permission flags are mutated step by step; the final set-bit
 // count is returned as the exit code.
 
+@derive(Copy, Clone)
 struct Machine {
     flags: i32
+}
+
+// `~m` is the machine holding every known flag that `m` does not.
+impl BitNot for Machine {
+    type Output = Machine
+    func bitnot(self) -> Machine {
+        Machine { flags: ~self.flags & 7 }   // 7 is READ | WRITE | EXEC
+    }
 }
 
 impl Machine {
@@ -68,6 +78,13 @@ func main() -> i32 {
         println("bit {probe:03b} -> {on}")
         probe <<= 1
     }
+
+    // The denied set is the complement of the granted one; `.abs()` makes the gap
+    // between their sizes the same whichever side is larger.
+    val denied = ~m
+    val gap = (denied.popcount() - m.popcount()).abs()
+    println("denied    = {denied.flags:03b}")
+    println("gap       = {gap}")
 
     // Final flags: READ | EXEC (WRITE was set then cleared) -> popcount 2.
     if m.has(READ) {

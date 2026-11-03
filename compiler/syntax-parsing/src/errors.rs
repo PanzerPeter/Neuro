@@ -49,6 +49,11 @@ pub enum ParseError {
     )]
     UnquotedLoopLabel { name: String, span: Span },
 
+    #[error(
+        "a tuple has zero or at least two elements: `(x,)` is not a tuple; write one value as itself"
+    )]
+    OneElementTuple { span: Span },
+
     #[error("`export` cannot be applied to {what}")]
     ExportNotAllowed { what: String, span: Span },
 
@@ -156,6 +161,7 @@ impl ParseError {
             | ParseError::CyclicTypeAlias { span, .. }
             | ParseError::UndeclaredLifetime { span, .. }
             | ParseError::UnquotedLoopLabel { span, .. }
+            | ParseError::OneElementTuple { span }
             | ParseError::ExportNotAllowed { span, .. }
             | ParseError::MisplacedNoPrelude { span }
             | ParseError::EmptyInterpolationHole { span }
