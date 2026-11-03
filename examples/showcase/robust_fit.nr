@@ -1,25 +1,14 @@
-// Showcase: a loss with branches and a loop, marked for differentiation.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's `@grad` through control flow: a `while` that damps the prediction,
-//   an `if` expression that soft-clips the error, and the `mut` bindings both
-//   reassign · 2C's `@` contraction and broadcast arithmetic · 2D's `pool` arena
-//   around each evaluation · a struct and a `Vec` collecting the trials · string
-//   interpolation with the format mini-language.
-//
-// The compiler derives `robust_fit`'s gradient beside it at compile time. Where the
-// body branches, the derivative follows the branch the call actually takes, and
-// where it loops, the derivative undoes exactly the iterations the call ran. Nothing
-// is recorded while the program runs: the backward pass recomputes what it needs.
-//
-// This program only evaluates the losses, so no derivative runs: a `@grad` call
-// runs its derivative only for a `.backward()`, as `gradient_loss.nr` does. The
-// compiler's own tests check the derivative of loops and branches like these
-// against finite differences.
+// Showcase: a loss with branches and a loop, marked for differentiation. Integration
+// example: `@grad` through control flow (a `while` that damps the prediction, an `if`
+// expression that soft-clips the error, and reassigned `mut` bindings), `@`, a `pool`
+// around each evaluation, and a `Vec` of trials. Where the body branches, the derivative
+// follows the branch the call took. Where it loops, the derivative undoes exactly the
+// iterations the call ran. Nothing is recorded at run time. This program only evaluates the
+// losses (see `gradient_loss.nr` for `.backward()`).
 
 // Every tensor parameter is differentiated, so `w` is borrowed `&mut`. `limit` and
 // `sweeps` are plain numbers, constants as far as the derivative is concerned.
+
 @grad
 func robust_fit(w: &mut Tensor<f32, [2, 1]>, limit: f32, sweeps: i32) -> Tensor<f32, []> {
     // Three samples whose targets are exactly `x @ [1, 2]`.

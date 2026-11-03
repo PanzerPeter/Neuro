@@ -528,8 +528,8 @@ impl Parser {
         }
     }
 
-    /// Parse a `[d0, d1, ...]` tensor shape. An axis is an extent — a non-negative
-    /// integer literal, a shape parameter's name, or `?` — optionally preceded by a
+    /// Parse a `[d0, d1, ...]` tensor shape. An axis is an extent (a non-negative
+    /// integer literal, a shape parameter's name, or `?`) optionally preceded by a
     /// dimension name and a colon (`[batch: 32]`); an empty list is the rank-0 scalar
     /// shape.
     fn parse_shape_argument(&mut self) -> ParseResult<ShapeArg> {

@@ -1,20 +1,11 @@
-// Showcase: sensor readings quantized to one byte each, with the out-of-range ones
-// caught instead of clamped.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   `.to_checked::<u8>()`, which answers `None` where `as` would saturate ·
-//   `match` over the `Option` it returns, and `??` for a default · a closure
-//   capturing the scale · a `@derive(Copy)` struct per reading collected in a
-//   `Vec` · a range walked with `.step(n)` · an enum with its own `impl` block and an
-//   `impl PartialEq`, so its values compare with `==` · a rank-0 tensor read out with
-//   `.item()` · interpolation with format specs.
-//
-// A reading's code is twice its value, truncated toward zero, so a byte holds readings
-// from just above -0.5 to just below 128. Past either end `as u8` would clamp to 0 or
-// 255, both plausible codes. The last sample is NaN (a sensor that returned nothing),
-// which `as u8` turns into 0 and `.to_checked` refuses like any other value a byte
-// cannot hold.
+// Showcase: sensor readings quantized to one byte each, with out-of-range values rejected
+// instead of clamped. Integration example: `.to_checked::<u8>()`, `match` and `??` over its
+// `Option`, a closure capturing a scale, a `Copy` struct per reading in a `Vec`,
+// `.step(n)`, an enum with its own `impl` and `impl PartialEq`, `.item()` on a rank-0
+// tensor, and format specs. A reading's code is twice its value, truncated toward zero, so
+// a byte holds values from just above -0.5 to just below 128. `as u8` would clamp
+// out-of-range values to 0 or 255, both plausible codes. A NaN reading, which `as u8` turns
+// into 0, is refused too.
 
 const SCALE: f64 = 2.0
 

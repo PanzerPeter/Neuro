@@ -1,18 +1,11 @@
 // Showcase: temporal-difference learning, where the bootstrapped target must not learn.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's gradient fences, `.detach()` on a value and a call to a `@no_grad` function,
-//   inside `@grad` losses built from the `@` contraction and broadcast arithmetic · 2D's
-//   `pool` arena around each training step · a `Vec` of `Copy` records · string
-//   interpolation with the format mini-language.
-//
-// A linear value function v(s) = bias + slope * s / 3 is fitted to a four-state chain that
-// pays 1 on its last step. The TD target r + 0.9 v(s') is built from the same weights it
-// trains, and semi-gradient TD treats it as a constant: fencing it with `.detach()` or
-// computing it in a `@no_grad` function gives the same derivative, bit for bit.
-// Differentiating through it instead (the residual gradient) minimizes a different error
-// and settles on a steeper line.
+// Integration example: `.detach()` and a `@no_grad` function fencing the target inside
+// `@grad` losses built from `@` and broadcasting, a `pool` around each step, a `Vec` of
+// `Copy` records, and interpolation. A linear value function is fitted to a four-state
+// chain that pays 1 at its last step. The TD target is built from the weights it trains, so
+// semi-gradient TD treats it as a constant. Fencing it with `.detach()` or a `@no_grad`
+// function gives the same derivative. Differentiating through it (the residual gradient)
+// minimizes a different error and settles on a steeper line.
 
 const GAMMA: f32 = 0.9
 const STEPS: i32 = 300

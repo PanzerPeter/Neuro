@@ -238,7 +238,7 @@ func main() -> i32 {
     );
 }
 
-/// A transposed shape keeps its names, in the transposed order — which is exactly the
+/// A transposed shape keeps its names, in the transposed order, which is exactly the
 /// transposition error named dimensions exist to catch.
 #[test]
 fn transposing_a_named_shape_transposes_its_names() {

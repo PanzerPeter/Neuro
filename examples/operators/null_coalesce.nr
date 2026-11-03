@@ -1,12 +1,7 @@
-// The `??` operator: unwrap a fallible value or fall back.
-//
-// `??` reads an `Option<T>` or a `Result<T, E>` and produces the inner `T`, using the
-// right-hand expression when the value is absent or the call failed. For a `Result`
-// the error payload is discarded: `??` says "I do not care why it failed, use this
-// instead". When the reason matters, `match` on the value instead.
-//
-// Every result is printed, so which side of each `??` was taken can be read off
-// the output.
+// The `??` operator: unwrap a fallible value or fall back. `??` yields the inner `T` of an
+// `Option<T>` or `Result<T, E>`, or the right-hand side when the value is absent or the
+// call failed. For a `Result` the error is discarded; `match` on the value when the reason
+// matters. Every result is printed, so the output shows which side of each `??` ran.
 
 func lookup(key: i32) -> Option<i32> {
     if key == 1 {

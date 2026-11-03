@@ -1,22 +1,13 @@
-// Named tensor dimensions: `Tensor<f32, [batch: 32, embed: 768]>`
-//
-// An axis may carry a name before its extent. The name is part of the type and is
-// checked wherever both sides supply one, so a signature reads as documentation and a
-// transposed argument is a compile error rather than a wrong answer at run time.
-//
-// A name does NOT make a shape a different type. `Tensor<i32, [3, 4]>` and
-// `Tensor<i32, [rows: 3, cols: 4]>` are interchangeable: two tensor types agree when
-// their element types agree, their ranks agree, and each pair of extents agrees, with
-// names compared only at a position where BOTH sides name the axis. What is rejected
-// is `[rows: 3, cols: 4]` against `[cols: 3, rows: 4]` — the same extents, the wrong
-// way round.
-//
-// Names live in the tensor type's own namespace, not in the surrounding scope: the
-// `rows` below is an axis name, and a local variable called `rows` would neither
-// shadow it nor collide with it. The extent is still the only thing a generic can
-// bind, so `[batch: N]` names the axis `batch` and leaves `N` as the shape parameter.
+// Named tensor dimensions: `Tensor<f32, [batch: 32, embed: 768]>`. An axis may carry a name
+// before its extent. The name is part of the type and is checked wherever both sides supply
+// one, so a signature documents its axes and a transposed argument is a compile error. A
+// name does not change the type: `Tensor<i32, [3, 4]>` and `Tensor<i32, [rows: 3, cols:
+// 4]>` are interchangeable. What is rejected is the same extents in the wrong order, such
+// as `[rows: 3, cols: 4]` against `[cols: 3, rows: 4]`. Names live in the tensor's own
+// namespace, so a local called `rows` neither shadows nor collides with the axis.
 
 // The shape is the signature's documentation: every reader knows which axis is which.
+
 func total_pixels(image: &Tensor<i32, [channels: 3, height: 2, width: 4]>) -> i32 {
     mut total = 0
     for c in 0..3 {

@@ -1,16 +1,9 @@
-// The `>>` operator: build a new function out of two.
-//
-// `f >> g` is the function `|x| g(f(x))`, applied left to right. Where `|>` pushes a
-// value through a chain, `>>` names the chain itself, so a pipeline written once can
-// be applied in several places.
-//
-// An operand is any function value: a function name, an associated function, a
-// generic function's instance `f::<T>`, a bound method or a closure literal. The
-// composition is a closure, and `>>` binds tighter than `|>` (Appendix B), so
-// `x |> f >> g` applies the composed function to `x`.
-//
-// `>>` is not right shift in this language. Shifting is the `.shr(n)` method, which
-// leaves the token free for the operator an AI-first language uses far more often.
+// The `>>` operator: build a new function out of two. `f >> g` is the closure `|x|
+// g(f(x))`. `|>` pushes a value through a chain; `>>` names the chain itself, so one
+// pipeline can be applied in several places. An operand is any function value: a function
+// name, an associated function, an instance `f::<T>`, a bound method or a closure literal.
+// `>>` binds tighter than `|>`, so `x |> f >> g` applies the composed function to `x`. `>>`
+// is not right shift in this language. Shifting is the `.shr(n)` method.
 
 func normalize(reading: i32) -> i32 {
     reading - 100

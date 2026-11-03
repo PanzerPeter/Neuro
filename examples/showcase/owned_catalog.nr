@@ -1,25 +1,11 @@
-// Showcase: a catalog whose collections own the text they hold.
-//
-// The sub-phase closer for the value model. Everything 2E built is in one program:
-//   move semantics and the by-value ABI · a consuming `self` receiver ·
-//   non-`Copy` values inside aggregates · drop for a reassigned binding ·
-//   drop for a value held in a struct field · release of an anonymous heap
-//   string · place expressions (`self.bytes += n`, `names[i] = ...`) ·
-//   the owned string a holder stores · and the collection slots below.
-//
-// The rule this program leans on: a collection owns what its slots hold. `push`
-// and `insert` move their argument into a slot, so the binding it came from is
-// gone afterwards; `v[i]` and `m.get(k)` read the slot in place, as a borrow;
-// `pop` hands the slot's own value over, because the slot goes with it. To keep
-// a value and also store it, `.clone()` it first.
-//
-// That is what makes `first_name` below sound. It returns a copy of an element
-// of a `Vec` its own caller still owns, so the returned value is independent of
-// the collection and stays valid whatever happens to it.
-//
-// The counts are what the program asserts, and they only come out right if each
-// buffer was intact when it was read. The loop keeps the heap flat only if each
-// one was also released exactly once.
+// Showcase: a catalog whose collections own the text they hold. Integration example: move
+// semantics, a consuming `self` receiver, drop of a reassigned binding and of a struct
+// field, place expressions such as `self.bytes += n` and `names[i] = ...`, and `Vec`,
+// `HashMap` and `BTreeMap` slots. `push` and `insert` move their argument into a slot,
+// `v[i]` and `m.get(k)` read in place as borrows, and `pop` hands the value over. To keep a
+// value and also store it, `.clone()` it first. `first_name` returns a copy, so its result
+// is independent of the collection. The counts only come out right if each buffer was
+// intact when read and released exactly once.
 
 const ROUNDS: i32 = 200
 

@@ -1,24 +1,14 @@
-// Tensor sorting and selection: `.sort()`, `.argsort()`, `.topk()`
-//
-// All three order one axis of a tensor and differ only in what they hand back: the
-// elements in that order, the receiver positions that produce that order, or the leading
-// `k` of both. With no `axis:` they work along the last axis, which is the row of a
-// matrix; `axis:` may be a position, a dimension NAME the receiver's type declares, or a
-// negative index counting from the end.
-//
-// They are NATIVE to the element dtype, so `f32` and `f64` sort without wrapping every
-// element in an ordered-float type first. The comparator is IEEE-754-ordered with one
-// rule: `NaN` sorts to the END, whether the order is ascending or descending. Real
-// workloads treat `NaN` as "invalid", so pushing it to the back leaves the best
-// candidates at the front where top-k expects them.
-//
-// Equal elements keep the order they were written in, which is the only thing that makes
-// an argsort of a tensor with ties mean anything.
-//
-// Like a reduction, a selection READS its receiver: it allocates its own result and
-// leaves the buffer it ordered alone, so it works through a borrow.
+// Tensor sorting and selection: `.sort()`, `.argsort()` and `.topk()`. All three order one
+// axis. They return the sorted elements, the positions that produce that order, or the
+// leading `k` of both. With no `axis:` they work along the last axis. `axis:` takes a
+// position, a dimension name, or a negative index. They are native to the element type, so
+// `f32` and `f64` sort without a wrapper. `NaN` sorts to the end in either direction, so
+// top-k sees the best candidates first. Equal elements keep their written order, so an
+// argsort with ties is well defined. A selection reads its receiver and works through a
+// borrow.
 
 // A borrowed receiver: `scores` stays with the caller.
+
 func best(scores: &Tensor<i32, [5]>) -> i32 {
     val ranked: Tensor<i32, [5]> = scores.sort(descending: true)
     ranked[0]

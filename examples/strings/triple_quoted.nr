@@ -1,14 +1,7 @@
-// Triple-quoted (block) strings: multi-line text with the closing delimiter's
-// indentation stripped from every content line.
-//
-// The `"""` block spans lines verbatim. Whatever indentation the closing `"""`
-// sits at is removed from each content line, so a block can be indented to match
-// the code around it without that indentation leaking into the value. Escapes and
-// `{...}` interpolation holes behave exactly as they do in a `"..."` literal.
-//
-// Every block below is checked against the exact text it should produce and then
-// printed between markers, so the dedenting is visible column by column in the
-// output. `main` returns the number of checks that passed.
+// Triple-quoted (block) strings: multi-line text with the closing delimiter's indentation
+// stripped from each content line. Escapes and `{...}` holes work as in a `"..."` literal.
+// Every block below is checked against its expected text and printed between markers, so
+// the dedent shows column by column.
 
 func check(actual: string, expected: string) -> i32 {
     if actual == expected {

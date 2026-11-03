@@ -1,8 +1,6 @@
-// Neuro Example: Control flow
-// Demonstrates: if/else, while loops, break/continue, boolean logic, comparisons
-//
-// Each helper's answer is printed, so which loop form produced which number is
-// readable without tracing the arithmetic.
+// Neuro Example: Control flow Demonstrates if/else, while, break/continue, boolean logic,
+// and comparisons. Each helper's answer is printed, so the output shows which loop form
+// produced which number.
 
 func is_positive(n: i32) -> i32 {
     if n > 0 {

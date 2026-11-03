@@ -1,9 +1,7 @@
-// Derivable traits, by derive and by hand
-//
-// `Copy`, `Clone`, `Debug`, `PartialEq` and `Hashable` are ordinary traits. `@derive`
-// writes the impl field by field, or a struct writes it itself. Either way the type
-// meets a bound that names the trait. The scalars and `string` meet these bounds too,
-// so one generic body runs over all of them.
+// Derivable traits, by `@derive` and by hand: `Copy`, `Clone`, `Debug`, `PartialEq` and
+// `Hashable`. Each is an ordinary trait. `@derive` writes the impl field by field, or a
+// struct can write it itself. Either way the type meets a bound naming the trait, and
+// scalars and `string` meet these bounds too.
 
 @derive(Copy, Clone, Debug, PartialEq, Hashable)
 struct Tile {

@@ -1,18 +1,9 @@
-// Showcase: the derived `Debug` and `PartialEq` working alongside earlier features.
-//
-// Cumulative integration example combining:
-//   `@derive(Debug, PartialEq)`: struct rendering and field-wise equality
-//   · `@derive(Copy, Clone)` structs · impl methods (`&self`)
-//   · a fixed-size array + a counted `for i in 0..n` loop with indexing
-//   · enums with `match` · nested struct fields · labeled `break`
-//   · string interpolation with the format mini-language (`:?`, `:>W`, `:<W`)
-//   · `println`
-//
-// The point of the combination: a derived `==` is *structural*, so two samples built
-// independently from the same numbers compare equal, and the comparison recurses into
-// the nested `Origin` without either struct naming a method. The derived `{s:?}` is
-// what makes the duplicate visible in the output rather than merely counted, and it
-// renders a `char` field in its debug form, quotes and all.
+// Showcase: derived `Debug` and `PartialEq` alongside earlier features. Integration
+// example: `@derive(Debug, PartialEq)` on nested structs, `@derive(Copy, Clone)`, `match`
+// on enums, a counted `for` loop, a labeled `break`, and the `:?`, `:>W` and `:<W` specs.
+// Derived `==` is structural and recurses into the nested struct, so two samples built from
+// the same numbers compare equal. The derived `{s:?}` shows the duplicate in the output,
+// quotes and all.
 
 @derive(Copy, Clone, Debug, PartialEq)
 struct Origin {

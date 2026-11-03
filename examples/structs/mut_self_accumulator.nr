@@ -1,12 +1,7 @@
-// Mutable methods: `&mut self` advances struct state in place.
-//
-// Demonstrates the ownership-gated receiver:
-//   `&mut self` methods write to `self.field` and the change is observed by a
-//   later `&self` query. The accumulator is driven entirely through method
-//   calls on a `mut` binding: no direct field assignment in `main`.
-//
-// The running total is printed after each `add`, so the in-place mutation is
-// visible step by step.
+// Mutable methods: `&mut self` advances struct state in place. The accumulator is driven
+// entirely through method calls on a `mut` binding, with no direct field assignment in
+// `main`. A later `&self` query observes each change, and the running total is printed
+// after each `add`.
 
 struct Accumulator {
     total: i32

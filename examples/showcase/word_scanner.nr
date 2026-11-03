@@ -1,21 +1,10 @@
-// Showcase: the codepoint iterators driving a small tokenizer.
-//
-// Cumulative integration example combining:
-//   `.char_indices()` byte offsets and `.chars()` codepoint walks
-//   · zero-copy `.slice(range)` views cut at those offsets
-//   · the growable `StringBuilder` buffer and `.to_string()`
-//   · a heap-backed `Vec<string>` that frees at scope exit
-//   · a struct with `&self` methods and an associated function
-//   · `.enumerate()` over a `Vec` head and a `.filter(p)` adapter over the scalars
-//   · string interpolation with the format mini-language
-//
-// The point of the combination: a scanner needs both units at once. It decides where a
-// token ends by reading *characters* (a space is a character, and so is 'é') but it
-// cuts the token out by *bytes*, because that is what a zero-copy view takes. Getting
-// one of the two wrong is invisible on ASCII and corrupts every accented word, which is
-// why the text below is deliberately not ASCII.
-//
-// Expected exit code: 27
+// Showcase: the codepoint iterators driving a small tokenizer. Integration example:
+// `.char_indices()` byte offsets, `.chars()`, zero-copy `.slice(range)` views, a
+// `StringBuilder` and `.to_string()`, a `Vec<string>`, a struct with `&self` methods,
+// `.enumerate()` over a `Vec`, a `.filter(p)` adapter, and format specs. A scanner decides
+// where a token ends by reading characters, but it cuts the token out by bytes because a
+// view takes bytes. The two units differ only on non-ASCII text, so the input is
+// deliberately not ASCII.
 
 struct Token {
     text: string,

@@ -1,9 +1,6 @@
-// A sweep over the core language: arithmetic, comparison, logic, if/else,
-// nested if, function calls, the numeric types, and mutation.
-//
-// Every check prints what it produced and the run ends with a verdict line, so
-// a failure is readable in the output rather than only in the exit code. Exit 0
-// means every check held.
+// A sweep over the core language: arithmetic, comparison, logic, if/else, nested if,
+// function calls, numeric types, and mutation. Each check prints its result and a verdict
+// line ends the run. Exit 0 means every check held.
 
 func test_arithmetic() -> i32 {
     val a: i32 = 10

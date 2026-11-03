@@ -1,26 +1,14 @@
-// By-value tensor operators: `a + b`, `&a + &b`, and the scalar broadcast.
-//
-// A by-value operator ALLOCATES. It reads both operands and writes a fresh tensor, which
-// is what makes it different from the in-place `+=` family: `w -= g` overwrites the
-// buffer `w` already owns, while `w = w - g` builds a second one. That difference is the
-// reason compound assignment has its own dispatch, and the reason a by-value operator can
-// read two borrows: it never needs to write into either.
-//
-// An OWNED operand is moved, exactly as passing a tensor to a function moves it. A
-// BORROWED one (`&a`) is only read, so a weight can feed an operator without leaving the
-// binding that owns it.
-//
-// SHAPES BROADCAST. The two shapes are aligned at their TRAILING axis. An axis whose
-// extent is 1 is stretched across the other operand's, and an operand of lower rank
-// supplies the innermost axes and repeats across the leading ones. So a `[2, 3]` combines
-// with a `[3]` row, with a `[2, 1]` column, and with a plain scalar; it does not combine
-// with a `[2]`, because 2 lines up against the 3 at the trailing axis and neither is 1.
-//
-// A SCALAR broadcasts from either side, and takes the tensor's element type: the `2.0`
-// below is an `f32` literal because the tensor is an `f32` one, the same way
-// `val x: f32 = 0.01` types its literal.
+// By-value tensor operators: `a + b`, `&a + &b` and scalar broadcasting. A by-value
+// operator allocates a fresh tensor from two operands. The in-place `+=` family writes into
+// the buffer the target owns instead (`w -= g`), while `w = w - g` builds a second one. An
+// owned operand is moved; a borrowed one (`&a`) is only read. Shapes broadcast from the
+// trailing axis. An axis of extent 1 stretches across the other operand, and a lower-rank
+// operand supplies the innermost axes. So `[2, 3]` combines with `[3]`, with `[2, 1]` and
+// with a scalar, but not with `[2]`. A scalar takes the tensor's element type, so `2.0` is
+// an `f32` literal in an `f32` tensor.
 
 // A borrowed pair: neither operand is consumed, so the caller keeps both.
+
 func combine(a: &Tensor<i32, [2, 3]>, b: &Tensor<i32, [2, 3]>) -> Tensor<i32, [2, 3]> {
     return a * b
 }

@@ -1,10 +1,7 @@
-// Neuro Programming Language - String concatenation
-// Demonstrates the `+` operator joining two strings into a new owned string.
-//
-// `string + string` allocates a fresh heap buffer and copies both operands'
-// bytes in, yielding a new immutable `string`. Operands are read, not consumed
-// (like `==`), so they remain usable afterward. A `&string` slice may stand in
-// for either side. The result's `.len()` is the sum of the operand lengths.
+// `+` joins two strings into a new owned `string`. `string + string` allocates a fresh heap
+// buffer and copies both operands in. Operands are read, not consumed, so they remain
+// usable. A `&string` may stand in for either side, and the result's `.len()` is the sum of
+// the operand lengths.
 
 func main() -> i32 {
     val hello: string = "Hello, "

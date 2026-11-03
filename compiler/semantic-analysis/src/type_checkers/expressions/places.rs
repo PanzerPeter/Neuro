@@ -42,7 +42,7 @@ impl TypeChecker {
     ///
     /// Only borrows held by a live reference binding freeze the name. A transient
     /// `&mut` handed to a call ends when that call returns, so a later operand of the
-    /// same statement — `combine(bump(&mut y), y)` — reads a place nothing is
+    /// same statement (`combine(bump(&mut y), y)`) reads a place nothing is
     /// borrowing any more, and the statement-wide transient count cannot tell that
     /// from a borrow still in flight.
     ///

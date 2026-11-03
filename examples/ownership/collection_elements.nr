@@ -1,14 +1,10 @@
-// Collections of owned values: a `Vec`, `HashMap` or `BTreeMap` element may be any sized
-// value, and the collection owns what its slots hold.
-//
-//   - Insertion moves: `v.push(x)` and `m.insert(k, x)` take their arguments.
-//   - Indexing names a place: `v[i] = x` writes the slot, `v[i].field` and
-//     `v[i].method()` work on it in place, and `&v[i]` borrows it. Using a
-//     non-`Copy` `v[i]` by value is a compile error, since the slot cannot be left
-//     empty; `&v[i]`, `v[i].clone()` and `v.remove(i)` are the ways out.
-//   - Lookup borrows: `get` lends `Option<&T>` and `get_mut` lends `Option<&mut T>`,
-//     while `pop`, `remove` and a displacing `insert` hand the value over.
-//   - A slot that is overwritten, removed or cleared drops what it held.
+// Collections of owned values: a `Vec`, `HashMap` or `BTreeMap` owns what its slots hold.
+// `push` and `insert` move their arguments in. Indexing names a place: `v[i] = x` writes
+// the slot, and `v[i].field`, `v[i].method()` and `&v[i]` act on it in place. Using a
+// non-`Copy` `v[i]` by value is a compile error; use `&v[i]`, `v[i].clone()` or
+// `v.remove(i)`. `get` lends `Option<&T>` and `get_mut` lends `Option<&mut T>`. `pop`,
+// `remove` and a displacing `insert` hand the value over. An overwritten, removed or
+// cleared slot drops what it held.
 
 struct Task {
     title: string,

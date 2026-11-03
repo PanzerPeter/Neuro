@@ -804,7 +804,7 @@ func main() -> i32 {
 }
 
 /// A slice's extents are part of the result's type, so a bound that is only known at
-/// run time has no type to produce — unlike a position, which may be any integer.
+/// run time has no type to produce, unlike a position, which may be any integer.
 #[test]
 fn a_runtime_slice_bound_is_rejected_while_a_runtime_position_is_not() {
     let errors = semantic_errors(
@@ -1642,7 +1642,7 @@ func main() -> i32 {
     );
 }
 
-// `@` — matrix multiplication.
+// `@`: matrix multiplication.
 
 #[test]
 fn a_matrix_product_contracts_the_inner_axis() {

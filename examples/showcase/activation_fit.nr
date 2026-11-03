@@ -1,20 +1,12 @@
 // Showcase: one neuron trained under two activation functions passed in as values.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's `@grad` through function values: the activation is a parameter of the
-//   loss, applied with `.map`, and the squared errors are summed with `.reduce` · 2F's
-//   `>>` composition and 1F's closures, the two activations · 2C's `@` contraction ·
-//   2B's in-place compound assignment, the update · a struct and a `Vec` collecting the
-//   results · string interpolation with the format mini-language.
-//
-// The derivative is built at compile time, so it needs to know which function the
-// activation is. Each `.backward()` call below passes one it can name, a closure literal
-// or a composition, and gets a derivative made for exactly that function: the loss is
-// written once and differentiated twice. A function value picked at run time, say from
-// an `if`, is refused, because no derivative was built for it.
+// Integration example: the activation is a parameter of a `@grad` loss, applied with `.map`
+// and summed with `.reduce`. `>>` composition and closures supply the two activations, `@`
+// the forward pass, and `+=` the update. The derivative is built at compile time for each
+// function value named at the call (a closure literal or a composition). A function chosen
+// at run time is refused, since no derivative was built for it.
 
 // Four samples of two features. The targets are exactly `x @ [1, 2]`.
+
 @grad
 func activated_error(w: &mut Tensor<f32, [2, 1]>, activate: (f32) -> f32) -> Tensor<f32, []> {
     val x: Tensor<f32, [4, 2]> = [[1.0, 2.0], [2.0, 0.0], [0.0, 1.0], [3.0, 1.0]]

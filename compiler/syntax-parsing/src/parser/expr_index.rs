@@ -3,7 +3,7 @@
 //! Two forms share the bracket. One plain expression is the index an array, `Vec`, or
 //! `HashMap` takes, and stays [`Expr::Index`] so nothing about those types changes. A
 //! comma-separated list, a range, or a bare `..` is the tensor index a tensor takes, and
-//! no other indexable type accepts any of them — which is what lets the two be told
+//! no other indexable type accepts any of them, which is what lets the two be told
 //! apart here, before any type is known.
 
 use lexical_analysis::TokenKind;

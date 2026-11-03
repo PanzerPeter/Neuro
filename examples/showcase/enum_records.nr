@@ -1,14 +1,8 @@
-// Showcase: pattern matching working alongside enums, structs, methods, arrays,
-// and loops.
-//
-// Integration example combining several Phase-1E features:
-//   pattern matching (enum deconstruction + payload binding, value/or/range
-//   patterns, guards, wildcard) · enums with associated data (all three
-//   variant forms) · structs with an enum field · impl methods (&self) ·
-//   fixed-size arrays + for-in iteration · compound assignment.
-//
-// Enums are constructed and then deconstructed with `match`; the numeric result is
-// composed from the struct, array, and matched enum data.
+// Showcase: pattern matching with enums, structs, methods, arrays and loops. Integration
+// example: `match` on enum variants with payload binding, value, `|` and range patterns,
+// guards and wildcards, enums with all three variant forms, a struct holding an enum, and
+// compound assignment. Enums are built and then deconstructed with `match`, and the numeric
+// result combines the struct, the array and the matched data.
 
 enum Status { Active, Idle, Done }
 

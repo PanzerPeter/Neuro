@@ -1,17 +1,9 @@
-// Borrow exclusivity: the flow-sensitive aliasing rules.
-//
-// The borrow checker enforces two coexistence rules at compile time:
-//   * any number of shared `&T` borrows of a place may be live at once;
-//   * a `&mut T` borrow is exclusive: while it is live, no other borrow
-//     (shared or mutable) of the same place may exist.
-//
-// A third rule governs the borrowed place itself: while a `&mut` of it is live,
-// the place may not be read, written, or moved through its own name — every
-// access goes through the borrow.
-//
-// A borrow held by a binding lives until that binding leaves scope; a borrow
-// passed to a function ends with the call. This program uses only borrow
-// patterns the checker accepts, then returns a value derived from them.
+// Borrow exclusivity: the flow-sensitive aliasing rules. Any number of shared `&T` borrows
+// of a place may be live at once. A `&mut T` borrow is exclusive: while it is live, no
+// other borrow of the same place may exist. While a `&mut` of a place is live, the place
+// may not be read, written or moved through its own name, so every access goes through the
+// borrow. A borrow held by a binding lasts until that binding leaves scope, and a borrow
+// passed to a function ends with the call.
 
 func inc(n: &mut i32) {
     *n = *n + 1

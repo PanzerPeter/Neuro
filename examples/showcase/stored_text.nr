@@ -1,25 +1,11 @@
-// Showcase: text that is built, STORED, and released by whoever stored it.
-//
-// Integration example combining the release of an owned string a holder stores
-// with the features that put it there:
-//   struct + `impl` methods · `[T; N]` arrays + `for x in &a` · tuples ·
-//   place expressions (`self.total += n`, `entry.label = ...`) · `StringBuilder`
-//   builder + `push_str` · string interpolation · `&string` parameters.
-//
-// The sibling program `transient_text.nr` covers the other half: a buffer no
-// position ever stores, released at the consumer that reads it. Here every
-// buffer reaches a position that outlives the expression that built it, so the
-// holder is what releases it:
-//   * a struct field and an array or tuple element, when the store into it
-//     provably allocated — and NOT when it points at a `.rodata` literal;
-//   * a function's return value, released by the caller that took it;
-//   * an argument handed to a parameter the callee only reads, released at the
-//     call it was built for.
-//
-// The counts are what the program asserts. They only come out right if every
-// buffer was intact when it was read, which a release emitted one step early
-// would break, and the loop keeps the heap flat only if each one was released
-// exactly once.
+// Showcase: text that is built, stored, and released by whoever stored it. Integration
+// example: a struct with `impl` methods, `[T; N]` arrays iterated with `for x in &a`,
+// tuples, place expressions (`self.total += n`, `entry.label = ...`), `StringBuilder`,
+// interpolation, and `&string` parameters. Every buffer here reaches a position that
+// outlives the expression that built it, so its holder releases it: a struct field, an
+// array or tuple element (not when it points at a literal), a function's return value
+// (released by the caller), or an argument the callee only reads (released at the call).
+// `transient_text.nr` covers buffers no position ever stores.
 
 const ROUNDS: i32 = 300
 

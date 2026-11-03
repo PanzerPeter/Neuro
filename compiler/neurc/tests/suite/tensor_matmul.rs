@@ -2,7 +2,7 @@
 // `neurc compile` and the linked binary.
 //
 // `@` is the one tensor operator that is not element-wise. It contracts the operands'
-// inner axis — `[M, K] @ [K, N]` gives `[M, N]` — so unlike `+` it neither broadcasts
+// inner axis (`[M, K] @ [K, N]` gives `[M, N]`) so unlike `+` it neither broadcasts
 // nor accepts a scalar. It shares `*`'s precedence row (Appendix B row 4), so a mix of
 // the two groups left to right: `a @ b * c` scales the product, `a * b @ c` the operand.
 
@@ -77,7 +77,7 @@ func main() -> i32 {
     assert_eq!(exit, 9);
 }
 
-/// A borrowed operand is read rather than consumed, so one weight feeds two products —
+/// A borrowed operand is read rather than consumed, so one weight feeds two products:
 /// the reason every tensor operator is defined on `&T` as well.
 #[test]
 fn a_borrowed_operand_survives_the_product() {

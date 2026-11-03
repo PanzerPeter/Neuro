@@ -1,16 +1,9 @@
-// Showcase: fine-tuning a model's head while its feature layer stays frozen.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's `@grad(wrt: [...])`, whose list names the head's two tensors through the
-//   receiver's exported fields, so `.backward()` fills only their gradient slots and the
-//   feature layer is a constant of the derivative · the `@` contraction and broadcast
-//   arithmetic the loss is made of · 2D's `pool` arena around each step · structs nested
-//   in structs, `&mut self` methods, and a `Vec` of `Copy` records · string interpolation
-//   with the format mini-language.
-//
-// The features are "pretrained": they are fixed, and only the head learns to read them.
-// Three fine-tuning budgets are compared, each on a fresh copy of the same model.
+// Showcase: fine-tuning a model's head while its feature layer stays frozen. Integration
+// example: `@grad(wrt: [...])` naming the head's tensors through exported fields, so
+// `.backward()` fills only their gradients. Also `@`, broadcast arithmetic, a `pool` around
+// each step, nested structs, `&mut self` methods and a `Vec` of `Copy` records. The
+// features are fixed "pretrained" values. Three fine-tuning budgets are compared, each on a
+// fresh copy of the model.
 
 struct Dense {
     export w: Tensor<f32, [2, 1]>,

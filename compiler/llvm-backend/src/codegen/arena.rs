@@ -15,7 +15,7 @@
 //
 // What the arena does NOT capture is as important as what it does. An allocation made by
 // a callee belongs to whoever the callee gives it to, which this phase cannot prove, so
-// it stays an ordinary heap allocation — slower, and never unsafe. Nor does the arena
+// it stays an ordinary heap allocation, slower and never unsafe. Nor does the arena
 // capture a store whose place outlives the block: the language routes that allocation to the
 // heap, because the value is still reachable after the mark goes back. `route_store_off_arena`
 // is where the block's own bindings are told apart from the ones it inherited.

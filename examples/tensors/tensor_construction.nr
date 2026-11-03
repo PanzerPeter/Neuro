@@ -1,16 +1,12 @@
-// Tensor values: literal coercion and the construction helpers
-//
-// `Tensor<T, [d0, d1, ...]>` carries its element type and every extent in the type,
-// so two tensors of different shapes are different types. A nested array literal
-// becomes a tensor only where a `Tensor<...>` annotation says so; with no annotation
-// it stays a plain array. Without an annotation, name the type with a turbofish.
-//
-// A tensor owns its buffer and is not `Copy`, so binding it or passing it MOVES it.
-// These programs build tensors and pass them around; reading elements back out is
-// slicing and indexing, which `tensors/tensor_indexing.nr` covers.
+// Tensor values: literal coercion and the construction helpers. `Tensor<T, [d0, d1, ...]>`
+// carries its element type and every extent in the type, so tensors of different shapes are
+// different types. A nested array literal becomes a tensor only under a `Tensor<...>`
+// annotation or a turbofish. A tensor owns its buffer and is not `Copy`, so binding or
+// passing it moves it. Element reads are covered in `tensors/tensor_indexing.nr`.
 
 // A tensor parameter names its full shape; a caller with a different shape is a
 // compile error, not a runtime one.
+
 func accept_batch(batch: Tensor<f32, [2, 3]>) -> i32 {
     return 6
 }

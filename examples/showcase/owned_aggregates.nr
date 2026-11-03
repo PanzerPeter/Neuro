@@ -1,20 +1,12 @@
-// Showcase: non-`Copy` values held inside aggregates, and the ownership that follows
-// them there.
-//
-// Cumulative integration example combining:
-//   arrays, tuples, enum payloads and newtypes holding an owned `string`
-//   · a generic struct instantiated over a non-`Copy` type argument
-//   · pattern matching over enum payloads that are not scalars
-//   · destructuring a struct, a tuple, and an array element by element
-//   · a consuming `self` method handing back two owned fields at once
-//   · `Vec<string>` and the `Option<string>` its `.pop()` returns
-//   · string interpolation and `println`
-//
-// The rule the whole program leans on: an aggregate holding an owner IS an owner. It
-// moves rather than copies, it gives up one element at a time, and once any element has
-// left it can no longer be read as a whole.
+// Showcase: non-`Copy` values held inside aggregates, and the ownership that follows them.
+// Integration example: arrays, tuples, enum payloads and newtypes holding an owned
+// `string`, a generic struct over a non-`Copy` type, destructuring, a consuming `self`
+// method, and `Vec<string>` with `.pop()`. An aggregate holding an owner is an owner. It
+// moves rather than copies, gives up one element at a time, and cannot be read whole once
+// an element has left it.
 
 // A newtype over `string` forwards the inner type's ownership along with its name.
+
 newtype Label = string
 
 // A generic struct holds whatever it is instantiated over, `Copy` or not.

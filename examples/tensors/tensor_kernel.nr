@@ -1,31 +1,18 @@
-// Writing a GPU kernel by hand: the `@kernel` attribute.
-//
-// Where `@gpu` takes whole-tensor arithmetic and turns each operation into a kernel for
-// you, `@kernel(threads: [...])` runs the body you write once per GPU thread. The
-// compiler launches one thread per element of the first `KernelOut` parameter, in
-// blocks shaped `threads`. Inside the body, `thread_id` is the thread's position in that
-// grid and `block_id` its block's, each read one axis at a time: `.x`, `.y`, `.z`.
-//
-// The grid rounds up to whole blocks, so a 37 x 45 output in 16 x 16 blocks gets a 3 x 3
-// grid of 48 x 48 threads, and the threads past the edge have no element. That is why
-// the body checks `row < 37 && col < 45` before it writes. Every index is also checked
-// at run time: a thread that reads or writes past an extent stops the program with a
-// `panic:`, as an out-of-range index does on the CPU.
-//
-// WHAT A KERNEL TAKES: tensors it reads as `Tensor`, tensors it writes as
-// `KernelOut<Tensor>`, and numbers or `bool`s by value. It returns nothing; what it
-// computes is what it writes. The call borrows every tensor: pass an input as `a` (you
-// still own it afterwards) and an output as `&mut r`. Inside the body an output is only
-// ever indexed, and the index, read or write, goes in an `unsafe { }` block:
-// `unsafe { out[i] = v }`. The compiler cannot prove that no other thread writes that
-// element, so `unsafe` marks where you vouch for it. The handle cannot be stored, passed on or returned.
-// The body may use locals, arithmetic, casts, `if`, `while`, `loop`, `for` over a range,
-// `break`, `continue` and `return`, and tensor elements. It cannot call functions yet.
-//
-// A KERNEL REQUIRES A GPU. With no usable NVIDIA GPU the program stops at startup, before
-// `main` runs. Compiling one needs a Linux `neurc`.
+// Writing a GPU kernel by hand: the `@kernel` attribute. `@kernel(threads: [...])` runs the
+// body once per GPU thread, one thread per element of the first `KernelOut` parameter, in
+// blocks shaped `threads`. `thread_id` and `block_id` give a thread's position, read one
+// axis at a time with `.x`, `.y` and `.z`. The grid rounds up to whole blocks, so threads
+// past the edge have no element and the body checks its bounds before it writes. Every
+// index is checked at run time: an out-of-range access stops the program with a `panic:`.
+// Tensors are passed as `Tensor` (read) or `KernelOut<Tensor>` (written), and numbers or
+// `bool`s by value. The call borrows every tensor, so pass an input as `a` and an output as
+// `&mut r`. An output is only ever indexed, inside `unsafe { }`, because the compiler
+// cannot prove that no other thread writes that element. The body may use locals,
+// arithmetic, casts, control flow and tensor elements, but not function calls. A kernel
+// needs a GPU and a Linux `neurc`.
 
 // One thread per output element: add, then clamp at zero.
+
 @kernel(threads: [16, 16])
 func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut<Tensor<f32, [37, 45]>>) {
     val row = thread_id.x

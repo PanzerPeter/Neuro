@@ -3,7 +3,7 @@
 //
 // A `?` axis has no compile-time extent, so it is an ACCEPTING position: one function
 // takes every batch size, while the axes beside it stay checked exactly as before. The
-// value assertions prove the run-time half of that — a widened tensor is still the same
+// value assertions prove the run-time half of that: a widened tensor is still the same
 // DLPack handle addressing the same buffer, so it moves, is stored, and is released with
 // no extent involved.
 

@@ -1,18 +1,9 @@
-// Showcase: a value held inside another value is destroyed with its holder.
-//
-// Cumulative integration example combining:
-//   deterministic `Drop` destructors announcing themselves as they run
-//   · a struct field, an array element, a tuple element, an enum payload and a
-//     newtype's inner value, each holding an owner
-//   · a `Vec<i32>` field, whose heap buffer goes back with the struct that owns it
-//   · pattern matching over an enum whose payload is not a scalar
-//   · a `for` loop over an array of holders, a named constant, and `println`
-//     interpolation
-//
-// The rule the program leans on: a holder owns what it holds. When the holder's owner
-// goes, so does every value inside it, in declaration order, and exactly once. A value
-// given up first — moved into another binding, or displaced by an assignment — is
-// destroyed on its own path instead, never twice.
+// Showcase: a value held inside another value is destroyed with its holder. Integration
+// example: `Drop` announcing each destruction, with a struct field, an array element, a
+// tuple element, an enum payload and a newtype's inner value as holders, plus a `Vec<i32>`
+// field and a `match` over a non-scalar payload. A holder owns what it holds. When the
+// holder goes, its contents go too, in declaration order and exactly once. A value given up
+// first, by a move or an assignment, is destroyed on its own path instead.
 
 struct Handle {
     id: i32,

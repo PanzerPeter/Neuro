@@ -1,21 +1,14 @@
-// Moving tensors to a GPU: `.to(Device::GPU(0))` and `.to(Device::CPU)`.
-//
-// `.to(device)` consumes a tensor and returns it with its buffer on the device named.
-// A `@gpu` function reads a tensor that already lives on the GPU in place, and a call
-// given one leaves its result on the GPU as well. A loop of `@gpu` calls over device
-// tensors therefore keeps its data on the GPU the whole way, and only `.to(Device::CPU)`
-// brings the answer back.
-//
-// Outside `@gpu`, a float or integer tensor operation runs on the device its tensors live on
-// too: operators and `@`, compound assignment, reductions, sorts, slices, `.t()`, `einsum`,
-// the elementwise math methods, and `.map` / `.zip` / `.reduce` over a closure, as well as
-// reading or writing one element and `.clone()`. Integer operations keep the host's checks
-// there. An operation with no device form (any operation on a `bf16` tensor, say) aborts with a
-// diagnostic asking for `.to(Device::CPU)` first.
-//
-// On a machine with several GPUs, `Device::GPU(1)` and up name the others, and a `@gpu`
-// call runs on the GPU its tensors are on. Like every program with a bare `@gpu`
-// function, this one stops at startup when there is no usable NVIDIA GPU.
+// Moving tensors to a GPU: `.to(Device::GPU(0))` and `.to(Device::CPU)`. `.to(device)`
+// consumes a tensor and returns it with its buffer on that device. A `@gpu` call given a
+// device tensor reads it in place and leaves its result on the GPU, so a loop of `@gpu`
+// calls keeps the data resident until `.to(Device::CPU)`. Outside `@gpu`, float and integer
+// operations run on the device their tensors live on: operators, `@`, compound assignment,
+// reductions, sorts, slices, `.t()`, `einsum`, the elementwise math methods, `.map`, `.zip`
+// and `.reduce`, element reads and writes, and `.clone()`. Integer operations keep the
+// host's checks. An operation with no device form (on a `bf16` tensor, say) aborts and asks
+// for `.to(Device::CPU)` first. `Device::GPU(1)` and up name the other GPUs on a multi-GPU
+// machine. Like any bare `@gpu` program, this one stops at startup without a usable NVIDIA
+// GPU.
 
 @gpu
 func step(state: &Tensor<f32, [8, 8]>, delta: &Tensor<f32, [8, 8]>, rate: f32) -> Tensor<f32, [8, 8]> {

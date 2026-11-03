@@ -1,12 +1,10 @@
-// Panic-family builtins: panic / assert / unreachable.
-//
-// All guards in this program hold, so it runs to completion, prints what each
-// guard saw, and exits with code 7. Flip any condition (e.g. divide by zero, or
-// `assert(false)`) and the matching builtin prints a diagnostic
-// ("<message> at <file>:<line>:<col>") to *stderr* and aborts the process: the
-// stack is NOT unwound, and nothing further reaches stdout.
+// Panic-family builtins: `panic`, `assert` and `unreachable`. Every guard here holds, so
+// the program runs to completion and prints what each guard saw. A failing guard writes
+// "<message> at <file>:<line>:<col>" to stderr and aborts without unwinding, so nothing
+// further reaches stdout.
 
 // `panic` in a guard: returns i32 normally, but diverges on the error path.
+
 func checked_div(a: i32, b: i32) -> i32 {
     if b == 0 {
         panic("division by zero")

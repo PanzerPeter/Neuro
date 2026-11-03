@@ -1,8 +1,6 @@
-// Neuro Example: assignment to mutable variables
-// Demonstrates: `mut` bindings, reassignment, read-modify-write
-//
-// Each step prints the value the counter now holds; the final value is also
-// returned as the exit code.
+// Neuro Example: assignment to mutable variables Demonstrates `mut` bindings and
+// reassignment. Each step prints the value the counter now holds. The final value is also
+// the exit code.
 
 func test_assignment() -> i32 {
     mut counter: i32 = 0

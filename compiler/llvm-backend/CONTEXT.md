@@ -8,7 +8,8 @@ Emit native object code, or the textual LLVM module behind it, from the typed Ne
 - Input: `program: &neuro_hir::HirProgram, optimization: OptimizationLevelSetting, source: &str,
   source_path: &str, external: &[ExternalBodies], gpu: GpuVendor`
 - Output: `Result<Vec<u8>, CodegenError>` from `compile`, or `Result<String, CodegenError>`
-  from `compile_to_ir`, which prints the module instead of selecting instructions
+  from `compile_to_ir`, which prints the module instead of selecting instructions. `CodegenResult<T>`
+  is the exported alias for `Result<T, CodegenError>`
 
 `CodegenError` implements `From<inkwell::builder::BuilderError>`, so the several hundred
 builder calls inside codegen use `?` directly. A builder failure is always an internal

@@ -1,11 +1,7 @@
-// Methods example
-//
-// Demonstrates impl blocks, instance methods (&self), and
-// associated functions (TypeName::func) on structs. Inside an impl,
-// `Self` names the type being extended, as `Rect` below writes it.
-//
-// Every method result is printed, so the associated function and both receivers
-// are visible in the output rather than only in the exit code.
+// Methods: `impl` blocks, instance methods (`&self`) and associated functions
+// (`TypeName::func`). Inside an `impl`, `Self` names the type being extended, as `Rect`
+// writes it below. Every method result is printed, so the associated function and both
+// receivers show in the output.
 
 struct Counter {
     value: i32

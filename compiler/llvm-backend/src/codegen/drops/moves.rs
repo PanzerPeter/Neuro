@@ -23,7 +23,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The binding a store's place is rooted in, or `None` where the place reaches
-    /// storage no binding here names — a `*p` write, whose referent belongs to whoever
+    /// storage no binding here names: a `*p` write, whose referent belongs to whoever
     /// handed the reference over.
     pub(crate) fn place_root(place: &HirPlace) -> Option<&str> {
         match place {
@@ -84,7 +84,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// moved out of. Mirrors the move sites the type checker validates.
     ///
     /// A path into a holder disowns that position and everything beneath it, leaving the
-    /// holder's siblings armed — that is what makes destructuring a sequence of ordinary
+    /// holder's siblings armed: that is what makes destructuring a sequence of ordinary
     /// moves. Naming the binding itself, or naming a place through an index the compiler
     /// cannot evaluate, disowns the whole binding.
     ///
@@ -177,7 +177,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// A `match` that binds a payload by value is the one move site with no place
     /// expression to name: which position left depends on the tag. Clearing all of them
-    /// is the conservative answer for an arm that binds — a part of the variant it did
+    /// is the conservative answer for an arm that binds: a part of the variant it did
     /// not bind leaks rather than being released twice. An arm that binds nothing takes
     /// nothing, and stores the returned values back.
     pub(crate) fn mark_held_moved_for_drop(

@@ -1,13 +1,13 @@
 // `export import`: re-exporting another module's names to offer a flatter public API.
 //
-//   examples/modules/
-//     reexports.nr     <- this file, the root module
-//     api.nr           <- module `api`, which re-exports from `geometry`
-//     geometry.nr      <- module `geometry`, where the declarations really live
+//   modules/
+//     reexports.nr  <- this file, the root module
+//     api.nr        <- module `api`, which re-exports from `geometry`
+//     geometry.nr   <- module `geometry`, where the declarations live
 //
-// The names arrive by two routes below: qualified through the facade, and imported from
-// it, and both land on the same declaration in `geometry`. The rename rides along: what
-// `api` calls `SHIFT` is `geometry`'s `ORIGIN_SHIFT`.
+// The names arrive by two routes: qualified through the facade, and imported from it. Both
+// land on the same declaration in `geometry`, and the rename travels: `api`'s `SHIFT` is
+// `geometry`'s `ORIGIN_SHIFT`.
 
 import api::{Point}
 

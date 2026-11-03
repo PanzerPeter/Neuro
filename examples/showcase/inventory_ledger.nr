@@ -1,11 +1,8 @@
-// An inventory ledger: the standard collections working with prior features.
-//
-// Combines: `Vec<T>` holding `Copy` structs, a second `Vec<string>` of names, a
-// `HashMap<string, i32>` name index, a key-ordered `BTreeMap<i32, i32>` report,
-// an enum + `match` classifier, an `impl` block with `&self` methods, `Option`
-// matching on the fallible reads, `??` for the reads that only want a default,
-// and `for` over collections in all three receiver modes: `for x in v` consumes
-// the names, `for x in &v` reads items in place, `for x in &mut v` restocks them.
+// Showcase: a ledger on the standard collections, alongside earlier features. Integration
+// example: a `Vec` of `Copy` structs, a `Vec<string>`, a `HashMap<string, i32>` index, a
+// key-ordered `BTreeMap` report, an enum with `match`, `Option` and `??` reads, and `for`
+// in all three receiver modes. `for x in v` consumes the names, `for x in &v` reads the
+// items in place, and `for x in &mut v` restocks them.
 
 @derive(Copy, Clone)
 struct Item {

@@ -1,15 +1,8 @@
-// Showcase: the derivable traits as bounds, alongside earlier features.
-//
-// Cumulative integration example combining:
-//   `Copy` / `Clone` / `Debug` / `PartialEq` / `Hashable`, derived and hand-written
-//   · generic functions bounded by them · a `Vec<T>` built inside a generic body
-//   · a `HashMap` keyed by a derived struct · an enum with a hand-written `Debug`
-//     rendered through `match` · `for` over an array and a `Vec`
-//   · string interpolation with `:?` and a width
-//
-// The point of the combination: one generic body (`repeat`, `report`) serves a derived
-// struct, an enum with its own `Debug`, and a plain integer alike. Each meets the bound
-// its own way, and the body cannot tell which.
+// Showcase: the derivable traits as bounds, alongside earlier features. Integration
+// example: `Copy`, `Clone`, `Debug`, `PartialEq` and `Hashable`, derived or hand-written,
+// as bounds on generic functions. A `HashMap` is keyed by a derived struct, and an enum has
+// a hand-written `Debug`. One generic body (`repeat`, `report`) serves a derived struct, an
+// enum and a plain integer alike.
 
 @derive(Copy, Clone, Debug, PartialEq, Hashable)
 struct Bin {

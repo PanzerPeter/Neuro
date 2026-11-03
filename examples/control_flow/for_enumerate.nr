@@ -1,9 +1,6 @@
-// `.enumerate()` in a `for` head: iterate a sequence and its position at once.
-//
-// The head binds a pair `(index, value)`. The index is a `u64` counting from
-// zero (a POSITION, not a value the sequence holds), which is what lets it
-// index the very sequence it walks. A range makes the distinction visible: the
-// positions of `10..14` are still 0, 1, 2, 3.
+// `.enumerate()` in a `for` head: iterate a sequence and its position at once. The index is
+// a `u64` position counting from zero, not a value the sequence holds, so it can index the
+// sequence it walks. Over a range, `10..14` still yields positions 0, 1, 2, 3.
 
 func label_scores(scores: [i32; 4]) -> i32 {
     mut weighted: i32 = 0

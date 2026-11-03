@@ -1,15 +1,9 @@
-// Showcase: values that hold borrows, working together with earlier features.
-//
-// Cumulative integration example combining:
-//   a struct and an enum declaring a lifetime parameter, each holding `&'a string`
-//   · `Option<&'a string>` returned from a search, read with `match`, `??` and `.map`
-//   · a struct holding a `&mut i32`, written through by a `&mut self` method
-//   · `@derive(Copy, Clone)` on a struct with a reference field · fixed arrays
-//   · `for` over a range · a borrowed `.slice` view · string interpolation
-//
-// No name is copied: every `Entry` points into one of the three strings `main` owns,
-// and each value carrying such a view holds its borrow for as long as it lives, so
-// none of those strings can be moved or replaced while a record still reads it.
+// Showcase: values that hold borrows, alongside earlier features. Integration example: a
+// struct and an enum with a lifetime parameter, each holding `&'a string`; `Option<&'a
+// string>` read with `match`, `??` and `.map`; a struct holding a `&mut i32` that a `&mut
+// self` method writes through; and borrowed `.slice` views. Every `Entry` points into one
+// of the three strings `main` owns, so none of them can be moved or replaced while a record
+// reads it.
 
 @derive(Copy, Clone)
 struct Entry<'a> {

@@ -1,12 +1,6 @@
-// Demonstrates float literal type suffixes.
-// Suffixes pin the type of a float literal without a variable annotation.
-//
-// Each suffixed literal is printed, so the widths are visible in the output.
-// `main` returns 0: the printed values are the assertion here.
-//
-// An `f32` prints the exact value it holds, which is rarely the decimal that was
-// typed: `3.14159f32` is stored as the nearest representable single and renders
-// as 3.141590118408203. That gap is the point of choosing a width.
+// Float literal suffixes: `f32` and `f64` pin a literal's type without a variable
+// annotation. Each suffixed literal is printed. An `f32` prints the value it holds, not the
+// decimal that was typed: `3.14159f32` renders as 3.141590118408203.
 
 func scale_f32(x: f32, k: f32) -> f32 {
     return x * k

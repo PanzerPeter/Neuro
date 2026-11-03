@@ -1,13 +1,8 @@
-// Deriving `Debug` and `PartialEq`
-//
-// `@derive(Debug)` gives a struct the `{value:?}` rendering: its name, then each
-// field in declaration order. `@derive(PartialEq)` gives it `==` / `!=`, compared
-// field by field. Both recurse: a field that is itself a struct needs the same
-// derive, which is what lets `Reading` render and compare through `Sensor`.
-//
-// Every name in a `@derive` list is checked. The derivable set is `Copy`, `Clone`,
-// `Debug`, `PartialEq` and `Hashable`; anything else, a misspelling included, is a
-// compile error rather than a silent no-op.
+// Deriving `Debug` and `PartialEq`. `@derive(Debug)` gives `{value:?}` output: the name,
+// then each field in declaration order. `@derive(PartialEq)` gives `==` and `!=`, compared
+// field by field. Both recurse, so a field that is a struct needs the same derive. Every
+// name in a `@derive` list is checked. Anything outside `Copy`, `Clone`, `Debug`,
+// `PartialEq` and `Hashable` is a compile error, misspellings included.
 
 @derive(Debug, PartialEq)
 struct Sensor {

@@ -1,12 +1,7 @@
-// Neuro Programming Language - Immutable borrows
-//
-// An immutable borrow `&T` is a non-owning reference to a value. It lets a
-// function read a value without taking ownership, so the caller keeps using
-// its binding afterward. The borrow expression `&x` references the place `x`.
-//
-// Borrowing never moves the borrowed value, and `&T` is itself Copy.
-// Method and field access auto-deref through the borrow, and every built-in
-// operator reads a borrowed operand as it reads an owned one.
+// Immutable borrows `&T`: a non-owning reference that lets a function read a value and
+// leaves the caller its binding. `&x` borrows the place `x`. Borrowing never moves the
+// value, and `&T` is itself `Copy`. Field and method access auto-deref through the borrow,
+// and every built-in operator reads a borrowed operand as it reads an owned one.
 
 struct Point {
     x: i64,

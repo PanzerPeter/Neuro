@@ -1,18 +1,12 @@
-// Showcase: explicit lifetime annotations working together with prior features.
-//
-// Cumulative integration example combining:
-//   explicit lifetime annotations `<'a>` on reference parameters + return
-//   · immutable borrows `&string` and borrowed string slices
-//   · builtin `.len()` / `.slice(range)` / `.char_slice(range)` on strings
-//   · if-expressions and implicit returns
-//   · a lifetime alongside a type parameter, monomorphized on the type only
-//
-// A lifetime parameter is a pure well-formedness annotation: it is validated against
-// the declared parameter list and then erased, so `&'a string` is exactly `&string`
-// at runtime and every borrow below costs nothing.
+// Showcase: explicit lifetime annotations over borrowed text. Integration example: `<'a>`
+// on reference parameters and the return, `&string` and borrowed `.slice` and `.char_slice`
+// views, if-expressions, and a lifetime alongside a type parameter. A lifetime is a
+// well-formedness annotation, erased after checking, so `&'a string` costs the same as
+// `&string`.
 
 // The classic signature: two borrows sharing one lifetime, returning a borrow
 // that lives as long as both inputs.
+
 func longest<'a>(a: &'a string, b: &'a string) -> &'a string {
     if a.len() > b.len() { a } else { b }
 }

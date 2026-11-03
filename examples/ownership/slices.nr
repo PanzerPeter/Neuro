@@ -1,9 +1,10 @@
-// Borrowed slices `&[T]` / `&mut [T]`: one signature over a fixed-size array, a
-// sub-range of it, and a `Vec<T>`; `.len()`, indexing, iteration, and writing
-// through a mutable slice.
+// Borrowed slices `&[T]` and `&mut [T]`: one signature over a fixed-size array, a sub-range
+// of it, and a `Vec<T>`. `.len()`, indexing, iteration and writes through a mutable slice
+// all work on the view.
 
 // A `&[i32]` is a (pointer, length) view. It does not care where the elements
 // came from, so this one signature serves every source below.
+
 func sum(xs: &[i32]) -> i32 {
     mut total: i32 = 0
     for x in xs {

@@ -133,8 +133,8 @@ impl TypeChecker {
     /// The element type a scalar written to the LEFT of a tensor operand should take, so
     /// `0.5 * matrix` is the scalar broadcast it reads as.
     ///
-    /// The right operand has not been checked yet at this point — an operator types its
-    /// left side first — so the tensor is recognized from the binding rather than from a
+    /// The right operand has not been checked yet at this point (an operator types its
+    /// left side first) so the tensor is recognized from the binding rather than from a
     /// type. That is what keeps the lookahead free of side effects: a speculative
     /// `check_expr` would record any diagnostic the discarded attempt produced. A scalar
     /// beside anything else needs its suffix, exactly as it does today.
@@ -154,7 +154,7 @@ impl TypeChecker {
     /// Compound assignment takes the by-value operator's broadcast rules, with one
     /// asymmetry the in-place update forces: the result is written back into the buffer
     /// the target already owns, so the join has to come back as the TARGET's shape. An
-    /// operand may therefore be stretched up to it but never past it — `w -= row` is the
+    /// operand may therefore be stretched up to it but never past it: `w -= row` is the
     /// row-wise update, `row -= w` has nowhere to put the wider result.
     pub(crate) fn compound_assign_operand_fits(
         &mut self,
@@ -213,7 +213,7 @@ impl TypeChecker {
     ///
     /// A by-value operator allocates rather than updating in place, so unlike `OP=` it
     /// reads both operands and consumes neither's buffer into the other's. An owned
-    /// operand is still moved — its buffer is released once the result is built — while
+    /// operand is still moved (its buffer is released once the result is built) while
     /// a borrowed one is only read, which is what lets a weight stay in a training loop.
     pub(crate) fn check_tensor_binary(
         &mut self,
@@ -326,7 +326,7 @@ impl TypeChecker {
     ///
     /// Matrix multiplication neither broadcasts nor stretches: it reads the inner axis of
     /// each operand and contracts it away. A scalar operand therefore has nothing to
-    /// contract, and an operand of any rank but 2 has no inner axis to name — both are the
+    /// contract, and an operand of any rank but 2 has no inner axis to name: both are the
     /// shape error rather than a silently different operation.
     fn matmul_shape(
         &mut self,

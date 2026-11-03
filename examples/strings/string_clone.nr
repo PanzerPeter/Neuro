@@ -1,10 +1,6 @@
-// Neuro Programming Language - String .clone()
-// Demonstrates the explicit deep-copy method on a non-Copy owned string.
-//
-// `.clone()` returns a fresh `string` equal to its receiver. It is the canonical
-// opt-out of move-by-default for non-Copy types. Today strings are immutable and
-// rodata-backed, so a clone copies the (ptr, len) fat pointer; when heap-backed
-// strings land, it will duplicate the underlying buffer.
+// `.clone()` on a non-`Copy` owned `string`: the explicit deep copy. `.clone()` returns a
+// fresh `string` with the same bytes, in a buffer of its own. It is the opt-out from
+// move-by-default, so the source and the copy are independent owners.
 
 func main() -> i32 {
     val original: string = "neuro"

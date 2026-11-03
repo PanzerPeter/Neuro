@@ -1,22 +1,14 @@
-// Showcase: training a least-squares fit by gradient descent.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's `@grad` with `.backward()`, `.grad()` and `.zero_grad()`, a whole
-//   training step, and `.item()` reading the rank-0 loss out as an `f32` · 2C's `@` contraction and broadcast arithmetic, which are the loss
-//   itself, and compound assignment, which is the update · 2D's `pool` arena around
-//   each step · a struct and a `Vec` recording the progress · string interpolation
-//   with the format mini-language.
-//
-// `@grad` leaves `squared_error` exactly as written and adds a second function the
-// compiler derives from it. `loss.backward()` runs that derivative and parks one
-// gradient beside each parameter, where `.grad()` reads it. Nothing is recorded while
-// the program runs: the derivative is ordinary compiled code, built before the
-// program starts.
+// Showcase: training a least-squares fit by gradient descent. Integration example: `@grad`,
+// `.backward()`, `.grad()`, `.zero_grad()` and `.item()`, the loss written with `@` and
+// broadcasting, compound assignment as the update, a `pool` around each step, and a `Vec`
+// of progress records. `@grad` leaves `squared_error` as written and adds a derivative the
+// compiler builds beside it. `.backward()` runs that derivative and parks a gradient beside
+// each parameter. Nothing is recorded while the program runs.
 
 // Every tensor parameter is differentiated, so each one is borrowed `&mut`: the
 // gradient belongs to the caller's tensor, not to a copy. `scale` is a plain
 // number and is treated as a constant.
+
 @grad
 func squared_error(w: &mut Tensor<f32, [2, 1]>, b: &mut Tensor<f32, [1]>, scale: f32) -> Tensor<f32, []> {
     // Four samples of two features, and the targets they should map to. The targets

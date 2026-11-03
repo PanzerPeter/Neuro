@@ -1,21 +1,13 @@
-// Showcase: the iteration protocol carrying a small stream pipeline.
-//
-// Integration example combining several features at once:
-//   the `IntoIterator` / `Iterator` protocol · the `.map(f)` / `.filter(p)` head
-//   adapters · trait associated types (`type Item`) and an associated-type bound
-//   (`S: Iterator<Item = i32>`) · generic structs monomorphized per instance ·
-//   closures stored in a struct field · `@derive(Copy)` structs with `&mut self`
-//   methods · `Option` + `match` · `Vec<i32>` + `for`-in · string interpolation
-//   with the format mini-language · the pipeline operator `|>` and the composition
-//   operator `>>` over every function-value spelling: a function name, an associated
-//   function, a generic function's instance, a bound method and a closure literal.
-//
-// The point is composition: a source, a transform, and a filter are three separate
-// types, each implementing `Iterator`, and a single `for` head drives the whole chain
-// one element at a time: no intermediate array is ever built.
+// Showcase: the iteration protocol carrying a small stream pipeline. Integration example:
+// `IntoIterator` and `Iterator` with associated types, `.map` and `.filter` head adapters,
+// a bound `S: Iterator<Item = i32>`, generic structs, closures in a struct field, `|>` and
+// `>>` over every function-value spelling, `Option`, and `for`-in. A source, a transform
+// and a filter are three types, each an `Iterator`, and one `for` head drives the chain one
+// element at a time. No intermediate array is built.
 
 // A container. It holds no cursor, so it may be walked more than once: each `for`
 // head asks it for a fresh iterator through `into_iter()`.
+
 @derive(Copy, Clone)
 struct Readings {
     samples: [i32; 6]

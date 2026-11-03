@@ -5,6 +5,184 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-138: a private function is reachable by its bare name after `import`
+
+- **Status**: open, confirmed
+- **Area**: `module-resolution` (the flat merge); `semantic-analysis` (call resolution)
+- **Severity**: minor. A program that breaks the visibility rule compiles; nothing is read
+  out of bounds
+
+**Minimal repro**
+
+Two files side by side:
+
+```text
+// lib.nr
+export func shown() -> i32 { 1 }
+
+func internal() -> i32 { 4 }
+
+// main.nr
+import ./lib
+
+func main() -> i32 {
+    internal()
+}
+```
+
+Expected: an error at `internal()`, since `internal` is not exported. Observed: `neurc run
+main.nr` exits 4. The qualified `lib::internal()` is refused as it should be.
+
+**Root cause**: confirmed in the behaviour, with the mechanism known. Modules merge into one flat
+namespace, and visibility is checked only where a
+path or an import list names the item. A bare name resolves in the merged namespace, where every
+module's private items sit beside the root's.
+
+**Workaround**: none needed to compile; to keep the rule, call imported items qualified or
+through an import list, which are checked.
+
+**Fix sketch**: record each merged item's home module and refuse a bare reference to a private
+item from another module. The hierarchical module namespaces planned for the standard library
+remove the flat merge and this with it. Regression tests: a bare call, a bare type name and a
+bare constant from a private item, each refused, and the same names from inside their own module
+still accepted.
+
+## BUG-137: an enum and a struct, or a struct and a newtype, may share a name
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`predeclare_enum` in `declarations/enums.rs`, struct and
+  newtype registration)
+- **Severity**: minor. Two declarations of one name compile, and which one a use reaches depends
+  on the syntax of the use
+
+**Minimal repro**
+
+```neuro
+enum Color { Red, Blue }
+struct Color { x: i32 }
+
+func main() -> i32 {
+    val c = Color { x: 3 }
+    val d = Color::Red
+    c.x
+}
+```
+
+Expected: an "already defined" error at the second `Color`. Observed: the program compiles and
+exits 3. `struct Color { x: i32 }` beside `newtype Color = i32` is accepted the same way.
+
+**Root cause**: confirmed in the code. `predeclare_enum` refuses an enum whose name is already in
+`struct_defs`, but enums are predeclared before structs are registered, so the struct is not
+there yet when the enum is checked, and struct registration does not look at `enum_defs`.
+Nothing compares a newtype's name with a struct's.
+
+**Workaround**: give each type its own name.
+
+**Fix sketch**: register every nominal name (struct, enum, newtype, alias, trait) in one map
+during predeclaration and report the second declaration of any name, whatever its kind.
+Regression tests: each pair in both source orders.
+
+## BUG-136: a `const` that reads a later `const` type-checks, then fails to build
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` accepts it; `llvm-backend` constant folding refuses it
+- **Severity**: minor. The program is refused, but with an internal error instead of a
+  diagnostic, after `neurc check` reported it clean
+
+**Minimal repro**
+
+```neuro
+const LATE: i32 = EARLY * 2
+const EARLY: i32 = 21
+
+func main() -> i32 {
+    LATE
+}
+```
+
+Expected: exit 42. Items are order-independent at module level, and a constant expression may
+reference other constants. Observed: `neurc check` passes; `neurc run` stops with
+"Code generation error: undefined variable: EARLY".
+
+**Root cause**: not yet confirmed. The checker resolves every module constant before checking
+initializers; the backend folds constants in source order, so a reference to a later one finds
+nothing.
+
+**Workaround**: declare a constant before the constants that read it.
+
+**Fix sketch**: fold module constants in dependency order (a topological sort over the names
+each initializer reads), and report a cycle as a type error. Regression tests: the repro, a
+chain of three, and a cycle refused at check time.
+
+## BUG-135: a `const` declared in a function body stays visible to the checker after its block
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (function-body constant scoping)
+- **Severity**: minor. The program is refused, but with an internal error instead of a
+  diagnostic, after `neurc check` reported it clean
+
+**Minimal repro**
+
+```neuro
+func f() -> i32 {
+    const K: i32 = 4
+    K
+}
+
+func g() -> i32 {
+    K
+}
+
+func main() -> i32 {
+    f()
+}
+```
+
+Expected: "undefined variable 'K'" in `g`. Observed: `neurc check` passes; `neurc run` stops with
+"Code generation error: undefined variable: K". A `const` declared inside an `if` block and
+read after the block behaves the same way.
+
+**Root cause**: not yet confirmed. The backend ends a function-body constant with its block, as
+the changelog describes; the checker still registers it where later blocks and functions can see
+it.
+
+**Workaround**: declare a constant used in more than one block at module level.
+
+**Fix sketch**: give a function-body `const` the scope of the block that declares it in the
+checker, as `val` has. Regression tests: the repro, the `if` block form, and a module constant
+of the same name read after the block.
+
+## BUG-134: a binding declared without an initializer type-checks, then fails to build
+
+- **Status**: open, confirmed
+- **Area**: `syntax-parsing` / `semantic-analysis` (`Stmt::VarDecl` with `init: None`)
+- **Severity**: minor. The program is refused, but with an internal error instead of a
+  diagnostic, after `neurc check` reported it clean
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    mut z: i32
+    z = 5
+    z
+}
+```
+
+Expected: an error at the declaration, since every binding is initialized where it is declared.
+Observed: `neurc check` passes; `neurc run` stops with "Code generation error: undefined
+variable: z". `val z: i32` followed by `return z` fails the same way.
+
+**Root cause**: confirmed in the code. The parser accepts a `val` / `mut` with a type and no
+`= value` (`Stmt::VarDecl` keeps `init: Option<Expr>`), the checker binds the name, and the
+backend never allocates a binding that has no initializer.
+
+**Workaround**: initialize every binding where it is declared.
+
+**Fix sketch**: refuse a missing initializer, in the parser or the checker, with a diagnostic
+that says to write `= value`. Regression tests: `val` and `mut`, with and without a later
+assignment.
+
 ## BUG-132: a borrow of an owning temporary is refused
 
 - **Status**: open, confirmed. Narrowed: a shared borrow of a `Copy` temporary passed to a
@@ -383,51 +561,6 @@ own clone, a nested struct recursively, an array or tuple per element. A field t
 `.clone()` of its own (`Vec`, `StringBuilder`) stays refused. The copy's `string` positions must
 be armed, or the new buffers leak (see BUG-092). Regression tests: each field kind under a leak
 check, the copy outliving the original, and a generic struct instantiated with `string`.
-
-## BUG-092: a struct returned from a function never releases the `string` buffers it holds
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; `plan_held_drops` in `codegen/drops/mod.rs`, the same mechanism as
-  BUG-085 in the return direction
-- **Severity**: major. An unbounded leak, one buffer per call, for a struct built by a helper
-
-**Minimal repro**
-
-```neuro
-struct T { text: string, n: i32 }
-
-func mk(i: i32) -> T { T { text: "w {i}", n: i } }
-
-func main() -> i32 {
-    mut c: u64 = 0
-    for i in 0..4 {
-        val t = mk(i)
-        c = c + t.text.len()
-    }
-    c as i32
-}
-```
-
-Expected: exit 12, with each `text` buffer released when `t` leaves scope. Observed: exit 12,
-and AddressSanitizer's leak check reports all four buffers. Building the struct in place
-(`val t = T { text: "w {i}", n: i }`) releases every buffer, so the two spellings disagree.
-Moving the field on (`v.push(t.text)`, `val s = t.text`) leaks the same way, which is what
-`examples/showcase/word_scanner.nr` does with `Token::of`.
-
-**Root cause**: confirmed in the code. The callee clears its own drop flags when the struct
-leaves as its return value. The caller's binding gets its positions from `plan_held_drops`,
-which starts every `string` position disarmed, because a type cannot prove a `string` owns its
-buffer, and only a store in the caller's frame arms one. A binding initialized from a call
-result has no such store, so nothing releases the field.
-
-**Workaround**: build the struct where it is used, or return the `string` itself and build the
-struct in the caller.
-
-**Fix sketch**: the flags have to cross the return, as BUG-085 needs them to cross the call:
-return the `string` positions' flags beside the struct, or have the callee's summary prove that
-every return path fills a position with a fresh buffer and arm it in the caller. Regression
-tests: the repro in a loop under a leak check, a field filled from a literal (must not be
-freed), and a field moved out of the returned struct.
 
 ## BUG-085: a struct passed by value never releases the `string` buffers it holds
 

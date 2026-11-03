@@ -1,15 +1,6 @@
-// Adapter methods in a `for` head: `.map(f)` and `.filter(p)`.
-//
-// `.map()`, `.filter()`, and `.enumerate()` are adapters that return new iterators,
-// so they compose in a single `for` head. They are recognised as part of the head
-// rather than resolved as methods, which is what lets them
-// apply to a range and an array: neither of which is a value with methods on it.
-//
-//     .map(f)     replaces each element with `f(element)`
-//     .filter(p)  drops each element for which `p(element)` is false
-//
-// The chain runs left to right, one element at a time: nothing between the source
-// and the loop is ever materialized.
+// Adapters in a `for` head: `.map(f)`, `.filter(p)` and `.enumerate()`. They compose in one
+// head and apply to a range or an array. The chain runs one element at a time, and nothing
+// between the source and the loop is materialized.
 
 func main() -> i32 {
     // One adapter over an array.

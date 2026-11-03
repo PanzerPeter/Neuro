@@ -373,7 +373,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 // address, not the value, so one load reaches the place it names. Two
                 // shapes do: a borrow of an aggregate, and the `self` of a `&mut self`
                 // method, whose type is the struct itself. A borrowed slice is neither
-                // — its slot holds the fat pointer by value — which is why the LLVM
+                // (its slot holds the fat pointer by value), which is why the LLVM
                 // representation, not the semantic type alone, decides.
                 let ty = Type::from_hir(&expr.ty);
                 let indirect_shape = matches!(ty, Type::Reference { .. })

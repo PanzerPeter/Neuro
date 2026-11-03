@@ -1,20 +1,14 @@
-// Tensor shape generics: `func f<M, K>(t: Tensor<f32, [M, K]>)`
-//
-// A bare name in a tensor shape is a compile-time value, not a type: it is a
-// `const NAME: u32` parameter, inferred from the shape of the argument the caller
-// passes. One template is written once and specialized per distinct set of extents,
-// so a shape-generic function costs nothing at run time that the hand-written one
-// would not.
-//
-// Because the extents are part of the type, a parameter written twice must be the same
-// number in both places: that is what makes a shape mismatch a COMPILE error rather
-// than a wrong answer at run time. A `where` clause states the rest, e.g. `where N > 0`,
-// and is checked at the call that supplies the offending extent.
-//
-// A shape parameter is a value, so it can be read in the body like any other.
+// Tensor shape generics: `func f<M, K>(t: Tensor<f32, [M, K]>)`. A bare name in a tensor
+// shape is a compile-time `u32` value, not a type, inferred from the argument's shape. One
+// template is specialized per distinct set of extents, so it costs nothing at run time over
+// a hand-written version. A parameter that appears twice must have the same extent both
+// times, so a shape mismatch is a compile error. A `where` clause states the rest, such as
+// `where N > 0`, and is checked at the call that supplies the extent. The shape parameter
+// is a value, readable in the body.
 
 // M and K are inferred from the argument. Borrowing reads the tensor without
 // consuming it, so the caller keeps its own.
+
 func rank_two_size<M, K>(t: &Tensor<i32, [M, K]>) -> i32 {
     return (M * K) as i32
 }

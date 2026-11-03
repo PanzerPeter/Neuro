@@ -1,9 +1,7 @@
-// Vector physics step: operator traits working together with prior features.
-//
-// Combines: operator traits (`+` / `-` / unary `-` / `==`) on a `Copy` struct,
-// an `impl` block with an `&self` method, compound assignment (`+=` desugaring
-// through the `Add` impl), `if`-expressions, and a `while` loop. The operators dispatch
-// to the trait methods; everything is monomorphized to plain calls.
+// Showcase: operator traits driving a vector physics step. Integration example: `+`, `-`,
+// unary `-` and `==` on a `Copy` struct, an `impl` block with an `&self` method, `+=`
+// through the `Add` impl, `if` expressions, and a `while` loop. The operators dispatch to
+// trait methods and are monomorphized to plain calls.
 
 @derive(Copy, Clone)
 struct Vec2 {

@@ -1,9 +1,7 @@
-// Pattern matching: `match` as an exhaustive expression over enums and
-// scalar values: variant deconstruction with payload binding, literal / or /
-// range patterns, guard clauses, and the `_` wildcard.
-//
-// Every scrutinee prints the arm it selected, so the range and guard arms are
-// distinguishable from the wildcard in the output.
+// Pattern matching: `match` as an exhaustive expression over enums and scalars. It covers
+// payload binding, literal, `|` and range patterns, guard clauses, and the `_` wildcard.
+// Every scrutinee prints the arm it selected, so the range and guard arms can be told apart
+// from the wildcard.
 
 enum Op {
     Nop,

@@ -1,16 +1,9 @@
-// Showcase: a formatted status report built from live readings.
-//
-// Integration example combining string interpolation with the features that
-// produce the values it renders:
-//   struct + impl methods (&self) · enum with a payload + match · fixed-size
-//   array + for-in loop · f64 math and `as` casts · string concatenation ·
-//   string interpolation with the format mini-language (:.N, :x, :>W, :<W, :+d) ·
-//   `println` writing the finished report to standard output.
-//
-// Every rendered line is checked against the exact text it should produce and
-// then printed, and `main` returns the total width of the report's aligned
-// column as its exit code: a number that only comes out right if every field
-// padded correctly.
+// Showcase: a formatted status report built from live readings. Integration example: a
+// struct with `&self` methods, an enum with a payload matched, a fixed array walked by
+// `for`-in, `f64` math and `as` casts, string concatenation, the format specs `:.N`, `:x`,
+// `:>W`, `:<W` and `:+d`, and `println`. Each line is checked against the exact text it
+// should produce, then printed. The exit code is the width of the aligned column, which is
+// right only if every field padded correctly.
 
 enum Level {
     Nominal,

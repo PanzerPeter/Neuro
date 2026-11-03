@@ -1,8 +1,5 @@
-// Structs example
-//
-// Demonstrates struct definition, instantiation, field access, and mutation.
-// Each field is read back and printed, so the assignment into `origin` is
-// observable rather than inert.
+// Structs: definition, instantiation, field access and mutation.
+// Each field is read back and printed, so the assignment into `origin` is observable.
 
 struct Point {
     x: f64,

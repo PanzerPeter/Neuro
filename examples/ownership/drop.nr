@@ -1,17 +1,9 @@
-// Drop: deterministic destruction at scope exit.
-//
-// A type that implements `Drop` runs its `drop(&mut self)` destructor when its
-// owner leaves scope, on normal exit only (a panic aborts without running
-// destructors). Here each `Guard` increments a counter through a mutable borrow
-// when it is dropped, so the counters are observable once the scope closes. A
-// `&mut` is exclusive, so each live guard holds a counter of its own.
-//
-// Three guards are created in an inner block and destroyed at its end (in reverse
-// declaration order); one of them is moved into a new binding first, so it is
-// dropped exactly once, not twice.
-//
-// A guard held inside another value follows the same rule: the holder owns what it
-// holds, so a struct field is destroyed when the struct is. The program returns 5.
+// `Drop`: deterministic destruction at scope exit. A type implementing `Drop` runs its
+// `drop(&mut self)` when its owner leaves scope, on normal exit only (a panic aborts
+// without running destructors). Each guard bumps a counter through a `&mut` when it is
+// dropped. Guards are destroyed in reverse declaration order, and a guard moved into
+// another binding is dropped once, by its new owner. A struct field is destroyed with the
+// struct that holds it.
 
 struct Guard {
     id: i32,

@@ -1,13 +1,8 @@
-// Showcase: an online mean accumulator.
-//
-// Integration example combining struct state with float math:
-//   struct with mixed i32/f64 fields · direct field mutation on a `mut`
-//   binding · &self query methods · f64 division · while loop · `as` cast ·
-//   `.is_nan()` guarding the accumulator against a non-finite sample.
-//
-// This example advances the running state by assigning to the fields directly
-// on the mutable binding in `main`, keeping the method side read-only (`&self`).
-// For the in-place `&mut self` style, see `structs/mut_self_accumulator.nr`.
+// Showcase: an online mean accumulator. Integration example: a struct with mixed `i32` and
+// `f64` fields, direct field mutation on a `mut` binding, `&self` query methods, `while`,
+// `as`, and `.is_nan()` guarding against a non-finite sample. This program advances the
+// state by assigning fields directly in `main` and keeps the methods read-only. For the
+// in-place `&mut self` style, see `structs/mut_self_accumulator.nr`.
 
 struct RunningStats {
     count: i32,

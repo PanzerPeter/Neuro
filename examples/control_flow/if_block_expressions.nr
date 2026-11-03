@@ -1,8 +1,6 @@
-// `if` and bare blocks as *expressions*: each evaluates to a value rather than
-// only steering control flow.
-//
-// Every branch result is printed, so which arm each call took can be read off
-// the output.
+// `if` and bare blocks as *expressions*: each evaluates to a value rather than only
+// steering control flow. Every branch result is printed, so the output shows which arm each
+// call took.
 
 func abs(n: i32) -> i32 {
     val result = if n >= 0 { n } else { 0 - n }

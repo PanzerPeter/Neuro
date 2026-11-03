@@ -1,28 +1,11 @@
-// Showcase: trait declarations and both dispatch forms working together with
-// prior features.
-//
-// Cumulative integration example combining:
-//   trait declarations with a required and a default method
-//   · trait implementations for multiple concrete types
-//   · trait-bounded generic function, monomorphized per type
-//   · `impl Trait` static dispatch in argument position
-//   · `dyn Trait` dynamic dispatch through a trait object
-//   · `Self` in a trait signature, a default method and impl bodies
-//   · a generic with two bounds, `<T: Shape + Resizable>`
-//   · structs + `&self` methods
-//   · fixed-size arrays with iteration
-//   · @derive(Copy) + if-expressions and implicit returns
-//
-// A trait bound can be satisfied two ways, and the keyword chooses. `impl Trait`
-// and a named `<T: Shape>` are both monomorphized: the compiler emits one
-// specialized copy per concrete type, so they cost nothing at runtime. `dyn Trait`
-// instead produces a single runtime type: the reference carries a pointer to the
-// value plus a pointer to that type's method table, and the call jumps through the
-// table. That is what lets ONE `dyn` function serve shapes of different types.
-//
-// `Self` names whichever type implements a trait. A method returning it cannot sit
-// in a method table, because the caller of a `dyn` call would not know the size of
-// what comes back, so `Resizable` is used through bounds only.
+// Showcase: traits and both dispatch forms, alongside earlier features. Integration
+// example: trait declarations with a required and a default method, impls for several
+// types, a generic bounded by two traits (`<T: Shape + Resizable>`), `impl Trait` and `dyn
+// Trait` dispatch, `Self` in signatures, fixed arrays, and `@derive(Copy)`. `impl Trait`
+// and `<T: Shape>` are monomorphized, one copy per concrete type, so they cost nothing at
+// run time. `dyn Trait` is a single runtime type: the reference carries a value pointer and
+// a method-table pointer, and each call goes through the table. A method returning `Self`
+// cannot sit in a method table, so `Resizable` is used through bounds only.
 
 trait Shape {
     // Required: every shape must define its own area.

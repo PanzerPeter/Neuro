@@ -1,371 +1,62 @@
 # Expressions
 
-Expressions are code constructs that evaluate to a value.
+An expression is code that evaluates to a value. This page covers what expressions share: how a statement ends, which expression a block yields, and the order operands run in. The table names the page that owns each form.
 
-## Expression Types
+## Expression Forms
 
-### Literals
+| Form | Example | Owned by |
+|------|---------|----------|
+| Literals | `42`, `3.14`, `true`, `"hello"` | [Types](types.md) for numeric literals, [Strings](strings.md#literals) for strings |
+| Names | `x`, `add` | [Variables](variables.md), [Functions](functions.md) |
+| Operators | `a + b`, `-x`, `x ?? 0`, `f(x)?`, `x \|> f` | [Operators](operators.md) |
+| Grouping | `(a + b) * c` | [Operators](operators.md#operator-precedence) |
+| Cast | `n as f64` | [Types](types.md#type-conversion) |
+| Calls | `add(5, 3)`, `Point::new(1, 2)` | [Functions](functions.md) |
+| Method calls | `c.add(32)`, `"hello".len()` | [Structs](structs.md#impl-blocks) for user methods, [Strings](strings.md#string-methods) and [Types](types.md#integer-methods) for builtin receivers |
+| Struct literals | `Point { x: 3.0, y: 4.0 }` | [Structs](structs.md#struct-instantiation) |
+| Field access | `p.x` | [Structs](structs.md#field-access) |
+| Tuples | `(12, 30)`, `pair.0` | [Types](types.md#tuples) |
+| `if` | `if n >= 0 { n } else { 0 - n }` | [Control flow](control-flow.md#if-as-an-expression) |
+| `match` | `match shape { ... }` | [Control flow](control-flow.md#pattern-matching) |
+| `if val`, `while val` | `if val Some(x) = lookup() { x }` | [Control flow](control-flow.md#if-val-and-while-val) |
+| Loops | `loop`, `while`, `for` | [Control flow](control-flow.md#loops) |
+| Blocks | `{ ... }` | [Control flow](control-flow.md#blocks-as-values) |
+| Closures | `\|x\| x * x` | [Functions](functions.md#closures-and-lambdas) |
 
-Values written directly in code:
-
-```neuro
-42              // Integer literal (i32 by default)
-3.14            // Float literal (f64 by default)
-true            // Boolean literal
-false           // Boolean literal
-"hello"         // String literal (type: string)
-```
-
-### String Interpolation
-
-A string literal may embed expressions in `{...}` holes. The whole literal is an
-expression of type `string`, evaluated to a fresh owned string each time it is
-reached:
-
-```neuro
-val message = "Welcome to {name} v{version}"
-val report  = "Sum: {a + b}, Product: {a * b}"
-```
-
-A hole holds any expression (a call, a field access, a struct literal, an `if`,
-a nested block): the lexer only finds the hole's bounds and the parser
-re-parses its text as an ordinary expression. Write a literal brace as `\{` or
-`\}`; an unescaped `}` outside a hole is an error, so a dropped `{` is caught
-where it goes missing.
-
-An optional `:spec` after the expression chooses the rendering. The shape is
-`[< > ^] [+] [0] [width] [.precision] [kind]`, where *kind* is one of
-`? e d x X b o`:
-
-```neuro
-"{pi:.2}"     // 3.14        (fixed point, 2 decimals)
-"{pi:e}"      // 3.14159e0   (scientific)
-"{n:x}"       // ff          (lowercase hex, n = 255)
-"{n:08d}"     // 00000255    (zero-padded to width 8)
-"{s:^10}"     // centred in a field of width 10
-"{delta:+d}"  // +42 or -42  (always show the sign)
-```
-
-Which specifiers a value accepts depends on its type, and a mismatch is a
-compile error rather than a surprising rendering: radix kinds (`d x X b o`)
-require an integer, fixed-point and scientific (`.N`, `e`) require a float, and
-the `+` flag requires a signed integer or a float. Interpolation renders
-integers, floats, `bool`, `char`, and `string` directly, and a struct that
-derives `Debug` under the `:?` specifier: `"{p:?}"` yields `Point { x: 1, y: 2 }`,
-recursing into a nested struct and quoting a `string` or `char` field. A struct
-has no display form, so the bare `"{p}"` is a compile error either way. Other
-aggregates (arrays, tuples, enums) do not render yet.
-
-Two limits are worth knowing. A hole may not contain a `"` string literal: the
-quote ends the enclosing literal, and the hole is reported as unterminated. And
-an interpolated literal is not a constant, so it cannot appear in a pattern.
-
-See [`examples/strings/string_interpolation.nr`](../../examples/strings/string_interpolation.nr)
-for every specifier checked against its expected output.
-
-### Triple-Quoted Strings
-
-A `"""…"""` literal spans lines. Its value is dedented to the column the closing
-`"""` sits at, so a block can be indented to match the code around it without
-that indentation ending up in the string:
-
-```neuro
-val block = """
-    Hello from {name}.
-    This spans multiple lines.
-    """
-// "Hello from Neuro.\nThis spans multiple lines."
-```
-
-The rules:
-
-- Both newlines that touch a delimiter are punctuation and are dropped: the one
-  directly after the opening `"""`, and the one that separates the last content
-  line from the closing delimiter's line. A block is therefore its content lines
-  with no leading or trailing blank. To end a block with a newline, leave a blank
-  line before the closing delimiter: that blank line's own terminator is then the
-  last one, and it survives.
-  Text trailing the opening delimiter on the same line is content, and is exempt
-  from the dedent rule: it sits flush against the delimiter and cannot be
-  indented.
-- The closing `"""` must be alone on its line. The whitespace before it is the
-  prefix stripped from every content line; indentation beyond that prefix
-  survives, so nested structure inside the block is preserved.
-- A blank line needs no indentation of its own and normalizes to empty.
-- A non-blank line indented less than the closing delimiter is a compile error.
-- A single `"` or `""` inside the block needs no escape; only `"""` ends it.
-
-Escapes and `{...}` interpolation holes work exactly as in a `"…"` literal. A
-block string produces the same `string` value and carries no runtime cost of its
-own.
-
-See [`examples/strings/triple_quoted.nr`](../../examples/strings/triple_quoted.nr)
-for each rule checked against its expected text.
-
-### Identifiers
-
-Variable and function names:
-
-```neuro
-x               // Variable reference
-add             // Function reference
-```
-
-### Binary Expressions
-
-Two operands with an operator:
-
-```neuro
-a + b           // Addition
-x * y           // Multiplication
-result == 42    // Comparison
-flag && ready   // Logical AND
-```
-
-### Unary Expressions
-
-Single operand with operator:
-
-```neuro
--x              // Arithmetic negation
-!flag           // Logical NOT
-~mask           // Bitwise NOT (integer types only)
-```
-
-### Cast Expressions
-
-Explicit numeric type conversion:
-
-```neuro
-n as f64        // Integer to float
-pi as i32       // Float to integer (truncates toward zero)
-flag as i32     // Boolean to integer (false → 0, true → 1)
-```
-
-### Function Call Expressions
-
-```neuro
-add(5, 3)                   // Free function call
-double(square(x))           // Nested calls
-max(min(a, b), c)           // Multiple nesting
-c.add(32)                   // Method call (instance method)
-Point::new(1, 2)            // Associated function call
-"hello".len()               // Builtin method on a string receiver
-```
-
-Method-call syntax `receiver.method(args)` resolves against user-defined `impl` methods
-when the receiver is a struct, and against a fixed, compiler-known set of intrinsic methods
-when the receiver is a builtin type (`string.len()` and `.clone()`, the integer overflow
-methods, `.slice()`, and more). See [strings.md](strings.md#string-methods) for the string set
-and [types.md](types.md#integer-methods) for the integer set.
-
-### Struct Literal Expressions
-
-Construct a struct value by naming all fields:
-
-```neuro
-val p = Point { x: 3.0, y: 4.0 }
-val c = Counter { value: 0, step: 1 }
-```
-
-All fields must be present; duplicate or unknown fields are compile errors.
-
-### Field Access Expressions
-
-Read a field from a struct value:
-
-```neuro
-val x = p.x          // reads field x, type is f64
-val total = c.value + c.step
-```
-
-Field access binds tighter than function calls in the precedence table.
-
-### Tuple Literals and Index Access
-
-A tuple literal groups two or more values; element access uses a constant index:
-
-```neuro
-val pair = (12, 30)       // (i32, i32)
-val mixed = (5, true)     // (i32, bool)
-val a = pair.0            // 12
-val b = pair.1            // 30
-```
-
-A single parenthesized expression `(x)` is grouping. There is no one-element tuple:
-`(x,)` is a compile error.
-Tuple index `t.N` binds like field access and chains like it: `t.0.1` is element `1`
-of element `0`. Tuple destructuring (`val (a, b) = t`)
-is a binding form covered under [Variables](variables.md) and [Types](types.md).
+String literals can also hold `{...}` interpolation holes and span lines. See [String interpolation](strings.md#string-interpolation) and [Triple-quoted strings](strings.md#triple-quoted-strings).
 
 ### If Expressions
 
-`if`/`else` chains are expressions when every arm has an `else` branch:
-
-```neuro
-val abs_n: i32 = if n >= 0 { n } else { 0 - n }
-val sign: i32  = if n < 0 { -1 } else if n == 0 { 0 } else { 1 }
-```
-
-All arms must produce the same type. An `if` without `else` has type `void` and cannot be used as a value.
-
-An arm that **leaves the scope** rather than producing a value (`return`, `break`,
-`continue`, `panic(...)` or `unreachable()`) is exempt: it never reaches the point
-where the `if` has a value, so it neither supplies the type nor has to match it. The
-remaining arms decide:
-
-```neuro
-func first_positive(n: i32) -> i32 {
-    val v = if n > 0 { return 1 } else { 2 }   // the `if` is an i32; the then-arm returns
-    v
-}
-```
+An `if` with an `else` produces a value, and every arm must agree on its type. An arm that leaves the scope (`return`, `break`, `continue`, `panic(...)` or `unreachable()`) is exempt from that agreement. An `if` without `else` has type `void`, so `val z = if c { 1 }` fails. See [Control flow](control-flow.md#if-as-an-expression).
 
 ### Match Expressions
 
-`match` is an expression that exhaustively deconstructs a value. The first arm
-whose pattern matches, and whose optional `if` guard holds, supplies the
-value; all arm bodies must have the same type, except those that leave the scope
-(`{ return ... }`, `{ break }`, `{ continue }`, `panic(...)`, `unreachable()`), which
-supply no type at all.
+The first arm whose pattern and optional `if` guard hold supplies the value. [Control flow](control-flow.md#pattern-matching) shows the patterns. The rules below are the ones that page does not state:
 
-```neuro
-enum Shape { Circle(i32), Rect { w: i32, h: i32 }, Unit }
-
-func area(s: Shape) -> i32 {
-    match s {
-        Shape::Circle(r)       => r * r * 3,   // tuple variant, binds `r`
-        Shape::Rect { w, h }   => w * h,        // struct variant, binds `w`, `h`
-        Shape::Unit            => 0
-    }
-}
-
-func classify(n: i32) -> i32 {
-    match n {
-        0            => 1,        // literal
-        1 | 2        => 2,        // or-pattern
-        3..=9        => 3,        // inclusive range (`..` is exclusive)
-        n if n < 0   => 4,        // bare binding + guard
-        _            => 9         // wildcard catch-all
-    }
-}
-```
-
-**Patterns**: `_` (wildcard), a bare identifier (binds the whole scrutinee), a
-literal, an inclusive `a..=b` / exclusive `a..b` range over an ordered scalar,
-or an enum variant pattern (`E::Unit`, `E::Tuple(a, b)`, `E::Struct { field }`).
-
-**Exhaustiveness**: every case must be handled. An enum match must cover every
-variant or include a `_` arm; an integer/`char` match requires a `_` arm; a
-`bool` match needs both `true` and `false` (or `_`). A guarded arm does not
-count toward exhaustiveness.
-
-A borrow of an enum or scalar is matched through: `match d` on `d: &Dir` tests the `Dir`,
-as `match self` does in a `&self` method. An arm that binds an owning payload by value moves
-it out, which a borrowed scrutinee cannot give up, so that is an error there; bind with `_`
-or match on an owned value.
-
-**Limits**: the scrutinee must be an enum, integer, `char`, or `bool` (or a borrow of one);
-enum-payload sub-patterns must be bindings or `_` (match a payload *value* with a
-guard, e.g. `Some(n) if n == 0`); and alternatives of an `|`-pattern may not
-bind.
-
-### Block Expressions
-
-A `{ … }` block is an expression whose value is its final (trailing) expression:
-
-```neuro
-val area: i32 = {
-    val w: i32 = 6
-    val h: i32 = 7
-    w * h           // trailing expression: the block's value
-}
-```
-
-Locals declared inside a block are scoped to that block.
+- **Patterns.** `_`, a bare name, a literal, an inclusive `a..=b` or exclusive `a..b` range over an ordered scalar, or an enum variant pattern.
+- **Exhaustiveness.** An enum match must name every variant or have a `_` arm. An integer or `char` match needs a `_` arm. A `bool` match needs both `true` and `false`, or a `_` arm. A guarded arm does not count toward exhaustiveness.
+- **Borrowed scrutinee.** A borrow of an enum or scalar is matched through: `match d` with `d: &Dir` tests the `Dir`. An arm that moves an owning payload out of the borrow is an error. Bind it with `_`, or match an owned value.
+- **Limits.** The scrutinee must be an enum, integer, `char` or `bool`, or a borrow of one. A payload sub-pattern must be a binding or `_`, so match a payload value with a guard, as in `Opt::Some(n) if n == 0`. An alternative of an `|` pattern may not bind a name.
 
 ### Unsafe Block Expressions
 
-An `unsafe { … }` block is a block expression prefixed with the reserved
-`unsafe` keyword. It evaluates exactly like a bare block: its value is the
-trailing expression, and its locals are block-scoped:
-
-```neuro
-val x: i32 = unsafe {
-    val a: i32 = 20
-    a + 22          // trailing expression: the block's value
-}
-```
-
-`unsafe` has one meaning so far. Inside a `@kernel` body, indexing an output
-(`out[i] = v`, `out[i] += v`, `val x = out[i]`) is legal only in an `unsafe`
-block, which marks where the programmer vouches that no other thread writes
-that element. See [Writing a kernel](tensors.md#writing-a-kernel-kernel).
-Everywhere else an `unsafe` block behaves like `{ }`.
-
-### Parenthesized Expressions
-
-Control evaluation order:
-
-```neuro
-(a + b) * c     // Force addition first
-x / (y + z)     // Force addition before division
-```
-
-## Operator Precedence
-
-Higher precedence operators bind first. The full ladder, `@` and the pipeline operators
-included, is in [Operators: Operator Precedence](operators.md#operator-precedence).
-
-**Examples**:
-
-```neuro
-a + b * c         // Parsed as: a + (b * c)
-a & b + c         // Parsed as: a & (b + c)   (arithmetic before bitwise)
-a | b & c         // Parsed as: a | (b & c)   (AND before OR)
-x & mask == 0     // Parsed as: (x & mask) == 0   (bitwise before comparison)
-!a && b           // Parsed as: (!a) && b
-a || b && c       // Parsed as: a || (b && c)
-n as f64 + 1.0    // Parsed as: (n as f64) + 1.0
-f(x)? + 1         // Parsed as: (f(x)?) + 1
-```
+`unsafe { }` is a block expression with the same value rules as a bare block. It has one effect: inside a `@kernel` body, indexing an output element (`out[i] = v`, `out[i] += v`, `val x = out[i]`) is legal only inside an `unsafe` block, which marks where you vouch that no other thread writes that element. See [Control flow](control-flow.md#unsafe-blocks) and [Writing a kernel](tensors.md#writing-a-kernel-kernel).
 
 ## Expression-Based Returns
 
-The last expression in a function body is the return value (Neuro has no semicolons; statements are newline-terminated):
+The last expression in a block is its value. Neuro has no semicolons, so a statement ends at its newline, and a final expression needs no `return`:
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
-    a + b  // Implicit return
-}
-
-func max(a: i32, b: i32) -> i32 {
-    if a > b {
-        a  // Implicit return from if branch
-    } else {
-        b  // Implicit return from else branch
-    }
+    a + b
 }
 ```
 
-**Key distinction**: it is positional, not punctuation-based:
-- A bare expression in the **last** position of a block is its return value
-- Any earlier line (a `val`/`mut` binding, assignment, or non-final expression) is a statement evaluated for its effect
-
-```neuro
-func example() -> i32 {
-    val x: i32 = 42  // Statement (binding)
-    x  // Last expression, implicit return
-}
-```
+Position decides, not punctuation. Earlier lines run for their effect, and only the last line yields the value. An explicit `return` is covered in [Functions](functions.md#return-values).
 
 ## Statement Boundaries
 
-There are no semicolons: a newline ends a statement, and a top-level item too, so
-`struct A {} struct B {}` on one line is an error. An expression continues onto the
-next line only when the line that just ended asks it to: it ends with a binary
-operator, a comma, or an opening delimiter, or the expression is still inside an
-unclosed `(`, `[`, or `{`:
+A newline ends a statement, and so does the end of a top-level item. This is why `struct A {} struct B {}` on one line is an error. An expression continues onto the next line only when the line that just ended asks for it: it ends with a binary operator, a comma, or an opening delimiter, or it is still inside an unclosed `(`, `[` or `{`:
 
 ```neuro
 val total: i32 = 1 +
@@ -382,113 +73,52 @@ val chained: i32 = cell
     .get()               // continues: a leading `.` cannot start a statement
 ```
 
-The decision belongs to the line that ended, never to the line that follows. A line
-*starting* with a token that can also begin an expression therefore begins a new
-statement: `(` a parenthesized expression, `[` an array literal, `*` a dereference,
-`-` a negation, `&` a borrow, `|` a closure literal, and `@` an attribute. It can never
-be a call, an index, a multiplication, a subtraction, a bitwise AND or OR, or a matrix
-product continuing the line above. To continue across one of those operators, end the
-line with it, or keep the expression inside an unclosed `(` or `[`:
+The line that ended makes the decision, never the line after it. A line that starts with `(`, `[`, `*`, `-`, `&`, `|` or `@` begins a new statement, even when the line above could take it as a call, index, product, difference, bitwise operand or matrix product. To continue across one of those operators, end the line with it, or keep the expression inside an unclosed `(` or `[`:
 
 ```neuro
 val a: i32 = f()
 (2 + 3)                  // a new statement, not `f()(2 + 3)`
+```
 
+```neuro
 func negated_double(a: i32) -> i32 {
     val scaled = a * 2
     -scaled              // the tail expression, not `a * 2 - scaled`
 }
+```
 
+```neuro
 val total = base -
     offset               // continues: the line ends with `-`
 ```
 
-## Type Checking
-
-All expressions are type-checked at compile time:
-
-```neuro
-val x: i32 = 42 + 10        // OK: i32 + i32 = i32
-val y: f64 = 3.14 * 2.0     // OK: f64 * f64 = f64
-val z: bool = x > y         // Error: type mismatch: expected i32, found f64
-```
-
 ## Evaluation Order
 
-Left-to-right evaluation for operators of same precedence:
+Operands evaluate left to right, so the left operand of a binary operator runs before the right one. In this program `c` is read as `0` before `tick` raises it to `1`, so the result is `1`:
 
 ```neuro
-a + b + c       // Evaluates as: (a + b) + c
-a - b - c       // Evaluates as: (a - b) - c
-a * b / c       // Evaluates as: (a * b) / c
+func tick(c: &mut i32) -> i32 {
+    *c = *c + 1
+    *c
+}
+
+func main() -> i32 {
+    mut c: i32 = 0
+    val s = c * 10 + tick(&mut c)   // reads c first: 0 * 10 + 1
+    s
+}
 ```
 
-Function arguments are evaluated left-to-right:
+Function arguments evaluate left to right, in the order they are written. Operators of equal precedence group left to right, so `a - b - c` is `(a - b) - c`. The short-circuit forms `&&`, `||` and `??` are covered in [Operators](operators.md).
 
-```neuro
-add(first(), second())  // first() called before second()
-```
+## Operator Precedence
 
-## Expression Examples
+Operator precedence, including `@` and the pipeline operators, is in [Operators](operators.md#operator-precedence).
 
-### Arithmetic Expressions
-
-```neuro
-val sum: i32 = a + b
-val product: i32 = x * y * z
-val average: i32 = (a + b + c) / 3
-val remainder: i32 = n % 10
-```
-
-### Comparison Expressions
-
-```neuro
-val is_equal: bool = x == y
-val is_greater: bool = a > b
-val in_range: bool = x >= 0 && x <= 100
-```
-
-### Logical Expressions
-
-```neuro
-val both_true: bool = flag1 && flag2
-val either_true: bool = flag1 || flag2
-val inverted: bool = !flag
-val complex: bool = (a && b) || (c && d)
-```
-
-### Nested Function Calls
-
-```neuro
-val result: i32 = add(mul(2, 3), div(10, 2))
-val distance: i32 = abs(x1 - x2) + abs(y1 - y2)
-```
-
-## Common Patterns
-
-### Chained Comparisons
-
-```neuro
-val in_range: bool = min <= value && value <= max
-val outside_range: bool = value < min || value > max
-```
-
-### Conditional Values
-
-```neuro
-val sign: i32 = if x > 0 { 1 } else if x < 0 { -1 } else { 0 }
-val abs_value: i32 = if x >= 0 { x } else { -x }
-```
-
-### Expression Composition
-
-```neuro
-val result: i32 = square(x) + square(y)
-val total: i32 = sum(a, b) + sum(c, d)
-```
-
-## References
+## See also
 
 - [Operators](operators.md): operator reference and precedence
-- [Types](types.md): expression type checking
-- [Functions](functions.md): function call expressions
+- [Control flow](control-flow.md): `if`, `match`, loops and blocks
+- [Functions](functions.md): calls, closures and returns
+- [Structs](structs.md): struct literals, field access and methods
+- [Types](types.md): casts, tuples and literal types

@@ -1,10 +1,7 @@
-// Standard collections: Vec<T>, HashMap<K, V>, BTreeMap<K, V>.
-//
-// All three are heap-backed library types. They are not Copy (assignment moves
-// them) and each frees its buffer when its owner leaves scope. The fallible
-// readers return an `Option`, so a miss is a value to match on rather than a
-// trap: `get` lends the element as `Option<&T>`, while `pop` and a map's
-// `remove` hand it over as `Option<T>`.
+// Standard collections: `Vec<T>`, `HashMap<K, V>` and `BTreeMap<K, V>`. All three are
+// heap-backed and not `Copy` (assignment moves them), and each frees its buffer when its
+// owner leaves scope. Fallible readers return an `Option`: `get` lends `Option<&T>`, while
+// `pop` and `remove` hand over `Option<T>`.
 
 func main() -> i32 {
     // --- Vec<T>: growable, indexable, iterable ---------------------------

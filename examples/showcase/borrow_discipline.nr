@@ -1,16 +1,9 @@
-// Borrow discipline: what a live borrow forbids, and how code is written around it.
-//
-// Combines structs with `&mut self` / `&self` methods, arrays and `for` loops, and
-// string interpolation with the borrowee rules of the memory model, and with reading
-// through a borrow, where operators and method calls need no `*`:
-//
-//   * while a `&mut` of a place is live, the place may not be read, written, or
-//     moved through its own name — every access goes through the borrow;
-//   * while any borrow of a place is live, the value may not be moved out of it,
-//     because the borrow would be left pointing at storage the binding gave away.
-//
-// A borrow held by a binding lives until that binding leaves scope, so the usual
-// shape is to confine the borrow to a block, or to read back through it.
+// Showcase: what a live borrow forbids, and how code is written around it. Integration
+// example: structs with `&mut self` and `&self` methods, arrays, `for` loops and
+// interpolation, and reading through a borrow with no `*`. While a `&mut` of a place is
+// live, the place may not be read, written or moved through its own name. While any borrow
+// is live, the value may not be moved out. A borrow lasts until its binding leaves scope,
+// so confine it to a block or read back through it.
 
 struct Accumulator {
     total: i32,

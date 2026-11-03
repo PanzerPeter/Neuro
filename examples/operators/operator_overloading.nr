@@ -1,12 +1,7 @@
-// Operator overloading via operator traits.
-//
-// Operators on a user type are sugar for trait method calls. A `Copy` struct that
-// implements `Add` / `Sub` / `Neg` / `PartialEq` gets `+`, `-`, unary `-`, and
-// `==` / `!=`: each dispatched to its impl method and monomorphized to a plain call
-// (no vtable, zero runtime cost).
-//
-// Each operator's result is printed as a vector, so the dispatch is visible
-// component by component.
+// Operator overloading through operator traits. Operators on a user type are sugar for
+// trait method calls. A `Copy` struct implementing `Add`, `Sub`, `Neg` and `PartialEq` gets
+// `+`, `-`, unary `-`, `==` and `!=`, each monomorphized to a plain call. Each operator's
+// result is printed as a vector, so the dispatch shows component by component.
 
 @derive(Copy, Clone)
 struct Vec2 {

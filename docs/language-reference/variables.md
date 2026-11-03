@@ -1,53 +1,31 @@
 # Variables
 
-Variables store values that can be used and manipulated in your programs.
+Neuro binds names with three keywords: `const` for compile-time constants, `val` for immutable bindings and `mut` for mutable ones. This page covers declaration, reassignment, destructuring, type annotations, scope and initialization. Moving a value from one binding to another is covered in [Ownership and Borrowing](ownership.md#moves).
 
-## Compile-Time Constants
+## Constants
 
-Use `const` to declare compile-time constants. Constants must have an explicit type
-annotation and a *constant expression* as their value.
+`const` declares a compile-time constant, either at module level or inside a function body. It needs an explicit type annotation, and its value must be a constant expression.
 
 ```neuro
 const MAX_RETRIES: i32 = 3
 const BASE: i32 = 10
-const DOUBLED: i32 = BASE * 2   // arithmetic on other consts is allowed
-```
-
-**Key points**:
-- Declared with `const` keyword
-- Type annotation is required
-- RHS must be a constant expression: literals, arithmetic/unary/cast on literals,
-  or identifiers that refer to previously declared `const` names
-- Function calls and runtime values are not allowed as `const` initializers
-- An integer constant must have a value of its type: an initializer that overflows it or
-  divides by zero is a compile error on the initializer (`ConstHasNoValue`)
-- No ownership or lifetime, consts do not participate in the borrow checker
-- Module-level consts are visible to all functions regardless of source order
-- Function-body consts are scoped to the enclosing function
-
-### Module-Level Constants
-
-```neuro
-const LEARNING_RATE_SCALE: i32 = 100
-const MAX_EPOCHS: i32 = 50
+const DOUBLED: i32 = BASE * 2
 
 func train() -> i32 {
-    return MAX_EPOCHS * LEARNING_RATE_SCALE   // 5000
-}
-```
-
-### Function-Body Constants
-
-```neuro
-func compute_threshold(base: i32) -> i32 {
     const FACTOR: i32 = 4
-    return base * FACTOR
+    return MAX_RETRIES * FACTOR
 }
 ```
+
+- Module-level constants are visible to every function, whatever the source order.
+- A function-body constant is visible from its declaration to the end of its block.
+- A constant may use the names of constants declared before it.
+- An integer constant must fit its type. An initializer that overflows, or divides by zero, is refused with `constant expression has no value`.
+- Constants take no part in ownership or borrow checking.
 
 ### Constant Expressions
 
-Valid RHS forms for `const`:
+A constant's value is built from these forms:
 
 | Form | Example |
 |---|---|
@@ -55,345 +33,134 @@ Valid RHS forms for `const`:
 | Float literal | `3.14`, `1.0e-3` |
 | Bool literal | `true`, `false` |
 | String literal | `"hello"` |
-| Unary op on const expr | `-MAX`, `!FLAG` |
-| Binary op on const exprs | `A * 2`, `A + B` |
-| Cast of const expr | `BASE as f32` |
-| Another `const` name | `DOUBLED` (if `DOUBLED` is a `const`) |
+| Unary op on a constant | `-MAX`, `!FLAG` |
+| Binary op on constants | `A * 2`, `A + B` |
+| Cast of a constant | `BASE as f32` |
+| Another `const` name | `DOUBLED` |
 
-### Constants vs Variables
+Function calls and run-time values are not constant expressions.
+
+### Constants and Variables
 
 | | `const` | `val` | `mut` |
 |---|---|---|---|
-| Keyword | `const` | `val` | `mut` |
 | Mutable | no | no | yes |
 | Scope | module or function | function/block | function/block |
-| RHS | constant expr only | any expr | any expr |
+| Initializer | constant expression only | any expression | any expression |
 | Ownership | none | yes | yes |
-| LLVM emission | global constant | stack alloca | stack alloca |
+| Emitted as | global constant | stack slot | stack slot |
 
-## Variable Declaration
+## Declaring Variables
 
-### Immutable Variables
-
-Use `val` to declare immutable variables:
+`val` declares an immutable binding and `mut` a mutable one. Both are statements inside a function body; a module-level binding is always a `const`.
 
 ```neuro
-val x: i32 = 42
-val name: string = "Neuro"
-val pi: f64 = 3.14159
-```
-
-**Key points**:
-- Declared with `val` keyword
-- Cannot be reassigned after initialization
-- Type annotation optional when type can be inferred from a numeric literal
-- Must be initialized at declaration
-
-### Mutable Variables
-
-Use `mut` to declare mutable variables:
-
-```neuro
-mut counter: i32 = 0
-counter = counter + 1
-counter = 42
-
-mut flag: bool = false
-flag = true
-```
-
-**Key points**:
-- Declared with `mut` keyword
-- Can be reassigned after initialization
-- Reassigned value must match original type
-- Type annotation optional when type can be inferred from a numeric literal
-- A binding is one kind of assignment target. Fields, elements and tensor coordinates are
-  targets too: see [places](operators.md#places-what-may-sit-on-the-left)
-
-## Syntax
-
-### Basic Syntax
-
-```neuro
-val name: Type = value      // Immutable
-mut name: Type = value      // Mutable
-```
-
-**Components**:
-- `val` or `mut` keyword
-- Variable name (identifier)
-- Type annotation (`: Type`)
-- Initializer expression (`= value`)
-
-### Examples
-
-```neuro
-func variables() -> i32 {
-    // Immutable variables
-    val x: i32 = 10
-    val y: i32 = 20
-    val sum: i32 = x + y
-
-    // Mutable variables
-    mut counter: i32 = 0
-    counter = 5
-    counter = counter + 1
-
-    return counter
+func main() -> i32 {
+    val limit: i32 = 10
+    mut total: i32 = 0
+    total = total + limit
+    return total
 }
 ```
 
-## Mutability
+- Every `val` and `mut` takes an initializer.
+- The type annotation is optional when the initializer determines the type (see [Type Annotations](#type-annotations)).
+- `mut` makes the binding reassignable. It does not change its type.
+- A `mut` pattern makes every binding in it mutable (see [Destructuring](#destructuring)).
 
-### Immutable by Default
+## Reassignment
 
-Variables are immutable by default in Neuro:
-
-```neuro
-val x: i32 = 10
-// x = 20  // Error: cannot assign to immutable variable
-```
-
-A reader can tell from the declaration alone which bindings change.
-
-### Explicit Mutability
-
-Use `mut` when you need to modify a variable:
-
-```neuro
-mut x: i32 = 10
-x = 20        // OK: x is mutable
-x = x + 5     // OK: can update
-```
-
-## Variable Reassignment
-
-### Mutable Variable Assignment
-
-```neuro
-mut x: i32 = 0
-x = 10                  // Simple assignment
-x = x + 5               // Update based on current value
-x = x * 2               // Arithmetic update
-```
-
-### Type-Safe Reassignment
-
-Reassigned values must match the variable's type:
-
-```neuro
-mut x: i32 = 10
-x = 20        // OK: i32
-// x = 3.14   // Error: expected i32, found f64
-// x = true   // Error: expected i32, found bool
-```
-
-### Assignment with Expressions
-
-```neuro
-mut result: i32 = 0
-result = add(5, 3)              // Function call result
-result = if x > 0 { 1 } else { 0 }  // Conditional
-result = x * 2 + y              // Complex expression
-```
-
-### Multiple Reassignments
+A `mut` binding takes a new value with `=`. The new value must have the binding's type.
 
 ```neuro
 func counter() -> i32 {
-    mut count: i32 = 0
-    count = count + 1     // count = 1
-    count = count + 1     // count = 2
-    count = count + 1     // count = 3
+    mut count = 0
+    count = count + 1
+    count = count * 10
     return count
 }
 ```
 
+A binding is one kind of assignment target. Fields, elements and tensor coordinates are targets too: see [places](operators.md#places-what-may-sit-on-the-left).
+
 ## Destructuring
 
-A `val` or `mut` binding may take a pattern instead of a single name:
+A `val` or `mut` may bind a pattern instead of a single name:
 
 ```neuro
-// Tuple destructuring
-val (x, y) = get_point()
+struct Point { x: i32, y: i32 }
 
-// Struct destructuring, binds each named field by its own name
-val Point { x, y } = point
-
-// Array destructuring, binds positionally
-val [a, b, c] = triple
-
-// Array destructuring with a trailing rest: `rest` is a fresh `[T; N - 2]` array
-val [first, second, ..rest] = numbers
-
-// A bare `..` ignores the remainder; `_` discards a single element
-val [head, ..] = numbers
-val [_, mid, _] = triple
-```
-
-A rest-less array pattern must bind every element; `val [a, b] = arr` where `arr`
-has more than two elements is a compile error. Add a `..rest` (or `..`) to capture
-the remainder. `mut` patterns make every binding mutable. Patterns nest, so an
-element may itself be a tuple, struct, or array pattern.
-
-### Pattern Matching in Declarations
-
-```neuro
-val Some(value) = optional else {
-    return 0
+func destructure() -> i32 {
+    val (a, b) = (3, 4)
+    val p = Point { x: 5, y: 6 }
+    val Point { x, y } = p
+    val [first, second, ..rest] = [1, 2, 3, 4]
+    val [head, ..] = [7, 8]
+    val [_, mid, _] = [1, 2, 3]
+    mut (lo, hi) = (1, 2)
+    lo = lo + 1
+    return a + b + x + y + first + second + rest[0] + head + mid + lo + hi
 }
 ```
 
-The `else` branch runs when the value does not match the pattern; see
-[`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) for the full form,
-including the optional `|binding|`.
+- Tuple patterns bind positionally.
+- Struct patterns bind each named field under its own name. There is no renaming form: `Point { x: px }` is a parse error.
+- Array patterns bind positionally. A rest-less array pattern must bind every element. Add `..rest` to capture the remainder as a fresh array, or a bare `..` to ignore it. `_` discards one element.
+- Patterns nest, so an element may itself be a tuple, struct or array pattern.
 
-## Move Semantics (Ownership)
+### Refutable Patterns
 
-Every binding owns its value. For **non-`Copy`** types (`string`, the collections,
-structs without `@derive(Copy)`), placing the value somewhere new *moves* ownership out
-of the source binding, and the source becomes invalid. Reading a moved binding is a
-compile error:
+A `val` pattern may fail to match when the value is an `Option` or a similar enum. The `else` branch runs when it does not match, and must leave the scope:
 
 ```neuro
-val s1: string = "Hello"
-val s2: string = s1        // s1 is MOVED into s2
-// val n: u64 = s1.len()   // ERROR: use of moved value 's1'
-val n: u64 = s2.len()      // OK, s2 owns the value now
-```
-
-A move happens whenever a non-`Copy` value is handed to a new owner: a `val`/`mut`
-initializer, an assignment, a `return` or a function's last expression, a struct-field
-store, a by-value call argument, the left side of `??`, the operand of `?`, or a `match`
-whose arm binds an owning payload by value. An `if`, `match` or block in one of those
-positions moves whatever its arms yield. A value reached through a borrow (a `&self`
-receiver's field, say) owns nothing to hand over, so moving it is an error:
-
-```neuro
-func consume(s: string) -> u64 { s.len() }
-
-val greeting: string = "Hi"
-val len: u64 = consume(greeting)   // greeting is moved into consume()
-// val again = greeting.len()      // ERROR: greeting was moved
-```
-
-**`Copy` scalars are never moved.** `i8`..`u64`, `f32`/`f64`, and `bool` are
-duplicated on assignment, so the source stays valid:
-
-```neuro
-val a: i32 = 5
-val b: i32 = a             // a is COPIED
-val c: i32 = a + b         // both a and b still valid
-```
-
-**`.clone()` is the opt-out.** When you need an independent copy of a non-`Copy`
-value, clone it, the receiver is borrowed, not moved:
-
-```neuro
-val a: string = "hello"
-val b: string = a.clone()  // a is NOT moved
-val ok: bool = a == b      // reading a here is fine
-```
-
-**A move in a branch counts after the branch.** A move inside one arm of an `if` or
-`match` does not affect the other arms, but past the `if` or `match` the binding may
-already be gone, so reading it there is a use of a moved value. An arm that leaves
-(`return`, `break`, `continue`, or a `panic`) is the exception, since no path past the
-branch runs it:
-
-```neuro
-val msg: string = "hi"
-if ready {
-    val r: u64 = consume(msg)   // moves msg on this path
+func first_or_zero(optional: Option<i32>) -> i32 {
+    val Some(value) = optional else {
+        return 0
+    }
+    return value
 }
-// val n: u64 = msg.len()      // COMPILE ERROR: use of moved value 'msg'
-
-val other: string = "hey"
-if !ready {
-    return consume(other)       // moves other, but this path leaves
-}
-val m: u64 = other.len()        // OK: every path that reaches here kept `other`
 ```
 
-> Move tracking covers every non-`Copy` type: `string`, the collections
-> (`Vec`, `HashMap`, `BTreeMap`), any struct without `@derive(Copy)`, and any array,
-> tuple, enum, newtype or generic instance holding one of those. Scalars, aggregates
-> built only out of `Copy` parts, references, and `@derive(Copy)` structs are
-> freely duplicable. A type with a `Drop` impl cannot be `Copy`. `mut` bindings that
-> were moved can be revived by reassigning them a fresh value; a `mut` binding that
-> still holds one has that value destroyed by the assignment that replaces it.
+The full form, including the optional `|binding|`, is described in [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope).
 
 ## Type Annotations
 
-Type annotations are optional when the initializer determines the type:
+Annotations are optional when the initializer fixes the type:
 
 ```neuro
-val x: i32 = 42           // Explicit annotation
-val pi: f64 = 3.14159     // Explicit annotation
-val flag: bool = true     // Explicit annotation
+struct Point { x: i32, y: i32 }
 
-val n = 100               // Inferred i32 (default for integer literals)
-val ratio = 3.14          // Inferred f64 (default for float literals)
-mut count = 0             // Inferred i32
-```
-
-A `bool`, string or struct initializer gives the binding its own type (`val p = Point { x: 1, y: 2 }`
-is a `Point`). An integer literal with nothing else to go on is `i32`, a float literal `f64`.
-Function parameters and return types always need annotations.
-
-## Variable Scope
-
-### Function Scope
-
-Variables are scoped to the function where they're declared:
-
-```neuro
-func example() -> i32 {
-    val x: i32 = 10
-    return x  // x is in scope
-}
-
-func other() -> i32 {
-    // return x  // Error: x not in scope
-    return 0
+func annotations() -> i32 {
+    val x: i32 = 42           // explicit
+    val n = 100               // i32: the default for integer literals
+    val ratio = 3.14          // f64: the default for float literals
+    mut count = 0             // i32
+    val p = Point { x: 1, y: 2 }   // Point
+    return x + n + count + p.x
 }
 ```
 
-### Block Scope
+A `bool`, `string` or struct initializer gives the binding its own type. An integer literal with nothing else to go on is `i32`, and a float literal is `f64`. An annotation must fit its value: `val x: u8 = 300` is refused with `integer literal 300 out of range for type u8`.
 
-Variables are scoped to their enclosing block:
+Function parameters always need type annotations.
+
+## Scope and Shadowing
+
+A name is visible from its declaration to the end of the block that contains it. A function's locals are not visible to other functions.
 
 ```neuro
 func blocks() -> i32 {
     val x: i32 = 1
     if true {
-        val y: i32 = 2  // y only exists in this block
-        // x and y both in scope
+        val y: i32 = 2
     }
-    // Only x in scope here
-    // return y  // Error: y not in scope
     return x
 }
 ```
 
 ### Shadowing
 
-Inner scopes can shadow outer scope variables:
-
-```neuro
-func shadowing() -> i32 {
-    val x: i32 = 1
-    if true {
-        val x: i32 = 2  // Shadows outer x
-        // Inner x is 2
-    }
-    // Outer x is still 1
-    return x  // Returns 1
-}
-```
-
-The inner binding may have a different type. A later `val` or `mut` in the *same* block may
-reuse a name too, and change its type:
+A `val` or `mut` whose name is already in scope declares a new binding. The new binding may have a different type, and it may reuse a name from the same block:
 
 ```neuro
 func reparse() -> i32 {
@@ -403,251 +170,79 @@ func reparse() -> i32 {
 }
 ```
 
-A shadowed binding is not dropped when it is shadowed. It stays owned, and alive under any
-borrow taken of it, until its block ends. Its initializer runs before the new name exists, so
-`val x = x` moves the outer `x` into the new one.
+A `val` inside a block shadows an outer `mut` of the same name. It does not assign to it:
 
-Reassignment is the other way to change a value. It keeps the same binding, so the new
-value must have the binding's type.
+```neuro
+func shadow_mut() -> i32 {
+    mut total: i32 = 0
+    if true {
+        val total: i32 = 10   // a new binding, gone at this brace
+    }
+    return total              // 0
+}
+```
+
+To assign to the outer `mut`, drop the `val` and write `total = 10`.
+
+A shadowed binding is not dropped when it is shadowed. It stays alive until its block ends, including under any borrow taken of it. The new initializer runs before the new name exists, so `val s = s` moves the outer `s` into the new binding.
 
 ## Initialization
 
-### Required Initialization
-
-Variables must be initialized when declared:
+Every binding is initialized where it is declared. The initializer may be any expression, including `if` and blocks:
 
 ```neuro
-val x: i32 = 42           // OK: initialized
-mut y: i32 = 0            // OK: initialized
-// val z: i32             // Error: missing initializer
-```
-
-### Initialization with Expressions
-
-```neuro
-val x: i32 = 10 + 20              // Arithmetic
-val y: i32 = add(5, 3)            // Function call
-val z: i32 = if true { 1 } else { 0 }  // Conditional
-```
-
-## Common Patterns
-
-### Accumulators
-
-```neuro
-func sum_to_n(n: i32) -> i32 {
-    mut sum: i32 = 0
-    for i in 1..=n {
-        sum = sum + i
-    }
-    return sum
-}
-```
-
-### State Machines
-
-```neuro
-func state_machine(input: i32) -> i32 {
-    mut state: i32 = 0
-    if input == 1 {
-        state = 1
-    } else if input == 2 {
-        state = 2
-    }
-    return state
-}
-```
-
-### Conditional Initialization
-
-```neuro
-func conditional_init(flag: bool) -> i32 {
-    val x: i32 = if flag {
-        42
-    } else {
-        0
-    }
+func pick(flag: bool) -> i32 {
+    val x: i32 = if flag { 42 } else { 0 }
     return x
 }
 ```
 
-## Examples
-
-### Counter
-
-```neuro
-func count_up() -> i32 {
-    mut counter: i32 = 0
-    counter = counter + 1  // 1
-    counter = counter + 1  // 2
-    counter = counter + 1  // 3
-    return counter
-}
-```
-
-### Swap (Manual)
-
-```neuro
-func swap_manual(a: i32, b: i32) -> i32 {
-    mut temp: i32 = a
-    mut first: i32 = b
-    mut second: i32 = temp
-    return first * 100 + second
-}
-```
-
-### Running Total
-
-```neuro
-func running_total(a: i32, b: i32, c: i32) -> i32 {
-    mut total: i32 = 0
-    total = total + a
-    total = total + b
-    total = total + c
-    return total
-}
-```
-
-### Flag Toggle
-
-```neuro
-func toggle_flag(initial: bool) -> i32 {
-    mut flag: bool = initial
-    flag = !flag
-    if flag {
-        return 1
-    } else {
-        return 0
-    }
-}
-```
-
-## Best Practices
-
-### 1. Prefer Immutable Variables
-
-```neuro
-// Good: immutable when possible
-val x: i32 = 10
-val y: i32 = x * 2
-
-// Only use mut when necessary
-mut counter: i32 = 0
-counter = counter + 1
-```
-
-### 2. Declare Variables Close to Use
-
-```neuro
-// Good: declare near usage
-func calculate() -> i32 {
-    val x: i32 = get_x()
-    val y: i32 = get_y()
-    return x + y
-}
-
-// Bad: declare far from usage
-func calculate_bad() -> i32 {
-    val x: i32 = get_x()
-    // ... lots of code ...
-    val y: i32 = get_y()
-    return x + y
-}
-```
-
-### 3. Use Descriptive Names
-
-```neuro
-// Good: clear names
-val user_count: i32 = 42
-val is_valid: bool = true
-val max_retries: i32 = 3
-
-// Bad: unclear names
-val n: i32 = 42
-val f: bool = true
-val x: i32 = 3
-```
-
-### 4. Initialize with Meaningful Values
-
-```neuro
-// Good: meaningful initialization
-mut error_count: i32 = 0
-mut is_complete: bool = false
-
-// Avoid: magic numbers without context
-mut x: i32 = 42  // What does 42 mean?
-```
-
-### 5. Group Related Variables
-
-```neuro
-// Good: related variables together
-val width: i32 = 10
-val height: i32 = 20
-val area: i32 = width * height
-```
-
 ## Common Mistakes
 
-### Assigning to Immutable Variable
+Each example shows the diagnostic the compiler reports, with its exact text.
 
 ```neuro
 val x: i32 = 10
-// x = 20  // Error: cannot assign to immutable variable
+x = 20   // error: cannot assign to immutable variable 'x'
+```
 
-// Fix: use mut
+```neuro
 mut y: i32 = 10
-y = 20  // OK
+y = 3.14   // error: type mismatch: expected i32, found f64
 ```
 
-### Type Mismatch in Reassignment
-
 ```neuro
-mut x: i32 = 10
-// x = 3.14  // Error: expected i32, found f64
-
-// Fix: ensure types match
-mut y: f64 = 10.0
-y = 3.14  // OK
+func main() -> i32 {
+    val z
+    return 0
+}   // error: variable 'z' used without initialization
 ```
 
-### Using Uninitialized Variable
-
 ```neuro
-// Error: uninitialized variables are not allowed
-// val x: i32
-// return x
-
-// Fix: initialize
-val x: i32 = 0
-return x
+const N = 5   // error: unexpected token Equal, expected ':'
 ```
 
-### Shadowing Instead of Reassignment
-
-A `val` inside a block declares a new binding, even when an outer `mut` has the same name:
+```neuro
+func f() -> i32 { 3 }
+const C: i32 = f()   // error: constant expression required: only literals, arithmetic on literals, and references to other constants are allowed
+```
 
 ```neuro
-mut total: i32 = 0
-if ready {
-    val total: i32 = 10   // a new binding that ends at this block's brace
+func main() -> i32 {
+    val [a, b] = [1, 2, 3]   // error: array destructuring pattern binds 2 element(s) but the array has 3: list every element or add a `..rest` pattern
+    return a
 }
-return total              // still 0
-
-// If you meant reassignment, drop the `val`:
-// total = 10
 ```
 
-## References
+```neuro
+func main() -> i32 { return 0 }
+val TOP: i32 = 1   // error: unexpected token Val, expected function, struct, enum, impl, const, type, newtype, module, or import definition
+```
 
-- [Types](types.md) - Type system and type checking
-- [Functions](functions.md) - Local variables in functions
-- [Expressions](expressions.md) - Variable initialization expressions
-- [Operators](operators.md) - Assignment operator
+## See also
 
-## See Also
-
-- Rust Book: [Variables and Mutability](https://doc.rust-lang.org/book/ch03-01-variables-and-mutability.html)
-- [Immutability](https://en.wikipedia.org/wiki/Immutable_object)
+- [Ownership and Borrowing](ownership.md): moves, borrows and `.clone()`
+- [Types](types.md): primitive types and inference
+- [Functions](functions.md): parameters and local bindings
+- [Control flow](control-flow.md): `val ... else` and block scope
+- [Operators](operators.md): assignment targets

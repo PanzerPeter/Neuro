@@ -129,7 +129,7 @@ func main() -> i32 {
 }
 
 /// Reducing a vector along its only axis yields the rank-0 tensor. Indexing cannot read
-/// one back — a rank-0 index has no argument to give — so the value is reached by
+/// one back (a rank-0 index has no argument to give) so the value is reached by
 /// reducing it again, over the empty product of extents that is its single element.
 #[test]
 fn reducing_a_vector_yields_a_rank_zero_tensor() {

@@ -163,21 +163,20 @@ Every row is implemented, tested and usable today. Depth lives in the
 
 | Feature | Summary |
 |---|---|
-| **Types and inference** | `i8` through `u64`, `f16` / `bf16` / `f32` / `f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, type aliases |
-| **Control flow** | `if` / `else if` / `else`, `while`, `loop`, range-`for`, labelled `break` / `continue`, block-as-value, `for x in xs` / `&xs` / `&mut xs` over arrays, slices and `Vec`s, `for` over any type implementing the prelude's iterator protocol |
-| **Functions** | Recursion, forward references, implicit returns, named arguments with external labels, higher-order functions, `\|>` pipelines, `>>` composition |
-| **Generics and traits** | Generic functions, structs, impls and methods, nested at their own parameters (`Option<T>`), const generics, `where` clauses, turbofish; required and default methods, `Self`, associated types, operator traits, `impl Trait` and `dyn Trait` dispatch. Fully monomorphized |
-| **Closures** | `\|x\| x * x` typed by its context, captures by copy, `&`, `&mut` or `move`, `(T) -> R` / `mut (T) -> R` / `once (T) -> R` function types, passed to generic higher-order functions, returned and stored, `mut` and `once` values moved and lent to calls |
-| **Structs, enums, newtypes** | Fields, functional update `..base`, `impl` blocks and trait impls on structs, enums and newtypes with `&self` / `&mut self` / consuming receivers; unit, tuple and struct-field variants carrying any sized payload; `@derive(Copy, Clone, Debug, PartialEq, Hashable)`, or the same traits by hand, each usable as a bound |
-| **Pattern matching** | Exhaustive `match` over variant, literal, or, range and wildcard patterns with `if` guards, `if val` / `while val`, plus `val`-binding destructuring of structs and arrays |
-| **Arrays, tuples, collections** | `[T; N]`, tuples, zero-copy slices `&[T]` / `&mut [T]`, heap-backed `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` owning any sized element, and `StringBuilder` ([reference](docs/language-reference/types.md)) |
-| **Tensors** | `Tensor<T, [d0, ...]>` with shapes checked at compile time: broadcasting, `a @ b` matmul, slicing, shape generics, named and dynamic axes, reductions, sorting, `einsum`, `.map` / `.zip` / `.reduce`, `.exp()` / `.log()` / `.sqrt()` / `.tanh()` / `.abs()` / `.pow(p)`, and `@gpu` functions run as NVIDIA or AMD kernels on Linux, with an opt-in CPU fallback chosen at startup, hand-written `@kernel` functions launched one thread per element, and tensors kept on any GPU with `.to(Device::GPU(n))`, where float and integer tensor operations run on them too ([reference](docs/language-reference/tensors.md)) |
-| **Automatic differentiation** | `@grad` compiles a reverse-mode derivative beside a function or method, with no gradient tape; `wrt:` selection, `.backward()` / `.grad()` / `.zero_grad()`, `order: 2` Hessians, `.detach()` / `@no_grad`, each checked against finite differences ([reference](docs/language-reference/autodiff.md)) |
-| **Strings** | Immutable fat-pointer `string` with slices, concatenation, codepoint iteration, interpolation `"{x:.2}"` and triple-quoted blocks; growable `StringBuilder` buffer ([reference](docs/language-reference/strings.md)) |
-| **Errors** | `Option<T>` and `Result<T, E>` in the implicit prelude as ordinary generic enums with `.map`, `.map_err`, `.ok`, `.ok_or` and `is_*`; `??` unwraps with a lazy or diverging fallback, `?` propagates, `val-else` exits the scope, `checked_*` arithmetic and float `.to_checked::<T>()` report what does not fit |
-| **Ownership** | Move-by-default, `Copy`, borrows with flow-sensitive exclusivity, also held in struct fields and enum payloads, lifetime elision, deterministic `Drop`, and `pool { }` arena blocks ([reference](docs/language-reference/memory-model.md)) |
-| **Modules** | Every `.nr` file is a module, `mod.nr` directories nest, inline `module { }` blocks group; `import` with renames and re-export facades, private-by-default visibility, implicit prelude ([reference](docs/language-reference/modules.md)) |
-| **Toolchain** | `neurc check` / `run` / `compile` on inkwell 0.10 and LLVM 23, `--emit obj` for C and NumPy interop, buffered `print` / `println`, and a `panic` / `assert` runtime with located diagnostics |
+| **Types and inference** | `i8`-`u64`, `f16` / `bf16` / `f32` / `f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, aliases ([reference](docs/language-reference/types.md)) |
+| **Control flow** | `if`, `while`, `loop`, `for` over ranges, collections and the iterator protocol, `'label` breaks, blocks as values ([reference](docs/language-reference/control-flow.md)) |
+| **Functions and closures** | Named arguments, implicit returns, `\|>` pipelines, `>>` composition; closures that capture by copy, borrow or `move` ([reference](docs/language-reference/functions.md)) |
+| **Generics and traits** | Monomorphized generics with const parameters and `where` clauses, associated types, operator traits, `impl` / `dyn` dispatch ([reference](docs/language-reference/generics-and-traits.md)) |
+| **Structs and enums** | Methods with `&self` / `&mut self` / `self` receivers, payload variants, newtypes, `@derive(Copy, Clone, Debug, PartialEq, Hashable)` ([reference](docs/language-reference/structs.md)) |
+| **Pattern matching** | Exhaustive `match` with or, range and guard patterns, `if val` / `while val`, `val-else`, destructuring `val` bindings |
+| **Arrays and collections** | `[T; N]`, tuples, slices `&[T]` / `&mut [T]`, and `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` owning any sized element |
+| **Tensors** | `Tensor<T, [dims]>` with compile-time shapes: broadcasting, `@`, slicing, reductions, sorting, `einsum`, named and dynamic axes ([reference](docs/language-reference/tensors.md)) |
+| **GPU** | `@gpu` functions as NVIDIA or AMD kernels on Linux with an opt-in CPU fallback, hand-written `@kernel`s, tensors kept on a GPU with `.to(...)` |
+| **Automatic differentiation** | `@grad` compiles a reverse-mode derivative with no tape: `wrt:`, `.backward()`, `order: 2` Hessians, `.detach()` ([reference](docs/language-reference/autodiff.md)) |
+| **Strings** | Immutable `string` slices, interpolation `"{x:.2}"`, triple-quoted blocks, codepoint iteration, growable `StringBuilder` ([reference](docs/language-reference/strings.md)) |
+| **Errors** | `Option<T>` / `Result<T, E>` in the prelude, `??` fallbacks, `?` propagation, `checked_*` arithmetic, `.to_checked::<T>()` conversions |
+| **Ownership** | Moves, `Copy`, borrow exclusivity, references in fields, lifetimes, deterministic `Drop`, `pool { }` arenas ([reference](docs/language-reference/ownership.md)) |
+| **Modules and toolchain** | File modules, `import` and re-exports, the prelude; `neurc check` / `run` / `compile` on LLVM 23, `--emit obj` for C and NumPy ([reference](docs/language-reference/modules.md)) |
 
 > **Alpha memory note.** Stack values, literals, the owning collections and reassigned bindings
 > are all reclaimed, and so is a heap `string` stored into a struct field, an array or tuple

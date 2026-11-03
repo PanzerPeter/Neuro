@@ -1,16 +1,8 @@
-// Showcase: windowed sensor readings behind one slice signature.
-//
-// Integration example combining borrowed slices with features that shipped
-// before them:
-//   `&[T]` / `&mut [T]` slices over both a fixed-size array and a `Vec<T>` ·
-//   `.slice(range)` sub-ranges · struct with `impl` methods (`&self`) ·
-//   `Option<T>` returned from a fallible reader and unwrapped with `match` ·
-//   `for (i, x) in xs.enumerate()` · string interpolation with the format
-//   mini-language · `as` casts.
-//
-// The point of the slice type is that `Window::over` is written once and reads
-// a raw array, a window into that array, and a heap-backed `Vec` alike: none of
-// which copies a single element.
+// Showcase: windowed sensor readings behind one slice signature. Integration example:
+// `&[T]` and `&mut [T]` slices over an array and a `Vec<T>`, `.slice(range)`, `impl`
+// methods on `&self`, `Option` unwrapped with `match`, `for (i, x) in xs.enumerate()`, and
+// `as` casts. `Window::over` is written once and reads a raw array, a window into it, or a
+// heap-backed `Vec` alike, copying no elements.
 
 struct Window {
     count: u64,

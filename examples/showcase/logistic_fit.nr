@@ -1,21 +1,14 @@
 // Showcase: logistic regression with an elastic-net penalty, trained by its own gradient.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's elementwise math inside a `@grad` body: `.tanh()` builds the sigmoid,
-//   `.log()` the likelihood, `.abs()` and `.pow(2.0)` the penalty, each differentiated
-//   by its own rule · Phase 3's `.backward()` / `.grad()` / `.zero_grad()` training loop
-//   · 2C's `@` contraction and scalar broadcast, `@` sharing `*`'s precedence row
-//   · 2B's reductions and in-place compound assignment · a struct recording the run
-//   · string interpolation with the format mini-language, where `.sqrt()` and `.exp()`
-//   turn the results into readable numbers.
-//
-// The derivative of every one of those functions is written out by the compiler at
-// compile time. `.abs()` has no slope at 0, and the language picks 0 there, so a weight
-// the L1 term drives to exactly zero is not pushed back off it.
+// Integration example: `.tanh()`, `.log()`, `.abs()` and `.pow(2.0)` inside a `@grad` body,
+// the `.backward()`, `.grad()` and `.zero_grad()` loop, `@` sharing the precedence row of
+// `*`, reductions, a struct recording the run, and `.sqrt()` and `.exp()` in the report.
+// The compiler writes out the derivative of each function at compile time. `.abs()` has no
+// slope at 0 and the language picks 0 there, so a weight the L1 term drives to exactly zero
+// is not pushed back off it.
 
 // Six samples of two features and a constant column for the bias. Positive
 // features mean class 1, negative ones class 0.
+
 @grad(wrt: [w])
 func penalized_loss(w: &mut Tensor<f32, [3, 1]>, l1: f32, l2: f32) -> Tensor<f32, []> {
     val x: Tensor<f32, [6, 3]> = [

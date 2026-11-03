@@ -1,16 +1,9 @@
 // Showcase: a two-layer classifier whose layers run on the GPU when one is usable.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   `@gpu(fallback: true)` · `@` and broadcast `+` in kernel bodies · `pool` arena blocks
-//   · a closure through `.map` · an enum with a payload and `match`
-//   · a `Vec` of `Copy` structs.
-//
-// Both layers carry `fallback: true`, so the program picks their bodies once at startup:
-// the GPU kernels where an NVIDIA GPU is usable, the same arithmetic on the CPU where
-// none is. The output is identical either way.
-// Each batch is also computed inline on the host, and a `Verdict` says whether the two
-// agree. Every batch runs inside a `pool`.
+// Integration example: `@gpu(fallback: true)`, `@` and broadcast `+` in kernel bodies,
+// `pool` blocks, a closure through `.map`, an enum with a payload matched, and a `Vec` of
+// `Copy` structs. The bodies are picked once at startup: GPU kernels where an NVIDIA GPU is
+// usable, the same arithmetic on the CPU otherwise. Each batch is also computed on the
+// host, and a `Verdict` records whether the two agree. The output is identical either way.
 
 @gpu(fallback: true)
 func hidden(x: &Tensor<f32, [4, 3]>, w: &Tensor<f32, [3, 5]>, b: &Tensor<f32, [5]>) -> Tensor<f32, [4, 5]> {

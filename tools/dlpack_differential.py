@@ -14,7 +14,7 @@ link it into a shared library with the platform C compiler, `ctypes`-load it, ca
 function, wrap the returned pointer in a DLPack capsule, and hand it to `numpy.from_dlpack`.
 
 NumPy takes OWNERSHIP of each array it imports, so releasing them at the end runs the
-handle's own `deleter` — the single release path the spec requires. A double free or a
+handle's own `deleter`: the single release path the spec requires. A double free or a
 deleter that frees the wrong block crashes the interpreter here instead of going unnoticed.
 
 Run it directly, or through `cargo test -p neurc --test numpy_differential`:
@@ -295,7 +295,7 @@ class NeuroTensor:
     """The DLPack producer side of a pointer a Neuro function returned.
 
     `numpy.from_dlpack` asks any object for `__dlpack__`, so wrapping the raw pointer in
-    this is the whole import path — no copy, no intermediate buffer. The capsule carries no
+    this is the whole import path: no copy, no intermediate buffer. The capsule carries no
     destructor of its own: once NumPy consumes it, the array owns the handle and calls the
     handle's `deleter` when it is collected.
     """

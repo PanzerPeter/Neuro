@@ -1,36 +1,11 @@
-// Showcase: a weight update written in place, the shape a training step has.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   tensor literal coercion + the construction helpers · a struct holding a
-//   tensor field · an enum matched to pick a schedule · a `for` loop · borrowed
-//   tensor parameters · string interpolation with the format mini-language ·
-//   2B's in-place compound assignment, which is the reason the weight buffer
-//   keeps one address across every step below · 2B's slicing and indexing,
-//   which is what finally reads the updated elements back out · 2B's shape
-//   generics, which let the step below be written ONCE for every width a layer
-//   in this program has · 2C's by-value tensor operators with their
-//   broadcast shape rules, which give the same step its allocating form · and
-//   2C's `@` operator, which turns those weights into an actual forward pass.
-//
-// `w -= g` updates the buffer `w`'s DLPack handle already addresses. Nothing is
-// allocated, no handle is replaced, and a pointer held by an optimizer or by a
-// foreign DLPack consumer stays valid across the statement. The by-value
-// desugaring `w = w - g` would build a second tensor per step and invalidate
-// both, which is why the compound operators are their own dispatch.
-//
-// The last two blocks are where the sub-phase's own features meet. `@` contracts
-// an axis rather than walking one, so a `[4, 64]` batch against the `[64, 32]`
-// weight matrix gives `[4, 32]` activations — and the bias that is then added to
-// them is a `[32]` row broadcast down all four, which is the element-wise rule
-// from the block above doing its job on the matrix product's result.
-//
-// 2C's by-value operators are the other half of that pair, and the block below is
-// where the two meet: `&w - &(lr * g)` ALLOCATES a fresh tensor and
-// reads two borrows, which is exactly what makes it the wrong thing to run per
-// step and the right thing to compute a candidate with. Its operands broadcast:
-// a scalar learning rate stretches across every element, and a per-neuron bias
-// row stretches down the rows of the matrix it is added to.
+// Showcase: a weight update written in place, the shape a training step takes. Integration
+// example: tensor literals and construction helpers, a struct with a tensor field, an enum
+// that picks a schedule, tensor parameters, `for`, slicing and indexing, shape generics,
+// and `@` for a forward pass. `w -= g` updates the buffer `w` already addresses, so nothing
+// is allocated and a pointer held by an optimizer or a DLPack consumer stays valid. The
+// by-value form `w = w - g` builds a second tensor, so it is the wrong form to run per step
+// and the right one to compute a candidate with. Broadcasting covers a scalar learning rate
+// and a per-neuron bias row.
 
 enum Schedule {
     Constant,
@@ -62,7 +37,7 @@ func step_for(schedule: Schedule) -> Tensor<i32, [4]> {
 
 // One descent step, written once for every width in the program. `N` is a
 // compile-time value inferred from the operands' own shape, so `descend` below is
-// specialized per width with nothing left to check at run time — and passing two
+// specialized per width with nothing left to check at run time: and passing two
 // tensors of DIFFERENT widths to it is a compile error, not a silent misalignment.
 // `where N > 0` rules out the rank-1 tensor with no elements to step.
 func descend<N>(w: Tensor<i32, [N]>, step: &Tensor<i32, [N]>) -> Tensor<i32, [N]>

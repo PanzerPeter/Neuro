@@ -1,15 +1,6 @@
-// `.rev()` on a range: walk the same bounds from the top down.
-//
-// `.rev()` applies to a RANGE, not to a sequence, so it is written on the
-// parenthesised range itself. It changes the order values arrive in and nothing
-// else: the bounds, the element type, and which values the range names are the
-// same as without it.
-//
-// The exclusive and inclusive spellings differ exactly where they always do.
-// `(0..5).rev()` starts at 4, because 5 was never in the range; `(0..=5).rev()`
-// starts at 5, because it was.
-//
-// Expected exit code: 0
+// `.rev()` on a range: the same bounds walked from the top down. `.rev()` applies to a
+// range, not a sequence, and changes only the order: `(0..5).rev()` starts at 4,
+// `(0..=5).rev()` at 5.
 
 func main() -> i32 {
     mut exclusive = ""

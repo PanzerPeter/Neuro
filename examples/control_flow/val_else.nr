@@ -1,19 +1,9 @@
-// `val-else`: unwrap a pattern or leave the scope.
-//
-// `val PATTERN = value else { ... }` binds the pattern's names for the REST of the
-// enclosing block, not just one arm. The `else` branch handles the failure and must
-// exit the scope (`return`, `break`, `continue`, `panic(...)`, `unreachable()`), so
-// the binding is always initialized on the path that continues.
-//
-// Writing `else |name|` binds the value the failure carried. What `name` is depends on
-// the scrutinee's type:
-//
-//   Result<T, E>   the `Err` payload
-//   Option<T>      nothing: `None` is empty, so only `else |_|` (or plain `else`)
-//   any other enum the original scrutinee, unmodified, for a nested `match`
-//
-// Every form is exercised twice (once binding, once failing), and both results
-// are printed, so which side of each `val-else` ran is visible in the output.
+// `val-else`: unwrap a pattern, or leave the scope. `val PATTERN = value else { }` binds
+// the pattern's names for the rest of the enclosing block. The `else` branch must leave the
+// scope (`return`, `break`, `continue`, `panic` or `unreachable`). `else |name|` binds the
+// failure payload: the `Err` value for a `Result`, nothing for an `Option` (use `else
+// |_|`), and the unmodified scrutinee for any other enum. Both sides of each form run, and
+// both results are printed.
 
 enum Shape {
     Circle { radius: i32 },

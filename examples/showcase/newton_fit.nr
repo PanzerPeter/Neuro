@@ -1,21 +1,13 @@
-// Showcase: Newton's method against gradient descent, on one logistic fit.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's `@grad(order: 2)`, whose `.backward()` fills `.hessian()` beside
-//   `.grad()` · elementwise `.exp()` and `.log()` inside the differentiated body,
-//   each differentiated twice · 2D's `pool` arena around every step · element
-//   reads of the gradient and the Hessian, and a tensor literal built from them ·
-//   a `Copy` struct recording each run · string interpolation with the format
-//   mini-language.
-//
-// Both optimizers minimize the same regularized logistic loss over a weight and a
-// bias. Gradient descent follows the slope; Newton's method also reads the
-// curvature, solving the 2 x 2 system `H d = g` for its step, and lands on the
-// minimum in a handful of steps where descent needs ten times as many.
+// Showcase: Newton's method against gradient descent, on one logistic fit. Integration
+// example: `@grad(order: 2)` with `.hessian()` beside `.grad()`, `.exp()` and `.log()`
+// differentiated twice, a `pool` around every step, element reads of the gradient and
+// Hessian, and a `Copy` struct per run. Both optimizers minimize the same regularized loss.
+// Newton's method solves the 2 x 2 system `H d = g` for its step, so it reaches the minimum
+// in a handful of steps where gradient descent needs many more.
 
 // Six points on a line, their classes overlapping, so the best fit is finite. The
 // ridge term makes the loss strictly convex, which Newton's method relies on.
+
 @grad(order: 2)
 func logistic_loss(theta: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
     val x: Tensor<f32, [6]> = [-2.0, -1.0, -0.5, 0.5, 1.0, 2.5]

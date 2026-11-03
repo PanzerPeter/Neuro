@@ -1,14 +1,10 @@
-// Constraining an associated type in a bound: `Trait<Assoc = T>`.
-//
-// A trait that declares `type Item` says a member exists; only an impl says what it
-// is. That is enough to call a method on a concrete value, but not through a type
-// parameter: `T: Source` erases the implementor, and with it the only thing that
-// answers `Self::Item`. Writing `T: Source<Item = i32>` puts the answer in the bound,
-// so a generic body can call a method whose signature names the associated type.
-//
-// The form is one bound, written in three places: the parameter list, a `where`
-// clause, and argument-position `impl Trait`, which is that same bound spelled
-// anonymously. In return position it states what the caller gets.
+// Constraining an associated type in a bound: `Trait<Assoc = T>`. A trait with `type Item`
+// says a member exists, and only an impl says what it is. `T: Source` erases the
+// implementor, so `Self::Item` cannot be answered through it. `T: Source<Item = i32>` puts
+// the answer in the bound, so a generic body can call a method whose signature names the
+// associated type. The same bound can be written in a parameter list, in a `where` clause,
+// or as an argument-position `impl Trait`. In return position it states what the caller
+// gets.
 
 trait Source {
     type Item

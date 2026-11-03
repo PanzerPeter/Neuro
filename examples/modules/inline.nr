@@ -1,8 +1,7 @@
-// Inline `module { }` blocks: a module that needs no file of its own.
-//
-// A block is a module in every sense a file is one: its items are private unless written
-// with `export`, a qualified path reaches into it, and blocks nest. Use one for a grouping
-// that belongs with the code around it; use a file when the unit is worth compiling apart.
+// Inline `module { }` blocks: a module that needs no file of its own. A block is a module
+// in every sense a file is one: its items are private unless `export`ed, qualified paths
+// reach into it, and blocks nest. Use one for a grouping that belongs with the code around
+// it.
 
 module counter {
     export struct Tally {

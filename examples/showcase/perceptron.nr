@@ -1,13 +1,7 @@
-// Showcase: a two-neuron feed-forward pass.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   structs · impl blocks (associated fn + &self methods) · f64 arithmetic
-//   · if/else as a value expression · while loop · `as` cast.
-//
-// A "hidden" neuron feeds an "output" neuron; a small ramp of inputs is run
-// through both and the fired outputs are summed. The truncated sum is returned
-// as the process exit code.
+// Showcase: a two-neuron feed-forward pass. Integration example: structs, `impl` blocks
+// with an associated function and `&self` methods, `f64` arithmetic, `if`/`else` as a
+// value, `while`, and `as`. A hidden neuron feeds an output neuron. A ramp of inputs runs
+// through both, the fired outputs are summed, and the truncated sum is the exit code.
 
 struct Neuron {
     weight: f64,

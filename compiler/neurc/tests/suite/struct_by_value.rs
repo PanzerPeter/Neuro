@@ -191,3 +191,40 @@ func main() -> i32 {
         .expect("compilation failed");
     assert_eq!(exit, 1, "the destructor must run exactly once");
 }
+
+/// BUG-092: a struct a helper returned released none of its `string` fields. The flags
+/// now cross the return: a field built by the callee is freed with the caller's binding,
+/// a field moved out on (bound, or pushed into a `Vec`) is freed by its new owner, and a
+/// field filled from a literal is never freed. A leak is LeakSanitizer's to see; what
+/// is asserted here is the arithmetic and a clean exit, which a bad free would not give.
+#[test]
+fn regression_bug_092_returned_struct_owns_its_string_fields() {
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "returned_struct_strings.nr",
+            r#"
+struct T { text: string, n: i32 }
+
+func mk(i: i32) -> T { T { text: "w {i}", n: i } }
+
+func lit(i: i32) -> T { T { text: "plain", n: i } }
+
+func main() -> i32 {
+    mut c: u64 = 0
+    mut v: Vec<string> = Vec::new()
+    for i in 0..400 {
+        val t = mk(i)
+        val s = t.text
+        c = c + s.len()
+        val u = mk(i)
+        v.push(u.text)
+        val w = lit(i)
+        c = c + w.text.len()
+    }
+    (c % 100) as i32 + v.len() as i32 % 7
+}
+"#,
+        )
+        .expect("compilation failed");
+    assert_eq!(exit, 91);
+}

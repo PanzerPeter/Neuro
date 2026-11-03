@@ -1,17 +1,10 @@
-// `import` declarations: the five ways to name what another module holds.
-//
-// An import does two things. It pulls the module into the build (without one, only a
-// qualified path reaches into a module) and it binds names locally, so the rest of the
-// file can drop the qualifier.
-//
-//   examples/modules/
-//     imports.nr       <- this file, the root module
-//     geometry.nr      <- module `geometry`
-//     shapes/
-//       mod.nr         <- module `shapes`
-//       area.nr        <- module `shapes::area`
+// The forms of `import`: naming what another module holds. An import pulls the module into
+// the build (without one, only a qualified path reaches it) and binds names locally, so the
+// file can drop the qualifier. The modules named here are `geometry`, `shapes` and
+// `shapes::area`; see `main.nr` for the layout.
 
 // Named items, one of them renamed. `Point` is a type; `ORIGIN_SHIFT` is a constant.
+
 import geometry::{Point, ORIGIN_SHIFT as SHIFT}
 
 // A child module of a directory module, under a shorter name.

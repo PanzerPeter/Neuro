@@ -406,7 +406,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         // Open the method-body drop scope. A by-value `Drop`-typed parameter is moved
         // into the method and owned by it, so it is registered for destruction at method
-        // exit — and so is a consuming `self`, which the caller handed over. A borrowed
+        // exit, and so is a consuming `self`, which the caller handed over. A borrowed
         // receiver is not: its value stays the caller's.
         self.push_drop_scope();
         if matches!(method.self_param, Some(HirSelfParam::Owned))

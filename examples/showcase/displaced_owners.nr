@@ -1,18 +1,9 @@
-// Showcase: reassigning a binding releases the value it displaces.
-//
-// Cumulative integration example combining:
-//   deterministic `Drop` destructors counting through a `&mut i32` sink
-//   · owned `string` buffers built by `+` and displaced by the next assignment
-//   · a `Vec<string>` whose buffer goes back when a fresh vector replaces it
-//   · a range `for` loop rotating one binding through many values
-//   · a named constant, a struct, an `impl Drop` block, and `println` interpolation
-//
-// The rule the program leans on: a `mut` binding has exactly one live value. Giving it
-// a new one ends the previous value's ownership right there, so the destructor runs at
-// the assignment instead of being skipped. Three cases fall out of it, and all three
-// are visible below: a value already moved out is not released a second time, a
-// `string` rebound to a literal owns nothing to release, and a reassignment may read
-// the very value it is about to displace.
+// Showcase: reassigning a binding releases the value it displaces. Integration example:
+// `Drop` counting through a `&mut i32` sink, owned `string` buffers, a `Vec<string>`
+// replaced by a fresh vector, and a range `for` loop rotating one binding through many
+// values. A `mut` binding holds one live value at a time, so the destructor runs at the
+// assignment. A value already moved out is not released twice, a `string` rebound to a
+// literal owns nothing to release, and a reassignment may read the value it displaces.
 
 struct Rotation {
     index: i32,

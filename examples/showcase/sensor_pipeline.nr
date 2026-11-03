@@ -1,14 +1,9 @@
-// Showcase: Option / Result working alongside structs, methods, arrays, generics,
-// and pattern matching.
-//
-// Integration example combining several features at once:
-//   standard-library `Option<T>` / `Result<T, E>` (generic enums, monomorphized per
-//   type argument) · structs with `impl` methods (`&self`) · borrowed struct
-//   parameters (`&Sensor`) · fixed-size arrays + `for`-in iteration · a generic
-//   function (`choose<T>`) · pattern matching with a guard · compound assignment.
-//
-// A reading is looked up in a table (absent → `Option::None`), validated (out of range
-// → `Result::Err`), and the results are folded into one exit code.
+// Showcase: `Option` and `Result` working alongside structs, methods, arrays, generics and
+// pattern matching. Integration example: the standard `Option<T>` and `Result<T, E>` as
+// generic enums, `impl` methods on `&self`, borrowed struct parameters, a fixed array
+// walked with `for`-in, a generic `choose<T>`, a guarded `match`, and `+=`. A reading is
+// looked up in a table (absent gives `None`), validated (out of range gives `Err`), and the
+// results fold into one exit code.
 
 struct Sensor {
     id: i32,

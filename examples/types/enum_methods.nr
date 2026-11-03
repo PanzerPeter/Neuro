@@ -1,5 +1,5 @@
-// Enum methods and trait impls: an enum takes `impl` blocks exactly as a struct does.
-// A traffic light steps through its cycle with a `&mut self` method, reports itself through
+// Enum methods and trait impls: an enum takes `impl` blocks exactly as a struct does. A
+// traffic light steps through its cycle with a `&mut self` method, reports itself through
 // `&self` methods and a trait (called both through a bound and through `&dyn`), and
 // compares with `==` because it implements `PartialEq`.
 

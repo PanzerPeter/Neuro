@@ -95,7 +95,7 @@ impl TypeChecker {
         Some(vec![shape[1].clone(), shape[0].clone()])
     }
 
-    /// `.reshape([...])`: the same elements, re-described. Dimension names are dropped —
+    /// `.reshape([...])`: the same elements, re-described. Dimension names are dropped:
     /// a new extent is not the axis the old name documented.
     fn resolve_reshape(
         &mut self,

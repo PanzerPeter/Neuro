@@ -232,7 +232,7 @@ The backend is handed the *root* file's source for panic-location rendering. Mer
 share one span space, the same approximation the prepended prelude has always had, so a panic
 diagnostic from a non-root module reports a position in the root file's coordinates.
 
-The two-step linker strategy (clang on Unix; clang, then lld-link, then cl.exe on Windows) is
+The two-step linker strategy (`cc` on Unix; clang, then lld-link, then cl.exe on Windows) is
 required because LLVM object files need a platform linker driver to attach the C runtime startup
 code: neurc cannot ship its own linker. The Unix link passes `-lm` explicitly:
 `Tensor::random_normal` emits `log` and `cos`, and the C math library is a separate archive on
@@ -241,7 +241,7 @@ Every Unix link also passes `-ldl` (`GPU_RUNTIME_LIBS`), for the GPU runtime's `
 older than 2.34. A `.to(device)` links the runtime as surely as a `@gpu` body does, and only the
 backend sees which programs make one, so the driver cannot restrict the flag to them.
 
-`link_windows` keeps **every** driver's diagnosis and reports them together when the last one
+The Windows `link_object_to_executable` keeps **every** driver's diagnosis and reports them together when the last one
 fails, rather than logging each at `debug` and raising only the last. The two failures look
 nothing alike and the distinction is the whole diagnosis: a driver that is absent means no
 toolchain is installed, while a driver that ran and could not resolve a symbol means the object

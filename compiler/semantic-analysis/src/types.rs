@@ -54,7 +54,7 @@ impl ArrayLen {
     /// Whether an extent found at an axis satisfies the one expected there.
     ///
     /// Widening only: an expected `?` accepts any extent, which is the compile-time check
-    /// a dynamic axis opts out of. The reverse is NOT accepted — a `?` found where a
+    /// a dynamic axis opts out of. The reverse is NOT accepted: a `?` found where a
     /// literal is expected would let the consumer index at strides the run-time shape may
     /// not have, and the run-time check that would catch it does not exist yet.
     pub(crate) fn satisfies(&self, expected: &ArrayLen) -> bool {
@@ -561,8 +561,8 @@ impl Type {
 
     /// Whether an abstract type parameter appears anywhere in this type.
     ///
-    /// A position that is re-validated once per instantiation — a `@derive(Copy)`
-    /// field of a generic struct — cannot ask
+    /// A position that is re-validated once per instantiation (a `@derive(Copy)`
+    /// field of a generic struct) cannot ask
     /// [`TypeChecker::is_type_copy`] about a type still carrying a `T`, because that
     /// answers `false` for every instantiation at once. Such a site defers on this
     /// predicate and lets the construction site's concrete argument answer instead.

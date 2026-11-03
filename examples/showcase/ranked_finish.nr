@@ -1,19 +1,8 @@
-// Showcase: `.enumerate()` carrying a position through earlier features.
-//
-// Cumulative integration example combining:
-//   `.enumerate()` on arrays, on `Vec<T>`, and on a range
-//   · structs with `&self` methods · @derive(Copy)
-//   · fixed-size arrays and the growable `Vec<T>`
-//   · `match` on the position · string interpolation
-//
-// The point of the combination: the position `.enumerate()` binds is a `u64`,
-// which is exactly what an index expression takes. So a rank can read BACK into
-// the array that produced it (comparing each runner with the next one), which a
-// plain `for runner in runners` cannot do at all. The same head works unchanged
-// over a heap-growable `Vec<T>` and over a range, where the position stays a
-// count from zero rather than the value the range yields.
-//
-// Expected exit code: 176
+// Showcase: `.enumerate()` carrying a position through earlier features. Integration
+// example: `.enumerate()` on arrays, `Vec<T>` and a range, structs with `&self` methods,
+// `@derive(Copy)`, and `match` on the position. The position is a `u64`, the type an index
+// expression takes, so a rank can read back into the array that produced it, such as
+// comparing each runner with the next. Over a range the position still counts from zero.
 
 @derive(Copy, Clone)
 struct Runner {

@@ -1,19 +1,9 @@
-// Showcase: deterministic `Drop` and labeled loop exit working together with
-// earlier features.
-//
-// Cumulative integration example combining:
-//   `impl Drop` destructors running at scope exit (reverse declaration order)
-//   · a labeled `break` leaving a nested loop from the inside
-//   · a labeled `loop` as a value: `continue 'search` and `break 'search probe`
-//   · mutable borrows `&mut i32` held in struct fields, one counter per guard
-//   · structs with `&self` methods · @derive(Copy)
-//   · fixed-size arrays with indexed reads · `match` with range and `_` patterns
-//   · if-expressions and implicit returns
-//
-// `Drop` and labeled breaks are the two features this file exists to exercise in
-// combination: the labeled `break` unwinds out of *two* loops at once, and the
-// scope guard must still run its destructor exactly once on that path. Because a
-// labeled break is a normal scope exit (not a panic), the destructors do run.
+// Showcase: deterministic `Drop` and labeled loop exits working together. Integration
+// example: `impl Drop` running at scope exit, a labeled `break` leaving a nested loop, a
+// labeled `loop` as a value with `continue 'search` and `break 'search probe`, `&mut i32`
+// counters held in struct fields, and `match` with range and `_` patterns. A labeled break
+// is a normal scope exit, not a panic, so each guard's destructor still runs exactly once
+// on that path.
 
 struct ScanLog {
     closed: &mut i32

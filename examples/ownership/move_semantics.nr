@@ -1,10 +1,7 @@
-// Neuro Programming Language - Move semantics by default
-//
-// Non-Copy owned values (here a `string`) are MOVED when bound, assigned,
-// returned, or passed by value. After a move the source binding is invalid;
-// reading it is a compile error. `.clone()` is the explicit opt-out.
-//
-// Copy scalars (integers, floats, bool) are duplicated, never moved.
+// Move semantics by default: a non-`Copy` owned value (here a `string`) moves when it is
+// bound, assigned, returned or passed by value. After a move the source binding is invalid,
+// and reading it is a compile error. `.clone()` is the explicit opt-out. Copy scalars
+// (integers, floats, `bool`) are duplicated, never moved.
 
 func consume(s: string) -> u64 {
     // `s` is moved into this function and dropped at the end of its scope.

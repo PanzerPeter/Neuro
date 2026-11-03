@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.26.1] - 2026-11-03
+
+### Fixed
+
+- A borrowed literal passed to a reference parameter has the parameter's type. `g(&5)` against
+  `&i64` stored the literal as an `i32` and lent that 4-byte slot, so a debug build read the
+  other half from the stack and computed a wrong answer; `&1.5` against `&f32` and `&200`
+  against `&u8` were wrong the same way. An optimized build happened to be right.
+- A call through a function-typed parameter reaches the parameter when a generic function of the
+  same name is declared. The checker resolved the generic function first, so declaring any
+  `func f<T>` broke programs that never called it: the prelude's `Option::map` takes a parameter
+  named `f`.
+- BUG-092 (a struct returned from a function never released its `string` fields) no longer
+  reproduces under LeakSanitizer, including a field moved out of the result and a field filled
+  from a literal. An earlier ownership change fixed it; its entry is removed and a regression
+  test pins it.
+
+### Documentation
+
+- The language reference is reorganized. Two new pages, Ownership and Borrowing and Generics and
+  Traits, collect material that was split across Types, Variables, Functions and Structs. Structs
+  now covers enums, and string interpolation and triple-quoted literals moved from Expressions to
+  Strings.
+- Every page in `docs/` is checked against the compiler. Its snippets run under `neurc`, its
+  quoted diagnostics are the text `neurc` prints, and stale claims and generic advice are gone.
+  The compiler component pages share one outline.
+- The `examples/` header comments were checked against their programs and tightened, the
+  showcase index is grouped by theme with one line per program, and the README capability table
+  is back to one line per row.
+- Filed BUG-134 to BUG-138: a binding with no initializer, a function-body `const` read outside
+  its block, a `const` reading a later one, an enum and a struct sharing a name, and a private
+  function reachable by its bare name after `import`. The first three pass `neurc check` and then
+  stop the build with an internal error.
+- Code comments no longer use em dashes.
+
 ## [5.26.0] - 2026-11-03
 
 ### Added
@@ -1354,7 +1389,7 @@ tensor backend, is next.
   the GPU is used in place. Like bare `@gpu`, a kernel needs a `neurc` built with the MLIR backend
   and a GPU at run time. A malformed `@kernel`, including one with no `threads:`, is now a type
   error; it used to compile as an ordinary function (the `@kernel` half of
-  [BUG-088](docs/BUGS.md#bug-088-an-attribute-the-compiler-does-not-know-is-accepted-and-ignored)).
+  BUG-088).
 - `examples/tensors/tensor_kernel.nr` and the `heat_diffusion` showcase, which steps a
   simulation with two kernels over tensors that stay on the GPU.
 

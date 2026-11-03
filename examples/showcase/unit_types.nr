@@ -1,16 +1,9 @@
-// Showcase: newtype units of measure working alongside structs, enums, methods,
-// pattern matching, and arrays.
-//
-// Integration example combining several Phase-1E features:
-//   newtype declarations (distinct nominal wrappers constructed as
-//   `Name(value)` with `.0` inner access) · structs with newtype fields ·
-//   impl methods (&self) · enums · pattern matching ·
-//   fixed-size arrays + for-in iteration · compound assignment.
-//
-// Newtypes make `Meters` and `Seconds` distinct types even though both wrap `i32`,
-// so mixing them up is a compile error: the safety a plain `type` alias cannot
-// give. Here they flow through a struct, methods, and functions, and their inner
-// values are combined into a single numeric result.
+// Showcase: newtype units of measure, alongside structs, enums, methods, pattern matching
+// and arrays. Integration example: `newtype` declarations with `.0` access, structs with
+// newtype fields, `impl` methods on `&self`, enums, `match`, a fixed array walked with
+// `for`, and compound assignment. `Meters` and `Seconds` are distinct types even though
+// both wrap `i32`, so mixing them is a compile error. A plain `type` alias cannot give that
+// safety.
 
 newtype Meters = i32
 newtype Seconds = i32

@@ -1,13 +1,8 @@
-// The `?` operator: propagate a failure out of the enclosing function.
-//
-// `expr?` unwraps an `Option<T>` / `Result<T, E>` to its payload, or leaves the
-// function immediately carrying `None` / `Err(e)` on. The error travels as-is:
-// there is no implicit conversion, so a callee's `E` must already be the caller's.
-//
-// Each call prints what it produced, so a short-circuit is visible as the
-// fallback showing up in the output.
-//
-// Expected exit code: 129
+// The `?` operator: propagate a failure out of the enclosing function. `expr?` unwraps an
+// `Option<T>` or `Result<T, E>` to its payload, or returns `None` or `Err(e)` from the
+// function at once. The error passes through unchanged: there is no implicit conversion, so
+// a callee's `E` must already be the caller's. Each call prints its result, so a
+// short-circuit shows up as the fallback in the output.
 
 func halve(n: i32) -> Result<i32, i32> {
     if n % 2 == 0 {

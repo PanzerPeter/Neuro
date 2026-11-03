@@ -1,21 +1,10 @@
-// Showcase: a batch of token embeddings, with every tensor axis named.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   named tensor dimensions · shape manipulation (`.t()` / `.permute(...)` /
-//   `.reshape(...)` / `.flatten(...)`), which names those dimensions rather than
-//   counting axes ·
-//   structs holding tensor fields · a trait with an `impl` per layer kind ·
-//   shape-generic functions whose extents are inferred from the argument ·
-//   tensor slicing, which keeps the surviving axis's name · in-place `+=` on a
-//   tensor · a fixed-size array walked by `for`-in · string interpolation with
-//   the format mini-language.
-//
-// The point of the names is the signature: `[batch: 2, seq: 3, embed: 4]` says
-// which axis is which, and a caller that hands over a `[seq: .., batch: ..]`
-// tensor is a compile error rather than a silently transposed batch. Names are
-// checked only where both sides write one, so `row_sum` below takes an unnamed
-// `[N]` and accepts a named `[embed: 4]` row without ceremony.
+// Showcase: a batch of token embeddings, with every tensor axis named. Integration example:
+// named tensor dimensions, shape manipulation (`.t()`, `.permute(...)`, `.reshape(...)`,
+// `.flatten(...)`), structs with tensor fields, a trait with an `impl` per layer kind,
+// shape-generic functions, slicing, and in-place `+=`. A signature such as `[batch: 2, seq:
+// 3, embed: 4]` says which axis is which, so a `[seq, batch]` argument is a compile error.
+// Names are checked only where both sides write one, so an unnamed `[N]` accepts a named
+// `[embed: 4]` row.
 
 trait Stage {
     func label(&self) -> string

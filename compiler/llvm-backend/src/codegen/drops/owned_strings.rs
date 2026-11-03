@@ -419,8 +419,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Release the buffer of a tensor receiver that no binding owns.
     ///
     /// A reduction or a sort READS its receiver and builds a fresh result, so a receiver
-    /// that was constructed for the call — an operator result, a value a call returned, a
-    /// constructor, another reduction — has no drop entry to release it at scope exit and
+    /// that was constructed for the call (an operator result, a value a call returned, a
+    /// constructor, another reduction) has no drop entry to release it at scope exit and
     /// would otherwise leak once per evaluation. Only the shapes that provably allocate a
     /// buffer of their own qualify: a place expression names a binding whose own entry
     /// covers it, and every other shape may hand back a buffer something else still owns.

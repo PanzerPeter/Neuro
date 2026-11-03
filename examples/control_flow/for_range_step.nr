@@ -1,15 +1,7 @@
-// `.step(n)` on a range: keep every `n`th value of the walk.
-//
-// Like `.rev()`, `.step(n)` applies to a RANGE, written on the parenthesised range
-// itself, and `n` must be a positive integer of the range's own type. A constant
-// stride below one is a compile error; a run-time one is checked when the loop
-// starts, and a zero stride aborts rather than looping forever.
-//
-// `.rev()` goes underneath: `(0..10).rev().step(3)` starts at the LAST value and
-// strides down (9, 6, 3, 0). The two orders are not the same walk, so only this
-// one is accepted.
-//
-// Expected exit code: 0
+// `.step(n)` on a range: keep every `n`th value of the walk. `n` must be a positive integer
+// of the range's type. A constant stride below one is a compile error, and a zero stride at
+// run time aborts. Only `.rev().step(n)` is accepted, not `.step(n).rev()`: the two are
+// different walks.
 
 func main() -> i32 {
     mut every_fifth = ""

@@ -1,23 +1,10 @@
-// Showcase: a `@grad` loss assembled from ordinary helper functions.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's `@grad` through calls: the loss is built from helpers, one of them
-//   shape-generic and one of them branching · 1F's generics, inferred from a
-//   tensor argument's shape · 2C's `@` contraction · 2D's `pool` arena around each
-//   evaluation · a struct and a `Vec` collecting the results · string
-//   interpolation with the format mini-language · Phase 4's MLIR routing: a
-//   compiler computes `residual`'s straight-line tensor
-//   arithmetic through MLIR and links it in, and every call site stays as it is.
-//
-// The compiler derives the gradient of each `@grad` function beside it at compile
-// time, and follows every call into the callee's body to do so: the helpers need no
-// annotation of their own, and the rest of the program calls them as usual.
-//
-// This program only evaluates the losses, so no derivative runs: a `@grad` call
-// runs its derivative only for a `.backward()`, as `gradient_loss.nr` does. The
-// compiler's own tests check the derivative through calls against finite
-// differences.
+// Showcase: a `@grad` loss assembled from ordinary helper functions. Integration example: a
+// shape-generic helper and a branching one, the `@` contraction, a `pool` around each
+// evaluation, a `Vec` of `Copy` structs, and string interpolation. The compiler derives
+// each `@grad` function's gradient at compile time and follows every call into the callee.
+// This program only evaluates the losses, since a derivative runs only on `.backward()`
+// (see `gradient_loss.nr`). `residual` is straight-line tensor arithmetic that the compiler
+// computes through MLIR.
 
 func residual(prediction: &Tensor<f32, [3, 1]>, target: &Tensor<f32, [3, 1]>) -> Tensor<f32, [3, 1]> {
     prediction - target

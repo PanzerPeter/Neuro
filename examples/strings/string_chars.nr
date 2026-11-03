@@ -1,14 +1,8 @@
-// Neuro Programming Language - Codepoint iterators `.chars()` / `.char_indices()`
-//
-// `.chars()` hands out an iterator over Unicode scalar values. Each step is O(1): the
-// cursor reads the code point standing at its byte offset and advances by that code
-// point's own UTF-8 width, so nothing is re-scanned. It is an ordinary `Iterator`, so a
-// `for` head drives it, `.enumerate()` numbers the scalars, and the iterator itself can
-// be held and stepped by hand.
-//
-// `.char_indices()` walks the same text but binds the *byte* offset of each scalar
-// alongside it. That is the offset `.slice(range)` takes, which is what makes the pair
-// the tokenizer's tool: find a position by reading characters, then cut by bytes.
+// `.chars()` and `.char_indices()`: codepoint iterators over a string. `.chars()` yields
+// Unicode scalar values. Each step is O(1), advancing by the code point's own UTF-8 width.
+// It is an ordinary `Iterator`, so a `for` head drives it and `.enumerate()` numbers the
+// scalars. `.char_indices()` also binds each scalar's byte offset, the offset
+// `.slice(range)` takes: find a position by reading characters, then cut by bytes.
 
 func main() -> i32 {
     val text = "aé漢🎉"        // four scalars, one per UTF-8 width: 1 + 2 + 3 + 4 bytes

@@ -30,6 +30,28 @@ impl TypeChecker {
         args: &[ast_types::Expr],
         span: shared_types::Span,
     ) -> Option<Type> {
+        // A local binding of function type (a closure or a function-typed
+        // parameter) is callable directly: `f(args)`. It shadows a same-named
+        // top-level function, generic ones included, matching hir-lowering's
+        // order; only a newtype constructor outranks it there, so here too.
+        if self.lookup_newtype_inner(func_name).is_none()
+            && let Some(Type::Function { params, ret, mode }) =
+                self.symbols.lookup(func_name).map(|info| info.ty.clone())
+        {
+            if !type_args.is_empty() {
+                self.record_error(TypeError::TurbofishCountMismatch {
+                    name: func_name.to_string(),
+                    expected: 0,
+                    found: type_args.len(),
+                    span,
+                });
+            }
+            self.check_call_args(args, &params, span);
+            let lend = self.call_bound_function(func_name, mode, span);
+            self.end_lends(lend.into_iter().collect());
+            return Some(*ret);
+        }
+
         // A call to a generic function: unify its parameters against the call
         // arguments (and any explicit turbofish), then yield the substituted return type.
         if self.generic_funcs.contains_key(func_name) {
@@ -63,18 +85,6 @@ impl TypeChecker {
             if let Some(ret) = self.resolve_einsum_builtin(func_name, args, span) {
                 return Some(ret);
             }
-        }
-
-        // A local binding of function type (a closure or a function-typed
-        // parameter) is callable directly: `f(args)`. It shadows a same-named
-        // top-level function, matching the usual locals-over-globals precedence.
-        if let Some(Type::Function { params, ret, mode }) =
-            self.symbols.lookup(func_name).map(|info| info.ty.clone())
-        {
-            self.check_call_args(args, &params, span);
-            let lend = self.call_bound_function(func_name, mode, span);
-            self.end_lends(lend.into_iter().collect());
-            return Some(*ret);
         }
 
         let func_ty = if let Some(ty) = self.functions.get(func_name) {
@@ -999,8 +1009,8 @@ impl TypeChecker {
 
                 // Calling a consuming (`self`) method hands the receiver to the callee,
                 // which destroys it: the caller loses the value. A borrowed receiver has
-                // nothing to hand over — the value belongs to whoever it was borrowed
-                // from — so reaching one is an error rather than a move.
+                // nothing to hand over (the value belongs to whoever it was borrowed
+                // from) so reaching one is an error rather than a move.
                 if self.consuming_self_methods.contains(&mangled) {
                     self.record_consumed_receiver(object, &obj_ty, *fa_span);
                 }

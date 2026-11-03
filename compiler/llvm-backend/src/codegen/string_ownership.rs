@@ -6,9 +6,9 @@
 // expression that produced the value. Two of the storing positions sit on the
 // far side of a call, where the producing expression is not in view:
 //
-//   * a function's RETURN value — the caller sees `make()` and cannot tell whether the
+//   * a function's RETURN value: the caller sees `make()` and cannot tell whether the
 //     body handed back a literal or a buffer;
-//   * a by-value ARGUMENT — the callee owns the frame the buffer was handed into, and
+//   * a by-value ARGUMENT: the callee owns the frame the buffer was handed into, and
 //     the caller cannot tell whether it stored it somewhere that outlives the call.
 //
 // Both are answered here, once per program, by reading the callee's body. Each answer
@@ -99,8 +99,8 @@ pub(crate) fn dyn_callee(trait_name: &str, method: &str) -> String {
 ///
 /// The return summary is a fixpoint because one producer can be another's only return
 /// path (`func a() -> string { return b() }`). It starts empty and grows, so it
-/// converges, and an optimistic cycle — a function whose only return path is a call to
-/// itself — never enters it.
+/// converges, and an optimistic cycle (a function whose only return path is a call to
+/// itself) never enters it.
 pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
     let bodies = string_returning_bodies(items);
     // A top-level name a local binding shadows is not reliably the function at a call

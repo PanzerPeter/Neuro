@@ -4,9 +4,9 @@ Neuro has no garbage collector and no reference counting. Every value is either 
 place or borrowed from one, and the compiler inserts the release. This page records what that
 machinery covers **today**, in alpha, and what it does not.
 
-Related pages: [Types](types.md) for borrows, slices and collections, [Variables](variables.md)
-for moves and reassignment, [Control Flow](control-flow.md#pool-blocks) for `pool` arena blocks,
-[Strings](strings.md) for the two string representations.
+Related pages: [Ownership and Borrowing](ownership.md) for moves, borrows and `Drop`,
+[Types](types.md) for slices and collections, [Control Flow](control-flow.md#pool-blocks) for
+`pool` arena blocks, [Strings](strings.md) for the two string representations.
 
 ## What is reclaimed
 

@@ -1,121 +1,87 @@
 # Operators
 
-Operators perform operations on values (operands). Every built-in operator also takes a
-borrowed operand (`&T` or `&mut T`) and reads through it; see
-[Reading through a borrow](types.md#reading-through-a-borrow).
+Operators combine values into new values, or write a new value into a place. This page lists each operator's operand types and the rules that differ from Rust. Built-in operators on numbers, `bool` and `char` also read through a borrow, so `x + 1` works the same for `x: &i32` (see [Reading through a borrow](ownership.md#reading-through-a-borrow)).
 
-## Arithmetic Operators
+## Arithmetic
 
-### Addition (`+`)
+| Operator | Meaning | Operands | Notes |
+|----------|---------|----------|-------|
+| `a + b` | Addition | Two numbers of one type, or two strings | On strings, concatenation |
+| `a - b` | Subtraction | Two numbers of one type | |
+| `a * b` | Multiplication | Two numbers of one type | |
+| `a / b` | Division | Two numbers of one type | Integer division truncates |
+| `a % b` | Remainder | Two numbers of one type | Integers and floats |
+| `a @ b` | Matrix product | Two rank-2 tensors | Contracts an axis; see [Tensors](#tensors) |
 
-```neuro
-val sum: i32 = 10 + 20      // 30
-val total: f64 = 3.14 + 2.86  // 6.00
-```
-
-**Types**: Works with numeric types (integers and floats), and with `string` (concatenation)
-**Requirement**: Both operands must be the same type
-
-On two strings, `+` is **concatenation**: it allocates a new owned, immutable `string`
-holding the left operand's bytes followed by the right operand's. A `&string` slice may stand in
-for either side. Operands are read, not consumed, so they remain usable afterward.
+Both operands must have the same type. A bare literal takes the other operand's type, so `x + 1` works for `x: i64`, but two typed values never convert implicitly. `x + y` with `x: i32` and `y: f64` fails with `type mismatch: expected i32, found f64`, so convert with `as` first.
 
 ```neuro
+val sum: i32 = 10 + 20                         // 30
+val ratio: f64 = 10.0 / 4.0                    // 2.5
 val greeting: string = "Hello, " + "Neuro!"   // "Hello, Neuro!"
-val a: string = "ab"
-val b: string = "cd"
-val joined: string = a + &b                   // "abcd"; a and b still valid
 ```
 
-> The concatenated buffer is heap-allocated and released by `Drop`: with the binding that
-> holds it, or, for an anonymous result, at the consumer that reads and discards it (the left
-> operand of `a + b + c`, an `==` operand, a `println` argument). Reassigning a binding frees the
-> buffer it displaces, and `s = s + "!"` is safe because the new buffer is built before the old
-> one is released. The few shapes the compiler cannot prove an owner for are listed in the
-> [memory model](memory-model.md#what-still-leaks).
+On two strings, `+` allocates a new owned `string`. Either side may be a `&string`. The operands are read, not moved, so `a` and `b` stay usable after `a + b`. The few shapes whose owner the compiler cannot track are listed in the [memory model](memory-model.md#what-still-leaks).
 
-### Subtraction (`-`)
+### Integer division and remainder
+
+Integer `/` truncates toward zero, and `%` takes the sign of its left operand. So `(a / b) * b + a % b` always equals `a`.
 
 ```neuro
-val diff: i32 = 50 - 20     // 30
-val delta: f64 = 10.5 - 2.3  // 8.2
+val q: i32 = -7 / 2   // -3, not -4
+val r: i32 = -7 % 3   // -1
+val s: i32 = 7 % -3   // 1
 ```
 
-**Types**: Works with numeric types
-**Requirement**: Both operands must be the same type
+Dividing or taking a remainder by zero panics in every build, `-O0` through `-O3`:
 
-### Multiplication (`*`)
-
-```neuro
-val product: i32 = 6 * 7    // 42
-val area: f64 = 3.14 * 2.0  // 6.28
+```text
+panic: division by zero at main.nr:4:18
+panic: remainder by zero at main.nr:4:18
 ```
 
-**Types**: Works with numeric types
-**Requirement**: Both operands must be the same type
+### Float division and remainder
 
-### Division (`/`)
+Float `/` never panics. A zero divisor gives an infinity or NaN. Float `%` takes the sign of its left operand, like `fmod`, so `-5.5 % 2.0` is `-1.5`.
 
-```neuro
-val quotient: i32 = 20 / 4  // 5
-val ratio: f64 = 10.0 / 3.0  // 3.333...
+### Overflow
+
+`+`, `-`, `*`, unary `-`, `/`, `%` and shifts are checked. In a debug build (`-O0`, the default) an overflow panics. In a release build (`-O1` to `-O3`) it wraps in two's complement:
+
+```text
+panic: integer overflow at main.nr:3:9
 ```
 
-**Types**: Works with numeric types
-**Requirement**: Both operands must be the same type
-**Note**: Integer division truncates (5 / 2 = 2)
+Division and remainder overflow only at `MIN / -1` and `MIN % -1`. The full rule, including how `const` initializers are checked, is in [integer overflow](types.md#integer-overflow).
 
-### Modulo (`%`)
+### Tensors
 
-```neuro
-val remainder: i32 = 17 % 5  // 2
-val mod: i32 = 10 % 3        // 1
-```
-
-**Types**: Works with integer types
-**Requirement**: Both operands must be integers
-
-### On tensors: element-wise, with broadcasting
-
-All five arithmetic operators apply to tensors. They combine the operands element by
-element and allocate a **fresh** tensor, so `*` is the element-wise product; the matrix
-product is `@` below. Both owned and borrowed operands are accepted: an owned one is moved,
-a borrowed one is only read.
+The five arithmetic operators apply to tensors element by element and allocate a fresh tensor, so `*` is the element-wise product. An owned operand is moved, and a borrowed one is only read.
 
 ```neuro
 val m: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
 val row: Tensor<i32, [3]> = [100, 200, 300]
 
 val doubled = &m * 2          // a scalar stretches across every element
-val shifted = &m + &row       // a lower-rank operand repeats across the leading axes
+val shifted = &m + &row       // the rank-1 operand repeats across the rows
 ```
 
-Shapes broadcast: they align at the trailing axis, an extent of `1` stretches across a
-wider one, and a lower-rank operand supplies the innermost axes. A scalar sits on either
-side and takes the tensor's element type. The full rule, its edge cases, and the way
-compound assignment inherits it are in
-[Tensors: element-wise arithmetic](tensors.md#element-wise-arithmetic).
+Shapes align at the trailing axis. An extent of `1` stretches across a wider one, and a lower-rank operand supplies the innermost axes. A pair that does not fit fails with ``the operands of `+` do not broadcast``. The full rule is in [Element-wise arithmetic](tensors.md#element-wise-arithmetic).
 
-### Matrix Multiplication (`@`)
-
-`@` is the matrix product, and it is the one tensor operator that is not element-wise: it
-**contracts** an axis instead of walking one. Element `[i, j]` of the result is the dot
-product of row `i` of the left operand and column `j` of the right.
+`@` is the matrix product, and the one tensor operator that contracts an axis instead of walking one. For `[M, K] @ [K, N]` the result is `[M, N]`, and element `[i, j]` is the dot product of row `i` of the left operand and column `j` of the right. Both operands must be rank 2, and neither broadcasts, so there is no vector or scalar form. A `?` extent on either operand is a compile error, because the contracted axis must be known.
 
 ```neuro
 val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
 val b: Tensor<i32, [3, 2]> = [[7, 8], [9, 10], [11, 12]]
 
-val c = &a @ &b               // [2, 2]: the inner 3 is contracted away
+val c = &a @ &b               // [2, 2]
 ```
 
-**Shape rule**: `[M, K] @ [K, N]` gives `[M, N]`. The two inner extents must agree, and a
-mismatch is a compile error. Both operands are rank 2 and neither broadcasts: there is no
-vector form and no scalar form of `@`. A `?` extent is rejected on either operand, because
-the contracted axis bounds the sum and the result's own two size its buffer.
+```text
+error: the operands of `@` do not multiply: &Tensor<i32, [2, 3]> against &Tensor<i32, [2, 2]>; matrix multiplication takes two rank-2 tensors whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`
+```
 
-Shape parameters make the check generic: the repeated `K`
-below is verified once at the declaration rather than per call site:
+Shape parameters make the check generic. The repeated `K` below is verified once, at the declaration:
 
 ```neuro
 func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]> {
@@ -123,279 +89,87 @@ func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tenso
 }
 ```
 
-**Precedence**: the same as `*`, `/` and `%`, as in Python, so a mix of them groups left to
-right (see [Operator Precedence](#operator-precedence)): `a @ b * s` scales the product and
-`a * s @ b` scales the left operand. It binds tighter than `+`, so `a @ b + c` adds `c` to the
-product, and looser than `as`.
+On a user type, `@` dispatches through the `MatMul` trait (see [Operator Overloading](#operator-overloading)).
 
-On a user type, `@` dispatches through the `MatMul` trait like every other overloadable
-operator. See [Tensors: matrix multiplication](tensors.md#matrix-multiplication).
+## Comparison
 
-## Comparison Operators
+Comparisons return `bool`.
 
-All comparison operators return `bool`.
+| Operator | Meaning | Operands |
+|----------|---------|----------|
+| `==`, `!=` | Equal, not equal | Numbers, `bool`, `char`, `string` (and `&string`), a newtype over these, or a `Copy` type with `impl PartialEq` |
+| `<`, `<=`, `>`, `>=` | Ordering | Numbers and `char` (by code point), or a `Copy` type with `impl Comparable` |
 
-### Equal (`==`)
+- Both operands must have the same type. `a == b` with `i32` and `i64` fails with `type mismatch: expected i32, found i64`.
+- Comparisons do not chain. `a < b < c` fails with ``comparison operators cannot be chained: use `&&` to combine separate comparisons``. Write `a < b && b < c`.
+- Ordering is not defined for `string` or `bool`. `"a" < "b"` fails with `cannot apply binary operator < to types string and string`.
+- Floats follow IEEE ordering: every comparison involving NaN is `false`, `!=` included. So `nan != nan` is `false`.
+- Arrays, tuples and collections have no `==` yet. `[1, 2] == [1, 2]` fails with `cannot apply binary operator == to types [i32; 2] and [i32; 2]`. Compare the elements.
+- Comparisons read through `&` and `&mut`, so `r == 4` works for `r: &i32`. On two references to a struct, `==` calls the struct's `eq`, as `*ra == *rb` does.
 
-```neuro
-val is_equal: bool = 42 == 42  // true
-val same: bool = x == y
-```
+## Logical
 
-### Not Equal (`!=`)
+| Operator | Meaning | Operands | Notes |
+|----------|---------|----------|-------|
+| `a && b` | And | `bool` | Short-circuit: `b` runs only when `a` is `true` |
+| `a \|\| b` | Or | `bool` | Short-circuit: `b` runs only when `a` is `false` |
+| `!a` | Not | `bool` | Never overloadable |
 
-```neuro
-val is_different: bool = 42 != 10  // true
-val not_same: bool = x != y
-```
+With `false && f()`, `f` is never called. An integer is not a condition: `x && true` with `x: i32` fails with `cannot apply binary operator && to types i32 and bool`.
 
-### Less Than (`<`)
+## Unary
 
-```neuro
-val is_less: bool = 5 < 10  // true
-val smaller: bool = x < y
-```
+| Operator | Meaning | Operands | Notes |
+|----------|---------|----------|-------|
+| `-a` | Negation | A number | Same type. Overflows where `0 - a` does |
+| `~a` | Bitwise not | An integer, or a user type with `impl BitNot` | Same type. `~0` is `-1` for `i32` |
 
-### Greater Than (`>`)
+`-a` is `0 - a`, so it overflows at a signed type's `MIN` and at every nonzero unsigned value. A negative literal is checked as written instead, so `val x: u32 = -5` fails with ``literal -5 is negative and u32 is unsigned: use a signed type, or `0u32.wrapping_sub(5u32)` if the two's-complement wrap was intended``. `~` on a `bool` fails with `cannot apply operator ~ to type bool`.
 
-```neuro
-val is_greater: bool = 10 > 5  // true
-val larger: bool = x > y
-```
+## Bitwise and Shifts
 
-### Less Than or Equal (`<=`)
+| Operator | Meaning | Operands |
+|----------|---------|----------|
+| `a & b` | And | Two integers of one type |
+| `a \| b` | Or | Two integers of one type |
+| `a ^ b` | Xor | Two integers of one type |
+| `a << n` | Left shift | Integer `a`, and `n` of the same type (a literal adapts) |
 
-```neuro
-val is_lte: bool = 5 <= 5  // true
-val at_most: bool = x <= max
-```
+Bitwise operators take integers only (`i8` to `i64`, `u8` to `u64`), and the result has the operand type.
 
-### Greater Than or Equal (`>=`)
-
-```neuro
-val is_gte: bool = 10 >= 5  // true
-val at_least: bool = x >= min
-```
-
-**Types**: Work with numeric types, booleans, and strings (`==`/`!=` only)
-**Requirement**: Both operands must be the same type
-**Chaining**: Comparison operators cannot be chained. `a < b < c` is a compile error; write `a < b && b < c` instead.
-
-## Logical Operators
-
-Work with boolean values, return boolean.
-
-### Logical AND (`&&`)
+A shift amount outside `0..bits`, or a negative one, is an overflow. A debug build panics with `shift overflow`. A release build masks the amount to `amount & (bits - 1)`:
 
 ```neuro
-val both: bool = true && true    // true
-val result: bool = flag1 && flag2
-val valid: bool = x > 0 && x < 100
+mut s: i32 = 40
+val r: i32 = 1 << s   // debug: panic: shift overflow; -O1 and up: 1 << 8 = 256
 ```
 
-**Short-circuit**: If left side is `false`, right side is not evaluated
+There is no right-shift operator. `>>` is [function composition](#function-composition-), so `x >> 1` fails to compile with ``the operands of `>>` must be function values``. Use `x.shr(1)`, which is arithmetic on signed integers and logical on unsigned ones (see [integer methods](types.md#integer-methods)).
 
-### Logical OR (`||`)
+## Assignment
 
-```neuro
-val either: bool = true || false  // true
-val result: bool = flag1 || flag2
-val valid: bool = x < 0 || x > 100
-```
-
-**Short-circuit**: If left side is `true`, right side is not evaluated
-
-### Logical NOT (`!`)
-
-```neuro
-val inverted: bool = !true  // false
-val opposite: bool = !flag
-```
-
-**Unary operator**: Takes single boolean operand
-
-## Unary Operators
-
-### Negation (`-`)
-
-```neuro
-val neg: i32 = -42       // -42
-val opposite: i32 = -x
-val abs_neg: i32 = -abs(x)
-```
-
-**Types**: Works with numeric types
-**Returns**: Same type as operand
-
-On an integer, `-x` is `0 - x` and follows the same overflow rule as the subtraction: it
-panics in debug builds and wraps in release ones. That makes it an overflow at a signed
-type's `MIN`, and at every nonzero value of an unsigned type. See
-[integer overflow](types.md#integer-overflow).
-
-### Logical NOT (`!`)
-
-```neuro
-val not_true: bool = !true  // false
-val not_flag: bool = !flag
-```
-
-**Types**: Works with boolean type only
-**Returns**: boolean
-
-## Bitwise Operators
-
-Work with integer values only (`i8` to `i64`, `u8` to `u64`). Cannot be used with floats or bools.
-
-### Bitwise AND (`&`)
-
-```neuro
-val a: i32 = 0b1100   // 12
-val b: i32 = 0b1010   // 10
-val r: i32 = a & b    // 0b1000 = 8
-```
-
-**Returns**: same type as operands
-
-### Bitwise OR (`|`)
-
-```neuro
-val a: i32 = 0b1100   // 12
-val b: i32 = 0b1010   // 10
-val r: i32 = a | b    // 0b1110 = 14
-```
-
-**Returns**: same type as operands
-
-### Bitwise XOR (`^`)
-
-```neuro
-val a: i32 = 0b1100   // 12
-val b: i32 = 0b1010   // 10
-val r: i32 = a ^ b    // 0b0110 = 6
-```
-
-**Returns**: same type as operands
-
-### Left Shift (`<<`)
-
-```neuro
-val a: i32 = 1
-val r: i32 = a << 4   // 1 * 2^4 = 16
-```
-
-**Returns**: same type as operands
-**Overflow**: an amount outside `0..bits` panics in debug builds and is masked to `amount & (bits - 1)` in release ones, for `.shr(n)` too. See [integer overflow](types.md#integer-overflow).
-**Note**: Right shift is exposed as the `.shr(n)` method, not an operator (`ashr` for signed receivers, `lshr` for unsigned). See [types.md](types.md#integer-methods).
-
-### Bitwise NOT (`~`)
-
-```neuro
-val a: i32 = 0
-val r: i32 = ~a       // -1 (all bits set, two's complement)
-```
-
-**Unary**: takes a single integer operand, or a user type that implements `BitNot`
-**Returns**: same type as operand
-
-## Type Casting Operator (`as`)
-
-Performs an explicit numeric or boolean type conversion.
-
-```neuro
-val n: i32 = 42
-val x: f64 = n as f64          // widen integer to float
-val y: i64 = n as i64          // widen to larger integer
-
-val pi: f64 = 3.14159
-val trunc: i32 = pi as i32     // truncate toward zero → 3
-
-val flag: bool = true
-val one: i32 = flag as i32     // false → 0, true → 1
-```
-
-**Types**: between any two numeric types, from `bool` to an integer, and between `char` and an
-integer.
-**Rules**:
-- Widening integers zero-extends (unsigned) or sign-extends (signed).
-- Floats to integers truncate towards zero and saturate at the target's range; see
-  [Float to integer](types.md#float-to-integer).
-- Booleans to integers map `false → 0` and `true → 1`. Nothing casts *to* `bool`.
-- `char` to an integer gives its code point, and an integer to `char` the reverse.
-
-## Assignment Operator (`=`)
-
-### Variable Assignment
+`=` writes a value into a place. The place must be `mut`, and the value must have the place's type:
 
 ```neuro
 mut x: i32 = 10
-x = 20              // Reassign
-x = x + 5           // Update
-x = add(x, 10)      // Assign from expression
+x = x + 5
 ```
 
-**Requirement**: Variable must be declared with `mut`
-**Type checking**: Right-hand side must match variable type
+Assigning to an immutable binding fails with `cannot assign to immutable variable 'x'`.
 
-### Cannot Assign to Immutable
+### Compound Assignment Operators
 
-```neuro
-val x: i32 = 10
-// x = 20  // Error: cannot assign to immutable variable
-```
-
-## Compound Assignment Operators
-
-Shorthand for updating a place. For every type except a tensor each form is
-equivalent to a plain assignment with the corresponding binary operator on the right-hand
-side; a tensor updates its buffer in place instead (see below).
-
-| Operator | Equivalent to | On a tensor    |
-|----------|---------------|----------------|
-| `x += n` | `x = x + n`   | `add_assign`   |
-| `x -= n` | `x = x - n`   | `sub_assign`   |
-| `x *= n` | `x = x * n`   | `mul_assign`   |
-| `x /= n` | `x = x / n`   | `div_assign`   |
-| `x %= n` | `x = x % n`   | `rem_assign`   |
-| `x &= n` | `x = x & n`   | not defined    |
-| `x \|= n` | `x = x \| n` | not defined    |
-| `x ^= n` | `x = x ^ n`   | not defined    |
-| `x <<= n` | `x = x << n` | not defined    |
+`x op= n` is `x = x op n` for every type except a tensor. The forms are `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=` and `<<=`. There is no `>>=`, because `>>` is composition. A tensor target updates in place (see below) and takes only the arithmetic forms.
 
 ```neuro
 mut score: i32 = 100
 score += 50    // 150
-score -= 25    // 125
-score *= 2     // 250
-score /= 5     // 50
 score %= 13    // 11
-
-mut flags: u8 = 0b0011u8
-flags <<= 2u8           // 0b1100
-flags |= 0b0001u8       // 0b1101
-flags &= 0b1001u8       // 0b1001
-flags ^= 0b1111u8       // 0b0110
 ```
-
-There is no `>>=`: `>>` is function composition, and the right shift is the `.shr(n)`
-method. A tensor has no bitwise operators, so a tensor target rejects the bitwise forms.
-
-```neuro
-mut sum: i32 = 0
-mut i: i32 = 1
-while i <= 10 {
-    sum += i
-    i += 1
-}
-```
-
-**Requirement**: Left-hand side must be a writable place (see below)
-**Type checking**: Same rules as the underlying binary operator apply
 
 ### Places: what may sit on the left
 
-Plain and compound assignment take the same left-hand side, a **place**: the storage a
-value is written into, rather than a value. A place is rooted at a binding and reached
-through any number of projections.
+Plain and compound assignment take a **place**: the storage a value is written into. A place is rooted at a binding and reached through any number of projections.
 
 | Form | Example |
 |------|---------|
@@ -408,407 +182,40 @@ through any number of projections.
 | A tensor coordinate | `t[row, column] = v` |
 | The referent of a mutable reference | `*r += 1` |
 
-```neuro
-struct Point { x: i32, y: i32 }
-
-impl Point {
-    func translate(&mut self, dx: i32, dy: i32) {
-        self.x += dx
-        self.y += dy
-    }
-}
-```
-
 The rules:
 
-- The binding the place is rooted at must be `mut`, except where the place is reached
-  through a borrow. Then the borrow nearest the place decides, however deep the place is:
-  `xs: &mut [T]` is an immutable binding you may write elements through (`xs[0][1] = 9`
-  included), and a `&[T]` binding declared `mut` is one you may not.
-- The value is evaluated before the place is addressed, so a value that grows the `Vec`
-  it is stored into (`v[0] = { v.push(x); 42 }`) lands in the grown `Vec`.
-- Anything that is not one of the forms above is not a place. A literal or an operator
-  result is a value with no storage, and assigning to one is a parse error naming what a
-  place is. A projection of a call result (`make()[0] = 5`) parses, and is refused as a
-  write into a temporary.
-- A tensor index that leaves an axis standing (`t[0, ..]`) produces a *fresh* tensor
-  rather than naming storage, so it cannot be assigned to. Name every axis.
-- A newtype's `.0` reads its inner value but is not a place. Rebuild the whole value
-  instead: `m = Meters(v)`.
+- The binding a place is rooted at must be `mut`, unless the place is reached through a borrow. Then the borrow nearest the place decides: `xs: &mut [T]` lets you write `xs[0][1] = 9` through an immutable binding, and a `mut` binding of type `&[T]` does not let you write.
+- The value on the right is evaluated before the place is addressed. A block that pushes onto the `Vec` it is stored into, then yields `42`, writes into the grown `Vec`.
+- Anything else is not a place. A literal or operator result is a parse error (``the left of `=` must be a place``). A call result such as `make()[0] = 5` parses, then fails with `cannot assign into a temporary`.
+- A tensor index that leaves an axis standing (`t[0, ..]`) makes a fresh tensor, so it cannot be assigned to. Name every axis.
+- A newtype's `.0` reads its inner value but is not a place. Rebuild the value instead: `m = Meters(v)`.
 
-### On tensors: in place, no reallocation
+### Tensors: in place
 
-A tensor is the one type whose compound assignment does *not* desugar. `w -= g` updates
-the buffer `w` already owns, element by element:
+A tensor's compound assignment does not desugar to `w = w - g`. It updates the buffer `w` already owns, element by element:
 
 ```neuro
 mut w: Tensor<f32, [2, 2]> = [[1.0, 2.0], [3.0, 4.0]]
 val g: Tensor<f32, [2, 2]> = [[0.5, 0.5], [0.5, 0.5]]
 
-w -= &g          // in place: same buffer, same address, nothing allocated
-w *= &g
+w -= &g          // same buffer, same address, nothing allocated
+w *= 2.0         // a scalar is broadcast
 ```
 
-Why it is a separate rule rather than an optimization of the desugaring: `w = w - g`
-allocates a fresh tensor and rebinds the name to it on every step, which invalidates any
-pointer the runtime, an optimizer's state, or a foreign DLPack consumer is holding, and
-costs a whole weight buffer per training step. The in-place form guarantees neither
-happens: the tensor's DLPack handle and its `data` pointer are unchanged across the
-statement.
-
-The rules:
-
-- The target must be a writable tensor place: a `mut` binding, or a field of one.
-- The operand is a tensor of the **same** element type, either owned or borrowed.
-  `w += g` consumes `g`; `w += &g` reads it, so one gradient can serve every iteration of
-  a loop. Shapes broadcast exactly as they do for the by-value operators, with one
-  asymmetry: the result goes back into the target's own buffer, so an operand may be
-  stretched **up to** the target's shape and never past it. A shape that does not is a
-  compile error naming both types. A scalar operand is accepted the same way, so
-  `w *= 2.0` is the scalar broadcast.
-- The right-hand side is evaluated **first**, before the target is borrowed for the
-  update.
-- The element type must have arithmetic: any integer or float, the half-precision `f16` /
-  `bf16` included (each element is computed in `f32` and rounded back). `bool` is rejected.
-- Element arithmetic carries the scalar guards: an overflowing element panics in debug
-  builds, and a zero divisor panics in every build.
-
-## Null/Error Coalescing Operator (`??`)
-
-`??` is the read-site equivalent of `unwrap_or(default)`: it returns the unwrapped value of an `Option<T>` or `Result<T, E>` when present, and falls back to the right-hand expression when absent (`None`) or failed (`Err`). The expression's type is the unwrapped payload `T`.
-
-```neuro
-val present = lookup(1) ?? 0        // the Some payload
-val absent  = lookup(7) ?? 5        // 5, the fallback
-
-val ok     = divide(24, 4) ?? 0     // the Ok payload
-val failed = divide(1, 0)  ?? 4     // 4, the Err payload is discarded
-```
-
-For a `Result`, the error payload is **discarded**: `??` states "I do not care why it failed, use this instead". When the reason matters, `match` on the value instead.
-
-**Laziness**: the fallback is only evaluated when the left-hand side is absent or failed. A fallback that calls a function, panics, or does real work is skipped entirely when the value is present.
-
-**Fallback type**: the right-hand side must produce the payload type `T`, not another `Option`/`Result`. A mismatch is an ordinary type error.
-
-**Borrowed payload**: when the payload is a borrow of a `Copy` type, as a collection's `get` lends, and the fallback is a value rather than a borrow, `??` reads the payload through and the expression is the value: `counts.get(k) ?? 0` is an `i32`. A fallback that is itself a borrow keeps the expression a borrow.
-
-**Diverging fallback**: the right-hand side may leave instead of producing a value. `?? panic("...")` is how a value is unwrapped, and `return`, `break` and `continue` work unbraced:
-
-```neuro
-val config = load() ?? panic("no config")   // the payload, or stop the program
-val first = lookup(key) ?? return 0         // leave the function
-val value = parse(line) ?? continue         // skip this iteration
-```
-
-**Associativity**: right-to-left. `a ?? b ?? c` parses as `a ?? (b ?? c)`, so each fallback is evaluated only when every left-hand side up to it has produced the absent / error variant. Left-to-right would force the middle fallback even when the chain succeeds early, defeating the short-circuit contract. In a chain, every operand but the last must itself be fallible:
-
-```neuro
-val chained = lookup(7) ?? lookup(1) ?? 99
-```
-
-**Precedence**: looser than `||` (so `a ?? b || c` means `a ?? (b || c)`), tighter than range operators.
-
-Applying `??` to anything that is not an `Option<T>` or `Result<T, E>` is rejected:
-
-```text
-error: `??` expects an `Option<T>` or `Result<T, E>` on the left, found i32
-```
-
-`??` moves its left operand, so an `Option` holding an owner (a `string`, a `Vec`) is spent by it, exactly as by a `match`. Runnable program: [`examples/operators/null_coalesce.nr`](../../examples/operators/null_coalesce.nr).
-
-## Error Propagation Operator (`?`)
-
-`?` is the postfix complement of `??`: instead of supplying a fallback, it hands the failure to the caller. `expr?` evaluates to the unwrapped payload when `expr` is `Some` / `Ok`, and otherwise leaves the enclosing function immediately, carrying the failure variant on.
-
-```neuro
-func quarter(n: i32) -> Result<i32, i32> {
-    val half = halve(n)?     // Err(n) leaves quarter() right here
-    val rest = halve(half)?
-    Result::Ok(rest)
-}
-```
-
-It desugars to exactly this `match`:
-
-```neuro
-val half = match halve(n) {
-    Result::Ok(v)  => v,
-    Result::Err(e) => return Result::Err(e)
-}
-```
-
-**Enclosing function**: the function containing the `?` must return the same fallible enum: a `Result` propagates only out of a `-> Result<_, _>` function, an `Option` only out of a `-> Option<_>` one. Otherwise the failure has nowhere to go:
-
-```text
-error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32
-```
-
-**No conversion**: the error travels as-is. There is no `From`/`Into` trait system, so the callee's `E` must already be the caller's `E`; a mismatch is an ordinary type error. When the types differ, convert first with `.map_err`, which takes a closure or a tuple variant: `read(path).map_err(AppError::Io)?`.
-
-**Payload types are independent**: only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine: the unwrapped `bool` is used locally, not returned.
-
-**Short-circuiting**: nothing after a failing `?` runs, including the rest of a loop body: `?` returns from the *function*, not from the iteration.
-
-**Precedence**: postfix, binding as tightly as a call or index. `f(x)? + 1` adds to the unwrapped payload, and `parse(s)?.field` reads a field of the unwrapped value.
-
-Runnable program: [`examples/operators/error_propagation.nr`](../../examples/operators/error_propagation.nr).
-
-When the reason for a failure should be handled rather than forwarded, use [`match`](control-flow.md), `??` for a fallback, or [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) to unwrap or leave the scope.
-
-## Pipeline Operator (`|>`)
-
-`x |> f` is `f(x)`. It exists so a chain of transformations reads top to bottom in the order the stages run, rather than inside out:
-
-```neuro
-val result = clamp_low(normalize(reading))      // read from the inside out
-
-val result = reading                            // the same thing, read downwards
-    |> normalize
-    |> clamp_low
-```
-
-The piped value becomes the **first** argument of the function on the right, so a stage taking further arguments needs one of the spellings below rather than a partially applied call.
-
-**The right-hand side is a function value, never a call.** Five spellings produce one:
-
-```neuro
-val a = reading |> normalize                       // a function name
-val b = reading |> Scaler::halve                   // an associated function
-val c = reading |> convert::<u8>                   // a generic function's instance
-val d = reading |> scaler.apply                    // a bound method: scaler.apply(reading)
-val e = reading |> (|v| v * v)                     // a parenthesized closure literal
-```
-
-A path may also name a non-generic enum's tuple variant, which constructs it: `5 |> Wrapped::Num`.
-A closure target takes its parameter type from the piped value, so it needs no annotation. A
-generic target without a turbofish takes its type arguments from the piped value, as a call
-would. A binding of function type is a name like any other, so `x |> halve` works for a
-`val halve = |v: i32| v / 2` too. Anything else is rejected where it is written:
-
-```text
-error: the right of `|>` must be a function value: a function name, a path `Type::function`,
-       an instance `f::<T>`, a bound method `receiver.method`, or a parenthesized closure `(|x| ...)`
-```
-
-**Associativity**: left to right. `x |> f |> g` is `g(f(x))`, so each stage sees what the previous one produced.
-
-**Precedence**: the loosest binary operator in the language, so the whole expression on its left is what gets piped. `100 + 45 |> normalize` normalizes 145. Parenthesize when only part of the expression should flow: `100 + (45 |> normalize)`.
-
-**Line breaks**: a chain may put each `|>` at the start of its own line, as above. The operator continues the previous line, so no trailing marker is needed.
-
-**Ownership**: a stage takes its argument by value, so an owned `string`, a `Vec` or a tensor flows through a chain as readily as a scalar does; each intermediate is released once the stage after it has consumed it.
-
-Runnable program: [`examples/operators/pipeline.nr`](../../examples/operators/pipeline.nr).
-
-## Function Composition (`>>`)
-
-`f >> g` is the function `|x| g(f(x))`. Where `|>` pushes a value through a chain, `>>` names the chain itself, so one preparation pipeline can be written once and applied wherever it is needed:
-
-```neuro
-val prepare = normalize >> clamp_low          // a value of type (i32) -> i32
-
-val ready = prepare(reading)                  // applied here
-val batch = other |> prepare                  // and here
-```
-
-**Both operands are function values**, spelled the five ways a `|>` target is, and a binding of
-function type is one too:
-
-```neuro
-val ready = Point::scale >> convert::<i64> >> (|v| v + 1) >> scaler.apply >> held
-```
-
-A composition is a closure, and it captures what its operands hold by the closure rules: a
-binding or a bound method's receiver is borrowed for as long as the composition lives, so such a
-composition stays in the scope it was built in, while one over function names and `Copy` captures
-can be returned. Each operand takes one parameter, and each stage's result must be what the next
-one accepts; a mismatch is reported at the stage that produced it:
-
-```text
-error: type mismatch: expected i32, found string
-```
-
-The types need not stay the same along the chain: `label >> width` composes `(i32) -> string` with
-`(string) -> i32` into `(i32) -> i32`.
-
-**The first operand types the composition.** The composed function takes what its first stage
-takes. A later stage is called with the stage before it, so a generic one infers its type
-arguments and a closure literal its parameter types from there. The first operand has nothing
-before it: a generic function there needs a turbofish (`identity::<i32> >> double`), a closure
-literal there annotates its parameter, unless the composition is written where a function type
-is expected (`val g: (i32) -> i32 = identity >> double`).
-
-Two spellings are refused as operands. A bound method's receiver must be a variable or a field
-of one, since a call's result cannot be borrowed past its expression. A `move` closure must be
-bound with `val` first and composed by name: the composition runs its stages afresh on each call,
-so a literal there could not keep what it owns.
-
-**The result is an ordinary function value.** It binds to a `val`, passes to a `(T) -> U` parameter, and is called as many times as needed.
-
-**Associativity**: left to right. `f >> g >> h` applies `f` first and `h` last.
-
-**Precedence**: tighter than `|>`, looser than everything else. That is what makes `x |> f >> g` apply the composed function to `x` rather than compose `x |> f` with `g`. A composition called where it is written needs no name: `(f >> g)(x)`.
-
-**`>>` is not right shift.** Shifting right is the `.shr(n)` integer method, which leaves the token for the operator an AI-first language reaches for far more often. It is not a token of its own either: the parser reads two adjacent `>`, so the closing brackets of `Vec<Vec<i32>>` are unaffected.
-
-Runnable program: [`examples/operators/compose.nr`](../../examples/operators/compose.nr).
-
-## Operator Precedence
-
-From highest to lowest, matching the parser's Pratt ladder:
-
-| Level | Operators | Associativity | Example |
-|-------|-----------|---------------|---------|
-| 17 (highest) | `.` | L-to-R | `p.x` |
-| 16 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
-| 15 | `-` (unary), `!`, `~` | R-to-L | `-x`, `!flag`, `~mask` |
-| 14 | `as` | L-to-R | `n as f64` |
-| 13 | `*`, `/`, `%`, `@` | L-to-R | `a * b`, `n % 2`, `w @ x` |
-| 12 | `+`, `-` | L-to-R | `a + b`, `x - y` |
-| 11 | `<<` | L-to-R | `a << 4` |
-| 10 | `&` | L-to-R | `a & mask` |
-| 9 | `^` | L-to-R | `a ^ b` |
-| 8 | `\|` | L-to-R | `a \| b` |
-| 7 | `<`, `>`, `<=`, `>=`, `==`, `!=` | none (no chaining) | `x < y`, `x == y` |
-| 6 | `&&` | L-to-R | `a && b` |
-| 5 | `\|\|` | L-to-R | `a \|\| b` |
-| 4 | `??` | R-to-L | `a ?? b ?? c` parses as `a ?? (b ?? c)` |
-| 3 | `..`, `..=` | L-to-R | `1..=n` |
-| 2 | `>>` | L-to-R | `f >> g >> h` applies `f` first |
-| 1 (lowest) | `\|>` | L-to-R | `x \|> f \|> g` parses as `g(f(x))` |
-
-The six comparisons share one level and do not chain: `a < b < c` and `a == b < c` are errors,
-write `a < b && b < c`. `&`, `^` and `|` bind tighter, so `x & 3 == 2` is `(x & 3) == 2`. `>>` composes
-functions rather than shifting bits; right shift is the `.shr(n)` method.
-
-### Precedence Examples
-
-```neuro
-a + b * c       // Same as: a + (b * c)
-a * b + c       // Same as: (a * b) + c
-x & mask == 0   // Same as: (x & mask) == 0
-w @ x + b       // Same as: (w @ x) + b
-w @ x * s       // Same as: (w @ x) * s
-x * s @ w       // Same as: (x * s) @ w
-!a && b         // Same as: (!a) && b
-a || b && c     // Same as: a || (b && c)
-```
-
-### Using Parentheses
-
-```neuro
-(a + b) * c     // Force addition first
-a * (b + c)     // Force addition before multiplication
-(a && b) || c   // Force AND before OR (though same as default)
-```
-
-## Type Requirements
-
-### Numeric Operators
-
-`+`, `-`, `*`, `/`, `%` work with:
-- `i8`, `i16`, `i32`, `i64`
-- `u8`, `u16`, `u32`, `u64`
-- `f16`, `bf16`, `f32`, `f64` (a half-precision operation computes in `f32` and rounds
-  once, see [Half-Precision Types](types.md#half-precision-types-f16--bf16))
-
-Both operands must be the same type.
-
-`+` additionally works on `string` (and `&string`) as concatenation, producing a new owned
-`string`. The other arithmetic operators have no string meaning.
-
-### Integer-Only Operators
-
-`&`, `|`, `^`, `~`, `<<` work only with integer types:
-- `i8`, `i16`, `i32`, `i64`
-- `u8`, `u16`, `u32`, `u64`
-
-### Comparison Operators
-
-`==`, `!=`, `<`, `>`, `<=`, `>=` work with:
-- All numeric types (same type required)
-  - *Note:* Float comparison (`f16`, `bf16`, `f32`, `f64`) uses IEEE-754 ordered predicates, so every comparison involving `NaN` returns `false`.
-- `bool` (only `==` and `!=`)
-- `char`, which has a built-in total order over its Unicode scalar values
-- `string` (only `==` and `!=`), byte-level equality via length check + `memcmp`
-- a newtype over any of the above, which compares as its inner type does
-
-Nothing else has comparison built in. A struct, enum or newtype gets `==` / `!=` from
-`impl PartialEq` and the ordering operators from `impl Comparable` (see
-[Operator Overloading](#operator-overloading)), and a struct can also `@derive(PartialEq)`.
-Arrays, tuples and collections have no equality yet, and neither does a reference to
-anything but a string. Read through it with `*` first.
-
-### Logical Operators
-
-`&&`, `||`, `!` work only with `bool`
-
-## Common Patterns
-
-### Range Checking
-
-```neuro
-val in_range: bool = x >= min && x <= max
-val out_of_range: bool = x < min || x > max
-```
-
-### Clamping
-
-```neuro
-val clamped: i32 = if x < min { min } else if x > max { max } else { x }
-```
-
-### Sign Determination
-
-```neuro
-val sign: i32 = if x > 0 { 1 } else if x < 0 { -1 } else { 0 }
-```
-
-### Absolute Value
-
-```neuro
-val abs: i32 = if x >= 0 { x } else { -x }
-```
-
-## Common Mistakes
-
-### Type Mismatch
-
-```neuro
-val x: i32 = 10
-val y: f64 = 3.14
-// val z = x + y  // Error: cannot add i32 and f64
-```
-
-### Integer Division
-
-```neuro
-val result: i32 = 5 / 2  // Result is 2, not 2.5
-```
-
-Use floats for decimal division:
-
-```neuro
-val result: f64 = 5.0 / 2.0  // Result is 2.5
-```
-
-### Boolean Comparison
-
-```neuro
-val flag: bool = true
-// if flag == true { }  // Redundant
-if flag { }             // Better
-```
+The rewrite would allocate a new tensor on every step, which invalidates any pointer the runtime, an optimizer or a DLPack consumer holds, and costs a whole weight buffer per training step. The in-place form does neither, so the tensor's DLPack handle and `data` pointer are unchanged across the statement.
+
+- The target must be a `mut` tensor binding, or a field of one.
+- The operand is a tensor of the **same** element type, owned or borrowed. `w += g` moves `g`, and `w += &g` reads it, so one gradient can serve every iteration of a loop.
+- Shapes broadcast as they do for the by-value operators, with one asymmetry: the result goes back into the target, so the operand may stretch **up to** the target's shape and never past it.
+- The right-hand side is evaluated first, before the target is borrowed.
+- The element type must have arithmetic: any integer or float, including `f16` and `bf16` (computed in `f32`, rounded back). `bool` is rejected.
+- Element arithmetic keeps the scalar guards: an overflowing element panics in a debug build, and a zero divisor panics in every build.
 
 ## Operator Overloading
 
-Operators on a custom type are sugar for method calls. Implement the corresponding
-**operator trait** to make an operator work on your type. The operator traits are
-built into the compiler: you write only the `impl`, never a `trait` declaration.
+An operator on a user type is sugar for a trait method call. Implement the matching **operator trait** to make the operator work on your type. The traits are built into the compiler, so you write only the `impl`, never a `trait` declaration.
 
-An arithmetic, bitwise, or unary operator trait declares its result type with
-`type Output = T`:
+An arithmetic, bitwise or unary trait declares its result with `type Output`:
 
 ```neuro
 @derive(Copy, Clone)
@@ -826,29 +233,21 @@ impl Neg for Vec2 {
     func neg(self) -> Vec2 { Vec2 { x: -self.x, y: -self.y } }
 }
 
-val c = Vec2 { x: 1, y: 2 } + Vec2 { x: 3, y: 4 }   // (4, 6), via Add::add
-val d = -c                                          // (-4, -6), via Neg::neg
-```
-
-Comparison uses `PartialEq` (equality) and `Comparable` (ordering); their methods take
-`&self` and `rhs: &Self` and return `bool`. `Comparable` requires `PartialEq` on the
-same type:
-
-```neuro
-impl PartialEq for Vec2 {
-    func eq(&self, rhs: &Vec2) -> bool { self.x == rhs.x && self.y == rhs.y }
-    func ne(&self, rhs: &Vec2) -> bool { self.x != rhs.x || self.y != rhs.y }
+func main() -> i32 {
+    val c = Vec2 { x: 1, y: 2 } + Vec2 { x: 3, y: 4 }   // via Add::add
+    val d = -c                                          // via Neg::neg
+    return d.x
 }
-
-val a = Vec2 { x: 1, y: 2 }
-val b = Vec2 { x: 1, y: 2 }
-if a == b { }   // via PartialEq::eq
 ```
 
-**Operator → trait → method:**
+`==` and `!=` use `PartialEq`, and the orderings use `Comparable`. `Comparable` requires `PartialEq` on the same type. A `Copy` type that implements `Comparable` without `PartialEq` fails with:
+
+```text
+error: `impl Comparable for Meters` requires `impl PartialEq for Meters`
+```
 
 | Operator(s) | Trait | Method(s) |
-|---|---|---|
+|-------------|-------|-----------|
 | `+` | `Add` | `add` |
 | `-` (binary) | `Sub` | `sub` |
 | `*` | `Mul` | `mul` |
@@ -861,25 +260,172 @@ if a == b { }   // via PartialEq::eq
 | `==` `!=` | `PartialEq` | `eq` `ne` |
 | `<` `<=` `>` `>=` | `Comparable` | `lt` `le` `gt` `ge` |
 
-Rules and limits:
+The rules:
 
-- The receiver type must be `Copy` (the scalar path). Each operator dispatches to its own
-  method; implement the method for every operator you use.
-- A declared `type Output` must match the method's return type.
-- The logical `!a` (boolean NOT) is **not** overloadable: it is always boolean negation.
-- Compound assignment (`v += w`) works when the type implements the matching by-value
-  operator: it desugars to `v = v + w`. In-place `*Assign` behaviour is compiler-known on
-  tensors (see [Compound Assignment Operators](#compound-assignment-operators)) but not
-  yet declarable for a user type. The tensor arithmetic operators are compiler-known too,
-  and are not reached through an operator-trait impl.
-- Operator overloading is fully monomorphized and erased: each operator becomes the
-  method call it stands for, with no vtable and no runtime cost.
+- The receiver type must be `Copy`. `impl Add for Meters` on a non-`Copy` struct fails with ``operator trait 'Add' can only be implemented for a `Copy` type``.
+- Each operator dispatches to its own method, so implement the method for every operator the type uses. For example, `!=` calls `ne`, so an `impl PartialEq` with only `eq` supports `==` and rejects `!=`.
+- The declared `type Output` must match the method's return type.
+- `!a` (logical not), `&&`, `||`, `??`, `?`, `|>` and `>>` are not overloadable.
+- `v += w` works when the type implements the by-value operator: it desugars to `v = v + w`. A user type cannot yet declare an in-place `*Assign` operator.
+- Calls are monomorphized. Each operator becomes the method call it stands for, with no vtable.
 
-See [`examples/operators/operator_overloading.nr`](../../examples/operators/operator_overloading.nr)
-for a complete program.
+The complete program is [`examples/operators/operator_overloading.nr`](../../examples/operators/operator_overloading.nr).
 
-## References
+## Null/Error Coalescing Operator (`??`)
 
-- [Types](types.md): type requirements for operators
-- [Expressions](expressions.md): operator precedence and evaluation
-- [Variables](variables.md): assignment operator
+`??` is the read-site equivalent of `unwrap_or(default)`. It returns the payload of an `Option<T>` or `Result<T, E>` when present, and evaluates the right-hand side when the value is `None` or `Err`. The expression has the payload type `T`.
+
+```neuro
+val present = lookup(1) ?? 0        // the Some payload
+val absent  = lookup(7) ?? 5        // 5, the fallback
+```
+
+- **Errors are discarded.** For a `Result`, `??` ignores the `Err` payload. When the reason matters, use `match`.
+- **Laziness.** The fallback runs only when the left side is absent or failed.
+- **Fallback type.** The right side must produce `T`, not another `Option` or `Result`. A mismatch is an ordinary type error.
+- **Borrowed payload.** When the payload is a borrow of a `Copy` type, as `get` returns, and the fallback is a value, `??` reads through: `counts.get(k) ?? 0` is an `i32`.
+- **Diverging fallback.** The right side may leave the scope instead of producing a value. `return`, `break`, `continue` and `panic(...)` all work unbraced:
+
+```neuro
+val config = load() ?? panic("no config")   // the payload, or stop the program
+val first = lookup(key) ?? return 0         // leave the function
+val value = parse(line) ?? continue         // skip this iteration
+```
+
+- **Associativity.** Right to left: `a ?? b ?? c` is `a ?? (b ?? c)`, so each fallback runs only when every earlier side has failed. Every operand but the last must itself be fallible.
+- **Precedence.** Looser than `||`. The fallback takes everything to its right that binds looser than `??`, so `a ?? 0 |> f` is `a ?? (0 |> f)` and `a ?? b || c` is `a ?? (b || c)`. Parenthesize the left side or the fallback to group otherwise.
+- **Moves its operand.** An `Option` holding an owner, such as a `string` or a `Vec`, is moved by `??`, as it is by `match`.
+
+Applying `??` to a non-fallible value fails with:
+
+```text
+error: `??` expects an `Option<T>` or `Result<T, E>` on the left, found i32: `??` unwraps a fallible value or falls back
+```
+
+The runnable program is [`examples/operators/null_coalesce.nr`](../../examples/operators/null_coalesce.nr).
+
+## Error Propagation Operator (`?`)
+
+`?` is the postfix counterpart of `??`. It hands the failure to the caller instead of supplying a fallback. `expr?` yields the payload of `Some` or `Ok`. Otherwise it returns the failure from the enclosing function at once, as `match expr { Ok(v) => v, Err(e) => return Err(e) }` would.
+
+```neuro
+func halve(n: i32) -> Result<i32, i32> {
+    if n % 2 != 0 { return Result::Err(n) }
+    return Result::Ok(n / 2)
+}
+
+func quarter(n: i32) -> Result<i32, i32> {
+    val half = halve(n)?     // Err(n) leaves quarter() right here
+    val rest = halve(half)?
+    Result::Ok(rest)
+}
+```
+
+- **Enclosing function.** It must return the same fallible enum. A `Result` propagates only out of a `-> Result<_, _>` function, and an `Option` only out of a `-> Option<_>` one:
+
+  ```text
+  error: `?` on a Option<i32> has nowhere to propagate: the enclosing function returns i32, but it must return an `Option` for the failure to be forwarded; otherwise handle the value with `match`, `??`, or `val-else`
+  ```
+
+- **No conversion.** The error travels unchanged, and there is no `From` trait. When the types differ, convert first with `.map_err`: `read(path).map_err(AppError::Io)?`.
+- **Payload types are independent.** Only the error types must agree. `?` on a `Result<bool, E>` inside a `-> Result<i32, E>` function is fine, because the `bool` is used locally.
+- **Short-circuit.** Nothing after a failing `?` runs, including the rest of a loop body. `?` returns from the function, not from the iteration.
+- **Precedence.** Postfix, binding as tightly as a call. `f(x)? + 1` adds to the payload, and `parse(s)?.field` reads a field of it.
+
+The runnable program is [`examples/operators/error_propagation.nr`](../../examples/operators/error_propagation.nr). To handle a failure rather than forward it, use [`match`](control-flow.md#pattern-matching), `??`, or [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope).
+
+## Pipeline Operator (`|>`)
+
+`x |> f` is `f(x)`. A chain of stages reads top to bottom in the order it runs. The piped value becomes the first argument of the function on the right:
+
+```neuro
+val result = reading
+    |> normalize
+    |> clamp_low
+```
+
+The right side must be a function value, never a call. Five spellings produce one:
+
+```neuro
+val a = reading |> normalize                       // a function name
+val b = reading |> Scaler::halve                   // an associated function
+val c = reading |> convert::<u8>                   // a generic function's instance
+val d = reading |> scaler.apply                    // a bound method: scaler.apply(reading)
+val e = reading |> (|v| v * v)                     // a parenthesized closure literal
+```
+
+A path may also name a non-generic enum's tuple variant, which constructs it (`5 |> Wrapped::Num`). A binding of function type is a name like any other. Anything else fails with:
+
+```text
+error: the right of `|>` must be a function value: a function name, a path `Type::function`, an instance `f::<T>`, a bound method `receiver.method`, or a parenthesized closure `(|x| ...)`
+```
+
+- **Associativity.** Left to right, so `x |> f |> g` is `g(f(x))`.
+- **Precedence.** The loosest binary operator, so the whole expression on its left is piped: `100 + 45 |> normalize` normalizes 145. Parenthesize to pipe part of it: `100 + (45 |> normalize)`.
+- **Ownership.** A stage takes its argument by value, so an owned `string`, `Vec` or tensor flows through a chain. Each intermediate is released after the stage that consumes it.
+
+The runnable program is [`examples/operators/pipeline.nr`](../../examples/operators/pipeline.nr).
+
+## Function Composition (`>>`)
+
+`f >> g` is the function `|x| g(f(x))`. Where `|>` pushes one value through a chain, `>>` names the chain, so a preparation pipeline can be written once and applied wherever it is needed:
+
+```neuro
+val prepare = normalize >> clamp_low          // a value of type (i32) -> i32
+
+val ready = prepare(reading)
+val batch = other |> prepare
+```
+
+Both operands are function values, spelled the same ways as a `|>` target. The first operand types the composition. A later stage is called with the output of the stage before it, so generics and closure parameters infer from there. A generic first operand needs a turbofish (`identity::<i32> >> double`). A stage that cannot take the previous stage's output fails at that stage, for example `type mismatch: expected string, found i32` when the output is `i32` and the next stage takes `string`.
+
+- **Associativity.** Left to right: `f >> g >> h` applies `f` first.
+- **Precedence.** Tighter than `|>`, looser than everything else, so `x |> f >> g` applies the composed function to `x`. A composition called in place needs no name: `(f >> g)(x)`.
+- **Refused operands.** A bound method's receiver must be a variable or a field of one, since a call result cannot be borrowed past its expression. A `move` closure must be bound with `val` first.
+- **Not a shift.** `>>` never shifts bits. The right shift is the `.shr(n)` method (see [Bitwise and Shifts](#bitwise-and-shifts)). The parser reads two adjacent `>` tokens, so `Vec<Vec<i32>>` still closes correctly.
+
+The runnable program is [`examples/operators/compose.nr`](../../examples/operators/compose.nr).
+
+## Operator Precedence
+
+From highest to lowest. The parser uses the same levels.
+
+| Level | Operators | Associativity | Example |
+|-------|-----------|---------------|---------|
+| 17 (highest) | `.` | L-to-R | `p.x` |
+| 16 | call `f(…)`, index `a[i]`, postfix `?`, turbofish `::<…>` | L-to-R | `f(x)?`, `arr[i]` |
+| 15 | prefix `-`, `!`, `~`, `*`, `&`, `&mut` | R-to-L | `-x`, `!flag`, `~mask`, `*r`, `&mut x` |
+| 14 | `as` | L-to-R | `n as f64` |
+| 13 | `*`, `/`, `%`, `@` | L-to-R | `a * b`, `n % 2`, `w @ x` |
+| 12 | `+`, `-` | L-to-R | `a + b`, `x - y` |
+| 11 | `<<` | L-to-R | `a << 4` |
+| 10 | `&` | L-to-R | `a & mask` |
+| 9 | `^` | L-to-R | `a ^ b` |
+| 8 | `\|` | L-to-R | `a \| b` |
+| 7 | `<`, `>`, `<=`, `>=`, `==`, `!=` | none (no chaining) | `x < y`, `x == y` |
+| 6 | `&&` | L-to-R | `a && b` |
+| 5 | `\|\|` | L-to-R | `a \|\| b` |
+| 4 | `??` | R-to-L | `a ?? b ?? c` is `a ?? (b ?? c)` |
+| 3 | `..`, `..=` | L-to-R | `1..=n` |
+| 2 | `>>` | L-to-R | `f >> g >> h` applies `f` first |
+| 1 (lowest) | `\|>` | L-to-R | `x \|> f \|> g` is `g(f(x))` |
+
+Three rules are easy to misread:
+
+- `&`, `^` and `|` bind tighter than comparisons, unlike C. So `x & 3 == 2` is `(x & 3) == 2`.
+- `as` binds tighter than every binary operator. So `2 + 3 as i32` is `2 + (3 as i32)`, and `n as f64 + 1.0` is `(n as f64) + 1.0`.
+- `@` shares the `*` row, so `x * 0.5 @ w` groups left to right, and `a @ b + c` adds `c` to the product.
+
+```neuro
+x & mask == 0     // (x & mask) == 0
+a + b * c         // a + (b * c)
+w @ x + b         // (w @ x) + b
+a || b && c       // a || (b && c)
+```
+
+## See also
+
+- [Types](types.md): operand types, integer overflow and integer methods
+- [Tensors](tensors.md): element-wise arithmetic, `@` and in-place updates
+- [Ownership](ownership.md): borrows read through by operators
+- [Expressions](expressions.md): what an expression is, and statement boundaries

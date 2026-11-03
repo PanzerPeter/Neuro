@@ -1,17 +1,10 @@
-// Showcase: an incident desk whose collections own the tickets they file.
-//
-// Non-`Copy` collection elements carried by earlier features:
-//   a `Vec` of structs that own a `string` and a `Vec` · an enum with an `impl`,
-//   matched on its variants · `&mut self` methods called on a slot in place ·
-//   a closure passed to a generic higher-order function over a borrowed `Vec` ·
-//   `Option::map` over the `Option<&T>` a lookup lends · `??` reading a borrowed
-//   count through · a `HashMap` of `Vec`s edited through `get_mut` · a user `Drop`
-//   that runs once for every way a slot gives its ticket up.
-//
-// The queue is never copied: `push` and `insert` move a ticket in, the readers lend
-// one, and `remove`, `swap_remove`, a displacing `insert` and a consuming `for` hand
-// one over. Every closing line below is a `Drop`, so the output is also the proof
-// that each ticket was destroyed exactly once, at the point its owner gave it up.
+// Showcase: an incident desk whose collections own the tickets they file. Integration
+// example: a `Vec` and a `HashMap` of non-`Copy` structs, `&mut self` methods on a slot in
+// place, a closure through a generic higher-order function, `Option::map` over a lookup's
+// `Option<&T>`, `??` over a borrowed count, `get_mut`, and a user `Drop`. `push` and
+// `insert` move a ticket in, readers lend one, and `remove`, `swap_remove`, a displacing
+// `insert` and a consuming `for` hand it over. Each `Drop` line shows that every ticket is
+// destroyed exactly once.
 
 enum Severity {
     Low,

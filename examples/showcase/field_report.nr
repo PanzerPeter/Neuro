@@ -1,25 +1,10 @@
-// Showcase: the 2A sub-phase end to end: standard I/O and the spec stragglers,
-// combined in one program.
-//
-// Cumulative integration example combining the features 2A added:
-//   `@derive(Debug, PartialEq)`: struct rendering and structural equality
-//   · `println` to stdout · `.is_nan()` on a computed float
-//   · `&[T]` borrowed slices passed to one signature from an array and from a `Vec`
-//   · the `IntoIterator` / `Iterator` protocol with an associated type (`type Item`)
-//   · an associated-type bound (`S: Iterator<Item = i32>`)
-//   · `.enumerate()` and the `.filter(p)` head adapter
-//   · `.chars()` codepoint iteration and `.char_indices()` byte offsets
-//   plus earlier features: `@derive(Copy, Clone)` structs with `&self` methods,
-//   fixed-size arrays, `Vec<T>`, `match` on `Option`, and the format mini-language.
-//
-// The point of the combination: every one of these is a *separate* addition, and the
-// program only produces the right report if they agree with each other: the slice
-// parameter must accept both an array and a `Vec`, the protocol's `Item` must be the
-// type the bound demanded, the byte offsets must line up with the codepoints standing
-// at them, and a NaN must fail `==` while the derived equality still finds duplicates
-// among the readings that are not NaN.
-//
-// Expected exit code: 63
+// Showcase: a field report built on standard I/O and the iteration features. Integration
+// example: `@derive(Debug, PartialEq)`, `println`, `.is_nan()`, `&[T]` slice parameters
+// that take an array and a `Vec`, the `IntoIterator` and `Iterator` protocol with an
+// associated type, `.enumerate()`, a `.filter(p)` head adapter, `.chars()` and
+// `.char_indices()`. The slice parameter must accept both sources, byte offsets must line
+// up with the characters at them, and a NaN must fail `==` while derived equality still
+// finds duplicates among the other readings.
 
 @derive(Copy, Clone, Debug, PartialEq)
 struct Reading {

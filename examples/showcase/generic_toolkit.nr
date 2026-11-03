@@ -1,24 +1,9 @@
-// Showcase: generics, const generics, turbofish, and where-clauses working together
-// with prior features.
-//
-// Cumulative integration example combining:
-//   generic structs + generic inherent impls with monomorphization
-//   · generic functions with monomorphization
-//   · const generic parameters + turbofish + `where` value predicates
-//   · fixed-size arrays
-//   · enums with associated data + pattern matching
-//   · tuples as generic type arguments
-//   · non-`Copy` type arguments: a struct holding a `string`, moved by value
-//   · `Drop` destructors observed through a generic call boundary
-//   · if-expressions and implicit returns
-//   · generics at an enclosing parameter: `Option<T>` and `Result<Cell<T>, string>` in
-//     generic signatures, `Cell<T>` in its own impl, propagated with `?` and unwrapped
-//     with `??`
-//   · generic methods: `Cell<T>::with<U>` adds its own parameter to the impl's, inferred
-//     from a `string` argument or supplied by a turbofish after the method name
-//
-// Each generic template below (function, struct, or impl) is emitted once per
-// concrete type or const argument, so `T` and `N` cost nothing at runtime.
+// Showcase: generics, const generics, turbofish and `where` clauses alongside earlier
+// features. Integration example: generic structs and functions, const parameters with
+// `where` predicates, a non-`Copy` type argument, `Drop` across a generic boundary,
+// `Option` and `Result` at a generic parameter propagated with `?`, and generic methods
+// such as `Cell<T>::with<U>`. Each generic template is emitted once per concrete type or
+// const argument, so `T` and `N` cost nothing at run time.
 
 enum Shape {
     Circle(i32),
@@ -70,7 +55,7 @@ struct Buffer<T, const CAP: u32> {
 }
 
 // The classic identity template: reused here at i32, at a tuple type, and at the two
-// non-`Copy` types below. A type argument carries no `Copy` requirement — the body is
+// non-`Copy` types below. A type argument carries no `Copy` requirement: the body is
 // move-checked once against an abstract `T` that is treated as non-`Copy`, so it is
 // already valid for every instantiation.
 func identity<T>(x: T) -> T {

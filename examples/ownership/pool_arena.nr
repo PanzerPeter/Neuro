@@ -1,54 +1,18 @@
-// The `pool` block: scoped arena allocation.
-//
-// Inside a `pool`, the allocations the block itself writes come from one contiguous
-// bump arena instead of the heap. Leaving the block moves the bump pointer back, which
-// frees everything the body allocated in a single step: no per-object release walk, and
-// no cost that grows with how many objects there were.
-//
-// A pool may carry a label (`pool batch { ... }`). Nothing refers to it — a `pool` is
-// not a value and cannot be broken out of — so the label exists to name the arena in a
-// diagnostic, which is what makes nested pools readable.
-//
-// Three rules keep the arena safe, all checked at compile time:
-//
-//   * Nothing that outlives the block may be written from inside it, unless the value
-//     is provably off the arena. Storing a `string`, a collection or a tensor that the
-//     block ALREADY allocated into a binding declared before the `pool` would leave that
-//     binding pointing at bytes the block's exit reclaims. Scalars are free to cross: an
-//     `i32` carries no address. So is anything the compiler can trace to the heap, which
-//     is both `summary` lines below.
-//   * A `return` or `break` that leaves the block carries a number, `bool` or `char`,
-//     or nothing. Leaving by `return`, `break` or `continue` runs the release on the
-//     way out, so nothing that could point into the arena may travel with the jump.
-//   * A value the block owns may not have a destructor unless its type also
-//     implements `PoolAware`. The arena is released in one store and cannot run a
-//     destructor per object; `PoolAware` is how a type says its release can be
-//     batched into the arena's own sweep instead. `Round` below is that opt-in.
-//     Inside the block the sweep REPLACES the destructor, and it runs in reverse
-//     registration order at the closing brace, so a resource is never released
-//     before something that was queued on it.
-//
-// The arena captures what the block writes, not what its callees write: a buffer a
-// called function allocates belongs to whoever that function hands it to, so it stays
-// an ordinary heap allocation. That costs the arena's speed on such a path and never
-// its safety.
-//
-// Nor does the arena capture a value the block is storing somewhere that outlives it.
-// The compiler routes that allocation to the heap instead, because the owner is right
-// there in the statement: `summary = "round " + ...` below builds its text with the
-// arena switched off, so the binding still reads correctly after the closing brace,
-// while `val run = "run-" + "042"` a few lines up — kept by the block itself — does come
-// from the bump region.
-//
-// What routing cannot do is move a buffer allocated EARLIER. `summary = line` would not
-// compile, because `line` was already taken from the arena on its own line. The same
-// trace has to hold through a call: every argument must itself be off the arena, or the
-// callee could be handing back the pointer the block gave it. And where the owner cannot
-// be known at all — a call through a trait object, whose implementation is only known at
-// runtime — the value stays in the block.
+// The `pool` block: scoped arena allocation. Allocations the block itself writes come from
+// one contiguous bump arena, and leaving the block frees all of them in one step. A `pool`
+// may carry a label (`pool batch { }`) that names the arena in diagnostics. Three rules are
+// checked at compile time:
+//   * a value that outlives the block may not be written from inside it unless it is provably off the arena. Scalars cross
+//     freely. A `string`, collection or tensor the block allocated may not be stored into an earlier binding. A store whose
+//     text is built in place (`summary = "round " + ...`) is routed to the heap instead.
+//   * a `return` or `break` that leaves the block carries a number, `bool`, `char` or nothing.
+//   * a value with a destructor needs a `PoolAware` impl. The arena sweeps those in reverse registration order at the closing
+//     brace, replacing the destructor.
+// Allocations made inside called functions stay on the heap.
 
 // A round marker built inside the arena. It has a destructor, so a `pool` would refuse
 // to own one, so the `impl PoolAware` beneath it is what makes this program compile.
+
 struct Round {
     index: i32
 }

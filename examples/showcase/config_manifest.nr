@@ -1,18 +1,8 @@
-// Showcase: a config manifest rendered from typed records and checked against
-// the exact document it should produce.
-//
-// Integration example combining triple-quoted block strings with the features
-// that produce the text they frame:
-//   struct + `@derive(Copy)` + impl method (&self) · enum with a payload + match ·
-//   fixed-size array + for-in loop · string interpolation with the format
-//   mini-language (:>W, :<W, :.N) · string concatenation · `.len()`.
-//
-// The header, the footer, and the expected document are all block strings: the
-// value each carries is dedented to the column its closing `"""` sits at, so the
-// literals stay indented with the code while the rendered document does not.
-// The finished manifest is printed and then checked against that literal, so the
-// output *is* the document. `main` returns its byte length, which only comes out
-// right if every line rendered and every block dedented exactly as intended.
+// Showcase: a config manifest rendered from typed records and checked against the document
+// it should produce. Integration example: triple-quoted block strings, a `@derive(Copy)`
+// struct, an enum with a payload matched, a fixed array walked by `for`, format specs, and
+// `.len()`. Each block string is dedented to the column of its closing `"""`, so literals
+// stay indented with the code. The exit code is the byte length of the rendered manifest.
 
 enum Setting {
     Flag(bool),

@@ -1,21 +1,12 @@
-// Showcase: ordering a tensor axis alongside the rest of the tensor surface.
-//
-// Cumulative integration example combining:
-//   `.sort()` / `.argsort()` / `.topk(k:, axis:)` on a tensor
-//   · named dimensions (`[batch: 3, classes: 4]`) · tensor literal coercion
-//   · reductions `.max(axis:)` / `.sum()` / `.mean()` · tensor slicing and indexing
-//   · `.t()` shape manipulation · in-place `+=` on a tensor
-//   · a struct holding a tensor field with an `&self` method
-//   · `for` over a range and over a reversed range · string interpolation
-//
-// The point of the combination: an argsort index is an ordinary integer, so it reads
-// BACK into the tensor that produced it and into anything indexed the same way. That is
-// what turns "which class scored highest" into a label lookup, which a reduction alone
-// cannot do: `.max()` answers WHAT the best score was and never WHERE it was.
-//
-// Expected exit code: 130
+// Showcase: ordering a tensor axis alongside the rest of the tensor surface. Integration
+// example: `.sort()`, `.argsort()` and `.topk(k:, axis:)`, named dimensions, reductions
+// with `axis:`, slicing and indexing, `.t()`, in-place `+=`, and a struct with a tensor
+// field. An argsort index is an ordinary integer, so it reads back into the tensor that
+// produced it. That turns "which class scored highest" into a label lookup, which `.max()`
+// alone cannot do: it gives the best score, never its position.
 
 // A scoreboard owns its logits and reads them without giving them up.
+
 struct Batch {
     logits: Tensor<f64, [batch: 3, classes: 4]>
 }

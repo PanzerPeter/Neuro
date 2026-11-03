@@ -1,8 +1,6 @@
-// Neuro Example: Factorial calculation using recursion
-// Demonstrates: recursive function calls, if/else, arithmetic operations
-//
-// The recursion prints each multiplication as it unwinds, so the output shows
-// how factorial(5) = 120 is actually assembled.
+// Neuro Example: Factorial calculation using recursion Demonstrates recursive calls,
+// if/else, and arithmetic. The recursion prints each multiplication as it unwinds, so the
+// output shows how factorial(5) is built.
 
 func factorial(n: i32) -> i32 {
     val result: i32 = 0

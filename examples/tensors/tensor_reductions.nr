@@ -1,26 +1,14 @@
-// Tensor reductions: `.sum()`, `.mean()`, `.max()`, `.min()`
-//
-// A reduction folds a tensor's elements. With no argument it folds all of them and
-// hands back one scalar of the element type. With `axis:` it folds along that axis
-// alone, dropping it from the result and keeping every other axis — extent and dimension
-// name both — so a `[2, 3]` summed along axis 1 is a `[2]`.
-//
-// The axis may be written three ways: a position, a dimension NAME the receiver's own
-// type declares, or a negative index counting from the end, so `axis: -1` is the last
-// axis whatever the rank is.
-//
-// A reduction READS its receiver. It allocates a fresh, smaller tensor (or nothing at
-// all for a scalar result) and leaves the buffer it summarised alone, which is why it
-// accepts a borrow: a weight can be summarised without being moved out of whatever owns
-// it.
-//
-// Reducing a rank-1 tensor along its only axis leaves a rank-0 `Tensor<T, []>`, and
-// `.item()` reads its one element back as a plain `T`.
-//
-// `.mean()` is float-only. An integer mean would have to pick a rounding rule, and the
-// language does not give one; `.sum()` and an explicit divide say what was meant.
+// Tensor reductions: `.sum()`, `.mean()`, `.max()` and `.min()`. With no argument a
+// reduction folds every element into one scalar of the element type. With `axis:` it folds
+// that axis alone and drops it: a `[2, 3]` summed along axis 1 is a `[2]`. The axis can be
+// a position, a dimension name the type declares, or a negative index counting from the
+// end. A reduction reads its receiver and allocates a smaller tensor, so it accepts a
+// borrow. Reducing a rank-1 tensor leaves a rank-0 `Tensor<T, []>`, which `.item()` reads
+// as a plain `T`. `.mean()` is float-only: an integer mean would need a rounding rule the
+// language does not give.
 
 // A borrowed receiver: `scores` stays with the caller.
+
 func spread(scores: &Tensor<i32, [4]>) -> i32 {
     scores.max() - scores.min()
 }

@@ -1,13 +1,8 @@
-// f16 / bf16 half-precision primitives
-//
-// `f16` (IEEE-754 half) and `bf16` (bfloat16) are ordinary floating point: arithmetic,
-// the six comparisons, the math methods and `.to_checked`, like `f32`. Each operation
-// computes in `f32` and rounds its answer to the operand type once, so the result is the
-// correctly rounded one on every machine. A chain rounds after every step; nothing is
-// carried at a wider precision unless the program asks with `as f32`.
-//
-// A literal takes its type from context (`val h: f16 = 0.5`, `h * 2.0`) or from its
-// suffix (`1.5f16`, `0.02bf16`). There is no implicit widening: an `f16` meets only `f16`.
+// `f16` and `bf16` half-precision floats. They are ordinary floating point: arithmetic, the
+// six comparisons, the math methods and `.to_checked`. Each operation computes in `f32` and
+// rounds once to the operand type, and a chain rounds after every step unless the program
+// widens with `as f32`. A literal takes its type from context (`val h: f16 = 0.5`) or from
+// a suffix (`1.5f16`). There is no implicit widening.
 
 func scale(x: f16) -> f16 {
     return x * 4.0

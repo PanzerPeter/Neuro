@@ -1,24 +1,13 @@
-// Showcase: closures and higher-order functions.
-//
-// Integration example combining closures with several prior features:
-//   · a higher-order function taking a `(i32) -> i32` closure parameter
-//   · Copy-by-value capture of an enclosing variable
-//   · a `move` closure with a block body and an explicit return type
-//   · fixed-size arrays and indexed iteration
-//   · a struct method, working alongside closures
-//   · capture modes: a closure that writes a local borrows it `&mut` and is passed to a
-//     `mut (..)` parameter; one that reads a heap `string` or pushes to a `Vec` borrows
-//     it; a `move` closure that gives its `string` away is `once`
-//   · inference: closures with no annotations, typed by the generic function they are
-//     handed to, whose type parameters they help infer
-//   · escaping closures: built inside a function and returned in a struct, kept in an
-//     `Option` and matched back out, and a `move` closure returned with the `string` it owns
-//   · lending and moving: a returned `mut` closure is lent to a `mut (..)` parameter, so the
-//     caller still holds it afterwards, then moves into a struct field and out again
-//
-// The results are composed into a single deterministic exit code.
+// Showcase: closures and higher-order functions. Integration example: `(i32) -> i32`
+// parameters, copy-by-value capture, `move` closures, fixed arrays, a struct method, and
+// type inference from the generic function a closure is passed to. Capture follows use: a
+// closure that writes a local borrows it `&mut` and goes to a `mut (..)` parameter; one
+// that reads a `string` or pushes to a `Vec` borrows it; a `move` closure that gives its
+// `string` away is `once`. Closures are also returned, stored in struct fields and lent to
+// `mut` parameters.
 
 // Apply `f` to each element of a 4-element array and sum the results.
+
 func map_sum(xs: [i32; 4], f: (i32) -> i32) -> i32 {
     mut total: i32 = 0
     mut i: i32 = 0

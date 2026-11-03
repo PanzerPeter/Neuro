@@ -12,7 +12,7 @@
 //! falls through are joined back in (`SymbolTable::join_moves`): the binding may be
 //! gone, so a later read is a use of a moved value.
 //!
-//! A move out of a *sub-place* — `l.w`, `(o).inner.w` — is recorded against the
+//! A move out of a *sub-place* (`l.w`, `(o).inner.w`) is recorded against the
 //! place's ROOT binding rather than the one field, because the language leaves a
 //! struct whose field has been moved out partially moved and unusable as a whole.
 //! Reaching the place through a borrow is not a move at all but an error: a
@@ -20,8 +20,8 @@
 //! owns, once per call.
 //!
 //! A loop body is the one region where restoring the state is not the whole
-//! story. The restore is right for what follows the loop — it may run zero times,
-//! so the binding may still own its value there — but a move that is still
+//! story. The restore is right for what follows the loop (it may run zero times,
+//! so the binding may still own its value there) but a move that is still
 //! outstanding when the body *ends* is one the next iteration performs again on a
 //! binding that owns nothing. `report_loop_body_moves` reports those before the
 //! restore, which is what keeps the second iteration from freeing the same buffer
@@ -47,8 +47,8 @@ const SELF_RECEIVER: &str = "self";
 impl TypeChecker {
     /// Record the move that occurs when `expr` appears in a consuming position.
     ///
-    /// Moves apply to a place expression — an identifier or a field path rooted
-    /// in one, either possibly wrapped in parentheses — whose value has a
+    /// Moves apply to a place expression (an identifier or a field path rooted
+    /// in one, either possibly wrapped in parentheses) whose value has a
     /// move-tracked type. A literal, a `.clone()` call, or any compound
     /// expression produces a fresh value and moves nothing here; nested
     /// consuming positions (e.g. an argument inside a call) are handled where
@@ -186,8 +186,8 @@ impl TypeChecker {
     /// The path of a sub-place below its root binding, as the move state keys it:
     /// `"label"` for `t.label`, `"0"` for `t.0`, `"1.name"` for `t.1.name`.
     ///
-    /// `None` means the place has no statically nameable path — a runtime array index
-    /// is the case that matters — and a move through it is recorded against the whole
+    /// `None` means the place has no statically nameable path (a runtime array index
+    /// is the case that matters) and a move through it is recorded against the whole
     /// binding, because the compiler cannot say which element left.
     pub(crate) fn place_path(place: &Expr) -> Option<String> {
         match place {
@@ -333,8 +333,8 @@ impl TypeChecker {
     /// The type a place expression denotes, paired with whether reaching it
     /// crossed a reference.
     ///
-    /// `None` means the expression is not a place rooted in a binding — a call
-    /// result or a literal — which owns nothing a caller could move out of.
+    /// `None` means the expression is not a place rooted in a binding (a call
+    /// result or a literal) which owns nothing a caller could move out of.
     pub(crate) fn place_origin(&self, place: &Expr) -> Option<(Type, bool)> {
         match place {
             Expr::Paren(inner, _) => self.place_origin(inner),
@@ -362,7 +362,7 @@ impl TypeChecker {
             }
             // An array element and a tuple element are places in their own right. The
             // move is still recorded against the ROOT binding, because an aggregate
-            // with an element moved out is partially moved and unusable as a whole —
+            // with an element moved out is partially moved and unusable as a whole:
             // the same rule a struct field follows, and the reason a runtime index
             // needs no per-element state here.
             Expr::Index { object, .. } => {
@@ -392,7 +392,7 @@ impl TypeChecker {
     ///
     /// A loop body's moves are restored afterwards because the loop may run zero
     /// times, but a move that is still outstanding when the body ends is a move the
-    /// *next* iteration performs again on a binding that no longer owns anything —
+    /// *next* iteration performs again on a binding that no longer owns anything:
     /// a double free at run time rather than a diagnostic. Call this with the scope
     /// stack the snapshot was taken on: bindings declared inside the body have gone
     /// with its scope, which is what leaves only the outer ones.
@@ -414,7 +414,7 @@ impl TypeChecker {
 ///
 /// `continue` is deliberately not an exit: it starts the next iteration, which is
 /// exactly the repetition this predicate exists to detect. Nested loops are not
-/// descended into either — a `break` inside one targets that loop, not this one.
+/// descended into either: a `break` inside one targets that loop, not this one.
 fn stmts_exit_loop(stmts: &[Stmt]) -> bool {
     stmts.iter().any(stmt_exits_loop)
 }

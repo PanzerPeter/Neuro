@@ -1,21 +1,12 @@
-// Showcase: heat spreading along a rod, one GPU thread per cell.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   `@kernel` with `thread_id`, an early `return`, borrowed `Tensor` inputs and
-//   `KernelOut` outputs written in `unsafe` blocks · `out.partition` with `.flat` · `.to(Device::GPU(0))` /
-//   `.to(Device::CPU)` · a `@gpu` function over device tensors · `pool` arena blocks · a
-//   closure through `.map` · a `.sum()` reduction · a `Vec` of `Copy` structs.
-//
-// The rod starts cold with a hot spot in the middle, and both ends are held at their
-// starting temperature. Each step, every cell moves toward the average of its neighbours,
-// computed by a hand-written kernel: one thread per cell, 32 cells to a block. The two
-// temperature buffers live on the GPU the whole time and take turns as input and output,
-// so no step copies anything to or from the host. Every 25 steps a `@gpu` function measures
-// how far the rod has moved since the last report, that difference comes back to the host
-// to be summed, and a second kernel keeps the new temperatures on the GPU for the next
-// report, writing through `partition` so each thread can only reach its own cell. The same simulation also runs on the host, and the two must agree.
-// Without a usable NVIDIA GPU the program stops before `main` with a `panic:` line.
+// Showcase: heat spreading along a rod, one GPU thread per cell. Integration example: a
+// `@kernel` with `thread_id` and an early `return`, `KernelOut` written in `unsafe` blocks,
+// `out.partition` with `.flat`, `.to(Device::GPU(0))` and `.to(Device::CPU)`, a `@gpu`
+// function over device tensors, `pool` blocks, a closure through `.map`, and `.sum()`. Both
+// temperature buffers stay on the GPU and take turns as input and output. Every 25 steps a
+// `@gpu` function measures the change on the device, and a second kernel keeps the
+// temperatures for the next report, writing through `partition` so each thread reaches only
+// its own cell. The host runs the same simulation, and the two must agree. Without a usable
+// NVIDIA GPU the program stops before `main` with a `panic:` line.
 
 @kernel(threads: [32])
 func diffuse(t: Tensor<f32, [100]>, rate: f32, next: KernelOut<Tensor<f32, [100]>>) {

@@ -1,6 +1,6 @@
-# Structs and Methods
+# Structs and Enums
 
-Structs are user-defined types that group related fields together. Methods add behaviour to structs via `impl` blocks.
+Structs group named fields into one nominal type, and enums hold exactly one of several named variants. Both take `impl` blocks for methods, associated functions and trait impls, and both move unless they are `Copy`. Matching on an enum's variants is covered in [Control Flow](control-flow.md#pattern-matching).
 
 ## Struct Definition
 
@@ -16,7 +16,9 @@ struct Rectangle {
 }
 ```
 
-Fields are declared as `name: Type` and separated by commas. Trailing commas are allowed.
+Fields are declared as `name: Type` and separated by commas. Trailing commas are allowed. A field may have any type, including another struct or an enum. A struct cannot hold itself: naming it in one of its own fields is an error.
+
+Structs are nominal: two structs with identical fields are distinct types, and a value of one does not pass where the other is expected. A struct that holds a reference declares a lifetime parameter for it, as in `struct View<'a> { text: &'a string }` (see [Lifetimes](ownership.md#lifetimes-and-returned-references)).
 
 ### Field visibility
 
@@ -46,7 +48,7 @@ val origin = Point { x: 0.0, y: 0.0 }
 val rect = Rectangle { width: 10, height: 5 }
 ```
 
-All fields must be provided. Field order in the literal does not need to match the definition order.
+Field order in the literal does not matter. Every declared field must be provided (`MissingStructField`), each only once (`DuplicateStructField`), and no field may be named that the struct does not declare (`UnknownField`).
 
 ### Field-Init Shorthand
 
@@ -70,7 +72,7 @@ val shifted = Point { x: 10.0, ..p }   // x = 10.0, y inherited from p (2.0)
 val copy = Point { ..p }               // all fields copied from p
 ```
 
-The base must be the same struct type as the literal (otherwise a type `Mismatch` error). When a base is present, omitting fields is **not** a `MissingStructField` error: the base fills them in. The base is evaluated and its fields are copied into the new value; no allocation is introduced.
+The base must be the same struct type as the literal (otherwise a type mismatch). When a base is present, omitting fields is **not** a `MissingStructField` error: the base fills them in.
 
 ## Field Access
 
@@ -106,6 +108,11 @@ val fixed = Point { x: 1.0, y: 2.0 }
 Structs can be passed as function parameters:
 
 ```neuro
+struct Rectangle {
+    width: i32,
+    height: i32
+}
+
 func area(r: Rectangle) -> i32 {
     return r.width * r.height
 }
@@ -116,15 +123,32 @@ func main() -> i32 {
 }
 ```
 
-A function of any kind may return a struct: free functions, associated functions, and
-methods alike. The by-value struct ABI covers all three, which is what makes both a plain
-factory function and the `Type::new(...)` constructor pattern work.
+A free function, an associated function or a method may return a struct, so a plain factory function and a `Type::new(...)` constructor both work.
+
+## Definition Order Independence
+
+Structs and `impl` blocks can appear in any order. Forward references are supported:
+
+```neuro
+impl Score {
+    func doubled(&self) -> i32 {
+        self.value * 2
+    }
+}
+
+struct Score {
+    value: i32
+}
+
+func main() -> i32 {
+    val s = Score { value: 21 }
+    return s.doubled()  // 42
+}
+```
 
 ## impl Blocks
 
-Use `impl TypeName { ... }` to add methods and associated functions to a struct. Everything in
-this section applies to an enum too; see
-[Enum methods and trait impls](types.md#methods-and-trait-impls).
+Use `impl TypeName { ... }` to add methods and associated functions to a struct. An enum takes `impl` blocks the same way (see [Methods and Trait Impls](#methods-and-trait-impls)). Generic structs and their impls are covered in [Generics and Traits](generics-and-traits.md#generic-structs-and-impls), and user traits in [Traits and Impls](generics-and-traits.md#traits-and-impls).
 
 ### Instance Methods (`&self`)
 
@@ -151,10 +175,8 @@ func main() -> i32 {
 }
 ```
 
-- `self` inside the method refers to the receiver struct value.
-- All struct fields are accessible via `self.field`.
-- The receiver is a shared borrow: the method can read fields but cannot move an owning one
-  out (see [Consuming Methods](#consuming-methods-self)).
+The receiver is a shared borrow: the method can read fields but cannot move an owning one
+out (see [Consuming Methods](#consuming-methods-self)).
 
 ### Mutating Methods (`&mut self`)
 
@@ -215,7 +237,6 @@ func main() -> i32 {
     val label = Label { text: "sensor-a" }
     val size = label.peek()            // borrows: `label` survives
     val text = label.into_text()       // consumes: `label` is gone after this
-    // val again = label.peek()        // Error: use of moved value 'label'
     return text.len() as i32
 }
 ```
@@ -229,8 +250,7 @@ func main() -> i32 {
   reference into it.
 - On a **`Copy`** struct a `self` receiver duplicates rather than moves, so the caller keeps
   its value. This is what lets an operator-trait method `func add(self, ...)` work.
-- A `Drop` type's destructor runs inside the consuming method, at its exit: once, never
-  twice.
+- A `Drop` type's destructor runs at the method's exit, once ([Destructors](ownership.md#destructors-impl-drop)).
 
 See [`examples/ownership/consuming_self.nr`](../../examples/ownership/consuming_self.nr).
 
@@ -253,30 +273,6 @@ impl Point {
 func main() -> i32 {
     val p = Point::new(10, 32)
     return p.x + p.y  // 42
-}
-```
-
-### Combining Methods and Associated Functions
-
-```neuro
-struct Rect {
-    width: i32,
-    height: i32
-}
-
-impl Rect {
-    func new(w: i32, h: i32) -> Rect {
-        Rect { width: w, height: h }
-    }
-
-    func area(&self) -> i32 {
-        self.width * self.height
-    }
-}
-
-func main() -> i32 {
-    val r = Rect::new(6, 7)
-    return r.area()  // 42
 }
 ```
 
@@ -304,84 +300,14 @@ impl Shape {
 }
 ```
 
-In `impl<T> Cell<T>`, `Self` is `Cell<T>`. A generic type applied to the impl's own
-parameter is not supported yet, so there `Self` is refused just as `Cell<T>` is.
-`Self` outside an `impl` or a `trait` is an error.
-
-## Destructors (`impl Drop`)
-
-A struct can define a destructor by implementing the built-in `Drop` trait. Its
-`drop(&mut self)` method runs automatically when an owner of the value goes out
-of scope:
-
-```neuro
-struct Guard {
-    sink: &mut i32
-}
-
-impl Drop for Guard {
-    func drop(&mut self) {
-        *self.sink = *self.sink + 1   // record that the destructor ran
-    }
-}
-
-func main() -> i32 {
-    mut dropped: i32 = 0
-    {
-        val g = Guard { sink: &mut dropped }
-    }                 // `g` goes out of scope here → `drop` runs, dropped == 1
-    return dropped    // 1
-}
-```
-
-Rules:
-
-- Destructors run **only on normal scope exit**: fall-through, `return`,
-  `break`, and `continue`. A panic aborts the process without running any
-  destructor (there is no stack unwinding).
-- When several owned values leave the same scope, they are dropped in **reverse
-  declaration order** (LIFO).
-- A value that has been **moved** out (rebound, returned, passed by value, or
-  stored into a struct) is dropped exactly once, by its final owner, never
-  twice. Reading a moved value is already a compile error.
-- A `Copy` type may **not** implement `Drop` (a type with a destructor is moved,
-  not duplicated). `@derive(Copy)` together with `impl Drop` is a compile error.
-- The `drop` method must be exactly `drop(&mut self)`: no extra parameters and
-  no return type, and an `impl Drop` block may contain no other methods.
-
-- Reassigning a `mut` binding runs the displaced value's destructor at the
-  assignment. The new value is built first, so a reassignment may read the value it
-  replaces; a value already moved out is not destroyed a second time.
-- A holder owns what it holds. When a value is destroyed, so is every owner inside
-  it: a struct field, an array or tuple element, an enum payload, and a newtype's
-  inner value. The holder's own `drop` runs first, then its fields in declaration
-  order, and each position is destroyed exactly once.
-- A position given up first is destroyed on its own path instead. Moving `p.field`
-  into another binding leaves its siblings owned by `p`, and assigning to
-  `p.field` destroys the value it displaces there.
-
-```neuro
-struct Slot { guard: Guard }
-
-func main() -> i32 {
-    mut dropped: i32 = 0
-    {
-        val held = Slot { guard: Guard { sink: &mut dropped } }
-    }                 // the struct goes, and its field goes with it
-    return dropped    // 1
-}
-```
-
-Not yet supported: a `match` arm that binds *some* of a variant's owning fields and not
-others (`A(x, _)`) disowns the whole scrutinee, so the field it did not bind leaks rather
-than being destroyed twice. An arm that binds every owning field, or none, releases
-everything exactly once.
+In `impl<T> Cell<T>`, `Self` is `Cell<T>`. `Self` outside an `impl` or a `trait` is an error.
 
 ## Derived Traits (`@derive`)
 
 A struct opts into compiler-generated impls with `@derive(...)`. The derivable set is `Copy`,
-`Clone`, `Debug`, `PartialEq` and `Hashable`; any other name in the list is a compile error
-rather than a silent no-op.
+`Clone`, `Debug`, `PartialEq` and `Hashable`. Any other name in the list is `UnknownDerive`
+rather than a silent no-op, and a repeated name is `DuplicateDerive`. Enums take no `@derive`
+(see [Methods and Trait Impls](#methods-and-trait-impls)).
 
 ```neuro
 @derive(Debug, PartialEq)
@@ -399,37 +325,41 @@ func main() -> i32 {
 }
 ```
 
-The derives recurse, and they are generated inline over the fields rather than through a
-method. That has two consequences worth knowing:
+Each derive recurses into the struct's fields, and every field must support the same derive:
 
-- Every field must itself be handled by the same derive: a scalar, `string`, `char`, `bool`,
-  another struct carrying the same derive (`Hashable` also refuses a float field), or a struct
-  or enum that implements the trait by hand, whose own `fmt_debug`, `eq`, `hash` or `clone` the
-  derive calls for that field. A newtype field is handled as its inner value, except that a
-  hand-written `Clone` on it is called too. Anything else is a `DeriveFieldUnsupported` error
-  naming the field.
-  A `Copy` struct's `.clone()` is a copy of the whole value, so it calls no field's `clone`.
-- Deriving a trait and also writing its `impl` for the same struct is a
-  `DeriveConflictsWithImpl` error. Pick one: the derive for the field-wise behavior, the `impl`
-  when it should be something else. `@derive(Copy)` derives `Clone` too.
+- `Debug` gives the `{value:?}` rendering: the struct's name, then each field in declaration
+  order, as in `Point { x: 1, y: 2 }`. A field-less struct renders as its bare name. A struct
+  has no display form, so `"{p}"` is an error even with the derive; write `"{p:?}"`.
+- `PartialEq` gives `==` and `!=`, compared field by field. `PartialEq` is the
+  [operator trait](operators.md#operator-overloading) behind `==`.
+- `Hashable` hashes the fields in declaration order, so a struct that derives both
+  `PartialEq` and `Hashable` is a `HashMap` key with no hand-written impls. A float field is
+  refused (`DeriveFieldUnsupported`).
+- `Clone` gives `.clone()`, which returns a fresh value without moving the receiver. Each
+  field must be `Copy`, or a struct that derives or implements `Clone`, or a type with a
+  hand-written `Clone`. A `string`, `Vec`, tensor or `StringBuilder` field is refused
+  (`DeriveFieldUnsupported`), so such a struct writes `impl Clone` by hand
+  ([BUG-098](../BUGS.md)).
+- `Copy` makes the struct copy, rather than move, on bind, assign, return and by-value
+  pass. Each field must be `Copy`: scalars, arrays and tuples of them, and structs that derive
+  `Copy`. A `string` or collection field is refused, and the error names the field
+  (`CopyDeriveNonCopyField`). A struct without `Copy` is a move type; see
+  [Move Semantics](ownership.md#moves). `@derive(Copy)` also derives `Clone`,
+  and `.clone()` on a `Copy` value always copies the whole value.
 
-A struct that derives `PartialEq` and `Hashable` is a `HashMap` key with no hand-written impls.
+A field whose type is a struct or enum uses that type's own derive or hand-written impl of the
+trait. A newtype field uses the newtype's own impl when it has one, and its inner value otherwise.
+Deriving a trait and also writing its `impl` for the same struct is `DeriveConflictsWithImpl`:
+keep one. A struct that derives `Debug` over a field whose type has no debug form is
+`DeriveFieldUnsupported`.
 
-`{value:?}` is the only hole a struct renders in. A struct has no display form, so `"{p}"`
-is an error even with `@derive(Debug)`. See [`examples/structs/derives.nr`](../../examples/structs/derives.nr).
+See [`examples/structs/derives.nr`](../../examples/structs/derives.nr).
 
 ### Derivable traits by hand and as bounds
 
-Each derivable name is also an ordinary trait. The prelude declares four of them:
-
-```neuro
-trait Copy {}                     // requires `Clone`
-trait Clone { func clone(&self) -> Self }
-trait Debug { func fmt_debug(&self, out: &mut StringBuilder) }
-trait Hashable { func hash(&self) -> u64 }
-```
-
-`PartialEq` is the [operator trait](operators.md#operator-overloading) behind `==`.
+Each derivable name is also an ordinary trait. The prelude declares `Copy` (which requires
+`Clone`), `Clone` (`clone(&self) -> Self`), `Debug` (`fmt_debug(&self, out: &mut StringBuilder)`)
+and `Hashable` (`hash(&self) -> u64`).
 
 A struct may implement any of them by hand. `{x:?}` calls a hand-written `fmt_debug`, and a
 hand-written `impl Copy` is accepted only where `@derive(Copy)` would be: on a struct whose
@@ -464,290 +394,18 @@ func label<T: Debug>(name: string, v: &T) -> string {
 }
 ```
 
-`.clone()` on a `Copy` value is a copy, and `.hash()` on an integer, `bool`, `char`, `string`
-or a struct that derives `Hashable` returns the hash a `HashMap` uses for that key. `v.eq(&w)`
-is `v == w` on anything `==` already compares, and a `T: PartialEq` (or `T: Comparable`) body
-may call it too. What a
+A `T: PartialEq` body may call `v.eq(&w)`, and a `T: Hashable` body may call `v.hash()`. What a
 `T: Copy` or `T: Clone` bound gives a generic body is in
-[Functions](functions.md#ownership-through-a-type-parameter). See
+[Generics and Traits](generics-and-traits.md#ownership-through-a-type-parameter). See
 [`examples/structs/derivable_traits.nr`](../../examples/structs/derivable_traits.nr).
 
-## Definition Order Independence
-
-Structs and `impl` blocks can appear in any order. Forward references are supported:
-
-```neuro
-impl Score {
-    func doubled(&self) -> i32 {
-        self.value * 2
-    }
-}
-
-struct Score {
-    value: i32
-}
-
-func main() -> i32 {
-    val s = Score { value: 21 }
-    return s.doubled()  // 42
-}
-```
-
-## Generic Structs and Impls
-
-A struct may declare type parameters in `<...>` after its name; each distinct set of
-concrete type arguments is monomorphized into its own specialized struct at zero runtime
-cost. Type arguments are **inferred** from the field values at a struct literal, or
-written explicitly in a type annotation (`Pair<i32, f64>`).
-
-```neuro
-struct Pair<T, U> {
-    first: T,
-    second: U
-}
-
-// A generic inherent impl: `impl<T> Wrapper<T>` specializes its methods per instance.
-struct Wrapper<T> {
-    value: T
-}
-
-impl<T> Wrapper<T> {
-    func get(self) -> T {   // by value: `&self` cannot give away an owning `T`
-        self.value
-    }
-}
-
-func first_of(p: &Pair<i32, i32>) -> i32 {
-    p.first
-}
-
-func main() -> i32 {
-    val p = Pair { first: 40, second: 2 }   // Pair<i32, i32> inferred
-    val w = Wrapper { value: 30 }           // Wrapper<i32>
-    val flag = Wrapper { value: true }      // Wrapper<bool>, distinct instance
-    return first_of(&p) + w.get()           // 40 + 30 = 70
-}
-```
-
-**Restrictions.** Type arguments carry no `Copy` requirement: an instance *holds*
-the value, so `Wrapper<string>` owns the string it holds and moves with it (see
-[Types → Ownership of an element](types.md#ownership-of-an-element)). A generic struct is usable
-only *with* type arguments; its bare name is rejected.
-
-**A generic at the enclosing parameter.** A field, an impl signature or a body may instantiate a
-generic with a parameter in scope: `struct Outer<U> { i: Inner<U> }` holds an `Inner<i32>` in an
-`Outer<i32>`. Inside `impl<T> Cell<T>`, both `Cell<T>` and `Self` are the type `self` has. An
-associated function of a generic type infers the instance from its arguments, so `Cell::new(42)`
-calls `new` on `Cell<i32>`; when the arguments do not mention the parameter, supply it with a
-turbofish (`Bag::nothing::<i32>()`).
-
-```neuro
-struct Cell<T> {
-    v: T,
-}
-
-impl<T> Cell<T> {
-    func new(v: T) -> Cell<T> {
-        Cell { v: v }
-    }
-
-    func maybe(self) -> Option<T> {
-        Option::Some(self.v)
-    }
-}
-```
-
-### Generic methods
-
-A method may declare type parameters of its own, after its name and in addition to its impl's.
-A call infers them from its arguments; when the arguments do not mention one, a turbofish after
-the method name supplies it. Each set of type arguments a program uses compiles to its own copy
-of the method, exactly as a generic function does. Bounds and `where` clauses work as they do
-on a function.
-
-```neuro
-impl<T> Cell<T> {
-    func with<U>(self, other: U) -> Pair<T, U> {
-        Pair { first: self.v, second: other }
-    }
-}
-
-val p = Cell::new(5).with("five")        // U = string, inferred
-val q = Cell::new(true).with::<i64>(40i64)  // U = i64, from the turbofish
-```
-
-An associated function takes its own parameters the same way. On a generic type, one turbofish
-lists the type's parameters first and the function's own after them:
-`Cell::empty::<i32, f64>()`. A method's parameter may not reuse a name its impl declares. Trait
-methods take no type parameters of their own, so a generic method lives in an inherent `impl`.
-[`generic_methods.nr`](../../examples/structs/generic_methods.nr) runs the forms above.
-
-### Const (value) parameters
-
-A generic struct may also declare a **const parameter**, a compile-time value used as an array
-length, so `[T; CAP]` is sized concretely per instance:
-
-```neuro
-struct Buffer<T, const CAP: u32> {
-    data: [T; CAP],
-    count: u32
-}
-
-// CAP is inferred from the field array's length (Buffer<i32, 4>):
-val buf = Buffer { data: [1, 2, 3, 4], count: 4 }
-
-// or written explicitly in a type annotation:
-val other: Buffer<i32, 4> = Buffer { data: [5, 6, 7, 8], count: 4 }
-```
-
-Each distinct `CAP` produces its own monomorphized struct at zero runtime cost. A generic `impl`
-declares the const parameter the same way, and its methods read it as a value:
-
-```neuro
-impl<T, const CAP: u32> Buffer<T, CAP> {
-    func capacity(&self) -> u32 { CAP }
-}
-```
-
-## Traits
-
-A `trait` defines shared behaviour that many types can implement. Traits are Neuro's
-mechanism for bounded polymorphism. A trait method is either **required** (a signature
-with no body, implementors must provide one) or a **default** method (a signature with a
-body that implementors inherit unless they override it).
-
-```neuro
-trait Shape {
-    // Required: every implementor must define this.
-    func area(&self) -> i32
-
-    // Default (provided): inherited unless the implementor writes its own.
-    func is_big(&self) -> i32 {
-        if self.area() > 20 { 1 } else { 0 }
-    }
-}
-```
-
-Implement a trait for a type with `impl Trait for Type`:
-
-```neuro
-struct Square { side: i32 }
-
-impl Shape for Square {
-    func area(&self) -> i32 { self.side * self.side }
-    // `is_big` is not written, so Square inherits the trait's default.
-}
-```
-
-The compiler checks each trait impl for **conformance**: every required method must be
-present, each method's signature must match the trait's, and an impl may only contain
-methods the trait declares.
-
-Inside a trait, `Self` names whichever type implements it:
-
-```neuro
-trait Resizable {
-    func grown(&self, by: i32) -> Self
-}
-
-impl Resizable for Square {
-    func grown(&self, by: i32) -> Self { Self { side: self.side + by } }
-}
-```
-
-The impl may write `Self` or its own name (`-> Square`). A default method naming `Self`
-means each implementor in turn, and through a bound `T: Resizable`, `grown` returns `T`. A
-trait that names `Self` anywhere but the receiver cannot be used as `dyn Trait`
-([object safety](functions.md#object-safety)).
-
-### Trait bounds on generics
-
-A generic parameter may be bounded by a trait (`<T: Shape>`). Inside the body, the trait's
-methods may be called on the bounded parameter; at the call site the concrete type
-argument must implement the trait:
-
-```neuro
-func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
-    s.area() * factor          // dispatched through the `Shape` bound
-}
-```
-
-A trait-bounded generic is **fully monomorphized and erased**: each `impl` lowers to ordinary
-methods and each bound is specialized per concrete type, so there is no vtable and no runtime
-cost. Supertraits (`Comparable` requires `PartialEq`), dynamic dispatch (`dyn Trait`, which
-*does* use a vtable, see [Functions](functions.md#dyn-trait-dynamic-dispatch)) and the
-[operator traits](operators.md#operator-overloading) build on the same trait machinery.
-
-### Associated types
-
-A trait may declare an associated type: a member type each implementor chooses. The trait
-writes the name alone; the impl binds it, and either side names it as `Self::Name`:
-
-```neuro
-trait Channel {
-    type Sample
-
-    func sample(&self) -> Self::Sample
-}
-
-struct Tally { counted: i32 }
-
-impl Channel for Tally {
-    type Sample = i32
-
-    func sample(&self) -> Self::Sample { self.counted }
-}
-```
-
-`Self::Sample` resolves to whatever the impl bound, in a signature, in a method body, and
-nested inside another type (`Option<Self::Sample>`). An impl may spell the position either
-way: `-> i32` above means the same thing. Conformance requires every declared associated
-type to be bound, and rejects a binding the trait never declared.
-
-### Constraining an associated type in a bound
-
-A bare `T: Channel` bound erases the implementor, and with it the only thing that says what
-`Sample` is, so a generic body cannot call a method whose signature names it. The
-`Trait<Assoc = T>` form puts the answer in the bound:
-
-```neuro
-func scaled<T: Channel<Sample = i32>>(source: &T, factor: i32) -> i32 {
-    source.sample() * factor       // typed as i32 by the bound
-}
-```
-
-The constraint is written wherever a bound is:
-
-```neuro
-func clause<T>(source: &T) -> i32 where T: Channel<Sample = i32> { source.sample() }
-
-func anonymous(source: &impl Channel<Sample = i32>) -> i32 { source.sample() }
-
-func make(seed: i32) -> impl Channel<Sample = i32> { Tally { counted: seed } }
-```
-
-At the call site the concrete type argument's own binding must match the one the bound
-demands: passing a `Channel` implementor whose `type Sample = f64` to a `Sample = i32` bound
-is an error naming both types. A bound may only constrain an associated type the trait
-declares, and a bare bound still cannot type a call to a method that names one.
-
-A trait declaring an associated type has **no `dyn` form yet**. The form that will work
-binds the associated type in the trait-object type itself (`&dyn Channel<Sample = i32>`),
-which is what keeps the vtable's signatures resolvable after the implementor is erased. The
-compiler does not accept it today and says so: `dyn` on such a trait is rejected as not
-object-safe, naming the associated type and the bound form that is not implemented.
-
-## Nominal Typing
-
-Neuro uses nominal typing for structs: two struct types are compatible only if they have the same name, regardless of field layout.
-
-## Error Types
+## Struct Errors
 
 | Error | Trigger |
 |---|---|
 | `UnknownStruct` | Using an undefined struct name |
 | `StructAlreadyDefined` | Redefining a struct |
-| `UnknownField` | Accessing a field that doesn't exist |
+| `UnknownField` | Naming a field the struct does not declare, in a literal, an access or an assignment |
 | `MissingStructField` | Omitting a field in a struct literal |
 | `DuplicateStructField` | Providing the same field twice in a literal |
 | `AssignToImmutableField` | Mutating a field on a `val` binding |
@@ -762,13 +420,248 @@ Neuro uses nominal typing for structs: two struct types are compatible only if t
 | `UnknownDerive` | A `@derive` argument that names no derivable trait |
 | `DuplicateDerive` | The same trait listed twice in a `@derive` list |
 | `DeriveFieldUnsupported` | A field a derive cannot render, compare, clone or hash |
+| `CopyDeriveNonCopyField` | `@derive(Copy)` or `impl Copy` on a struct with a field that is not `Copy` |
 | `DeriveConflictsWithImpl` | A struct both derives a trait and declares an `impl` of it |
 | `InvalidCopyImpl` | `impl Copy` on an enum or a newtype, or a generic `impl Copy` bounding a parameter by another trait |
 | `MissingSupertraitImpl` | `impl Copy` without `Clone`, or `impl Comparable` without `PartialEq` |
 | `UnrenderableStruct` | A struct hole with no `Debug`, derived or by hand, or missing the `:?` specifier |
 
-## References
+## Enum Types
 
-- [Types](types.md): type system overview
+An enum holds exactly one of several named **variants**. A variant may be a bare tag, carry a
+positional **tuple** payload, or carry **named fields**, and all three may appear in one enum.
+Like structs, enums use nominal typing.
+
+### Definition
+
+```neuro
+// Bare variants
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+// Mixed variant shapes
+enum Shape {
+    Circle { radius: f64 },              // named-field variant
+    Rectangle { width: f64, height: f64 },
+    Triangle { base: f64, height: f64 }
+}
+
+enum Message {
+    Quit,                                // unit variant
+    Move(i32, i32),                      // tuple variant
+    Write(bool)
+}
+```
+
+An enum value can be bound to a `val` or `mut`, passed to and returned from functions, and stored
+in a struct field. It is **`Copy`** exactly when every payload it can carry is, so an enum over
+scalars duplicates on a bind while one carrying a `string` moves.
+
+### Construction
+
+Each variant shape has its own construction syntax, all prefixed with the enum name:
+
+```neuro
+val c = Color::Red                       // unit variant
+val m = Message::Move(1, 2)              // tuple variant
+val s = Shape::Circle { radius: 5.0 }    // struct variant
+```
+
+### Methods and Trait Impls
+
+An enum takes `impl` blocks as a struct does: `&self`, `&mut self` and consuming `self`
+methods, associated functions, user trait impls (static dispatch through a bound, dynamic
+through `&dyn Trait`, default methods included) and operator traits such as `PartialEq`. The
+body usually `match`es on `self`, and a `&mut self` method may assign a whole new variant to
+`self`. From [`examples/types/enum_methods.nr`](../../examples/types/enum_methods.nr):
+
+```neuro
+enum Light {
+    Red,
+    Amber,
+    Green
+}
+
+impl Light {
+    func start() -> Light {
+        return Light::Red
+    }
+
+    func wait_secs(&self) -> i32 {
+        match self {
+            Light::Red => 30,
+            Light::Amber => 3,
+            Light::Green => 25
+        }
+    }
+
+    func advance(&mut self) {
+        self = match self {
+            Light::Red => Light::Green,
+            Light::Green => Light::Amber,
+            Light::Amber => Light::Red
+        }
+    }
+}
+
+impl PartialEq for Light {
+    func eq(&self, other: &Light) -> bool {
+        return self.wait_secs() == other.wait_secs()
+    }
+}
+```
+
+Enums differ from structs in three ways:
+
+- There is no `@derive` on an enum. Write `impl Debug`, `impl PartialEq` or `impl Clone` by hand.
+- `impl Copy` is refused. An enum is `Copy` by its payloads, as described under Definition.
+- An `impl` member may not share a variant's name (`ImplMemberNamesVariant`): `Light::start()`
+  and `Light::Red` must stay distinct. A generic enum's `impl<T> Tree<T>` is instantiated for each
+  instance, as a generic struct's is.
+
+### Memory Layout
+
+An enum is a tagged union: a discriminant identifies the active variant, and the storage is sized
+for the widest variant's payload. Two enums with the same variant names but declared separately
+are distinct types.
+
+### Generic Enums
+
+An enum may take type parameters. Each distinct set of type arguments is monomorphized into its own
+nominal tagged union, exactly as a [generic struct](generics-and-traits.md#generic-structs-and-impls)
+is, so `Slot<i32>` and `Slot<i64>` are different types, each with its own payload width, and there
+is no runtime cost.
+
+```neuro
+enum Slot<T> { Filled(T), Vacant }
+enum Tagged<T, U> { Left(T), Right(U) }
+
+func main() -> i32 {
+    val a = Slot::Filled(4)                  // T inferred from the payload → Slot<i32>
+    val b: Slot<bool> = Slot::Vacant         // no payload, so the annotation fixes T
+    val t: Tagged<i32, bool> = Tagged::Right(true)
+    return 0
+}
+```
+
+Where the type arguments come from, in order:
+
+1. **The expected type**: an annotated binding, a parameter, a struct field, a `return`.
+2. **The payload**: `Slot::Filled(4)` determines `T = i32` by unifying `4`'s type against the variant's declared payload.
+3. **The enclosing function's return type**, when it is an instance of the same enum. This is what makes the common fallible-function shape work, because a tail `if` branch has no other context:
+
+```neuro
+func divide(a: i32, b: i32) -> Result<i32, i32> {
+    if b == 0 {
+        Result::Err(1)                   // Err determines E; T comes from the return type
+    } else {
+        Result::Ok(a / b)                // Ok determines T; E comes from the return type
+    }
+}
+```
+
+If none of the three determines an argument, the construction is rejected with `GenericEnumNotInferable`: annotate the target. Using the bare name as a type (`func f(o: Slot) -> i32`) is `GenericEnumNeedsArgs`.
+
+A `match` pattern is written with the **base** name. It matches whatever instance the scrutinee has, and its payload binds at that instance's concrete type:
+
+```neuro
+match a {
+    Slot::Filled(v) => v + 1,            // v is i32 here
+    Slot::Vacant => 0
+}
+```
+
+### `Option<T>` and `Result<T, E>`
+
+These two generic enums are the standard library's absence and failure types. They are available in **every program without a declaration**, because the compiler prepends an implicit prelude:
+
+```neuro
+enum Option<T> { Some(T), None }
+enum Result<T, E> { Ok(T), Err(E) }
+```
+
+They are ordinary generic enums: nothing about them is special-cased in the type checker or the backend, and a program that declares its own `Option` or `Result` shadows the prelude entry.
+
+```neuro
+func unwrap_or(o: Option<i32>, fallback: i32) -> i32 {
+    match o {
+        Option::Some(v) => v,
+        Option::None => fallback
+    }
+}
+
+func main() -> i32 {
+    val present = Option::Some(30)
+    val absent: Option<i32> = Option::None
+    return unwrap_or(present, 0) + unwrap_or(absent, 12)  // 42
+}
+```
+
+Variants may be written qualified (`Option::Some`, `Result::Err`) or, because the implicit prelude imports `Some`, `None`, `Ok`, and `Err` into every file without `@no_prelude`, unqualified (`Some(x)`). The [`??` operator](operators.md#nullerror-coalescing-operator-) unwraps either type with a fallback, the [`?` operator](operators.md#error-propagation-operator-) unwraps one or hands the failure to the caller, and [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) unwraps one or exits the scope.
+
+#### Methods
+
+Both enums carry a few methods, written as ordinary Neuro source in the prelude. Each one
+consumes its receiver, except the `is_*` tests, which borrow it.
+
+| Method | On | Result |
+|---|---|---|
+| `.map(f)` | `Option<T>`, `Result<T, E>` | `f: (T) -> U` applied to the `Some` / `Ok` payload |
+| `.map_err(f)` | `Result<T, E>` | `f: (E) -> F` applied to the `Err` payload |
+| `.ok()` | `Result<T, E>` | `Option<T>`, the error discarded |
+| `.ok_or(e)` | `Option<T>` | `Result<T, E>`, with `e` for `None` |
+| `.is_some()` / `.is_none()` | `Option<T>` | `bool` |
+| `.is_ok()` / `.is_err()` | `Result<T, E>` | `bool` |
+
+```neuro
+val doubled = find(2).map(|v| v * 2) ?? 0
+val checked: Result<i32, string> = find(0).ok_or("not found")
+val code = divide(1, 0).map_err(|msg| msg.len())
+if checked.is_err() { println("missing") }
+```
+
+`f` takes any closure or function value, so a tuple variant can wrap an error in one step:
+`read(path).map_err(AppError::Io)?`. There is no `.unwrap()`: `?? panic("...")` unwraps.
+A program that declares its own `Result` keeps `Option`'s methods except `.ok_or`, which builds
+the prelude's `Result`; a program with its own `Option` loses `Result::ok` the same way.
+
+### Limitations
+
+- Payloads must be sized. Any sized type is admissible, `Copy` or not: a `string`, a struct, an array, a tuple, another enum. `void` and the unsized types (`dyn Trait`, `[T]`) are rejected (`UnsupportedEnumPayload`), because a payload slot has to have a width.
+- No enum that holds itself inline, directly or through a struct, array, tuple or another enum: it would have no finite size.
+- No `impl Drop` on an enum (`InvalidDropImpl`): only a struct runs a user destructor, see [Destructors](ownership.md#destructors-impl-drop).
+- **A generic enum's tuple variant is a function value only where a function type is
+  expected.** `Error::Io` passes as a function anywhere. `Option::Some` names no instance until
+  something says which, so it needs a function type from its context: an annotation
+  (`val f: (i32) -> Option<i32> = Option::Some`), a parameter (`apply(Wrap::Two)`), or a
+  generic call whose earlier inputs fixed its parameters (`o.map(Option::Some)` with
+  `o: Option<i32>`). Bare, `val f = Option::Some` is an error; write `|x| Option::Some(x)`.
+
+### Enum Errors
+
+| Error | Cause |
+|---|---|
+| `EnumAlreadyDefined` | Two `enum` declarations share a name |
+| `UnknownEnumVariant` | Construction names a variant the enum does not declare |
+| `EnumVariantFormMismatch` | A variant built with the wrong syntax (e.g. a struct variant called like a function) |
+| `EnumVariantArityMismatch` | A tuple variant built with the wrong number of arguments |
+| `UnknownEnumField` / `MissingEnumField` / `DuplicateEnumField` | Struct-variant field set is wrong |
+| `UnsupportedEnumPayload` | A variant payload is `void` or an unsized type |
+| `GenericEnumNeedsArgs` | A generic enum's bare name used as a type |
+| `GenericEnumNotInferable` | A construction whose type arguments no context determines |
+| `GenericArgCountMismatch` | `Option<i32, bool>`, wrong number of type arguments |
+| `ImplMemberNamesVariant` | An `impl` method or associated function named like one of the enum's variants |
+| `InvalidDropImpl` | `impl Drop` on an enum |
+
+## See also
+
+- [Types](types.md): the type system overview
 - [Variables](variables.md): `val` and `mut` bindings
 - [Functions](functions.md): function definitions
+- [Generics and Traits](generics-and-traits.md): generic structs and enums, trait impls and bounds
+- [Ownership and Borrowing](ownership.md): moves, `Copy`, destructors and struct lifetimes
+- [Control Flow](control-flow.md): `match` and pattern matching
+- [Modules](modules.md): field and declaration visibility

@@ -1,10 +1,9 @@
-// Neuro Programming Language - String Type Test
-//
-// Every string this file builds is printed, so the escapes and the Unicode
-// escape are visible as rendered text. `main` returns 0: the output is the
-// assertion here.
+// Strings: a test of the `string` type. Every string this file builds is printed, so the
+// escapes and the Unicode escape show as rendered text. `main` returns 0, so the output is
+// the assertion.
 
 // Simple string return
+
 func get_greeting() -> string {
     return "Hello, Neuro!"
 }

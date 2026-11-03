@@ -1,8 +1,6 @@
-// Demonstrates compound assignment operators: +=, -=, *=, /=, %=, and the bitwise
-// &=, |=, ^=, <<=. On an integer each one is the plain assignment `x = x OP rhs`.
-//
-// The score is printed after every operator so the desugaring is checkable by
-// reading the output rather than by tracing the arithmetic.
+// Compound assignment: `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=` and `<<=`. On an
+// integer each one is the plain assignment `x = x OP rhs`. The score is printed after every
+// operator, so the desugaring can be checked by reading the output.
 
 func main() -> i32 {
     mut score: i32 = 100

@@ -1,46 +1,28 @@
 # Neuro Example Programs
 
-Runnable `.nr` programs demonstrating the language. Each program asserts itself
-two ways, and the test harness checks both:
+Runnable `.nr` programs, grouped by topic. The example test harness compiles and runs each
+one and checks two things:
 
 - the `i32` returned from `main` becomes the process **exit code**, registered in
   [`expected.txt`](expected.txt);
-- whatever the program writes to **standard output** is fixed byte for byte in a
-  sibling `.out` file: `basics/hello.nr` is pinned by `basics/hello.out`.
-
-Every program with a `main` currently prints, so every one has a `.out` file. The rule
-still runs the other way too: a program that prints nothing has no `.out` file, and that
-absence is itself the expectation: its output must stay empty.
-
-Each program explains itself in a header comment. This file says where things are,
-not what each one does.
+- what the program writes to **standard output** matches a sibling `.out` file byte for
+  byte: `basics/hello.nr` is pinned by `basics/hello.out`. A program with no `.out` file
+  must print nothing. Every program with a `main` has one today.
 
 ## Layout
 
 | Directory       | What it covers | Reference |
 | --------------- | -------------- | --------- |
 | `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
-| `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md) |
+| `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md), [Generics and traits](../docs/language-reference/generics-and-traits.md) |
 | `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `StringBuilder` | [Strings](../docs/language-reference/strings.md) |
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes, `@gpu` kernels, hand-written `@kernel` functions and their `partition` write form, device transfer with `.to` and the operations that then run on the device | [Tensors](../docs/language-reference/tensors.md) |
-| `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, collections of owned values, deterministic `Drop`, `pool` arena blocks | [Types](../docs/language-reference/types.md#references-immutable-borrows-t) |
+| `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, collections of owned values, deterministic `Drop`, `pool` arena blocks | [Ownership](../docs/language-reference/ownership.md) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, `if val` / `while val`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
-| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs](../docs/language-reference/structs.md) |
+| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs and Enums](../docs/language-reference/structs.md) |
 | `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
 | `showcase/`     | Bigger programs proving many features work **together** | see the index below |
-
-The single source of truth for each program's expected exit code is
-[`expected.txt`](expected.txt); for its expected output, the sibling `.out` file.
-A multi-file program registers its root with an exit code and each of its other
-modules with the marker `module`: those have no `main` of their own and are
-compiled as part of the root that reaches into them, so only the root has output
-of its own to pin.
-
-A program with bare `@gpu` or `@kernel` functions carries `gpu` after its exit code. Only a compiler
-on Linux can compile it, and only a machine with an NVIDIA GPU can run it, so the
-harness checks what each setup can: both pins where a GPU runs it, the startup abort
-where none is usable, and a type check off Linux.
 
 ## Compiling and running
 
@@ -56,115 +38,153 @@ cargo run -p neurc -- compile examples/basics/hello.nr -o /tmp/hello
 /tmp/hello | diff - examples/basics/hello.out && echo "output matches"
 ```
 
-> Compiled binaries are git-ignored under `examples/`, but prefer `-o /tmp/...`
-> so you never leave artifacts in the source tree.
+Compiled binaries under `examples/` are git-ignored, but `-o` pointing outside the tree
+keeps them out of the source tree entirely.
 
 ## Testing
 
-Every example is compiled and run by a single integration test that **discovers
-files automatically**:
+One integration test, [`compiler/neurc/tests/examples.rs`](../compiler/neurc/tests/examples.rs),
+compiles and runs every example. It finds the programs by walking `examples/` recursively:
 
 ```bash
 cargo test --workspace                 # runs all examples (among everything else)
 cargo test -p neurc --test examples    # just the example harness
 ```
 
-The harness ([`compiler/neurc/tests/examples.rs`](../compiler/neurc/tests/examples.rs))
-walks `examples/` recursively, compiles and runs every `.nr` file, and asserts both
-its exit code against [`expected.txt`](expected.txt) and its standard output against
-the sibling `.out` file. It fails if:
+Each `expected.txt` line is a path and a marker. The marker is an exit code, optionally
+followed by `gpu`, or the word `module` in place of the exit code:
 
-- a `.nr` file on disk has **no** entry in `expected.txt` (forces registration),
-- an entry in `expected.txt` points at a file that **doesn't exist** (stale),
-- a `.out` file has no `.nr` beside it (stale golden file),
-- any example's exit code **doesn't match** its registered value,
-- any example's output **doesn't match** its `.out` file, including a silent
-  example that starts printing, which has no `.out` and so must print nothing.
+- `module` marks a non-root module of a multi-file program. It has no `main` of its own,
+  so the harness records it and does not run it alone. The root program that uses it
+  compiles it.
+- `gpu` marks a program with bare `@gpu` or `@kernel` functions. Only a Linux compiler
+  builds it, and only a machine with an NVIDIA GPU runs it. Where a GPU runs it, the exit
+  code and output are checked like any other program. Where no GPU is usable, it must abort
+  at startup with the runtime's `panic:` diagnostic and print nothing. Off Linux, it must
+  type-check. A program whose `@gpu` functions all take `fallback: true` runs everywhere and
+  has no marker.
 
-An output mismatch prints the first differing line and then both texts in full,
-with every line quoted so trailing whitespace stays visible.
+The harness collects every problem across all examples and reports them together. It fails
+when:
+
+- a `.nr` file has no line in `expected.txt`;
+- a line in `expected.txt` names a file that does not exist;
+- a `.out` file has no `.nr` beside it;
+- a program fails to compile, or is killed by a signal;
+- the exit code differs from the registered one;
+- the output differs from the `.out` file, or a program with no `.out` file prints anything.
+
+A malformed `expected.txt` line (a duplicate path, a bad exit code, an unknown marker)
+fails the run before any example is checked. A stdout mismatch shows the first differing
+line, then both texts in full with every line quoted, so trailing whitespace is visible.
 
 ## Adding an example
 
-1. Drop a `.nr` file into the topic directory it belongs to (create a new
-   directory if no topic fits), and open it with a comment saying what it shows.
+1. Drop a `.nr` file into the topic directory it fits, or create a new directory if none
+   does. Open it with a header comment saying what it shows.
 2. Add one line to [`expected.txt`](expected.txt), in that directory's section:
    `path/from/examples.nr  <exit-code>`.
-3. If it prints, save exactly what it prints beside it as `<name>.out`:
+3. If it prints, save its output beside it as `<name>.out`:
    `cargo run -p neurc -- compile examples/<name>.nr -o /tmp/ex && /tmp/ex > examples/<name>.out`.
-   Read that file before committing it: it is an assertion, so it is only worth
-   having if the text in it is the text the program *should* produce.
-4. Run `cargo test -p neurc --test examples`.
-
-No Rust edits are needed: discovery is automatic.
+   Read the file before committing it. It is an assertion, so it is only worth having if the
+   text is what the program should produce.
+4. Run `cargo test -p neurc --test examples`. No Rust edits are needed.
 
 ## Showcase index
 
-One line each. The program's own header comment is the full description.
+Each showcase program with a `main` is listed once, under its theme. The header comment
+in each program has the full description. The three module files under
+`showcase/telemetry/` have no `main` and are not listed.
 
-- [`activation_fit.nr`](showcase/activation_fit.nr): one neuron trained under two activations passed into the same `@grad` loss, a closure capturing a local and a `>>` composition, which the loss applies with `.map` and sums with `.reduce`, so each `.backward()` call gets a derivative made for the function it passes
-- [`attention_head.nr`](showcase/attention_head.nr): one attention head written as two `einsum` contractions, with a `>>` composition rescaling every score through `.map` and `.reduce` folding the context
-- [`batch_arena.nr`](showcase/batch_arena.nr): a batched forward pass run inside nested `pool` arenas, with a `PoolAware` scratch type the arena sweeps in reverse construction order, a headline the compiler routes off the arena because the binding it is stored into outlives the block, and a summary line a declared function builds so a `&mut self` method may store it past the block
-- [`bin_tally.nr`](showcase/bin_tally.nr): the derivable traits as bounds: a `HashMap` keyed by a struct that derives `PartialEq` and `Hashable`, a `Vec<T>` filled in a body bounded by `T: Copy`, and one `T: Debug` body rendering a derived struct, an enum with a hand-written `Debug` matched on its variants, and an integer
-- [`borrow_discipline.nr`](showcase/borrow_discipline.nr): `&mut self` methods, arrays and interpolation written around a live borrow, which freezes the borrowee's own name and forbids moving out from under it; operators and a method call through a `& &` read their borrowed operands without `*`
-- [`borrowed_records.nr`](showcase/borrowed_records.nr): a struct and an enum declaring a lifetime parameter hold views into strings `main` owns: copied records in fixed arrays, a search returning `Option<&string>` read with `match`, `??` and `.map`, a borrowed `.slice` view outliving the method that made it, and a running total kept through a `&mut` held in a field
-- [`borrowed_text.nr`](showcase/borrowed_text.nr): explicit lifetime annotations over borrowed text
-- [`buffered_report.nr`](showcase/buffered_report.nr): a shift report long enough to exercise buffered stdout
-- [`closures.nr`](showcase/closures.nr): closures and higher-order functions over arrays, a struct method, a `Vec` and a heap `string`. Closures that write a local, push to a `Vec` or read a `string` borrow what they capture, and the writing one goes to a `mut (i32) -> void` parameter; a `move` closure hands its `string` to a `once` parameter. Unannotated closures go to a generic `fold` whose type parameters they help infer, and closures built inside functions come back out of them in a struct field, through an `Option` and a `match`, and as a `move` closure owning its `string`. A returned `mut` tally is lent to a `mut` parameter, so the caller still holds it afterwards, then moves into a struct field and out again
-- [`composed_loss.nr`](showcase/composed_loss.nr): two `@grad` losses built from helper functions, one of them shape-generic and branching on the weights' size, so the derived gradient follows each call into the callee, evaluated inside a `pool` over three candidate weights collected in a `Vec` of `Copy` structs; its `residual` helper is the straight-line tensor arithmetic the compiler computes through MLIR
-- [`config_manifest.nr`](showcase/config_manifest.nr): a config manifest rendered from typed records
-- [`derived_records.nr`](showcase/derived_records.nr): derived `Debug` and `PartialEq` over earlier features
-- [`displaced_owners.nr`](showcase/displaced_owners.nr): a reassigned binding releasing the value it displaces, across a `Drop` type, a heap `string` and a `Vec`
-- [`enum_records.nr`](showcase/enum_records.nr): pattern matching over enums, structs, methods and arrays
-- [`field_report.nr`](showcase/field_report.nr): standard I/O driving a field report
-- [`frozen_features.nr`](showcase/frozen_features.nr): a model fine-tuned through a `@grad(wrt: [self.head.w, self.head.b])` method, so `.backward()` fills only the head's gradient slots and the feature layer stays a constant, each step inside a `pool`, three budgets compared in a `Vec` of `Copy` structs
-- [`gpu_fallback.nr`](showcase/gpu_fallback.nr): a two-layer classifier whose layers are `@gpu(fallback: true)`, so they run as kernels where a GPU is usable and on the CPU where not, with identical output; the ReLU is a closure through `.map`, a `Verdict` enum with a payload is matched against the same layers computed on the host, each batch runs inside a `pool`, and the results go in a `Vec` of `Copy` structs. The suite also builds it for an AMD chip (`--gpu-arch gfx90a`) and checks the same two pins against the HIP build's host path
-- [`gpu_layer.nr`](showcase/gpu_layer.nr): a dense layer whose `x @ w + bias` runs as `@gpu` kernels over weights moved to the GPU once with `.to(Device::GPU(0))`, its result left on the GPU, where it is checked element by element against the same layer on the host and reduced to a per-row peak by ordinary operators and reductions that run there too, its first row's leading unit picked by `.topk` on the GPU, the ReLU a closure through `.map` that runs there too, only the activated first row brought back, as a slice, with `.to(Device::CPU)`, the weights decayed in place with `*=` on the GPU and on the host after each batch, an `i64` sample tally kept on the GPU with `+=` and summed, maxed and divided there with the host's integer checks, each batch inside a `pool` that also releases the call's device memory, and the results in a `Vec` of `Copy` structs
-- [`heat_diffusion.nr`](showcase/heat_diffusion.nr): heat spreading along a rod, stepped by a `@kernel` with one thread per cell over two temperature buffers that stay on the GPU (`.to(Device::GPU(0))`) and take turns as the borrowed `Tensor` input and the `KernelOut` output, written by index inside `unsafe { }`, with an early `return` for the threads past the rod; every 25 steps a `@gpu` function measures the change on the device, `.to(Device::CPU)` brings it back for a closure through `.map` and a `.sum()`, a second kernel copies the new temperatures aside through `out.partition` and `.flat`, so each thread can reach only its own cell, each step runs inside a `pool`, the reports go in a `Vec` of `Copy` structs, and the final rod must match the same simulation run on the host cell for cell
-- [`generic_toolkit.nr`](showcase/generic_toolkit.nr): generics, const generics, turbofish and `where` clauses together, plus a non-`Copy` type argument, `Drop` across a generic boundary, `Option<T>` / `Result<Cell<T>, string>` at a function's own parameter propagated with `?`, and a generic method `Cell<T>::with<U>` called with an inferred and a turbofished `U`
-- [`gradient_loss.nr`](showcase/gradient_loss.nr): a least-squares fit over `@` and broadcasting trained by gradient descent, each step a `@grad` call, `.backward()`, a `w -= rate * w.grad()` update, `.zero_grad()` and a `.item()` read of the loss inside a `pool`, with progress collected in a `Vec` of `Copy` structs
-- [`grid_update.nr`](showcase/grid_update.nr): a heat grid whose every mutation names the storage it writes to: a field, a field of a field, a tuple element (through a field, a `&mut` parameter and a closure's capture), a nested array element, a `Vec` element and a tensor coordinate
-- [`held_destruction.nr`](showcase/held_destruction.nr): a value held in a struct field, an array or tuple element, an enum payload or a newtype, destroyed with its holder and exactly once when one element is given up first
-- [`incident_desk.nr`](showcase/incident_desk.nr): a ticket queue whose `Vec` and `HashMap` own non-`Copy` tickets: `&mut self` methods called on a slot in place, a closure through a generic higher-order function over a borrowed `Vec`, `.map` over the `Option<&T>` a lookup lends, `??` reading a borrowed count through, `get_mut` editing a map's `Vec`, and a user `Drop` proving each ticket is destroyed once, whether overwritten, taken out, displaced or left behind by a consuming loop
-- [`inventory_ledger.nr`](showcase/inventory_ledger.nr): the standard collections carrying an inventory ledger, walked in all three `for` modes: the names consumed, the items read through `&items` and restocked in place through `&mut items`
-- [`job_queue.nr`](showcase/job_queue.nr): `val-else` early exit carrying a small job queue, whose rejected costs `if val` queues for a retry and a `while val` loop drains with `continue`
-- [`log_builder.nr`](showcase/log_builder.nr): a run transcript assembled in one growable `StringBuilder`, finished by a consuming `self` method
-- [`logistic_fit.nr`](showcase/logistic_fit.nr): logistic regression trained by `.backward()`, its sigmoid built from `.tanh()`, its likelihood from `.log()` and its elastic-net penalty from `.abs()` and `.pow(2.0)`, with `@` sharing `*`'s precedence row (`x * 0.5 @ w` halves the inputs first) and broadcast arithmetic, a struct recording the run, and `.sqrt()` / `.exp()` in the report
-- [`mixed_precision.nr`](showcase/mixed_precision.nr): `bf16` updates that round back to their weight beside an `f32` master copy that moves, with a `Copy` struct of `bf16` fields in a `Vec`, a closure through `.map`, `.topk` over `bf16` scores and `.to_checked` with `match`
-- [`model_shapes.nr`](showcase/model_shapes.nr): a network's layer stack declared with real tensor parameters
-- [`mutable_borrows.nr`](showcase/mutable_borrows.nr): mutable borrows `&mut T` and the dereference operator `*`
-- [`named_axes.nr`](showcase/named_axes.nr): a batch of token embeddings with every tensor axis named
-- [`newton_fit.nr`](showcase/newton_fit.nr): one logistic fit solved by Newton's method and by gradient descent, the Newton step read off the `.hessian()` a `@grad(order: 2)` loss fills beside `.grad()`, its `.exp()` / `.log()` body differentiated twice, each step inside a `pool` and each run a `Copy` struct
-- [`num_algorithms.nr`](showcase/num_algorithms.nr): a tiny integer-math toolkit
-- [`optimizer_step.nr`](showcase/optimizer_step.nr): a weight update written in place and by value, all three broadcast forms, plus the forward pass `@` makes of it
-- [`owned_aggregates.nr`](showcase/owned_aggregates.nr): arrays, tuples, enum payloads, newtypes and a generic struct all holding an owned `string`, destructured element by element
-- [`owned_catalog.nr`](showcase/owned_catalog.nr): a catalog whose `Vec`, `HashMap` and `BTreeMap` own the text they hold, moved in by `push` and `insert` and read in place, closing the value model with the rest of its sub-phase
-- [`perceptron.nr`](showcase/perceptron.nr): a two-neuron feed-forward pass
-- [`quantized_readings.nr`](showcase/quantized_readings.nr): sensor readings quantized to one byte by `.to_checked::<u8>()`, so a reading a byte cannot hold (NaN included) is rejected instead of clamped, with a closure, `match` and `??` over the `Option`, a `Vec` of `Copy` structs, a `.step(n)` walk, an enum with its own `impl` and `impl PartialEq` sorting codes into bands, and `.item()` reading their total out of a rank-0 tensor
-- [`ranked_batch.nr`](showcase/ranked_batch.nr): ordering a tensor axis alongside the rest of the tensor surface
-- [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` carrying a position through earlier features
-- [`render_settings.nr`](showcase/render_settings.nr): a render pipeline configured by named arguments
-- [`replay_buffer.nr`](showcase/replay_buffer.nr): range `.rev()` and `.step(n)` driving a replay buffer
-- [`ridge_objective.nr`](showcase/ridge_objective.nr): an objective carried as a value, its loss a `@grad` method reading a nested ridge penalty off a constant receiver, trained through `.backward()` by an ordinary method of the same type inside a `pool`, three penalties compared in a `Vec` of `Copy` structs
-- [`robust_fit.nr`](showcase/robust_fit.nr): a `@grad` loss whose body loops a data-dependent number of times and branches on its own error, so the derived gradient follows the path each call takes, evaluated inside a `pool` over three trials collected in a `Vec` of `Copy` structs
-- [`running_stats.nr`](showcase/running_stats.nr): an online mean accumulator
-- [`sample_audit.nr`](showcase/sample_audit.nr): `?` error propagation threaded through earlier features
-- [`scan_guard.nr`](showcase/scan_guard.nr): deterministic `Drop` and labeled loop exits together, a labeled `for` left from inside and a labeled `loop` whose `break 'search probe` carries a value out past `continue 'search`
-- [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` / `Result` over structs, methods, arrays and generics
-- [`sensor_windows.nr`](showcase/sensor_windows.nr): windowed sensor readings behind one slice signature
-- [`settings_loader.nr`](showcase/settings_loader.nr): typed settings read from raw text, where a lookup's `Option` becomes a `Result` with `.ok_or`, a parse error is wrapped by passing an enum variant to `.map_err`, both propagate with `?`, results are rendered through `.map` / `.map_err`, and `??` takes a default, skips a loop iteration with `continue`, or unwraps with `panic`
-- [`shape_traits.nr`](showcase/shape_traits.nr): trait declarations and both dispatch forms together, plus a trait whose methods return `Self`, called through a two-trait bound
-- [`simulation.nr`](showcase/simulation.nr): a tiny bit-flag state machine whose struct field is set, masked and toggled with `|=`, `&=` and `^=` inside a `while` loop, then walked bit by bit with a `<<=` probe through a `&self` method; `~` on the machine runs its `BitNot` impl to give the denied flags, and `.abs()` measures the gap between the two sets
-- [`status_report.nr`](showcase/status_report.nr): a formatted status report built from live readings
-- [`stored_text.nr`](showcase/stored_text.nr): text stored into a struct field, an array or tuple element, a call's argument and a call's return value, each released by whoever stored it
-- [`stream_pipeline.nr`](showcase/stream_pipeline.nr): the iteration protocol with the `|>` and `>>` operators carrying a small stream pipeline; the composition chains a bound method, an associated function, an inferred closure literal and a generic function, and `keep::<i32>` is a generic instance used as a value
-- [`td_value_fit.nr`](showcase/td_value_fit.nr): temporal-difference value learning whose bootstrapped target is fenced two ways, by `.detach()` and by a `@no_grad` function, which train identically, against the unfenced residual gradient that settles elsewhere, each step inside a `pool` and each run a `Copy` struct in a `Vec`
-- [`telemetry/main.nr`](showcase/telemetry/main.nr): multi-file compilation and `import` over prior features
-- [`transient_text.nr`](showcase/transient_text.nr): headings, rows and comparisons built from strings nothing ever binds, released where they are read
-- [`typed_channels.nr`](showcase/typed_channels.nr): associated types, one trait with three implementors
-- [`unit_types.nr`](showcase/unit_types.nr): newtype units of measure over structs, enums and methods
-- [`vector_physics.nr`](showcase/vector_physics.nr): operator traits driving a vector physics step
-- [`word_scanner.nr`](showcase/word_scanner.nr): the codepoint iterators driving a small tokenizer
+### Training and autodiff
+
+- [`activation_fit.nr`](showcase/activation_fit.nr): One neuron trained under two activations passed as values into a `@grad` loss, using closures and a `>>` composition.
+- [`composed_loss.nr`](showcase/composed_loss.nr): Two `@grad` losses built from helper functions, one shape-generic and one branching, evaluated in a `pool` over candidate weights.
+- [`frozen_features.nr`](showcase/frozen_features.nr): Fine-tuning only a model's head with `@grad(wrt: [...])`, so `.backward()` fills the head's gradients while the feature layer stays fixed.
+- [`gradient_loss.nr`](showcase/gradient_loss.nr): A least-squares fit by gradient descent: `@grad`, `.backward()`, `.grad()`, `.zero_grad()` and `.item()` in a `pool` per step.
+- [`logistic_fit.nr`](showcase/logistic_fit.nr): Logistic regression with an elastic-net penalty, trained by its own gradient, with `.tanh()`, `.log()`, `.abs()` and `.pow(2.0)` in the loss.
+- [`newton_fit.nr`](showcase/newton_fit.nr): One logistic fit solved by Newton's method (`@grad(order: 2)` and `.hessian()`) and by gradient descent, for comparison.
+- [`ridge_objective.nr`](showcase/ridge_objective.nr): A training objective carried as a value, whose `@grad` loss method reads a ridge penalty from a constant receiver.
+- [`robust_fit.nr`](showcase/robust_fit.nr): A `@grad` loss with a `while` loop and an `if` expression, where the derivative follows the path each call took.
+- [`td_value_fit.nr`](showcase/td_value_fit.nr): Temporal-difference learning, with the bootstrapped target fenced by `.detach()` or `@no_grad` and compared with the unfenced residual gradient.
+
+### GPU and kernels
+
+- [`gpu_fallback.nr`](showcase/gpu_fallback.nr): A two-layer classifier with `@gpu(fallback: true)` layers that run as kernels where a GPU is usable and on the CPU otherwise, with identical output.
+- [`gpu_layer.nr`](showcase/gpu_layer.nr): A dense layer whose forward pass runs as `@gpu` kernels on device-resident weights, checked against the host. Stops without a usable NVIDIA GPU.
+- [`heat_diffusion.nr`](showcase/heat_diffusion.nr): Heat along a rod, one GPU thread per cell in a `@kernel` with `partition` writes, checked against a host run. Stops without a usable NVIDIA GPU.
+
+### Tensors
+
+- [`attention_head.nr`](showcase/attention_head.nr): One scaled dot-product attention head written as two `einsum` contractions, with a `>>` composition rescaling the scores.
+- [`mixed_precision.nr`](showcase/mixed_precision.nr): `bf16` updates that round back to their weight beside an `f32` master copy that moves, with `.topk` and `.to_checked` over `bf16` data.
+- [`model_shapes.nr`](showcase/model_shapes.nr): A network's layer stack declared with real tensor parameters, where shapes are part of the types and a second owner of a tensor needs `.clone()`.
+- [`named_axes.nr`](showcase/named_axes.nr): A batch of token embeddings with every axis named, so an argument with its axes swapped is a compile error.
+- [`optimizer_step.nr`](showcase/optimizer_step.nr): A weight update written in place (`w -= g`) and by value (`w = w - g`), with broadcasting and an `@` forward pass.
+- [`ranked_batch.nr`](showcase/ranked_batch.nr): Ordering a tensor axis with `.sort()`, `.argsort()` and `.topk(k:, axis:)`; an argsort index reads back into the tensor it ranks.
+- [`replay_buffer.nr`](showcase/replay_buffer.nr): A replay buffer read newest first with `.rev()` and `.step(n)` on a `for` head and a tensor index axis.
+
+### Ownership, borrows and Drop
+
+- [`batch_arena.nr`](showcase/batch_arena.nr): A batched forward pass in nested `pool` arenas, with a `PoolAware` type and rules for which values may cross a block.
+- [`borrow_discipline.nr`](showcase/borrow_discipline.nr): What a live `&mut` forbids (reading, writing or moving the borrowed place by name), and the code written around it.
+- [`borrowed_records.nr`](showcase/borrowed_records.nr): Structs and an enum holding `&'a string` views into strings `main` owns, read with `match`, `??`, `.map` and a `&mut` field.
+- [`borrowed_text.nr`](showcase/borrowed_text.nr): Lifetime annotations on borrowed text: `<'a>` on parameters and returns, with `.slice` and `.char_slice` views.
+- [`displaced_owners.nr`](showcase/displaced_owners.nr): Reassigning a binding releases the value it displaces, counted through a `Drop` type, a `string` and a `Vec<string>`.
+- [`grid_update.nr`](showcase/grid_update.nr): A heat grid updated in place, each mutation naming its storage: a field, a tuple element, an array element, a `Vec` element or a tensor cell.
+- [`held_destruction.nr`](showcase/held_destruction.nr): Values held in a struct field, an element, an enum payload or a newtype, each destroyed with its holder, exactly once.
+- [`incident_desk.nr`](showcase/incident_desk.nr): A `Vec` and `HashMap` owning non-`Copy` tickets, with `&mut self` methods on slots, `get_mut`, and a `Drop` that fires once per ticket.
+- [`mutable_borrows.nr`](showcase/mutable_borrows.nr): Mutable borrows `&mut T` and the dereference `*`, where writes through the borrow reach the caller's storage.
+- [`owned_aggregates.nr`](showcase/owned_aggregates.nr): Arrays, tuples, enum payloads, newtypes and a generic struct holding an owned `string`, destructured one element at a time.
+- [`owned_catalog.nr`](showcase/owned_catalog.nr): A catalog whose `Vec`, `HashMap` and `BTreeMap` own their text: `push` and `insert` move values in, and `.clone()` keeps a copy.
+- [`stored_text.nr`](showcase/stored_text.nr): Text stored in a struct field, an element, a return value or an argument, each released by the holder that stores it.
+- [`transient_text.nr`](showcase/transient_text.nr): Strings nothing binds to a name (`+` chains, interpolations, `StringBuilder::to_string`), released where they are read.
+
+### Collections, iteration and text
+
+- [`buffered_report.nr`](showcase/buffered_report.nr): A shift report long enough to drain the stdout buffer several times, pinning the output order across drains.
+- [`config_manifest.nr`](showcase/config_manifest.nr): A config manifest rendered from typed records, with triple-quoted block strings dedented to their closing `"""`.
+- [`field_report.nr`](showcase/field_report.nr): Standard I/O and iteration: `&[T]` parameters that accept an array or a `Vec`, a user `Iterator`, and `.char_indices()`.
+- [`inventory_ledger.nr`](showcase/inventory_ledger.nr): A ledger on `Vec`, `HashMap` and `BTreeMap`, walked with `for` in all three receiver modes: by value, `&` and `&mut`.
+- [`log_builder.nr`](showcase/log_builder.nr): A run transcript built in one growable `StringBuilder`, finished by a consuming `self` method.
+- [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` on arrays, `Vec` and ranges, with a `u64` position that indexes back into the array it came from.
+- [`sensor_windows.nr`](showcase/sensor_windows.nr): One `&[T]` and `&mut [T]` signature over an array and a `Vec`, windowed with `.slice(range)` without copying elements.
+- [`status_report.nr`](showcase/status_report.nr): A status report built from live readings, with format specs `:.N`, `:x`, `:>W`, `:<W` and `:+d`, checked against their exact text.
+- [`stream_pipeline.nr`](showcase/stream_pipeline.nr): `Iterator` with associated types and `.map` / `.filter` adapters, chained with `|>` and `>>` into a stream with no intermediate array.
+- [`word_scanner.nr`](showcase/word_scanner.nr): A small tokenizer on `.chars()` and `.char_indices()` that cuts tokens out by byte offset, on non-ASCII input.
+
+### Traits, generics and closures
+
+- [`bin_tally.nr`](showcase/bin_tally.nr): Derivable traits as bounds (`Copy`, `Clone`, `Debug`, `PartialEq`, `Hashable`), with a `HashMap` keyed by a derived struct.
+- [`closures.nr`](showcase/closures.nr): Closures and higher-order functions: capture by copy, by reference or by `move`, `(i32) -> i32` parameters, and closures returned or stored in fields.
+- [`derived_records.nr`](showcase/derived_records.nr): `@derive(Debug, PartialEq)` and `@derive(Copy, Clone)` on nested structs, with the `:?` spec and structural `==`.
+- [`generic_toolkit.nr`](showcase/generic_toolkit.nr): Generic structs and functions with const parameters, `where` clauses, turbofish, a non-`Copy` type argument, and `?` at a generic parameter.
+- [`shape_traits.nr`](showcase/shape_traits.nr): Trait declarations with default methods, `impl Trait` and `dyn Trait` dispatch, and a generic bounded by two traits.
+- [`typed_channels.nr`](showcase/typed_channels.nr): Associated types (`type Sample`) with one trait and three implementors, and `Channel<Sample = i32>` bounds.
+
+### Structs, enums and numbers
+
+- [`enum_records.nr`](showcase/enum_records.nr): `match` over enum variants (payloads, `|`, ranges, guards) with structs, arrays and loops.
+- [`num_algorithms.nr`](showcase/num_algorithms.nr): Five integer routines using recursion, `while`, saturating and checked overflow methods, and `Option` matched into a value.
+- [`perceptron.nr`](showcase/perceptron.nr): A two-neuron feed-forward pass with structs, `impl` blocks, associated functions, `&self` methods and `as` casts.
+- [`quantized_readings.nr`](showcase/quantized_readings.nr): Sensor readings quantized with `.to_checked::<u8>()`, which rejects out-of-range and NaN values where `as u8` would clamp them.
+- [`render_settings.nr`](showcase/render_settings.nr): A render pipeline called with named arguments in a different order from the declaration, plus a positional `_` parameter.
+- [`running_stats.nr`](showcase/running_stats.nr): An online mean accumulator with mixed `i32` and `f64` fields, direct field mutation and an `.is_nan()` guard.
+- [`simulation.nr`](showcase/simulation.nr): A bit-flag state machine on a struct field, using `|=`, `&=`, `^=` and `<<=`, and `~` through a `BitNot` impl.
+- [`unit_types.nr`](showcase/unit_types.nr): Newtype units of measure (`Meters` and `Seconds` both wrap `i32`) that the compiler keeps apart.
+- [`vector_physics.nr`](showcase/vector_physics.nr): Operator traits (`+`, `-`, unary `-`, `==`, and `+=` through `Add`) on a `Copy` struct, driving a physics step.
+
+### Control flow and errors
+
+- [`job_queue.nr`](showcase/job_queue.nr): `val-else` in its three forms, with `if val` and a `while val` loop that drains a retry queue with `continue`.
+- [`sample_audit.nr`](showcase/sample_audit.nr): `?` on `Result` and `Option` that leaves the whole function from inside a loop, with a `val-else` error binding.
+- [`scan_guard.nr`](showcase/scan_guard.nr): Deterministic `Drop` with labeled exits: `break 'label` out of nested loops, and a labeled `loop` whose `break` carries a value.
+- [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` and `Result` used as generic enums with structs, borrowed parameters, a generic `choose<T>` and a guarded `match`.
+- [`settings_loader.nr`](showcase/settings_loader.nr): Typed settings parsed from raw text: `.ok_or`, `.map_err`, `?` lifting errors into one enum, and `??` with a default.
+
+### Multi-file
+
+- [`telemetry/main.nr`](showcase/telemetry/main.nr): The root of a multi-file program: sibling and directory modules, the three `import` forms, `export import`, and an inline `module` block.
 
 ## See also
 

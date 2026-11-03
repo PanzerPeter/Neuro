@@ -17,6 +17,10 @@ can drive the Pratt parser over a bare expression and assert on the `ParseError`
 produces, which `parse()` cannot express because every fragment would first have to be
 wrapped in an item.
 
+The crate also re-exports the `ast-types` node types (`Item`, `Expr`, `Stmt`, `Type` and the
+rest) and the alias `ParseResult`, so a caller that only parses can name the tree it gets back
+without a second dependency. The types stay owned by `ast-types`.
+
 ## Shared Kernel
 - ast-types: owns the AST node definitions, so semantic-analysis and the backends consume the
   tree without depending on this slice

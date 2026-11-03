@@ -1,75 +1,29 @@
 # Type System
 
-Neuro is statically typed. Annotations are explicit by default and optional where the
-initializer's type is unambiguous: literals take their type from context, and every other
-expression already carries the type the checker resolved for it.
-
-## Current Status
-
-- Implemented: primitive types (integers, floats, booleans, `char`)
-- Implemented: half-precision scalars (`f16`, `bf16`) with the scalar surface `f32` has, each operation correctly rounded
-- Implemented: extended integer types (`i8`-`i64`, `u8`-`u64`)
-- Implemented: function types, void type, type aliases, newtypes
-- Implemented: contextual inference for numeric literals
-- Implemented: fixed-size arrays `[T; N]`, including of non-`Copy` elements, and borrowed
-  slices `&[T]` / `&mut [T]` over an array, a `Vec<T>`, or a sub-range
-- Implemented: tuples `(T1, T2, ...)`, including of non-`Copy` elements, with destructuring
-- Implemented: structs, enums, generic enums, `Option<T>` / `Result<T, E>`, and the
-  standard collections
-- Implemented: generic functions, structs, and impls, monomorphized
-- Implemented: traits, operator traits, and `impl` / `dyn` dispatch
-- Text types are on their own page ([Strings](strings.md)), as are tensors
-  ([Tensors](tensors.md))
+Neuro is statically typed, and no value changes type without an explicit `as`. Annotations are optional where the initializer's type is unambiguous: literals take their type from context, and every other expression already carries the type the checker resolved for it. Structs and enums, ownership and borrowing, and generics and traits have their own pages, linked where they come up.
 
 ## Primitive Types
 
+Text is covered in [Strings](strings.md). The scalar types are below.
+
 ### Integer Types
 
-Neuro supports 8 integer types with different sizes and signedness:
-
-#### Signed Integers
-
-| Type | Size | Range |
+| Type | Bits | Range |
 |------|------|-------|
-| `i8` | 8-bit | -128 to 127 |
-| `i16` | 16-bit | -32,768 to 32,767 |
-| `i32` | 32-bit | -2,147,483,648 to 2,147,483,647 |
-| `i64` | 64-bit | -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 |
+| `i8` | 8 | -128 to 127 |
+| `i16` | 16 | -32,768 to 32,767 |
+| `i32` | 32 | -2,147,483,648 to 2,147,483,647 |
+| `i64` | 64 | -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 |
+| `u8` | 8 | 0 to 255 |
+| `u16` | 16 | 0 to 65,535 |
+| `u32` | 32 | 0 to 4,294,967,295 |
+| `u64` | 64 | 0 to 18,446,744,073,709,551,615 |
 
-#### Unsigned Integers
+**Default type**: an integer literal is `i32` unless context says otherwise. Contextual inference from a declaration, parameter, or return type is implemented, and a literal that does not fit its type is an error. An unannotated literal past the `i32` range is not promoted to `i64`.
 
-| Type | Size | Range |
-|------|------|-------|
-| `u8` | 8-bit | 0 to 255 |
-| `u16` | 16-bit | 0 to 65,535 |
-| `u32` | 32-bit | 0 to 4,294,967,295 |
-| `u64` | 64-bit | 0 to 18,446,744,073,709,551,615 |
+Arithmetic made only of literals takes its context's type the same way, so `val d: u8 = 200 + 50` is `u8` arithmetic and `val big: i64 = 2147483647 + 1` is `2147483648`. A literal next to a typed operand takes that operand's type.
 
-**Examples**:
-
-```neuro
-func demo_integers() -> i32 {
-    val tiny: i8 = 127           // Smallest signed
-    val small: i16 = 32767       // Medium signed
-    val normal: i32 = 2147483647 // Default signed
-    val big: i64 = 9223372036854775807  // Largest signed
-
-    val byte: u8 = 255           // Smallest unsigned
-    val word: u16 = 65535        // Medium unsigned
-    val dword: u32 = 4294967295  // Large unsigned
-    val qword: u64 = 18446744073709551615  // Largest unsigned
-
-    return normal
-}
-```
-
-**Default Type**: Integer literals default to `i32` when no annotation is present. Contextual inference from declaration, parameter, and return context is implemented; range validation is enforced (e.g. `300` cannot be assigned to `i8`). If an unannotated integer literal exceeds the range of `i32` (e.g. `5000000000`), a compile error is emitted. It is not silently promoted to `i64`.
-
-Arithmetic made only of literals takes its context's type the same way, so `val d: u8 = 200 + 50`
-is `u8` arithmetic and `val big: i64 = 2147483647 + 1` is `2147483648`. A literal next to a typed
-operand takes that operand's type.
-
-**Type Suffixes**: A suffix appended directly to an integer literal overrides contextual inference and pins the type:
+**Type suffixes**: a suffix appended directly to an integer literal overrides contextual inference and pins the type:
 
 ```neuro
 val a = 42i64      // i64, no annotation needed
@@ -78,80 +32,77 @@ val c = 0xFFu8     // hex literal with suffix
 val d = 0b1010i32  // binary literal with suffix
 ```
 
-Valid suffixes: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`. The value is range-checked against the suffix type at compile time; `300u8` is a compile error.
+The valid suffixes are `i8` through `i64` and `u8` through `u64`. A value that does not fit the suffix type is a compile error, as `300u8` is.
 
-#### Integer Overflow
+### Integer Overflow
 
-When a runtime `+`, `-`, or `*` produces a result outside the range of its integer type, the behavior depends on the optimization level the program was compiled with:
+When a runtime `+`, `-`, `*`, or unary `-` produces a result outside its type's range, the behavior depends on the optimization level, set with `-O` on `neurc run` and `neurc compile`:
 
 | Build | Flag | Overflow behavior |
 |-------|------|-------------------|
-| Debug | `-O0` (default) | The program **aborts** at runtime (traps). |
-| Release | `-O1`, `-O2`, `-O3` | The result **wraps** using two's complement. |
+| Debug | `-O0` (default) | The program panics: `panic: integer overflow at <file>:<line>:<col>`. |
+| Release | `-O1`, `-O2`, `-O3` | The result wraps using two's complement. |
 
 ```neuro
 func main() -> i32 {
-    mut x: u8 = 200u8
+    val x: u8 = 200u8
     val y: u8 = 100u8
-    val z: u8 = x + y   // 300 > u8::MAX
-    // Debug (-O0):   aborts here
-    // Release (-O2): wraps to 44
+    val z: u8 = x + y   // 300 does not fit in a u8: panics at -O0, wraps to 44 at -O2
     return z as i32
 }
 ```
 
-The debug-build trap turns a silent miscalculation into an immediate failure during development, while release builds match the zero-overhead wrapping behavior of the underlying hardware. The check covers `+`, `-`, `*`, unary `-`, and the one overflowing division, `MIN / -1` (and the matching `MIN % -1`).
+The debug trap turns a silent miscalculation into an immediate failure during development. The check covers `+`, `-`, `*`, unary `-`, and the one overflowing division, `MIN / -1` (and `MIN % -1`).
 
-A shift is an overflow when its amount is outside `0..bits` of the shifted type, a negative signed amount included. `<<` and `.shr(n)` then panic with `shift overflow` in a debug build, and a release build masks the amount to `amount & (bits - 1)`, so `1 << 40` on an `i32` is `1 << 8`.
-
-A `const` initializer is folded by the compiler, so it never reaches either tier. Rather than pick one and make the choice observable in a value, an initializer whose arithmetic overflows its declared type is a compile error:
-
-```neuro
-const C: u8 = 200u8 + 100u8   // error: constant expression overflows u8
-```
-
-Write the value you mean, or widen the type. The bitwise operators `&`, `|`, `^` and `~` have no overflow rule to begin with and fold exactly as they evaluate at run time, a `<<` folds when its amount is inside `0..bits` and is a compile error otherwise, and an explicit `as` cast still narrows: `300 as u8` is `44` in a `const` just as it is in a function body.
+A shift overflows when its amount is outside `0..bits` of the shifted type, a negative signed amount included. `<<` and `.shr(n)` then panic with `shift overflow` at `-O0`. At `-O1` and above the amount is masked to `amount & (bits - 1)`, so `1 << 40` on an `i32` is `1 << 8`.
 
 Unary negation is `0 - x`, so it overflows wherever that subtraction does: at a signed type's `MIN`, and at every nonzero value of an unsigned type.
 
 ```neuro
 mut y: u8 = 1u8
-val n = -y          // Debug: aborts. Release: wraps to 255.
+val n = -y          // panics at -O0, wraps to 255 at -O2
 ```
 
-A negative *literal* written for an unsigned type is rejected outright rather than deferred to run time, because a literal is range-checked against the value it denotes:
+A negative literal written for an unsigned type is rejected at compile time instead of wrapping. Use `wrapping_sub` when the wrap is what you mean:
 
 ```neuro
-// val x: u8 = -1        // COMPILE ERROR: -1 is negative and u8 is unsigned
-val x: u8 = 0u8.wrapping_sub(1u8)   // 255, if the wrap is what you meant
+val x: u8 = 0u8.wrapping_sub(1u8)   // 255
 ```
 
-#### Integer Methods
+A `const` initializer is folded by the compiler and never reaches either tier. An initializer whose arithmetic overflows its declared type is a compile error:
 
-When the overflow behavior matters, request it explicitly with a builtin intrinsic method. These dispatch on any integer receiver and take one same-typed argument, except `.abs()`. They are compiler-known intrinsics, not user-defined `impl` methods.
+```neuro
+const C: u8 = 200u8 + 100u8   // error: constant expression has no value: `+` overflows u8, whose values do not include the result
+```
+
+Write the value you mean, or widen the type. The bitwise operators `&`, `|`, `^` and `~` have no overflow rule and fold exactly as they evaluate at run time. A `<<` folds when its amount is inside `0..bits` and is a compile error otherwise. An explicit `as` still narrows: `300 as u8` is `44` in a `const` as it is in a function body.
+
+### Integer Methods
+
+When the overflow behavior matters, request it with a builtin method. These are compiler-known intrinsics, not user-defined `impl` methods. They dispatch on any integer receiver and take one argument of the receiver's type, except `.abs()`, which takes none.
 
 | Method | Returns | Behavior |
 |--------|---------|----------|
-| `.wrapping_add(rhs)` / `.wrapping_sub(rhs)` / `.wrapping_mul(rhs)` | receiver type | Two's-complement wrap on overflow. Never traps, regardless of build profile. |
-| `.saturating_add(rhs)` / `.saturating_sub(rhs)` / `.saturating_mul(rhs)` | receiver type | Clamp to the type's `MIN` / `MAX` instead of overflowing. |
+| `.wrapping_add(rhs)` / `.wrapping_sub(rhs)` / `.wrapping_mul(rhs)` | receiver type | Two's-complement wrap on overflow. Never traps, in any build. |
+| `.saturating_add(rhs)` / `.saturating_sub(rhs)` / `.saturating_mul(rhs)` | receiver type | Clamps to the type's `MIN` / `MAX` instead of overflowing. |
 | `.checked_add(rhs)` / `.checked_sub(rhs)` / `.checked_mul(rhs)` | `Option<T>` | `Option::Some(result)` when it fits, `Option::None` when it would overflow. |
-| `.abs()` | receiver type | Signed integers only, no argument. The absolute value. `MIN.abs()` does not fit, so it is an ordinary overflow: a panic in a debug build, `MIN` in a release one. |
-| `.shr(n)` | receiver type | Right shift by `n`. Arithmetic (sign-preserving) for signed types, logical for unsigned. Right shift is a method rather than an operator (see [operators.md](operators.md)). |
+| `.abs()` | receiver type | Signed integers only. `MIN.abs()` does not fit: a panic in a debug build, `MIN` in a release one. |
+| `.shr(n)` | receiver type | Right shift by `n`. Arithmetic for signed types, logical for unsigned. Right shift is a method, not an operator (see [operators.md](operators.md)). |
 
 ```neuro
 val a: u8 = 200
 val b: u8 = 100
 val wrapped: u8   = a.wrapping_add(b)     // 44   (200 + 100 = 300, wraps mod 256)
-val saturated: u8 = a.saturating_add(b)   // 255  (clamps to u8::MAX)
+val saturated: u8 = a.saturating_add(b)   // 255  (clamps to MAX)
 val floored: u8   = b.saturating_sub(a)   // 0    (unsigned underflow clamps to 0)
 val shifted: u8   = a.shr(2)              // 50   (200 >> 2, logical)
 ```
 
-`checked_*` is the reporting form: the overflow is not papered over, and the caller must
-deconstruct the [`Option`](../../examples/types/option_result.nr) before using the value.
-`T` is the receiver's own type, so `200u8.checked_add(100u8)` is an `Option<u8>`.
+`checked_*` is the reporting form. The overflow is not hidden, and the caller must unwrap the [`Option`](../../examples/types/option_result.nr) before using the value. `T` is the receiver's own type, so `200u8.checked_add(100u8)` is an `Option<u8>`.
 
 ```neuro
+val a: u8 = 200
+val b: u8 = 100
 val checked: Option<u8> = a.checked_add(b)
 val total: u8 = match checked {
     Option::Some(v) => v,
@@ -159,9 +110,7 @@ val total: u8 = match checked {
 }
 ```
 
-None of these ever trap: the checked forms compile to the LLVM `*.with.overflow`
-intrinsics and select the variant from the overflow bit, so there is no branch on the
-happy path.
+None of these methods trap.
 
 ### Floating-Point Types
 
@@ -172,23 +121,11 @@ happy path.
 | `f32` | 32-bit | ~7 decimal digits | ±1.18e-38 to ±3.40e38 |
 | `f64` | 64-bit | ~15 decimal digits | ±2.23e-308 to ±1.80e308 |
 
-`f16` is the IEEE-754 half float; `bf16` is bfloat16, which trades mantissa bits for an `f32`-sized exponent range. Both are ordinary floats, computed through `f32` (see [Half-Precision Types](#half-precision-types-f16--bf16) below).
+`f16` is the IEEE-754 half float. `bf16` is bfloat16, which trades mantissa bits for an `f32`-sized exponent range. Both are ordinary floats, computed through `f32` (see [Half-Precision Types](#half-precision-types-f16--bf16)).
 
-**Examples**:
+**Default type**: a float literal is `f64` unless context says otherwise.
 
-```neuro
-func demo_floats() -> f64 {
-    val pi: f32 = 3.14159        // Single precision
-    val e: f64 = 2.71828182845   // Double precision (default)
-    val sci: f64 = 1.23e10       // Scientific notation
-
-    return e
-}
-```
-
-**Default Type**: Float literals default to `f64`. Contextual inference from declaration, parameter, and return context is implemented.
-
-**Type Suffixes**: A suffix appended directly to a float literal overrides contextual inference and pins the type:
+**Type suffixes**: a suffix appended directly to a float literal overrides contextual inference:
 
 ```neuro
 val a = 1.5f32        // f32, no annotation needed
@@ -197,10 +134,7 @@ val c = 1e10f32       // exponent form with suffix
 val d = 1.5e-5f64     // fractional + exponent with suffix
 ```
 
-Valid suffixes: `f16`, `bf16`, `f32`, `f64`. The suffix attaches directly to the literal; no whitespace is permitted between the digits and the suffix. The exponent form (`1e10f32`) and the fractional form (`1.5f32`) both accept a suffix.
-
-A float literal that rounds to infinity in its type is an error: `1e400`, `1e39f32` and
-`70000.0f16` are refused, as an integer literal too large for its type is.
+The valid suffixes are `f16`, `bf16`, `f32`, and `f64`. The suffix attaches directly to the literal with no whitespace between. A float literal that rounds to infinity in its type is a compile error: `1e400`, `1e39f32`, and `70000.0f16` are all refused.
 
 #### Float Methods
 
@@ -209,13 +143,11 @@ A float literal that rounds to infinity in its type is an error: `1e400`, `1e39f
 | `.is_nan()` | `bool` | `true` when the receiver is NaN, `false` for every other value including `Inf` and `-Inf`. Nullary. |
 | `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` | the receiver's type | The function of the receiver, IEEE 754 out of domain (`.log()` of `0.0` is `-inf`). Nullary. Float tensors have them too, see [tensors](tensors.md#elementwise-math). |
 | `.pow(p)` | the receiver's type | The receiver raised to `p`, a value of the receiver's type. |
-| `.to_checked::<T>()` | `Option<T>` | The receiver truncated toward zero as the integer type `T`, or `None` when the result does not fit `T` or the receiver is NaN. See [Type Conversion](#type-conversion). |
+| `.to_checked::<T>()` | `Option<T>` | The receiver truncated toward zero as the integer type `T`, or `None` when the result does not fit `T` or the receiver is NaN. See [Float to integer](#float-to-integer). |
 
 Every float type has these methods, `f16` and `bf16` included.
 
-Floats follow IEEE 754 in full, so **every** comparison against NaN is false: `NaN == NaN`
-and `NaN != NaN` alike. That makes NaN undetectable with the comparison operators, and
-`.is_nan()` is the way to test for it:
+Floats follow IEEE 754, so every comparison against NaN is false, including `NaN == NaN` and `NaN != NaN`. The comparison operators cannot detect NaN, and `.is_nan()` is the test for it:
 
 ```neuro
 val zero: f64 = 0.0
@@ -227,14 +159,11 @@ val b: bool = inf.is_nan()    // false: infinity is not NaN
 val c: bool = nan == nan      // false: the equality operator cannot see it
 ```
 
-The result is an ordinary `bool`, so it composes with `!`, `&&`, and `||`. Like the integer
-intrinsics, `.is_nan()` needs a value receiver: read through a `&f64` with `*r` first.
-
 ### Half-Precision Types (`f16` / `bf16`)
 
-`f16` and `bf16` are ordinary floats, the storage types of mixed-precision training. They have binding and `Copy`, `as` casts to and from every numeric type, arithmetic (`+ - * / %`, unary `-`, compound assignment), the six comparisons, the [float methods](#float-methods) and `.to_checked`. A literal takes its type from context (`val h: f16 = 0.5`, `h * 2.0`) or from a suffix (`1.5f16`, `0.02bf16`).
+`f16` and `bf16` are ordinary floats, the storage types of mixed-precision training. They support binding and `Copy`, `as` casts to and from every numeric type, arithmetic (`+ - * / %`, unary `-`, compound assignment), the six comparisons, the [float methods](#float-methods), and `.to_checked`. A literal takes its type from context (`val h: f16 = 0.5`, `h * 2.0`) or from a suffix (`1.5f16`, `0.02bf16`).
 
-**Each operation is correctly rounded to the operand type.** `a + b` on two `bf16` values computes in `f32` and rounds the answer to `bf16` once. `f32` carries more than twice either format's significand bits, so that one rounding gives exactly the IEEE 754 result for `+ - * /` and `.sqrt()`, on every target, whatever half-precision hardware it has. There is no excess precision: `a * b + c` rounds after `*` and again after `+`, at every optimization level.
+**Each operation is correctly rounded to the operand type.** `a + b` on two `bf16` values computes in `f32` and rounds the answer to `bf16` once. `f32` carries more than twice either format's significand bits, so that one rounding gives the IEEE 754 result for `+ - * /` and `.sqrt()` on every target. There is no excess precision: `a * b + c` rounds after `*` and again after `+`, at every optimization level.
 
 ```neuro
 val one: bf16 = 1.0
@@ -243,13 +172,13 @@ val stepwise = one + step + step             // 1.0: each addition is a tie, rou
 val carried = (one as f32 + step as f32 + step as f32) as bf16   // 1.0078125
 ```
 
-There is no implicit widening. An `f16` meets only `f16`, so `h + 1.0f32` and `h + 1` are type errors; a program that wants `f32` accumulation writes `as f32`, as `carried` does. A half hole in an interpolated string prints the exact value, as an `f32` hole does: `"{h}"` and `"{h as f32}"` give the same text.
+There is no implicit widening. An `f16` meets only `f16`, so `h + 1.0f32` and `h + 1` are type errors. A program that wants `f32` accumulation writes `as f32`, as `carried` does. An interpolated hole prints a half value exactly as it prints an `f32`: `"{h}"` and `"{h as f32}"` give the same text.
 
-As **tensor element types** (`Tensor<bf16, [...]>`) they have elementwise operators (with a tensor or a half-precision scalar on the other side), compound assignment, matmul, `einsum`, reductions, sorts, traversals and the elementwise math methods. On the CPU each element is computed in `f32` and rounded back once, and a reduction accumulates in `f32`, so a long `bf16` sum does not stall where a 16-bit running total would.
+As tensor element types they take the tensor operators and reductions. A reduction accumulates in `f32`, so a long `bf16` sum does not stall the way a 16-bit running total would. See [Tensors](tensors.md).
 
 ### Digit Separators
 
-Underscores may be placed between digits of any numeric literal to improve readability. They carry no value (the compiler strips them before parsing) and work in every base, in floats, in exponents, and alongside type suffixes.
+Underscores may be placed between digits of any numeric literal. They carry no value, and they work in every base, in floats, in exponents, and alongside type suffixes.
 
 ```neuro
 val million = 1_000_000      // decimal grouping
@@ -261,49 +190,15 @@ val scaled  = 1_0e1_0        // exponent
 val wide    = 1_000_000i64   // with a type suffix
 ```
 
-A separator is only recognized between digits: a leading underscore (`_1000`) is an identifier, not a number.
+A separator is only recognized between digits. A leading underscore (`_1000`) makes an identifier, not a number.
 
 ### Boolean Type
 
-The `bool` type represents truth values:
-
-```neuro
-func demo_booleans() -> i32 {
-    val is_true: bool = true
-    val is_false: bool = false
-
-    if is_true {
-        return 1
-    } else {
-        return 0
-    }
-}
-```
-
-**Values**: `true` or `false`
-**Operations**: Logical operators (`&&`, `||`, `!`), comparison results
+`bool` holds `true` or `false`. It supports `&&`, `||`, and `!`, and it is the result type of comparisons. `bool` casts to an integer type (`true as i64` is `1`), but an integer does not cast to `bool`.
 
 ### Character Type
 
-The `char` type is a single **Unicode scalar value** (a 32-bit code point), not a byte.
-Char literals are written with single quotes and support escape sequences:
-
-```neuro
-func demo_chars() -> i32 {
-    val letter: char = 'A'
-    val newline: char = '\n'
-    val emoji: char = '\u{1F44D}'   // thumbs-up, U+1F44D
-
-    // char is Copy, so the source stays valid after a bind.
-    val also = letter
-
-    // Built-in total order: all six comparison operators work directly.
-    if letter < 'Z' && also == letter {
-        return letter as i32        // as-cast char -> integer (65)
-    }
-    return 0
-}
-```
+The `char` type is a single **Unicode scalar value**, a 32-bit code point, not a byte.
 
 | Property | Behavior |
 |---|---|
@@ -311,971 +206,60 @@ func demo_chars() -> i32 {
 | **Literals** | `'a'`, `'\n'`, `'\t'`, `'\r'`, `'\\'`, `'\''`, `'\0'`, `'\xNN'`, `'\u{...}'` |
 | **Copy** | Yes, binding a `char` copies it; the source remains valid |
 | **Comparison** | Built-in `==`, `!=`, `<`, `>`, `<=`, `>=` (ordered by code point) |
-| **Casts** | `as` to/from any integer type (`'A' as i32`, `97 as char`); **not** to/from `float`/`bool` |
-| **Arithmetic** | None, `'a' + 1` is a compile error; cast to an integer and compute there |
+| **Casts** | `as` to/from any integer type (`'A' as i32` is `65`, `97 as char` is `'a'`); **not** to/from `float` or `bool` |
+| **Arithmetic** | None. `'a' + 1` is a compile error; cast to an integer and compute there |
 
-An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated literal
-(`'a`) are all lexer errors.
-
-## String Type
-
-`string` and the growable `StringBuilder` buffer have their own page: see
-[Strings](strings.md).
-
-## Struct Types
-
-Structs are user-defined types that group named fields. They use nominal typing: two structs with identical fields are distinct types.
-
-### Definition
-
-```neuro
-struct Point {
-    x: f64,
-    y: f64
-}
-
-struct Counter {
-    value: i32,
-    step: i32
-}
-```
-
-Fields are listed as `name: Type`, separated by commas or newlines. A field may have any type: a scalar, `string`, a collection, an array, a tuple, a tensor, an enum or another struct. A struct cannot hold itself inline.
-
-### Instantiation
-
-```neuro
-val p = Point { x: 3.0, y: 4.0 }
-val c = Counter { value: 0, step: 1 }
-```
-
-All fields must be provided. Extra or missing fields are compile errors.
-
-### Field Access
-
-```neuro
-val x_coord = p.x   // reads field x from p
-val total = c.value + c.step
-```
-
-Field access resolves to the declared field type.
-
-### Field Mutation
-
-Field mutation is only allowed on `mut` bindings:
-
-```neuro
-mut cursor = Point { x: 0.0, y: 0.0 }
-cursor.x = 5.0   // OK: cursor is mut
-
-val fixed = Point { x: 1.0, y: 2.0 }
-fixed.x = 3.0    // error: cannot assign to field 'x' of immutable binding 'fixed'
-```
-
-### Definition Order
-
-Structs can be used before they are defined in the source file, the compiler performs a pre-registration pass:
-
-```neuro
-func main() -> i32 {
-    val s = Score { value: 42 }
-    return s.value
-}
-
-struct Score {
-    value: i32
-}
-```
-
-### Copy and Clone (`@derive`)
-
-By default a struct is **move-by-default**, just like `string`: binding, assigning,
-returning, or passing it by value moves the source, and reading the source afterward is a
-`use of moved value` error. A struct opts out of moving by deriving `Copy`:
-
-```neuro
-@derive(Copy, Clone)
-struct Point { x: i32, y: i32 }
-
-val a = Point { x: 3, y: 4 }
-val b = a          // a is COPIED, not moved
-val s = a.x + b.y  // a is still valid here
-```
-
-Rules:
-
-- A struct may derive `Copy` only when **every field is `Copy`**. The scalars (integers,
-  floats including `f16` / `bf16`, `bool`, `char`) are `Copy`, and so are arrays and tuples of
-  them; `string` and the collections are not; a struct field is `Copy` only when its type also
-  derives `Copy`. Anything else is a compile error that names the offending field.
-- `Copy` implies `Clone`. `.clone()` on any `Copy` value returns a copy.
-- `@derive(Clone)` (or `Copy`) enables `struct.clone()`, an explicit copy that returns a fresh
-  value without moving the receiver. The derived copy does not yet clone a field that owns a
-  buffer (`string`, a tensor, a collection, `StringBuilder`, or an array of them), so such a
-  field makes the derive a `DeriveFieldUnsupported` error ([BUG-098](../BUGS.md)); write
-  `impl Clone` by hand instead. A field whose type has a hand-written `Clone` is cloned by it,
-  unless the struct being cloned is `Copy`: a `Copy` value's `.clone()` is always a copy.
-- `@derive(Debug)` gives the struct its `{value:?}` rendering: the struct's name followed by
-  each field in declaration order, e.g. `Point { x: 1, y: 2 }`. A field-less struct renders as
-  its bare name. Every field must itself be renderable (a scalar, `string`, `char`, `bool`,
-  another struct that derives `Debug`, or a type whose `Debug` is written by hand, which renders
-  through its own `fmt_debug`). Otherwise the derive is a `DeriveFieldUnsupported` error.
-  A struct has no *display* form, so `"{p}"` stays an error even with the derive; write `"{p:?}"`.
-- `@derive(PartialEq)` gives the struct `==` and `!=`, compared field by field. The same field
-  rule applies: a nested struct must derive `PartialEq` or implement it by hand, and a
-  hand-written one is compared by its own `eq`.
-- `@derive(Hashable)` gives the struct a hash of its fields, taken in declaration order. Each
-  field must be an integer, `bool`, `char`, `string`, or a type that derives or implements
-  `Hashable`; a float is refused. A struct deriving `PartialEq` and `Hashable` is a `HashMap` key.
-- The derivable set is exactly `Copy`, `Clone`, `Debug`, `PartialEq`, `Hashable`. Any other
-  name in a `@derive` list is `UnknownDerive`, never a silent no-op, and a repeated name is
-  `DuplicateDerive`. Deriving a trait and also writing its `impl` for the same struct is
-  `DeriveConflictsWithImpl`: keep one.
-
-Each derivable name is also an ordinary trait, implementable by hand and usable as a bound;
-[Structs](structs.md#derivable-traits-by-hand-and-as-bounds) covers both.
-
-```neuro
-@derive(Clone)
-struct Vec2 { x: f64, y: f64 }
-
-val v = Vec2 { x: 1.0, y: 2.0 }
-val w = v.clone()  // independent copy; v stays usable
-```
-
-```neuro
-@derive(Debug, PartialEq)
-struct Point { x: i32, y: i32 }
-
-val a = Point { x: 1, y: 2 }
-val b = Point { x: 1, y: 2 }
-println("{a:?} == {b:?} is {a == b}")   // Point { x: 1, y: 2 } == Point { x: 1, y: 2 } is true
-```
-
-See [`examples/structs/derives.nr`](../../examples/structs/derives.nr) for both derives run
-end to end, including the recursion through a nested struct.
-
-### Type Errors
-
-| Error | Cause |
-|---|---|
-| `MissingStructField` | Struct literal omits a declared field |
-| `UnknownField` | Struct literal or access uses a field that doesn't exist |
-| `AssignToImmutableField` | Field assignment on a `val` binding |
-| `StructAlreadyDefined` | Two `struct` declarations share the same name |
-| `UnknownStruct` | Struct literal references an undeclared struct name |
-| `CopyDeriveNonCopyField` | `@derive(Copy)` or `impl Copy` on a struct with a non-`Copy` field |
-
-## Enum Types
-
-Enums are user-defined types that hold exactly one of several named **variants**. A variant may be a bare tag, carry a positional **tuple** payload, or carry **named fields**, all three may appear in one enum. Like structs, enums use nominal typing.
-
-### Definition
-
-```neuro
-// Bare variants
-enum Color {
-    Red,
-    Green,
-    Blue
-}
-
-// Mixed variant shapes
-enum Shape {
-    Circle { radius: f64 },              // named-field variant
-    Rectangle { width: f64, height: f64 },
-    Triangle { base: f64, height: f64 }
-}
-
-enum Message {
-    Quit,                                // unit variant
-    Move(i32, i32),                      // tuple variant
-    Write(bool)
-}
-```
-
-### Construction
-
-Each variant shape has its own construction syntax, all prefixed with the enum name:
-
-```neuro
-val c = Color::Red                       // unit variant
-val m = Message::Move(1, 2)              // tuple variant
-val s = Shape::Circle { radius: 5.0 }    // struct variant
-```
-
-An enum value can be bound to a `val`/`mut`, passed to and returned from functions, and stored in a struct field. An enum is **`Copy`** exactly when every payload it can carry is, so an enum over scalars duplicates on a bind while one carrying a `string` moves.
-
-### Methods and Trait Impls
-
-An enum takes `impl` blocks exactly as a struct does: `&self`, `&mut self` and consuming `self`
-methods, associated functions, user trait impls (static dispatch through a bound, dynamic
-through `&dyn Trait`, default methods included) and operator traits such as `PartialEq`. The
-body usually `match`es on `self`, and a `&mut self` method may assign a whole new variant to
-`self`. From [`examples/types/enum_methods.nr`](../../examples/types/enum_methods.nr):
-
-```neuro
-impl Light {
-    func start() -> Light {
-        return Light::Red
-    }
-
-    func advance(&mut self) {
-        self = match self {
-            Light::Red => Light::Green,
-            Light::Green => Light::Amber,
-            Light::Amber => Light::Red
-        }
-    }
-}
-
-impl PartialEq for Light {
-    func eq(&self, other: &Light) -> bool {
-        return self.wait_secs() == other.wait_secs()
-    }
-}
-```
-
-`Light::start()` is an associated call and `Light::Red` a variant, so an `impl` member may not
-share a variant's name (`ImplMemberNamesVariant`). A generic enum's `impl<T> Tree<T>` is
-monomorphized with each instance, as a generic struct's is.
-
-### Memory Layout
-
-An enum is a tagged union: a discriminant identifying the active variant, plus storage for the widest variant's payload. Two enums with the same variant names but declared separately are distinct types.
-
-### Generic Enums
-
-An enum may take type parameters. Each distinct set of type arguments is **monomorphized** into its own nominal tagged union, exactly as a generic struct is, so `Slot<i32>` and `Slot<i64>` are different types, each with its own payload width, and there is no runtime cost.
-
-```neuro
-enum Slot<T> { Filled(T), Vacant }
-enum Tagged<T, U> { Left(T), Right(U) }
-
-val a = Slot::Filled(4)                  // T inferred from the payload → Slot<i32>
-val b: Slot<bool> = Slot::Vacant         // no payload, so the annotation fixes T
-```
-
-Where the type arguments come from, in order:
-
-1. **The expected type**, an annotated binding, a parameter, a struct field, a `return`.
-2. **The payload**, `Slot::Filled(4)` determines `T = i32` by unifying `4`'s type against the variant's declared payload.
-3. **The enclosing function's return type**, when it is an instance of the same enum. This is what makes the common fallible-function shape work, because a tail `if` branch has no other context:
-
-```neuro
-func divide(a: i32, b: i32) -> Result<i32, i32> {
-    if b == 0 {
-        Result::Err(1)                   // Err determines E; T comes from the return type
-    } else {
-        Result::Ok(a / b)                // Ok determines T; E comes from the return type
-    }
-}
-```
-
-If none of the three determines an argument, the construction is rejected with `GenericEnumNotInferable`, annotate the target. Using the bare name as a type (`func f(o: Slot) -> i32`) is `GenericEnumNeedsArgs`.
-
-A `match` pattern is written with the **base** name; it matches whatever instance the scrutinee has, and its payload binds at that instance's concrete type:
-
-```neuro
-match a {
-    Slot::Filled(v) => v + 1,            // v is i32 here
-    Slot::Vacant => 0
-}
-```
-
-### `Option<T>` and `Result<T, E>`
-
-These two generic enums are the standard library's absence and failure types. They are available in **every program without a declaration**, the compiler prepends an implicit prelude:
-
-```neuro
-enum Option<T> { Some(T), None }
-enum Result<T, E> { Ok(T), Err(E) }
-```
-
-They are ordinary generic enums: nothing about them is special-cased in the type checker or the backend, and a program that declares its own `Option` or `Result` shadows the prelude entry.
-
-```neuro
-func unwrap_or(o: Option<i32>, fallback: i32) -> i32 {
-    match o {
-        Option::Some(v) => v,
-        Option::None => fallback
-    }
-}
-
-val present = Option::Some(30)
-val absent: Option<i32> = Option::None
-```
-
-Variants may be written qualified (`Option::Some`, `Result::Err`) or, because the implicit prelude imports `Some`, `None`, `Ok`, and `Err` into every file without `@no_prelude`, unqualified (`Some(x)`). The [`??` operator](operators.md#nullerror-coalescing-operator-) unwraps either type with a fallback, the [`?` operator](operators.md#error-propagation-operator-) unwraps one or hands the failure to the caller, and [`val-else`](control-flow.md#val-else-unwrap-or-leave-the-scope) unwraps one or exits the scope.
-
-#### Methods
-
-Both enums carry a few methods, written as ordinary Neuro source in the prelude. Each one
-consumes its receiver, except the `is_*` tests, which borrow it.
-
-| Method | On | Result |
-|---|---|---|
-| `.map(f)` | `Option<T>`, `Result<T, E>` | `f: (T) -> U` applied to the `Some` / `Ok` payload |
-| `.map_err(f)` | `Result<T, E>` | `f: (E) -> F` applied to the `Err` payload |
-| `.ok()` | `Result<T, E>` | `Option<T>`, the error discarded |
-| `.ok_or(e)` | `Option<T>` | `Result<T, E>`, with `e` for `None` |
-| `.is_some()` / `.is_none()` | `Option<T>` | `bool` |
-| `.is_ok()` / `.is_err()` | `Result<T, E>` | `bool` |
-
-```neuro
-val doubled = find(2).map(|v| v * 2) ?? 0
-val checked: Result<i32, string> = find(0).ok_or("not found")
-val code = divide(1, 0).map_err(|msg| msg.len())
-if checked.is_err() { println("missing") }
-```
-
-`f` takes any closure or function value, so a tuple variant can wrap an error in one step:
-`read(path).map_err(AppError::Io)?`. There is no `.unwrap()`: `?? panic("...")` unwraps.
-A program that declares its own `Result` keeps `Option`'s methods except `.ok_or`, which builds
-the prelude's `Result`; a program with its own `Option` loses `Result::ok` the same way.
-
-### Limitations
-
-- **Payloads must be sized.** Any sized type is admissible, `Copy` or not: a `string`, a struct, an array, a tuple, another enum. `void` and the unsized types (`dyn Trait`, `[T]`) are rejected (`UnsupportedEnumPayload`), because a payload slot has to have a width.
-- **No enum that holds itself inline**, directly or through a struct, array, tuple or another
-  enum: it would have no finite size.
-- **No `impl Drop` on an enum** (`InvalidDropImpl`): only a struct runs a user destructor.
-- **A generic enum's tuple variant is a function value only where a function type is
-  expected.** `Error::Io` passes as a function anywhere. `Option::Some` names no instance until
-  something says which, so it needs a function type from its context: an annotation
-  (`val f: (i32) -> Option<i32> = Option::Some`), a parameter (`apply(Wrap::Two)`), or a
-  generic call whose earlier inputs fixed its parameters (`o.map(Option::Some)` with
-  `o: Option<i32>`). Bare, `val f = Option::Some` is an error; write `|x| Option::Some(x)`.
-
-### Type Errors
-
-| Error | Cause |
-|---|---|
-| `EnumAlreadyDefined` | Two `enum` (or an `enum` and a `struct`) share a name |
-| `UnknownEnumVariant` | Construction names a variant the enum does not declare |
-| `EnumVariantFormMismatch` | A variant built with the wrong syntax (e.g. a struct variant called like a function) |
-| `EnumVariantArityMismatch` | A tuple variant built with the wrong number of arguments |
-| `UnknownEnumField` / `MissingEnumField` / `DuplicateEnumField` | Struct-variant field set is wrong |
-| `UnsupportedEnumPayload` | A variant payload is `void` or an unsized type |
-| `GenericEnumNeedsArgs` | A generic enum's bare name used as a type |
-| `GenericEnumNotInferable` | A construction whose type arguments no context determines |
-| `GenericArgCountMismatch` | `Option<i32, bool>`, wrong number of type arguments |
-| `ImplMemberNamesVariant` | An `impl` method or associated function named like one of the enum's variants |
-
-## Newtype Declarations
-
-A `newtype` creates a **distinct nominal type** that wraps an inner type. Unlike a `type` alias, which is transparent, so the alias and its target are interchangeable, a newtype and its inner type are *different types*. This buys unit-of-measure and domain-identifier safety at zero runtime cost.
-
-```neuro
-newtype Meters = i32
-newtype Seconds = i32
-newtype Celsius = f64
-```
-
-### Construction and Inner Access
-
-Build a newtype value by calling the newtype name with a single inner-typed argument, and read the wrapped value back with `.0`:
-
-```neuro
-val d: Meters = Meters(30)     // construction
-val raw: i32 = d.0             // inner access
-```
-
-### Distinctness
-
-Because a newtype is a separate type, its values are not interchangeable with the inner type or with another newtype over the same inner type:
-
-```neuro
-val m: Meters = Meters(3)
-val bad: i32 = m               // ERROR: expected i32, found Meters
-val also_bad = Meters(1) + Seconds(2)  // ERROR: no `impl Add` makes Meters + Seconds
-```
-
-A newtype forwards `Copy`/`Clone` from its inner type, so a `Copy`-inner newtype is itself `Copy` and a `newtype Name = string` moves like the `string` it wraps. It can be a `val`/`mut` binding, a function parameter or return type, and a struct field.
-
-A newtype takes `impl` blocks and trait impls exactly as a struct does: methods with any
-receiver, associated functions, user traits (through a bound or `&dyn`), and the operator
-traits, which is how it gets arithmetic:
-
-```neuro
-newtype Meters = i32
-
-impl Add for Meters {
-    type Output = Meters
-    func add(self, rhs: Meters) -> Meters { Meters(self.0 + rhs.0) }
-}
-
-impl Meters {
-    func double(&self) -> Meters { Meters(self.0 * 2) }
-}
-```
-
-`.0` reads the inner value through a borrow too, so `m.0` works on `m: &Meters`.
-
-`.0` is read-only. Assigning to it is an error even on a `mut` binding; replace the
-whole value instead, `m = Meters(5)`.
-
-### Type Errors
-
-| Error | Cause |
-|---|---|
-| `NewtypeAlreadyDefined` | A newtype reuses a builtin, struct, enum, or newtype name |
-| `CyclicNewtype` | A newtype wraps itself directly or transitively |
-
-## References, Immutable Borrows (`&T`)
-
-An **immutable borrow** `&T` is a non-owning reference to a value. It lets a
-function read a value without taking ownership, so the caller keeps using its binding
-afterward. The borrow expression `&x` takes a reference to the place `x`.
-
-```neuro
-func describe(s: &string) -> u64 {
-    s.len()                 // method call auto-derefs through the borrow
-}
-
-func main() -> i32 {
-    val msg: string = "Neuro"
-    val n: u64 = describe(&msg)   // borrow, msg is NOT moved
-    val again: u64 = msg.len()    // still valid: borrowing never consumes
-    return 0
-}
-```
-
-**Rules:**
-
-- A reference type `&T` may appear on parameters, return types, and local bindings.
-- Borrowing **does not move** the borrowed value; that is the whole point of a reference.
-  A non-`Copy` value such as `string` stays usable after being borrowed.
-- `&T` is itself `Copy`: passing or re-borrowing a reference duplicates the pointer.
-- A method call **auto-derefs** its receiver through any number of `&` and `&mut`:
-  `r.len()` on a `&string`, `r.method()` on a `&Struct` or a `& &Struct`, and `r.abs()` on a
-  `&f64` behave as if applied to the referent. A field read does too (`r.field` on a
-  `&Struct` or a `& &Struct`); a field write goes through one `&mut`.
-- `&&T` is a borrow of a borrow, the same type as `& &T`, and `&&x` borrows `&x`.
-- Every built-in operator reads a borrowed operand: see
-  [Reading through a borrow](#reading-through-a-borrow).
-- Only a **place** can be borrowed: a `val`/`mut`/parameter binding, or a field, a tuple
-  element, or an array, slice or `Vec` element reached from one (`&p.name`, `&arr[i]`,
-  `&v[i]`). A borrow of a part borrows the whole binding, so `p` may not be moved while
-  `&p.name` is live. Borrowing a tensor element or a `const` (an inlined value, not a
-  memory location) anywhere else is a `CannotBorrowValue` error.
-- A **temporary** (a literal, an operator or call result, a `const`) lives until the end
-  of its statement, so a shared borrow of one may be passed straight to a call:
-  `id(&1)`, `norm(&Point { x: 3, y: 4 })`. Only a `Copy` value may be borrowed this way
-  for now. The borrow may not be bound (`val r = &5`), and a call that could keep it, in
-  a result that holds a reference or through a `&mut` argument, refuses it
-  (`TemporaryBorrowEscapes`).
-
-```neuro
-struct Point { x: i64, y: i64 }
-impl Point {
-    func sum(&self) -> i64 { self.x + self.y }
-}
-
-func read_sum(p: &Point) -> i64 { p.sum() }   // borrow a struct, call through it
-```
-
-A returned `&T` is checked against what it points into; see
-[Lifetimes](#lifetimes-returned-references).
-
-### Reading through a borrow
-
-Arithmetic, comparison, bitwise and logical operators accept a borrowed operand wherever they
-accept an owned one, and so do `+` and `==` on strings, every tensor operator, compound
-assignment and string interpolation. The result is what the owned operands would give, and the
-operand stays borrowed. A bare literal next to a borrowed operand takes the referent's type.
-
-```neuro
-func clamp_add(x: &i64, step: &mut i64) -> i64 {
-    if x > 100 { return x - 1 }
-    *step += 1
-    2 * x + step.saturating_mul(2)   // i64 arithmetic; x and step are only read
-}
-```
-
-Anywhere else a borrow keeps its own type: `val y = *x` copies the referent out,
-`val y = x` copies the borrow, `x as i64` is an error, and a write still goes through `*r = v`.
-
-### References, Mutable Borrows (`&mut T`)
-
-A **mutable borrow** `&mut T` is a non-owning reference that grants **write** access to a
-value. The borrow expression `&mut x` requires `x` to be a `mut` binding, you
-cannot acquire write access through a reference to a value you may not write directly.
-
-Values are read and written through the prefix **dereference operator** `*`:
-
-```neuro
-func increment(n: &mut i32) {
-    *n = *n + 1          // read with *n, write with *n = ...
-}
-
-func main() -> i32 {
-    mut counter: i32 = 40
-    increment(&mut counter)       // mutate in place, counter is borrowed, not moved
-    increment(&mut counter)
-    return counter                // 42
-}
-```
-
-**Rules:**
-
-- `&mut x` requires a `mut` binding; mutably borrowing a `val` is a compile error
-  (`cannot mutably borrow`).
-- `*r` reads the referent; dereferencing a non-reference is an error (`cannot dereference`).
-- `*r = value` writes through the reference and requires `r: &mut T`; writing through an
-  immutable `&T` is an error (`cannot assign through an immutable reference`).
-- `&mut T` and `&T` are **distinct types**, there is no implicit `&mut T → &T` coercion
-  (explicit over implicit).
-
-```neuro
-func main() -> i32 {
-    mut x: i32 = 7
-    val r: &mut i32 = &mut x
-    *r = 35
-    return *r                     // 35
-}
-```
-
-### Borrow Exclusivity (`&` / `&mut` aliasing rules)
-
-The borrow checker enforces two coexistence rules at compile time:
-
-- **Any number of shared `&T` borrows** of a place may be live at the same time.
-- **A `&mut T` borrow is exclusive**: while it is live, no other borrow of that place
-  shared or mutable, may exist.
-
-A third rule governs the **borrowee** (the place the borrow points at) rather than the
-borrows against each other:
-
-- While a `&mut T` of a place is live, the place may not be **read**, **written**, or
-  **moved** through its own name. Every access goes through the borrow.
-- While *any* borrow of a place is live, the value may not be **moved out** of it, nor the
-  binding **assigned** a new one. Either would leave the borrow pointing at storage the
-  binding no longer owns.
-
-A borrow's region is **lexical**. A borrow held by a binding (`val r = &x`) lives until that
-binding leaves scope; a borrow passed to a function, used in a condition, or returned ends
-with the statement that took it. So sequential borrows in separate statements never conflict,
-and a borrow taken inside a block is released at the block's closing brace.
-
-```neuro
-func main() -> i32 {
-    mut x: i32 = 5
-    val a: &i32 = &x
-    val b: &i32 = &x          // ok, shared borrows coexist
-    val c: &mut i32 = &mut x  // ERROR: cannot borrow 'x' as mutable, it is already borrowed
-    return 0
-}
-```
-
-```neuro
-func inc(n: &mut i32) { *n = *n + 1 }
-
-func main() -> i32 {
-    mut x: i32 = 0
-    inc(&mut x)               // the &mut ends with this call
-    inc(&mut x)               // ok, the previous borrow is no longer live
-    return x                  // 2
-}
-```
-
-```neuro
-func consume(s: string) -> u64 { s.len() }
-
-func main() -> i32 {
-    mut n: i32 = 1
-    val r: &mut i32 = &mut n
-    val read: i32 = n         // ERROR: cannot use 'n' while it is mutably borrowed
-    *r = 5                    // write through the borrow instead
-
-    val s: string = "hello"
-    val b: &string = &s
-    val len: u64 = consume(s) // ERROR: cannot move out of 's' while it is borrowed
-    return 0
-}
-```
-
-The diagnostics are `cannot borrow '<name>' as mutable` (a `&mut` while any borrow is live),
-`cannot borrow '<name>' as immutable` (a `&` while a `&mut` is live),
-`cannot use '<name>' while it is mutably borrowed` (any access through the frozen name),
-`cannot move out of '<name>' while it is borrowed`, and
-`cannot assign to '<name>' while it is borrowed`.
-
-> **By design:** the borrow region is **lexical**, not non-lexical liveness (NLL). A borrow held
-> by a binding freezes its borrowee until that binding leaves scope, even when the borrow is
-> never used again. Code is written around it: read back through the borrow, or confine the
-> borrow to a block, and the block is what separates a shared read from a later `&mut`. A borrow
-> passed to a call ends with that call, so sequential calls never conflict.
-
-### Lifetimes, Returned References
-
-Lifetimes are **inferred** in the vast majority of cases. The elision rules match Rust: a
-single input reference lifetime is applied to the outputs, and the `&self` lifetime is applied to
-a method's outputs. In practice this means a function or method that **returns a reference** may
-borrow one of its reference parameters (or, in a method, `&self`); the returned borrow then lives
-as long as the caller's borrow.
-
-```neuro
-func first(a: &i32, b: &i32) -> &i32 {
-    a                       // ok, the returned borrow outlives the call
-}
-```
-
-The borrow checker rejects returning a reference to a value that dies when the function returns
-a body-local or a by-value parameter, because the reference would dangle:
-
-```neuro
-func dangle() -> &i32 {
-    val local: i32 = 5
-    return &local           // ERROR: cannot return a reference to 'local', it is local to
-                            //        this function and does not outlive the call
-}
-```
-
-The check follows a returned reference through a local reference binding (`val r = &local; r` is
-also rejected), through a value holding one (see
-[References held in values](#references-held-in-values)), and into the arms of a returned
-`if`/`else` or `match`. The diagnostic is `cannot return a reference to '<name>'`.
-
-#### Explicit lifetime annotations
-
-For the advanced patterns elision cannot express, a lifetime parameter is declared in the
-generic-parameter list as `'a` and used on reference types as `&'a T` / `&'a mut T`:
-
-```neuro
-func longest<'a>(a: &'a string, b: &'a string) -> &'a string {
-    if a.len() > b.len() { a } else { b }
-}
-```
-
-An annotation is a **well-formedness surface only**: every lifetime used on a reference must be
-declared in the enclosing `<...>` list (an undeclared `'b` is the `undeclared lifetime` error), and
-the annotation is then **erased**, `&'a T` and `&T` are the same type, so a lifetime costs nothing
-at runtime and never changes which values a signature accepts. The elision rules above still do the
-real outlives checking; explicit lifetimes do not tighten or relax it. Lifetime parameters may be
-mixed with type and const parameters (`func f<'a, T>(...)`); only the type/const parameters drive
-monomorphization. Lifetime **bounds** (`'a: 'b`) are not part of the language.
-
-#### References held in values
-
-A struct field, an enum or `Option` payload, and a tuple or array element may hold a reference.
-The struct or enum may declare lifetime parameters for it, and so may an `impl` block for the
-type:
-
-```neuro
-struct View<'a> { text: &'a string, from: u64 }
-enum Pick<'a, T> { Borrowed(&'a T), Owned(T) }
-
-impl<'a> View<'a> {
-    func source(&self) -> &'a string { self.text }
-}
-
-func view<'a>(text: &'a string, from: u64) -> View<'a> {
-    View { text: text, from: from }
-}
-```
-
-A use of the type names its lifetimes before its type arguments (`View<'a>`, `Pick<'a, i32>`),
-writes the anonymous `'_`, or leaves them out. As on a reference, a named lifetime must be
-declared and is then erased.
-
-The binding that holds such a value holds its borrows, just as `val r = &s` holds one. While
-it lives, the borrowee cannot be moved, assigned or borrowed `&mut`. The value takes the borrows
-written into it, the borrows of the holder it was copied from or is a part of (including a
-`match` or `for` binding), and, for a call's result, the borrows of every argument and the
-receiver, since under elision the result may hold any of them. A holder keeps its borrows until
-its own scope ends, even after its value has moved on, so two holders of `&mut x` need separate
-blocks.
-
-Three stores are refused:
-
-| Store | Diagnostic |
-|---|---|
-| A borrow put into a binding declared outside the borrowee's scope: `r = &s`, `h = H { r: &s }`, `h.r = &s`, or `set(&mut h, &s)` from an inner block | `'s' does not live long enough` |
-| A value holding a borrow of a local, returned | `cannot return a reference to 's'` |
-| The same value stored through a `&mut` parameter or `self` | `cannot store a borrow of 's' through a reference` |
-
-A call is judged conservatively: a signature does not say what the callee keeps, so a `&mut`
-argument whose type can hold a reference takes every borrow the call's other arguments carry.
-[`borrowed_records.nr`](../../examples/showcase/borrowed_records.nr) puts these rules together.
-
-### String Slices (`&string`)
-
-`&string` is the **borrowed string slice**: a non-owning `(ptr, len)` view into
-UTF-8 data. There is no separate slice type, `&string` is both "a borrow of an owned
-`string`" and "a string slice," the analogue of Rust's `&str`.
-
-A slice is read-only, so its fundamental operation is **equality**. The operators `==`
-and `!=` compare the underlying UTF-8 bytes for any combination of an owned `string` and a
-`&string` slice; a borrowed operand is auto-dereferenced to its fat pointer before the byte
-compare, so it costs no copy.
-
-```neuro
-func slices_equal(a: &string, b: &string) -> bool {
-    a == b                       // two borrowed slices
-}
-
-func main() -> i32 {
-    val lang: string = "Neuro"
-    val same: string = "Neuro"
-    val eq: bool = slices_equal(&lang, &same)   // true
-    val lit: bool = (&lang == "Neuro")          // true, slice vs owned literal
-    if eq && lit { return 0 }
-    return 1
-}
-```
-
-Comparing through borrows never moves: `lang` stays usable after each `&lang`. Reference
-peeling for equality is **string-only**, so comparing a non-string reference to its value
-(`&n == n` on an `i32`) or mixing types (`i32 == &string`) is still a type error; reading
-other `&T` through `==` needs the `*` deref operator.
+An empty literal (`''`), a multi-character literal (`'ab'`), and an unterminated literal (`'a`) are lexer errors.
 
 ## Void Type
 
-Functions that don't return a value have implicit `void` return type:
+A function with no `->` clause returns `void`. A `void` function has no value, so binding its result is an error. The explicit `-> void` spelling is also accepted, and `return` may be bare in it.
 
 ```neuro
-func print_debug() {
-    // No return type specified = void
-    // Implicit return at end of function
+func log_line() {
+    // No return type: the function returns void
 }
 
-// Explicit void (optional, rarely used)
-func print_debug_explicit() -> void {
+func log_nothing() -> void {
     return
 }
 ```
 
-**Note**: The `main` function must return `i32` (exit code), not void.
-
-## Type Annotations
-
-### Variable Declarations
-
-Type annotations are optional when the type can be inferred from context:
-
-```neuro
-val x: i32 = 42              // Explicit type annotation
-val pi: f64 = 3.14159        // Explicit type annotation
-val flag: bool = true        // Explicit type annotation
-val n = 100                  // Inferred i32 (default for integer literals)
-val e = 2.71828              // Inferred f64 (default for float literals)
-```
-
-### Function Parameters
-
-Function parameters must have explicit type annotations:
-
-```neuro
-func add(a: i32, b: i32) -> i32 {
-    return a + b
-}
-```
-
-### Function Return Types
-
-Return types must be explicitly specified (or omitted for void):
-
-```neuro
-func returns_int() -> i32 {
-    return 42
-}
-
-func returns_float() -> f64 {
-    return 3.14
-}
-
-func returns_nothing() {
-    // Implicit void return
-}
-```
-
-## Type Compatibility
-
-### Strict Type System
-
-Neuro has no implicit conversions between types:
-
-```neuro
-func strict_types() -> i32 {
-    val x: i32 = 42
-    val y: i64 = x  // Error: type mismatch (i32 vs i64)
-    return y
-}
-```
-
-Even compatible types require explicit conversion.
-
-### Function Type Checking
-
-Function calls are type-checked strictly:
-
-```neuro
-func takes_i32(x: i32) -> i32 {
-    return x
-}
-
-func test() -> i32 {
-    val x: i64 = 100
-    return takes_i32(x)  // Error: expected i32, found i64
-}
-```
-
-### Return Type Checking
-
-All return statements must match the declared return type:
-
-```neuro
-func returns_i32() -> i32 {
-    if true {
-        return 42       // OK: i32
-    } else {
-        return 3.14     // Error: expected i32, found f64
-    }
-}
-```
-
-## Type Safety Guarantees
-
-Every type error is reported at compile time, and no value changes type without an `as`.
-Ownership and borrow checking reject a use after a move, a write through a shared borrow and
-a reference that outlives its value; [docs/BUGS.md](../BUGS.md) lists the open defects in
-that guarantee.
-
-## Common Type Errors
-
-### Type Mismatch
-
-```neuro
-func mismatch() -> i32 {
-    val x: i32 = true  // Error: expected i32, found bool
-    return x
-}
-```
-
-**Error message**:
-```text
-error: type mismatch: expected i32, found bool
- --> program.nr:2:5
-  |
-2 |     val x: i32 = true  // Error: expected i32, found bool
-  |     ^^^^^^^^^^^^^^^^^
-```
-
-### Argument Type Mismatch
-
-```neuro
-func takes_i32(x: i32) -> i32 {
-    return x
-}
-
-func wrong_arg() -> i32 {
-    return takes_i32(true)  // Error: expected i32, found bool
-}
-```
-
-**Error message**:
-```text
-error: type mismatch: expected i32, found bool
- --> program.nr:6:22
-  |
-6 |     return takes_i32(true)  // Error: expected i32, found bool
-  |                      ^^^^
-```
-
-### Return Type Mismatch
-
-```neuro
-func returns_wrong() -> i32 {
-    return true  // Error: expected i32, found bool
-}
-```
-
-**Error message**:
-```text
-error: return type mismatch: expected i32, found bool
- --> program.nr:2:5
-  |
-2 |     return true  // Error: expected i32, found bool
-  |     ^^^^^^^^^^^
-```
-
-## Best Practices
-
-### 1. Choose Appropriate Integer Types
-
-```neuro
-// Good: use smallest type that fits
-val age: u8 = 25          // Ages fit in u8 (0-255)
-val year: u16 = 2025      // Years fit in u16
-val file_size: u64 = 1000000000  // Large files need u64
-
-// Avoid: unnecessarily large types
-val counter: i64 = 0      // Wasteful if i32 suffices
-```
-
-### 2. Use f64 for Most Floating-Point Math
-
-```neuro
-// Good: f64 for precision
-val pi: f64 = 3.141592653589793
-
-// Only use f32 when:
-// - Memory is constrained
-// - Precision is not critical
-// - Interfacing with f32 APIs
-```
-
-### 3. Be Explicit About Types
-
-Inference is available, but an explicit type states intent where a literal alone would not:
-
-```neuro
-// Clear intent
-func calculate_area(radius: f64) -> f64 {
-    val pi: f64 = 3.14159
-    return pi * radius * radius
-}
-```
-
-### 4. Use Booleans for Flags
-
-```neuro
-// Good: boolean for true/false
-val is_valid: bool = true
-
-// Avoid: integer for boolean logic
-val is_valid_flag: i32 = 1  // Less clear
-```
+`main` is the exception: it must be declared `func main() -> i32`, because its return value is the exit status. See [Common Type Errors](#common-type-errors).
 
 ## Type Conversion
 
-Explicit type conversions are supported via the `as` operator. There are no implicit type conversions in Neuro.
+Explicit conversions use `as`. There are no implicit conversions.
+
+| From | To | Result |
+|------|----|--------|
+| integer | integer | Keeps the low bits of the value: `300 as u8` is `44`, `-1i32 as u8` is `255`. |
+| integer | float | The nearest float to the integer's value. |
+| float | integer | Truncates toward zero, saturates to the target's range, and maps NaN to `0`. See [Float to integer](#float-to-integer). |
+| `bool` | integer | `true` is `1`, `false` is `0`. |
+| integer | `char` | The integer as a code point: `97 as char` is `'a'`. |
+| `char` | integer | The code point: `'A' as i32` is `65`. |
+| `f16` / `bf16` | any numeric type | Allowed. See [Half-Precision Types](#half-precision-types-f16--bf16). |
+| integer | `bool` | Not allowed. Compare with `!= 0` instead. |
+| float | `bool` or `char` | Not allowed. |
+| `char` | float or `bool` | Not allowed. |
 
 ```neuro
 func convert_types() -> i64 {
     val x: i32 = 42
-    val y: i64 = x as i64      // Explicit conversion (widening)
-    val f: f64 = y as f64      // Int to float
-    
+    val y: i64 = x as i64      // widening
+    val f: f64 = y as f64      // integer to float
     val pi: f64 = 3.14
-    val trunc: i32 = pi as i32 // Float to int (truncates)
-    
+    val trunc: i32 = pi as i32 // truncates to 3
     val flag: bool = true
-    val num: i32 = flag as i32 // Boolean to int (1)
-    
+    val num: i32 = flag as i32 // 1
     return y
 }
 ```
 
-The compiler will reject invalid casts (e.g. casting a string to an integer).
-
 ### Float to integer
 
-`as` from a float to an integer truncates toward zero. Every input has a defined result: a
-value the target cannot hold saturates to the target's minimum or maximum, and NaN becomes
-`0`. When a clamped answer would be wrong, use `.to_checked::<T>()`, which returns
-`Option<T>` and gives `None` in exactly the cases where `as` would saturate or map NaN:
+`as` from a float to an integer truncates toward zero. Every input has a defined result: a value the target cannot hold saturates to the target's minimum or maximum, and NaN becomes `0`. When a clamped answer would be wrong, use `.to_checked::<T>()`, which returns `Option<T>` and gives `None` in exactly the cases where `as` would saturate or map NaN:
 
 ```neuro
 val reading: f64 = 300.7
@@ -1284,61 +268,113 @@ val checked = reading.to_checked::<u8>() ?? 0u8   // None, so 0
 val small = (2.9).to_checked::<i8>()              // Some(2)
 ```
 
-`.to_checked` takes an `f16`, `bf16`, `f32` or `f64` value and exactly one integer type
-argument.
+`.to_checked` takes an `f16`, `bf16`, `f32` or `f64` value and exactly one integer type argument.
 
-A cast whose operand is a compile-time constant (a float literal, a `const`, or arithmetic
-over those) that the target cannot hold is reported as the warning
-`float_cast_out_of_range`. The program still compiles, and the cast still saturates.
-Silence the warning with `@allow(float_cast_out_of_range)` on the enclosing function or
-method, or on the module-level `const` whose initializer holds the cast:
+A cast whose operand is a compile-time constant (a float literal, a `const`, or arithmetic over those) that the target cannot hold is reported as the warning `float_cast_out_of_range`. The program still compiles, and the cast still saturates. Silence the warning with `@allow(float_cast_out_of_range)` on the enclosing function or method, or on the module-level `const` whose initializer holds the cast:
 
 ```neuro
 @allow(float_cast_out_of_range)
 const CEILING: i32 = 1e20 as i32
 ```
 
-## Examples
+### No implicit conversions
 
-### Working with Multiple Types
+Every binding, argument, return value, and operand has to match its type exactly. Passing an `i64` to an `i32` parameter, returning an `f64` from an `i32` function, and adding an `i32` to an `f64` are all type mismatches. The fix is an explicit `as`:
 
 ```neuro
-func compute(a: i32, b: f64) -> f64 {
-    // Mix i32 and f64 by casting one
-    // return a + b  // ERROR: Type mismatch
-
-    // Explicit conversion
+func mixed(a: i32, b: f64) -> f64 {
     return (a as f64) + b
-
-    
 }
 ```
 
-### Type-Safe Function Composition
+The messages are listed under [Common Type Errors](#common-type-errors).
+
+## Arrays
+
+A fixed-size array `[T; N]` holds exactly `N` values of element type `T`. `N` is part of the type, so `[i32; 3]` and `[i32; 4]` are distinct types. `N` is an integer literal, or, inside a generic definition, a `const` generic parameter (`[T; CAP]`), resolved to a concrete length by monomorphization.
 
 ```neuro
-func double(x: i32) -> i32 {
-    x * 2
+val a: [i32; 4] = [10, 20, 30, 40]   // explicit type
+val b = [1, 2, 3]                    // inferred [i32; 3]
+
+val first = a[0]                     // index read
+mut c = [0, 0, 0]
+c[1] = 42                            // element assignment (mut binding)
+val n: u64 = a.len()                 // 4, a compile-time constant
+
+for x in a {  }                      // iterate by value
+for x in &a {  }                     // iterate over a borrow
+```
+
+- **Element type**: any sized type. An array of `Copy` elements is itself `Copy`. An array holding an owner (a `string`, a non-`Copy` struct) moves rather than copies, and reading one element out moves that element. See [Ownership of an element](ownership.md#ownership-of-elements).
+- **Literals** must be homogeneous. The length is the element count, which must equal `N` when a `[T; N]` annotation is present.
+- **Bounds**: an out-of-range index panics in every build, with `panic: array index out of bounds at <file>:<line>:<col>`. Unlike integer overflow, which wraps in release builds, an index past the end has no defined result to fall back on.
+- **Iteration**: `for x in arr` and `for x in &arr` bind each element in order, and `for (i, x) in arr.enumerate()` also binds its `u64` position (see [Control Flow](control-flow.md)).
+
+## Borrowed Slices (`&[T]` / `&mut [T]`)
+
+`&[T]` is a non-owning `(ptr, len)` view over a contiguous run of `T`. It is the array and `Vec` counterpart of [`&string`](ownership.md#string-slices-string). A function that only reads or writes elements takes a slice, and does not care whether they come from a `[T; N]`, a `Vec<T>`, or part of either.
+
+```neuro
+func sum(xs: &[i32]) -> i32 {
+    mut total = 0
+    for x in xs { total = total + x }
+    total
 }
 
-func add_ten(x: i32) -> i32 {
-    x + 10
+func double_each(xs: &mut [i32]) {
+    mut i: u64 = 0
+    while i < xs.len() {
+        xs[i] = xs[i] * 2
+        i = i + 1
+    }
 }
 
-func compose() -> i32 {
-    val x: i32 = 5
-    val y: i32 = double(x)      // 10
-    val z: i32 = add_ten(y)     // 20
-    z
+func main() -> i32 {
+    mut fixed: [i32; 4] = [1, 2, 3, 4]
+    mut grown: Vec<i32> = Vec::new()
+    grown.push(9)
+    double_each(&mut fixed)
+    val a = sum(&fixed)                  // whole array
+    val b = sum(fixed.slice(1..3))       // sub-range, zero copy
+    val c = sum(&grown)                  // Vec, same signature
+    return a + b + c                     // 20 + 10 + 9
 }
 ```
+
+- **`[T]` alone is unsized** and never appears outside a reference. The owned forms are `[T; N]` and `Vec<T>`.
+- **Unsizing**: `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]` parameter, and the `&mut` forms satisfy a `&mut [T]` one. There is no `&T` to `&mut T` strengthening. A `&mut` binding passed to a `&` parameter is a shared reborrow for the call, and one call may not reborrow the same `&mut` twice unless both parameters are `&`.
+- **`.slice(range)`** on an array, a `Vec<T>`, or another slice yields a `&[T]` view over the named sub-range, copying nothing. It accepts `a..b` and `a..=b`. An out-of-range or reversed range panics in every build, because the view outlives the check.
+- **`.len()`** is O(1), read from the view's length: the borrowed run's length, not the container's.
+- **Indexing** is bounds-checked as on the owning container. `xs[i] = v` requires a `&mut [T]`, and the write reaches the buffer, so the owner sees it.
+- **Iteration**: a slice is a borrow, so `for x in xs` binds each element as a `&T`, or as a `&mut T` over a `&mut [T]`, which writes the element in place (`*x += 1`). `.enumerate()` works on a slice as it does on an array.
+- **Borrow rules** are the ordinary ones. A live view counts as a shared borrow of the place it came from, so a `&mut` of that place is rejected while the view is alive. Returning a view of a function-local buffer is rejected as a dangling reference. See [Ownership and Borrowing](ownership.md).
+
+## Tuples
+
+A tuple `(T1, T2, ...)` is an anonymous, fixed-size, heterogeneous aggregate. Element types may differ, and the arity is part of the type, so `(i32, bool)` and `(i32, i32)` are distinct.
+
+```neuro
+val pair: (i32, i32) = (12, 30)     // explicit type
+val mixed = (5, true, 'a')          // inferred (i32, bool, char)
+
+val a = pair.0                      // index access by constant position
+val b = pair.1
+
+val (x, y) = pair                   // destructuring bind
+val (_, keep, _) = mixed            // `_` discards an element
+val ((p, q), r) = ((1, 2), 3)       // nested destructuring
+```
+
+- **Element type**: any sized type. A tuple is `Copy` exactly when every element is, and otherwise moves, on the same terms as an array element. See [Ownership of an element](ownership.md#ownership-of-elements).
+- **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping. There is no one-element tuple, so `(x,)` is an error, and a tuple literal needs at least two elements.
+- **Index access**: `t.0`, `t.1`, and so on read by a constant index. An out-of-range index is a compile error, and indices chain (`t.0.1`). An element of a `mut` tuple is a place: `pair.0 = 7`, `pair.1 += 1`.
+- **Destructuring**: `val (a, b) = t` binds each position. `_` is a wildcard, and patterns nest. Struct and array patterns work too. See [Variables](variables.md#destructuring).
+- **Function boundaries**: tuples may be passed as parameters and returned, as in `func min_max(a: i32, b: i32) -> (i32, i32)`.
 
 ## Type Aliases
 
-A `type` declaration introduces a **transparent** alias for an existing type. The
-alias and its target are fully interchangeable, no new nominal type is created,
-so a value of the alias type and a value of the target type are the same type to
-the compiler (contrast with `newtype`, which is a distinct type).
+A `type` declaration introduces a **transparent** alias for an existing type. The alias and its target are interchangeable: no new type is created, so a value of either is the same type to the compiler. Contrast [`newtype`](#newtype-declarations), which is a distinct type.
 
 ```neuro
 type Meters = f64
@@ -1359,220 +395,103 @@ func main() -> i32 {
 }
 ```
 
-Aliases resolve in every type-annotation position: variable and `const`
-annotations, function parameters and return types, struct fields, and `as` cast
-targets. Alias chains collapse to their ultimate target:
+Aliases resolve in every type-annotation position: variable and `const` annotations, function parameters and return types, struct fields, and `as` cast targets. Alias chains collapse to their ultimate target:
 
 ```neuro
 type A = B
 type B = i32
-val x: A = 1                // x : i32
+
+func main() -> i32 {
+    val x: A = 1            // x is i32
+    return x
+}
 ```
 
-**Rules and diagnostics:**
+Aliases are resolved at parse time, so they cost nothing at run time and compile to the same code as the target type. An alias is not usable as a value-position constructor or path name (`MyAlias { ... }`).
 
-- A duplicate alias name is a compile error.
-- An alias may not shadow a built-in type name (`i32`, `f64`, `string`, …).
-- A cyclic alias chain (`type A = B`; `type B = A`) is a compile error.
-- An unknown target type is reported where the alias is *used*, against the
-  resolved name.
+**Rules and diagnostics**:
 
-Aliases are resolved at parse time, so they carry zero runtime cost and produce
-exactly the same code as writing the target type directly. Using an alias as a
-value-position constructor or path name (e.g. `MyAlias { ... }`) is not part of
-this feature.
+- A duplicate name is an error: `duplicate type alias 'C'`.
+- An alias may not shadow a built-in type: `type alias 'i32' shadows a built-in type; choose a different name`.
+- A cyclic chain is an error: `type alias 'A' is defined in terms of itself (cyclic alias)`.
+- An unknown target is reported where the alias is used, against the resolved name: `unknown type name 'Nope'`.
 
-## Arrays
+## Newtype Declarations
 
-A fixed-size array `[T; N]` holds exactly `N` values of element type `T`, with
-`N` fixed at compile time and part of the type, `[i32; 3]` and `[i32; 4]` are
-distinct types. `N` is an integer literal, or, inside a generic definition, a
-`const` generic parameter (`[T; CAP]`), resolved to a concrete length by
-monomorphization.
+A `newtype` creates a **distinct nominal type** that wraps an inner type. Unlike a `type` alias, a newtype and its inner type are different types, so the compiler will not mix them. This gives unit-of-measure and domain-identifier safety at no run-time cost. Structs and enums are also nominal, and they are covered on [Structs](structs.md).
 
 ```neuro
-val a: [i32; 4] = [10, 20, 30, 40]   // explicit type
-val b = [1, 2, 3]                    // inferred [i32; 3]
-
-val first = a[0]                     // index read
-mut c = [0, 0, 0]
-c[1] = 42                            // element assignment (mut binding)
-val n = a.len()                      // 4, as u64 (compile-time constant)
-
-for x in a {  }                      // iterate by value
-for x in &a {  }                     // iterate over a borrow
+newtype Meters = i32
+newtype Seconds = i32
+newtype Celsius = f64
 ```
 
-- **Element type**: any sized type. An array of `Copy` elements is itself `Copy`;
-  an array holding an owner (a `string`, a non-`Copy` struct) is itself an owner
-  and moves rather than copies. Reading one element out is a move of that element:
-  see [Ownership of an element](#ownership-of-an-element) below.
-- **Literals** must be homogeneous; the length is the element count and, when a
-  `[T; N]` annotation is present, must equal `N`.
-- **Bounds**: an out-of-range index panics with a located diagnostic in every
-  build. Unlike integer overflow, which wraps in release builds, an index past the
-  end has no defined result to fall back on.
-- **Iteration**: `for x in arr` / `for x in &arr` bind each element in order, and
-  `for (i, x) in arr.enumerate()` binds its `u64` position alongside it (see
-  [Control Flow](control-flow.md)).
+### Construction and Inner Access
 
-## Borrowed Slices (`&[T]` / `&mut [T]`)
-
-`&[T]` is a non-owning `(ptr, len)` view over a contiguous run of `T`, the array-and-`Vec`
-analogue of `&string`. A function that only reads or writes elements takes one, and stops
-caring whether they came from a `[T; N]`, a `Vec<T>`, or the interior of either.
+Build a newtype value by calling the newtype name with one inner-typed argument. Read the wrapped value back with `.0`:
 
 ```neuro
-func sum(xs: &[i32]) -> i32 {
-    mut total = 0
-    for x in xs { total = total + x }
-    total
+newtype Meters = i32
+
+func main() -> i32 {
+    val d: Meters = Meters(30)     // construction
+    val raw: i32 = d.0             // inner access
+    return raw
+}
+```
+
+`.0` also reads through a borrow, so `m.0` works on `m: &Meters`. It is read-only: assigning to it is an error even on a `mut` binding. Replace the whole value instead, with `m = Meters(5)`.
+
+### Distinctness
+
+```neuro
+newtype Meters = i32
+newtype Seconds = i32
+
+val m: Meters = Meters(3)
+val bad: i32 = m                       // error: type mismatch: expected i32, found Meters
+val also_bad = Meters(1) + Seconds(2)  // error: cannot apply binary operator + to types Meters and Seconds
+```
+
+A newtype forwards `Copy` and `Clone` from its inner type. A `Copy`-inner newtype is itself `Copy`, and `newtype Name = string` moves like the `string` it wraps. It can be a `val` or `mut` binding, a parameter or return type, and a struct field.
+
+### Methods and Trait Impls
+
+A newtype takes `impl` blocks and trait impls exactly as a struct does, including the operator traits. That is how it gets arithmetic:
+
+```neuro
+newtype Meters = i32
+
+impl Add for Meters {
+    type Output = Meters
+    func add(self, rhs: Meters) -> Meters { Meters(self.0 + rhs.0) }
 }
 
-func double_each(xs: &mut [i32]) {
-    mut i: u64 = 0
-    while i < xs.len() {
-        xs[i] = xs[i] * 2
-        i = i + 1
-    }
+impl Meters {
+    func double(&self) -> Meters { Meters(self.0 * 2) }
 }
-
-val fixed: [i32; 4] = [1, 2, 3, 4]
-mut grown: Vec<i32> = Vec::new()
-
-val a = sum(&fixed)                  // whole array
-val b = sum(fixed.slice(1..3))       // sub-range, zero copy
-val c = sum(&grown)                  // Vec, same signature
 ```
 
-- **`[T]` alone is unsized** and never appears outside a reference; annotating a parameter
-  `[T]` is a compile error. The owned forms are `[T; N]` and `Vec<T>`.
-- **Unsizing**: `&[T; N]`, `&Vec<T>`, and `&[T]` all satisfy a `&[T]` parameter, and the
-  `&mut` forms a `&mut [T]` one. There is no `&T` → `&mut T` strengthening. The one
-  weakening is at a call: a `&mut` binding passed to a `&` parameter is a shared reborrow for
-  the call's duration, and one call may not reborrow the same `&mut` twice unless both
-  parameters are `&`.
-- **`.slice(range)`** on an array, a `Vec<T>`, or another slice yields a `&[T]` view over the
-  named sub-range, copying nothing. It accepts `a..b` and `a..=b`. An out-of-range or reversed
-  range panics in **every** build, debug and release alike: the call hands back a view that
-  outlives the check, so there is no later point at which the mistake could still be caught.
-- **`.len()`** is O(1), read from the length word of the view: the borrowed run's length, not
-  the container's.
-- **Indexing** is bounds-checked exactly as on the owning container: an out-of-range index
-  panics in every build. `xs[i] = v` requires a `&mut [T]`; the
-  write reaches the buffer, so the owner sees it.
-- **Iteration**: a slice is a borrow, so `for x in xs` binds each element as a `&T`, or as a
-  `&mut T` over a `&mut [T]`, which writes the element in place (`*x += 1`). `.enumerate()`
-  works on a slice like it does on an array.
-- **Borrow rules** are the ordinary ones. A live view counts as a shared borrow of the place
-  it came from, so a `&mut` of that place while the view is alive is rejected, and returning a
-  view of a function-local buffer is rejected as a dangling reference.
+Assigning to the inner value is an error. The message tells you to rebuild the whole value:
 
-## Tuples
-
-A tuple `(T1, T2, ...)` is an anonymous, fixed-size, **heterogeneous** aggregate.
-Element types may differ; the arity is part of the type, so `(i32, bool)` and
-`(i32, i32)` are distinct.
-
-```neuro
-val pair: (i32, i32) = (12, 30)     // explicit type
-val mixed = (5, true, 'a')          // inferred (i32, bool, char)
-
-val a = pair.0                      // index access by constant position
-val b = pair.1
-
-val (x, y) = pair                   // destructuring bind
-val (_, keep, _) = mixed            // `_` discards an element
-val ((p, q), r) = ((1, 2), 3)       // nested destructuring
+```text
+error: cannot assign to the inner value of newtype 'Meters': `.0` reads it but is not a place; rebuild the whole value instead, e.g. `x = Meters(v)`
 ```
 
-- **Element type**: any sized type. A tuple is `Copy` exactly when every element
-  is, and otherwise moves, on the same terms as an array element: see
-  [Ownership of an element](#ownership-of-an-element).
-- **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping.
-  There is no one-element tuple: `(x,)` is a compile error, and one value is
-  written as itself. A tuple literal needs at least two elements.
-- **Index access**: `t.0`, `t.1`, … read by a constant index; an out-of-range
-  index is a compile error, and indices chain (`t.0.1`). An element of a `mut`
-  tuple is a place: `pair.0 = 7`, `pair.1 += 1`, `t.0.1 = 9`.
-- **Destructuring**: `val (a, b) = t` binds each position; `_` is a wildcard, and
-  patterns nest. It is a binding form, not a new value, it desugars to ordinary
-  bindings.
-- **Function boundaries**: tuples may be passed as parameters and returned, e.g.
-  `func min_max(a: i32, b: i32) -> (i32, i32)`.
+### Type Errors
 
-Struct and array destructuring patterns are also supported: `val Point { x, y } = p`
-binds each named field, and `val [first, second, ..rest] = arr` binds array elements
-positionally with an optional trailing `..rest` (a fresh `[T; N - k]` remainder) or
-bare `..` to ignore it. A rest-less array pattern must match the array's length
-exactly. See [Variables → Destructuring](variables.md#destructuring).
-
-## Ownership of an element
-
-An aggregate that holds an owner IS an owner. An array, a tuple, a struct, an enum
-payload, a newtype and a generic instance all follow the same three rules when what they
-hold is not `Copy`.
-
-**The aggregate moves.** Passing or binding it hands over everything inside it, so the
-source binding is spent:
-
-```neuro
-val pair: (string, string) = ("left", "right")
-val taken = pair        // moves both elements
-// println(pair.0)      // ERROR: use of moved value 'pair'
-```
-
-**One element at a time.** Reading an element out moves that element and leaves its
-siblings alone, which is what makes destructuring work:
-
-```neuro
-struct Two { a: string, b: string }
-
-val t = Two { a: "x", b: "y" }
-val first = t.a         // moves `t.a`
-val second = t.b        // `t.b` is untouched and still owned
-val Two { a, b } = Two { a: "p", b: "q" }   // the same thing, spelled as a pattern
-```
-
-**A partially moved value cannot be read whole.** Once any element has left, the
-aggregate is no longer complete, so naming it as a whole is an error:
-
-```neuro
-val t = Two { a: "x", b: "y" }
-val first = t.a
-// consume(t)           // ERROR: use of moved value 't'
-```
-
-**A store puts an element back.** Assigning to a moved-out place refills it, and the
-aggregate is whole again once every place that left has been refilled:
-
-```neuro
-mut t = Two { a: "x", b: "y" }
-val first = t.a
-t.a = "z"               // `t.a` is owned again
-consume(t)              // fine: nothing is missing
-```
-
-A place refilled on only some paths (one arm of an `if` without an `else`) may still be
-moved where the paths meet. A place whose aggregate, or an enclosing field, left as a whole
-has nothing to refill: assign the aggregate instead.
-
-An index the compiler cannot evaluate names no particular element, so a move through one
-takes the whole binding: `a[0]` moves element `0`, while `a[i]` moves `a`. Use
-`.clone()` on the element when the aggregate has to stay intact.
+| Error | Cause |
+|---|---|
+| `NewtypeAlreadyDefined` | A newtype reuses a builtin, struct, enum, or newtype name |
+| `CyclicNewtype` | A newtype wraps itself directly or transitively |
 
 ## Tensor Types
 
-`Tensor<T, [d0, d1, ...]>` and everything built on it (construction, indexing, shape
-generics, named dimensions, reshaping, reductions, sorting, dynamic axes, devices) has
-its own page: see [Tensors](tensors.md).
+`Tensor<T, [d0, d1, ...]>`, its shape system, indexing, and devices are on [Tensors](tensors.md).
 
 ## Standard Collections
 
-Beyond the fixed-size `[T; N]`, the standard library provides three heap-backed
-collections. They are library types, not language primitives, but because the
-language exposes no allocator, the compiler knows all three by name and lowers
-their operations directly.
+Beyond `[T; N]`, the standard library provides three heap-backed collections. They are library types, but the language has no allocator, so the compiler knows all three by name and lowers their operations directly.
 
 ```neuro
 mut counts: Vec<i32> = Vec::new()               // growable contiguous array
@@ -1580,46 +499,34 @@ mut stock: HashMap<string, i32> = HashMap::new() // average-O(1) lookup
 mut ranks: BTreeMap<i32, i32> = BTreeMap::new()  // key-ordered map
 ```
 
-`Vec::new()` and its siblings carry no value to infer an element type from, so
-the binding must be annotated.
+`Vec::new()` and its siblings carry no value to infer an element type from, so the binding must be annotated.
 
 ### Ownership
 
-All three own a heap buffer, so none is `Copy`: assignment and by-value passing
-**move** them, and the buffer is freed when the owner leaves scope. A method
-that mutates (`push`, `pop`, `insert`, `remove`, `clear`) needs a `mut` binding,
-exactly like a `&mut self` method.
+All three own a heap buffer, so none is `Copy`. Assignment and by-value passing **move** them, and the buffer is freed when the owner leaves scope. A method that mutates (`push`, `pop`, `insert`, `remove`, `clear`) needs a `mut` binding, as a `&mut self` method does.
 
 ```neuro
 mut a: Vec<i32> = Vec::new()
 val b: Vec<i32> = a       // moves; `a` is invalid from here
 ```
 
-A collection owns what its slots hold, and an element may be any sized value: a
-scalar, a `string`, a struct, a tensor, another collection. The ownership rules
-are the ones for any other place:
+A collection owns what its slots hold, and an element may be any sized value: a scalar, a `string`, a struct, a tensor, or another collection. The rules are those for any other place (see [Ownership of an element](ownership.md#ownership-of-elements)):
 
-- Insertion moves: `v.push(x)` and `m.insert(k, x)` take their arguments, so
-  the bindings they came from are invalid afterwards. To keep a value and also
-  store it, `.clone()` it first.
-- Indexing names a place: `v[i]` is the slot itself: `v[i] = x` writes it,
-  `v[i].field` and `v[i].method()` work on it in place, and `&v[i]` / `&mut v[i]`
-  borrow it. Using a non-`Copy` `v[i]` by value is a compile error, because a
-  slot cannot be left empty; the error names the three ways out: `&v[i]`,
-  `v[i].clone()`, and `v.remove(i)` / `v.swap_remove(i)`.
-- Lookup borrows: `get` lends `Option<&T>` and `get_mut` lends
-  `Option<&mut T>`, and the collection stays borrowed while the result lives.
-  `pop`, `remove` and a displacing `insert` hand the value over.
-- A slot that is overwritten, removed or cleared drops what it held,
-  and the collection drops its live slots when it is dropped.
+- Insertion moves. `v.push(x)` and `m.insert(k, x)` take their arguments, so the bindings they came from are invalid afterward. To keep a value and also store it, `.clone()` it first.
+- Indexing names a place. `v[i]` is the slot itself: `v[i] = x` writes it, `v[i].field` and `v[i].method()` work in place, and `&v[i]` and `&mut v[i]` borrow it. Using a non-`Copy` `v[i]` by value is an error, because a slot cannot be left empty.
+- Lookup borrows. `get` lends `Option<&T>`, and the collection stays borrowed while the result lives. Maps also have `get_mut`, which lends `Option<&mut T>`. `pop`, `remove`, and a displacing `insert` hand the value over.
+- A slot that is overwritten, removed, or cleared drops what it held. The collection drops its live slots when it is dropped.
 
 ```neuro
-val name: string = "ada" + "!"
-mut names: Vec<string> = Vec::new()
-names.push(name)          // moves; `name` is invalid from here
-val first = &names[0]     // a borrow of the slot
-val kept = names[0].clone()
-val taken = names.remove(0)   // takes the element out
+func main() -> i32 {
+    val name: string = "ada" + "!"
+    mut names: Vec<string> = Vec::new()
+    names.push(name)                    // moves; `name` is invalid from here
+    val kept = names[0].clone()         // an independent copy
+    val first_len = names[0].len()      // a method on the slot, in place
+    val taken = names.remove(0)         // takes the element out
+    return first_len as i32             // 4
+}
 ```
 
 ### `Vec<T>`
@@ -1632,20 +539,15 @@ val taken = names.remove(0)   // takes the element out
 | `v.get(i)` | `Option<&T>` | The checked borrow |
 | `v.remove(i)` | `T` | Takes element `i` out and shifts the tail down |
 | `v.swap_remove(i)` | `T` | Takes element `i` out and moves the last element into its slot |
-| `v[i]` / `v[i] = x` | the slot / nothing | Panics out of range, in **every** build |
+| `v[i]` / `v[i] = x` | the slot / nothing | Panics out of range, in every build |
 | `v.len()` | `u64` | Live element count |
 | `v.clear()` | nothing | Drops every element, keeping the buffer |
 | `for x in v` | nothing | Iterates the live elements in order, consuming `v` |
 | `for x in &v` / `&mut v` | nothing | Iterates the elements as `&T` / `&mut T`, leaving `v` usable |
 
-`for x in v` consumes `v`, whatever its element type: each pass owns the element it
-is handed, and leaving the loop early drops the ones it did not reach. `for x in &v`
-binds each element as a `&T`, read in place (`total += x`, `x.len()`), and
-`for x in &mut v` as a `&mut T` that writes the slot (`*x += 1`, `x.count = 0`).
-Either way `v` stays borrowed for the whole loop, so the body cannot push to it.
+`for x in v` consumes `v` whatever its element type. Each pass owns the element it is handed, and leaving the loop early drops the ones it did not reach. `for x in &v` binds each element as a `&T`, read in place. `for x in &mut v` binds a `&mut T` that writes the slot. Either way `v` stays borrowed for the whole loop, so the body cannot push to it.
 
-A `Vec` index is checked in every build, like an array's; a `Vec`'s length is only
-known at run time, so the optimizer can rarely prove the check redundant.
+A `Vec` index is checked in every build, as an array's is. Because a `Vec`'s length is known only at run time, the optimizer can rarely prove the check redundant.
 
 ### `HashMap<K, V>` and `BTreeMap<K, V>`
 
@@ -1653,48 +555,37 @@ Both share one surface:
 
 | Operation | Result | Notes |
 | --- | --- | --- |
-| `m.insert(k, v)` | `Option<V>` | Moves both in; an existing key keeps its slot and hands back the value it held |
+| `m.insert(k, v)` | `Option<V>` | Moves both in. An existing key keeps its slot and hands back the value it held |
 | `m.get(k)` | `Option<&V>` | `None` when absent |
 | `m.get_mut(k)` | `Option<&mut V>` | Holds the map exclusively while the result lives |
 | `m.contains_key(k)` | `bool` | |
 | `m.remove(k)` | `Option<V>` | Takes the value out, dropping the key |
 | `m.len()` | `u64` | Live entry count |
 | `m.clear()` | nothing | |
-| `m.keys()` | `Vec<K>` | A fresh `Vec`, so a map is iterated via `for k in m.keys()` |
+| `m.keys()` | `Vec<K>` | A fresh `Vec`, so a map is iterated with `for k in m.keys()` |
 
-`HashMap` is open-addressed with linear probing and average-O(1) lookup.
-`BTreeMap` keeps its entries ordered by key, so `keys()` comes back **ascending**:
-that ordering is the reason to choose it.
+`HashMap` has average-O(1) lookup. `BTreeMap` keeps its entries ordered by key, so `keys()` returns them **ascending**. Pick it when iteration order matters.
 
 ### Element and key types
 
-- **Elements and values** may be any sized value except one that holds a
-  reference or a function value.
-- **Keys** additionally need equality and, per map, a hash or a total order. The
-  compiler supplies both for integer, `bool`, `char`, and `string` keys. A
-  struct key needs `PartialEq` plus `Hashable` (`HashMap`), derived or written
-  by hand, or `PartialEq` plus `impl Comparable` (`BTreeMap`). A type parameter
-  is a key when its bounds name the same traits and `Copy`
-  (`func count<K: Hashable + PartialEq + Copy>`).
-- **Float keys are rejected.** IEEE-754 comparison is a partial order, NaN
-  compares false against everything, including itself, so a map keyed on a raw
-  float could hold a key it can never find again. Use the prelude's validating
-  wrappers, which reject NaN at construction:
+- **Elements and values** may be any sized value except one that holds a reference or a function value.
+- **Keys** also need equality, plus a hash (`HashMap`) or a total order (`BTreeMap`). The compiler supplies both for integer, `bool`, `char`, and `string` keys. A struct key needs `PartialEq` and `Hashable` (`HashMap`), or `PartialEq` and `Comparable` (`BTreeMap`), derived or written by hand. A type parameter is a key when its bounds name those traits and `Copy`, as in `func count<K: Hashable + PartialEq + Copy>`. See [Generics and Traits](generics-and-traits.md).
+- **Float keys are rejected.** IEEE-754 comparison is a partial order, and NaN compares false against everything, itself included. A map keyed on a raw float could hold a key it can never find again. Use the prelude's validating wrappers, which reject NaN when they are built:
 
 ```neuro
 mut scores: BTreeMap<OrderedF32, i32> = BTreeMap::new()
 scores.insert(OrderedF32::new(0.75f32), 3)
 ```
 
-`OrderedF32` / `OrderedF64` implement `Comparable`, not `Hashable`: hashing a
-float has no representation-independent answer, so they are ordered-map keys.
+`OrderedF32` and `OrderedF64` implement `Comparable`, not `Hashable`. Hashing a float has no representation-independent answer, so they are ordered-map keys only.
 
 ### `Hashable`
 
-`Hashable` is a prelude trait, `trait Hashable { func hash(&self) -> u64 }`. A struct derives
-it or implements it by hand:
+`Hashable` is a prelude trait with one method, `hash(&self) -> u64`. A struct derives it (see [Structs](structs.md)) or implements it by hand:
 
 ```neuro
+struct Point { x: i32, y: i32 }
+
 impl Hashable for Point {
     func hash(&self) -> u64 {
         (self.x * 31 + self.y) as u64
@@ -1702,33 +593,83 @@ impl Hashable for Point {
 }
 ```
 
-Equal keys must hash equally; the map only needs that much. The integers, `bool`, `char` and
-`string` implement it already, and `.hash()` on one of them, or on a struct that derives it,
-returns the hash the map uses for that key.
+The one requirement is that equal keys hash equally. The integers, `bool`, `char`, and `string` already implement it. `.hash()` on one of them, or on a struct that derives it, returns the hash the map uses for that key.
 
 ### Current limits
 
 - An element may not hold a reference or a function value.
-- `keys()` builds a `Vec` holding a copy of every key rather than an iterator over
-  borrows, and there is no `values()`.
-- `Vec<T>` does not go through the `IntoIterator` / `Iterator` protocol
-  ([control flow](control-flow.md#the-iteration-protocol)): `for x in v` lowers to
-  a counted loop, exactly as `for x in arr` does, and so does
-  `for (i, x) in v.enumerate()`, which binds the counter that loop already keeps.
-  The protocol is what a *user-defined* type implements to stand in a `for` head;
-  the built-in sequences take the direct path instead.
+- `keys()` builds a `Vec` holding a copy of every key rather than an iterator over borrows, and there is no `values()`.
+- `Vec<T>` does not go through the [`Iterator` protocol](control-flow.md#the-iteration-protocol). `for x in v` lowers to a counted loop, as `for x in arr` does, and so does `for (i, x) in v.enumerate()`. The protocol is what a user-defined type implements to stand in a `for` head.
 
-## References
+## Type Annotations and Inference
 
-- [Strings](strings.md): the `string` slice and the growable `StringBuilder` buffer
+### Variable Declarations
+
+Annotations are optional when the type can be inferred from context:
+
+```neuro
+val x: i32 = 42              // explicit type annotation
+val pi: f64 = 3.14159        // explicit type annotation
+val n = 100                  // inferred i32 (default for integer literals)
+val e = 2.71828              // inferred f64 (default for float literals)
+```
+
+### Function Parameters and Return Types
+
+Parameters must have explicit type annotations. A return type must be written too, unless the function returns `void`:
+
+```neuro
+func add(a: i32, b: i32) -> i32 {
+    return a + b
+}
+```
+
+Generic parameters, trait bounds, and `where` clauses are covered on [Generics and Traits](generics-and-traits.md).
+
+## Common Type Errors
+
+The messages below are the compiler's text. The output puts the file and position above each one. A type mismatch looks like this:
+
+```text
+error: type mismatch: expected i32, found bool
+ --> program.nr:2:5
+  |
+2 |     val x: i32 = true
+  |     ^^^^^^^^^^^^^^^^^
+```
+
+| Message | Cause |
+|---|---|
+| `type mismatch: expected i32, found bool` | A binding, argument, or operand has a different type from the one expected. Argument mismatches use the same text. |
+| `return type mismatch: expected i32, found bool` | A `return` value does not match the declared return type. |
+| `integer literal 300 out of range for type i8` | A literal, with or without a suffix, does not fit its type. An unannotated literal past `i32` gets the same message. |
+| ``literal -1 is negative and u8 is unsigned: use a signed type, or `0u8.wrapping_sub(1u8)` if the two's-complement wrap was intended`` | A negative literal for an unsigned type. |
+| `float literal out of range for type f32: its value rounds to infinity` | A float literal that rounds to infinity in its type. |
+| ``constant expression has no value: `+` overflows u8, whose values do not include the result`` | A `const` initializer whose arithmetic overflows its type. |
+| `cannot apply binary operator + to types char and i32` | Arithmetic on a `char`. Cast it to an integer first. |
+| `type mismatch: expected bool, found i32` | `1 as bool`. An integer does not cast to `bool`. |
+| `array literal has 2 elements but type annotation expects 3` | An array literal whose length differs from its `[T; N]` annotation. |
+| `tuple index 2 is out of range: the tuple has 2 elements` | A tuple index past the last element. |
+| ``a tuple has zero or at least two elements: `(x,)` is not a tuple; write one value as itself`` | A one-element tuple literal. |
+| ``` `[i32]` is unsized and must appear behind a reference: write `&[i32]` or `&mut [i32]` ``` | A parameter typed as a bare slice. |
+| ``cannot infer the element type of `Vec::new()`; annotate the binding, e.g. `val v: Vec<...> = Vec::new()` `` | An unannotated empty collection. |
+| ``f64 is not a valid `HashMap` key: floating-point values have no total order (NaN compares false against everything); wrap the key in the standard `OrderedF32` / `OrderedF64` struct, which rejects NaN`` | A float used as a map key. |
+| ``` `main` must be declared `func main() -> i32`: it returns the exit status as `i32`, found `void` ``` | A `main` with any other return type. |
+
+The three runtime failures are panics, not compile errors. Each names the location where it happened:
+
+```text
+panic: integer overflow at program.nr:4:17
+panic: shift overflow at program.nr:2:15
+panic: array index out of bounds at program.nr:4:12
+```
+
+## See also
+
+- [Strings](strings.md): `string` and the growable `StringBuilder`
 - [Tensors](tensors.md): `Tensor<T, [dims]>` and its shape system
-- [Structs](structs.md): `impl` blocks, methods, derives
-- [Variables](variables.md): variable declaration and usage
-- [Functions](functions.md): function types and signatures
+- [Structs](structs.md): structs, enums, `impl` blocks, and derives
+- [Ownership and Borrowing](ownership.md): moves, `&T` and `&mut T`, lifetimes, and `Drop`
+- [Generics and Traits](generics-and-traits.md): type parameters, bounds, and dispatch
+- [Variables](variables.md): bindings and destructuring
 - [Operators](operators.md): type requirements for operators
-- [Expressions](expressions.md): expression type checking
-
-## See Also
-
-- Rust Book: [Data Types](https://doc.rust-lang.org/book/ch03-02-data-types.html)
-- [Type System Design](https://en.wikipedia.org/wiki/Type_system)

@@ -1,13 +1,9 @@
-// The `|>` operator: apply a function to the value on its left.
-//
-// `x |> f` is `f(x)`. It exists to turn a nest of calls, which has to be read from
-// the inside out, into a chain read top to bottom in the order the stages run.
-//
-// The thing on the right of `|>` is a function *value*, never a call: a function
-// name, an associated function `Type::function`, a generic function's instance
-// `f::<T>`, a bound method `receiver.method`, or a parenthesized closure literal. A
-// binding of function type is a name like any other, so it works too. `|>` binds looser than every other operator, so the whole
-// expression to its left is what gets piped.
+// The `|>` operator: apply a function to the value on its left. `x |> f` is `f(x)`. It
+// turns a nest of calls, read from the inside out, into a chain read top to bottom in run
+// order. The right side is a function value, never a call: a function name,
+// `Type::function`, an instance `f::<T>`, a bound method `receiver.method`, or a
+// parenthesized closure literal. `|>` binds looser than every other operator, so the whole
+// expression to its left is piped.
 
 struct Scaler {
     factor: i32

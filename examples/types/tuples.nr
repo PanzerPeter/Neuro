@@ -1,10 +1,9 @@
-// Tuples and destructuring.
-//
-// A tuple `(T1, T2, ...)` is an anonymous, fixed-size, heterogeneous aggregate.
-// Elements are read by constant index (`t.0`, `t.1`) and bound by destructuring.
-// Tuple elements are restricted to Copy types for now, so a tuple is itself Copy.
+// Tuples: fixed-size, heterogeneous, anonymous aggregates. A tuple `(T1, T2, ...)` is read
+// by constant index (`t.0`, `t.1`) or bound by destructuring. Elements must be `Copy` for
+// now, so a tuple is itself `Copy`.
 
 // Tuples cross function boundaries: here a tuple is the return type.
+
 func min_max(a: i32, b: i32) -> (i32, i32) {
     if a < b { (a, b) } else { (b, a) }
 }

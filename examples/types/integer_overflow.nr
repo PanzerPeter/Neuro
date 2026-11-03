@@ -1,13 +1,7 @@
-// Neuro Example: Integer overflow semantics
-//
-// Debug builds (compiled with -O0) trap at runtime when a `+`, `-`, or `*`
-// on an integer type overflows, turning a silent miscalculation into an
-// immediate abort. Release builds (-O1..-O3) wrap using two's complement,
-// matching hardware behavior with zero overhead.
-//
-// This program stays within range, so it returns the same value (55) in both
-// debug and release builds. Push any of these sums past the type's maximum to
-// observe the debug-build trap.
+// Integer overflow semantics. Debug builds (`-O0`) trap when `+`, `-` or `*` overflows an
+// integer, which turns a silent miscalculation into an abort. Release builds (`-O1` to
+// `-O3`) wrap in two's complement. This program stays in range, so it returns 55 in both;
+// push a sum past the type's maximum to see the trap.
 
 func main() -> i32 {
     mut acc: i32 = 0

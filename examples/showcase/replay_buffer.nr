@@ -1,18 +1,9 @@
-// Showcase: range `.rev()` and `.step(n)` driving a replay buffer, over earlier features.
-//
-// Cumulative integration example combining:
-//   range `.rev()` and `.step(n)` in a `for` head and on a tensor index axis
-//   · static tensor types and tensor slicing · tensor reductions (`.sum()`)
-//   · structs with `&self` methods · `@derive(Copy, Clone)`
-//   · `.enumerate()` paired with `.rev()` · a `.filter(p)` head adapter
-//   · string interpolation · labeled `break`
-//
-// The point of the combination: a replay buffer is written oldest-first and read
-// newest-first, and `.rev()` is the only thing that changes between the two. The
-// reversed index produces a FRESH tensor, so the buffer itself keeps its own
-// order and can still be reduced, sliced, and re-read afterwards.
-//
-// Expected exit code: 79
+// Showcase: range `.rev()` and `.step(n)` driving a replay buffer, alongside earlier
+// features. Integration example: `.rev()` and `.step(n)` in a `for` head and on a tensor
+// index axis, static tensor types, slicing, `.sum()`, `.enumerate()` with `.rev()`, a
+// `.filter(p)` adapter, and a labeled `break`. A replay buffer is written oldest first and
+// read newest first, and `.rev()` is the only change between the two. The reversed index
+// produces a fresh tensor, so the buffer keeps its own order.
 
 @derive(Copy, Clone)
 struct Frame {

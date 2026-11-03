@@ -1,14 +1,10 @@
-// Showcase: a tiny integer-math toolkit.
-//
-// Integration example combining several control-flow and operator features:
-//   recursion · while loops · modulo (%) · compound assignment (+=)
-//   · saturating and checked overflow methods · Option + match deconstruction
-//   · tuples · loop-as-value · nested if/else · early return
-//   · nesting block comments.
-//
-// Five classic routines are computed and composed into a single exit code.
+// Showcase: a small integer-math toolkit. Integration example: recursion, `while` loops,
+// `%`, `+=`, saturating and checked overflow methods, an `Option` matched into a value,
+// tuples, loop-as-value, nested `if`, early return, and nested block comments. Five classic
+// routines are computed and combined into the exit code.
 
 // Integer square root via linear scan.
+
 func isqrt(n: i32) -> i32 {
     mut r: i32 = 0
     while (r + 1) * (r + 1) <= n {

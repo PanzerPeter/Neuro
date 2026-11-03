@@ -1,25 +1,11 @@
-// Showcase: a network's layer stack, declared with real tensor parameters.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   tensor literal coercion + the construction helpers · structs holding
-//   tensor fields · an enum matched to pick an initializer · a trait with an
-//   `impl` per layer kind · a fixed-size array walked by `for`-in · string
-//   interpolation with the format mini-language · tensor ownership: moves,
-//   `.clone()`, and the `.to(device)` transfer · a dynamic `?` axis reading two
-//   shapes through one signature · reductions (`.sum()`, `.max()`, `.min()`) over a
-//   borrowed table and over a struct's own weight field · a weight matrix at real
-//   scale, built in one function and returned by value.
-//
-// Every weight below is a real buffer the binary carries or fills at startup;
-// a tensor is not `Copy`, so building a layer MOVES its weights into it, and a
-// second owner has to be asked for explicitly with `.clone()`. A tensor value is a
-// DLPack handle whose `data` field addresses that buffer out of line, which is why
-// `hidden_weights()` below can hand back 100352 parameters by value at the default
-// `-O 0`, and why a foreign consumer would take the same pointer unchanged. The report
-// here is built from the shapes, which are part of the types, and the exit code is the
-// total parameter count modulo 256; reading elements back out is
-// `tensors/tensor_indexing.nr`, and the in-place updates are in `optimizer_step.nr`.
+// Showcase: a network's layer stack, declared with real tensor parameters. Integration
+// example: tensor literal coercion and the construction helpers, structs with tensor
+// fields, an enum that picks an initializer, a trait with an `impl` per layer kind,
+// `.clone()` and `.to(device)`, a dynamic `?` axis, and reductions over a borrowed table. A
+// tensor is not `Copy`, so building a layer moves its weights in, and a second owner needs
+// `.clone()`. The report is built from the shapes, which are part of the types. The exit
+// code is the total parameter count modulo 256. Element reads are in
+// `tensors/tensor_indexing.nr`, and in-place updates are in `optimizer_step.nr`.
 
 enum Init {
     Zeros,

@@ -1,16 +1,13 @@
 # Your First Neuro Program
 
-This tutorial walks you through writing, compiling, and running your first Neuro program.
+This tutorial takes you from an empty file to a program with functions, control flow and each
+basic type. Each step builds on the one before, so work through them in order. You need the
+compiler from the [Installation Guide](installation.md) and a text editor.
 
-## Prerequisites
-
-- Neuro compiler installed ([Installation Guide](installation.md))
-- Text editor or IDE
-- Basic programming knowledge
+The commands use `neurc`. Without `cargo install`, substitute `cargo run -p neurc --`, as the
+[Quick Start](quick-start.md) explains.
 
 ## Step 1: Create a Project Directory
-
-Create a directory for your Neuro programs:
 
 ```bash
 mkdir neuro-projects
@@ -28,36 +25,31 @@ func main() -> i32 {
 ```
 
 This is the simplest valid Neuro program:
+
 - `func` declares a function
-- `main` is the entry point (required)
-- `-> i32` specifies the return type (32-bit signed integer)
-- `return 0` exits with success code
+- `main` is the entry point every executable needs
+- `-> i32` is the return type, a 32-bit signed integer
+- `return 0` exits with the success code
 
 ## Step 3: Check the Program
 
-Validate syntax and types:
-
 ```bash
-cargo run -p neurc -- check hello.nr
+neurc check hello.nr
 ```
 
-Expected output:
 ```text
-Type checking passed for "hello.nr" (1 module(s), 17 HIR items)
+Type checking passed for "hello.nr" (1 module(s), 22 HIR items)
 ```
 
-The HIR item count includes the items of the implicit prelude, so it is larger than the
-number of declarations in your file.
+The HIR item count includes the implicit prelude, so it is larger than the number of
+declarations in your file.
 
 ## Step 4: Compile the Program
 
-Generate a native executable:
-
 ```bash
-cargo run -p neurc -- compile hello.nr
+neurc compile hello.nr
 ```
 
-Expected output:
 ```text
 Successfully compiled hello.nr -> hello
 ```
@@ -66,50 +58,17 @@ On Windows the executable is `hello.exe`.
 
 ## Step 5: Run the Program
 
-Execute your program:
-
 ```bash
-# Windows
-.\hello.exe
-
-# Unix
-./hello
+./hello                # Windows: .\hello.exe
+echo $?                # PowerShell: echo $LASTEXITCODE
 ```
 
-The program runs and returns exit code 0 (success).
+`echo` prints `0`, the exit code of a successful run.
 
-Check the exit code:
+## Variables
 
-```bash
-# Windows (PowerShell)
-echo $LASTEXITCODE
-
-# Unix
-echo $?
-```
-
-Output: `0`
-
-## Understanding the Program
-
-Each part of `hello.nr`:
-
-```neuro
-func main() -> i32 {
-    return 0
-}
-```
-
-- **`func`**: Keyword to declare a function
-- **`main`**: Function name (required entry point)
-- **`()`**: Empty parameter list
-- **`-> i32`**: Return type annotation
-- **`{...}`**: Function body
-- **`return 0`**: Return statement with value
-
-## Adding Variables
-
-Two bindings and an addition:
+Bindings are declared with `val`, which is immutable, and the type can be annotated or left to
+inference:
 
 ```neuro
 func main() -> i32 {
@@ -119,44 +78,35 @@ func main() -> i32 {
 }
 ```
 
-**New concepts**:
-- **`val`**: Declares an immutable variable
-- **`x: i32`**: Variable name and type annotation
-- **`= 10`**: Initializer expression
-- **`x + y`**: Arithmetic expression
+`val count = 42` is an `i32` too. Annotate a binding when its type is not obvious at a glance.
 
-Compile and run:
+Replace the contents of `hello.nr` with this program and run it:
 
 ```bash
-cargo run -p neurc -- run hello.nr
-echo $?             # Unix: 30 (PowerShell: echo $LASTEXITCODE)
+neurc run hello.nr
+echo $?                # 30
 ```
 
-## Using Mutable Variables
+## Mutable Variables
 
-Neuro supports mutable variables with the `mut` keyword:
+`mut` declares a binding that can be reassigned:
 
 ```neuro
 func main() -> i32 {
     mut counter: i32 = 0
     counter = counter + 1
     counter = counter + 2
-    return counter  // Returns 3
+    return counter
 }
 ```
 
-**New concepts**:
-- **`mut`**: Declares a mutable variable
-- **`counter = ...`**: Variable reassignment (only for mut variables)
+The program exits with `3`. Assigning to a `val` is an error (see [Common mistakes](#common-mistakes)),
+and a reassigned value must match the variable's type.
 
-**Key points**:
-- Immutable by default (`val`)
-- Explicit mutability (`mut`)
-- Type safety: reassigned value must match variable type
+## Functions
 
-## Adding Functions
-
-A second function, called from `main`:
+Parameters are `name: type` pairs. A call must pass one argument per parameter, each of the
+matching type:
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -169,40 +119,29 @@ func main() -> i32 {
 }
 ```
 
-**New concepts**:
-- **Function parameters**: `a: i32, b: i32`
-- **Function calls**: `add(5, 3)`
-- **Type checking**: Arguments must match parameter types
+This exits with `8`.
 
-Compile and run:
+## Implicit Returns
 
-```bash
-cargo run -p neurc -- run hello.nr
-echo $?             # 8
-```
-
-## Expression-Based Returns
-
-Neuro supports implicit returns (Rust-style):
+The last expression in a function body is its return value, so `return` can be left out:
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
-    a + b  // Implicit return (no 'return' keyword)
+    a + b
 }
 
 func main() -> i32 {
-    add(5, 3)  // Implicit return
+    add(5, 3)
 }
 ```
 
-**Key points**:
-- The last expression in the body becomes the return value (no `return`, no `;`)
-- Must match function return type
-- Can mix explicit `return` and implicit returns
+The last expression has no `return` and no `;`. It must match the return type, and explicit
+`return` statements can appear elsewhere in the body.
 
-## Control Flow: If/Else
+## Control Flow: If and Else
 
-Add conditional logic:
+An `if` condition must be a `bool`. An `i32` there is a type error (`expected bool, found i32`).
+`else` is optional, and `else if` chains conditions:
 
 ```neuro
 func max(a: i32, b: i32) -> i32 {
@@ -213,73 +152,59 @@ func max(a: i32, b: i32) -> i32 {
     }
 }
 
-func main() -> i32 {
-    val result: i32 = max(10, 5)
-    return result
-}
-```
-
-**New concepts**:
-- **`if` conditions**: Must be boolean expressions
-- **`else` blocks**: Optional alternative path
-- **`else if`**: Chain multiple conditions
-
-With else-if:
-
-```neuro
 func classify(x: i32) -> i32 {
     if x > 0 {
-        return 1  // Positive
+        return 1
     } else if x < 0 {
-        return -1  // Negative
+        return -1
     } else {
-        return 0  // Zero
+        return 0
     }
 }
 
 func main() -> i32 {
-    return classify(5)  // Returns 1
+    return classify(max(10, 5))
 }
 ```
 
-## Working with Different Types
+This exits with `1`. For loops, `match` and the other control forms, see the
+[control flow reference](../language-reference/control-flow.md).
 
-### Integers
+## Integers, Floats and Booleans
 
-Neuro supports multiple integer types:
+Integer types are `i8`, `i16`, `i32`, `i64` and their unsigned forms `u8`, `u16`, `u32`, `u64`.
+`i32` is the default for an unannotated integer literal:
 
 ```neuro
 func main() -> i32 {
-    val tiny: i8 = 127        // 8-bit signed
-    val small: i16 = 32767    // 16-bit signed
-    val normal: i32 = 42      // 32-bit signed (default)
-    val big: i64 = 9999999    // 64-bit signed
+    val tiny: i8 = 127
+    val small: i16 = 32767
+    val normal: i32 = 42
+    val big: i64 = 9999999
 
-    val byte: u8 = 255        // 8-bit unsigned
-    val word: u16 = 65535     // 16-bit unsigned
-    val dword: u32 = 42       // 32-bit unsigned
-    val qword: u64 = 99999    // 64-bit unsigned
+    val byte: u8 = 255
+    val word: u16 = 65535
+    val dword: u32 = 42
+    val qword: u64 = 99999
 
     return normal
 }
 ```
 
-### Floats
+Floats are `f32` and `f64`. A float literal is `f64` unless an annotated type gives it context,
+so `2.0` below becomes `f32`. Mixing widths needs an explicit `as` cast:
 
 ```neuro
 func main() -> i32 {
-    val pi: f32 = 3.14159     // 32-bit float
-    val e: f64 = 2.71828      // 64-bit float (default)
-
-    val result: f32 = pi * 2.0   // 2.0 infers as f32 from context
-    val wide: f64 = pi as f64 * 2.0  // explicit cast to mix widths
+    val pi: f32 = 3.14159
+    val e: f64 = 2.71828
+    val result: f32 = pi * 2.0
+    val wide: f64 = pi as f64 * 2.0
     return 0
 }
 ```
 
-Note: Float literals default to f64. When an annotated type is in context (e.g. `val x: f32 = 2.0`), the literal infers as f32.
-
-### Booleans
+Booleans are `true` and `false`, combined with `&&`, `||` and `!`:
 
 ```neuro
 func main() -> i32 {
@@ -296,7 +221,9 @@ func main() -> i32 {
 
 ## Operators
 
-### Arithmetic
+Arithmetic is `+ - * / %`, comparisons are `== != < > <= >=`, and logic is `&& || !`. Integer
+division truncates. The [operators reference](../language-reference/operators.md) covers
+precedence and the rest of the operator set.
 
 ```neuro
 func main() -> i32 {
@@ -304,234 +231,111 @@ func main() -> i32 {
     val b: i32 = 3
 
     val sum: i32 = a + b       // 13
-    val diff: i32 = a - b      // 7
-    val prod: i32 = a * b      // 30
     val quot: i32 = a / b      // 3
     val rem: i32 = a % b       // 1
+    val ge: bool = a >= 10     // true
+    val both: bool = ge && b != 5
 
-    return sum
-}
-```
-
-### Comparison
-
-```neuro
-func main() -> i32 {
-    val x: i32 = 10
-
-    val eq: bool = x == 10     // true
-    val ne: bool = x != 5      // true
-    val lt: bool = x < 20      // true
-    val gt: bool = x > 5       // true
-    val le: bool = x <= 10     // true
-    val ge: bool = x >= 10     // true
-
-    if eq {
-        return 1
-    } else {
-        return 0
+    if both {
+        return sum
     }
-}
-```
-
-### Logical
-
-```neuro
-func main() -> i32 {
-    val a: bool = true
-    val b: bool = false
-
-    val and_result: bool = a && b   // false
-    val or_result: bool = a || b    // true
-    val not_result: bool = !a       // false
-
-    if a && !b {
-        return 1  // This executes
-    } else {
-        return 0
-    }
+    return 0
 }
 ```
 
 ## Complete Example: Factorial
 
-Combining everything so far:
+Combining the pieces so far:
 
 ```neuro
 func factorial(n: i32) -> i32 {
     if n <= 1 {
-        1  // Implicit return
+        1
     } else {
-        n * factorial(n - 1)  // Implicit return with recursion
+        n * factorial(n - 1)
     }
 }
 
 func main() -> i32 {
     val result: i32 = factorial(5)
-    result  // Implicit return: 120
+    result
 }
 ```
 
-Compile and run:
-
-[`examples/basics/factorial.nr`](../../examples/basics/factorial.nr) is the same function
-with explicit returns, printing each multiplication as the recursion unwinds:
-
-```bash
-cargo run -p neurc -- run examples/basics/factorial.nr
-echo $?             # 120
-```
-
-## Best Practices
-
-### 1. Prefer Immutable Variables
-
-```neuro
-// Good
-val x: i32 = 10
-
-// Only use mut when necessary
-mut counter: i32 = 0
-counter = counter + 1
-```
-
-### 2. Use Explicit Types
-
-Inference works (`val count = 42` is an `i32`), but an annotation documents intent
-at a binding a reader has to trust:
-
-```neuro
-// Explicit and clear
-val count: i32 = 42
-```
-
-### 3. Use Implicit Returns for Simple Functions
-
-```neuro
-// Clean and concise
-func add(a: i32, b: i32) -> i32 {
-    a + b
-}
-
-// Use explicit return for complex logic
-func complex(x: i32) -> i32 {
-    if x > 0 {
-        return x * 2
-    }
-    return 0
-}
-```
-
-### 4. Keep Functions Small
-
-```neuro
-// Good: focused functions
-func is_positive(x: i32) -> bool {
-    x > 0
-}
-
-func is_negative(x: i32) -> bool {
-    x < 0
-}
-
-func classify(x: i32) -> i32 {
-    if is_positive(x) {
-        return 1
-    } else if is_negative(x) {
-        return -1
-    } else {
-        return 0
-    }
-}
-```
+This exits with `120`. [`examples/basics/factorial.nr`](../../examples/basics/factorial.nr) is the
+same function with explicit returns, and it prints each multiplication as the recursion unwinds.
 
 ## Common Mistakes
 
-### 1. Forgetting the Return Type
+### Returning a value from a function without a return type
 
-A function with no `->` returns nothing, so returning a value from it is an error:
+A function with no `->` returns nothing:
 
 ```neuro
-// Error: return type mismatch: expected void, found i32
+// error: return type mismatch: expected void, found i32
 func bad() {
     return 0
 }
 
-// Correct
 func good() -> i32 {
     return 0
 }
 ```
 
-### 2. Type Mismatch
+### Returning the wrong type
 
 ```neuro
-// Error: type mismatch
+// error: return type mismatch: expected i32, found bool
 func wrong() -> i32 {
-    return true  // bool, not i32
+    return true
 }
 
-// Correct
 func right() -> i32 {
     return 42
 }
 ```
 
-### 3. Assigning to Immutable Variable
+### Assigning to an immutable variable
 
 ```neuro
-// Error: cannot assign to immutable variable
+// error: cannot assign to immutable variable 'x'
 func bad() -> i32 {
     val x: i32 = 0
-    x = 10  // Error: x is immutable
+    x = 10
     return x
 }
 
-// Correct
 func good() -> i32 {
     mut x: i32 = 0
-    x = 10  // OK: x is mutable
+    x = 10
     return x
 }
 ```
 
-### 4. Statements vs Implicit Return
+### Ending a statement with a semicolon
 
-Neuro has no semicolons: statements are terminated by a newline. A trailing
-`;` is a parse error. The final expression in a function body (no `return`
-keyword) becomes its return value:
+Neuro has no semicolons: a newline ends a statement, and a `;` is a parse error. A block's last
+expression, with no `return`, is its value.
 
 ```neuro
 func example() -> i32 {
-    val x: i32 = 10  // Statement (newline-terminated, no `;`)
-    x                // Last expression is the implicit return value
+    val x: i32 = 10
+    x
 }
 
-// Common mistake: a stray semicolon
+// error: unexpected token Semicolon, expected a newline or '}' to end the statement
 func wrong() -> i32 {
     val x: i32 = 10
-    x;  // Error: `;` is not a valid token here
+    x;
 }
 ```
 
-## What's Next?
+## Exercises
 
-Now that you've written your first programs, explore:
+### Fibonacci
 
-1. **[Types](../language-reference/types.md)**: the type system
-2. **[Functions](../language-reference/functions.md)**: generics, closures, traits
-3. **[Control Flow](../language-reference/control-flow.md)**: loops, `match`, `val-else`
-4. **[CLI Usage](../guides/cli-usage.md)**: every command and flag
-
-## Practice Exercises
-
-Try implementing these programs:
-
-### Exercise 1: Fibonacci
-
-Write a function that computes the nth Fibonacci number.
-
-Expected output for `fibonacci(10)`: 55
+Write `fibonacci(n)`, the nth Fibonacci number. `fibonacci(10)` is 55, so the program exits with
+`55`.
 
 <details>
 <summary>Solution</summary>
@@ -551,12 +355,10 @@ func main() -> i32 {
 ```
 </details>
 
-### Exercise 2: Power
+### Power
 
-Write a function that computes x^n (x to the power of n).
-
-Expected exit code for `power(3, 4)`: 81. An exit status holds 0 to 255, so a larger result
-such as `power(2, 8)` shows up as `256 % 256`, which is 0.
+Write `power(base, exp)` for x to the power of n. `power(3, 4)` is 81. On Unix the exit code keeps
+only the low 8 bits, so a larger result such as `power(2, 8)`, which is 256, exits with `0`.
 
 <details>
 <summary>Solution</summary>
@@ -576,11 +378,9 @@ func main() -> i32 {
 ```
 </details>
 
-### Exercise 3: Is Prime
+### Is Prime
 
-Write a function that checks if a number is prime.
-
-Return 1 for prime, 0 for not prime.
+Write `is_prime(n)` that returns 1 for a prime and 0 otherwise. `is_prime(17)` exits with `1`.
 
 <details>
 <summary>Solution</summary>
@@ -614,11 +414,10 @@ func main() -> i32 {
 ```
 </details>
 
-## Getting Help
+## See also
 
-If you encounter issues:
-
-1. Read the error message: it gives the file, line and column of the problem
-2. Review the [Troubleshooting Guide](../guides/troubleshooting.md)
-3. Consult the [Language Reference](../language-reference/types.md)
-4. Report bugs: https://github.com/PanzerPeter/Neuro/issues
+- [Types](../language-reference/types.md): the type system
+- [Functions](../language-reference/functions.md): declarations, closures and calls
+- [Generics and traits](../language-reference/generics-and-traits.md): generic functions and trait bounds
+- [Control flow](../language-reference/control-flow.md): loops, `match` and `val`-else
+- [CLI Usage](../guides/cli-usage.md): every command and flag

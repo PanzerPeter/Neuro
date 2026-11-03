@@ -1,17 +1,9 @@
 // Showcase: mixed-precision updates, with `bf16` weights and an `f32` master copy.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   half-precision scalar arithmetic, rounded once per operation · a `@derive(Copy)`
-//   struct of `bf16` fields, updated by a function and collected in a `Vec` · `for` loops
-//   over ranges · a closure through `.map` on a `bf16` tensor · `.topk` ordering `bf16`
-//   scores · `.to_checked` with `match` · interpolation of widened values.
-//
-// A `bf16` weight of 1.0 cannot take an update of 2^-9: the step is a quarter of the gap
-// between 1.0 and the next `bf16` value, so every `weight - lr * grad` rounds back to 1.0
-// and a thousand steps change nothing. Keeping an `f32` master copy and narrowing it
-// once at the end is the usual fix, and it moves the weight by the whole thousand steps.
-// Both are exact per-operation results, the same on every machine.
+// Integration example: half-precision scalar arithmetic, a `Copy` struct of `bf16` fields
+// in a `Vec`, a closure through `.map` over a `bf16` tensor, `.topk` over `bf16` scores,
+// and `.to_checked` with `match`. A `bf16` weight of 1.0 cannot take an update of 2^-9:
+// every `weight - lr * grad` rounds back to 1.0, so a thousand steps change nothing. An
+// `f32` master copy, narrowed once at the end, moves by the full amount.
 
 @derive(Copy, Clone)
 struct Param {

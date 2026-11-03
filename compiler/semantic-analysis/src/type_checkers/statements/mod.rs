@@ -471,8 +471,8 @@ impl TypeChecker {
                 };
 
                 // Pass any declared type as the expected hint for inference.
-                // `Type::Unknown` comes back for two unrelated reasons — an error was
-                // reported here, or the initializer diverges (`panic`, `unreachable`) —
+                // `Type::Unknown` comes back for two unrelated reasons: an error was
+                // reported here, or the initializer diverges (`panic`, `unreachable`),
                 // and the two want opposite treatment below, so record which one it was.
                 let errors_before = self.errors.len();
                 let init_ty = if let Some(init_expr) = init {

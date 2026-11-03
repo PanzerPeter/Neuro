@@ -1,25 +1,14 @@
-// Einstein notation: `einsum("bij,bjk->bik", a, b)`
-//
-// One subscript per operand on the left of `->`, one letter per axis, and the result's
-// axes on the right. A letter that appears in an input but not in the output is summed
-// over; a letter that appears in the output takes its extent from wherever an input
-// bound it. That one rule covers matrix products, traces, outer products, transposes,
-// axis sums and batched contractions, which is why `einsum` replaces six method names
-// with one call.
-//
-// The subscripts are a STRING LITERAL, never a value. The compiler reads them while it
-// type-checks, matches each letter against the operands' shapes, and derives the result
-// type from the letters after `->`. A subscript that disagrees with its operands — a
-// letter bound to two different extents, an output letter no input binds — is a compile
-// error naming the letter.
-//
-// An empty output subscript contracts everything away, so the call produces one number
-// of the element type, exactly as a whole-tensor `.sum()` does.
-//
-// `einsum` READS its operands. It allocates its own result and leaves the buffers it
-// contracted alone, so it works through a borrow.
+// Einstein notation: `einsum("bij,bjk->bik", a, b)`. One subscript per operand, one letter
+// per axis, and the result's axes to the right of `->`. A letter in an input but not the
+// output is summed over. A letter in the output takes its extent from an input. That one
+// rule covers matrix products, traces, outer products, transposes, axis sums and batched
+// contractions. The subscripts are a string literal, read while the program type-checks. A
+// letter bound to two extents, or an output letter no input binds, is a compile error
+// naming the letter. An empty output subscript contracts everything to one number. `einsum`
+// reads its operands and allocates its own result, so it works through a borrow.
 
 // A borrowed weight matrix: `w` stays with the caller.
+
 func project(w: &Tensor<f32, [2, 3]>, x: &Tensor<f32, [3]>) -> Tensor<f32, [2]> {
     einsum("ij,j->i", w, x)
 }

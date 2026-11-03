@@ -1,7 +1,6 @@
-// A sibling module. The file name is the module name: this is `geometry`.
-//
-// Declarations are private to their module unless they carry `export`, so this file
-// chooses what the rest of the program may name.
+// A sibling module. The file name is the module name, so this file is `geometry`.
+// Declarations are private unless they carry `export`, so this file chooses what the rest
+// of the program may name.
 
 export struct Point {
     export x: i32,

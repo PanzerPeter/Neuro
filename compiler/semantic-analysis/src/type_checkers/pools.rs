@@ -409,7 +409,7 @@ impl TypeChecker {
     ///
     /// A function this program declares can: the backend emits its body on its own
     /// outside every pool, so what it allocates is libc's. A builtin or collection
-    /// method cannot be traced that way — its body is not a function at all, but
+    /// method cannot be traced that way: its body is not a function at all, but
     /// instructions inlined where the call was written, which take the bump path. Under
     /// a routed emission it can, because routing switches the arena off across the whole
     /// call site, including those inlined instructions.
@@ -604,7 +604,7 @@ impl TypeChecker {
     /// parameter, or a `&mut self` receiver, is the whole set of channels through which
     /// a callee can leave something behind in its caller. Whether the body actually
     /// stores through one is not asked, for the same reason `off_arena` does not ask
-    /// what a callee allocates — an unproven answer has to be the one that keeps the
+    /// what a callee allocates: an unproven answer has to be the one that keeps the
     /// value inside the block.
     fn retaining_places(&self, func: &Expr, args: &[Expr]) -> Vec<String> {
         let mut places = Vec::new();

@@ -1,32 +1,17 @@
-// Showcase: multi-file compilation and `import` working alongside prior features.
+// Showcase: multi-file compilation and `import` alongside earlier features. Integration
+// example: a sibling module, a directory module with a child, `import` in its three shapes
+// (a name list, a rename, and a module alias), the prelude, `export` visibility, an inline
+// `module { }` block, and `export import` re-exports.
 //
-// Cumulative integration example combining:
-//   file-based modules: a sibling module (`stats`), a directory module (`report`,
-//   which holds a `mod.nr`), and its child (`report::format`)
-//   · `import` in all its shapes: a name list, a rename, and a module alias
-//   · the implicit prelude: `Some` / `None` named with no import, in the root module and
-//     in `report` alike, and `stats` opting out of it with `@no_prelude`
-//   · structs with `impl` methods and associated functions
-//   · a generic function, monomorphized per type argument
-//   · fixed-size arrays and `for`-in iteration
-//   · a heap-backed `Vec<T>` that frees its buffer at scope exit
-//   · `Option<T>` unwrapped with a lazy `??` fallback and by pattern
-//   · enums with pattern matching
-//   · `export` visibility: each module publishes a surface and keeps the rest private:
-//     `Summary.total` and `report`'s `Band` never leave the file that declares them
-//   · an inline `module { }` block: logical grouping inside one file, under the same
-//     visibility rule a file module follows
-//   · `export import`: `report` re-exports its child's `clamp`, so a caller reaches it as
-//     `report::clamp` without ever naming `report::format`
-//
-//   examples/showcase/telemetry/
-//     main.nr            <- the root module, plus the inline module `scoring`
-//     stats.nr           <- module `stats`
+//   showcase/telemetry/
+//     main.nr          <- this file, the root module, plus the inline module `scoring`
+//     stats.nr         <- module `stats`
 //     report/
-//       mod.nr           <- module `report`
-//       format.nr        <- module `report::format`
+//       mod.nr         <- module `report`
+//       format.nr      <- module `report::format`
 
 // Names taken from a sibling module, one of them renamed.
+
 import ./stats::{Summary, summarize, pick as choose}
 
 // A name from the directory module, plus its child module under a shorter name.

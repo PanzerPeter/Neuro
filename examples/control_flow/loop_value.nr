@@ -1,14 +1,7 @@
-// `loop` as a value expression.
-//
-// Because blocks are expressions, a `loop` can produce a value: `break v`
-// exits the loop and makes `v` the value of the whole `loop` expression. All
-// value-carrying `break`s for one loop must agree on type. `while` and `for`
-// always yield unit: only `loop` can yield a value, because only `loop` is
-// guaranteed to leave solely via a `break`.
-//
-// Here the first loop searches for the first even candidate (2) and the second
-// runs until a counter reaches 5, yielding 5 * 10 = 50. The program returns
-// 2 + 50 - 52 = 0, and prints the two loop values on the way.
+// `loop` as a value: `break v` exits the loop and makes `v` the value of the whole `loop`
+// expression. All value-carrying breaks of one loop must agree on type. Only `loop` yields
+// a value, because only `loop` leaves solely through a `break`. `while` and `for` always
+// yield unit. The two loops here print their values, and the exit code combines them.
 
 func main() -> i32 {
     mut i: i32 = 0

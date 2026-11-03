@@ -1,9 +1,7 @@
-// char primitive type
-//
-// A `char` is a single Unicode scalar value (32-bit). Char literals are written
-// with single quotes and support escapes (`'\n'`, `'\u{1F44D}'`). `char` is
-// Copy, has a built-in total order, and `as`-casts to/from integer types, but
-// has no arithmetic (compute on the integer code point instead).
+// `char`: a single Unicode scalar value, 32 bits wide. Char literals use single quotes and
+// support escapes such as `'\n'` and `'\u{1F44D}'`. `char` is `Copy`, totally ordered, and
+// converts to and from integers with `as`, but has no arithmetic. Compute on the integer
+// code point instead.
 
 func main() -> i32 {
     val letter: char = 'A'

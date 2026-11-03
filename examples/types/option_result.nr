@@ -1,10 +1,10 @@
-// Option<T> and Result<T, E>: the standard-library enums for absence and failure.
-//
-// Both are ordinary generic enums, available in every program without a declaration.
-// A generic enum is monomorphized per set of type arguments, so `Option<i32>` and
-// `Option<i64>` are distinct types with their own payload widths and zero runtime cost.
+// `Option<T>` and `Result<T, E>`: the standard enums for absence and failure. Both are
+// generic enums available in every program without a declaration. Each is monomorphized per
+// type argument, so `Option<i32>` and `Option<i64>` are distinct types with zero runtime
+// cost.
 
 // `Option<T>`: a value that may be absent. Deconstructed with `match`.
+
 func unwrap_or(o: Option<i32>, fallback: i32) -> i32 {
     match o {
         Option::Some(v) => v,

@@ -1,19 +1,10 @@
-// The iteration protocol: `for` over a type you wrote yourself.
-//
-// `for x in e` is not a built-in over arrays and ranges alone. It calls
-// `e.into_iter()` once and then `.next()` until that answers `None`, so any type
-// implementing `IntoIterator` (a container that hands out an iterator) or
-// `Iterator` (a value that is already one) can stand in a `for` head.
-//
-// Both traits live in the prelude, so nothing here is imported:
-//
-//     trait Iterator     { type Item; func next(&mut self) -> Option<Self::Item> }
-//     trait IntoIterator { type Item; type Iter; func into_iter(self) -> Self::Iter }
-//
-// A type implementing `Iterator` needs no second `IntoIterator` impl: it is its
-// own iterator, and the loop uses it directly.
+// The iteration protocol: `for` over a type you wrote yourself. `for x in e` calls
+// `e.into_iter()` once, then `.next()` until it returns `None`. Any `IntoIterator` or
+// `Iterator` implementor can stand in a `for` head. A type that implements `Iterator` is
+// its own iterator, so it needs no `IntoIterator` impl.
 
 // A cursor over the even numbers below a limit. This is the `Iterator` half.
+
 @derive(Copy, Clone)
 struct EvensIter {
     next_value: i32,

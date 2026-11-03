@@ -1,8 +1,6 @@
 // Neuro Example: Fibonacci sequence calculation
-// Demonstrates: recursive function calls, multiple recursion branches
-//
-// `main` prints the whole sequence it walks up to, then returns fibonacci(10)
-// as the exit code.
+// Demonstrates recursive calls with multiple branches.
+// `main` prints the sequence it walks up to, then returns fibonacci(10) as the exit code.
 
 func fibonacci(n: i32) -> i32 {
     val result: i32 = 0

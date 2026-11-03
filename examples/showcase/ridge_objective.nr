@@ -1,18 +1,10 @@
-// Showcase: a training objective as a value, its loss a `@grad` method.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   Phase 3's `@grad` on a method, whose receiver is a constant the loss reads,
-//   with `.backward()`, `.grad()` and `.zero_grad()` driving gradient descent ·
-//   2C's `@` contraction and broadcast arithmetic, which are the loss itself ·
-//   2D's `pool` arena around each step · structs nested in structs, `&self`
-//   methods, and a `Vec` of `Copy` records · string interpolation with the format
-//   mini-language.
-//
-// One least-squares fit, three objectives. Each `Objective` carries its own ridge
-// penalty, and the `@grad` method reads it: the receiver is a constant as far as the
-// derivative is concerned, so its fields steer the gradient without receiving one.
-// The stronger the penalty, the harder the weights are pulled toward zero.
+// Showcase: a training objective carried as a value, with its loss a `@grad` method.
+// Integration example: `@grad` on a method whose receiver is a constant the loss reads,
+// `.backward()`, `.grad()` and `.zero_grad()` driving gradient descent, `@` and
+// broadcasting, a `pool` around each step, nested structs, and a `Vec` of `Copy` records.
+// Each `Objective` carries its own ridge penalty. The derivative treats the receiver as a
+// constant, so its fields steer the gradient without receiving one. A stronger penalty
+// pulls the weights harder toward zero.
 
 struct Penalty {
     strength: f32

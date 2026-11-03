@@ -1,17 +1,9 @@
-// Showcase: `?` error propagation threaded through earlier features.
-//
-// Cumulative integration example combining:
-//   the `?` operator on both `Result` and `Option`
-//   · structs with `&self` methods · @derive(Copy)
-//   · fixed-size arrays with `for x in arr` iteration
-//   · `match` with enum-variant patterns · `val-else` with an error binding
-//   · the `??` fallback · generic `Option` / `Result` from the implicit prelude
-//
-// The point of the combination: `?` inside a loop body leaves the *whole function*,
-// not just the iteration, and the error it carries out is the one the validator
-// produced: it survives the loop, the call chain, and the `match` that reads it.
-//
-// Expected exit code: 177
+// Showcase: `?` error propagation threaded through earlier features. Integration example:
+// `?` on `Result` and `Option`, `&self` methods, `@derive(Copy)`, a fixed array iterated
+// with `for x in arr`, `match` on enum variants, `val-else` with an error binding, and the
+// `??` fallback. `?` inside a loop leaves the whole function, not just the iteration. The
+// error it carries out is the one the validator produced, and it survives the loop, the
+// call chain and the `match` that reads it.
 
 @derive(Copy, Clone)
 struct Reading {

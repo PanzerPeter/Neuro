@@ -1,25 +1,14 @@
-// Showcase: a heat grid updated in place, written the way the arithmetic reads.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   2E's place expressions, which are what let every update below name the
-//   storage it writes to, tuple elements among them (`bounds.0 = v`), reached
-//   through a field, a `&mut` parameter and a closure's capture · structs with
-//   `&mut self` methods, whose bodies are
-//   now written `self.field += ...` instead of restating the field · arrays and
-//   nested arrays · 2B's static tensors, indexed coordinate by coordinate ·
-//   1G's `Vec` · `for` over ranges · and 1H's string interpolation with the
-//   format mini-language, which prints the result.
-//
-// Every statement that mutates here writes THROUGH a place. Before the place
-// expression existed, only a bare binding could sit on the left of an operator
-// assignment, so `self.total += n` had to be spelled `self.total = self.total + n`
-// and `t[r, c] = v` had no spelling at all. The difference is not only how it
-// reads: a compound assignment on a tensor updates the buffer the DLPack handle
-// already addresses, and the restated form would allocate a second one.
+// Showcase: a heat grid updated in place, with each mutation naming the storage it writes
+// to. Integration example: place expressions (a field, a field of a field, a tuple element
+// reached through a field, a `&mut` parameter or a closure capture, a nested array element,
+// a `Vec` element and a tensor coordinate), `&mut self` methods, `for` over ranges, and
+// string interpolation. `self.total += n` and `t[r, c] = v` need no restated form. On a
+// tensor, a compound assignment updates the buffer the DLPack handle already addresses
+// instead of allocating a second one.
 
 // A running tally kept behind `&mut self` methods. Both bodies are compound
-// assignments to a field, which is the shape BUG-025 named.
+// assignments to a field.
+
 struct Tally {
     total: i32,
     peak: i32

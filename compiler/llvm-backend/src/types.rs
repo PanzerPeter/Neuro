@@ -86,8 +86,8 @@ pub(crate) enum Type {
     Tuple(Vec<Type>),
     /// Tensor `Tensor<T, [d0, ...]>`. A value is a pointer to its DLPack handle, so
     /// moving, storing and releasing one needs no extent; `None` at an axis is a dynamic
-    /// `?`, and every operation that does need the extent — the buffer layout, its byte
-    /// size, an index's strides — reports it instead of guessing.
+    /// `?`, and every operation that does need the extent (the buffer layout, its byte
+    /// size, an index's strides) reports it instead of guessing.
     Tensor {
         element: Box<Type>,
         shape: Vec<Option<usize>>,

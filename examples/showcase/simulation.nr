@@ -1,13 +1,8 @@
-// Showcase: a tiny bit-flag state machine.
-//
-// Integration example combining bitwise operators with struct state:
-//   bit-flag constants via `<<` · set/mask/toggle with `|=`, `&=`, `^=` on a
-//   struct field · a `<<=` probe walking the flag bits · struct holding integer
-//   state · &self predicate + popcount methods · while loop with `break` · `.shr(n)` right shift ·
-//   `~` through a `BitNot` impl · a signed integer's `.abs()` · nested if.
-//
-// A machine's permission flags are mutated step by step; the final set-bit
-// count is returned as the exit code.
+// Showcase: a tiny bit-flag state machine. Integration example: bit-flag constants with
+// `<<`, set, mask and toggle with `|=`, `&=` and `^=` on a struct field, a `<<=` probe
+// walking the bits in a `&self` method, `.shr(n)`, `~` through a `BitNot` impl, `.abs()`,
+// and a `while` loop. The machine's flags are mutated step by step, and the final set-bit
+// count is the exit code.
 
 @derive(Copy, Clone)
 struct Machine {

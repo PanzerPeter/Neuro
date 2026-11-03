@@ -72,7 +72,7 @@ struct Cli {
 /// What `compile` writes to the output path.
 ///
 /// `Obj` stops the pipeline one step before the linker so the object can be linked by
-/// something other than a C runtime startup — a shared library a foreign consumer loads,
+/// something other than a C runtime startup: a shared library a foreign consumer loads,
 /// which is what the DLPack differential harness needs to reach a tensor-returning
 /// function. It therefore carries no entry-point requirement: a library has no `main`.
 ///

@@ -484,7 +484,7 @@ func main() -> i32 {
     );
 }
 
-/// A scalar operand is stretched, so the tensor side alone decides the result's shape —
+/// A scalar operand is stretched, so the tensor side alone decides the result's shape:
 /// and the literal beside it takes the ELEMENT's type rather than the `f64` default, or
 /// the backend would emit a mixed-width instruction.
 #[test]

@@ -1,8 +1,6 @@
-// Demonstrates integer literal type suffixes.
-// Suffixes pin the type of a literal without a variable annotation.
-//
-// Every suffixed literal is printed, including the two written in hex and
-// binary, so the suffix and the base are independent in the output.
+// Integer literal suffixes pin a literal's type without a variable annotation. Each
+// suffixed literal is printed, including the hex and binary ones, so the suffix and the
+// base show independently.
 
 func sum_bytes(a: u8, b: u8) -> i32 {
     return a as i32 + b as i32

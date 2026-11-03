@@ -3,7 +3,7 @@
 // Reached from the builtin-method arm of `check_call_expr`. All three order one axis of
 // the receiver and differ only in what they hand back: the reordered elements, the
 // ordering itself, or the leading `k` of both. The argument list arrives in declaration
-// order — `axis` then `descending`, or `k` then `axis` — because the argument-binding
+// order (`axis` then `descending`, or `k` then `axis`) because the argument-binding
 // pass fills an omitted one from the default the specification gives. An all-positional
 // call is the exception: binding leaves it as written, so its count is checked here.
 //

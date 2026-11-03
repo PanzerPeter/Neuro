@@ -1,23 +1,14 @@
-// Elementwise math: `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()`, `.pow(p)`
-//
-// The six are methods on every float scalar and on a tensor of any float element
-// type. On a tensor each applies element by element and hands back a fresh tensor of the
-// same shape; on a scalar it hands back that scalar type. `.pow(p)` takes its exponent as
-// a scalar of the element type. Nothing needs an import.
-//
-// A tensor receiver is READ, the way a reduction's is: the result is a new buffer, so a
-// weight can be transformed without being moved out of whatever owns it.
-//
-// Out-of-domain inputs follow IEEE 754 and are not diagnosed: `.log()` of 0 is `-inf`,
-// and `.sqrt()` of a negative number is NaN.
-//
-// Half-precision values (`f16`, `bf16`) have them as scalars and as tensor elements, each
-// computed in `f32` and rounded back once.
-//
-// In a `@grad` body every one of them is differentiated by its own rule, so a sigmoid or
-// a log-likelihood can be written directly (see `showcase/logistic_fit.nr`).
+// Elementwise math: `.exp()`, `.log()`, `.sqrt()`, `.tanh()`, `.abs()` and `.pow(p)`. The
+// six are methods on every float scalar and on a float tensor. A tensor applies them
+// element by element into a fresh tensor of the same shape, and a scalar returns a scalar.
+// `.pow(p)` takes its exponent as a scalar of the element type. The receiver is read, not
+// moved. Out-of-domain inputs follow IEEE 754 and are not diagnosed: `.log()` of 0 is
+// `-inf`, and `.sqrt()` of a negative is NaN. `f16` and `bf16` compute in `f32` and round
+// once. In a `@grad` body each is differentiated by its own rule (see
+// `showcase/logistic_fit.nr`).
 
 // A borrowed receiver: `x` stays with the caller.
+
 func softplus_total(x: &Tensor<f64, [3]>) -> f64 {
     (x.exp() + 1.0).log().sum()
 }

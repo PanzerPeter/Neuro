@@ -1,8 +1,6 @@
-// Neuro Programming Language - Builtin Method Dispatch
-// Demonstrates an intrinsic method on a builtin type: string.len()
-//
-// `.len()` reads the byte length stored in the string fat pointer (ptr, len).
-// It is O(1) (no scan) and returns a u64. The length excludes the null terminator.
+// `.len()` on `string`: an intrinsic method on a builtin type. It reads the byte length
+// stored in the fat pointer `(ptr, len)`, so it is O(1) and returns a `u64`. The length
+// excludes any null terminator.
 
 func main() -> i32 {
     val greeting: string = "hello, world"

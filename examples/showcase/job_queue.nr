@@ -1,24 +1,10 @@
-// Showcase: `val-else` early exit and `if val` / `while val` carrying a small job
-// queue, combined with earlier features.
-//
-// Cumulative integration example combining:
-//   `val-else` binding a pattern for the rest of the block, with the three
-//     type-directed `else` forms: `|reason|` on a Result, `|verdict|` on a plain
-//     enum, and a bare `else { break }` on an Option
-//   · `if val` taking only the branch it cares about, followed by a plain
-//     `else if`, and `while val` draining a retry queue with `continue`
-//   · `Option<T>` / `Result<T, E>` from the implicit prelude
-//   · `??` supplying a default for an absent lookup
-//   · a `Vec<i32>` collection: `push`, `pop`, `for`-in, scope-exit free
-//   · `@derive(Copy)` structs with an associated function and `&self` methods
-//   · an enum with tuple and unit variants · `match` with a guard
-//   · a fixed-size array `[i32; 5]` with indexed reads · range-`for` · `loop`
-//
-// The point of the combination: `val-else` is the shape that replaces a `match`
-// whose success arm would otherwise swallow the entire rest of the function. Here
-// every stage validates, exits on failure, and keeps writing straight-line code.
-// `if val` and `while val` are the other half: the success branch is the only one
-// with work to do, so it is the only one written.
+// Showcase: `val-else`, `if val` and `while val` carrying a small job queue. Integration
+// example: `val-else` in its three `else` forms (`|reason|` on a `Result`, `|verdict|` on a
+// plain enum, and a bare `else` on an `Option`), `if val` with a plain `else if`, `while
+// val` draining a retry queue with `continue`, `??`, `Vec` operations, `Copy` structs, and
+// a `match` guard. `val-else` replaces a `match` whose success arm would swallow the rest
+// of the function, so each stage validates, exits on failure and keeps straight-line code.
+// `if val` and `while val` write only the branch that does work.
 
 @derive(Copy, Clone)
 struct Job {

@@ -1,8 +1,6 @@
-// Copy trait + @derive(Copy, Clone)
-//
-// A struct that derives Copy is duplicated on assignment, so the source
-// binding stays valid (no move). A struct that derives Clone supports an
-// explicit `.clone()` deep copy. Both yield independent values.
+// `Copy` and `Clone`: `@derive(Copy, Clone)`. A struct that derives `Copy` is duplicated on
+// assignment, so the source stays valid. A struct that derives `Clone` supports an explicit
+// `.clone()` deep copy. Both yield independent values.
 
 @derive(Copy, Clone)
 struct Point {

@@ -1,14 +1,8 @@
-// Neuro Programming Language - String `.char_slice(range)`
-//
-// `.char_slice(range)` is the codepoint-indexed companion to `.slice(range)`. Both
-// return a borrowed `&string` view (zero copy, since strings are immutable) but
-// `.slice` counts bytes while `.char_slice` counts Unicode code points, walking the
-// UTF-8 bytes to find each endpoint. On ASCII the two agree; on anything else they do
-// not, which is the whole reason `.char_slice` exists.
-//
-// Because a code point index can never land inside a code point, `.char_slice` has no
-// boundary rule to break: its only runtime failure is a range that runs past the last
-// character or one whose bounds are reversed, which panics like `.slice`.
+// `.char_slice(range)`: the codepoint-indexed companion to `.slice(range)`. Both return a
+// borrowed `&string` view. `.slice` counts bytes and `.char_slice` counts Unicode code
+// points, so they agree on ASCII and differ elsewhere. A code point index cannot split a
+// code point, so the only runtime failure is a range that runs past the last character or
+// has reversed bounds, which panics as `.slice` does.
 
 func main() -> i32 {
     val s = "héllo"          // 5 characters, 6 bytes: 'é' takes two

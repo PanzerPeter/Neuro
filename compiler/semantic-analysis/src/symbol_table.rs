@@ -21,7 +21,7 @@ struct BorrowProvenance {
 
 /// What a binding has given away: the whole value, or individual sub-places of it.
 ///
-/// A sub-place is keyed by its path below the binding — `"label"`, `"0"`, `"0.name"` —
+/// A sub-place is keyed by its path below the binding (`"label"`, `"0"`, `"0.name"`)
 /// so that `val (a, b) = pair` moves two different elements rather than the same root
 /// twice. Only a statically nameable step joins a path; a runtime array index cannot be
 /// one, so a move through it takes the whole binding instead.
@@ -661,7 +661,7 @@ impl SymbolTable {
     /// the snapshot, so it must be called with the same scope stack.
     ///
     /// A loop body uses this to tell a move it performed on a binding declared
-    /// outside the loop — which the next iteration would perform again — from one
+    /// outside the loop (which the next iteration would perform again) from one
     /// the body re-established before the iteration ended.
     ///
     /// [`snapshot_moves`]: SymbolTable::snapshot_moves

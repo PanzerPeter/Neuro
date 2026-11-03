@@ -1,10 +1,9 @@
-// Neuro Example: Named arguments
-// Demonstrates: passing arguments by name, external labels, positional-only `_`
-//
-// All three spellings of the same call print the same number, which is the
-// point of the feature: the name is a call-site convenience, not a new function.
+// Neuro Example: Named arguments Demonstrates passing arguments by name, external labels,
+// and positional-only `_` parameters. All three spellings of the same call print the same
+// number: a name is a call-site convenience, not a new function.
 
 // An ordinary parameter may be passed positionally or by its own name.
+
 func blend(base: i32, accent: i32, weight: i32) -> i32 {
     return base * 100 + accent * 10 + weight
 }

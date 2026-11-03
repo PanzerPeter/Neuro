@@ -1,23 +1,10 @@
-// Showcase: associated types: one trait, three implementors, three sample types.
-//
-// Cumulative integration example combining:
-//   associated types (`type Sample`) and `Self::Sample` paths
-//   · `Channel<Sample = i32>` bounds constraining that member on a type parameter
-//   · trait declarations with a default method · @derive(Copy) structs with `&self` methods
-//   · `Option<T>` + `match` · `Vec<T>` + `for`-in · string interpolation and the
-//     format mini-language
-//
-// The point of the combination: a `Channel` trait without an associated type would have
-// to pick ONE sample type for every instrument, so the thermocouple's `f64`, the tally's
-// `i32`, and the interlock's `bool` could not share a trait at all. The trait names the
-// member; each impl says what it is; `Self::Sample` reads back whatever that impl chose,
-// including nested inside `Option<...>` where the drain loop needs it.
-//
-// A generic reader needs the other half. `T: Channel` erases the instrument, and with it
-// the only thing that says what `Sample` is, so `T: Channel<Sample = i32>` puts the
-// answer in the bound: one body serving every counted channel and no float channel.
-//
-// Expected exit code: 108
+// Showcase: associated types, one trait with three implementors. Integration example: `type
+// Sample` with `Self::Sample` paths, `Channel<Sample = i32>` bounds on a type parameter, a
+// trait with a default method, `@derive(Copy)` structs with `&self` methods, `Option` and
+// `match`, and `Vec` iteration. A trait without an associated type would have to pick one
+// sample type for every instrument, so a thermocouple's `f64`, a tally's `i32` and an
+// interlock's `bool` could not share it. `T: Channel<Sample = i32>` puts the answer in the
+// bound, so one body serves every counted channel and no float channel.
 
 trait Channel {
     type Sample

@@ -419,7 +419,14 @@ impl Lowerer {
                 if let Some(reference) = self.borrow_of_capture(operand, *mutable, *span) {
                     return Ok(reference);
                 }
-                let operand = self.lower_expr(operand, None)?;
+                // A borrowed temporary takes its type from the reference it fills, as the
+                // checker typed it: `g(&5)` against `&i64` is an `i64` slot, never the
+                // literal's `i32` default the callee would read eight bytes through.
+                let inner_expected = match expected {
+                    Some(HirType::Reference { inner, .. }) => Some(&**inner),
+                    _ => None,
+                };
+                let operand = self.lower_expr(operand, inner_expected)?;
                 let ty = HirType::Reference {
                     inner: Box::new(operand.ty.clone()),
                     mutable: *mutable,

@@ -1,10 +1,7 @@
-// Neuro Programming Language - Integer Primitive Methods
-// Demonstrates the wrapping / saturating / checked arithmetic intrinsics, the
-// right-shift method and a signed integer's `.abs()` on builtin integer types. All dispatch through the builtin-method
-// path: they are compiler-known intrinsics, not user-defined impl methods.
-//
-// Each intrinsic prints what it produced and the run ends with a verdict line,
-// so a wrong answer names itself instead of collapsing into exit 1.
+// Integer primitive methods: the wrapping, saturating and checked arithmetic intrinsics,
+// the right-shift method, and a signed integer's `.abs()`. These are compiler intrinsics,
+// not user impl methods. Each prints its result, and a verdict line ends the run so a wrong
+// answer names itself.
 
 func main() -> i32 {
     val a: u8 = 200

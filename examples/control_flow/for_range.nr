@@ -1,8 +1,6 @@
-// The half-open range `for` loop: `start..end` visits every value from `start`
-// up to but NOT including `end`.
-//
-// The loop prints each value it visits, so the excluded upper bound is visible
-// in the output rather than asserted in a comment.
+// The half-open range `for` loop: `start..end` visits every value from `start` up to but
+// not including `end`. Each visited value is printed, so the excluded bound shows in the
+// output.
 
 func sum_range(start: i32, end: i32) -> i32 {
     mut sum: i32 = 0

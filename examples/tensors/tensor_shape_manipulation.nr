@@ -1,22 +1,14 @@
-// Tensor shape manipulation: `.t()`, `.reshape(...)`, `.permute(...)`, `.flatten(...)`
-//
-// All four produce a tensor of a different shape from the receiver's elements, and all
-// four CONSUME the receiver: a tensor owns its buffer, so a transpose hands that buffer
-// on rather than leaving a second copy of a weight matrix alive behind your back. Write
-// `t.clone().t()` when the original has to stay readable.
-//
-// The result's shape is computed at compile time, so the tensor a shape method returns
-// is as statically shaped as the one it came from, and a mistake is a compile error:
-// `.reshape` cannot change how many elements a tensor holds, `.t()` is the matrix
-// transpose and rejects any rank but 2, and a `.permute` that names an axis the shape
-// does not declare is told which names it does declare.
-//
-// `.permute` and `.flatten` take dimension NAMES as well as positions. A name resolves
-// against the receiver's own shape, never against the surrounding scope, so the `height`
-// below is an axis even though a local of that name is in scope.
+// Tensor shape manipulation: `.t()`, `.reshape(...)`, `.permute(...)` and `.flatten(...)`.
+// All four return a tensor of a different shape and consume the receiver, since a tensor
+// owns its buffer. Write `t.clone().t()` to keep the original. The result's shape is
+// computed at compile time: `.reshape` cannot change the element count, `.t()` rejects any
+// rank but 2, and `.permute` lists the names the shape does declare when given an unknown
+// one. `.permute` and `.flatten` take dimension names as well as positions, resolved
+// against the receiver's own shape, never the surrounding scope.
 
 // The names make the axis order part of the signature, and `.permute` reads as the
 // rearrangement it performs rather than as three anonymous numbers.
+
 func to_channels_last(
     image: Tensor<i32, [channels: 2, height: 2, width: 3]>
 ) -> Tensor<i32, [height: 2, width: 3, channels: 2]> {

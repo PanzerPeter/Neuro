@@ -474,7 +474,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Split an already-lowered function value into the halves a call needs.
     ///
     /// Separate from [`Self::call_function_value`] so a caller that calls the same
-    /// function repeatedly — a tensor traversal, one call per element — evaluates the
+    /// function repeatedly (a tensor traversal, one call per element) evaluates the
     /// value once, outside its loop, the way the surface says it is evaluated once.
     pub(crate) fn split_function_value(
         &self,

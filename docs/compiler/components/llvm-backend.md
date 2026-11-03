@@ -1,330 +1,292 @@
 # LLVM Backend
 
+The LLVM backend turns the typed HIR into native object code, or into textual LLVM IR with `neurc compile --emit llvm-ir`. It owns all scalar code and every tensor operation with no loop, and links in the tensor loops that the [MLIR backend](mlir-backend.md) computes. Read it when a change touches code generation, the runtime ABI, or the panic and output paths.
+
 **Crate**: `compiler/llvm-backend`
 **Library**: inkwell 0.10.0 (LLVM 23 bindings)
-**Build requirement**: `LLVM_SYS_231_PREFIX` pointing at an LLVM 23 install
+**Build requirement**: `LLVM_SYS_231_PREFIX` pointing at an LLVM 23 install. Every build of the compiler also needs MLIR 23 in the same prefix ([Installation](../../getting-started/installation.md#mlir)).
+**Entry points**: `compile` and `compile_to_ir`, both in [`lib.rs`](../../../compiler/llvm-backend/src/lib.rs)
 
 ## Overview
 
-The LLVM backend generates native object code from the typed High-Level IR (`neuro-hir`), not
-the AST. [HIR lowering](hir-lowering.md) has already attached a resolved type to every
-expression, so the backend reads types inline instead of re-deriving them. It uses
-[inkwell](https://github.com/TheDan64/inkwell) (safe Rust bindings to LLVM 23) to produce
-optimized machine code for the host platform.
+The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the AST. Lowering has already attached a resolved type to every expression, so codegen reads types inline and no backend pass collects them again. The language features it generates are described in the [language reference](../../language-reference/).
 
-The entry points are `compile` and `compile_to_ir`, both in
-[`lib.rs`](../../../compiler/llvm-backend/src/lib.rs). Each takes the HIR program, an
-`OptimizationLevelSetting`, the source text and path, and the `external` bodies.
-`compile` returns object code; `compile_to_ir` stops after the pass pipeline and returns the
-textual module (`neurc compile --emit llvm-ir`). The source text and path are carried through for
-located runtime-panic diagnostics (array bounds, slice boundaries, integer overflow).
-`external` names function bodies another backend computed; see [MLIR bodies](#mlir-bodies).
+`compile` returns object code, which `neurc` passes to the system linker. `compile_to_ir` runs the same pipeline up to the optimizer and returns the module as text. The program's source text and path travel with the HIR so that panic messages can name `file:line:col`.
 
 ## Architecture
 
-- **Dependencies**: `neuro-hir` (the typed HIR it consumes), `ast-types`, `shared-types`, `inkwell 0.10.0`, `thiserror`; `syntax-parsing`, `hir-lowering` and `mlir-backend` are dev-dependencies (tests and benches lower before compiling, and link the tensor bodies `mlir-backend` computes)
-- **Public API**: `compile`, `compile_to_ir`, `ExternalBodies`, `OptimizationLevelSetting`, `CodegenError`
-- **All internals**: `pub(crate)`, `CodegenContext`, `TypeMapper`, `codegen_*` helpers
-- **Output**: platform object code (`.o`) passed to the system linker by `neurc`
+- **Dependencies**: `neuro-hir` (the HIR it consumes), `ast-types` (the operator enums), `shared-types`, `inkwell`, `thiserror`. The `syntax-parsing`, `hir-lowering` and `mlir-backend` crates are dev-dependencies only: tests and benches lower source before compiling, and a test that compiles a tensor operation links the body MLIR computes for it. inkwell is pinned to a commit of its master because no crates.io release supports LLVM 23 yet.
+- **Public API**: `compile`, `compile_to_ir`, `ExternalBodies`, `BodyGuard`, `BodyGuardKind`, `BodyMemory`, `GpuVendor`, `OptimizationLevelSetting`, `CodegenError`, `CodegenResult`
+- **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins.
+- **Output**: a platform object file, or the textual module from `compile_to_ir`.
 
-## Supported Features
+### Module emission order
 
-### Types
+`compile` splits into `build_module` (generate and verify) and `emit_object_code`. Inside `build_module` the order is fixed:
 
-| Neuro | LLVM |
+1. Every function, method and closure signature is declared before any body, so a call resolves whatever the item order. Monomorphized instances rely on this.
+2. Vtables are emitted for every `impl Trait for Type`.
+3. Bodies are generated.
+4. The standard-output drain is inserted on every exit path, if the module prints.
+5. External bodies are linked, after every body, so each wrapper's declaration already exists.
+6. Soft-float builtins are linked, if the module uses `half` or `bfloat`.
+
+The module is then verified. The optimizer and instruction selection run after that (see [optimization levels](#optimization-levels)).
+
+## Behavior
+
+### Types and opaque pointers
+
+LLVM 15 removed typed pointers, so every pointer is an opaque `ptr`. The backend keeps the Neuro type of each pointer beside it and passes that type to every load. `map_type` in [`type_mapping.rs`](../../../compiler/llvm-backend/src/type_mapping.rs) is the authority for the table below.
+
+| Neuro type | LLVM type |
 |---|---|
-| `i8` / `i16` / `i32` / `i64` | `i8` / `i16` / `i32` / `i64` |
-| `u8` / `u16` / `u32` / `u64` | the same widths, with unsigned instruction selection |
-| `f16` / `bf16` | `half` / `bfloat` (conversions via the soft-float builtins) |
-| `f32` / `f64` | `float` / `double` |
+| `i8` to `i64`, `u8` to `u64` | `i8` to `i64` (signedness selects the instructions, not the type) |
+| `f16`, `bf16` | `half`, `bfloat` |
+| `f32`, `f64` | `float`, `double` |
 | `bool` | `i1` |
 | `char` | `i32` (a Unicode scalar value) |
-| `string` | anonymous struct `{ ptr, i64 }`, a fat pointer: data pointer + byte length |
-| `&string` | the `{ ptr, i64 }` fat pointer **by value**; `&mut string` is the referent's address |
-| `&T` / `&mut T` (other `T`) | `ptr` (opaque) |
-| `&dyn Trait` | `{ data ptr, vtable ptr }` fat pointer |
-| user struct | anonymous LLVM struct `{ T0, T1, ... }`, fields in declaration order |
-| tuple | anonymous LLVM struct, elements in position order |
+| `string` | `{ ptr, i64 }` (see [Strings](#strings)) |
+| `&string` | `{ ptr, i64 }` by value; `&mut string` is a `ptr` |
+| `&[T]`, `&mut [T]` | `{ ptr, i64 }` by value (buffer pointer and length) |
+| `&dyn Trait` | `{ ptr, ptr }` (data pointer and vtable pointer) |
+| other `&T`, `&mut T` | `ptr` |
+| `Tensor<T, S>` | `ptr` (a DLPack handle, see [Tensors](#tensors-and-dlpack)) |
+| struct | anonymous struct, fields in declaration order |
+| enum | `{ i32 tag, [W x [K x i64]] payload }` |
+| tuple | anonymous struct, elements in position order |
 | `[T; N]` | `[N x T]` |
-| enum | tagged union `{ i32 tag, [W x [K x i64]] payload }`, `W` slots for the widest variant, `K` words for the widest payload field |
-| closure | `{ fn_ptr, env_ptr }` fat pointer; the environment is a counted heap block shared by every copy, null when nothing is captured |
-| `void` | `void` |
+| closure, `(A) -> B` | `{ ptr, ptr }` (function pointer and environment) |
+| `Vec`, `HashMap`, `BTreeMap`, `StringBuilder` | `{ ptr, i64, i64, i64 }` header (see [Collections](#collections-and-builtins)) |
+| newtype | its inner type (erased) |
+| `void` | no value |
 
-The full ABI contract (string, struct, method, builtin-method, overflow, panic, drop,
-collections, constants, and soft-float) is documented in the slice's
-[CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md), which is authoritative.
+A bare `dyn Trait` or `[T]` is unsized and is rejected. Only the reference form maps.
 
-### Expressions
+### Strings
 
-Literals; variable loads; arithmetic, comparison, logical, and bitwise operators; unary
-`-`, `!`, `~`; calls (free functions, associated functions, methods, and indirect calls
-through a closure or a vtable); struct, enum, tuple, and array literals; field, index, and
-tuple-element access; casts; ranges (as `.slice` arguments and `for` bounds); `if`, `match`,
-`loop`, and block expressions in value position; and the `?` / `??` fallible operators,
-both of which are already desugared to a `match` in HIR.
+A `string` is `{ ptr, i64 }`: the pointer to UTF-8 bytes, and the byte count without the terminator. Literals live in `.rodata`, and the NUL after them exists only for C-string validity. The length is authoritative, so interior NUL bytes are ordinary content. A string is passed and returned by value, and an immutable `&string` is the same fat pointer, not a pointer to one, so a computed slice needs no stack slot.
 
-### Statements
+`==` and `!=` compare the length, then call libc `memcmp`. `+` allocates a new buffer with no terminator.
 
-- Bindings (`val`, `mut`), `alloca` in the **entry block**, never inside a loop
-- Assignment to a place: a binding, a field, an element, a tensor coordinate, or a referent
-- `return`, explicit and as a block's trailing expression
-- `if` / `else`, basic blocks with a merge block; a branch that returns contributes no
-  edge to the merge
-- `while`, `for` (a dedicated step block, so `continue` advances the induction variable),
-  and `loop` (whose value comes from its `break v` edges)
-- `break` / `continue`, including labelled forms; these branch to the loop's exit / step block
-- Scope-exit `Drop` calls and collection frees
+Whether a buffer must be freed is decided at compile time, never read from the value: a literal and a heap string have the same shape. `produces_owned_string` in [`drops/owned_strings.rs`](../../../compiler/llvm-backend/src/codegen/drops/owned_strings.rs) answers for each expression, and the answer is conservative on purpose. A missed "owned" leaks a buffer. A wrong "owned" hands `.rodata` to `free`. The full ownership rules are in the [CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md).
 
-### Signedness
+### Structs, enums and methods
 
-Integer instructions are selected based on signedness:
-- Signed: `sdiv`, `srem`, `icmp slt/sgt/sle/sge`
-- Unsigned: `udiv`, `urem`, `icmp ult/ugt/ule/uge`
+Structs are anonymous LLVM structs and are passed by value, with no `sret`. Values live in `alloca` slots, and a field read is a `getelementptr` plus `load`. A functional update such as `Point { x: 1.0, ..p }` seeds the aggregate from the base value.
 
-## Code Generation Pipeline
+An `impl` method is a free function named `TypeName__methodName`. `codegen_method_call` recovers the receiver type by splitting the symbol on `__`, so the separator must appear exactly once. Two rules guarantee that. Semantic analysis rejects a declared name containing `__`, and a monomorphized instance carries a `$g` marker that no identifier can contain (`identity$g_i32`).
 
-```text
-build_module
-  1. Declare every function, method and closure signature before any body,
-     so a call resolves regardless of item order (monomorphized instances included)
-  2. Emit vtables for every `impl Trait for Type`
-  3. Generate bodies
-  4. Insert the standard-output drain on every exit path, if the module prints
-  5. Link the external bodies, if any were handed in
-  6. Link the soft-float builtins, if the module uses `half` / `bfloat`
-  7. Verify the module
-then
-  8. Create a target machine for the host triple and run the `-O` pass pipeline
-  9. Emit object code to a memory buffer (`compile`) or print the module (`compile_to_ir`)
-```
+- `&self` and `self` pass the struct by value as the first parameter.
+- `&mut self` passes a pointer, so field writes reach the caller's storage.
+- An associated function has no receiver parameter, and `TypeName::func(args)` calls `TypeName__func`.
 
-Why the order is fixed is recorded under *Module Emission Order* in the slice's
-[CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md).
+An overloaded operator needs no backend code: [HIR lowering](hir-lowering.md) turns it into an ordinary method call.
 
-## Opaque Pointers (LLVM 15+)
+Enums are tagged unions. A payload field is written into a zeroed `[K x i64]` slot through memory, so any sized type round-trips bit for bit. `Some` and `None` resolve their tags by name, not by declaration order.
 
-LLVM 15 removed typed pointers. All pointers are now opaque (`ptr`). The backend tracks the Neuro type alongside every pointer in `variable_types: HashMap<String, BasicTypeEnum>` and supplies the type explicitly to every `build_load()` call.
+### Tensors and DLPack
 
-## String ABI
+A tensor value is a pointer to a `DLManagedTensorVersioned` (DLPack 1.1). A foreign consumer takes the same pointer, so there is no wrap step at an FFI boundary. The handle's `data` field addresses a flat, row-major element buffer, 64-byte aligned, with strides counted in elements. A freshly built tensor has `device` `kDLCPU`. It becomes `kDLCUDA` (or `kDLROCM` for an AMD build) after `.to(Device::GPU(n))` or a device-side call.
 
-`string` values are represented as an anonymous LLVM struct `{ ptr, i64 }`:
-- **field 0** (`ptr`): pointer to the UTF-8 bytes, followed by a NUL (in `.rodata` for a literal, on the heap for a built string)
-- **field 1** (`i64`): byte count excluding the null terminator
+The backend emits the operations that have no loop: building a handle, element read and write (`t[i, j]`, bounds-checked in every build), `.clone()`, `.to(...)`, `.detach()`, `.reshape(...)` and `.flatten(...)` (which rewrite the handle's shape without copying), and the derivative slots `.grad()`, `.hessian()` and `.zero_grad()`. Every host read of an existing tensor goes through `load_host_data`, which aborts with a located diagnostic instead of dereferencing device memory.
 
-The fat pointer is passed and returned by value. On x86-64 SysV this fits in two registers (no sret needed). `==` and `!=` lower to a length check followed by a `memcmp` against an external libc symbol; a `select` passes `n=0` to `memcmp` when lengths differ, keeping it safe.
+Releasing a tensor calls the handle's own `deleter`, so scope exit and a foreign owner run the same code. `__neuro_dlpack_deleter` frees the gradient and Hessian slots, then the buffer, then the structure. The structure and its control block share one `malloc`. The buffer is a separate allocation, because DLPack needs a 64-byte alignment that `malloc` does not promise. On Windows the buffer comes from `_aligned_malloc`, which only `_aligned_free` can release. The [CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md) covers the layout in full.
 
-## Struct and Method ABI
+A tensor held in a struct field is not freed by the struct's drop, the same gap collection fields have.
 
-User-defined structs are lowered to anonymous LLVM struct types `{ T0, T1, ... }` with fields in declaration order. All struct values are stack-allocated via `alloca`; field reads use `getelementptr` + `load`, field writes use `getelementptr` + `store`.
+### Integer arithmetic
 
-`impl` methods are lowered to free functions with a mangled name `StructName__methodName`. For `&self` instance methods the struct is passed by value as the first LLVM parameter (`self`). Associated functions (no `self`) have no implicit first parameter and are called via `TypeName::func(args)`.
+The overflow rule follows the optimization level (see the [CLI help](../../getting-started/installation.md) for the user-facing wording):
 
-## Error-Path Outlining
+- **`-O0`**: `+`, `-`, `*`, unary `-` and shifts are checked. A failure prints a located panic and aborts.
+- **`-O1` and up**: arithmetic wraps (two's complement). The checks are not emitted.
 
-Every panic-family failure path (`panic` / `assert` / `unreachable`, the array and `Vec`
-bounds guards, and the string-slice bounds and UTF-8 boundary checks) is emitted into a
-module-private cold function rather than inline in the function that can fail:
+Zero divisors are checked in every build, because there is no two's-complement answer to wrap to. `MIN / -1` follows the overflow rule. A `const` never wraps: an initializer that overflows its type is a compile error (`constant expression overflows`), not a silent value.
 
-```llvm
-guard.fail:
-  call void @neuro.cold.panic.0() #1   ; cold noreturn
-  unreachable
+`.wrapping_*`, `.saturating_*`, `.checked_*`, `.abs()` and `.to_checked::<T>()` are intrinsics on the receiver type. Float-to-integer `as` casts saturate, and NaN maps to zero, so no cast yields `poison`.
 
-; Function Attrs: cold minsize noinline noreturn
-define private void @neuro.cold.panic.0() #0 {
-entry:
-  %panic.write = call i64 @write(i32 2, ptr @panic.str, i64 46)
-  call void @abort()
-  unreachable
-}
-```
+### Control flow and stack slots
 
-The diagnostic machinery (one `write(2, …)` per message fragment, plus the `abort()`) would
-otherwise occupy cache lines between the guard branch and the code that follows it, at
-every check. `noinline` is what holds the split in place; without it the inliner folds a
-single-call-site function straight back in. Thunks are deduplicated by their rendered
-diagnostic text, so the copies monomorphization makes of one generic body share a single
-thunk.
+Every local, parameter, result slot and induction variable is an `alloca` in the entry block, placed by `CodegenContext::entry_alloca`. A slot allocated inside a loop body would grow the stack on every iteration, so entry placement keeps long loops from exhausting the stack. `mem2reg` promotes these slots to registers from `-O1` up, and it only promotes entry-block allocas.
 
-A `panic(msg)` whose message is a runtime `string` uses a `(ptr, i64)` thunk: only the
-constant fragments are baked in, and the fat pointer travels as two arguments.
+`if` and `match` branch into merge blocks, and a value-producing form writes a result slot that is loaded at the merge. `match` evaluates its scrutinee once and tests the arms in order. `for` and `loop` branch to a dedicated step or body block so `continue` reaches the right place, and a `break v` stores its value into the loop's slot. `&&` and `||` short-circuit through a `phi`. The fall-through of a `match` is `unreachable`, because exhaustiveness is checked upstream.
 
-Each guard branch also carries `!prof` branch weights (`2000 : 1`) marking the failure edge
-as the improbable one, so block placement keeps it off the fall-through path. At `-O0` the
-integer-overflow check is one more guard of the same shape: it prints
-`panic: integer overflow at file:line:col` through an outlined thunk. From `-O1` up, integer
-arithmetic wraps and carries no check.
+### Optimization levels
 
-## Error Types
+`OptimizationLevelSetting` picks two things. It sets the `TargetMachine` level, which governs instruction selection, and it runs the IR pass pipeline over the verified module. The `TargetMachine` level alone runs no IR passes, so an `alloca` would never be promoted and nothing would inline.
 
-Codegen reports a `CodegenError`. Most variants describe an internal invariant break (an
-unsupported type reaching the backend, an LLVM builder failure) rather than a fault in the
-program, because the type checker has already rejected invalid source. The authoritative list is
-[`compiler/llvm-backend/src/errors.rs`](../../../compiler/llvm-backend/src/errors.rs).
+| Setting | `TargetMachine` | IR pipeline | Integer overflow |
+|---|---|---|---|
+| `O0` | none | none | checked (panics) |
+| `O1` | less | `default<O1>` | wraps |
+| `O2` | default | `default<O2>` | wraps |
+| `O3` | aggressive | `default<O3>` | wraps |
 
-## Usage
+`-O0` runs no pipeline, which keeps its checks and guards exactly where codegen emitted them. Before a module is printed or compiled, its triple and data layout are set, so the optimizer reasons about the real size and alignment of each type.
 
-```rust
-use syntax_parsing::parse;
-use hir_lowering::lower_program;
-use llvm_backend::{compile, OptimizationLevelSetting};
+### Panics and error-path outlining
 
-let source = r#"
-    func add(a: i32, b: i32) -> i32 {
-        a + b
-    }
-"#;
+Panic-family builtins (`panic`, `assert`, `unreachable`) and every bounds or UTF-8 guard abort. There is no unwinding and no landing pad, so the happy path costs nothing, and `Drop` runs only on normal scope exit.
 
-let ast = parse(source)?;
-let hir = lower_program(&ast)?;                  // hir-lowering: AST → typed HIR
-let object_code = compile(&hir, OptimizationLevelSetting::O2, source, "add.nr", None)?;
-std::fs::write("output.o", &object_code)?;
-```
+The failure path is emitted into a module-private cold function, a thunk named `neuro.cold.panic.N` with attributes `cold noreturn noinline minsize`. The call site keeps the `cold noreturn` attributes, so they survive inlining of the enclosing function. `noinline` is required: without it the inliner folds a single-call-site thunk straight back in. Each guard branch carries `!prof` weights (`2000 : 1`), so block placement keeps the failure edge off the fall-through path. Thunks are deduplicated by their rendered text, so copies of one generic body share one thunk. A `panic` with a runtime message passes the message as a `(ptr, i64)` pair.
 
-This skips the stages a real program needs between parsing and lowering (module resolution,
-argument binding, type checking); `compile_file` in `neurc` runs them all.
+A panic writes its message to stderr with `write(2, ...)`, then calls `abort()`, which ends the process with status 134 on Linux.
 
-## LLVM IR Example
+Compiling a file `add.nr` that holds this function, at `-O0` with `neurc compile add.nr --emit llvm-ir`, gives the IR below. The panic text names that file:
 
-**Neuro source:**
 ```neuro
 func add(a: i32, b: i32) -> i32 {
     return a + b
 }
 ```
 
-**Generated LLVM IR at `-O0`** (`neurc compile --emit llvm-ir`, alignment annotations
-dropped). The `+` is overflow-checked at this level, so the add goes through
-`llvm.sadd.with.overflow` and a guard branch to an outlined panic thunk:
+The output also contains the prelude's functions, and the `write` and `abort` declarations, which are omitted here:
+
 ```llvm
+@panic.str.4 = private unnamed_addr constant [40 x i8] c"panic: integer overflow at add.nr:2:12\0A\00"
+
 define i32 @add(i32 %0, i32 %1) {
 entry:
-  %a = alloca i32
-  store i32 %0, ptr %a
-  %b = alloca i32
-  store i32 %1, ptr %b
-  %a1 = load i32, ptr %a
-  %b2 = load i32, ptr %b
+  %a = alloca i32, align 4
+  store i32 %0, ptr %a, align 4
+  %b = alloca i32, align 4
+  store i32 %1, ptr %b, align 4
+  %a1 = load i32, ptr %a, align 4
+  %b2 = load i32, ptr %b, align 4
   %addtmp = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %a1, i32 %b2)
   %arith.res = extractvalue { i32, i1 } %addtmp, 0
   %arith.ovf = extractvalue { i32, i1 } %addtmp, 1
   %arith.ok = xor i1 %arith.ovf, true
   br i1 %arith.ok, label %guard.cont, label %guard.fail, !prof !0
 
-guard.fail:
-  call void @neuro.cold.panic.0() #1
+guard.fail:                                       ; preds = %entry
+  call void @neuro.cold.panic.2() #1
   unreachable
 
-guard.cont:
+guard.cont:                                       ; preds = %entry
   ret i32 %arith.res
 }
+
+; Function Attrs: cold minsize noinline noreturn
+define private void @neuro.cold.panic.2() #0 {
+entry:
+  %panic.write = call i64 @write(i32 2, ptr @panic.str.4, i64 39)
+  call void @abort()
+  unreachable
+}
+
+declare { i32, i1 } @llvm.sadd.with.overflow.i32(i32, i32) #2
+
+attributes #0 = { cold minsize noinline noreturn }
+attributes #1 = { cold noreturn }
+attributes #2 = { nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none) }
+!0 = !{!"branch_weights", i32 2000, i32 1}
 ```
+
+Here the `+` is overflow-checked, so it calls `llvm.sadd.with.overflow` and branches on the overflow bit to the outlined thunk. With `-O2`, the same function is a single `add`.
+
+### Standard output
+
+`print` and `println` write into a 4096-byte buffer in `.bss`. A write that does not fit drains the buffer first. A write larger than the buffer goes straight to fd 1, so one huge string stays one syscall. `println` flushes at its newline only when fd 1 is a terminal (`isatty`, resolved once), so interactive output stays line by line while a pipe or file gets full buffers. `print` writes no terminator and never flushes at its end.
+
+The buffer must reach fd 1 before the process stops. `main` returns and the panic `abort` are the only exits, so `finalize_stdout_buffer` inserts a drain before every `ret` in `main` and before every recorded abort. The drain sits in front of the panic call too, so the diagnostic on stderr follows the stdout that led up to it.
+
+### Closures and dynamic dispatch
+
+A closure value is `{ fn_ptr, env_ptr }`. The environment is a `malloc`'d, reference-counted block, shared by every copy of the value, and it is null when nothing is captured. The closure function takes the environment as its first parameter, and a call through a local variable is an indirect call. `__neuro_fn_retain` and `__neuro_fn_release` manage the count.
+
+A `&dyn Trait` is `{ data, vtable }`. Each `impl Trait for Type` gets a constant `[N x ptr]` vtable in the trait's declaration order. Its slots are thunks: a `&self` method takes its struct by value, so the thunk loads the receiver first. A derived or builtin implementor exposes its trait methods under a `<method>$dyn` name, which the vtable uses.
+
+### Drops and the pool arena
+
+Drop types run `{struct}__drop(&mut self)` at each scope exit. Every owned binding has an `i1` drop flag, and every move clears it, so a moved value is dropped once. Holders keep one flag per owning field or element, so a partial move releases the rest. Assignment releases the displaced value after the new one is built, because the new value may read the old one.
+
+A `pool { }` block allocates from a bump arena, `__neuro_arena_base` and `__neuro_arena_offset`. The block releases everything at once by restoring a mark. Which allocations use the arena is decided at compile time by `pool_depth`. An allocation inside a callee stays on the heap, and a store to a place that outlives the block is routed to libc. `PoolAware` values register with the pool and get a LIFO sweep at exit, in place of their `Drop`. A release goes through `__neuro_release`, which ignores pointers inside the arena, so one wrapper serves both allocators.
+
+### Collections and builtins
+
+`Vec<T>`, `HashMap<K, V>`, `BTreeMap<K, V>` and `StringBuilder` share the `{ buffer, len, cap, used }` header, held by value in the owner's slot. Elements live in one heap buffer.
+
+- `Vec<T>` doubles its capacity, with a minimum of 8. `v[i]` is bounds-checked in every build.
+- `HashMap<K, V>` is an open-addressed table with linear probing and tombstones, rehashed at a 3/4 load factor.
+- `BTreeMap<K, V>` is a sorted array with binary search, so iteration is ordered.
+- `StringBuilder` is a byte run. Its `to_string` copies out a new `string`.
+
+Key equality, order and hash are supplied for integers, `bool` and `string` (FNV-1a for strings, SplitMix64 for integers). Struct keys use their `{Struct}__eq`, `__lt` and `__hash` methods, or the derived versions.
+
+String `slice` and `char_slice` compute a borrowed fat pointer, with bounds and UTF-8 boundary checks. `char_at` is the only byte-indexed string read, and the prelude's codepoint iterator is its one caller.
+
+### MLIR bodies
+
+This backend has no loops over a tensor's elements. Each such operation reaches it as a call to a function that [HIR lowering](hir-lowering.md) outlined, and whose body the [MLIR backend](mlir-backend.md) computed. `neurc` passes those bodies as LLVM IR text plus the `(function, symbol)` pairs. A call to one becomes a call to its symbol, and the backend loads each tensor's buffer from its handle and passes it as an exploded row-major `memref` descriptor. It allocates the result tensor itself and passes that buffer as one more descriptor, then releases the tensors the operation took by value.
+
+The linked IR is parsed into the module's own context and optimized at `-O2` whatever the program's level. Nothing in it permits reassociating floats, so the bits do not change. Each linked symbol is made internal so the optimizer can inline it. In a program that moves no tensor to a device, the call is emitted where it is made, so the result is the caller's own allocation, and a `pool` body's operations allocate from its arena.
+
+A body with integer checks takes an `i64` status word as one more descriptor, before its result. The wrapper fills it with all ones, and after the call reads the failed check's number from its low 12 bits. It then raises the panic that the operator would raise here (`integer overflow`, `division by zero`, `remainder by zero`, `shift overflow` or `range step must be positive`), at the operator's offset.
+
+### GPU runtime
+
+A module with device code links the backend's GPU runtime. It defines MLIR's `mgpu*` ABI over the CUDA driver (`libcuda.so.1`) or over HIP (`libamdhip64.so`, for a `GpuVendor::Amd` build, which `--gpu-arch gfxNNN` selects). Both are generated from one C source, `gpu_runtime.c`, with a vendor block for the calls that differ. The library is opened with `dlopen` on first use, so the binary does not depend on the driver and a missing GPU becomes a diagnostic.
+
+- **Staging.** A `Device` body's wrapper copies each host tensor operand to the device, runs the kernels, and copies the result back into the host tensor it returns. A device-resident operand is passed as it is, and the result is left on the device. An all-host call behaves as before.
+- **Arena.** Each device has a 64 MiB linear arena for staging and launcher scratch. A request that does not fit spills to the driver's allocator.
+- **Devices.** Each device has its own context, stream, arena and kernel modules. One device is current at a time, and a staged call switches to its operands' device and back.
+- **Startup.** Module loads run in a global constructor, so a program with a `@gpu` function checks for a usable GPU before `main`. Every runtime failure is an ordinary `panic:`.
+- **Fallback.** A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging wrapper; `f.host`, the host body; and `f`, which calls `__neuro_gpu_usable` to pick one. The constant `__neuro_gpu_fallback` is 1 when the program has no bare `@gpu` function. Then a load with no usable GPU leaves the module unloaded, and every call takes the host body.
+- **Outlined operations.** A tensor operation that follows its operands emits the same three functions. `f` picks `f.gpu` when any tensor operand lives on a GPU, and `f.host` otherwise.
+
+Element reads and writes and `.clone()` need no kernel. They branch on the tensor's device where they stand, so they work on a device tensor in any build.
+
+### Soft-float builtins
+
+On generic x86-64, LLVM lowers `half` and `bfloat` conversions to runtime calls such as `__extendhfsf2` and `__truncsfhf2`. Linux and macOS get them from libgcc or compiler-rt. The Windows linkers provide none, so `src/softfloat/` defines them. They are `weak_odr` (a platform runtime may override them) and integer-only, so they never call back into these conversions. `compile` links them only when the module uses `half` or `bfloat`. [`builtins.ll`](../../../compiler/llvm-backend/src/softfloat/builtins.ll) is generated from `reference.c` and was checked exhaustively against clang's native `_Float16` and `__bf16`.
+
+## Diagnostics
+
+### Runtime panics
+
+These are what a program prints when a check fails. Each comes from the `panic:` path (or `assertion failed`, or `internal error`), with the `file:line:col` of the operation. The rows say which builds check it.
+
+| Message | Cause | Builds |
+|---|---|---|
+| `panic: integer overflow at …` | `+`, `-`, `*`, unary `-`, or `MIN / -1` overflows | `-O0` only |
+| `panic: shift overflow at …` | a shift amount is outside `0..width` | `-O0` only (masked above) |
+| `panic: division by zero at …` | `/` by zero | every build |
+| `panic: remainder by zero at …` | `%` by zero | every build |
+| `panic: array index out of bounds at …` | an array, `Vec`, slice or tensor index outside its length | every build |
+| `panic: string slice splits a UTF-8 code point at …` | a byte `slice` endpoint inside a code point | every build |
+| `panic: range step must be positive at …` | `.step(n)` with `n <= 0` | every build |
+| `panic: <message> at …` | `panic(msg)` | every build |
+| `assertion failed at …` | `assert(cond)` is false | every build |
+| `internal error: entered unreachable code at …` | `unreachable()` runs | every build |
+
+GPU failures use the same `panic:` path. When no GPU is usable, the message reads `<what> needs an NVIDIA GPU, and none is usable: <reason>` (`AMD` for an AMD build), where `<what>` is `@gpu` or `@kernel`.
+
+### Compile-time errors
+
+`CodegenError` covers what codegen cannot emit. Most variants are internal invariant breaks, because the type checker has already rejected invalid source, so a user rarely sees one. A few are reachable from source. A `const` whose value overflows its type reports `constant expression overflows <type>`. The variants are listed in [`errors.rs`](../../../compiler/llvm-backend/src/errors.rs). An LLVM builder failure surfaces as `LLVM error: …`.
 
 ## Testing
 
-The crate's tests cover, at a glance: primitive type mapping, the signedness/float type
-predicates, compiling a simple arithmetic function to non-empty object code, a multi-function
-program with variable declarations and calls, and `OptimizationLevelSetting::from_u8` (accepts
-0 to 3, rejects anything higher). The full list lives beside the source in
-[`compiler/llvm-backend/src/`](../../../compiler/llvm-backend/src/).
+- Unit tests sit beside the code in `src/`, including [`tests.rs`](../../../compiler/llvm-backend/src/tests.rs) and the `#[cfg(test)]` modules of `type_mapping.rs` and `codegen/`.
+- Benchmarks are in [`benches/`](../../../compiler/llvm-backend/benches/).
+- End-to-end behavior, including every panic message above, is covered by the `neurc` suites in [`compiler/neurc/tests/suite/`](../../../compiler/neurc/tests/suite/).
 
-Run with:
+Run the crate's tests with the three prefix variables set to one LLVM and MLIR 23 install, as [Installation](../../getting-started/installation.md#mlir) describes:
+
 ```bash
-LLVM_SYS_231_PREFIX=/usr cargo test -p llvm-backend
+cargo test -p llvm-backend
 ```
-
-## Design Decisions
-
-### Why inkwell?
-
-inkwell provides safe, type-checked Rust bindings to the LLVM C API. The alternative, calling `llvm-sys` (raw unsafe bindings) directly, would require manual lifetime management and is significantly more error-prone. inkwell compiles against the exact LLVM version specified by the feature flag (`llvm23-1`), preventing version mismatch at link time.
-
-### Stack Allocation for All Locals
-
-All local variables and parameters are stack-allocated via `alloca` in the entry block. This
-is correct and simple, and LLVM's `mem2reg` pass (enabled from `-O1`) promotes them to SSA
-registers during optimization.
-
-### Optimization Levels
-
-The `OptimizationLevelSetting` enum maps to LLVM's optimization levels:
-
-| Setting | LLVM | Use |
-|---|---|---|
-| `O0` | None | Debugging, preserves all allocas |
-| `O1` | Less | Light optimization + mem2reg |
-| `O2` | Default | Standard release build |
-| `O3` | Aggressive | Maximum optimization |
-
-## MLIR bodies
-
-This backend has no loops over a tensor's elements: every such operation reaches it as a call
-to a function lowering outlined it into, whose body the [MLIR backend](mlir-backend.md)
-computed. `neurc` hands those bodies over as LLVM IR text plus the function each symbol stands
-for. A call to one is a call to its symbol: the backend loads each tensor's buffer out of its
-DLPack handle and passes it as an exploded row-major `memref` descriptor, allocates the result
-tensor itself and passes that buffer as one more descriptor, then releases every tensor the
-operation took by value. In a program that moves no tensor to a device the call is emitted right
-where it is made, so the result is the caller's own allocation, and a `pool` body's operations
-allocate from its arena. The IR is parsed into the module's own context, optimized at `-O2`
-whatever level the program is built at (it is the program's tensor arithmetic, and nothing in it
-may reassociate floats, so the bits do not change), linked in after every body, and each linked
-symbol is made internal so the optimizer can inline it. inkwell stays the terminal code-emission
-layer on every path.
-
-A body with integer arithmetic carries checks it cannot raise itself, so it takes an `i64`
-status word as one more descriptor before the result's. The wrapper fills it with all ones, and
-after the call reads the number of the check that failed, if any, from its low 12 bits and raises
-the panic its own arithmetic would: `integer overflow`, `division by zero` or `remainder by
-zero`, at the operator. For a device body the word is staged and copied back like a result.
-
-Bodies marked `BodyMemory::Device` launch GPU kernels, which read and write device memory only,
-so the wrapper stages them. It copies each tensor operand into a device buffer, hands the kernels
-a device buffer for the result, copies the result back into the host tensor it returns, and
-releases the staged buffers before returning. Callers still pass and receive host tensors. Device
-buffers come from a second linear arena, the `pool` arena's rules over a 64 MiB chunk of device
-memory: one call's staging is one region released by a single mark restore, and a buffer that
-does not fit spills to the GPU runtime's allocator. The same allocator serves the buffers a
-launcher allocates for itself between two kernels. In a program with device bodies, each `pool`
-block marks the device arena on entry and restores it at exit, after its `PoolAware` sweep: one
-batched release per device.
-
-`external` is a list, one set of bodies per memory kind, so a program's `@gpu` bodies and its
-host MLIR bodies link side by side. A module with device bodies also links the backend's own GPU
-runtime: MLIR's `mgpu*` ABI implemented over the CUDA driver, or over HIP when `compile` is given
-`GpuVendor::Amd`, which it opens with `dlopen` on first use rather than linking against it. An
-AMD build's device tensors report `kDLROCM` over DLPack instead of `kDLCUDA`. The launchers load their kernels from a global constructor,
-so a program checks for a usable GPU before `main`, and every runtime failure, a missing GPU
-included, is an ordinary `panic:` that drains buffered output and aborts.
-
-A `@kernel` function's wrapper stages the same way but has no result: it returns nothing, and
-each `&mut` tensor it was handed is staged like an operand, then copied back over the host
-buffer once the kernel has run. A `&mut` tensor already on the device is written in place. A
-program with a `@kernel` function, like one with a bare `@gpu` function, has no host body to
-fall back on, so a missing GPU is fatal at startup.
-
-A `@gpu(fallback: true)` function is emitted three times: `f.gpu`, the staging wrapper above;
-`f.host`, a call to its host body from the MLIR backend; and `f` itself, which asks the runtime's
-`__neuro_gpu_usable` which of the two to call. The backend also defines the constant
-`__neuro_gpu_fallback`, 1 when no bare `@gpu` function exists. With it set, a module load
-that finds no usable GPU leaves the module unloaded instead of aborting, and every call takes
-its host body. Without it the load aborts, naming `@kernel` when the program's only GPU code is
-`@kernel` functions and `@gpu` otherwise (the constant `__neuro_gpu_launcher`).
-
-A tensor operation lowering outlined to follow its operands (`HirTarget::FollowsOperands`, in a
-program that moves a tensor to a device) is emitted the same three ways, but `f` picks per call:
-`f.gpu` when any tensor operand lives on a GPU, `f.host` when every one is a host tensor. Element reads and writes and `.clone()` need no
-kernel. They branch on the tensor's DLPack device where they stand, copying one element through
-the runtime or cloning the buffer on its GPU, so they work on a device tensor in any build.
 
 ## Source
 
 - [`compiler/llvm-backend/src/`](../../../compiler/llvm-backend/src/)
-- [`compiler/llvm-backend/CONTEXT.md`](../../../compiler/llvm-backend/CONTEXT.md)
+- [`compiler/llvm-backend/CONTEXT.md`](../../../compiler/llvm-backend/CONTEXT.md): the authoritative ABI contract, with the rationale behind each rule
 
 ## See Also
 
-- [LLVM Language Reference](https://llvm.org/docs/LangRef.html)
-- [inkwell Documentation](https://thedan64.github.io/inkwell/)
-- [inkwell GitHub](https://github.com/TheDan64/inkwell)
-- [LLVM Kaleidoscope Tutorial](https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/index.html)
+- [MLIR Backend](mlir-backend.md), which computes the tensor loops this backend links
+- [HIR Lowering](hir-lowering.md), the stage before this one
+- [Language reference: types](../../language-reference/types.md), [memory model](../../language-reference/memory-model.md) and [tensors](../../language-reference/tensors.md)
+- [inkwell](https://github.com/TheDan64/inkwell) and the [LLVM Language Reference](https://llvm.org/docs/LangRef.html)

@@ -33,7 +33,7 @@ differences has just been checked against the primal.
 
 Pipeline: write one Neuro module holding every case's function, `neurc compile --emit obj`,
 link it into a shared library with the platform C compiler, `ctypes`-load it, and call each
-function at the perturbed points. NumPy is deliberately NOT a dependency — the oracle here
+function at the perturbed points. NumPy is deliberately NOT a dependency: the oracle here
 is arithmetic this file performs, not a library's derivative.
 
 Run it directly, or through `cargo test -p neurc --test grad_differential`:
@@ -58,7 +58,7 @@ EXIT_SKIPPED = 77
 
 # Central differences trade truncation error, O(h^2), against cancellation in the
 # subtraction, O(eps/h). The sum is minimised near eps^(1/3), which for IEEE double leaves
-# roughly ten correct digits — enough that a tolerance loose enough to absorb the numerical
+# roughly ten correct digits: enough that a tolerance loose enough to absorb the numerical
 # error is still far tighter than any wrong derivative would land.
 STEP_SCALE = sys.float_info.epsilon ** (1.0 / 3.0)
 

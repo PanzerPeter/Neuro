@@ -705,7 +705,7 @@ fn a_question_mark_leaving_a_pool_restores_the_mark() {
 /// The in-place guarantee, read off the IR: a compound assignment allocates nothing.
 ///
 /// The update runs against the buffer the target's handle already addresses, so the
-/// handle and its `data` pointer are the same values after the statement as before —
+/// handle and its `data` pointer are the same values after the statement as before:
 /// which is what keeps a pointer held by an optimizer or a foreign DLPack consumer
 /// valid. The desugaring this node replaces would build a second tensor here.
 #[test]

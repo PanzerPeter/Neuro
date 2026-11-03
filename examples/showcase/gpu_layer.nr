@@ -1,30 +1,10 @@
-// Showcase: a dense layer whose forward pass runs on the GPU.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   `@gpu` · `.to(Device::GPU(0))` / `.to(Device::CPU)` · `@` and broadcast `+` in one
-//   kernel body · operators, reductions, `.topk`, a slice, a closure through `.map` and an
-//   in-place `*=` on a device tensor outside `@gpu` · integer tensor arithmetic on the GPU
-//   with the host's checks · `pool` arena blocks · a `.sum()` reduction · a `Vec` of `Copy`
-//   structs.
-//
-// The weights and bias move to the GPU once, before the first batch, and stay there: each
-// call reads them in place and stages only the batch. Because a weight lives on the GPU,
-// so does each call's result. Its elements are compared with the same layer computed
-// inline on the host, one element read at a time, and the two must agree exactly. The
-// per-row peak is computed with ordinary operators and reductions, and the leading unit of
-// the first row with `.topk`, all of which run on the GPU because their operands live there.
-// The two units tie in the last batch, and a tie goes to the earlier unit. The ReLU, a closure
-// through `.map`, also runs on the GPU, one call per element. Only a slice of the result, the
-// activated first row, comes back with `.to(Device::CPU)`. After each batch the weights decay in place
-// with `*=`: on the GPU for the device copy, on the host for the reference, and the two stay
-// equal. Every batch is processed inside a `pool`, whose exit also releases the device memory
-// the call staged. How many samples each row has seen is an `i64` tally that lives on the GPU
-// too: each batch adds to it in place, and at the end its total, its busiest row and its
-// per-batch average are computed there, with the overflow and zero-divisor checks the host
-// would make.
-// Without a usable NVIDIA GPU the program stops before `main` with a `panic:` line, since
-// bare `@gpu` never falls back to the CPU.
+// Showcase: a dense layer whose forward pass runs on the GPU. Integration example: `@gpu`
+// kernels over weights moved once with `.to(Device::GPU(0))`, operators, reductions,
+// `.topk`, a slice, a closure through `.map`, in-place `*=` and `+=` on device tensors,
+// `pool` blocks, and a `Vec` of `Copy` structs. Each call's result stays on the device and
+// is compared element by element with the same layer on the host. Only the activated first
+// row is copied back with `.to(Device::CPU)`. Without a usable NVIDIA GPU the program stops
+// before `main` with a `panic:` line, since bare `@gpu` never falls back to the CPU.
 
 @gpu
 func dense(x: &Tensor<f32, [4, 3]>, w: &Tensor<f32, [3, 2]>, bias: &Tensor<f32, [2]>) -> Tensor<f32, [4, 2]> {

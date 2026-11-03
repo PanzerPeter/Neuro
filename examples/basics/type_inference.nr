@@ -1,10 +1,9 @@
 // Neuro Type Inference Demo
-// Demonstrates contextual type inference for numeric literals
-//
-// Each inferred binding is printed, so the output is a record of what the
-// literal on the right actually became.
+// Demonstrates contextual type inference for numeric literals.
+// Each inferred binding is printed, so the output records what each literal became.
 
 // Integer type inference from variable declarations
+
 func demonstrate_variable_inference() -> i32 {
     val x8: i8 = 127           // Literal 127 infers as i8
     val x16: i16 = 1000        // Literal 1000 infers as i16

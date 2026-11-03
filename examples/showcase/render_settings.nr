@@ -1,17 +1,9 @@
-// Showcase: sub-phase 1H end to end: a render pipeline configured by name.
-//
-// Integration example combining every 1H language-cleanup feature with the
-// machinery that gives them something to say:
-//   named arguments with external labels (`quality q:`) and a positional-only
-//   `_ ` parameter · string interpolation with the format mini-language
-//   (:.N, :>W) · a triple-quoted `"""` block with dedent · nested block
-//   comments · struct + impl (&self and &mut self) methods · enum with a
-//   payload + match · Option from the implicit prelude · fixed-size array +
-//   for-in loop.
-//
-// Every named call below is written with its arguments in an order that differs
-// from the declaration, so the program only produces the right answer if the
-// labels (not the positions) decided the binding.
+// Showcase: a render pipeline configured by named arguments. Integration example: named
+// arguments with external labels and a positional-only `_` parameter, format specs, a
+// triple-quoted block with dedent, a struct with `&self` and `&mut self` methods, an enum
+// with a payload, `Option` from the prelude, and a `for` over an array. Each named call
+// writes its arguments in a different order from the declaration, so the output is correct
+// only if the labels decided the binding.
 
 enum Quality {
     Draft,

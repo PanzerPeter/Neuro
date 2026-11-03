@@ -1,9 +1,6 @@
-// Neuro Extended Primitive Types Example
-// Demonstrates i8, i16, u8, u16, u32, u64 types
-//
-// Every helper is called and its answer printed, so each width is exercised
-// rather than merely declared. `main` returns 0: the assertions are the printed
-// values, not the exit code.
+// Extended integer types: `i8`, `i16`, `u8`, `u16`, `u32` and `u64`. Every helper is called
+// and its answer printed, so each width is exercised rather than only declared. The printed
+// values are the assertion; `main` returns 0.
 
 func test_i8_arithmetic(a: i8, b: i8) -> i8 {
     val sum: i8 = a + b

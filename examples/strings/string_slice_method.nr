@@ -1,9 +1,6 @@
-// Neuro Programming Language - String `.slice(range)`
-//
-// `.slice(range)` returns a borrowed `&string` view into the receiver's UTF-8
-// data: zero copy, since strings are immutable. The range may be exclusive
-// (`a..b`) or inclusive (`a..=b`). Indices are byte offsets; an out-of-bounds
-// range or one that splits a UTF-8 code point panics at runtime.
+// `.slice(range)`: a borrowed `&string` view into a string's UTF-8 bytes. The view is zero
+// copy, since strings are immutable. The range may be `a..b` or `a..=b`. Indices are byte
+// offsets, and an out-of-bounds range, or one that splits a code point, panics at run time.
 
 func main() -> i32 {
     val s = "hello, world"

@@ -34,16 +34,18 @@ Design goals:
 
 | Page | Covers |
 |---|---|
-| [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, borrows, type inference |
+| [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, the standard collections, type inference |
 | [Strings](language-reference/strings.md) | The `string` slice type and its escape sequences, the growable `StringBuilder` buffer, interpolation, triple-quoted literals, codepoint iteration |
 | [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic shapes, devices |
-| [Automatic Differentiation](language-reference/autodiff.md) | `@grad` on functions and methods, `wrt:` selection of parameters and receiver fields, the derivative it generates, `.backward()` / `.grad()` / `.zero_grad()` and the borrows they end, second derivatives with `order: 2` and `.hessian()`, the `.detach()` and `@no_grad` fences, its signature rules, which constructs a differentiated body may use, and how the derivative follows branches, loops, calls, function values and elementwise math |
-| [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |
-| [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, generics, dispatch, closures |
+| [Automatic Differentiation](language-reference/autodiff.md) | `@grad` on functions and methods, `wrt:` selection, `.backward()` / `.grad()` / `.zero_grad()`, second derivatives with `order: 2`, `.detach()` and `@no_grad`, what a differentiated body may contain |
+| [Variables](language-reference/variables.md) | `const`, `val`, `mut`, reassignment, destructuring, scoping and shadowing |
+| [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, recursion, the panic and output builtins, closures |
+| [Generics and Traits](language-reference/generics-and-traits.md) | Generic functions, structs and methods, const parameters, `where` clauses, turbofish, traits, associated types, `impl Trait` and `dyn Trait` dispatch |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |
 | [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `if val` / `while val`, `pool` arena blocks |
 | [Operators](language-reference/operators.md) | Arithmetic, comparison, logical, bitwise, cast, overloading, assignment places, `??`, `?`, `\|>`, `>>` |
-| [Structs](language-reference/structs.md) | User-defined types, `impl` methods, generic methods, associated functions, derives and the derivable traits as bounds, enums |
+| [Structs and Enums](language-reference/structs.md) | Struct and enum definitions, `impl` methods and receivers, associated functions, derives and the derivable traits as bounds, `Option<T>` and `Result<T, E>` |
+| [Ownership and Borrowing](language-reference/ownership.md) | Moves, `Copy` and `.clone()`, `&T` and `&mut T` borrows and their exclusivity, lifetimes, owned elements, `Drop` |
 | [Memory Model](language-reference/memory-model.md) | What is reclaimed and when: stack values, collections, reassigned bindings, `pool` blocks, and what still leaks in alpha |
 | [Modules](language-reference/modules.md) | Multi-file programs, `mod.nr` directories, qualified paths, `import`, inline `module` blocks, `export import` re-exports, visibility |
 

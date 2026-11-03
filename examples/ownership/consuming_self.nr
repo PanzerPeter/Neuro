@@ -1,13 +1,8 @@
-// Neuro Programming Language - Consuming `self` receivers
-//
-// A method may take its receiver three ways: `&self` borrows it, `&mut self`
-// borrows it exclusively, and a bare `self` CONSUMES it. A consuming call hands
-// the value to the method, so the caller loses it: reading the receiver after
-// the call is a compile error, exactly as if it had been passed by value to a
-// free function.
-//
-// Consuming is what an `into_*` conversion needs. The method owns the receiver's
-// fields, so it may move a non-Copy one straight out instead of cloning it.
+// Consuming `self` receivers. A method takes its receiver three ways: `&self` borrows it,
+// `&mut self` borrows it exclusively, and bare `self` consumes it. After a consuming call
+// the caller no longer has the value, as with a by-value argument. `into_*` conversions
+// need this: the method owns the fields and can move a non-`Copy` one out without cloning
+// it.
 
 struct Point {
     x: f64,
@@ -44,7 +39,7 @@ impl Label {
 }
 
 // A `Drop` type proves WHERE the destructor runs. The callee owns what it was
-// handed, so it destroys the receiver at its own exit — once, never twice.
+// handed, so it destroys the receiver at its own exit: once, never twice.
 struct Ticket {
     spent: &mut i32
 }

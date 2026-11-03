@@ -1,19 +1,9 @@
-// Showcase: a run transcript assembled in a single growable buffer.
-//
-// Integration example combining the growable `StringBuilder` with the features that
-// feed it:
-//   `Vec<T>` + `for x in &v` · struct + `impl` methods (`&self` and a consuming
-//   `self`) · enum with a payload + `match` · string interpolation with the
-//   format mini-language (:>W, :.N, :+d) · `&mut StringBuilder` parameters ·
-//   `@derive(Copy, Clone)`.
-//
-// The point of the buffer is the loop: each event appends its rendered line to
-// one allocation that grows in place. Concatenating with `+` would allocate and
-// recopy the whole transcript once per event instead.
-//
-// The finished transcript is checked against the exact text it should produce,
-// and `main` returns the transcript's byte length as its exit code: a number
-// that only comes out right if every field rendered and padded correctly.
+// Showcase: a run transcript assembled in one growable `StringBuilder`. Integration
+// example: `StringBuilder` with `push_str`, `Vec` iteration, a struct with `&self` and
+// consuming `self` methods, an enum with a payload, the format specs `:>W`, `:.N` and
+// `:+d`, and `&mut StringBuilder` parameters. Each event appends to one buffer that grows
+// in place. Concatenating with `+` would recopy the whole transcript for every event. The
+// exit code is the byte length of the transcript.
 
 @derive(Copy, Clone)
 struct Event {

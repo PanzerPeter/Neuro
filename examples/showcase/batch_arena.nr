@@ -1,52 +1,16 @@
-// Showcase: a batched forward pass run inside the pool allocator.
-//
-// This is an integration example: it exercises several features *together*
-// rather than in isolation:
-//   2D's `pool` block, taking its arena mark once per batch · 2D's `PoolAware`
-//   opt-in and its reverse-order release sweep, which is what lets a type with a
-//   destructor live in the arena ·
-//   2B's tensor literal coercion and construction helpers · 2C's `@` matrix
-//   multiplication and its by-value element-wise operators with scalar and row
-//   broadcast · 2B's reductions, which read a batch back out as one number ·
-//   a struct with a method on `&self` · a `for` loop over a range · string
-//   interpolation with the format mini-language.
-//
-// The shape a training loop actually has: weights and running totals declared
-// OUTSIDE the arena, so they survive it, and every per-batch intermediate built
-// INSIDE it, so the batch's memory goes back in one store at the closing brace.
-// The loop below allocates a product matrix, a scaled copy and a bias-broadcast
-// sum per step, and its high-water mark never moves — which is the whole reason
-// to reach for an arena over the heap in a loop like this.
-//
-// Four rules the block enforces are visible here. `running` and `steps` are an
-// `f32` and an `i32`, so the inner block may write them: a scalar carries no
-// address into the arena. No tensor declared before the `pool` is written from
-// inside it, and no `break` or `return` leaves the block — the loop's exit is the
-// loop's own, one level out. And `StepLog`, which the inner block builds and
-// therefore owns, has a destructor: a type with one is refused by a pool unless it
-// also implements `PoolAware`, because the arena's release is a single store and
-// cannot run a destructor per object. Deleting the `impl PoolAware` block below is
-// enough to make this program stop compiling. Inside the arena that trait REPLACES the
-// destructor: the two notes each step builds are released by one reverse-order sweep at
-// the block's brace, newest first, not one at a time as they go out of scope.
-//
-// The fourth is the two strings the inner block writes back out. A `string` carries a
-// pointer, so the arena refuses one whose allocation it cannot account for. `headline`
-// is the easy half: it is declared before the block, so `headline = "step " + "{step}"`
-// is ROUTED — the compiler sees the owner in the statement and builds that text on the
-// heap rather than in the arena, and it still reads after the closing brace. Writing
-// `headline = opened_note` instead would not compile, because that buffer was taken from
-// the arena on an earlier line and no routing can move it afterwards.
-//
-// `tally.record(...)` is the hard half, and routing does not reach it: the store happens
-// inside the callee, on a `&mut self` the block handed over, so the argument is emitted
-// where it was written — in the arena. `tally.record("step " + "{step}")` therefore still
-// does not compile. What DOES compile is the line below it, because `summarize` is a
-// declared function whose body is emitted outside every arena, so the text it returns is
-// ordinary heap memory the block's release never touches.
+// Showcase: a batched forward pass run inside nested `pool` arenas. Integration example:
+// `pool` with a `PoolAware` type, `@` and element-wise tensor operators, tensor reductions,
+// and a struct method on `&self`. Weights and totals live outside the arena and survive it.
+// Each step's intermediates live inside it and are released together at the closing brace.
+// Scalars may cross the block, no tensor declared before it is written inside it, and no
+// `break` or `return` leaves it. `StepLog` has a destructor, so it needs `PoolAware`;
+// deleting that impl stops the program compiling. The `headline` string is routed to the
+// heap because its binding predates the block. `headline = opened_note` would not compile,
+// since that buffer came from the arena.
 
 // A running tally, carried across the batches on the stack rather than in the
 // arena. Its fields are scalars, so it never allocates at all.
+
 struct Tally {
     steps: i32,
     total: f32,
@@ -90,7 +54,7 @@ impl Drop for StepLog {
 // The opt-in. `register_with_pool` hands the arena the handle this value owns, and
 // `bulk_release` is what the arena calls to give it back. Both run: the first at the
 // point the value is constructed, the second during the arena's sweep at the closing
-// brace — and never the `Drop` above, which is the whole trade the trait offers.
+// brace: and never the `Drop` above, which is the whole trade the trait offers.
 // The sweep walks registrations in reverse, so of the two notes each step builds, the
 // one opened last is the one released first.
 impl PoolAware for StepLog {
@@ -124,7 +88,7 @@ func main() -> i32 {
     // proven owner, which is what lets the line survive both closing braces below.
     mut headline: string = "no batches yet"
 
-    // Declared before the arena, so it survives every block below — which is exactly
+    // Declared before the arena, so it survives every block below: which is exactly
     // what makes `tally.record(...)` inside them a rule the compiler has to check.
     mut tally = Tally { steps: 0, total: 0.0, last: "no batches yet" }
 

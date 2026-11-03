@@ -1,17 +1,10 @@
-// Showcase: typed settings read out of raw key/value text, where every step can fail
-// and each failure keeps its reason until the code decides it no longer cares.
-//
-// Integration example combining the `Option` / `Result` methods with the features
-// they replace a `match` for:
-//   `.ok_or` / `.map_err` / `.map` / `.ok` / `.is_ok` / `.is_err` · `?` propagation ·
-//   an enum variant passed as the function `.map_err` takes · `??` with a default, with
-//   `continue`, and with `panic` as the unwrap · an enum with payloads + match ·
-//   closures and a named function as values · `.chars()` iteration · a borrowed array
-//   of structs · string interpolation.
-//
-// `?` converts nothing, so a lookup's `Option` and a parse's `string` error are both
-// lifted into `LoadError` before they propagate. `main` returns the sum of the values
-// that loaded, which only comes out right if every default and every skip was taken.
+// Showcase: typed settings read from raw key/value text, where each step can fail and keeps
+// its reason until the code no longer needs it. Integration example: `Option` and `Result`
+// methods (`.ok_or`, `.map_err`, `.map`, `.ok`, `.is_ok`, `.is_err`), `?`, an enum variant
+// passed as a function, `??` with a default, `continue` or `panic`, closures and named
+// functions as values, and `.chars()`. `?` converts nothing, so a missing key's `Option`
+// and a parse's `string` error are both lifted into `LoadError` before they propagate. The
+// exit code is the sum of the values that loaded.
 
 enum LoadError {
     Missing(string),

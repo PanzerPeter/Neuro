@@ -1,15 +1,8 @@
-// `if val` and `while val`: a single-pattern test as a condition.
-//
-// `if val PATTERN = value { ... }` runs its block only when `value` matches, with the
-// pattern's names bound inside that block. With an `else` it is a value, like `if`;
-// without one it is a statement. Links chain freely with plain `else if` conditions.
-//
-// `while val PATTERN = value { ... }` evaluates `value` again before every pass and
-// stops at the first one that does not match. It is a `while`: `break` and `continue`
-// work, labels too, and a `break` carries no value.
-//
-// Both take any pattern a `match` arm takes. `val-else` is the complement: it handles
-// the failing side and keeps the binding for the rest of the block.
+// `if val` and `while val`: a single-pattern test used as a condition. `if val PATTERN =
+// value { }` runs its block only on a match, with the pattern's names bound inside. With an
+// `else` it yields a value, like `if`. `while val` evaluates `value` again before each pass
+// and stops at the first non-match. Both take any `match` pattern. `val-else` handles the
+// failing side of a single-pattern test.
 
 enum Reading {
     Celsius(i32),

@@ -1,11 +1,7 @@
-// Neuro Example: unsafe blocks
-// Demonstrates: `unsafe { }` as an expression that evaluates to its trailing
-// value, used both bound to a `val` and as the function's implicit return.
-//
-// The one thing `unsafe` permits is a raw index read or write of a
-// `KernelOut` inside a `@kernel` (see examples/tensors/tensor_kernel.nr).
-// Anywhere else it behaves exactly like a bare block. Each of the three uses
-// prints its value, which is the clearest way to show it really is just a block.
+// `unsafe { }` as an expression that evaluates to its trailing value, bound to a `val` and
+// used as an implicit return. The one thing `unsafe` permits is a raw index read or write
+// of a `KernelOut` inside a `@kernel` (see `tensors/tensor_kernel.nr`). Anywhere else it is
+// a bare block.
 
 func main() -> i32 {
     // unsafe block bound to a value: evaluates to its trailing expression

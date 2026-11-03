@@ -1,19 +1,10 @@
-// Showcase: a shift report long enough to exercise buffered standard output.
-//
-// Integration example combining the features that feed a printing loop:
-//   struct + `@derive(Copy, Clone)` + `impl` methods (`&self`) · `Vec<T>` +
-//   `for x in &v` · the growable `StringBuilder` + `push_str` · string interpolation
-//   with the format mini-language (:>W, :.N) · `while` loop · `%` and `as`.
-//
-// The point of this example is the volume. `println` copies its bytes into a
-// page-sized buffer and drains it when it fills, so the 240 lines below cross
-// that boundary repeatedly and their order across the drains is what the golden
-// output pins down. The banner is deliberately larger than the buffer will ever
-// be: a string that cannot fit goes straight to the descriptor, and it must not
-// overtake the lines already waiting in front of it.
-//
-// The exit code is the number of readings at or above the peak threshold, which
-// only comes out right if every reading was built and classified correctly.
+// Showcase: a shift report long enough to exercise buffered standard output. Integration
+// example: a struct with `&self` methods, `Vec<T>` iteration, a `StringBuilder`,
+// interpolation with width and precision, `while`, `%` and `as`. `println` buffers its
+// bytes and drains a page-sized buffer when it fills. The report crosses that boundary
+// repeatedly, and the golden output pins the order across drains. The banner is larger than
+// the buffer, so it goes straight to the descriptor and must not overtake the lines already
+// waiting. The exit code is the number of readings at or above the peak threshold.
 
 @derive(Copy, Clone)
 struct Reading {

@@ -1,27 +1,15 @@
-// Functional tensor operations: `.map(f)`, `.zip(other, f)`, `.reduce(init, f)`.
-//
-// All three walk the receiver's elements once, in row-major order, calling a function per
-// element. They differ only in what that function is handed and what becomes of its answer:
+// Functional tensor operations: `.map(f)`, `.zip(other, f)` and `.reduce(init, f)`.
+// All three walk the receiver once in row-major order and call a function per element:
 //
 //     .map(f)            f(element)          -> a tensor of the same shape
 //     .zip(other, f)     f(element, other)   -> a tensor of the same shape
 //     .reduce(init, f)   f(accumulator, x)   -> one value, not a tensor
 //
-// `.map` is the one construct that changes what a tensor's buffer holds: the result's
-// element type is the FUNCTION's return type, not the receiver's.
-//
-// A fold answers one number of the seed's type, the way a whole-tensor `.sum()` does, so
-// nothing has to be unwrapped afterwards to use it. The accumulator is the FIRST parameter,
-// which is what `|acc, x|` means, and the seed takes its type from that parameter: an
-// untyped `0.0` folded over an `f32` tensor is an `f32`.
-//
-// All three READ their operands. Each allocates its own result and leaves the buffers it
-// walked alone, so a traversal works through a borrow and a shared weight survives one.
-//
-// There is deliberately no `.filter`. A filter's output length depends on the VALUES in the
-// buffer, so its result would have no shape the type system can name, which is the whole
-// point of a shape being part of the type. Use a `Vec<T>` where a data-dependent length is
-// genuinely what you want.
+// `.map` may change the element type, since the result takes the function's return type. A
+// fold's seed takes its type from the accumulator parameter, so an untyped `0.0` folded
+// over an `f32` tensor is an `f32`. All three read their operands, so a traversal works
+// through a borrow. There is no `.filter`: its output length would depend on the values,
+// which a shape type cannot name. Use a `Vec<T>` for that.
 
 func halve(x: f32) -> f32 {
     x / 2.0

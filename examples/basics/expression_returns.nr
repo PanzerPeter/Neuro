@@ -1,11 +1,9 @@
 // Example: Expression-Based Returns in Neuro
-// Demonstrates implicit returns: a function body whose final expression is its
-// value, with no `return` keyword.
-//
-// Every function below is called and printed, so the feature is visible in the
-// program's output as well as in its exit code.
+// Implicit returns: a function body whose final expression is its value, with no `return`.
+// Every function is called and printed, so the feature shows in the output too.
 
 // Simple expression-based return
+
 func double(x: i32) -> i32 {
     x * 2
 }

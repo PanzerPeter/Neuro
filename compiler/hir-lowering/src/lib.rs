@@ -755,7 +755,7 @@ fn resolve_tensor_dim(
 /// The extents of a shape every one of whose axes is static.
 ///
 /// Semantic analysis rejects a `?` axis at every operation that consumes an
-/// extent, so one arriving here is a compiler bug rather than a program error — reported
+/// extent, so one arriving here is a compiler bug rather than a program error, reported
 /// as a value, since a lowering pass has no business panicking.
 fn static_extents(shape: &[Option<usize>]) -> Result<Vec<usize>, LoweringError> {
     shape

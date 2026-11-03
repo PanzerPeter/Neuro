@@ -1,81 +1,28 @@
 # Functions
 
-Functions are the primary unit of code organization in Neuro.
+A function is a named, typed block of code, and every program starts at `main`. Generic functions are covered in [Generics and Traits](generics-and-traits.md).
 
-## Function Declaration
-
-### Basic Syntax
-
-```neuro
-func function_name(param1: Type1, param2: Type2) -> ReturnType {
-    // function body
-    return value
-}
-```
-
-**Components**:
-- `func` keyword
-- Function name (identifier)
-- Parameter list (optional)
-- Return type annotation (required unless void)
-- Function body (block of statements)
-
-### Simple Function
-
-```neuro
-func greet() -> i32 {
-    return 0
-}
-```
-
-### Function with Parameters
+## Declaration
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
-    return a + b
+    a + b
 }
 ```
 
-### Function without Return Value
+The return type follows `->`. A function that returns nothing omits it and returns `void`:
 
 ```neuro
-func do_something() {
-    // Implicit void return
-    val x: i32 = 10
+func announce() {
+    println("ready")
 }
 ```
 
 ## Parameters
 
-### Parameter Syntax
+Each parameter is written `name: Type`. Calls bind arguments to parameters in the order written, or by name (see [Named Arguments](#named-arguments)).
 
-Each parameter requires:
-1. Parameter name
-2. Type annotation
-
-```neuro
-func process(input: i32, flag: bool) -> i32 {
-    if flag {
-        return input * 2
-    } else {
-        return input
-    }
-}
-```
-
-### Multiple Parameters
-
-```neuro
-func complex(a: i32, b: i32, c: i32, d: i32) -> i32 {
-    return a + b + c + d
-}
-```
-
-### Parameter Passing
-
-A parameter of scalar type is passed by value (copied). Reference parameters (`&T` / `&mut T`)
-pass a borrow instead, see [Borrows](types.md); a non-`Copy` value passed by value is *moved*
-rather than copied.
+A parameter of scalar type is passed by value (copied). A reference parameter (`&T` or `&mut T`) receives a borrow, see [Ownership and Borrowing](ownership.md#borrows-t). Any other non-`Copy` value passed by value is moved into the callee, and the caller can no longer use it.
 
 ```neuro
 func modify(x: i32) -> i32 {
@@ -93,26 +40,44 @@ func test() -> i32 {
 }
 ```
 
+Neuro has no default parameter values and no variadic functions: every parameter of a declared function must be given. A function that takes any number of values takes a slice:
+
+```neuro
+func sum(values: &[i32]) -> i32 {
+    mut total = 0
+    for v in values { total = total + v }
+    total
+}
+
+func main() -> i32 {
+    val xs = [1, 2, 3]
+    val s = sum(&xs)      // 6
+    return s - 6
+}
+```
+
 ## Named Arguments
 
-An argument may be passed by name at the call site. Named arguments may appear in any
-order, and any number of positional arguments may come first.
+An argument may be passed by name at the call site. Named arguments may appear in any order, and any number of positional arguments may come first.
 
 ```neuro
 func connect(host: string, port: i32, timeout: i32) -> i32 {
     return port + timeout
 }
 
-val a = connect("localhost", 8080, 30)               // all positional
-val b = connect("localhost", port: 8080, timeout: 30)
-val c = connect("localhost", timeout: 30, port: 8080) // same call as b
+func main() -> i32 {
+    val a = connect("localhost", 8080, 30)               // all positional
+    val b = connect("localhost", port: 8080, timeout: 30)
+    val c = connect("localhost", timeout: 30, port: 8080) // same call as b
+    return a - b
+}
 ```
+
+Naming an argument does not make it optional. `connect("localhost", port: 8080)` is rejected with `'connect' takes 3 argument(s), but 1 given`.
 
 ### External labels
 
-A parameter may be declared with two names: an **external label** the caller writes and
-an **internal name** the body uses, written `external internal: T`. The external label is
-then **required** at every call site.
+A parameter may be declared with two names: an **external label** the caller writes and an **internal name** the body uses, written `external internal: T`. The external label is then required at every call site.
 
 ```neuro
 func clamp(_ value: f32, min lo: f32, max hi: f32) -> f32 {
@@ -121,37 +86,47 @@ func clamp(_ value: f32, min lo: f32, max hi: f32) -> f32 {
     return value          // the body says lo / hi, never min / max
 }
 
-val x = clamp(1.5, min: 0.0, max: 1.0)
-// val y = clamp(1.5, 0.0, 1.0)   // error: min and max must be named
+func main() -> i32 {
+    val x = clamp(1.5, min: 0.0, max: 1.0)
+    return 0
+}
 ```
 
-An external label of `_` suppresses the call-site name: the argument is positional and
-naming it is an error.
+Writing `clamp(1.5, 0.0, 1.0)` is rejected with ``the 'min' argument of 'clamp' must be named: write `min: <value>` ``.
+
+An external label of `_` suppresses the call-site name: the argument is positional, and naming it is an error.
 
 ```neuro
 func scale(_ value: f32, _ factor: f32) -> f32 {
     return value * factor
 }
 
-val r = scale(2.0, 3.0)      // no names accepted
-// val s = scale(value: 2.0, factor: 3.0)   // error: both are positional-only
+func main() -> i32 {
+    val r = scale(2.0, 3.0)      // no names accepted
+    return 0
+}
 ```
+
+`scale(value: 2.0, factor: 3.0)` is rejected with ``the 'value' parameter of 'scale' is declared `_ value:`, which means it is passed positionally and its name is not written at the call site``.
 
 ### Rules
 
-- Positional arguments must precede named arguments.
-- Named arguments may appear in any order relative to each other.
-- A plain `name: T` parameter may be passed positionally *or* as `name: value`.
-- An `external internal: T` parameter must always be named `external:`.
-- A `_ name: T` parameter must always be positional.
-- Two parameters of one function may not answer to the same call-site name.
-- Free functions, associated functions (`Type::f(...)`), and methods (`x.m(...)`) all
-  accept named arguments. Closures, the panic builtins, enum variants, and newtype
-  constructors declare no parameter names, so a label on one is an error.
+A plain `name: T` parameter may be passed positionally or as `name: value`. Free functions, associated functions (`Type::f(...)`) and methods (`x.m(...)`) all accept named arguments. Builtin tensor methods take labels too, such as `.sum(axis: 1)` (see [Tensors](tensors.md)).
 
-Arguments are bound to parameters before type checking, and are **evaluated in the order
-they are written**, exactly as a positional call evaluates them left to right. Naming them
-therefore changes which parameter each value reaches, never when it is computed:
+Closures, the panic builtins, enum variants and newtype constructors declare no parameter names, so a label on one is an error. The compiler reports the rule each violation breaks:
+
+| Violation | Diagnostic |
+| --- | --- |
+| A positional argument after a named one | ``in the call to 'connect': a positional argument cannot follow a named one; move it before `port:` `` |
+| An `external internal: T` parameter passed positionally | ``the 'min' argument of 'clamp' must be named: write `min: <value>` `` |
+| A `_ name: T` parameter passed by name | ``the 'value' parameter of 'scale' is declared `_ value:`, which means it is passed positionally and its name is not written at the call site`` |
+| A label that matches no parameter | `'f' has no parameter named 'c'` |
+| The same label twice | `argument 'a' is given twice in the call to 'f'` |
+| A missing argument | `'f' takes 2 argument(s), but 1 given` |
+| Two parameters of one function with the same call-site name (reported at the declaration) | `two parameters share the call-site name 'x'; a named argument must identify exactly one parameter` |
+| A label on a closure, panic builtin, enum variant or newtype constructor | `named arguments are not available here: 'panic' has no declared parameter names` |
+
+Arguments are bound to parameters before type checking, and are evaluated in the order they are written, exactly as a positional call evaluates them left to right. Naming them therefore changes which parameter each value reaches, never when it is computed:
 
 ```neuro
 func bump(r: &mut i32) -> i32 { *r = *r + 1
@@ -167,159 +142,48 @@ func main() -> i32 {
 }
 ```
 
-A call that only passes values costs nothing at runtime: it produces exactly the IR the
-equivalent positional call produces. A call that reorders arguments carrying effects binds
-each of them to a temporary first, which is one binding per argument and no other cost.
+A call that only passes values costs nothing at runtime: it produces exactly the IR the equivalent positional call produces. A call that reorders arguments carrying effects binds each of them to a temporary first, which is one binding per argument and no other cost.
 
 ### Limitation
 
-A method call is matched on the method name alone, because the receiver's type is not yet
-known when arguments are bound. If two different types declare a method of the same name
-with *different* parameter names, a named argument on that method is rejected; write the
-call positionally, or rename one of the methods. Positional calls are never affected.
-
+A method call is matched on the method name alone, because the receiver's type is not yet known when arguments are bound. If two different types declare a method of the same name with *different* parameter names, a named argument on that method is rejected with ``named arguments cannot be used with 'm': more than one type declares a method of that name with different parameter names, so `x:` does not identify one parameter``. Write the call positionally, or rename one of the methods. Positional calls are never affected.
 
 ## Return Values
 
+The last expression in a function body is its return value, and it must match the declared return type. `return` may appear anywhere in the body and exits at once. Statements after a `return` compile without a warning and never run.
+
+### Expression-Based Returns
+
+Neuro has no semicolons, and a statement ends at its newline, so the final expression needs no keyword:
+
+```neuro
+func add(a: i32, b: i32) -> i32 {
+    a + b
+}
+```
+
 ### Explicit Return
 
-Use the `return` keyword to exit a function with a value:
-
-```neuro
-func explicit_return() -> i32 {
-    return 42
-}
-```
-
-### Multiple Return Points
-
-```neuro
-func conditional_return(x: i32) -> i32 {
-    if x > 0 {
-        return 1
-    } else if x < 0 {
-        return -1
-    } else {
-        return 0
-    }
-}
-```
-
-### Expression-Based Returns (Implicit Return)
-
-The last expression in a function body automatically becomes the return value (Neuro has no semicolons; statements are newline-terminated):
-
-```neuro
-func implicit_return() -> i32 {
-    42  // No 'return' keyword needed
-}
-
-func add(a: i32, b: i32) -> i32 {
-    a + b  // Implicit return
-}
-```
-
-**Mixing explicit and implicit returns**:
+`return` exits early. Mixing the two forms is common:
 
 ```neuro
 func mixed(x: i32) -> i32 {
     if x > 10 {
-        return 100  // Explicit return for early exit
+        return 100  // explicit return for an early exit
     }
-    x * 2  // Implicit return for normal case
+    x * 2           // the last expression is the return value
 }
 ```
 
-**Key points**:
-- The last expression in the body is the return value
-- Must match function return type
-- Can mix with explicit `return` statements
-- There are no semicolons; a stray `;` is a parse error
-
-### Void Return
-
-Functions without a return value:
-
-```neuro
-func no_return() {
-    val x: i32 = 10
-    // Implicit void return at end
-}
-
-func explicit_void() {
-    val x: i32 = 10
-    return  // Explicit void return
-}
-```
-
-## Function Calls
-
-### Basic Call
-
-```neuro
-func add(a: i32, b: i32) -> i32 {
-    return a + b
-}
-
-func main() -> i32 {
-    val result: i32 = add(5, 3)
-    return result
-}
-```
-
-### Nested Calls
-
-```neuro
-func double(x: i32) -> i32 {
-    x * 2
-}
-
-func add(a: i32, b: i32) -> i32 {
-    a + b
-}
-
-func main() -> i32 {
-    val result: i32 = add(double(5), double(3))
-    // double(5) = 10, double(3) = 6
-    // add(10, 6) = 16
-    return result
-}
-```
-
-### Call Expressions
-
-Function calls can appear anywhere an expression is expected:
-
-```neuro
-func compute() -> i32 {
-    val x: i32 = add(1, 2) + add(3, 4)  // 3 + 7 = 10
-    return x
-}
-```
+A bare `return` exits a function that returns `void`.
 
 ## Recursion
 
-### Basic Recursion
-
-```neuro
-func factorial(n: i32) -> i32 {
-    if n <= 1 {
-        1
-    } else {
-        n * factorial(n - 1)
-    }
-}
-
-func main() -> i32 {
-    factorial(5)  // Returns 120
-}
-```
+A function may call itself, and may call a function declared later in the file, so mutual recursion needs no forward declaration.
 
 ### Tail Recursion
 
-Tail calls are not guaranteed to be eliminated. At `-O0` every call takes a stack frame, so a
-deep tail recursion can overflow the stack; from `-O1` up, LLVM usually turns a function's
-tail call to itself into a loop:
+Tail calls are not guaranteed to be eliminated. At `-O0` every call takes a stack frame, so a deep tail recursion can overflow the stack; from `-O1` up, LLVM usually turns a function's tail call to itself into a loop:
 
 ```neuro
 func factorial_tail(n: i32, acc: i32) -> i32 {
@@ -335,83 +199,35 @@ func factorial(n: i32) -> i32 {
 }
 ```
 
-### Mutual Recursion
-
-```neuro
-func is_even(n: i32) -> bool {
-    if n == 0 {
-        true
-    } else {
-        is_odd(n - 1)
-    }
-}
-
-func is_odd(n: i32) -> bool {
-    if n == 0 {
-        false
-    } else {
-        is_even(n - 1)
-    }
-}
-```
-
 ## The main Function
 
-Every Neuro program requires a `main` function as the entry point:
+Every program needs a `main` entry point, declared as `func main() -> i32` with no parameters. Only the root file's `main` is the entry point.
 
-```neuro
-func main() -> i32 {
-    // Program entry point
-    return 0  // Exit code
-}
-```
+The return value is the process exit status: `0` for success, and any other value signals an error by convention.
 
-**Requirements**:
-- Must be named `main`
-- Must return `i32` (exit code)
-- Must not have parameters
+Any other signature is refused. `func main(argc: i32) -> i32` gives `` `main` must be declared `func main() -> i32`: it takes no parameters, found 1 ``. The C runtime passes `argc` as the first argument and reads the return register as the exit status, so no other shape has a defined exit code.
 
-Any other signature is refused with `InvalidMainSignature`: the C runtime passes `argc` as
-the first argument and reads the return register as the exit status, so no other shape has a
-defined exit code. Only the root file's `main` is the entry point.
-
-**Exit codes**:
-- `0` = success
-- Non-zero = error (convention)
-
-## Function Scope
+## Scope
 
 ### Local Variables
 
-Variables declared in a function are local to that function:
+Variables are local to the block that declares them. Parameters are local variables initialized from the arguments.
 
 ```neuro
 func scoped() -> i32 {
-    val x: i32 = 10  // Local to scoped()
+    val x: i32 = 10
     return x
 }
 
 func other() -> i32 {
-    // val y: i32 = x  // Error: x not in scope
-    return 0
-}
-```
-
-### Parameter Scope
-
-Parameters are local variables initialized with argument values:
-
-```neuro
-func params(a: i32, b: i32) -> i32 {
-    // a and b are local variables
-    val sum: i32 = a + b
-    return sum
+    val y: i32 = x  // error: undefined variable 'x'
+    return y
 }
 ```
 
 ### Shadowing
 
-Inner scopes can shadow outer scope variables:
+An inner scope may shadow an outer variable, and a body may shadow a parameter of the same name:
 
 ```neuro
 func shadowing() -> i32 {
@@ -425,221 +241,16 @@ func shadowing() -> i32 {
 }
 ```
 
-## Type Checking
-
-### Argument Type Checking
-
-Function calls are strictly type-checked:
-
-```neuro
-func takes_i32(x: i32) -> i32 {
-    return x
-}
-
-func test() -> i32 {
-    val x: i64 = 100
-    return takes_i32(x)  // Error: expected i32, found i64
-}
-```
-
-### Return Type Checking
-
-All return paths must match the declared return type:
-
-```neuro
-func type_checked(flag: bool) -> i32 {
-    if flag {
-        return 42      // OK: i32
-    } else {
-        return 3.14    // Error: expected i32, found f64
-    }
-}
-```
-
-### Argument Count Checking
-
-```neuro
-func two_params(a: i32, b: i32) -> i32 {
-    return a + b
-}
-
-func wrong_count() -> i32 {
-    return two_params(1)  // Error: expected 2 args, found 1
-}
-```
-
-## Function Examples
-
-### Mathematical Functions
-
-```neuro
-func abs(x: i32) -> i32 {
-    if x < 0 {
-        -x
-    } else {
-        x
-    }
-}
-
-func max(a: i32, b: i32) -> i32 {
-    if a > b { a } else { b }
-}
-
-func min(a: i32, b: i32) -> i32 {
-    if a < b { a } else { b }
-}
-
-func clamp(x: i32, min_val: i32, max_val: i32) -> i32 {
-    min(max(x, min_val), max_val)
-}
-```
-
-### Boolean Logic Functions
-
-```neuro
-func and(a: bool, b: bool) -> bool {
-    a && b
-}
-
-func or(a: bool, b: bool) -> bool {
-    a || b
-}
-
-func xor(a: bool, b: bool) -> bool {
-    (a && !b) || (!a && b)
-}
-
-func implies(a: bool, b: bool) -> bool {
-    !a || b
-}
-```
-
-### Recursive Functions
-
-```neuro
-func fibonacci(n: i32) -> i32 {
-    if n <= 1 {
-        n
-    } else {
-        fibonacci(n - 1) + fibonacci(n - 2)
-    }
-}
-
-func gcd(a: i32, b: i32) -> i32 {
-    if b == 0 {
-        a
-    } else {
-        gcd(b, a % b)
-    }
-}
-
-func power(base: i32, exp: i32) -> i32 {
-    if exp == 0 {
-        1
-    } else {
-        base * power(base, exp - 1)
-    }
-}
-```
-
-## Best Practices
-
-### 1. Keep Functions Focused
-
-Each function should do one thing well:
-
-```neuro
-// Good: focused functions
-func is_positive(x: i32) -> bool {
-    x > 0
-}
-
-func absolute_value(x: i32) -> i32 {
-    if is_positive(x) { x } else { -x }
-}
-```
-
-### 2. Use Descriptive Names
-
-```neuro
-// Good: clear purpose
-func calculate_area(width: i32, height: i32) -> i32 {
-    width * height
-}
-
-// Bad: unclear
-func calc(w: i32, h: i32) -> i32 {
-    w * h
-}
-```
-
-### 3. Use Expression Returns for Simple Functions
-
-```neuro
-// Good: concise
-func double(x: i32) -> i32 {
-    x * 2
-}
-
-// Verbose (but acceptable)
-func double_verbose(x: i32) -> i32 {
-    return x * 2
-}
-```
-
-### 4. Use Explicit Returns for Complex Logic
-
-```neuro
-// Good: explicit returns for clarity
-func complex_logic(x: i32) -> i32 {
-    if x > 100 {
-        return 100
-    }
-    if x < 0 {
-        return 0
-    }
-    return x
-}
-```
-
-### 5. Minimize Nesting
-
-```neuro
-// Good: early returns reduce nesting
-func process(x: i32) -> i32 {
-    if x < 0 {
-        return 0
-    }
-    if x > 100 {
-        return 100
-    }
-    return x * 2
-}
-
-// Bad: deeply nested
-func process_nested(x: i32) -> i32 {
-    if x >= 0 {
-        if x <= 100 {
-            return x * 2
-        } else {
-            return 100
-        }
-    } else {
-        return 0
-    }
-}
-```
-
 ## Common Mistakes
 
-### Missing Return
+A missing `return` on one path:
 
 ```neuro
 func missing_return(x: i32) -> i32 {
     if x > 0 {
         return x
     }
-    // Error: missing return for x <= 0 case
+    // error: missing return statement in function returning i32
 }
 
 // Fix: add else branch
@@ -652,23 +263,12 @@ func fixed(x: i32) -> i32 {
 }
 ```
 
-### Unreachable Code
-
-Statements after a `return` compile without a warning and never run:
-
-```neuro
-func unreachable() -> i32 {
-    return 42
-    val x: i32 = 10  // accepted, never executed
-}
-```
-
-### Stray Semicolon
+A semicolon, which Neuro does not use:
 
 ```neuro
 func wrong() -> i32 {
     val x: i32 = 42
-    x;  // error: unexpected token Semicolon (Neuro has no semicolons)
+    x;  // error: unexpected token Semicolon, expected a newline or '}' to end the statement
 }
 
 // Fix: remove the semicolon
@@ -678,33 +278,20 @@ func right() -> i32 {
 }
 ```
 
-## Not in the Language
+Type, arity and scope errors:
 
-Neuro has no default parameter values and no variadic functions. A caller that wants to skip
-an argument passes it by [name](#named-arguments), and a function that takes any number of
-values takes a slice:
-
-```neuro
-func sum(values: &[i32]) -> i32 {
-    mut total = 0
-    for v in values { total = total + v }
-    total
-}
-
-val xs = [1, 2, 3]
-val s = sum(&xs)      // 6
-```
-
-A spread operator at call sites (`f(..args)`) is planned; see the
-[Quick Roadmap](../../README.md#quick-roadmap).
+| Mistake | Diagnostic |
+| --- | --- |
+| Passing an `i64` to an `i32` parameter | `type mismatch: expected i32, found i64` |
+| `return 3.14` from a function returning `i32` | `return type mismatch: expected i32, found f64` |
+| Calling a two-parameter function with one argument | `incorrect number of arguments: expected 2, found 1` |
+| Reading a local of another function | `undefined variable 'x'` |
+| Calling a function that is not declared | `undefined function 'x_fn'` |
+| Using a `string` after passing it by value | ``use of moved value 's': bind a `.clone()` if you need an independent copy`` |
 
 ## Panic Builtins
 
-Three compiler-known builtins terminate the program when an unrecoverable condition is
-reached. They follow the **abort, no unwinding** model: each prints a diagnostic
-(`message at file:line:col`) to standard error and calls `abort()`. The stack is *not*
-unwound, so future `Drop` / `defer` cleanup runs only on normal scope exit, never during a
-panic.
+Three compiler-known builtins terminate the program when an unrecoverable condition is reached. They abort without unwinding: each prints a diagnostic (`message at file:line:col`) to standard error and calls `abort()`. The stack is not unwound, so `Drop` destructors run only on normal scope exit, never during a panic.
 
 ```neuro
 func divide(a: i32, b: i32) -> i32 {
@@ -727,8 +314,7 @@ func main() -> i32 {
 | `assert` | `assert(cond: bool)` | Abort with `assertion failed at <loc>` only when `cond` is false; otherwise continue. |
 | `unreachable` | `unreachable()` | Print `internal error: entered unreachable code at <loc>` and abort. |
 
-Because these builtins **diverge** (they never return), a call may appear anywhere a value is
-expected, including the implicit-return (tail) position of a non-`void` function:
+Because these builtins diverge (they never return), a call may appear anywhere a value is expected, including the implicit-return (tail) position of a non-`void` function:
 
 ```neuro
 func parse_digit(c: i32) -> i32 {
@@ -736,25 +322,20 @@ func parse_digit(c: i32) -> i32 {
 }
 ```
 
-A user-defined function whose name is `panic`, `assert`, or `unreachable` shadows the builtin
-within the program.
+A user-defined function named `panic`, `assert` or `unreachable` shadows the builtin within the program.
 
-`return`, `break`, and `continue` diverge the same way, so an `if` or `match` arm that
-uses one takes its type from its siblings rather than imposing one on them, see
-[expressions.md](expressions.md#if-expressions).
+`return`, `break` and `continue` diverge the same way, so an `if` or `match` arm that uses one takes its type from its siblings, see [expressions.md](expressions.md#if-expressions).
 
 ## Standard Output Builtins
 
-Two more compiler-known builtins write text to **standard output**. Unlike the panic
-family they return: the result is `void`, so a call is a statement and not a value.
+`print` and `println` write text to standard output. Unlike the panic builtins they return: the result is `void`, so a call is a statement and not a value.
 
 | Builtin | Signature | Behaviour |
 |---|---|---|
 | `print` | `print(text: string)` | Write `text` to stdout. |
 | `println` | `println(text: string)` | Write `text` followed by a newline. |
 
-The newline is one `\n` byte. Standard output is the platform's text stream, so on
-Windows it reaches the console or pipe as `\r\n`, exactly as it would from a C program.
+The newline is one `\n` byte. Standard output is the platform's text stream, so on Windows it reaches the console or pipe as `\r\n`, exactly as it would from a C program.
 
 ```neuro
 func main() -> i32 {
@@ -773,311 +354,17 @@ hello from Neuro
 phase 2 is 0.88 done
 ```
 
-Each takes **exactly one** argument, and that argument is text: an owned `string` or an
-immutable `&string` sub-slice (`text.slice(1..4)`). There is no variadic form and no
-format string at the call site, because there is no need for one: [string
-interpolation](expressions.md#string-interpolation) has already rendered every hole, with
-its full format mini-language, into one ordinary `string` before the call is reached:
+Each takes exactly one argument, an owned `string` or an immutable `&string` sub-slice (`text.slice(1..4)`). There is no variadic form and no format string at the call site, because [string interpolation](strings.md#string-interpolation) has already rendered every hole into one `string` before the call. `println("{label:>10}: {count} of {total}")` is one argument.
 
-```neuro
-println("{label:>10}: {count} of {total}")
-```
+The text is read, not consumed, so the value stays usable afterwards. A user-defined function named `print` or `println` shadows the builtin within the program, as one named `panic` does. `@no_prelude` does not remove them, because they are compiler builtins rather than declarations.
 
-The text is **read, not consumed**, so the value stays usable afterwards:
+Output is buffered. A call copies its bytes into a page-sized buffer, which reaches the operating system when it fills, so a printing loop makes one write per buffer rather than one or two per call. The buffer is emptied on every path out of the program (`main` returning, a panic, a debug-build overflow trap), so buffering never loses output, and a line printed before a panic appears before the panic's diagnostic.
 
-```neuro
-val text: string = "kept"
-println(text)
-println(text)     // still valid: printing does not move its argument
-```
-
-A user-defined function named `print` or `println` shadows the builtin within the program,
-exactly as one named `panic` does. Both are compiler builtins rather than declarations, so
-`@no_prelude` does not take them away.
-
-Output is **buffered**. A call copies its bytes into a page-sized buffer, and the buffer
-reaches the operating system when it fills. So a printing loop pays one write for
-thousands of lines rather than one, or for `println` two, per call.
-
-That buffer is emptied on every path out of the program, so buffering never costs output:
-when `main` returns, when the panic runtime aborts, and when a debug-build arithmetic
-overflow traps. A line printed before a panic therefore still appears, and it appears
-*before* the panic's diagnostic on standard error rather than after it.
-
-When standard output is a **terminal**, the buffer is emptied at the end of every
-`println` instead of only when it fills, so a program's progress is visible while it runs.
-A pipe or a file gets the full buffer. This is the behaviour of C's standard library, and
-of every language's standard output built on it. `print` writes no line terminator and so
-ends no line: its bytes wait for the next `println` or for the program to finish.
-
-## Generic Functions
-
-A function may declare **type parameters** in angle brackets after its name. Each type
-parameter stands for a type supplied at the call site; the compiler generates one specialized
-copy of the function per distinct set of concrete type arguments (**monomorphization**), so a
-type parameter carries **zero runtime cost**.
-
-```neuro
-// A single template, instantiated at each concrete type it is called with.
-func identity<T>(x: T) -> T {
-    x
-}
-
-// Multiple type parameters.
-func second<T, U>(a: T, b: U) -> U {
-    b
-}
-
-func main() -> i32 {
-    val a = identity(41)     // identity<i32>
-    val f = identity(2.5)    // identity<f64>, a separate specialized copy
-    val s = second(1.5, 7)   // second<f64, i32> -> 7
-    return a + s             // 41 + 7 = 48
-}
-```
-
-**Type-argument inference.** Type arguments are inferred from the call's value arguments where
-possible. A type parameter that appears only in return position cannot be inferred and must be
-supplied explicitly with a turbofish (`identity::<i32>(x)`).
-
-**What a generic body may do.** On an *unbounded* type parameter the body may use only operations
-valid for *any* type: binding a value, returning it, passing it to another function, and building
-or observing tuples. Operations that need a known concrete type (arithmetic, comparison,
-field access, method calls) are rejected on a bare type parameter:
-
-```neuro
-func bad<T>(a: T, b: T) -> T {
-    a + b   // error: `+` is not defined on the unbounded type parameter T
-}
-```
-
-**Generic types at a type parameter.** A generic struct or enum may take the function's own
-parameter as its argument, in the signature and in the body. A call infers `T` through the
-instance it is handed, so `unwrap_or(Option::Some(40), 0)` below is an `i32`:
-
-```neuro
-func first_some<T>(x: T) -> Option<T> {
-    Option::Some(x)
-}
-
-func unwrap_or<U>(o: Option<U>, d: U) -> U {
-    match o {
-        Option::Some(v) => v,
-        Option::None => d,
-    }
-}
-```
-
-`Option<T>` moves like the `T` it holds. A generic that calls itself with a type built from its
-own parameter (`grow(Option::Some(x))` inside `grow<T>`) would need a new instance at every level,
-so the compiler refuses it once the chain of instances passes a fixed depth.
-
-**Bounds.** A trait bound (`func f<T: Shape>(x: &T)`) is **enforced**: the bound's methods become
-callable on the type parameter inside the body, and a type argument that does not implement the
-trait is rejected at the call site.
-
-```neuro
-func scaled_area<T: Shape>(s: &T, factor: i32) -> i32 {
-    s.area() * factor       // dispatched through the `Shape` bound
-}
-
-// error: type argument `NoImpl` for 'T' does not implement required trait 'Shape'
-```
-
-### Ownership through a type parameter
-
-A generic body is checked **once**, before any type argument is known, so a type parameter has
-to answer for every instantiation at once. It is therefore treated as **non-`Copy`**: a
-`T`-typed binding is *moved* when it is placed into a new owner, and reading it afterwards is a
-`use of moved value` error even where the call site later supplies `i32`.
-
-```neuro
-func dup<T>(v: T) -> T {
-    val a = v
-    val b = v        // error: use of moved value 'v'
-    b
-}
-```
-
-That is what leaves a type argument unconstrained: because the body already holds for the most
-restrictive case, a non-`Copy` type argument needs no further check.
-
-```neuro
-struct Holder {
-    name: string
-}
-
-func identity<T>(x: T) -> T {
-    x
-}
-
-val h = identity(Holder { name: "held" })   // identity<Holder>: moved in, moved back out
-val s = identity("text")                    // identity<string>
-val n = identity(41)                        // identity<i32>
-```
-
-The value is passed by value and returned by value, and a [`Drop`](structs.md#destructors-impl-drop) type's
-destructor runs exactly once per value, whether the callee consumes it or hands it back.
-
-A bound is how a body earns more. `T: Copy` makes `T` copy instead of move, so `dup` above
-compiles as `dup<T: Copy>`, and a `Vec<T>` may be built in the body. `T: Clone` gives the body
-`v.clone()`, which returns a `T`; a `Copy` bound gives it too. The scalars, `string`, a struct
-that derives the trait and one that implements it by hand all meet these bounds alike (see
-[Structs](structs.md#derivable-traits-by-hand-and-as-bounds)). A reference does not meet them yet.
-
-```neuro
-func dup<T: Copy>(v: T) -> (T, T) {
-    val a = v
-    val b = v        // fine: every instance copies
-    (a, b)
-}
-
-func twice<T: Clone>(v: &T) -> T {
-    v.clone()
-}
-```
-
-**Restrictions.** Without a `Copy` bound, the same conservatism bars a `T` from the positions
-restricted to `Copy` types: a closure borrows a `T`-typed binding rather than copying it, so it
-may move it out only as a `move` closure, and `[v, v]` or `(v, v)` over a `T` duplicates one
-owner, so the second slot is a use of a moved value. Generic **struct** and
-**enum** type arguments carry no `Copy` requirement either: the instance holds the value and
-moves with it (see [Types → Ownership of an element](types.md#ownership-of-an-element)). Generic
-`impl` blocks are supported.
-
-### Const (value) parameters
-
-A generic parameter list may also declare a **const parameter**, a compile-time *value* (of an
-integer type), written `const NAME: T`. A const parameter is usable as an array length and as a
-value in the body, and each distinct value is monomorphized into its own specialized code (zero
-runtime cost). Const parameters are inferred from array-argument lengths:
-
-```neuro
-func sum<const N: u32>(a: [i32; N]) -> i32 {
-    mut total: i32 = 0
-    for x in a {
-        total = total + x
-    }
-    total          // N is inferred from the array's length
-}
-
-val xs: [i32; 3] = [10, 20, 12]
-val s = sum(xs)    // sum<3>  ->  42
-```
-
-### `where` clauses
-
-For a readable signature, constraints may move into a `where` clause after the return type. A
-`where` clause carries trait bounds (`where T: Shape`, enforced exactly as an inline bound is) and
-**value predicates** over const parameters, a boolean expression checked at every instantiation
-and reported at the offending call:
-
-```neuro
-func head<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
-    a[0]           // guaranteed non-empty by `where N > 0`
-}
-```
-
-### Turbofish, explicit generic arguments
-
-When inference cannot reach a parameter (or you want to be explicit), supply the arguments at the
-call with a **turbofish** `::<...>`. This is the only call-site form for explicit generic arguments;
-arguments may be types or const values:
-
-```neuro
-val a = identity::<i32>(5)   // explicit type argument
-val b = zeros::<4>()         // explicit const argument
-```
-
-## Static and Dynamic Dispatch
-
-A trait bound can be satisfied two ways, and the keyword chooses which.
-
-### `impl Trait`, static dispatch
-
-`impl Trait` is anonymous-generic sugar. Each concrete type flowing through it produces a
-specialized copy of the function, exactly as a named type parameter does, so it carries
-**zero runtime cost** and no pointer indirection.
-
-```neuro
-// These two signatures compile to the same code:
-func train(model: &impl Model) -> i32 { model.step() }
-func train<T: Model>(model: &T) -> i32 { model.step() }
-```
-
-Each `impl Trait` parameter is its *own* anonymous parameter, so one call may bind two
-different concrete types, unlike a single shared `<T>`:
-
-```neuro
-func total(a: &impl Shape, b: &impl Shape) -> i32 { a.area() + b.area() }
-total(&square, &rect)   // valid: two different types
-```
-
-In **return** position, `impl Trait` names the one concrete type the body produces. It
-resolves transparently to that type, and the compiler verifies the type implements the
-trait:
-
-```neuro
-func make() -> impl Shape { Square { side: 3 } }
-```
-
-The body's result must be a direct constructor (a struct literal or enum value) for the
-concrete type to be inferable. Returning a binding or a call result is rejected with
-`cannot infer the concrete type of the impl Shape return`.
-
-### `dyn Trait`, dynamic dispatch
-
-`dyn Trait` is a single *runtime* type that can hold any implementor. Method calls go
-through a **vtable**: the reference carries a pointer to the value plus a pointer to that
-concrete type's method table, and the call jumps through a fixed slot.
-
-A trait object is **unsized**, so it only appears behind a reference, `&dyn Trait` or
-`&mut dyn Trait`. A bare `dyn Trait` is a compile error.
-
-```neuro
-// One function body serves every implementor.
-func measure(s: &dyn Shape) -> i32 { s.area() }
-
-measure(&square)   // &Square coerces to &dyn Shape
-measure(&rect)     // &Rect   coerces to &dyn Shape
-```
-
-A derived or builtin implementor coerces too: a struct with `@derive(Debug)` becomes a
-`&dyn Debug`, and so does `&n` for an `i32`. A `&string` does not yet
-([BUG-126](../BUGS.md)).
-
-Use `dyn` when values of *different* concrete types must be handled behind one
-interface; use `impl Trait` (or a named bound) when each call site has one concrete type.
-
-| Form         | Dispatch | Cost                   | Use when                                       |
-| ------------ | -------- | ---------------------- | ---------------------------------------------- |
-| `impl Trait` | static   | zero (monomorphized)   | one concrete type per call site                |
-| `&dyn Trait` | dynamic  | one vtable indirection | a heterogeneous set behind a uniform interface |
-
-### Object safety
-
-A trait is usable as `dyn` only if it is **object-safe**: every method must dispatch on a
-`&self` or `&mut self` receiver and name `Self` nowhere else, so the vtable has a fixed
-layout. A method that consumes `self` by value, one with no receiver at all, or one that
-takes or returns `Self` makes the trait unusable as a trait object (it remains fully usable
-through `impl Trait` and named bounds).
-
-```neuro
-trait Consume { func take(self) -> i32 }        // not object-safe: consumes self
-trait Maker   { func build() -> i32 }           // not object-safe: no receiver
-trait Grow    { func grown(&self) -> Self }     // not object-safe: returns Self
-```
-
-A trait declaring an associated type is also rejected as `dyn` today: the trait-object type
-would have to bind it (`&dyn Iterator<Item = u32>`), and that form is not implemented yet.
-
-A `&mut self` method requires a `&mut dyn Trait` receiver; mutations through it are
-visible to the caller.
+When standard output is a terminal, the buffer is emptied at the end of every `println`, so progress is visible while the program runs. A pipe or a file gets the full buffer, as with C's standard library. `print` writes no line terminator, so its bytes wait for the next `println` or for the program to finish.
 
 ## Closures and Lambdas
 
-A **closure** is an anonymous callable written with pipe-delimited parameters,
-`|params| body`. It can capture variables from the enclosing scope.
+A **closure** is an anonymous callable written with pipe-delimited parameters, `|params| body`. It can capture variables from the enclosing scope.
 
 ```neuro
 // Single-expression body (no braces): the return type is the body's.
@@ -1103,8 +390,7 @@ val tagged = move |x: i32| x + label
 
 ### Capture
 
-A closure captures each free variable its body uses, and how it holds one depends on that use,
-variable by variable:
+A closure captures each free variable its body uses. How it holds one depends on how the body uses it, variable by variable:
 
 | The body | The capture | Example |
 | --- | --- | --- |
@@ -1128,32 +414,28 @@ func main() -> i32 {
 }
 ```
 
-A borrowing closure holds its borrow for as long as it lives, exactly as `val r = &x` does: the
-binding cannot be moved while a closure reads it, and cannot be used at all while one writes it.
-End the closure's scope, as the block above does, before using the binding again.
+A borrowing closure holds its borrow for as long as it lives, exactly as `val r = &x` does: the binding cannot be moved while a closure reads it, and cannot be used at all while one writes it. End the closure's scope, as the block above does, before using the binding again.
 
-A `move` closure takes every capture by value. A `Copy` capture is copied into the closure, which
-keeps its own copy from call to call; any other capture is moved in, so its source binding is gone,
-and the closure releases it when its last copy is gone:
+A `move` closure takes every capture by value. A `Copy` capture is copied into the closure, which keeps its own copy from call to call. Any other capture is moved in, so its source binding is gone, and the closure releases it when its last copy is gone:
 
 ```neuro
-mut n = 0
-val tick = move || -> i32 {
-    n += 1
-    n
+func main() -> i32 {
+    mut n = 0
+    val tick = move || -> i32 {
+        n += 1
+        n
+    }
+    val first = tick()        // 1
+    val second = tick()       // 2, and `n` is still 0
+    first + second - 3
 }
-tick()        // 1
-tick()        // 2, and `n` is still 0
 ```
 
-A closure without `move` may not move a capture out (pass a `string` it captured to a function
-that takes one by value, say): it only borrowed it. The diagnostic asks for `move`.
+A closure without `move` may not move a capture out (passing a captured `string` to a function that takes one by value, say), because it only borrowed it. The diagnostic asks for `move`.
 
 ### Call modes
 
-How a closure uses its captures decides how it may be called. One that only reads them can be
-called any number of times; one that writes a capture is a `mut` function; a `move` closure that
-moves a capture out can be called once. A parameter's function type says which it accepts:
+How a closure uses its captures decides how it may be called. One that only reads them can be called any number of times. One that writes a capture is a `mut` function. A `move` closure that moves a capture out can be called once. A parameter's function type says which it accepts:
 
 | Parameter type | Accepts | The callee may |
 | --- | --- | --- |
@@ -1184,19 +466,11 @@ func main() -> i32 {
 }
 ```
 
-A closure that writes a capture passed where a plain `(T) -> U` is asked, or a `once` closure
-where a `mut` one is, is a type mismatch. Calling a `once` value a second time is a use of a
-moved value. A `mut` or `once` value moves rather than copies; passing one to a plain or `mut`
-parameter lends it for the call instead (see [Moving and lending](#moving-and-lending)). `once` is a mode only in front of a function type; elsewhere it is an
-ordinary name.
+A closure that writes a capture passed where a plain `(T) -> U` is asked, or a `once` closure where a `mut` one is, is a type mismatch. Calling a `once` value a second time is a use of a moved value. `once` is a mode only in front of a function type; elsewhere it is an ordinary name.
 
 ### Inference
 
-A closure parameter without an annotation takes its type from the function type the closure's
-context gives it: the parameter it is passed to, the typed binding, field or place it
-initializes, or the position it is returned from. The return type is the annotation, else the
-context's, else the body's own. `.map`, `.zip` and `.reduce` on a tensor, and `.map` / `.filter`
-in a `for` head, hand their closure the element type:
+A closure parameter without an annotation takes its type from the function type its context gives it: the parameter it is passed to, the typed binding, field or place it initializes, or the position it is returned from. The return type is the annotation, else the context's, else the body's own. `.map`, `.zip` and `.reduce` on a tensor, and `.map` / `.filter` in a `for` head, hand their closure the element type:
 
 ```neuro
 func twice(f: (i32) -> i32, x: i32) -> i32 { f(f(x)) }
@@ -1210,16 +484,11 @@ func main() -> i32 {
 }
 ```
 
-A parameter that nothing types is an error, so `val f = |x| x + 1` alone is refused: a later
-call does not type it. A literal called where it is written takes its parameter types from the
-arguments, so `(|x| x + 1)(4)` needs none. Annotate the parameter, or give the binding a function type. A block
-body that takes its return type from its last expression may not `return`; write the return
-type if it needs to.
+A parameter that nothing types is an error, so `val f = |x| x + 1` alone is refused with ``closure parameter 'x' needs a type: annotate it (`|x: T| ...`), or write the closure where a function type says what it takes, such as a typed binding `val f: (T) -> R = ...` or an argument to a function-typed parameter``. A literal called where it is written takes its parameter types from the arguments, so `(|x| x + 1)(4)` needs none. A block body that takes its return type from its last expression may not `return`; write the return type if it needs one.
 
 ### Function types and higher-order functions
 
-A closure or function value has the type `(T1, ...) -> R`. A function that takes
-one as a parameter and calls it is a **higher-order function**:
+A closure or function value has the type `(T1, ...) -> R`. A function that takes one as a parameter and calls it is a **higher-order function**:
 
 ```neuro
 func apply(v: i32, f: (i32) -> i32) -> i32 {
@@ -1232,17 +501,9 @@ func main() -> i32 {
 }
 ```
 
-A function's own name is a value of its function type too, so `apply(5, double)` passes
-`func double(x: i32) -> i32` directly, and `val f = double` binds it. An associated function is
-one through its path, `val s = Point::scale`, and so is an enum's tuple variant, its
-constructor: `val wrap = Error::Io`. A generic enum's variant needs a function type from its
-context to name its instance (`o.map(Option::Some)`, `val f: (i32) -> Option<i32> = Option::Some`). A generic function has no single type until its
-type arguments are named, so its bare name is refused; name the instance with a turbofish
-instead, `val f = identity::<i32>`.
+A function's own name is a value of its function type too, so `apply(5, double)` passes `func double(x: i32) -> i32` directly, and `val f = double` binds it. An associated function is one through its path, `val s = Point::scale`, and so is an enum's tuple variant, its constructor: `val wrap = Error::Io`. A generic enum's variant needs a function type from its context to name its instance (`o.map(Option::Some)`, `val f: (i32) -> Option<i32> = Option::Some`). A generic function has no single type until its type arguments are named, so its bare name is refused. Name the instance with a turbofish instead: `val f = identity::<i32>`.
 
-A higher-order function may be generic. The closure passed to it takes part in inferring its
-type parameters: it is typed after the call's other arguments, so it sees what they bound, and
-its result binds the rest:
+A higher-order function may be generic. The closure passed to it takes part in inferring its type parameters: it is typed after the call's other arguments, so it sees what they bound, and its result binds the rest:
 
 ```neuro
 func map_one<T, U>(value: T, f: (T) -> U) -> U {
@@ -1255,14 +516,11 @@ func main() -> i32 {
 }
 ```
 
-Any expression of function type can be called, not only a name: a closure literal called where
-it is written, `(|x: i32| -> i32 { x + 1 })(3)`, or a function chosen by an `if`,
-`(if fast { quick } else { exact })(v)`.
+Any expression of function type can be called, not only a name: a closure literal called where it is written, `(|x: i32| -> i32 { x + 1 })(3)`, or a function chosen by an `if`, `(if fast { quick } else { exact })(v)`.
 
 ### Returning and storing closures
 
-A closure that borrows nothing owns its environment, so it can be returned, stored in a struct
-or an enum, and moved like any other value. A plain `(T) -> U` value is also copied freely:
+A closure that borrows nothing owns its environment, so it can be returned, stored in a struct or an enum, and moved like any other value. A plain `(T) -> U` value is also copied freely:
 
 ```neuro
 struct Scaler { apply: (f32) -> f32 }
@@ -1284,20 +542,13 @@ func main() -> i32 {
 }
 ```
 
-Each closure compiles to a `{ function pointer, environment pointer }` value; a call dispatches
-indirectly through it. The environment is a heap block every copy shares (a closure with no
-captures has none), freed with the last copy along with whatever a `move` closure moved into it.
+Every copy of a closure shares one environment, which is freed with the last copy, along with whatever a `move` closure moved into it. A closure with no captures has no environment.
 
 ### Moving and lending
 
-Only a plain `(T) -> U` value copies, because its calls never write its environment. A `mut` or
-`once` value moves: `val g = f` hands the closure to `g`, and a later use of `f` is a use of a
-moved value. If copies of a `mut` closure shared one environment, a call through one copy could
-run a call through another and write that environment while the first call was still using it.
+Only a plain `(T) -> U` value copies, because its calls never write its environment. A `mut` or `once` value moves: `val g = f` hands the closure to `g`, and a later use of `f` is a use of a moved value. If copies of a `mut` closure shared one environment, a call through one copy could run a call through another and write that environment while the first call was still using it.
 
-Passing a function value to a function-typed parameter does not move it. The call borrows it,
-shared for a plain parameter and exclusive for a `mut` one, and the caller has it back when the
-call returns. A `once` parameter takes the value for good:
+Passing a function value to a function-typed parameter does not move it. The call borrows it, shared for a plain parameter and exclusive for a `mut` one, and the caller has it back when the call returns. A `once` parameter takes the value for good:
 
 ```neuro
 func twice(f: mut () -> void) {
@@ -1318,12 +569,7 @@ func main() -> i32 {
 }
 ```
 
-Calling a `mut` value borrows it exclusively too, so nothing else may reach it during the call:
-`f(|| f())` and `twice(f, f)` with two `mut` parameters are refused. The borrow starts once the
-arguments are evaluated, so `f(f(1))` is fine: the inner call has returned before the outer one
-starts. A closure that calls or lends a `mut` value it captured writes that capture: the closure
-is `mut` itself and holds the value exclusively while it lives. A `mut` value reached through a
-shared `&` borrow, such as a field read through `&self`, can be neither called nor lent.
+Calling a `mut` value borrows it exclusively too, so nothing else may reach it during the call: `f(|| f())` and `twice(f, f)` with two `mut` parameters are refused. The borrow starts once the arguments are evaluated, so `f(f(1))` is fine, because the inner call returns before the outer one starts. A closure that calls or lends a `mut` value it captured writes that capture, so the closure is `mut` itself and holds the value exclusively while it lives. A `mut` value reached through a shared `&` borrow, such as a field read through `&self`, can be neither called nor lent.
 
 A value that may borrow lives only in the scope that made it:
 
@@ -1331,36 +577,25 @@ A value that may borrow lives only in the scope that made it:
 - a function-typed parameter, since its caller may have passed such a closure;
 - a closure that captures either.
 
-Such a value may initialize a binding, be passed to a function-typed parameter or read by a
-built-in that only calls it, or be called. It may not be returned, assigned, stored inside
-another value, or yielded from a block:
+Such a value may initialize a binding, be passed to a function-typed parameter, be read by a built-in that only calls it, or be called. It may not be returned, assigned, stored inside another value, or yielded from a block. Returning a closure over the function values a function was handed is refused with this diagnostic:
 
 ```text
-error: this value may borrow from the scope that built it (a closure that borrows a capture, a
-function-typed parameter, or a closure holding either), so it lives only as long as that scope
+error: this value may borrow from the scope that built it (a closure that borrows a capture, a function-typed parameter, or a closure holding either), so it lives only as long as that scope: bind it with `val` or `mut`, pass it to a function-typed parameter, or call it; it cannot be assigned, returned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map` as a closure literal that holds a `&mut`
 ```
 
 ### Not yet supported
 
-- Returning a closure over the function values a function was handed
-  (`func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 { move |x| g(f(x)) }`).
+- Returning a closure over the function values a function was handed (`func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 { move |x| g(f(x)) }`).
 - Storing a borrowing closure in a holder that dies before what it borrows.
-- A closure literal that writes through a borrow, written as the argument of a built-in method
-  (`.map`, `.filter`, `.zip`, `.reduce`); bind it with `mut` first, so the borrow rules see it
-  beside what the method walks. A literal that only reads what it borrows goes there directly,
-  and a `for` head's literal keeps its borrows until the loop ends.
+- A closure literal that writes through a borrow, written as the argument of a built-in method (`.map`, `.filter`, `.zip`, `.reduce`). Bind it with `mut` first, so the borrow rules see it beside what the method walks. A literal that only reads what it borrows goes there directly, and a `for` head's literal keeps its borrows until the loop ends.
 - A closure without `move` taking a capture by value because its body moves it out.
-- An instantiated associated function or generic method as a value on its own
-  (`val f = Cell::new::<i32>`); it works as a `|>` target and as a later `>>` stage.
+- An instantiated associated function or generic method as a value on its own (`val f = Cell::new::<i32>`). It works as a `|>` target and as a later `>>` stage.
 
-## References
+## See also
 
-- [Types](types.md) - Function types and type checking
-- [Variables](variables.md) - Local variables in functions
-- [Control Flow](control-flow.md) - If/else and function control flow
-- [Expressions](expressions.md) - Expression-based returns
-
-## See Also
-
-- Rust Book: [Functions](https://doc.rust-lang.org/book/ch03-03-how-functions-work.html)
-- [Recursion](https://en.wikipedia.org/wiki/Recursion_(computer_science))
+- [Generics and Traits](generics-and-traits.md): generic functions, `impl Trait` and `dyn Trait` dispatch
+- [Types](types.md): function types and type checking
+- [Variables](variables.md): local bindings
+- [Control Flow](control-flow.md): `if`, `match` and loops
+- [Expressions](expressions.md): expression-based returns
+- [Operators](operators.md): the `|>` pipeline and `>>` composition

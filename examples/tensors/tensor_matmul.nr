@@ -1,27 +1,15 @@
-// Matrix multiplication: the `@` operator.
-//
-// `@` is the one tensor operator that is not element-wise. `a * b` multiplies the two
-// buffers position for position; `a @ b` CONTRACTS an axis, so element `[i, j]` of the
-// result is the dot product of row `i` of the left operand and column `j` of the right.
-// That is the operation every linear layer in a network is written with, which is why it
-// gets an operator of its own rather than a method.
-//
-// THE SHAPE RULE IS `[M, K] @ [K, N]` -> `[M, N]`. The two inner extents must agree, and
-// they are what disappears from the result. Both operands are RANK 2: `@` neither
-// broadcasts nor stretches, so there is no vector form and no scalar form. A shape
-// mismatch is a compile error, not a run-time one.
-//
-// PRECEDENCE: `@` shares the row of `*`, `/` and `%`, as in Python, so a mix of them
-// groups left to right: `a @ b * c` scales the product and `a * b @ c` scales the left
-// operand. It binds tighter than `+`, so `a @ b + c` adds `c` to the product, and looser
-// than `as`.
-//
-// Like every tensor operator it accepts owned or borrowed operands: `&w @ &x` reads a
-// weight without moving it out of the binding that owns it.
+// Matrix multiplication: the `@` operator. `@` contracts an axis, unlike the element-wise
+// `*`: element `[i, j]` of `a @ b` is the dot product of row `i` of `a` and column `j` of
+// `b`. Every linear layer is written with it. The shape rule is `[M, K] @ [K, N] -> [M,
+// N]`. Both operands are rank 2, `@` does not broadcast, and a shape mismatch is a compile
+// error. `@` shares the precedence of `*`, `/` and `%`, so `a @ b * c` groups left to
+// right. It binds tighter than `+` and looser than `as`. Like every tensor operator it
+// accepts owned or borrowed operands: `&w @ &x` reads a weight without moving it.
 
 // One projection, written once for every width in the program. `M`, `K` and `N` are
 // compile-time values inferred from the operands' own shapes, and the repeated `K` is
 // what makes a mismatched pair a compile error at the call site.
+
 func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]> {
     return w @ x
 }

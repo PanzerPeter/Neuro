@@ -1,108 +1,80 @@
 # CLI Usage Guide
 
-Complete reference for the `neurc` command-line compiler.
+`neurc` is the Neuro compiler's command-line driver. It checks, compiles and runs `.nr` files, and this page lists every command, flag and environment variable it reads.
 
 ## Installation
 
-After building from source:
+Build the compiler against an LLVM 23 and MLIR 23 prefix (see [Installation](../getting-started/installation.md)), then either install it or run it from the checkout:
 
 ```bash
-# Install compiler globally
-cargo install --path compiler/neurc
-
-# Or run directly from source
-cargo run -p neurc -- <command> <args>
+cargo install --path compiler/neurc        # puts neurc on PATH
+cargo run -p neurc -- <command> <args>     # or run it without installing
 ```
+
+The build reads the three prefix variables under [Environment Variables](#environment-variables).
+
+## Usage
+
+`neurc --help` lists the commands, `neurc <command> --help` lists a command's flags, and `neurc --version` prints the compiler version. A rejected command line (an unknown flag, `-O4`, a `--gpu-arch` with neither prefix) exits with status `2` before any file is read.
 
 ## Commands
 
 ### check
 
-Validate syntax and types without generating code.
+Validate syntax and types without generating code. `check` takes no flags.
 
-**Syntax**:
 ```bash
-neurc check <file.nr>
-```
-
-**Examples**:
-```bash
-# Check a single file
 neurc check examples/basics/hello.nr
-
-# With debug logging
-RUST_LOG=debug neurc check examples/basics/function_call.nr
 ```
 
 **Output**:
-- Success: `Type checking passed for "examples/basics/hello.nr" (1 module(s), N HIR items)`, where `N` counts the implicit prelude's items as well as the file's
-- Failure: `Type errors found in "<file>":`, then one located diagnostic per error, then `Error: N type error(s) found`
+- Success: `Type checking passed for "<file>" (N module(s), N HIR items)` on stdout. The item count includes the prelude's items.
+- Failure: the diagnostics on stderr, then `Error: N type error(s) found` (or `Error: Parsing failed` for a syntax error).
 
-**Exit codes**:
-- 0: No errors found
-- 1: Errors found
+Lint warnings go to stderr and never change the exit status.
+
+**Exit codes**: `0` no errors, `1` errors found.
 
 ### compile
 
-Compile Neuro source to native executable.
+Compile a Neuro source file to a native executable, an object file or LLVM IR.
 
-**Syntax**:
 ```bash
 neurc compile <file.nr> [options]
 ```
 
 **Options**:
-- `-o, --output <FILE>`: output path (default: the input filename without its extension)
-- `-O, --optimization <0-3>`: optimization level (default: `0`); see [Optimization](#optimization)
-- `--emit <exe|obj|llvm-ir>`: artifact to write (default: `exe`); see [Emitting an object file](#emitting-an-object-file) and [Emitting LLVM IR](#emitting-llvm-ir)
-- `--gpu-arch <CHIP>`: the GPU that `@gpu` kernels and `Device::GPU` tensors are built for (default: `sm_60`); see [Choosing a GPU](#choosing-a-gpu). `run` takes it too
+- `-o, --output <FILE>`: output path. Default: the input name without its extension (`hello` for `hello.nr`, `hello.exe` on Windows), `.o` or `.obj` with `--emit obj`, `.ll` with `--emit llvm-ir`.
+- `-O, --optimization <0-3>`: optimization level, default `0`. See [Optimization levels](#optimization-levels).
+- `--emit <exe|obj|llvm-ir>`: artifact to write, default `exe`. See [Emitting an object file](#emitting-an-object-file) and [Emitting LLVM IR](#emitting-llvm-ir).
+- `--gpu-arch <CHIP>`: the GPU that `@gpu` kernels and `Device::GPU` tensors are built for, default `sm_60`. See [Choosing a GPU](#choosing-a-gpu). `run` takes it too.
 
-**Examples**:
 ```bash
-# Default output (hello.exe on Windows)
-neurc compile examples/basics/hello.nr
-
-# Custom output path
-neurc compile examples/basics/hello.nr -o bin/my_program
-
-# Custom output with .exe extension
-neurc compile examples/basics/hello.nr -o bin/my_program.exe
-
-# Compile from different directory
-neurc compile ../path/to/program.nr
-
-# With debug logging
-RUST_LOG=debug neurc compile examples/basics/hello.nr
+neurc compile examples/basics/hello.nr                 # writes examples/basics/hello
+neurc compile examples/basics/hello.nr -o bin/hello -O2
 ```
+
+**Output**: `Successfully compiled <input.nr> -> <output>` on stdout. The object file of an executable build goes to a temporary directory that is removed after linking.
+
+`-o` may not name a source file of the program: `neurc` refuses rather than overwrite it.
+
+**Exit codes**: `0` success, `1` compilation or link failure, `2` a rejected command line.
 
 #### Choosing a GPU
 
-`--gpu-arch` names a chip, and the prefix picks the vendor. `sm_NN` is an NVIDIA compute
-capability. The kernels ship as PTX, which the CUDA driver compiles for any GPU at or above it,
-so the default `sm_60` covers every recent NVIDIA card. `gfxNNN` is an AMD architecture. The
-kernels are compiled to a code object for exactly that chip, and the program opens HIP
-(`libamdhip64.so`) instead of the CUDA driver.
+`--gpu-arch` names a chip, and the prefix picks the vendor. `sm_NN` is an NVIDIA compute capability. The kernels ship as PTX, which the CUDA driver compiles for any GPU at or above it, so the default `sm_60` covers every recent NVIDIA card. `gfxNNN` is an AMD architecture. The kernels are compiled to a code object for exactly that chip, and the program opens HIP (`libamdhip64.so`) instead of the CUDA driver.
 
 ```bash
 neurc compile --gpu-arch gfx90a model.nr    # an MI200-series GPU
 ```
 
-Compiling for AMD needs ROCm, because the code object is linked with ROCm's `ld.lld`
-(`$ROCM_PATH/llvm/bin/ld.lld`, `/opt/rocm` by default); without it the compile fails and says
-so. Running needs the HIP runtime and a GPU of that architecture. A program that only moves
-tensors with `.to(Device::GPU(0))` links the same runtime, so the flag matters for it too.
-`neurc` refuses a chip name with neither prefix, or one LLVM 23 has no processor for.
+Compiling for AMD needs ROCm, because the code object is linked with ROCm's `ld.lld` (see [`ROCM_PATH`](#rocm_path)). Without it the compile fails and says so. Running needs the HIP runtime and a GPU of that architecture. A program that only moves tensors with `.to(Device::GPU(0))` links the same runtime, so the flag matters for it too. A chip name with neither prefix is refused by `neurc`, and a chip LLVM 23 has no processor for is refused by the MLIR lowering (`unknown GPU chip`).
 
 #### Emitting an object file
 
-`--emit obj` stops before the linker and writes the object file to the output path. Because
-an object may be a library, it does **not** require a `main` function; the default
-`--emit exe` still does.
+`--emit obj` stops before the linker and writes the object file to the output path. An object may be a library, so it does **not** require a `main` function. The default `--emit exe` still does.
 
-This is how a Neuro module is made callable from another language. A tensor value is a
-DLPack handle (see [tensors](../language-reference/tensors.md)), so a function returning
-`Tensor<T, S>` returns a `DLManagedTensorVersioned*` that NumPy, PyTorch or JAX consumes
-with no conversion step:
+This is how a Neuro module is made callable from another language. A tensor value is a DLPack handle (see [tensors](../language-reference/tensors.md)), so a function returning `Tensor<T, S>` returns a `DLManagedTensorVersioned*` that NumPy, PyTorch or JAX consumes with no conversion step:
 
 ```bash
 neurc compile --emit obj -o tensors.o tensors.nr
@@ -115,111 +87,97 @@ lib = ctypes.CDLL("./libtensors.so")
 lib.make_batch.restype = ctypes.c_void_p
 ```
 
-`tools/dlpack_differential.py` is a worked version of exactly this: it links a library of
-tensor-returning functions and checks every result against NumPy's own, reading dtype, rank,
-extents and strides from the handle. Run it with
-`python tools/dlpack_differential.py --neurc target/debug/neurc`, or as part of the suite
-through `cargo test -p neurc --test numpy_differential`.
+`tools/dlpack_differential.py` is a worked version of this: it links a library of tensor-returning functions and checks every result against NumPy's own, reading dtype, rank, extents and strides from the handle. Run it with `python tools/dlpack_differential.py --neurc target/debug/neurc`, or through `cargo test -p neurc --test numpy_differential`.
 
-`tools/grad_differential.py` links the same way for a different reason: it calls compiled
-scalar functions at perturbed points and takes their gradients by central differences, which
-is how a derivative this compiler generates gets checked against a computation that shares
-none of its machinery. Run it with
-`python tools/grad_differential.py --neurc target/debug/neurc`, or through
-`cargo test -p neurc --test grad_differential`.
+`tools/grad_differential.py` links the same way and takes gradients of compiled scalar functions by central differences. Run it with `python tools/grad_differential.py --neurc target/debug/neurc`, or through `cargo test -p neurc --test grad_differential`.
 
-`neurc` does not link the shared library itself: `-shared` is the platform C compiler's job,
-and on Windows a DLL additionally needs an export list.
+`neurc` does not link the shared library itself: `-shared` is the platform C compiler's job, and on Windows a DLL additionally needs an export list.
 
 #### Emitting LLVM IR
 
-`--emit llvm-ir` stops before instruction selection and writes the textual module (default
-output: the input name with `.ll`). Like `--emit obj` it does not require a `main` function.
+`--emit llvm-ir` stops before instruction selection and writes the textual module. Like `--emit obj` it does not require a `main` function.
 
 ```bash
 neurc compile --emit llvm-ir -o twice.ll twice.nr
 ```
 
-The module carries the host data layout and triple, so it can be handed straight to `opt`,
-`llc` or `clang`. `-O` still selects the middle-end pass pipeline: `-O0` emits the module as
-codegen built it, which is what a tool that rewrites the IR wants, and `-O2` emits what the
-object path would have given the backend.
-
-**Output**:
-- Success: `Successfully compiled <input.nr> -> <output_path>`
-- Failure: the failing stage's errors, then `Compilation failed: <reason>` plus a numbered `Caused by (n):` chain
-
-**Exit codes**:
-- 0: Compilation successful
-- 1: Compilation failed
-- 2: the command line itself was rejected (an unknown flag, `-O4`, a `--gpu-arch` with
-  neither prefix), before any file was read. This holds for every command
-
-`-o` may not name a source file of the program being compiled: `neurc` refuses rather than
-overwrite it with the executable, object or IR.
+The module carries the host data layout and triple, so it can be handed straight to `opt`, `llc` or `clang`. `-O` still selects the middle-end pass pipeline: `-O0` emits the module as codegen built it, and `-O2` emits what the object path would have given the backend.
 
 ### run
 
-Compile a source file and run the resulting program immediately.
+Compile a source file to a temporary executable and run it immediately.
 
-**Syntax**:
 ```bash
 neurc run <file.nr> [options]
 ```
 
 **Options**:
-- `-O, --optimization <0-3>`: optimization level (default: `0`); see [Optimization](#optimization)
-- `--gpu-arch <CHIP>`: as for `compile`; see [Choosing a GPU](#choosing-a-gpu)
+- `-O, --optimization <0-3>`: default `0`. See [Optimization levels](#optimization-levels).
+- `--gpu-arch <CHIP>`: as for `compile`. See [Choosing a GPU](#choosing-a-gpu).
 
-The executable is written to a temporary directory and removed once the program exits, so
-`run` never leaves a binary beside the source. Use `compile` when you want to keep one.
+The executable is removed once the program exits, so `run` never leaves a binary beside the source. Use `compile` to keep one.
 
-**Examples**:
-```bash
-neurc run examples/basics/hello.nr
-neurc run examples/basics/hello.nr -O2
-```
-
-**Output**: the program's own stdout and stderr, with no compiler banner. Compiler and
-linker failures still report on stderr as `Run failed: <reason>` plus a `Caused by (n):` chain.
+**Output**: the program's own stdout and stderr, with no compiler banner. Compiler and linker failures go to stderr as `Run failed: <reason>` followed by a `Caused by (n):` chain.
 
 **Exit codes**:
-- The program's own exit code, when it was built and started
-- 1: compilation, linking, or process startup failed, or the program was killed by a signal
+- The program's own exit code, when it was built and started. `main`'s return value is the status, truncated to 8 bits by the OS.
+- `1`: compilation, linking or process startup failed, or the program was killed by a signal.
+
+## Optimization levels
+
+`-O` applies to `compile` and `run`.
+
+- `-O0` (default): a debug build. Integer overflow panics: `panic: integer overflow at <file>:<line>:<col>`.
+- `-O1` to `-O3`: release builds. Integer overflow wraps. `-O2` is the usual choice for speed; `-O3` is the most aggressive.
+
+Division by zero panics at every level. For the speed of the programs `neurc` produces, see the [benchmarks](../../README.md#performance).
+
+## Diagnostics
+
+Every diagnostic that names a location has the same shape: the message, ` --> file:line:column`, the source line and a caret under the span. The column counts characters. A program spread over several modules prints the message without a location, because a span from an imported module cannot be resolved against the root file. The examples of each kind of error are in [Troubleshooting](troubleshooting.md#compilation-errors).
+
+- Parse errors stop at the first one and end with `Parsing failed`.
+- Type errors are all reported, then `N type error(s) found`. A use-after-move adds a `note: moved here` line.
+- Under `compile` and `run`, a failure is wrapped as `Compilation failed: <reason>` (or `Run failed: <reason>`), followed by a numbered `Caused by (n):` chain.
+
+### Code generation and link errors
+
+A codegen failure prints as `Compilation failed: Code generation error: ...`. A link failure names the linker invocation:
+
+```text
+Compilation failed: Failed to link object file to executable
+  Caused by (1): Failed to execute cc - ensure a C compiler (gcc/clang) is installed
+  Caused by (2): No such file or directory (os error 2)
+```
+
+On Unix the linker driver is `cc`, and every Unix link passes `-lm -ldl`. On Windows `neurc` tries `clang`, then `lld-link`, then MSVC's `cl.exe`, and when all three fail it reports each driver's own reason.
 
 ## Environment Variables
 
 ### RUST_LOG
 
-Control logging verbosity:
+Sets the log level for `neurc`'s own messages, printed to stderr as `[INFO  neurc] ...`:
+
+| Level | Shows |
+| --- | --- |
+| `error` | errors only |
+| `warn` | warnings and errors |
+| `info` | the file being compiled and the optimization level |
+| `debug` | each pipeline stage (module resolution, type checking, lowering, codegen, linking) |
+| `trace` | everything |
 
 ```bash
-# Windows (PowerShell)
-$env:RUST_LOG="debug"
-neurc compile program.nr
-
-# Unix
-RUST_LOG=debug neurc compile program.nr
+RUST_LOG=debug neurc compile program.nr 2> debug.log      # Unix
+$env:RUST_LOG="debug"; neurc compile program.nr 2> debug.log   # PowerShell
 ```
 
-**Levels**:
-- `error`: only errors
-- `warn`: warnings and errors
-- `info`: informational messages
-- `debug`: each compilation step (recommended for troubleshooting)
-- `trace`: everything
+### ROCM_PATH
 
-**Examples**:
-```bash
-RUST_LOG=error neurc compile program.nr   # Minimal output
-RUST_LOG=info neurc compile program.nr    # Standard output
-RUST_LOG=debug neurc compile program.nr   # Detailed diagnostics
-```
+Read when compiling for an AMD chip (`--gpu-arch gfxNNN`). The code object is linked with `$ROCM_PATH/llvm/bin/ld.lld`, and `/opt/rocm` is used when it is unset.
 
-### LLVM_SYS_231_PREFIX, MLIR_SYS_230_PREFIX, TABLEGEN_230_PREFIX
+### Build-time prefix variables
 
-Building the compiler needs all three, each pointing at the one prefix that holds LLVM 23
-and MLIR 23:
+`LLVM_SYS_231_PREFIX`, `MLIR_SYS_230_PREFIX` and `TABLEGEN_230_PREFIX` are read by Cargo while building `neurc`, not by `neurc` itself. All three must point at the one prefix that holds LLVM 23 and MLIR 23:
 
 ```bash
 prefix=/opt/llvm-mlir-23                  # Arch / CachyOS (source build)
@@ -228,250 +186,42 @@ prefix=$(brew --prefix llvm)              # macOS
 export LLVM_SYS_231_PREFIX=$prefix MLIR_SYS_230_PREFIX=$prefix TABLEGEN_230_PREFIX=$prefix
 ```
 
-See the [Installation Guide](../getting-started/installation.md) for full setup.
+The per-platform setup is in [Installation](../getting-started/installation.md).
 
-## Workflow Examples
+## Platform Notes
 
-### Basic Development
+- **Linux**: GCC or Clang on `PATH` (`build-essential` on Debian and Ubuntu, `base-devel` on Arch), plus the LLVM 23 prefix.
+- **macOS**: Xcode Command Line Tools and LLVM 23 from Homebrew (`llvm`). Apple Silicon is supported.
+- **Windows**: MSVC Build Tools 2022, and an LLVM 23 and MLIR 23 prefix built from source, which the [Windows section of Installation](../getting-started/installation.md#windows-msvc) describes. The executable always gets a `.exe` extension. Forward slashes and backslashes both work in paths.
 
-```bash
-# 1. Write code in editor
-vim program.nr
+`neurc` compiles for the host target only.
 
-# 2. Check for errors (fast)
-neurc check program.nr
+## Workflows
 
-# 3. Fix errors, re-check
-neurc check program.nr
-
-# 4. Compile when ready
-neurc compile program.nr
-
-# 5. Run executable
-./program  # Unix
-.\program.exe  # Windows
-```
-
-### Rapid Iteration
+Check often, compile when the check passes:
 
 ```bash
-# Check-compile-run loop (Unix)
-neurc check program.nr && neurc compile program.nr && ./program
-
-# Windows (PowerShell)
-neurc check program.nr; if ($?) { neurc compile program.nr; if ($?) { .\program.exe } }
+neurc check program.nr && neurc compile program.nr && ./program          # Unix
+neurc check program.nr; if ($?) { neurc compile program.nr; if ($?) { .\program.exe } }   # PowerShell
 ```
 
-### Debugging Compilation Issues
-
-```bash
-# Enable debug logging
-RUST_LOG=debug neurc compile program.nr 2> debug.log
-
-# Review debug.log for detailed diagnostics
-cat debug.log
-```
-
-## Output Files
-
-### Executable
-
-Default executable naming:
-- **Windows**: `<input>.exe` (e.g., `program.nr` → `program.exe`)
-- **Unix**: `<input>` without extension (e.g., `program.nr` → `program`)
-
-Custom output with `-o`:
-```bash
-neurc compile program.nr -o custom_name
-neurc compile program.nr -o bin/release/app
-```
-
-### Temporary Files
-
-`compile` writes the object file (`.o` on Unix, `.obj` on Windows) into a fresh temporary
-directory and removes the directory once linking finishes, whether the link succeeded or not.
-`--emit obj` writes the object to the output path instead.
-
-## Error Handling
-
-Errors go to stderr with exit code `1`. `compile` wraps the failing stage's message in a
-`Compilation failed:` line followed by a numbered `Caused by (n):` chain.
-
-### Parse Errors
-
-Example:
-```text
-error: unexpected token RightBrace, expected expression
- --> bad.nr:3:1
-  |
-3 | }
-  | ^
-
-Error: Parsing failed
-```
-
-**Information provided**:
-- The file, line and column of the offending token (the end of the file when the input
-  stopped early), with the source line underlined
-- The offending token and what the parser expected
-
-### Type Errors
-
-Example:
-```text
-Type errors found in "bad.nr":
-error: type mismatch: expected i32, found bool
- --> bad.nr:2:5
-  |
-2 |     val x: i32 = true
-  |     ^^^^^^^^^^^^^^^^^
-
-Error: 1 type error(s) found
-```
-
-**Information provided**:
-- Every type error, not just the first: the type checker keeps going
-- Each error's kind, the file, line and column it occurs at, the offending line of source
-  with a caret under the span, and the expected/found types
-- A use-after-move adds a `note: moved here` pointing at where the value went
-
-A program spread over several modules prints the message without a location: a span there
-indexes the module that raised the error rather than the file named on the command line.
-
-### Code Generation and Link Errors
-
-Codegen failures print as `Compilation failed: Code generation error: ...`; link failures
-name the linker invocation, for example:
-
-```text
-Compilation failed: Failed to link object file to executable
-  Caused by (1): Failed to execute cc - ensure a C compiler (gcc/clang) is installed
-  Caused by (2): No such file or directory (os error 2)
-```
-
-On Unix the linker driver is `cc`. On Windows `neurc` tries `clang`, then `lld-link`, then
-MSVC's `cl.exe`, and when all three fail it reports each driver's own reason.
-
-**Common causes**:
-- Missing C toolchain (clang or MSVC on Windows, gcc/clang on Unix)
-- Missing system libraries
-
-## Performance
-
-### Compilation Times
-
-With a release build of `neurc`, `check` on any program in `examples/` finishes in a few
-milliseconds and `compile` (linking included) in well under a second. A debug build of `neurc`
-itself is noticeably slower. For the speed of the programs it produces, see the
-[benchmarks](../../README.md#performance).
-
-### Optimization
-
-`neurc compile` supports optimization levels `-O0` through `-O3`.
-
-- `-O0`: fastest compile, no optimization. A debug build: integer overflow panics
-- `-O1`: basic optimization. From here up, integer overflow wraps
-- `-O2`: balanced optimization (the usual choice for a release build)
-- `-O3`: maximum optimization
-
-## Platform-Specific Notes
-
-### Windows
-
-**Requirements**:
-- MSVC Build Tools 2022
-- LLVM 23 (the `clang+llvm-*-x86_64-pc-windows-msvc` development archive)
-- a static libxml2 copied in as `xml2s.lib` (see
-  [troubleshooting](troubleshooting.md#cannot-open-input-file-xml2slib-windows))
-
-**Executable extension**: Always `.exe`
-
-**Path separators**: Use backslashes or forward slashes
-
-```powershell
-# Both work
-neurc compile examples\basics\hello.nr
-neurc compile examples/basics/hello.nr
-```
-
-### Linux
-
-**Requirements**:
-- GCC or Clang (`build-essential` on Debian, `base-devel` on Arch)
-- LLVM 23
-
-**Executable extension**: none
-
-### macOS
-
-**Requirements**:
-- Xcode Command Line Tools
-- LLVM 23 (via Homebrew, `llvm`)
-
-**Apple Silicon**: supported
-
-**Executable extension**: none
-
-## Advanced Usage
-
-### Target
-
-`neurc` compiles for the host target only, and the linker driver is fixed (see
-[Code Generation and Link Errors](#code-generation-and-link-errors)).
-
-### Build Scripts
-
-Integrate into build scripts:
-
-```bash
-#!/bin/bash
-set -e
-
-echo "Checking Neuro programs..."
-neurc check src/main.nr
-neurc check src/utils.nr
-
-echo "Compiling..."
-neurc compile src/main.nr -o bin/app
-
-echo "Build complete!"
-```
-
-### CI/CD Integration
+In a CI job, install `neurc` as above, then let the shell stop on the first failure:
 
 ```yaml
-# Example GitHub Actions workflow
-- name: Install LLVM
+- name: Build and run
   run: |
-    wget https://apt.llvm.org/llvm.sh
-    chmod +x llvm.sh
-    sudo ./llvm.sh 23
-    sudo apt-get install -y llvm-23-dev libmlir-23-dev mlir-23-tools libpolly-23-dev libzstd-dev zlib1g-dev
-    for var in LLVM_SYS_231_PREFIX MLIR_SYS_230_PREFIX TABLEGEN_230_PREFIX; do
-      echo "$var=/usr/lib/llvm-23" >> "$GITHUB_ENV"
-    done
-
-- name: Build Neuro compiler
-  run: cargo build --release -p neurc
-
-- name: Compile program
-  run: cargo run --release -p neurc -- compile program.nr
-
-- name: Run tests
-  run: ./program
+    neurc check src/main.nr
+    neurc compile src/main.nr -o app
+    ./app
 ```
-
-## Troubleshooting
-
-See [Troubleshooting Guide](troubleshooting.md) for common issues and solutions.
 
 ## Planned
 
-Debug information (`neurc compile -g`) and incremental compilation with a persistent cache
-are on the roadmap; see the [Quick Roadmap](../../README.md#quick-roadmap).
+Debug information and incremental compilation are planned. See the [Quick Roadmap](../../README.md#quick-roadmap).
 
-## References
+## See also
 
-- [Quick Start Guide](../getting-started/quick-start.md)
-- [Troubleshooting Guide](troubleshooting.md)
-- [Language Reference](../language-reference/types.md)
+- [Installation](../getting-started/installation.md)
+- [Quick Start](../getting-started/quick-start.md)
+- [Troubleshooting](troubleshooting.md)
+- [Tensors](../language-reference/tensors.md), for the DLPack interop behind `--emit obj`

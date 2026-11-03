@@ -442,8 +442,8 @@ fn build_elementwise<'c, 'a>(
 /// a `tensor.empty` destination, a `linalg.generic` that fills it with the element's
 /// zero, and a second one that accumulates the product into it.
 ///
-/// The fill is not optional. A reduction READS its destination at every point — that is
-/// what makes it an accumulator — and `tensor.empty` is undefined memory, so the sum
+/// The fill is not optional. A reduction READS its destination at every point (that is
+/// what makes it an accumulator) and `tensor.empty` is undefined memory, so the sum
 /// would start from whatever the allocator last left there.
 fn build_matmul<'c, 'a>(
     context: &'c Context,
@@ -795,8 +795,8 @@ pub(crate) struct Generic<'c, 'a> {
 
 /// Assemble one `linalg.generic`, with `body` as its region.
 ///
-/// Every shape this crate emits goes through here — the element-wise operation, the
-/// zero fill, and the matrix product — because the three differ only in their maps,
+/// Every shape this crate emits goes through here (the element-wise operation, the
+/// zero fill, and the matrix product) because the three differ only in their maps,
 /// their iterators and their body, which are exactly the arguments.
 pub(crate) fn generic_op<'c>(
     context: &'c Context,
@@ -1042,7 +1042,7 @@ pub(crate) fn indexing_maps<'c>(
 }
 
 /// The affine map for one operand: the result's dimensions on the left, and on
-/// the right the operand's own index per axis — a dimension where it walks that
+/// the right the operand's own index per axis: a dimension where it walks that
 /// axis, `0` where it is stretched, and nothing at all when it is a scalar.
 fn affine_map(rank: usize, axes: &OperandAxes) -> String {
     let dimensions = (0..rank)
@@ -1067,7 +1067,7 @@ fn affine_map(rank: usize, axes: &OperandAxes) -> String {
 /// One iterator per axis of the index space: the leading `rank - reductions` are
 /// `parallel`, the trailing `reductions` accumulate.
 ///
-/// An element-wise operation has no reduction — every one of its axes is independent.
+/// An element-wise operation has no reduction: every one of its axes is independent.
 /// A matrix product has exactly one, the contracted axis, and it comes last because
 /// that is the order the affine maps above number the dimensions in.
 pub(crate) fn iterator_types<'c>(

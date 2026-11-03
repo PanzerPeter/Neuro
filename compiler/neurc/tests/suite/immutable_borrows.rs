@@ -309,3 +309,47 @@ func main() -> i32 {{
         );
     }
 }
+
+/// A borrowed temporary takes the type of the reference it fills. `g(&5)` against `&i64`
+/// used to store the literal as its `i32` default and lend that 4-byte slot, so the callee
+/// read 8 bytes and the upper half was whatever the stack held: a wrong answer in a debug
+/// build and a correct one at `-O2`. Every literal shape here reads back exactly.
+#[test]
+fn regression_a_borrowed_literal_takes_the_type_of_its_reference() {
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "borrowed_literal_width.nr",
+            r#"
+func g(x: &i64) -> i64 {
+    *x * 2
+}
+
+func h(x: &f32) -> f32 {
+    *x + 0.5
+}
+
+func b(x: &u8) -> u8 {
+    *x + 1
+}
+
+func f(x: &i64, step: &mut i64) -> i64 {
+    *step += 1
+    *x * 2 + *step
+}
+
+func main() -> i32 {
+    mut s: i64 = 1
+    val a = g(&5)
+    val c = g(&-7)
+    val d = g(&(2 + 3))
+    val e = h(&1.5)
+    val k = b(&200)
+    val m = f(&5, &mut s)
+    val big = g(&5_000_000_000)
+    (a + c + d + m + big / 1_000_000_000) as i32 + k as i32 + (e * 2.0) as i32
+}
+"#,
+        )
+        .expect("compilation failed");
+    assert_eq!(exit, 233);
+}

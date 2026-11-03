@@ -1,8 +1,7 @@
-// Generic methods: a method declares type parameters of its own after its name.
-//
-// `Shelf::pick<U>` works for any `U`: the call infers it from the arguments, or a
-// turbofish after the method name supplies it. Each `U` a program uses is one compiled
-// copy of the method. An associated function takes its own parameters the same way.
+// Generic methods: a method declares its own type parameters after its name.
+// `Shelf::pick<U>` works for any `U`. The call infers `U` from its arguments, or a
+// turbofish after the method name supplies it. Each `U` a program uses compiles to one copy
+// of the method.
 
 struct Shelf {
     left: bool

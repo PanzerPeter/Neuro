@@ -1,7 +1,7 @@
 // In-place compound assignment on tensors (Phase 2B): `w += g`, `w -= g`, and the
 // rest of the `*Assign` family, end to end through `neurc compile` and the linked binary.
 //
-// A tensor still cannot be read back — indexing and the reductions are later 2B items —
+// A tensor still cannot be read back (indexing and the reductions are later 2B items)
 // so element values are asserted with the guard the elements already carry. Adding a
 // value to `i32`'s maximum panics on the debug tier exactly when that value is positive,
 // and adding it to the minimum panics exactly when it is negative, so bracketing a
@@ -190,8 +190,8 @@ func main() -> i32 {
 }
 
 /// Scalar compound assignment is unaffected by the tensor path: it still desugars to
-/// `x = x OP rhs`. The user-type half of the desugaring — an operator-trait impl reached
-/// through `+=` — is covered by `operator_traits.rs`.
+/// `x = x OP rhs`. The user-type half of the desugaring (an operator-trait impl reached
+/// through `+=`) is covered by `operator_traits.rs`.
 #[test]
 fn scalar_compound_assignment_still_desugars() {
     let source = r#"

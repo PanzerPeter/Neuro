@@ -1,24 +1,15 @@
-// Dynamic tensor shapes: `Tensor<f32, [?, 784]>`
-//
-// A `?` marks an axis whose extent is not known until run time. It is an ACCEPTING
-// position: one function written against `[?, 4]` takes a `[2, 4]` and a `[7, 4]` alike,
-// while the axes beside it stay checked exactly as before — `[2, 8]` is still a compile
-// error, because only the axis written `?` opted out.
-//
-// Widening is what `?` is for, and it goes one way. A statically shaped tensor is
-// accepted wherever a `?` is expected; the reverse is not, because a dynamic tensor's
-// run-time shape could be anything and a static annotation would let the next reader
-// index it at strides its buffer may not have.
-//
-// A `?`-shaped value is a tensor like any other at run time — a DLPack handle addressing
-// its buffer — so it binds, moves across a call boundary, and is released at scope exit
-// with no extent involved. What needs an extent does not work on one and says so: a
-// constructor and a tensor literal have no size to allocate, `.clone()` no size to copy,
-// an index no strides to compute, and the four shape casts no element count. Build such
-// a tensor at a static shape and pass it where the `?` is expected.
+// Dynamic tensor shapes: `Tensor<f32, [?, 784]>`. A `?` marks an axis whose extent is known
+// only at run time. It accepts any extent there, so a function written against `[?, 4]`
+// takes `[2, 4]` and `[7, 4]` alike, while the other axes stay checked: `[2, 8]` is still a
+// compile error. Widening goes one way. A static tensor is accepted where a `?` is
+// expected, but not the reverse, because a dynamic tensor's shape could be anything. A `?`
+// tensor binds, moves and is released like any other. Operations that need an extent (a
+// constructor, a tensor literal, `.clone()`, an index, the shape casts) reject it, so build
+// it at a static shape and pass it where the `?` is expected.
 
 // One signature, every batch size. The second axis is fixed, so a row of the wrong
 // width is still rejected at compile time.
+
 func embed_width(batch: &Tensor<i32, [?, 4]>) -> i32 {
     return 4
 }

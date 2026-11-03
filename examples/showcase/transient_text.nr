@@ -1,20 +1,10 @@
-// Showcase: text that is built, read once, and thrown away.
-//
-// Integration example combining the release of anonymous heap strings with the
-// features that produce them:
-//   `[T; N]` arrays + `for x in a` · `StringBuilder` + `push_str` · string
-//   interpolation with the format mini-language (:>W) · `pool { }` · struct +
-//   `impl` methods · `&string` parameters · `.slice(range)`.
-//
-// Every string below is owned by nobody: a `+` chain, an interpolation, and a
-// `StringBuilder::to_string` copy each allocate a buffer that is read by one consumer
-// and then unreachable. None of them is ever bound to a name, so no scope exit
-// can release them: they are released where they are consumed instead. Run the
-// loop with a large `ROUNDS` and the process's heap stays flat.
-//
-// The counts are what the program asserts: they only come out right if every
-// buffer was still intact when it was read, which a release emitted one step too
-// early would break.
+// Showcase: text that is built, read once, and thrown away. Integration example: `[T; N]`
+// arrays iterated by value, `StringBuilder` with `push_str`, interpolation with a width,
+// `pool { }`, a struct with `impl` methods, `&string` parameters, and `.slice(range)`. Each
+// string is owned by nobody: a `+` chain, an interpolation and a `StringBuilder::to_string`
+// copy each allocate a buffer that one consumer reads before it becomes unreachable.
+// Nothing binds these to a name, so they are released where they are consumed. With a large
+// `ROUNDS` the heap stays flat.
 
 const ROUNDS: i32 = 200
 

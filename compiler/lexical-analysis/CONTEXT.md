@@ -6,7 +6,7 @@ Transform raw Neuro source text into a validated token stream as the first stage
 ## Entry Point
 - Type: Library function
 - Input: `source: &str`
-- Output: `Result<Vec<Token>, LexError>`
+- Output: `Result<Vec<Token>, LexError>`, also exported as the alias `LexResult<Vec<Token>>`
 
 `LexError::span()` gives the range every variant carries, so a caller can render a location.
 

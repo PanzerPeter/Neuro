@@ -1,11 +1,7 @@
-// Neuro: AI-first compiled language
-//
-// A single perceptron (neuron) model demonstrating:
-//   structs · impl blocks · associated functions · instance methods
-//   val/mut bindings · if/block expressions · implicit returns
-//
-// Both regions of the activation are printed, so the ReLU clamp is visible as
-// output and not only as an exit code.
+// A single perceptron (neuron) model. Demonstrates structs, `impl` blocks, associated
+// functions, instance methods, `val` and `mut` bindings, if and block expressions, and
+// implicit returns. Both regions of the activation are printed, so the ReLU clamp shows in
+// the output.
 
 struct Neuron {
     weight: f64,

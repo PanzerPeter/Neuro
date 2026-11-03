@@ -293,3 +293,40 @@ func main() -> i32 {
         "{error}"
     );
 }
+
+/// A call through a function-typed parameter names the parameter, even when a top-level
+/// generic function has the same name. The checker used to resolve the generic first and
+/// refuse the call, and since the prelude's `Option::map` takes a parameter `f`, declaring
+/// any generic `func f<T>` broke programs that never called it.
+#[test]
+fn regression_a_function_parameter_shadows_a_same_named_generic_function() {
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "param_shadows_generic.nr",
+            r#"
+trait Shape {
+    func area(&self) -> i32
+}
+
+struct Sq { s: i32 }
+
+impl Shape for Sq {
+    func area(&self) -> i32 { self.s * self.s }
+}
+
+func f<T: Shape>(shape: &T) -> i32 { shape.area() }
+
+func h<T>(a: T, b: T) -> i32 { 9 }
+
+func apply(h: (i32) -> i32, v: i32) -> i32 { h(v) }
+
+func main() -> i32 {
+    val doubled = Some(3).map(|x: i32| -> i32 { x * 2 }) ?? 0
+    val sq = Sq { s: 2 }
+    apply(|x: i32| -> i32 { x + 1 }, 4) * 10 + doubled + f(&sq)
+}
+"#,
+        )
+        .expect("compilation failed");
+    assert_eq!(exit, 60);
+}

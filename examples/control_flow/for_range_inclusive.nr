@@ -1,7 +1,5 @@
-// The inclusive range `for` loop: `start..=end` visits `end` as well, which is
-// the one difference from the half-open `start..end` form.
-//
-// The loop prints each value, so `5` showing up at the end is the whole point.
+// The inclusive range `for` loop: `start..=end` visits `end` as well, unlike `start..end`.
+// Each value is printed, so the `5` at the end shows the upper bound is included.
 
 func main() -> i32 {
     mut total: i32 = 0

@@ -7,7 +7,8 @@ Validate the type correctness and scope rules of a parsed Neuro program before c
 - Type: Library function
 - Input: `items: &[Item]`
 - Output: `Result<Vec<Warning>, Vec<TypeError>>`: `Ok` carries non-fatal lint warnings, `Err`
-  fatal type errors. Warnings are dropped when errors are present.
+  fatal type errors. Warnings are dropped when errors are present. A `Warning`'s `WarningCode`
+  names its lint, the one name it prints and `@allow(...)` accepts.
 
 ## Shared Kernel
 - ast-types: read-only traversal of `Item` / `Expr` / `Stmt` nodes
@@ -1079,7 +1080,9 @@ arm, or outside an inner closure that binds the name is a capture. The body is c
 `current_function_return_type` redirected to the closure's return type, so an early `return` binds
 to the closure, and with `loop_stack` emptied for the same reason: an enclosing loop is not a
 `break` target from inside a closure, so one written there is `BreakOutsideLoop`. Both are restored
-afterwards. `check_plain_call` dispatches a call on a local binding of function type.
+afterwards. `check_plain_call` dispatches a call on a local binding of function type before it
+looks for a generic or ordinary function of that name, in `hir-lowering`'s order: only a newtype
+constructor outranks a local, so a parameter `f` is never mistaken for a declared `func f<T>`.
 
 A non-generic function's bare name types as its `Type::Function` (BUG-071); only a generic one
 is `FunctionUsedAsValue`, having no single type until its type arguments are named.

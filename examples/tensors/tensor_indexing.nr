@@ -1,19 +1,12 @@
-// Tensor slicing and indexing: `t[i, j]`, `t[0, ..]`, `t[1..3, 2..5]`
-//
-// A tensor index gives one argument per axis, and each argument is a position, a
-// range, or the whole axis `..`. An axis given a POSITION is dropped from the result,
-// so naming every axis reads one element; an axis given a range or `..` survives at
-// its new extent, so the result is a smaller tensor.
-//
-// A position may be any integer value, including one only known at run time. A range's
-// bounds must be constants, because the extent they produce is part of the result's
-// TYPE and a type cannot wait for a value.
-//
-// A slice is a fresh owned tensor holding a copy, not a view into the source: a tensor
-// owns its buffer and frees it when it goes out of scope, so two tensors never share
-// one buffer.
+// Tensor slicing and indexing: `t[i, j]`, `t[0, ..]` and `t[1..3, 2..5]`. Each axis gets a
+// position, a range or `..`. A position drops its axis from the result, so naming every
+// axis reads one element. A range or `..` keeps its axis at the new extent. A position may
+// be a run-time integer, but range bounds must be constants, since the extent is part of
+// the result's type. A slice is a fresh owned tensor holding a copy, not a view, so two
+// tensors never share a buffer.
 
 // A borrow reads a tensor without consuming it, so the caller keeps its own.
+
 func trace(m: &Tensor<i32, [3, 3]>) -> i32 {
     mut total = 0
     for i in 0..3 {
@@ -23,7 +16,7 @@ func trace(m: &Tensor<i32, [3, 3]>) -> i32 {
 }
 
 // A slice is an ordinary tensor value, so it passes to a function by value like any
-// other — and moves, like any other.
+// other: and moves, like any other.
 func sum_row(row: Tensor<i32, [3]>) -> i32 {
     return row[0] + row[1] + row[2]
 }

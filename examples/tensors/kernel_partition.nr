@@ -1,25 +1,18 @@
 // Writing from a GPU kernel so that no two threads touch one element: `out.partition(...)`.
-//
-// `unsafe { out[i] = v }` in a `@kernel` writes wherever `i` says, and nothing stops two
-// threads from writing the same element: the `unsafe` block is where you vouch they never do.
-// `out.partition(|base, slice| { ... })` instead hands each thread its own run of `out`,
-// so no two threads can meet, and needs no `unsafe`. The grid runs one thread
-// per element of the kernel's first `KernelOut` (the grid tensor). Partitioning a tensor
-// with `k` times as many elements gives each of those threads `k` of them, in row-major
-// order: `slice` is the run, indexed from 0 up to `slice.len()`, and `base` is the
-// row-major position of its first element. A thread in the overhang past the grid
-// tensor's edge gets no run, so the body needs no `row < M` guard.
-//
-// `.flat(i)` reads any tensor at row-major position `i`, whatever its rank. That is how
-// a run's own index turns back into the input element it sits over: `base + i`.
-//
-// The element count has to divide evenly among the grid's threads, and the compiler
-// refuses a partition where it does not. Like any kernel, this needs a GPU and a
-// Linux `neurc`.
+// `unsafe { out[i] = v }` writes wherever `i` says, and nothing stops two threads writing
+// the same element. The `unsafe` block is where you vouch that they never do.
+// `out.partition(|base, slice| { ... })` hands each thread its own run of `out`, so no two
+// threads meet and no `unsafe` is needed. The grid runs one thread per element of the
+// kernel's first `KernelOut`. Partitioning a tensor with `k` times as many elements gives
+// each thread `k` of them in row-major order: `slice` is the run, indexed from 0, and
+// `base` is the position of its first element. `.flat(i)` reads any tensor at row-major
+// position `i`. The element count must divide evenly among the grid's threads, or the
+// compiler refuses. A GPU and a Linux `neurc` are needed.
 
 // One thread per row of `m`: the grid tensor is `totals`, 6 rows in blocks of 4, so the
 // last 2 threads of the second block own nothing. A thread's run of `scaled` is its
 // row's 5 elements, and its run of `totals` is its one total.
+
 @kernel(threads: [4])
 func scale_rows(m: Tensor<f32, [6, 5]>, factor: Tensor<f32, [6]>, totals: KernelOut<Tensor<f32, [6]>>, scaled: KernelOut<Tensor<f32, [6, 5]>>) {
     scaled.partition(|base, row| {

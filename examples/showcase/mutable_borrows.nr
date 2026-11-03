@@ -1,11 +1,10 @@
-// Mutable borrows `&mut T` and the dereference operator `*`.
-//
-// A `&mut T` reference grants write access to a `mut` binding without taking
-// ownership. The value is read and written through the `*` dereference operator.
-// Mutating through the reference is visible at the original binding after the
-// call returns: the borrow points at the caller's storage, it does not copy.
+// Mutable borrows `&mut T` and the dereference operator `*`. A `&mut T` grants write access
+// to a `mut` binding without taking ownership. Reads and writes go through `*`, and the
+// change is visible at the original binding after the call, because the borrow points at
+// the caller's storage.
 
 // Increment the integer the reference points at, in place.
+
 func increment(n: &mut i32) {
     *n = *n + 1
 }
