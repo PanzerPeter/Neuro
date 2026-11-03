@@ -4,7 +4,7 @@ use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
-use ast_types::{ClosureParam, Expr, Stmt};
+use ast_types::{ClosureParam, Expr};
 
 use super::Parser;
 
@@ -152,57 +152,6 @@ impl Parser {
             is_move,
             span,
         })
-    }
-
-    /// Parse an if-expression. The `if` token has already been consumed; `start_span` is its span.
-    pub(super) fn parse_if_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
-        self.skip_newlines();
-        let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
-        self.skip_newlines();
-
-        let then_block = self.parse_block()?;
-        let mut end_span = self.previous_span(start_span);
-        self.skip_newlines_before_else();
-
-        let mut else_if_blocks: Vec<(Expr, Vec<Stmt>)> = Vec::new();
-        let mut else_block: Option<Vec<Stmt>> = None;
-
-        while self.check(&TokenKind::Else) {
-            self.advance(); // consume 'else'
-            self.skip_newlines();
-
-            if self.check(&TokenKind::If) {
-                self.advance(); // consume 'if'
-                self.skip_newlines();
-                let elif_cond = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
-                self.skip_newlines();
-                let elif_block = self.parse_block()?;
-                end_span = self.previous_span(start_span);
-                else_if_blocks.push((elif_cond, elif_block));
-                self.skip_newlines_before_else();
-            } else {
-                else_block = Some(self.parse_block()?);
-                end_span = self.previous_span(start_span);
-                break;
-            }
-        }
-
-        Ok(Expr::If {
-            condition: Box::new(condition),
-            then_block,
-            else_if_blocks,
-            else_block,
-            span: start_span.merge(end_span),
-        })
-    }
-
-    /// Skip the newlines between an `if` block and an `else` on a later line, and
-    /// only then: with no `else` to find, the newline is what ends the expression, and
-    /// skipping it let a following `-x` or `(...)` line continue it as an operand.
-    fn skip_newlines_before_else(&mut self) {
-        if matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::Else)) {
-            self.skip_newlines();
-        }
     }
 
     /// Parse a block expression. The `{` has already been consumed; `start_span` is its span.

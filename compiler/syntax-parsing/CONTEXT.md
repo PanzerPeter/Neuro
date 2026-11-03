@@ -114,6 +114,15 @@ no types.
   composition rather than a stray comparison.
 - **Instances**: a turbofish with no `(` after it is `Expr::Instance`, the generic named as a
   value.
+- **`if val` and `while val`** (`parser/conditionals.rs`): `if val P = e { A } else { B }`
+  becomes `match e { P => { A }, _ => { B } }`, so both take every pattern a `match` arm does
+  and reuse its move, borrow and exhaustiveness rules. An `else if val` link makes the rest of
+  the chain the `_` arm (or the `else` of the plain `if` before it), nested through `nested()`
+  so a long chain hits the depth limit instead of the stack. A chain with no final `else` is
+  unit, as an `if` is: each branch whose last statement is a value gets an empty-block tail, or
+  the `match` arms would have to agree. `while val P = e { B }` becomes
+  `while (true) { match e { P => { B }, _ => break } }`: a `while` so `break` still carries no
+  value, and `(true)` because the bare literal is what `prefer_loop_over_while_true` flags.
 
 `newtype` is the deliberate counter-example: unlike a `type` alias it is a distinct nominal type,
 so it stays an `Item::Newtype`. Construction `Name(value)` reuses the call parse and `.0` reuses

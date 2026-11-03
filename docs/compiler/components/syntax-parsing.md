@@ -38,9 +38,11 @@ an associated function, otherwise `&self`, `&mut self`, or owned `self`.
 
 **Statements** (`Stmt`): bindings (`val` / `mut`), assignment and compound assignment, field
 and index assignment, dereference assignment, `return`, `break`, `continue`, `if`, `while`,
-`for`, `loop`, `match`, destructuring bindings, `val-else`, and a bare expression. An `if` in
+`for`, `loop`, `match`, destructuring bindings, `val-else`, and a bare expression. A plain `if` in
 statement position always parses to `Stmt::If`, never `Stmt::Expr(Expr::If)`, which is why the
-type checker and HIR lowering each recognise a trailing `Stmt::If` as a block's value.
+type checker and HIR lowering each recognise a trailing `Stmt::If` as a block's value. `if val`
+and `while val` have no node: they parse to the `match` they mean (see the slice's
+`CONTEXT.md`).
 
 **Expressions** (`Expr`): literals, identifiers, unary and binary operators, calls (with
 optional turbofish type arguments), index, field access, `Type::member` paths, struct and enum
@@ -140,6 +142,7 @@ program that compiles. That is the grammar's source of truth. This table maps it
 | Traits, `impl` blocks, methods, associated types | `parser/item_impls.rs` |
 | `import` / `export import` forms | `parser/item_imports.rs` |
 | Statements, bindings, control flow | `parser/statements.rs`, `stmt_loops.rs`, `stmt_assignments.rs` |
+| `if` chains, `if val`, `while val` | `parser/conditionals.rs` |
 | `val PATTERN = expr else { ... }` | `parser/stmt_val_else.rs` |
 | Destructuring bindings | `parser/stmt_destructure.rs` |
 | Match patterns | `parser/patterns.rs` |

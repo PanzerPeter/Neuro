@@ -41,7 +41,7 @@ Design goals:
 | [Variables](language-reference/variables.md) | `val`, `mut`, reassignment, scoping |
 | [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, generics, dispatch, closures |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |
-| [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `pool` arena blocks |
+| [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `if val` / `while val`, `pool` arena blocks |
 | [Operators](language-reference/operators.md) | Arithmetic, comparison, logical, bitwise, cast, overloading, assignment places, `??`, `?`, `\|>`, `>>` |
 | [Structs](language-reference/structs.md) | User-defined types, `impl` methods, generic methods, associated functions, derives and the derivable traits as bounds, enums |
 | [Memory Model](language-reference/memory-model.md) | What is reclaimed and when: stack values, collections, reassigned bindings, `pool` blocks, and what still leaks in alpha |

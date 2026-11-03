@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.26.0] - 2026-11-03
+
+### Added
+
+- `if val PATTERN = value { ... }` runs its block only when `value` matches, with the
+  pattern's names bound inside it. With an `else` it is a value, like `if`; links chain with
+  plain `else if` conditions in any order.
+- `while val PATTERN = value { ... }` evaluates `value` before every pass and stops at the first
+  one that does not match. It is a `while`: `break`, `continue` and labels work, and `break`
+  carries no value. Both forms take any pattern a `match` arm takes.
+
 ## [5.25.0] - 2026-11-03
 
 ### Added

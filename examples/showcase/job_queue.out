@@ -6,4 +6,7 @@ slot 4: cost 9 -> 45
 scored total               = 63
 settled (val-else |verdict|) = 73
 drained (val-else break)   = 3
-total                      = 139
+retry: cost 60 -> 30
+retry: cost 0 has nothing to halve
+recovered (while val)      = 30
+total                      = 169

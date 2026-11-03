@@ -1,10 +1,12 @@
-// Showcase: `val-else` early exit carrying a small job queue, combined with
-// earlier features.
+// Showcase: `val-else` early exit and `if val` / `while val` carrying a small job
+// queue, combined with earlier features.
 //
 // Cumulative integration example combining:
 //   `val-else` binding a pattern for the rest of the block, with the three
 //     type-directed `else` forms: `|reason|` on a Result, `|verdict|` on a plain
 //     enum, and a bare `else { break }` on an Option
+//   · `if val` taking only the branch it cares about, followed by a plain
+//     `else if`, and `while val` draining a retry queue with `continue`
 //   · `Option<T>` / `Result<T, E>` from the implicit prelude
 //   · `??` supplying a default for an absent lookup
 //   · a `Vec<i32>` collection: `push`, `pop`, `for`-in, scope-exit free
@@ -15,6 +17,8 @@
 // The point of the combination: `val-else` is the shape that replaces a `match`
 // whose success arm would otherwise swallow the entire rest of the function. Here
 // every stage validates, exits on failure, and keeps writing straight-line code.
+// `if val` and `while val` are the other half: the success branch is the only one
+// with work to do, so it is the only one written.
 
 @derive(Copy, Clone)
 struct Job {
@@ -91,6 +95,7 @@ func main() -> i32 {
     val costs: [i32; 5] = [4, 12, 0, 60, 9]
 
     mut accepted: Vec<i32> = Vec::new()
+    mut retry: Vec<i32> = Vec::new()
     mut total: i32 = 0
 
     for i in 0..5 {
@@ -102,6 +107,10 @@ func main() -> i32 {
         println("slot {i}: cost {cost} -> {points}")
         if points > 0 {
             accepted.push(points)
+        }
+        // A rejected cost is queued for one retry; a valid one needs nothing here.
+        if val Result::Err(_) = priced(cost) {
+            retry.push(cost)
         }
         total = total + points
     }
@@ -127,7 +136,24 @@ func main() -> i32 {
 
     println("drained (val-else break)   = {drained}")
 
-    val sum = total + settled + drained
+    // The same drain as a `while val`: `pop` runs before every pass and the loop ends
+    // at the first `None`. A retry halves the cost and goes through `priced` again.
+    mut recovered: i32 = 0
+    while val Some(cost) = retry.pop() {
+        val halved = cost / 2
+        if val Result::Ok(valid) = priced(halved) {
+            recovered = recovered + valid
+        } else if halved == 0 {
+            println("retry: cost {cost} has nothing to halve")
+            continue
+        }
+        println("retry: cost {cost} -> {halved}")
+    }
+    // costs 0 and 60 were rejected: 60 / 2 = 30 is within budget, 0 stays 0  => recovered 30
+
+    println("recovered (while val)      = {recovered}")
+
+    val sum = total + settled + drained + recovered
     println("total                      = {sum}")
-    sum                        // 63 + 73 + 3 = 139
+    sum                        // 63 + 73 + 3 + 30 = 169
 }

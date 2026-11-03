@@ -190,7 +190,8 @@ impl Parser {
             TokenKind::If => {
                 let start_span = token.span;
                 self.advance(); // consume 'if'
-                self.parse_if_stmt(start_span)
+                self.parse_if_chain(start_span, true)
+                    .map(super::conditionals::IfChain::into_stmt)
             }
             TokenKind::While => {
                 let start_span = token.span;

@@ -1,5 +1,5 @@
-// Control-flow statements: `if`, `while`, `loop`, `for`, and `break`, with the
-// loop labels each may carry.
+// Control-flow statements: `while`, `loop`, `for`, and `break`, with the loop
+// labels each may carry. `if` chains live in `conditionals.rs`.
 //
 // One of the statement-shape parsers; each adds methods to the same
 // `impl Parser` block.
@@ -14,52 +14,6 @@ use ast_types::{Expr, LoopAdapter, LoopAdapterKind, Stmt};
 use super::Parser;
 
 impl Parser {
-    /// Parse an if/else statement
-    pub(crate) fn parse_if_stmt(&mut self, start_span: Span) -> ParseResult<Stmt> {
-        self.skip_newlines();
-
-        let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
-        self.skip_newlines();
-
-        let then_block = self.parse_block()?;
-        let mut end_span = self.previous_span(start_span);
-        self.skip_newlines();
-
-        let mut else_if_blocks = Vec::new();
-        let mut else_block = None;
-
-        while self.check(&TokenKind::Else) {
-            self.advance(); // consume 'else'
-            self.skip_newlines();
-
-            if self.check(&TokenKind::If) {
-                self.advance(); // consume 'if'
-                self.skip_newlines();
-
-                let else_if_condition =
-                    self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
-                self.skip_newlines();
-
-                let else_if_block = self.parse_block()?;
-                end_span = self.previous_span(start_span);
-                else_if_blocks.push((else_if_condition, else_if_block));
-                self.skip_newlines();
-            } else {
-                else_block = Some(self.parse_block()?);
-                end_span = self.previous_span(start_span);
-                break;
-            }
-        }
-
-        Ok(Stmt::If {
-            condition,
-            then_block,
-            else_if_blocks,
-            else_block,
-            span: start_span.merge(end_span),
-        })
-    }
-
     /// Parse a while statement, optionally prefixed with a loop `label`.
     pub(crate) fn parse_while_stmt(
         &mut self,
@@ -67,6 +21,10 @@ impl Parser {
         label: Option<Identifier>,
     ) -> ParseResult<Stmt> {
         self.skip_newlines();
+        if self.check(&TokenKind::Val) {
+            self.advance(); // consume 'val'
+            return self.parse_while_val(start_span, label);
+        }
 
         let condition = self.guarded_header(|p| p.parse_expr(Precedence::Lowest))?;
         self.skip_newlines();

@@ -73,6 +73,7 @@ mod held_borrows;
 mod higher_order_derivatives;
 mod hir_lowering;
 mod if_block_expressions;
+mod if_val;
 mod immutable_borrows;
 mod implicit_prelude;
 mod imports;

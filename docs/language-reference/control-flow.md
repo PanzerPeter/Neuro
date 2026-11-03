@@ -1114,6 +1114,50 @@ loop {
 
 Runnable program: [`examples/control_flow/val_else.nr`](../../examples/control_flow/val_else.nr).
 
+## `if val` and `while val`
+
+`if val PATTERN = value { ... }` runs its block only when `value` matches the pattern, with
+the pattern's names bound inside that block. Where `val-else` handles the failing case, `if val`
+is for code where only the matching case has work to do.
+
+```neuro
+if val Some(t) = lookup(key) {
+    println("found {t}")
+}
+```
+
+With an `else` it is an expression, like `if`, and every branch must have the same type.
+Without one it is a statement and its block's value is discarded. Links chain with plain
+`else if` conditions in any order:
+
+```neuro
+func to_celsius(r: Reading) -> i32 {
+    if val Reading::Celsius(c) = r { c }
+    else if val Reading::Fahrenheit(f) = r { (f - 32) * 5 / 9 }
+    else { 0 }
+}
+```
+
+`while val PATTERN = value { ... }` evaluates `value` before every pass and stops at the
+first one that does not match. It is a `while` loop: `break`, `continue` and labels work,
+and `break` takes no value.
+
+```neuro
+while val Some(n) = queue.pop() {
+    if n % 2 == 0 { continue }
+    odd_total += n
+}
+```
+
+Each form takes one pattern, and that pattern can be anything a `match` arm takes (see
+[Expressions → Match Expressions](expressions.md#match-expressions)). Matching against a
+pattern moves the value just as `match` does, so binding an owning payload uses up the
+scrutinee. A non-tail `if val` with an `else` still needs its branches to agree in type,
+which a plain `if` statement does not; the error then names the `match` the `if val` stands
+for.
+
+Runnable program: [`examples/control_flow/if_val.nr`](../../examples/control_flow/if_val.nr).
+
 ## References
 
 - [Expressions](expressions.md): boolean expressions

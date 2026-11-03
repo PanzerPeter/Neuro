@@ -122,6 +122,7 @@ control_flow/for_range_inclusive.nr   15
 control_flow/for_range_rev.nr         0
 control_flow/for_range_step.nr        0
 control_flow/if_block_expressions.nr  149
+control_flow/if_val.nr                67
 control_flow/iterator_protocol.nr     79
 control_flow/labeled_breaks.nr        4
 control_flow/loop_adapters.nr         109
@@ -181,7 +182,7 @@ showcase/grid_update.nr              50
 showcase/held_destruction.nr         5
 showcase/incident_desk.nr            33
 showcase/inventory_ledger.nr         181
-showcase/job_queue.nr                139
+showcase/job_queue.nr                169
 showcase/log_builder.nr              64
 showcase/logistic_fit.nr             6
 showcase/mixed_precision.nr          6

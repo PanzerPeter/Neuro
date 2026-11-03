@@ -271,7 +271,9 @@ impl Parser {
                 Ok(Expr::ArrayLiteral { elements, span })
             }),
 
-            TokenKind::If => self.parse_if_expr(token.span),
+            TokenKind::If => self
+                .parse_if_chain(token.span, false)
+                .map(super::conditionals::IfChain::into_expr),
 
             TokenKind::LeftBrace => self.parse_block_expr(token.span),
 

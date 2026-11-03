@@ -5,6 +5,7 @@ use lexical_analysis::{Token, TokenKind};
 use crate::errors::{ParseError, ParseResult};
 use shared_types::Span;
 
+mod conditionals;
 mod expr_index;
 mod expr_infix;
 mod expr_prefix;
