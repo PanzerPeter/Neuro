@@ -159,7 +159,7 @@ impl TypeChecker {
             }
         };
 
-        self.symbols.pop_scope();
+        self.pop_scope();
         self.current_function_return_type = saved_return;
         self.inferring_closure_return = saved_inferring;
         self.loop_stack = saved_loops;
@@ -242,7 +242,7 @@ impl TypeChecker {
                 }
             }
         }
-        self.symbols.pop_scope();
+        self.pop_scope();
     }
 
     /// Check a block-bodied closure nothing gives a return type, and return the type of
@@ -279,7 +279,7 @@ impl TypeChecker {
                 }
             };
         }
-        self.symbols.pop_scope();
+        self.pop_scope();
         result
     }
 

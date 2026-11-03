@@ -173,6 +173,9 @@ pub(crate) struct TypeChecker {
     /// The same constants' value expressions, for the one place a constant is folded
     /// into a type rather than read as a value: a `.reshape` extent.
     pub(crate) constant_values: HashMap<String, ast_types::Expr>,
+    /// Function-body constants still in scope, each with the symbol-table depth it was
+    /// declared at, innermost last. Closing a scope removes the ones declared inside it.
+    pub(crate) local_constants: Vec<(String, usize)>,
     /// Collected type errors
     errors: Vec<TypeError>,
     /// Collected non-fatal lint warnings
@@ -505,6 +508,7 @@ impl TypeChecker {
             lifetime_scope: HashSet::new(),
             constants: HashMap::new(),
             constant_values: HashMap::new(),
+            local_constants: Vec::new(),
             errors: Vec::new(),
             warnings: Vec::new(),
             current_function_return_type: None,

@@ -16,11 +16,23 @@ use shared_types::Span;
 use std::collections::HashMap;
 
 impl TypeChecker {
+    /// Whether a struct, enum, newtype or trait already holds `name`. Type names share
+    /// one namespace, so a second declaration of a name is refused whatever its kind.
+    /// Kinds register in a fixed order (newtypes, enums, traits, structs), and each
+    /// checks the kinds before it, so the later declaration in that order is reported.
+    pub(crate) fn nominal_name_taken(&self, name: &str) -> bool {
+        self.struct_defs.contains_key(name)
+            || self.generic_structs.contains_key(name)
+            || self.enum_defs.contains_key(name)
+            || self.newtype_defs.contains_key(name)
+            || self.trait_names.contains(name)
+    }
+
     /// Register a struct definition without checking field initializers.
     /// Called in the pre-registration pass so that structs can be referenced
     /// by functions and other structs defined later in the file.
     pub(crate) fn register_struct(&mut self, def: &StructDef) -> Option<()> {
-        if self.struct_defs.contains_key(&def.name.name) {
+        if self.nominal_name_taken(&def.name.name) {
             self.record_error(TypeError::StructAlreadyDefined {
                 name: def.name.name.clone(),
                 span: def.name.span,
@@ -309,9 +321,7 @@ impl TypeChecker {
     /// resolve `self.field` while being checked abstractly, mirroring how a generic
     /// function body checks once with placeholders.
     pub(crate) fn register_generic_struct(&mut self, def: &StructDef) {
-        if self.struct_defs.contains_key(&def.name.name)
-            || self.generic_structs.contains_key(&def.name.name)
-        {
+        if self.nominal_name_taken(&def.name.name) {
             self.record_error(TypeError::StructAlreadyDefined {
                 name: def.name.name.clone(),
                 span: def.name.span,

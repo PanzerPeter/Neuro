@@ -256,6 +256,20 @@ fn slice_receiver_of(expr: &Expr) -> Option<String> {
 }
 
 impl TypeChecker {
+    /// Close the innermost block scope, and with it every function-body `const` the block
+    /// declared, so a later block or function cannot read one.
+    pub(crate) fn pop_scope(&mut self) {
+        self.symbols.pop_scope();
+        let depth = self.symbols.depth();
+        while let Some((name, at)) = self.local_constants.last()
+            && *at > depth
+        {
+            self.constants.remove(name);
+            self.constant_values.remove(name);
+            self.local_constants.pop();
+        }
+    }
+
     /// Make `holder` hold the borrows `value`, of type `ty`, carries into it: a struct,
     /// enum, tuple or array built around a borrow, a call's result, a block, `if` or
     /// `match` value, a copied binding, or a closure. Each is a way for a borrow to
@@ -685,7 +699,7 @@ impl TypeChecker {
                 for stmt in then_block {
                     let _ = self.check_stmt(stmt);
                 }
-                self.symbols.pop_scope();
+                self.pop_scope();
                 if !stmts_diverge(then_block) {
                     fell_through.push(self.symbols.snapshot_moves());
                 }
@@ -707,7 +721,7 @@ impl TypeChecker {
                     for stmt in else_if_stmts {
                         let _ = self.check_stmt(stmt);
                     }
-                    self.symbols.pop_scope();
+                    self.pop_scope();
                     if !stmts_diverge(else_if_stmts) {
                         fell_through.push(self.symbols.snapshot_moves());
                     }
@@ -719,7 +733,7 @@ impl TypeChecker {
                     for stmt in else_stmts {
                         let _ = self.check_stmt(stmt);
                     }
-                    self.symbols.pop_scope();
+                    self.pop_scope();
                     if !stmts_diverge(else_stmts) {
                         fell_through.push(self.symbols.snapshot_moves());
                     }
@@ -852,7 +866,7 @@ impl TypeChecker {
                     let _ = self.check_stmt(stmt);
                 }
 
-                self.symbols.pop_scope();
+                self.pop_scope();
                 let ctx = self.loop_stack.pop();
                 self.close_loop_moves(&move_snapshot, body, ctx.as_ref());
 
@@ -939,7 +953,7 @@ impl TypeChecker {
                     let _ = self.check_stmt(stmt);
                 }
 
-                self.symbols.pop_scope();
+                self.pop_scope();
                 let ctx = self.loop_stack.pop();
                 self.close_loop_moves(&move_snapshot, body, ctx.as_ref());
 
@@ -1019,6 +1033,8 @@ impl TypeChecker {
                 self.constants.insert(name.name.clone(), declared_ty);
                 self.constant_values
                     .insert(name.name.clone(), value.clone());
+                self.local_constants
+                    .push((name.name.clone(), self.symbols.depth()));
                 Some(())
             }
 

@@ -989,6 +989,11 @@ pub enum TypeError {
     ConstAlreadyDefined { name: String, span: Span },
 
     #[error(
+        "constant '{name}' is cyclic: its initializer reads itself, directly or through other constants"
+    )]
+    CyclicConst { name: String, span: Span },
+
+    #[error(
         "constant expression required: only literals, arithmetic on literals, and references to other constants are allowed"
     )]
     InvalidConstExpr { span: Span },
@@ -1690,6 +1695,7 @@ impl TypeError {
             | Self::UnknownPathType { span, .. }
             | Self::UnknownAssociatedFunction { span, .. }
             | Self::ConstAlreadyDefined { span, .. }
+            | Self::CyclicConst { span, .. }
             | Self::InvalidConstExpr { span, .. }
             | Self::ConstHasNoValue { span, .. }
             | Self::ComparisonChain { span, .. }

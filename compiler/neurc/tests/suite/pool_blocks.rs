@@ -1851,3 +1851,46 @@ func main() -> i32 {
         Ok(32)
     );
 }
+
+#[test]
+fn regression_closure_capturing_by_mut_cannot_keep_a_pool_value() {
+    // A closure that captured an outer binding by `&mut` can store its argument there,
+    // so a call to it inside a pool is judged like a call with a `&mut` argument.
+    let test = CompileTest::new();
+    let refused = r#"
+struct Holder { t: Tensor<f32, [1024]> }
+func main() -> i32 {
+    mut h = Holder { t: Tensor::<f32, [1024]>::zeros() }
+    {
+        val f = |n: Tensor<f32, [1024]>| { h.t = n }
+        pool { f(Tensor::<f32, [1024]>::ones()) }
+    }
+    h.t.sum() as i32
+}
+"#;
+    let err = test
+        .check("closure_retains.nr", refused)
+        .expect_err("the arena's tensor would outlive its release through the capture");
+    assert!(
+        err.contains("'f' can store what it is given into 'h'"),
+        "got {err}"
+    );
+
+    // A capture of pointerless type keeps no address, so the call stays legal.
+    let accepted = r#"
+func main() -> i32 {
+    mut count = 0
+    mut acc = 0.0f32
+    {
+        val f = |n: i32| { count += n }
+        val g = |t: Tensor<f32, [4]>| { acc = acc + t.sum() }
+        pool {
+            f(5)
+            g(Tensor::<f32, [4]>::ones())
+        }
+    }
+    count + acc as i32
+}
+"#;
+    assert_eq!(test.compile_and_run("closure_scalar.nr", accepted), Ok(9));
+}

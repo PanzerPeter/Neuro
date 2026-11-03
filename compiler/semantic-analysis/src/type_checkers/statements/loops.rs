@@ -78,7 +78,7 @@ impl TypeChecker {
         for stmt in body {
             let _ = self.check_stmt(stmt);
         }
-        self.symbols.pop_scope();
+        self.pop_scope();
         let ctx = self.loop_stack.pop();
         self.close_loop_moves(&move_snapshot, body, ctx.as_ref());
         match ctx {

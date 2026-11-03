@@ -183,15 +183,29 @@ impl Lowerer {
                 detail: format!("call of non-callable type {:?}", callee.ty),
             });
         };
+        // `(k.f)(x)` reads a function-valued field. A call whose callee is a field access
+        // is a method call in the HIR, so the field's value is bound to a local first and
+        // called through it, as `val g = k.f` then `g(x)` is.
+        let mut stmts = Vec::new();
+        let callee = if matches!(callee.kind, HirExprKind::FieldAccess { .. }) {
+            self.bind_operand(callee, &mut stmts)
+        } else {
+            callee
+        };
         let args = self.lower_args(args, &params)?;
-        Ok(HirExpr::new(
+        let call = HirExpr::new(
             HirExprKind::Call {
                 callee: Box::new(callee),
                 args,
             },
-            *ret,
+            (*ret).clone(),
             span,
-        ))
+        );
+        if stmts.is_empty() {
+            return Ok(call);
+        }
+        stmts.push(HirStmt::Expr(call));
+        Ok(HirExpr::new(HirExprKind::Block { stmts }, *ret, span))
     }
 
     /// Lower a newtype construction `Name(value)` to a transparent
@@ -400,6 +414,7 @@ impl Lowerer {
 
         let (param_tys, ret) =
             self.instance_signature(&template, subst.clone(), const_subst.clone())?;
+        let lowered_args = coerce_to_params(lowered_args, &param_tys);
 
         let mangled = crate::mangle_instance(name, &template.generics, &subst, &const_subst);
         if crate::autodiff::is_grad(&template.attributes) {
@@ -709,6 +724,7 @@ impl Lowerer {
         let key = format!("{}__{}", type_name, member);
         let (name, params, ret) =
             self.instantiate_generic_method(&key, type_args, &lowered_args)?;
+        let lowered_args = coerce_to_params(lowered_args, &params);
         let callee = HirExpr::new(
             HirExprKind::Path {
                 type_name: type_name.to_string(),
@@ -952,7 +968,9 @@ impl Lowerer {
 
         if let Some(key) = self.generic_method_key(recv.referent(), method) {
             let lowered_args = self.lower_generic_method_args(&key, type_args, args)?;
-            let (name, _, ret) = self.instantiate_generic_method(&key, type_args, &lowered_args)?;
+            let (name, params, ret) =
+                self.instantiate_generic_method(&key, type_args, &lowered_args)?;
+            let lowered_args = coerce_to_params(lowered_args, &params);
             let callee = HirExpr::new(
                 HirExprKind::FieldAccess {
                     object: Box::new(object),
@@ -1365,6 +1383,16 @@ impl Lowerer {
         }
         Ok(out)
     }
+}
+
+/// A generic call's arguments, lowered before the instance's parameter types were known,
+/// with the unsizing coercion each concrete parameter calls for applied: `&[i32; 2]` to
+/// a `&[T]` instantiated as `&[i32]`, or `&Sq` to a `&dyn Area`.
+fn coerce_to_params(args: Vec<HirExpr>, params: &[HirType]) -> Vec<HirExpr> {
+    args.into_iter()
+        .enumerate()
+        .map(|(i, arg)| super::coercion::apply_unsizing_coercion(arg, params.get(i)))
+        .collect()
 }
 
 /// The element type of a contiguous container a `.slice(range)` may borrow from,

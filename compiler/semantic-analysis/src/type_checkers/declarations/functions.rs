@@ -266,7 +266,7 @@ impl TypeChecker {
         self.drop_allowed_warnings(warnings_before, &func.attributes);
 
         // Exit function scope
-        self.symbols.pop_scope();
+        self.pop_scope();
         self.current_function_return_type = None;
         self.in_kernel = false;
         self.kernel_outs.clear();

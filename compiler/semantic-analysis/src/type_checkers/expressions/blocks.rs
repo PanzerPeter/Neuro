@@ -134,7 +134,7 @@ impl TypeChecker {
     ) -> Option<Type> {
         self.symbols.push_scope();
         let ty = self.check_block_expr_type(stmts, expected);
-        self.symbols.pop_scope();
+        self.pop_scope();
         Some(ty)
     }
 
@@ -172,7 +172,7 @@ impl TypeChecker {
         self.push_pool(label);
         let _ = self.check_block_expr_type(stmts, None);
         self.pop_pool();
-        self.symbols.pop_scope();
+        self.pop_scope();
         Some(Type::Void)
     }
 
@@ -193,7 +193,7 @@ impl TypeChecker {
                 match stmt {
                     ast_types::Stmt::Expr(expr) => {
                         result = self.check_expr(expr, expected).unwrap_or(Type::Unknown);
-                        self.symbols.pop_scope();
+                        self.pop_scope();
                         return result;
                     }
                     ast_types::Stmt::If {
@@ -213,7 +213,7 @@ impl TypeChecker {
                                 expected,
                             )
                             .unwrap_or(Type::Unknown);
-                        self.symbols.pop_scope();
+                        self.pop_scope();
                         return result;
                     }
                     _ => {}
@@ -221,7 +221,7 @@ impl TypeChecker {
             }
             let _ = self.check_stmt(stmt);
         }
-        self.symbols.pop_scope();
+        self.pop_scope();
         result
     }
 }

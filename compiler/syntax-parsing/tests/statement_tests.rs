@@ -144,25 +144,37 @@ fn test_parse_val_declaration_with_init_no_type() {
 }
 
 #[test]
-fn test_parse_val_declaration_with_type_no_init() {
+fn regression_val_with_type_and_no_initializer_is_refused() {
     let source = r#"
         func test() {
             val x: i32
         }
     "#;
     let result = parse(source);
-    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+    assert!(
+        matches!(
+            result,
+            Err(syntax_parsing::ParseError::MissingInitializer { .. })
+        ),
+        "a binding with no initializer must be refused: {result:?}"
+    );
 }
 
 #[test]
-fn test_parse_val_declaration_no_type_no_init() {
+fn regression_val_with_no_type_and_no_initializer_is_refused() {
     let source = r#"
         func test() {
             val x
         }
     "#;
     let result = parse(source);
-    assert!(result.is_ok(), "Parse error: {:?}", result.err());
+    assert!(
+        matches!(
+            result,
+            Err(syntax_parsing::ParseError::MissingInitializer { .. })
+        ),
+        "a binding with no initializer must be refused: {result:?}"
+    );
 }
 
 #[test]

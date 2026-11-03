@@ -646,7 +646,11 @@ At a `&place` site a `&mut` is rejected while any borrow is live
 `&place` / `&mut place` initializer is promoted to a persistent borrow held by the new binding
 (`attach_borrow`), released when that binding leaves scope; reassigning a `mut` reference releases
 its old borrow first. Transient borrows are dropped at the end of every statement
-(`clear_transient_borrows`), so a borrow never outlives the statement that took it.
+(`clear_transient_borrows`), so a borrow never outlives the statement that took it. A call whose
+result provably holds no borrow (`carries_no_borrow`: no reference inside, and not a function
+value, type parameter or `dyn`) restores the transient counts it found, so the borrows its
+arguments took end when it returns: `take(len_of(&key), key)` moves `key` after `len_of` returned
+a `u64`. A result that may carry a borrow keeps them for the statement.
 
 A borrow's provenance records the scope index of the binding it targets, and its release goes
 to that binding, never to whatever the name resolves to later: once an inner shadow dies, its
@@ -757,7 +761,9 @@ checks trait bounds (`check_trait_bounds` / `TraitBoundNotSatisfied`, keyed off
 `T`, so it holds for every instantiation. Errors: `GenericParamShadowsBuiltin`,
 `GenericParamNotInferable` (fires at the call site, since turbofish exists).
 `unify_generic` unifies a function type position by position, and the mode directionally (the
-argument's call trait may be weaker than the slot's). A closure literal for a function-typed
+argument's call trait may be weaker than the slot's). It applies the unsizing rules of a
+non-generic call: a `[T]` behind a reference unifies its element with a slice's, an array's or a
+`Vec`'s, and a `&dyn Trait` position accepts an implementor through `assignable`. A closure literal for a function-typed
 parameter is checked after the other arguments, with what they bound handed to it as its context
 (`partially_substituted`: a position naming a still-unbound parameter of the callee becomes
 `Unknown`), so its result can bind the rest. A function-typed parameter of a generic call opens
@@ -1171,6 +1177,10 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   move-tracked when any payload is (`copy_within` / `tracked_within` carry the enums in progress,
   so the recursion ends even on a reported cycle): an enum holding an owner moves. Construction: `E::V` (Path) → unit, `E::V(..)` (Call→Path)
   → tuple, `E::V { .. }` (`EnumStructLiteral`) → struct, with arity/field/form diagnostics.
+- **One type namespace.** Struct, enum, newtype and trait names share one namespace. The kinds
+  register in a fixed order (newtypes, enums, trait names, structs, then traits in full), and
+  each checks the kinds before it (`nominal_name_taken`, and the trait check in `register_trait`),
+  so a second declaration of a name is refused whatever its kind and source order.
 - **Newtypes.** `predeclare_newtype` reserves each name (rejecting builtin/struct/enum/newtype
   collisions via `NewtypeAlreadyDefined`), then `resolve_newtype_inners` resolves inner types once
   all nominal names are known and rejects cycles (`CyclicNewtype`), which is what makes every
@@ -1463,9 +1473,14 @@ reported as `UnimportedVariantPattern` and contributing no exhaustiveness covera
 ### Constants
 `constants: HashMap<String, Type>` holds both module-level and body consts. `is_const_expr`
 validates the RHS (literals, arithmetic on literals, casts, identifiers referring to other known
-consts); a body `Stmt::Const` is validated in `check_stmt`. `Expr::Identifier` falls back to
-`constants` after the symbol table, so const names work in any expression context. Errors:
-`ConstAlreadyDefined`, `InvalidConstExpr`.
+consts); a body `Stmt::Const` is validated in `check_stmt`. A body const is also pushed onto
+`local_constants` with the symbol-table depth it was declared at, and the checker's own
+`pop_scope` (which every block exit calls instead of `symbols.pop_scope()`) removes the ones its
+block declared, so a body const is scoped like a `val` and sibling blocks may reuse its name.
+`Expr::Identifier` falls back to `constants` after the symbol table, so const names work in any
+expression context. A module const may read one declared later; one whose initializer reads
+itself, directly or through other consts, is `CyclicConst`. Errors: `ConstAlreadyDefined`,
+`CyclicConst`, `InvalidConstExpr`.
 
 ### Pool blocks
 `type_checkers/pools.rs` carries the escape rules `pool { }` needs. A pool's arena is
@@ -1594,8 +1609,10 @@ is refused when an argument fails the in-place reading AND the call gives the ca
 place declared before the INNERMOST open pool (the argument is emitted in the innermost arena, so a
 place an enclosing pool declared outlives its release, as the store rule reads it). Write access is read from the SIGNATURE, never
 from the callee's body: a `&mut self` receiver (found in `mut_self_methods`) and a `&mut T`
-parameter are the complete set of channels a callee has back into its caller, and whether the
-body actually stores through one is not asked. That over-approximates in the same direction
+parameter are the channels a signature shows back into its caller, and whether the body actually
+stores through one is not asked. A call through a closure binding has one more: each binding it
+captured by `&mut` (`SymbolTable::exclusive_borrows` of the closure binding) that was declared
+before the innermost pool and can hold an address counts as a `&mut` argument would. That over-approximates in the same direction
 `carries_no_arena` does: unproven means refused. Two things narrow it without weakening it. An
 argument whose declared parameter type is pointerless hands over no address, whatever
 expression computed it (BUG-043). And `outliving_root` skips a root binding of pointerless type,

@@ -6,6 +6,7 @@
 use crate::errors::TypeError;
 use crate::type_checkers::TypeChecker;
 use ast_types::{ConstDef, Expr};
+use std::collections::HashSet;
 
 impl TypeChecker {
     /// Register a module-level constant name and type in the constants map.
@@ -37,6 +38,13 @@ impl TypeChecker {
             });
             return None;
         }
+        if self.const_reads(&def.name.name, &def.value, &mut HashSet::new()) {
+            self.record_error(TypeError::CyclicConst {
+                name: def.name.name.clone(),
+                span: def.name.span,
+            });
+            return None;
+        }
 
         if let Some(expr_ty) = self.check_expr(&def.value, Some(&declared_ty))
             && !expr_ty.is_compatible_with(&declared_ty)
@@ -51,6 +59,30 @@ impl TypeChecker {
         self.check_const_value(&def.value, &declared_ty);
 
         Some(())
+    }
+
+    /// Whether the constant expression `expr` reads the constant `target`, directly or
+    /// through the initializers of the constants it names. `seen` keeps a cycle that does
+    /// not pass through `target` from looping.
+    fn const_reads(&self, target: &str, expr: &Expr, seen: &mut HashSet<String>) -> bool {
+        match expr {
+            Expr::Paren(inner, _) | Expr::Unary { operand: inner, .. } => {
+                self.const_reads(target, inner, seen)
+            }
+            Expr::Cast { expr: inner, .. } => self.const_reads(target, inner, seen),
+            Expr::Binary { left, right, .. } => {
+                self.const_reads(target, left, seen) || self.const_reads(target, right, seen)
+            }
+            Expr::Identifier(ident) => {
+                ident.name == target
+                    || (seen.insert(ident.name.clone())
+                        && self
+                            .constant_values
+                            .get(&ident.name)
+                            .is_some_and(|value| self.const_reads(target, value, seen)))
+            }
+            _ => false,
+        }
     }
 
     /// Returns true if `expr` is a valid constant expression.

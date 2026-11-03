@@ -54,6 +54,11 @@ pub enum ParseError {
     )]
     OneElementTuple { span: Span },
 
+    #[error(
+        "binding '{name}' has no initializer; a `val` or `mut` is initialized where it is declared: write `= value`"
+    )]
+    MissingInitializer { name: String, span: Span },
+
     #[error("`export` cannot be applied to {what}")]
     ExportNotAllowed { what: String, span: Span },
 
@@ -162,6 +167,7 @@ impl ParseError {
             | ParseError::UndeclaredLifetime { span, .. }
             | ParseError::UnquotedLoopLabel { span, .. }
             | ParseError::OneElementTuple { span }
+            | ParseError::MissingInitializer { span, .. }
             | ParseError::ExportNotAllowed { span, .. }
             | ParseError::MisplacedNoPrelude { span }
             | ParseError::EmptyInterpolationHole { span }

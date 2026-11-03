@@ -12,7 +12,7 @@ pub use errors::{CodegenError, CodegenResult};
 
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
 use inkwell::context::Context as LLVMContext;
-use neuro_hir::{HirItem, HirProgram, HirSelfParam, HirTarget};
+use neuro_hir::{HirConst, HirItem, HirProgram, HirSelfParam, HirTarget};
 use std::collections::HashMap;
 use types::Type;
 
@@ -458,9 +458,21 @@ fn build_module<'ctx>(
 
     // Emit module-level constants as LLVM global constants before any function.
     // This ensures all globals are defined before function bodies reference them.
-    for item in items {
-        if let HirItem::Const(def) = item {
-            codegen_ctx.codegen_global_const(def)?;
+    // A constant may read one declared after it, so each round folds every constant
+    // whose operands are folded, until a round makes no progress; the checker refuses
+    // a cycle, so what is left then carries its own error.
+    let mut pending: Vec<&HirConst> = items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Const(def) => Some(def),
+            _ => None,
+        })
+        .collect();
+    while !pending.is_empty() {
+        let before = pending.len();
+        pending.retain(|def| codegen_ctx.codegen_global_const(def).is_err());
+        if pending.len() == before {
+            codegen_ctx.codegen_global_const(pending[0])?;
         }
     }
 

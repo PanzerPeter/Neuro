@@ -21,8 +21,7 @@ impl TypeChecker {
     /// An unsized type (`dyn Trait`, `[T]`) is rejected with `UnsupportedEnumPayload`,
     /// since a slot has to have a width.
     pub(crate) fn predeclare_enum(&mut self, def: &EnumDef) {
-        if self.enum_defs.contains_key(&def.name.name)
-            || self.struct_defs.contains_key(&def.name.name)
+        if self.nominal_name_taken(&def.name.name)
             || self.generic_enums.contains_key(&def.name.name)
         {
             self.record_error(TypeError::EnumAlreadyDefined {

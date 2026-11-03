@@ -666,6 +666,22 @@ impl Lowerer {
                 }
                 self.unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
             }
+            // `&[T]` takes a slice, an array or a `Vec`, as the checker's unification does.
+            (
+                ast_types::Type::Slice { element: pe, .. },
+                HirType::Slice(ae) | HirType::Array { element: ae, .. },
+            ) => self.unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst),
+            (
+                ast_types::Type::Slice { element: pe, .. },
+                HirType::Collection {
+                    kind: neuro_hir::HirCollectionKind::Vec,
+                    args,
+                },
+            ) => {
+                if let [ae] = args.as_slice() {
+                    self.unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst);
+                }
+            }
             (ast_types::Type::Tuple { elements: pe, .. }, HirType::Tuple(ae))
                 if pe.len() == ae.len() =>
             {

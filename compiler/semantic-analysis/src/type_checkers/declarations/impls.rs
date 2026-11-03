@@ -645,7 +645,7 @@ impl TypeChecker {
             }
 
             self.drop_allowed_warnings(warnings_before, &method.attributes);
-            self.symbols.pop_scope();
+            self.pop_scope();
             self.current_function_return_type = None;
             self.current_fn_outliving.clear();
             self.self_is_owned = false;

@@ -90,6 +90,9 @@ no types.
   independently inferred. Return-position `impl Trait` is deliberately **not** desugared: it is
   one concrete type chosen by the body, not a caller-inferred parameter, and is resolved by
   semantic-analysis.
+- **Bindings**: `parse_var_decl` requires `= value` after a `val` / `mut` name and its optional
+  `: T`. A binding is initialized where it is declared, so a missing initializer is
+  `MissingInitializer` at the declaration; `Stmt::VarDecl`'s `init` is always `Some` from here.
 - **Destructuring binds**: `parse_stmt_into` detects `val`/`mut` followed by a tuple `(`, array
   `[`, or struct `Name {` pattern and routes to `parse_destructure_bind`, which binds the RHS to
   a `__destructure_N` temp and expands one projection per leaf through a parse-local

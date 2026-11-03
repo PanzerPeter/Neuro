@@ -67,6 +67,20 @@ impl TypeChecker {
         self.holds_reference_within(ty, &mut Vec::new())
     }
 
+    /// Whether a value of `ty` provably holds no borrow, so a call returning one ends the
+    /// borrows its arguments took. A function value, a type parameter or an unresolved
+    /// type may hold one, so each answers `false`.
+    pub(crate) fn carries_no_borrow(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Function { .. } | Type::Generic(_) | Type::Unknown | Type::DynObject(_) => false,
+            Type::Collection { args: elements, .. } | Type::Tuple(elements) => {
+                elements.iter().all(|e| self.carries_no_borrow(e))
+            }
+            Type::Array { element, .. } => self.carries_no_borrow(element),
+            _ => !self.type_holds_reference(ty),
+        }
+    }
+
     fn holds_reference_within(&self, ty: &Type, seen: &mut Vec<String>) -> bool {
         match ty {
             Type::Reference { .. } => true,

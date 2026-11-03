@@ -219,6 +219,7 @@ impl TypeChecker {
                     return self.check_expr(&bound, expected);
                 }
                 let lent = self.call_temporary_borrows.len();
+                let borrows_before = self.symbols.transient_borrows();
                 let ty = self.check_call_expr(func, type_args, args, span, expected);
                 self.refuse_escaping_temporary_borrows(lent, ty.as_ref());
                 // A call inside a pool hands the block a value it now owns, so the
@@ -229,6 +230,12 @@ impl TypeChecker {
                 // The reverse direction: what the block hands the callee, which the
                 // callee may store somewhere that outlives the pool.
                 self.check_pool_retention(func, args, *span);
+                // The borrows the arguments took end when the call returns, unless its
+                // result can carry one out: `take(len_of(&key), key)` moves `key` after
+                // `len_of` has returned a `u64`.
+                if ty.as_ref().is_some_and(|ty| self.carries_no_borrow(ty)) {
+                    self.symbols.set_transient_borrows(&borrows_before);
+                }
                 ty
             }
 

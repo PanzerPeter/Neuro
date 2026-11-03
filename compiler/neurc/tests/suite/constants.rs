@@ -489,3 +489,82 @@ fn test_bug_087_a_constant_without_a_value_is_a_checked_error() {
         .expect("the range's own ends are constants");
     assert_eq!(code, 0);
 }
+
+#[test]
+fn regression_function_body_const_ends_with_its_block() {
+    // A function-body `const` is scoped like a `val`: another function, or code after the
+    // declaring block, does not see it, and a sibling may reuse the name.
+    for source in [
+        "func f() -> i32 {\n    const K: i32 = 4\n    K\n}\nfunc g() -> i32 {\n    K\n}\nfunc main() -> i32 {\n    f() + g()\n}",
+        "func h(b: bool) -> i32 {\n    if b {\n        const Q: i32 = 7\n    }\n    Q\n}\nfunc main() -> i32 {\n    h(true)\n}",
+    ] {
+        let error = CompileTest::new()
+            .check("const_scope.nr", source)
+            .expect_err("a const read outside its block must be refused at check time");
+        assert!(
+            error.contains("undefined variable"),
+            "expected an undefined-variable diagnostic for:\n{source}\ngot: {error}"
+        );
+    }
+
+    let reuse = r#"
+const M: i32 = 1
+
+func f() -> i32 {
+    const K: i32 = 4
+    K
+}
+
+func g() -> i32 {
+    const K: i32 = 5
+    K
+}
+
+func h(b: bool) -> i32 {
+    if b {
+        const Q: i32 = 7
+        return Q
+    }
+    const Q: i32 = 8
+    Q
+}
+
+func main() -> i32 {
+    f() * 10 + g() + h(true) - h(false) + M
+}
+"#;
+    let code = CompileTest::new()
+        .compile_and_run("const_reuse.nr", reuse)
+        .expect("sibling blocks may each declare the same const name");
+    assert_eq!(code, 45);
+}
+
+#[test]
+fn regression_module_const_may_read_a_later_const() {
+    let source = r#"
+const C: i64 = B + A
+const B: i64 = A * 2
+const A: i64 = 7
+
+func main() -> i32 {
+    C as i32
+}
+"#;
+    let code = CompileTest::new()
+        .compile_and_run("const_later.nr", source)
+        .expect("a module const may read one declared after it");
+    assert_eq!(code, 21);
+
+    for source in [
+        "const A: i32 = B + 1\nconst B: i32 = A\nfunc main() -> i32 {\n    A\n}",
+        "const A: i32 = A\nfunc main() -> i32 {\n    A\n}",
+    ] {
+        let error = CompileTest::new()
+            .check("const_cycle.nr", source)
+            .expect_err("a cyclic const must be refused at check time");
+        assert!(
+            error.contains("is cyclic"),
+            "expected a cycle diagnostic for:\n{source}\ngot: {error}"
+        );
+    }
+}

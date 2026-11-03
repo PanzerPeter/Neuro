@@ -336,3 +336,48 @@ func main() -> i32 {
         .expect("should compile and run");
     assert_eq!(exit, 12);
 }
+
+#[test]
+fn regression_generic_slice_parameter_takes_arrays_vecs_and_slices() {
+    // `&[T]` unsizes its argument in a generic function, method or associated function
+    // as in a non-generic one, and `&dyn Trait` takes an implementor.
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "generic_slice.nr",
+            r#"
+func first<T: Copy>(xs: &[T]) -> T { xs[0] }
+func bump<T: Copy>(xs: &mut [T], v: T) { xs[1] = v }
+
+trait Area { func area(&self) -> i32 }
+struct Sq { s: i32 }
+impl Area for Sq { func area(&self) -> i32 { self.s * self.s } }
+func both<T: Copy>(x: T, d: &dyn Area) -> i32 { d.area() }
+
+struct W { n: i32 }
+impl W {
+    func pick<T: Copy>(&self, xs: &[T]) -> T { xs[1] }
+    func sum_of<T: Copy>(xs: &[T]) -> i32 { xs.len() as i32 }
+}
+
+struct Box2<T> { v: T }
+impl<T: Copy> Box2<T> {
+    func count(&self, xs: &[T]) -> i32 { xs.len() as i32 }
+}
+
+func main() -> i32 {
+    val a = [4, 5]
+    mut m = [1, 2, 3]
+    bump(&mut m, 9)
+    mut v: Vec<i32> = Vec::new()
+    v.push(30)
+    val w = W { n: 0 }
+    val b = Box2 { v: 1 }
+    val q = Sq { s: 2 }
+    first(&a) + first::<i32>(&a) + first(a.slice(0..2)) + first(&v) + m[1]
+        + w.pick(&m) + W::sum_of(&m) + b.count(&a) + both(1, &q)
+}
+"#,
+        )
+        .expect("compilation failed");
+    assert_eq!(exit, 4 + 4 + 4 + 30 + 9 + 9 + 3 + 2 + 4);
+}

@@ -14,7 +14,7 @@ pub(crate) mod traits;
 use super::derivable::{CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use super::{BoundInfo, GenericScope, TypeChecker};
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, TensorAxis, Type};
+use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type};
 use ast_types::{Attribute, Item};
 use shared_types::{Identifier, Span};
 use std::collections::HashMap;
@@ -355,7 +355,14 @@ impl TypeChecker {
                     inner: ai,
                     mutable: am,
                 },
-            ) => pm == am && self.unify_generic(pi, ai, subst),
+            ) => {
+                pm == am
+                    && match pi.as_ref() {
+                        // `&T` to `&dyn Trait` is a coercion, as at a non-generic call.
+                        Type::DynObject(_) => self.assignable(arg, param),
+                        _ => self.unify_generic(pi, ai, subst),
+                    }
+            }
             (
                 Type::Array {
                     element: pe,
@@ -366,6 +373,18 @@ impl TypeChecker {
                     size: asz,
                 },
             ) => unify_array_len(ps, asz, subst) && self.unify_generic(pe, ae, subst),
+            // A slice reached through a reference: `&[T]` takes a slice, an array or a
+            // `Vec` of the element, as the unsizing rule of a non-generic call does.
+            (Type::Slice(pe), Type::Slice(ae) | Type::Array { element: ae, .. }) => {
+                self.unify_generic(pe, ae, subst)
+            }
+            (
+                Type::Slice(pe),
+                Type::Collection {
+                    kind: CollectionKind::Vec,
+                    args,
+                },
+            ) => matches!(args.as_slice(), [ae] if self.unify_generic(pe, ae, subst)),
             (
                 Type::Tensor {
                     element: pe,
@@ -452,6 +471,9 @@ impl TypeChecker {
                 element: Box::new(self.substitute_generic(element, subst, span)),
                 size: substitute_array_len(size, subst),
             },
+            Type::Slice(element) => {
+                Type::Slice(Box::new(self.substitute_generic(element, subst, span)))
+            }
             Type::Tensor { element, shape } => Type::Tensor {
                 element: Box::new(self.substitute_generic(element, subst, span)),
                 shape: shape

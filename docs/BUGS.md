@@ -47,142 +47,6 @@ remove the flat merge and this with it. Regression tests: a bare call, a bare ty
 bare constant from a private item, each refused, and the same names from inside their own module
 still accepted.
 
-## BUG-137: an enum and a struct, or a struct and a newtype, may share a name
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`predeclare_enum` in `declarations/enums.rs`, struct and
-  newtype registration)
-- **Severity**: minor. Two declarations of one name compile, and which one a use reaches depends
-  on the syntax of the use
-
-**Minimal repro**
-
-```neuro
-enum Color { Red, Blue }
-struct Color { x: i32 }
-
-func main() -> i32 {
-    val c = Color { x: 3 }
-    val d = Color::Red
-    c.x
-}
-```
-
-Expected: an "already defined" error at the second `Color`. Observed: the program compiles and
-exits 3. `struct Color { x: i32 }` beside `newtype Color = i32` is accepted the same way.
-
-**Root cause**: confirmed in the code. `predeclare_enum` refuses an enum whose name is already in
-`struct_defs`, but enums are predeclared before structs are registered, so the struct is not
-there yet when the enum is checked, and struct registration does not look at `enum_defs`.
-Nothing compares a newtype's name with a struct's.
-
-**Workaround**: give each type its own name.
-
-**Fix sketch**: register every nominal name (struct, enum, newtype, alias, trait) in one map
-during predeclaration and report the second declaration of any name, whatever its kind.
-Regression tests: each pair in both source orders.
-
-## BUG-136: a `const` that reads a later `const` type-checks, then fails to build
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` accepts it; `llvm-backend` constant folding refuses it
-- **Severity**: minor. The program is refused, but with an internal error instead of a
-  diagnostic, after `neurc check` reported it clean
-
-**Minimal repro**
-
-```neuro
-const LATE: i32 = EARLY * 2
-const EARLY: i32 = 21
-
-func main() -> i32 {
-    LATE
-}
-```
-
-Expected: exit 42. Items are order-independent at module level, and a constant expression may
-reference other constants. Observed: `neurc check` passes; `neurc run` stops with
-"Code generation error: undefined variable: EARLY".
-
-**Root cause**: not yet confirmed. The checker resolves every module constant before checking
-initializers; the backend folds constants in source order, so a reference to a later one finds
-nothing.
-
-**Workaround**: declare a constant before the constants that read it.
-
-**Fix sketch**: fold module constants in dependency order (a topological sort over the names
-each initializer reads), and report a cycle as a type error. Regression tests: the repro, a
-chain of three, and a cycle refused at check time.
-
-## BUG-135: a `const` declared in a function body stays visible to the checker after its block
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (function-body constant scoping)
-- **Severity**: minor. The program is refused, but with an internal error instead of a
-  diagnostic, after `neurc check` reported it clean
-
-**Minimal repro**
-
-```neuro
-func f() -> i32 {
-    const K: i32 = 4
-    K
-}
-
-func g() -> i32 {
-    K
-}
-
-func main() -> i32 {
-    f()
-}
-```
-
-Expected: "undefined variable 'K'" in `g`. Observed: `neurc check` passes; `neurc run` stops with
-"Code generation error: undefined variable: K". A `const` declared inside an `if` block and
-read after the block behaves the same way.
-
-**Root cause**: not yet confirmed. The backend ends a function-body constant with its block, as
-the changelog describes; the checker still registers it where later blocks and functions can see
-it.
-
-**Workaround**: declare a constant used in more than one block at module level.
-
-**Fix sketch**: give a function-body `const` the scope of the block that declares it in the
-checker, as `val` has. Regression tests: the repro, the `if` block form, and a module constant
-of the same name read after the block.
-
-## BUG-134: a binding declared without an initializer type-checks, then fails to build
-
-- **Status**: open, confirmed
-- **Area**: `syntax-parsing` / `semantic-analysis` (`Stmt::VarDecl` with `init: None`)
-- **Severity**: minor. The program is refused, but with an internal error instead of a
-  diagnostic, after `neurc check` reported it clean
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    mut z: i32
-    z = 5
-    z
-}
-```
-
-Expected: an error at the declaration, since every binding is initialized where it is declared.
-Observed: `neurc check` passes; `neurc run` stops with "Code generation error: undefined
-variable: z". `val z: i32` followed by `return z` fails the same way.
-
-**Root cause**: confirmed in the code. The parser accepts a `val` / `mut` with a type and no
-`= value` (`Stmt::VarDecl` keeps `init: Option<Expr>`), the checker binds the name, and the
-backend never allocates a binding that has no initializer.
-
-**Workaround**: initialize every binding where it is declared.
-
-**Fix sketch**: refuse a missing initializer, in the parser or the checker, with a diagnostic
-that says to write `= value`. Regression tests: `val` and `mut`, with and without a later
-assignment.
-
 ## BUG-132: a borrow of an owning temporary is refused
 
 - **Status**: open, confirmed. Narrowed: a shared borrow of a `Copy` temporary passed to a
@@ -263,40 +127,6 @@ a parameter: `func view(xs: &[i32; 3]) -> View`.
 as a `&T` parameter already is, at least for a method whose result can hold a reference.
 Regression tests: the repro, and the iterator form driven by a `for` loop.
 
-## BUG-129: a generic function taking `&[T]` accepts no argument
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`; generic call checking, `unsizes_to_slice` in `type_checkers/resolution.rs`
-- **Severity**: major. A documented signature, `func sort<T: Comparable>(xs: &mut [T])`, cannot be called
-
-**Minimal repro**
-
-```neuro
-func first<T: Copy>(xs: &[T]) -> T { xs[0] }
-
-func main() -> i32 {
-    val a = [4, 5]
-    first(&a)
-}
-```
-
-Expected: exit 4. Observed: `type mismatch: expected &[T], found &[i32; 2]`. The same error
-follows for `first::<i32>(&a)` and for an argument that is already a slice (`a.slice(0..2)`,
-`found &[i32]`), so neither inference nor a turbofish reaches the parameter.
-
-**Root cause**: suspected, not traced end to end. The argument is checked against the
-declared `&[T]` with `T` still a generic, and the unsizing rule compares element types with
-`is_compatible_with`, which does not bind or substitute a type parameter. A non-generic
-`func f(xs: &[i32])` accepts `&a`.
-
-**Workaround**: write the function for the concrete element type, or take `&[T; N]` with a
-const parameter.
-
-**Fix sketch**: unify the slice element with the argument's element (array, `Vec` or slice)
-when inferring the call's type arguments, and check the argument against the substituted
-parameter type. Regression tests: the repro, the turbofish form, a `Vec` argument and a
-`&mut [T]` parameter written through.
-
 ## BUG-128: a method's reference into a local receiver can be returned
 
 - **Status**: open, confirmed
@@ -341,42 +171,6 @@ the AST. Then report an owned local receiver of a `self`-borrowing method in the
 walk. Regression tests: the repro, and the same call on a method returning `&'a string` from a
 field, which must keep compiling.
 
-## BUG-127: a borrow passed to an inner call blocks a move in the enclosing call
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`reject_move_of_borrowee` in `type_checkers/moves.rs`)
-- **Severity**: minor. A valid program is rejected; binding the inner result first compiles
-
-**Minimal repro**
-
-```neuro
-func len_of(s: &string) -> u64 { s.len() }
-func take(n: u64, s: string) -> u64 { n + s.len() }
-
-func main() -> i32 {
-    val key = "abc"
-    val n = take(len_of(&key), key)
-    n as i32
-}
-```
-
-Expected: exit 6. `len_of` returns a `u64`, so the borrow of `key` ends when it returns, before
-`key` is moved as the second argument. Observed: "cannot move out of 'key' while it is
-borrowed". A method chain hits the same check: `lookup(&key).ok_or(Missing(key))`.
-
-**Root cause**: confirmed in the code. A call's argument borrows are transient, counted while
-the call's operands are checked, and `reject_move_of_borrowee` counts every transient borrow on
-purpose (a `&mut` in flight beside a move of the same name is a real dangling borrow). The
-inner call's borrows are still counted when the enclosing call's next operand is checked,
-although the inner call has returned and its result holds no reference.
-
-**Workaround**: bind the inner call's result with `val` first.
-
-**Fix sketch**: release a call's transient argument borrows once the call is checked, unless
-its result type can hold a reference, in which case they pass to the result as they do today.
-Regression tests: the repro, the method-chain form, and a `&mut key` passed beside a move of
-`key` in the same call (must still be rejected).
-
 ## BUG-126: a `&string` cannot become a `&dyn Debug` or `&dyn Hashable`
 
 - **Status**: open, confirmed
@@ -411,111 +205,54 @@ coerce a reference to that.
 **Fix sketch**: give the coercion the address of the place that holds the fat pointer when the
 operand is a borrow of a `string` binding, and keep refusing a `&string` value that has no place.
 
-## BUG-124: a `for` over an array leaks its last element when it was not built in place
+## BUG-124: a `for` over an array of `string` leaks every element
 
 - **Status**: open, confirmed
-- **Area**: `llvm-backend`, ownership of `string` positions in an array iterated by `for`
-- **Severity**: minor. One buffer leaks per evaluation of the literal; no value is wrong
+- **Area**: `llvm-backend`, `codegen_for_each` in `codegen/expressions/arrays.rs` and the
+  `string` ownership flags
+- **Severity**: minor. One buffer leaks per element per loop; no value is wrong
 
 **Minimal repro**
 
 ```neuro
 func q() -> string { "a" + "b" }
-func main() -> i32 {
-    val parts = ["x" + "y", q()]
+
+func once() -> i32 {
+    val parts = [q(), "x" + "y"]
     mut total = 0
     for part in parts {
         total += part.len() as i32
     }
     total
 }
-```
 
-Expected: exit 4 and both buffers released, as `parts[0].len() + parts[1].len()` does with the
-same literal. Observed: exit 4, and LeakSanitizer (`LD_PRELOAD` of `libasan.so`) reports the
-buffer `q()` returned. A moved binding in the last position (`["x" + "y", b]` with
-`val b = q()`) leaks the same way, and so does `[q(), q()]` (one buffer). `[q(), "x" + "y"]`
-and `[q()]` leak nothing.
-
-**Root cause**: not yet confirmed in the code. The element's position is armed when the
-literal is bound (indexing the same binding releases both), so the leak is on the path that
-moves elements out of the array into the loop binding.
-
-**Workaround**: none needed for correctness. Iterating by index (`for i in 0..2` reading
-`parts[i]`) does not leak.
-
-**Fix sketch**: compare the per-element flags the `for` head hands to each iteration's
-binding against the flags the declaration armed, for a last element that was not allocated
-in place.
-
-## BUG-118: calling a function-valued field in parentheses fails to build
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`, call lowering of a parenthesized callee
-- **Severity**: major. A program the checker accepts fails to build with an internal codegen
-  error
-
-**Minimal repro**
-
-```neuro
-struct K { f: (i32) -> i32 }
-func double(x: i32) -> i32 { x * 2 }
 func main() -> i32 {
-    val k = K { f: double }
-    (k.f)(21)
-}
-```
-
-Expected: the program builds and exits with 42, as `val g = k.f` then `g(21)` does. Observed:
-`Code generation error: undefined function: K__f`. The indexed form `(ks[0].f)(21)` fails the
-same way.
-
-**Root cause**: not yet confirmed in the code. The call is lowered as a method call `K__f` on the
-receiver rather than as an indirect call through the field's value.
-
-**Workaround**: bind the field first: `val g = k.f` then `g(21)`.
-
-**Fix sketch**: when a call's callee is a parenthesized field access whose field is
-function-typed, read the field and call through the value, as a call through a local does.
-
-## BUG-117: a closure written before a `pool` and called inside it can keep the pool's memory
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis`, the `pool` retention rule for a call through a closure value
-- **Severity**: critical. Silent wrong answer: the outer value reads memory the arena has
-  already handed to a later pool
-
-**Minimal repro**
-
-```neuro
-struct Holder { t: Tensor<f32, [1024]> }
-func main() -> i32 {
-    mut out = 0.0f32
-    mut h = Holder { t: Tensor::<f32, [1024]>::zeros() }
-    {
-        val f = |n: Tensor<f32, [1024]>| { h.t = n }
-        pool { f(Tensor::<f32, [1024]>::ones()) }
+    mut t = 0
+    for i in 0..50 {
+        t += once()
     }
-    pool { val z = Tensor::<f32, [1024]>::zeros()
-           out = z.sum() }
-    out = out + h.t.sum()
-    (out / 8.0f32) as i32
+    t / 50
 }
 ```
 
-Expected: 128 (1024 ones summed, divided by 8), or a refusal of the call, as `h.t = ...` written
-directly in the pool is routed off the arena. Observed: 0. The tensor built in the first pool's
-arena is stored into `h` through the closure's mutable capture, the arena is released at the
-pool's exit, and the second pool reuses that memory.
+Expected: exit 4 and every buffer released. Observed: exit 4, and LeakSanitizer (`LD_PRELOAD`
+of `libasan.so`) reports both buffers of every call, whatever the order of the elements. With
+a single call the stack still holds the pointers, so the leak check may report only one of them.
 
-**Root cause**: not yet confirmed in the code. The retention rule reads what a call can store
-from the callee's parameters; a closure's captures are a second channel it does not see.
+**Root cause**: confirmed in the emitted IR. A by-value `for` over an array disowns the array at
+the loop head (`mark_moved_for_drop` clears the array's flag and each `string` position's flag)
+and registers the loop binding with `register_owned_binding`, which registers nothing for a bare
+`string`: whether a `string` owns its buffer is a per-position runtime flag, and the binding is
+given none. No iteration releases its element, and the array no longer does.
 
-**Workaround**: assign the field directly inside the pool, or build the value outside it.
+**Workaround**: iterate by index (`for i in 0..2` reading `parts[i]`) or by reference
+(`for part in &parts`); both leave the array to release its elements.
 
-**Fix sketch**: treat a call through a closure that captures a binding declared before the pool
-by mutable borrow as able to store each argument into that binding, and judge it like a `&mut`
-argument.
+**Fix sketch**: before clearing the array's position flags, copy them into a runtime-indexable
+slot, and give the loop binding an owned flag armed from the slot at the current index, released
+at the iteration's end and cleared if the body moves the binding. Elements that hold `string`
+fields (a struct, a tuple) need the same per position. Regression tests: the repro under a leak
+check, a literal element (must not be freed), and a body that moves the element into a `Vec`.
 
 ## BUG-098: `@derive(Clone)` refuses a struct with a field that owns a buffer
 

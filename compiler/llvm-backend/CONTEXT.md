@@ -641,7 +641,10 @@ fallback for a non-numeric resolved type.
 
 Module-level consts emit as `@NAME = internal constant TYPE VALUE` globals before any function
 definitions, and their LLVM value is also stored in `CodegenContext.const_values` so body
-references resolve without loading from the global. Body-level consts fold in Rust and bind the
+references resolve without loading from the global. A constant may read one declared after it,
+so emission runs in rounds: each folds every pending constant whose operands are folded, until a
+round makes no progress (the checker refuses a cycle, so what is left then reports its own
+error). Body-level consts fold in Rust and bind the
 `BasicValueEnum` through `bind_const` (no `alloca`, purely compile-time), which records what the
 name meant in the enclosing scope's frame exactly as a `val` does, so the constant ends with its
 block. `codegen_identifier` resolves a local or parameter before `const_values`, matching the

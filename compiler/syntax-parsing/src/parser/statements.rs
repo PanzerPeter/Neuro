@@ -101,20 +101,18 @@ impl Parser {
         };
 
         self.skip_newlines();
-        let init = if self.check(&TokenKind::Equal) {
-            self.advance(); // consume '='
-            self.skip_newlines();
-            Some(self.parse_expr(Precedence::Lowest)?)
-        } else {
-            None
-        };
-
-        let span = start_span.merge(
-            init.as_ref()
-                .map(|e| e.span())
-                .or_else(|| ty.as_ref().map(|t| t.span()))
-                .unwrap_or(name.span),
-        );
+        if !self.check(&TokenKind::Equal) {
+            let end = ty.as_ref().map_or(name.span, |t| t.span());
+            return Err(ParseError::MissingInitializer {
+                name: name.name,
+                span: start_span.merge(end),
+            });
+        }
+        self.advance(); // consume '='
+        self.skip_newlines();
+        let value = self.parse_expr(Precedence::Lowest)?;
+        let span = start_span.merge(value.span());
+        let init = Some(value);
 
         Ok(Stmt::VarDecl {
             name,

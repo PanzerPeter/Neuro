@@ -105,3 +105,30 @@ func main() -> i32 { dup() }
         .expect_err("a duplicate function definition must not compile");
     assert!(err.contains("function 'dup' already defined"), "{err}");
 }
+
+#[test]
+fn regression_type_names_share_one_namespace() {
+    // A struct, enum, newtype, trait or type alias may not reuse another's name, in
+    // either source order.
+    let kinds = [
+        "struct Color { x: i32 }",
+        "enum Color { Red }",
+        "newtype Color = i32",
+        "trait Color { }",
+        "type Color = i64",
+    ];
+    for (i, first) in kinds.iter().enumerate() {
+        for second in &kinds[i + 1..] {
+            for (a, b) in [(first, second), (second, first)] {
+                let source = format!("{a}\n{b}\nfunc main() -> i32 {{ 0 }}\n");
+                let err = CompileTest::new()
+                    .check("type_name_clash.nr", &source)
+                    .expect_err("two type declarations of one name must be refused");
+                assert!(
+                    err.contains("already defined") || err.contains("duplicate type alias"),
+                    "expected a duplicate-name diagnostic for:\n{source}\ngot: {err}"
+                );
+            }
+        }
+    }
+}

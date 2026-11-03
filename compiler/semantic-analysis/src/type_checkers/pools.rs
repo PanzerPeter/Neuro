@@ -628,6 +628,25 @@ impl TypeChecker {
                 places.extend(self.outliving_root(object));
             }
         }
+        // A closure that captured an outer binding by `&mut` can store its arguments
+        // there, a channel its parameter list does not show.
+        if let Expr::Identifier(ident) = func
+            && let Some(pool) = self.pool_stack.last()
+            && self
+                .symbols
+                .lookup(&ident.name)
+                .is_some_and(|info| matches!(info.ty, Type::Function { .. }))
+        {
+            for (place, scope) in self.symbols.exclusive_borrows(&ident.name) {
+                let holds_pointers = self
+                    .symbols
+                    .lookup(&place)
+                    .is_none_or(|symbol| !self.pool_safe(symbol.ty.referent()));
+                if scope < pool.scope_floor && holds_pointers {
+                    places.push(format!("'{place}'"));
+                }
+            }
+        }
         match self.declared_params(func) {
             Some(params) => places.extend(
                 params

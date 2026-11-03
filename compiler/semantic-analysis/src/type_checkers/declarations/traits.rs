@@ -20,7 +20,14 @@ impl TypeChecker {
     /// the declaration says which member exists, and only an implementor says what it is. The signature as written is kept so conformance can resolve it per impl.
     /// A duplicate trait name or method is rejected.
     pub(crate) fn register_trait(&mut self, def: &TraitDef) {
-        if self.traits.contains_key(&def.name.name) || is_builtin_type_name(&def.name.name) {
+        let name = &def.name.name;
+        if self.traits.contains_key(name)
+            || is_builtin_type_name(name)
+            || self.struct_defs.contains_key(name)
+            || self.generic_structs.contains_key(name)
+            || self.enum_defs.contains_key(name)
+            || self.newtype_defs.contains_key(name)
+        {
             self.record_error(TypeError::TraitAlreadyDefined {
                 trait_name: def.name.name.clone(),
                 span: def.name.span,

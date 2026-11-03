@@ -249,7 +249,9 @@ and must not drag a contextual type into the block.
 
 Three have no first-class source form: a `loop` value-expression takes its `break v` type (or
 `void`); a method-name callee `FieldAccess` carries the *call's* result type, since there is no
-method value; a `Range` carries `void`, being valid only as a `string.slice` /
+method value. A `Call` with a `FieldAccess` callee therefore always means a method call, so a call
+through a function-valued field (`(k.f)(x)`) binds the field's value to a fresh `__operand_N`
+local first and calls through that; a `Range` carries `void`, being valid only as a `string.slice` /
 `string.char_slice` argument whose lowering reads its bounds directly.
 
 Divergent panic-family calls (`panic` / `assert` / `unreachable`) adopt their context's expected
@@ -578,7 +580,10 @@ that order: the canonical vtable slot layout backends need. `resolve_type` deleg
 `apply_unsizing_coercion`. That is the **single site** where both unsizings are inserted:
 `&T` → `&dyn Trait` (`DynCoerce`) and `&[T; N]` / `&Vec<T>` → `&[T]` (`SliceCoerce`), so every
 context supplying an expected type (call arguments, returns, annotated bindings) gets them
-uniformly, and a value that already has the target shape is never re-coerced. A `DynCoerce`
+uniformly, and a value that already has the target shape is never re-coerced. A generic call
+lowers its arguments before the instance's parameter types exist, so `coerce_to_params` applies
+the same coercion against the instance's concrete parameters once they are known, for a generic
+function, method or associated function alike. A `DynCoerce`
 whose concrete type implements the trait with no impl (a derive, a builtin) gets the impl the
 compiler supplies from `emit_supplied_vtable_impl`, once per `(trait, type)` pair: `fmt_debug$dyn`
 pushes the `{self:?}` rendering into the builder, `hash$dyn` returns the builtin hash, and a

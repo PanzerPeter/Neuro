@@ -628,3 +628,42 @@ func main() -> i32 {{
         );
     }
 }
+
+#[test]
+fn regression_inner_call_borrow_ends_before_a_later_move() {
+    // `len_of` returns a `u64`, so the borrow of `key` it took is over before `key` moves
+    // as the next argument, in a call and in a method chain.
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "inner_borrow_move.nr",
+            r#"
+func len_of(s: &string) -> u64 { s.len() }
+func take(n: u64, s: string) -> u64 { n + s.len() }
+
+func main() -> i32 {
+    val key = "abc"
+    val n = take(len_of(&key), key)
+    val other = "abcd"
+    val m = Some(len_of(&other)).ok_or(other)
+    match m {
+        Ok(v) => n as i32 * 10 + v as i32,
+        Err(_) => 0
+    }
+}
+"#,
+        )
+        .expect("compilation failed");
+    assert_eq!(exit, 64);
+
+    // A result that carries the borrow keeps it, and a `&mut` in flight beside a move of
+    // the same name is still refused.
+    for source in [
+        "func first(s: &string) -> &string { s }\nfunc take(n: &string, s: string) -> u64 { n.len() + s.len() }\nfunc main() -> i32 {\n    val key = \"abc\"\n    take(first(&key), key) as i32\n}",
+        "func take(n: &mut string, s: string) -> u64 { s.len() }\nfunc main() -> i32 {\n    mut key = \"abc\"\n    take(&mut key, key) as i32\n}",
+    ] {
+        let err = CompileTest::new()
+            .check("held_borrow_move.nr", source)
+            .expect_err("a move under a live borrow must be refused");
+        assert!(err.contains("while it is borrowed"), "{source}\ngot: {err}");
+    }
+}

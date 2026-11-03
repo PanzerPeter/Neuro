@@ -330,3 +330,30 @@ func main() -> i32 {
         .expect("compilation failed");
     assert_eq!(exit, 60);
 }
+
+#[test]
+fn regression_parenthesized_function_field_is_called_through_its_value() {
+    // `(k.f)(x)` calls the field's value. A method of the same name is a different
+    // callee, reached by `k.f(x)`.
+    let exit = CompileTest::new()
+        .compile_and_run(
+            "field_call.nr",
+            r#"
+struct K { f: (i32) -> i32 }
+
+impl K {
+    func f(&self, x: i32) -> i32 { x + 1 }
+}
+
+func double(x: i32) -> i32 { x * 2 }
+
+func main() -> i32 {
+    val k = K { f: double }
+    val ks = [K { f: double }, K { f: |x: i32| x + 3 }]
+    (k.f)(21) + k.f(1) + (ks[0].f)(10) + (ks[1].f)(1)
+}
+"#,
+        )
+        .expect("compilation failed");
+    assert_eq!(exit, 42 + 2 + 20 + 4);
+}

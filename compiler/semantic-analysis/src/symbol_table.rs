@@ -378,6 +378,20 @@ impl SymbolTable {
         }
     }
 
+    /// The places `holder` borrows exclusively, each with the index of the scope that
+    /// defines it: what a closure captured by `&mut`, where a call through it can store.
+    pub(crate) fn exclusive_borrows(&self, holder: &str) -> Vec<(String, usize)> {
+        self.lookup(holder)
+            .map(|info| {
+                info.borrows
+                    .iter()
+                    .filter(|prov| prov.exclusive)
+                    .map(|prov| (prov.place.clone(), prov.scope))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Mark `holder` as holding a scope-bound closure.
     pub(crate) fn mark_scope_bound(&mut self, holder: &str) {
         if let Some(info) = self.lookup_mut(holder) {

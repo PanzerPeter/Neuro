@@ -53,7 +53,7 @@ impl TypeChecker {
         for stmt in else_block {
             let _ = self.check_stmt(stmt);
         }
-        self.symbols.pop_scope();
+        self.pop_scope();
 
         if !stmts_diverge(else_block) {
             self.record_error(TypeError::ValElseMustDiverge { span });

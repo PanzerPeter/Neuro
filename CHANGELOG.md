@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.26.2] - 2026-11-03
+
+### Fixed
+
+- A `val` or `mut` with no `= value` is a parse error at the declaration. `mut z: i32` passed
+  `neurc check` and then stopped the build with an internal error (BUG-134).
+- A function-body `const` ends with its block, as a `val` does. Another function or code after the
+  block could name it and the build then failed with an internal error, and two functions could not
+  each declare a constant of the same name (BUG-135).
+- A module `const` may read one declared after it. The backend folded constants in source order and
+  stopped with "undefined variable"; it now folds them in dependency order, and a constant whose
+  initializer reads itself, directly or through other constants, is a type error (BUG-136).
+- Struct, enum, newtype and trait names share one namespace, and a type alias may not reuse one
+  declared in its file. Two declarations of one name compiled, and which one a use reached
+  depended on the syntax of the use (BUG-137).
+- `(k.f)(x)` calls the function stored in field `f`. It failed to build with `undefined function
+  K__f`, and when `K` also had a method `f`, it called the method instead (BUG-118).
+- A generic `&[T]` parameter takes an array, a `Vec` or a slice, by inference or turbofish, in a
+  generic function, method or associated function, and a `&[T]` in a method of a generic `impl` is
+  substituted with the instance. A generic function's `&dyn Trait` parameter takes a reference to
+  an implementor, as a non-generic one does (BUG-129).
+- A borrow an inner call takes ends when that call returns, if its result cannot carry the borrow.
+  `take(len_of(&key), key)` was refused with "cannot move out of 'key' while it is borrowed"
+  (BUG-127).
+- A call inside a `pool` to a closure that captured an outer binding by `&mut` is judged like a call
+  with a `&mut` argument. The closure could store an arena value into the binding, which then read
+  memory a later pool reused (BUG-117).
+
+### Documentation
+
+- BUG-124 is restated: a `for` over an array of `string` leaks every element, not only the last.
+  The root cause is confirmed in the emitted IR.
+
 ## [5.26.1] - 2026-11-03
 
 ### Fixed

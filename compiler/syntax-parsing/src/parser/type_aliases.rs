@@ -82,8 +82,24 @@ pub(crate) fn expand_type_aliases(
         return Ok(());
     }
 
+    // An alias shares the type namespace with the file's own nominal declarations.
+    let declared = |name: &str| {
+        items.iter().any(|item| match item {
+            Item::Struct(def) => def.name.name == name,
+            Item::Enum(def) => def.name.name == name,
+            Item::Newtype(def) => def.name.name == name,
+            Item::Trait(def) => def.name.name == name,
+            _ => false,
+        })
+    };
     let mut direct: HashMap<&str, (&Type, Span)> = HashMap::new();
     for decl in &decls {
+        if declared(&decl.name.name) {
+            return Err(ParseError::DuplicateTypeAlias {
+                name: decl.name.name.clone(),
+                span: decl.name.span,
+            });
+        }
         if BUILTIN_TYPE_NAMES.contains(&decl.name.name.as_str()) {
             return Err(ParseError::TypeAliasShadowsBuiltin {
                 name: decl.name.name.clone(),
