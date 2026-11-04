@@ -27,7 +27,7 @@ func main() -> i32 {
         val c = product(&a, &b_gpu).to(Device::CPU)
         for i in 0..2048 {
             for j in 0..2048 {
-                checksum = checksum + c[i, j] as i64
+                checksum += c[i, j] as i64
             }
         }
     }

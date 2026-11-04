@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.26.3] - 2026-11-04
+
+### Changed
+
+- inkwell comes from its crates.io 0.11 release instead of a git commit, now that a release supports
+  LLVM 23, and the lockfile moves every dependency to its latest compatible version. All eleven
+  benchmark programs compile to byte-identical executables before and after.
+- The Neuro benchmarks use `for` over ranges, `for x in &v` in `vector_sum`, and a literal `0.5` in
+  the `gpu_mlp` body in place of a `half` parameter. Timings are unchanged: a re-run of every
+  benchmark stays within run-to-run noise of the published tables, which are left as they are.
+
 ## [5.26.2] - 2026-11-03
 
 ### Fixed

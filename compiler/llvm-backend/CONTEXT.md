@@ -49,8 +49,7 @@ transforms.
 - ast-types: the `BinaryOp` / `UnaryOp` enums (reused unchanged by the HIR)
 - shared-types: type system primitives, `FormatSpec` for interpolation
 
-inkwell 0.10.0 (feature `llvm23-1`) is a third-party crate, not Shared Kernel. No crates.io release
-supports LLVM 23 yet, so the root `Cargo.toml` pins it to a commit of inkwell's master. Requires LLVM 23;
+inkwell (feature `llvm23-1`) is a third-party crate, not Shared Kernel. Requires LLVM 23;
 set `LLVM_SYS_231_PREFIX` (e.g. `/usr` on Arch) before building. `semantic-analysis` is not a
 production dependency: neurc orders type-check then HIR lowering before codegen.
 `syntax-parsing`, `hir-lowering` and `mlir-backend` appear only in `[dev-dependencies]` (tests and

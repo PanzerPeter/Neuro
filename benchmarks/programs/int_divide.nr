@@ -9,24 +9,19 @@
 
 func work(n: i32) -> i64 {
     mut divisors: Vec<i64> = Vec::new()
-    mut d: i32 = 0
-    while d < 64 {
+    for d in 0..64 {
         divisors.push((d as i64) + 3)
-        d += 1
     }
 
     mut acc: i64 = 1
-    mut i: i32 = 0
-    while i < n {
+    for i in 0..n {
         val k = divisors[i % 64]
         acc = ((acc + (i as i64)) / k) + ((acc * 7 + (i as i64)) % k) + 1
-        i += 1
     }
     return acc
 }
 
 func main() -> i32 {
-    val a = work(20000000)
-    println("acc = {a}")
+    println("acc = {work(20000000)}")
     return 0
 }

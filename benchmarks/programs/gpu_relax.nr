@@ -26,7 +26,7 @@ func main() -> i32 {
     mut checksum: i64 = 0
     for i in 0..2048 {
         for j in 0..2048 {
-            checksum = checksum + (host[i, j] * 1024.0f32) as i64
+            checksum += (host[i, j] * 1024.0f32) as i64
         }
     }
     println("checksum = {checksum}")

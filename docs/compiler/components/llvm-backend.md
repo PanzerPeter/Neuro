@@ -3,7 +3,7 @@
 The LLVM backend turns the typed HIR into native object code, or into textual LLVM IR with `neurc compile --emit llvm-ir`. It owns all scalar code and every tensor operation with no loop, and links in the tensor loops that the [MLIR backend](mlir-backend.md) computes. Read it when a change touches code generation, the runtime ABI, or the panic and output paths.
 
 **Crate**: `compiler/llvm-backend`
-**Library**: inkwell 0.10.0 (LLVM 23 bindings)
+**Library**: inkwell (LLVM 23 bindings)
 **Build requirement**: `LLVM_SYS_231_PREFIX` pointing at an LLVM 23 install. Every build of the compiler also needs MLIR 23 in the same prefix ([Installation](../../getting-started/installation.md#mlir)).
 **Entry points**: `compile` and `compile_to_ir`, both in [`lib.rs`](../../../compiler/llvm-backend/src/lib.rs)
 
@@ -15,7 +15,7 @@ The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the A
 
 ## Architecture
 
-- **Dependencies**: `neuro-hir` (the HIR it consumes), `ast-types` (the operator enums), `shared-types`, `inkwell`, `thiserror`. The `syntax-parsing`, `hir-lowering` and `mlir-backend` crates are dev-dependencies only: tests and benches lower source before compiling, and a test that compiles a tensor operation links the body MLIR computes for it. inkwell is pinned to a commit of its master because no crates.io release supports LLVM 23 yet.
+- **Dependencies**: `neuro-hir` (the HIR it consumes), `ast-types` (the operator enums), `shared-types`, `inkwell`, `thiserror`. The `syntax-parsing`, `hir-lowering` and `mlir-backend` crates are dev-dependencies only: tests and benches lower source before compiling, and a test that compiles a tensor operation links the body MLIR computes for it.
 - **Public API**: `compile`, `compile_to_ir`, `ExternalBodies`, `BodyGuard`, `BodyGuardKind`, `BodyMemory`, `GpuVendor`, `OptimizationLevelSetting`, `CodegenError`, `CodegenResult`
 - **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins.
 - **Output**: a platform object file, or the textual module from `compile_to_ir`.

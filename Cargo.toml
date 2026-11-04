@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "5.26.2"
+version = "5.26.3"
 edition = "2024"
 rust-version = "1.98.1"
 authors = ["Neuro Contributors"]
@@ -43,13 +43,11 @@ logos = "0.16"
 # Requires LLVM 23 with dev libraries (the backend emits LLVM IR via inkwell).
 # LLVM_SYS_231_PREFIX points at that install: /usr on Arch/CachyOS, whose stock
 # `llvm` is 23. Feature flag llvm23-1 (inkwell's minor-version suffix scheme).
-# LLVM 23 support is on inkwell's master but in no crates.io release yet, so the
-# dependency is pinned to that commit; move back to a version once 0.11 ships.
 # default-features = false disables inkwell's `target-all` default, which would
 # otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
 # That fails to link against LLVM's official Windows build, which ships only a
 # subset of backends. We only ever initialize the native (x86) target.
-inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "e27198562729488a493e8110b4d925875eb917cb", default-features = false, features = ["llvm23-1", "target-x86"] }
+inkwell = { version = "0.11", default-features = false, features = ["llvm23-1", "target-x86"] }
 
 # MLIR Backend (Phase 1.8+)
 # Rust MLIR bindings for the tensor lowering path. melior 0.28.x is the MLIR 23

@@ -7,11 +7,9 @@
 // would let the conversion finish early and measure the wrong thing.
 
 func main() -> i32 {
-    mut i: i32 = 0
-    while i < 600000 {
+    for i in 0..600000 {
         val x = (i as f64) * 1.41421356237309 - 0.618033988749895
         println("loss {x:.6}")
-        i += 1
     }
     return 0
 }

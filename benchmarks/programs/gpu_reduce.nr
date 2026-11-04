@@ -15,9 +15,9 @@ func main() -> i32 {
     mut checksum: i64 = 0
     for r in 0..1000 {
         g[r, r] = 3.0f32
-        checksum = checksum + g.sum() as i64
+        checksum += g.sum() as i64
         val rows = g.sum(1).to(Device::CPU)
-        checksum = checksum + rows[r] as i64
+        checksum += rows[r] as i64
     }
     println("checksum = {checksum}")
     return 0

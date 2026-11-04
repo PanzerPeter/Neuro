@@ -204,7 +204,7 @@ vectorizes.
 | Benchmark | What it stresses | Neuro `-O 3` | `clang++ -O3` | `rustc -O3` | Python 3.14 | NumPy |
 |---|---|---|---|---|---|---|
 | `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 166 ms | 6668 ms | 1268 ms |
-| `vector_sum` | `Vec` push, indexed sweep | 24 ms | 26 ms | 24 ms | 6008 ms | 130 ms |
+| `vector_sum` | `Vec` push, sweep by reference | 24 ms | 26 ms | 24 ms | 6008 ms | 130 ms |
 | `call_overhead` | recursion, call and inline cost | 49 ms | 51 ms | 48 ms | 1409 ms | |
 | `print_lines` | integer holes to standard output | 13 ms | 20 ms | 13 ms | 111 ms | |
 | `format_floats` | `f64` holes at a fixed precision | 115 ms | 110 ms | 38 ms | 222 ms | |

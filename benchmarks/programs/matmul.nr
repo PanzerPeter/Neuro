@@ -19,7 +19,7 @@ func main() -> i32 {
         val c = &a @ &b
         for i in 0..256 {
             for j in 0..256 {
-                checksum = checksum + c[i, j] as i64
+                checksum += c[i, j] as i64
             }
         }
     }

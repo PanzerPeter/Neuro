@@ -4,10 +4,8 @@
 
 func mandel(w: i32, h: i32, max_iter: i32) -> i32 {
     mut total: i32 = 0
-    mut py: i32 = 0
-    while py < h {
-        mut px: i32 = 0
-        while px < w {
+    for py in 0..h {
+        for px in 0..w {
             val x0 = (px as f64) / (w as f64) * 3.5 - 2.5
             val y0 = (py as f64) / (h as f64) * 2.0 - 1.0
             mut x: f64 = 0.0
@@ -25,15 +23,12 @@ func mandel(w: i32, h: i32, max_iter: i32) -> i32 {
                 i += 1
             }
             total += i
-            px += 1
         }
-        py += 1
     }
     return total
 }
 
 func main() -> i32 {
-    val r = mandel(1000, 1000, 400)
-    println("mandel = {r}")
+    println("mandel = {mandel(1000, 1000, 400)}")
     return 0
 }

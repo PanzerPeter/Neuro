@@ -3,10 +3,8 @@
 // dominated by formatting and syscalls rather than by arithmetic.
 
 func main() -> i32 {
-    mut i: i32 = 0
-    while i < 600000 {
+    for i in 0..600000 {
         println("line {i}")
-        i += 1
     }
     return 0
 }
