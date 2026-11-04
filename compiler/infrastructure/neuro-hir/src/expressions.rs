@@ -407,8 +407,8 @@ pub enum HirInterpPart {
 /// One resolved arm of a [`HirExprKind::Match`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirMatchArm {
-    /// OR-alternatives: the arm's pattern part fires when any test matches. A
-    /// catch-all (`_` / bare binding) is a single [`HirMatchTest::Wildcard`].
+    /// OR-alternatives, tried in order. A catch-all (`_` / bare binding) is a single
+    /// [`HirMatchTest::Wildcard`].
     pub tests: Vec<HirMatchTest>,
     /// Bindings the arm introduces, in scope for its guard and body.
     pub bindings: Vec<HirMatchBinding>,
@@ -416,13 +416,13 @@ pub struct HirMatchArm {
     pub body: HirExpr,
 }
 
-/// A single refutable test of the scrutinee. Payload sub-patterns never
-/// contribute a test (they are irrefutable binding/`_` forms), so only the tag /
-/// scalar value is examined here.
+/// A refutable test of a value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirMatchTest {
     /// Matches unconditionally (`_` or a bare binding).
     Wildcard,
+    /// Never matches: an array pattern of a length this instance's `[T; N]` does not have.
+    Never,
     /// Enum-variant tag equals `tag`.
     Tag { tag: u32 },
     /// Scalar (integer / `char` / `bool`) equals `value` (encoded as the low bits of
@@ -430,6 +430,16 @@ pub enum HirMatchTest {
     IntEq { value: i64 },
     /// Ordered scalar lies in `lo..=hi` (an exclusive `..` is normalized to `hi - 1`).
     IntRange { lo: i64, hi: i64 },
+    /// A slice has exactly `len` elements, or at least that many when not `exact`.
+    SliceLen { len: u64, exact: bool },
+    /// Every test holds. Backends stop at the first failure: a later test reads a part
+    /// an earlier one proved exists, and any other variant's payload bytes are undefined.
+    All(Vec<HirMatchTest>),
+    /// `test` holds of the part of the value `step` reaches.
+    Part {
+        step: HirPatternStep,
+        test: Box<HirMatchTest>,
+    },
 }
 
 /// A binding introduced by a match arm, in scope for its guard and body.
@@ -437,16 +447,37 @@ pub enum HirMatchTest {
 pub struct HirMatchBinding {
     pub name: String,
     pub ty: HirType,
-    pub source: HirBindingSource,
+    /// Where the value sits, one path per alternative of the arm, in test order. An
+    /// empty path is the whole scrutinee.
+    pub paths: Vec<Vec<HirPatternStep>>,
 }
 
-/// Where a [`HirMatchBinding`]'s value comes from.
+impl HirMatchBinding {
+    /// A binding of payload slot `slot` of the scrutinee, in an arm of one alternative.
+    pub fn of_payload_slot(name: String, ty: HirType, slot: usize) -> Self {
+        let step = HirPatternStep::EnumPayload {
+            slot,
+            ty: ty.clone(),
+        };
+        Self {
+            name,
+            ty,
+            paths: vec![vec![step]],
+        }
+    }
+}
+
+/// One step from a matched value to a part of it. `ty` is the part's type.
 #[derive(Debug, Clone, PartialEq)]
-pub enum HirBindingSource {
-    /// The whole scrutinee value (a bare binding `n => ...`).
-    Scrutinee,
-    /// Enum payload slot `slot`, decoded back to the binding's type.
-    EnumPayload { slot: usize },
+pub enum HirPatternStep {
+    /// Payload slot `slot` of an enum value.
+    EnumPayload { slot: usize, ty: HirType },
+    /// Element `index` of an array or a borrowed slice.
+    Element { index: u64, ty: HirType },
+    /// The elements from `start` on: a shorter array, or a shorter slice borrow.
+    Rest { start: u64, ty: HirType },
+    /// The referent of a borrow.
+    Deref { ty: HirType },
 }
 
 /// One axis of a tensor index, resolved against the receiver's shape.

@@ -1,26 +1,14 @@
 // Type checking for `match` expressions: pattern/scrutinee typing, arm-body
-// unification, binding introduction, and exhaustiveness.
+// unification and binding introduction. Exhaustiveness is `exhaustiveness.rs`.
 
-use ast_types::{EnumPatternPayload, Expr, MatchArm, Pattern};
+use ast_types::{ArrayPatternRest, EnumPatternPayload, Expr, MatchArm, Pattern};
 use shared_types::{Literal, Span};
 
 use super::literals::suffix_to_type;
 use super::{TypeChecker, VariantForm};
 use crate::errors::TypeError;
 use crate::type_checkers::val_else::expr_diverges;
-use crate::types::Type;
-
-/// What a single guardless pattern proves about coverage of the scrutinee.
-enum Coverage {
-    /// Matches every value (`_` or a bare binding).
-    CatchAll,
-    /// Covers one enum variant by name.
-    Variant(String),
-    /// Covers one boolean value.
-    Bool(bool),
-    /// Contributes nothing decidable (a literal or range over an unbounded scalar).
-    Nothing,
-}
+use crate::types::{ArrayLen, Type};
 
 impl TypeChecker {
     /// Type-check a `match` expression and return its result type.
@@ -33,12 +21,18 @@ impl TypeChecker {
     ) -> Type {
         let written_ty = self.check_expr(scrutinee, None).unwrap_or(Type::Unknown);
         // A borrow is matched through, as `self` is in a `&self` method and as `*r` is
-        // written out: the patterns test the referent.
-        let scrut_ty = written_ty.referent().clone();
+        // written out: the patterns test the referent. A slice has no value of its own,
+        // so it stays the borrow.
+        let scrut_ty = if is_slice_borrow(&written_ty) {
+            written_ty.clone()
+        } else {
+            written_ty.referent().clone()
+        };
 
-        // Only Copy scalars and enums are matchable in this phase; reject anything
-        // else up front (but keep checking arms so their bodies still get diagnosed).
-        let matchable = matches!(&scrut_ty, Type::Enum(_))
+        // Reject anything else up front (but keep checking arms so their bodies still
+        // get diagnosed).
+        let matchable = matches!(&scrut_ty, Type::Enum(_) | Type::Array { .. })
+            || is_slice_borrow(&scrut_ty)
             || scrut_ty.is_integer()
             || scrut_ty.is_char()
             || scrut_ty.is_bool()
@@ -137,18 +131,14 @@ impl TypeChecker {
     ) -> (Type, bool) {
         self.symbols.push_scope();
 
-        // Or-patterns (`a | b`) may not bind: only a single pattern arm binds.
-        let binds_allowed = arm.patterns.len() == 1;
         let mut bindings: Vec<(String, Type, Span)> = Vec::new();
-        for pattern in &arm.patterns {
+        for (i, pattern) in arm.patterns.iter().enumerate() {
             let mut pat_bindings = Vec::new();
             self.check_pattern(pattern, scrut_ty, &mut pat_bindings);
-            if !binds_allowed && !pat_bindings.is_empty() {
-                self.record_error(TypeError::OrPatternBinding {
-                    span: pattern.span(),
-                });
-            } else if binds_allowed {
+            if i == 0 {
                 bindings = pat_bindings;
+            } else {
+                self.check_alternative_bindings(&bindings, &pat_bindings, pattern.span());
             }
         }
 
@@ -194,6 +184,43 @@ impl TypeChecker {
         (body_ty, binds_owner)
     }
 
+    /// Every alternative of an arm feeds one body, so each binds what the first does.
+    fn check_alternative_bindings(
+        &mut self,
+        first: &[(String, Type, Span)],
+        other: &[(String, Type, Span)],
+        span: Span,
+    ) {
+        let binds = |list: &[(String, Type, Span)], name: &str| {
+            list.iter().filter(|(n, _, _)| n == name).count()
+        };
+        for (name, ty, _) in first {
+            if binds(other, name) != binds(first, name) {
+                self.record_error(TypeError::OrPatternBindingMissing {
+                    name: name.clone(),
+                    span,
+                });
+            } else if let Some((_, other_ty, _)) = other.iter().find(|(n, _, _)| n == name)
+                && !other_ty.is_compatible_with(ty)
+            {
+                self.record_error(TypeError::OrPatternBindingType {
+                    name: name.clone(),
+                    first: ty.clone(),
+                    other: other_ty.clone(),
+                    span,
+                });
+            }
+        }
+        for (name, _, name_span) in other {
+            if binds(first, name) == 0 {
+                self.record_error(TypeError::OrPatternBindingMissing {
+                    name: name.clone(),
+                    span: *name_span,
+                });
+            }
+        }
+    }
+
     /// Settle what binding an owner by value does to the scrutinee. An owned scrutinee
     /// is given up whichever arm runs, as `??` and `?` give theirs up. A borrowed one
     /// (`self` in a `&self` method, or `*r`) owns nothing to give, so taking an owner out
@@ -212,18 +239,59 @@ impl TypeChecker {
     }
 
     /// Check a pattern against the scrutinee type, collecting the bindings it
-    /// introduces into `bindings`.
+    /// introduces into `bindings`. A pattern that looks inside a value looks through a
+    /// borrow of it, and nothing that owns may leave that borrow.
     pub(crate) fn check_pattern(
         &mut self,
         pattern: &Pattern,
         scrut_ty: &Type,
         bindings: &mut Vec<(String, Type, Span)>,
     ) {
+        let looks_inside = !matches!(
+            pattern,
+            Pattern::Wildcard(_) | Pattern::Binding(_) | Pattern::At { .. }
+        );
+        if looks_inside
+            && !is_slice_borrow(scrut_ty)
+            && let Type::Reference { inner, .. } = scrut_ty
+        {
+            let first_new = bindings.len();
+            self.check_pattern(pattern, inner, bindings);
+            for (name, ty, span) in &bindings[first_new..] {
+                if self.is_type_move_tracked(ty) {
+                    self.record_error(TypeError::CannotMoveOutOfBorrow {
+                        name: name.clone(),
+                        span: *span,
+                    });
+                }
+            }
+            return;
+        }
         match pattern {
             Pattern::Wildcard(_) => {}
             Pattern::Binding(ident) => {
                 bindings.push((ident.name.clone(), scrut_ty.clone(), ident.span));
             }
+            Pattern::At {
+                name,
+                pattern,
+                span,
+            } => {
+                bindings.push((name.name.clone(), scrut_ty.clone(), name.span));
+                let first_new = bindings.len();
+                self.check_pattern(pattern, scrut_ty, bindings);
+                if bindings.len() > first_new && self.is_type_move_tracked(scrut_ty) {
+                    self.record_error(TypeError::AtPatternBindsOwner {
+                        name: name.name.clone(),
+                        span: *span,
+                    });
+                }
+            }
+            Pattern::Array {
+                elements,
+                rest,
+                span,
+            } => self.check_array_pattern(elements, rest.as_ref(), scrut_ty, *span, bindings),
             Pattern::Literal(lit, span) => {
                 self.check_literal_pattern(lit, scrut_ty, *span);
             }
@@ -262,6 +330,67 @@ impl TypeChecker {
                     span: *span,
                 });
             }
+        }
+    }
+
+    /// Check `[p0, p1, ..rest]` against an array or a borrowed slice. An array's length
+    /// is part of its type, so a pattern that cannot fit is an error, not a dead arm.
+    fn check_array_pattern(
+        &mut self,
+        elements: &[Pattern],
+        rest: Option<&ArrayPatternRest>,
+        scrut_ty: &Type,
+        span: Span,
+        bindings: &mut Vec<(String, Type, Span)>,
+    ) {
+        let (element_ty, rest_ty) = match scrut_ty {
+            Type::Array { element, size } => {
+                let rest_ty = match size {
+                    ArrayLen::Fixed(n) => {
+                        let bound = elements.len();
+                        if bound > *n || (rest.is_none() && bound != *n) {
+                            self.record_error(TypeError::ArrayPatternLengthMismatch {
+                                expected: bound,
+                                found: *n,
+                                span,
+                            });
+                        }
+                        Type::Array {
+                            element: element.clone(),
+                            size: ArrayLen::Fixed(n.saturating_sub(bound)),
+                        }
+                    }
+                    // A size parameter is settled per instance, as for a destructuring
+                    // `val`.
+                    _ => Type::Unknown,
+                };
+                ((**element).clone(), rest_ty)
+            }
+            Type::Reference { inner, .. } if is_slice_borrow(scrut_ty) => {
+                let Type::Slice(element) = &**inner else {
+                    return;
+                };
+                let rest_ty = Type::Reference {
+                    inner: inner.clone(),
+                    mutable: false,
+                };
+                ((**element).clone(), rest_ty)
+            }
+            Type::Unknown => (Type::Unknown, Type::Unknown),
+            _ => {
+                self.record_error(TypeError::PatternTypeMismatch {
+                    pattern_ty: "an array".to_string(),
+                    scrutinee_ty: scrut_ty.clone(),
+                    span,
+                });
+                (Type::Unknown, Type::Unknown)
+            }
+        };
+        for element in elements {
+            self.check_pattern(element, &element_ty, bindings);
+        }
+        if let Some(ident) = rest.and_then(|r| r.binding.as_ref()) {
+            bindings.push((ident.name.clone(), rest_ty, ident.span));
         }
     }
 
@@ -321,7 +450,7 @@ impl TypeChecker {
                     });
                 }
                 for (sub, (_, field_ty)) in subs.iter().zip(fields.iter()) {
-                    self.bind_payload_sub(sub, field_ty, bindings);
+                    self.check_pattern(sub, field_ty, bindings);
                 }
             }
             (VariantForm::Struct, EnumPatternPayload::Struct(field_pats)) => {
@@ -330,9 +459,7 @@ impl TypeChecker {
                         .iter()
                         .find(|(n, _)| n.as_deref() == Some(fp.field.name.as_str()))
                     {
-                        Some((_, field_ty)) => {
-                            self.bind_payload_sub(&fp.pattern, field_ty, bindings)
-                        }
+                        Some((_, field_ty)) => self.check_pattern(&fp.pattern, field_ty, bindings),
                         None => self.record_error(TypeError::UnknownEnumField {
                             enum_name: enum_name.to_string(),
                             variant: variant.to_string(),
@@ -353,24 +480,6 @@ impl TypeChecker {
         }
     }
 
-    /// Bind one enum-payload sub-pattern. Sub-patterns are restricted to a binding or
-    /// `_`; a refutable sub-pattern (literal, range, nested variant) is an
-    /// error directing the user to a guard.
-    fn bind_payload_sub(
-        &mut self,
-        sub: &Pattern,
-        field_ty: &Type,
-        bindings: &mut Vec<(String, Type, Span)>,
-    ) {
-        match sub {
-            Pattern::Wildcard(_) => {}
-            Pattern::Binding(ident) => {
-                bindings.push((ident.name.clone(), field_ty.clone(), ident.span));
-            }
-            other => self.record_error(TypeError::RefutablePayloadPattern { span: other.span() }),
-        }
-    }
-
     /// Check that a literal pattern's type is compatible with the scrutinee.
     fn check_literal_pattern(&mut self, lit: &Literal, scrut_ty: &Type, span: Span) {
         if matches!(scrut_ty, Type::Unknown) {
@@ -381,8 +490,16 @@ impl TypeChecker {
             Literal::Integer(_, Some(suffix)) => &suffix_to_type(suffix) == scrut_ty,
             Literal::Char(_) => scrut_ty.is_char(),
             Literal::Boolean(_) => scrut_ty.is_bool(),
-            // Float and string literal patterns have no matchable scrutinee in phase 1E.
-            Literal::Float(_, _) | Literal::String(_) => false,
+            Literal::Float(_, _) | Literal::String(_) => {
+                if scrut_ty.is_float() || matches!(scrut_ty, Type::String) {
+                    self.record_error(TypeError::UntestableLiteralPattern {
+                        ty: scrut_ty.clone(),
+                        span,
+                    });
+                    return;
+                }
+                false
+            }
         };
         if !ok {
             self.record_error(TypeError::PatternTypeMismatch {
@@ -392,86 +509,11 @@ impl TypeChecker {
             });
         }
     }
-
-    /// Verify the arms cover every possible scrutinee value.
-    fn check_exhaustive(&mut self, arms: &[MatchArm], scrut_ty: &Type, span: Span) {
-        let mut has_catch_all = false;
-        let mut covered_variants: Vec<String> = Vec::new();
-        let mut bools_covered = [false; 2];
-
-        for arm in arms {
-            // A guarded arm may not fire, so it never contributes to exhaustiveness.
-            if arm.guard.is_some() {
-                continue;
-            }
-            for pat in &arm.patterns {
-                match pattern_coverage(pat) {
-                    Coverage::CatchAll => has_catch_all = true,
-                    Coverage::Variant(name) => {
-                        if !covered_variants.contains(&name) {
-                            covered_variants.push(name);
-                        }
-                    }
-                    Coverage::Bool(b) => bools_covered[b as usize] = true,
-                    Coverage::Nothing => {}
-                }
-            }
-        }
-
-        if has_catch_all {
-            return;
-        }
-
-        match scrut_ty {
-            Type::Enum(name) => {
-                let all: Vec<String> = self
-                    .enum_defs
-                    .get(name)
-                    .map(|vs| vs.iter().map(|v| v.name.clone()).collect())
-                    .unwrap_or_default();
-                let missing: Vec<String> = all
-                    .into_iter()
-                    .filter(|v| !covered_variants.contains(v))
-                    .collect();
-                if !missing.is_empty() {
-                    self.record_error(TypeError::NonExhaustiveMatch {
-                        reason: format!("unhandled variant(s): {}", missing.join(", ")),
-                        span,
-                    });
-                }
-            }
-            Type::Bool => {
-                if !(bools_covered[0] && bools_covered[1]) {
-                    self.record_error(TypeError::NonExhaustiveMatch {
-                        reason: "not all `bool` values are handled".to_string(),
-                        span,
-                    });
-                }
-            }
-            // Integers and `char` have too many values to enumerate; they require a
-            // wildcard arm.
-            _ => {
-                self.record_error(TypeError::NonExhaustiveMatch {
-                    reason: format!("a `{}` match requires a `_` wildcard arm", scrut_ty),
-                    span,
-                });
-            }
-        }
-    }
 }
 
-/// The coverage a single guardless pattern contributes to exhaustiveness.
-fn pattern_coverage(pat: &Pattern) -> Coverage {
-    match pat {
-        Pattern::Wildcard(_) | Pattern::Binding(_) => Coverage::CatchAll,
-        Pattern::Enum { variant, .. } => Coverage::Variant(variant.name.clone()),
-        Pattern::Literal(Literal::Boolean(b), _) => Coverage::Bool(*b),
-        // An unresolved variant pattern is already an error; contributing no coverage
-        // keeps the exhaustiveness report from compounding it.
-        Pattern::Literal(_, _) | Pattern::Range { .. } | Pattern::UnqualifiedEnum { .. } => {
-            Coverage::Nothing
-        }
-    }
+/// Whether `ty` is `&[T]` or `&mut [T]`.
+pub(crate) fn is_slice_borrow(ty: &Type) -> bool {
+    matches!(ty, Type::Reference { inner, .. } if matches!(**inner, Type::Slice(_)))
 }
 
 /// The human-readable word for a variant form, for the form-mismatch diagnostic.

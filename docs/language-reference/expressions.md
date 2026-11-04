@@ -33,10 +33,10 @@ An `if` with an `else` produces a value, and every arm must agree on its type. A
 
 The first arm whose pattern and optional `if` guard hold supplies the value. [Control flow](control-flow.md#pattern-matching) shows the patterns. The rules below are the ones that page does not state:
 
-- **Patterns.** `_`, a bare name, a literal, an inclusive `a..=b` or exclusive `a..b` range over an ordered scalar, or an enum variant pattern.
-- **Exhaustiveness.** An enum match must name every variant or have a `_` arm. An integer or `char` match needs a `_` arm. A `bool` match needs both `true` and `false`, or a `_` arm. A guarded arm does not count toward exhaustiveness.
-- **Borrowed scrutinee.** A borrow of an enum or scalar is matched through: `match d` with `d: &Dir` tests the `Dir`. An arm that moves an owning payload out of the borrow is an error. Bind it with `_`, or match an owned value.
-- **Limits.** The scrutinee must be an enum, integer, `char` or `bool`, or a borrow of one. A payload sub-pattern must be a binding or `_`, so match a payload value with a guard, as in `Opt::Some(n) if n == 0`. An alternative of an `|` pattern may not bind a name.
+- **Patterns.** `_`, a bare name, a literal, an inclusive `a..=b` or exclusive `a..b` range over an ordered scalar, an enum variant pattern, `name @ pattern`, or an array pattern. Payloads, array elements and the right of `@` take any pattern.
+- **Exhaustiveness.** The check reads inside payloads and arrays. The arms must cover every variant, both `bool` values and every slice length. An integer or `char`, at any depth, needs a binding or `_`. A guarded arm does not count. The error names a value no arm takes, as in ``no arm matches `Option::Some(Option::None)` ``. A match too complex to verify is an error.
+- **Borrowed scrutinee.** A borrow is matched through at every level: `match d` with `d: &Dir` tests the `Dir`, and `Some(Dir::Up)` over `Option<&Dir>` does too. Binding an owning value out of a borrow is an error. Bind it with `_`, or match an owned value.
+- **Limits.** The scrutinee must be an enum, integer, `char`, `bool`, array or borrowed slice, or a borrow of one. A `float` or `string` has no literal pattern, so compare one in a guard, as in `Some(s) if s == "x"`.
 
 ### Unsafe Block Expressions
 

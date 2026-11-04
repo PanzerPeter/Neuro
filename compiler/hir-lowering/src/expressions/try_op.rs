@@ -6,8 +6,7 @@
 
 use ast_types::Expr;
 use neuro_hir::{
-    HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt,
-    HirType,
+    HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt, HirType,
 };
 
 use crate::{Lowerer, LoweringError};
@@ -59,11 +58,11 @@ impl Lowerer {
         );
         let success = HirMatchArm {
             tests: vec![HirMatchTest::Tag { tag: success_tag }],
-            bindings: vec![HirMatchBinding {
-                name: format!("__try_{}", index),
-                ty: payload.clone(),
-                source: HirBindingSource::EnumPayload { slot: 0 },
-            }],
+            bindings: vec![HirMatchBinding::of_payload_slot(
+                format!("__try_{}", index),
+                payload.clone(),
+                0,
+            )],
             guard: None,
             body: unwrapped,
         };
@@ -117,11 +116,7 @@ impl Lowerer {
                 let (tag, _) = self.enum_variant(&return_instance, RESULT_FAILURE_VARIANT)?;
                 let value = HirExpr::new(HirExprKind::Variable(name.clone()), err_ty.clone(), span);
                 (
-                    vec![HirMatchBinding {
-                        name,
-                        ty: err_ty,
-                        source: HirBindingSource::EnumPayload { slot: 0 },
-                    }],
+                    vec![HirMatchBinding::of_payload_slot(name, err_ty, 0)],
                     self.build_enum_construct(
                         &return_instance,
                         RESULT_FAILURE_VARIANT,

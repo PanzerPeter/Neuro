@@ -2,8 +2,9 @@
 //! rebuilds the propagated value against the ENCLOSING function's return instance.
 //! No `HirExprKind` is added for `?`, so these tests assert on `Match`.
 
+use super::assert_payload_slot;
 use super::{binding_init, function_body, lower};
-use neuro_hir::{HirBindingSource, HirExprKind, HirMatchTest, HirStmt, HirType};
+use neuro_hir::{HirExprKind, HirMatchTest, HirStmt, HirType};
 
 /// The two fallible enums, declared exactly as the prelude declares them. The lowering
 /// slice sees no prelude, so each program brings its own.
@@ -32,10 +33,7 @@ fn try_lowers_to_a_two_arm_match() {
     // Arm 0 tests the `Ok` tag and binds payload slot 0, which it then yields.
     assert_eq!(arms[0].tests, vec![HirMatchTest::Tag { tag: 0 }]);
     assert_eq!(arms[0].bindings.len(), 1);
-    assert_eq!(
-        arms[0].bindings[0].source,
-        HirBindingSource::EnumPayload { slot: 0 }
-    );
+    assert_payload_slot(&arms[0].bindings[0], 0);
     let HirExprKind::Variable(read) = &arms[0].body.kind else {
         panic!("the success arm should read its binding");
     };

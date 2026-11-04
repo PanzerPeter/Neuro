@@ -5,6 +5,37 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-139: the unit type `()` cannot be written in a type position
+
+- **Status**: open, confirmed
+- **Area**: `syntax-parsing` (`parse_type`); `semantic-analysis` (`UnsupportedEnumPayload`)
+- **Severity**: minor. A valid program is refused with a clear diagnostic
+
+**Minimal repro**
+
+```neuro
+func f(o: Result<(), i32>) -> i32 {
+    match o {
+        Result::Ok(_) => 1,
+        Result::Err(e) => e
+    }
+}
+
+func main() -> i32 { 0 }
+```
+
+Expected: this compiles, since `()` is the zero-element tuple. Observed: "unexpected token
+RightParen, expected a tuple type `(T1, T2, ...)` or a function type `(T1, ...) -> R`".
+
+**Root cause**: confirmed in the code. `parse_type` reads `()` only as the start of a function
+type, so it refuses one with no `->` after it.
+
+**Workaround**: use a placeholder integer as the success payload.
+
+**Fix sketch**: parse `()` as the unit type. The next stop is likely `UnsupportedEnumPayload`,
+which refuses a `void` payload, so a unit payload also needs a layout: a zero-word slot, read by no
+binding. Regression tests: the repro, `Ok(())` as a value, and a `()` return annotation.
+
 ## BUG-138: a private function is reachable by its bare name after `import`
 
 - **Status**: open, confirmed

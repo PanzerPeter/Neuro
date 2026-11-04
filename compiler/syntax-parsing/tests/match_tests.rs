@@ -77,3 +77,74 @@ fn parses_negative_literal_and_exclusive_range() {
         }
     ));
 }
+
+fn first_pattern(src: &str) -> Pattern {
+    let Expr::Match { arms, .. } = parse_match(src) else {
+        panic!("expected a match");
+    };
+    arms[0].patterns[0].clone()
+}
+
+#[test]
+fn parses_an_at_binding_around_any_pattern() {
+    let Pattern::At { name, pattern, .. } = first_pattern("match n { x @ 1..=9 => x, _ => 0 }")
+    else {
+        panic!("expected an `@` binding");
+    };
+    assert_eq!(name.name, "x");
+    assert!(matches!(*pattern, Pattern::Range { .. }));
+
+    let nested = first_pattern("match n { Maybe::Some(v @ Tok::End) => 1, _ => 0 }");
+    let Pattern::Enum {
+        payload: EnumPatternPayload::Tuple(subs),
+        ..
+    } = nested
+    else {
+        panic!("expected a payload");
+    };
+    assert!(matches!(subs[0], Pattern::At { .. }));
+}
+
+#[test]
+fn parses_array_patterns_with_and_without_a_rest() {
+    let Pattern::Array { elements, rest, .. } =
+        first_pattern("match s { [1, x, ..tail] => 0, _ => 1 }")
+    else {
+        panic!("expected an array pattern");
+    };
+    assert_eq!(elements.len(), 2);
+    let binding = rest.and_then(|r| r.binding).expect("a named rest");
+    assert_eq!(binding.name, "tail");
+
+    let Pattern::Array { elements, rest, .. } = first_pattern("match s { [] => 0, _ => 1 }") else {
+        panic!("expected an array pattern");
+    };
+    assert!(elements.is_empty() && rest.is_none());
+
+    let Pattern::Array { elements, rest, .. } = first_pattern("match s { [a, ..,] => 0, _ => 1 }")
+    else {
+        panic!("expected an array pattern");
+    };
+    assert_eq!(elements.len(), 1);
+    assert!(rest.is_some_and(|r| r.binding.is_none()));
+}
+
+#[test]
+fn a_rest_closes_an_array_pattern() {
+    for src in ["match s { [.., z] => 0 }", "match s { [.., ..] => 0 }"] {
+        let err = parse_expr(src).expect_err("a rest must come last");
+        assert!(err.to_string().contains("no elements after"), "{err}");
+    }
+}
+
+#[test]
+fn a_struct_variant_pattern_may_end_in_dots() {
+    let Pattern::Enum {
+        payload: EnumPatternPayload::Struct(fields),
+        ..
+    } = first_pattern("match s { Shape::Rect { w, .. } => w, Shape::Dot { .. } => 0 }")
+    else {
+        panic!("expected a struct payload");
+    };
+    assert_eq!(fields.len(), 1);
+}

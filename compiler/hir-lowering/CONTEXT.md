@@ -337,7 +337,7 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   one to a hand-written `clone`, so a borrowed, indexed or temporary receiver is never taken
   over. Every other derived clone, a `Copy` struct's included, stays the backend's copy of the
   whole value.
-- **`val-else`** (`val_else.rs`). `lower_val_else` reuses `pattern_test` / `pattern_bindings` from
+- **`val-else`** (`val_else.rs`). `lower_val_else` reuses `lower_pattern` from
   `expressions/matches.rs` for the success test and bindings, lowers the `else` branch in a pushed
   scope with its own binding, and only then defines the pattern's bindings in the **enclosing**
   scope so later statements type against them. `resolve_else_binding` mirrors the checker's
@@ -740,13 +740,20 @@ compiler bug, not a diagnostic.
   array's `HirType`. A defensive arity re-check (`exact ⇒ N == start`, else `start <= N`) raises
   `Malformed` rather than underflowing `N - start`.
 - **Pattern matching**: a borrowed scrutinee is wrapped in a `Deref` first, so the patterns test
-  its referent (`match d` on `d: &Dir` lowers as `match *d`). `pattern_test` maps a pattern to a `HirMatchTest` (variant tag / `IntEq`
-  / `IntRange`, with `char`/`bool` literals as scalar codepoints or 0-1, and an exclusive `a..b`
-  normalized to `a..=b-1`); `pattern_bindings` resolves an arm's bindings to
-  `HirBindingSource::Scrutinee` or `EnumPayload { slot }` (slot = declared field position).
-  Bindings are defined in a per-arm scope so the guard and body lower correctly. A
-  `Pattern::UnqualifiedEnum` reaching `pattern_test` means neither module resolution nor the
-  checker ran, and surfaces as `LoweringError::Malformed`.
+  its referent (`match d` on `d: &Dir` lowers as `match *d`); a `&[T]` stays the borrow, since a
+  slice has no value of its own. `lower_pattern` walks a pattern once and returns its
+  `HirMatchTest` and its bindings. `pattern_at` carries the path walked so far: a sub-pattern's
+  test is wrapped in a `Part { step, test }`, and a binding records the path to its value. A tag
+  comes before its payload tests and a `SliceLen` before its element tests, inside one `All`,
+  because a backend stops at the first failure. Wildcards drop out. `char` / `bool` literals are
+  scalar codepoints or 0-1, and an exclusive `a..b` is normalized to `a..=b-1`. A pattern that looks
+  inside a value through a borrow adds a `Deref` step, at any depth. An array pattern whose length
+  the instance's `[T; N]` cannot have is `Never`: only a size parameter gets there.
+  `lower_arm_patterns` merges an arm's alternatives into one binding list in the first
+  alternative's order, each binding gathering one path per alternative. Bindings are defined in a
+  per-arm scope so the guard and body lower correctly. A `Pattern::UnqualifiedEnum` reaching
+  `pattern_at` means neither module resolution nor the checker ran, and surfaces as
+  `LoweringError::Malformed`.
 - **Newtypes**: a pre-pass records each newtype's inner AST type; `resolve_type` maps the name to
   `HirType::Newtype { name, inner }`, resolving the inner recursively (the checker already
   rejected cycles). A `Call` whose identifier callee names a newtype lowers to

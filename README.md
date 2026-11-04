@@ -168,7 +168,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Functions and closures** | Named arguments, implicit returns, `\|>` pipelines, `>>` composition; closures that capture by copy, borrow or `move` ([reference](docs/language-reference/functions.md)) |
 | **Generics and traits** | Monomorphized generics with const parameters and `where` clauses, associated types, operator traits, `impl` / `dyn` dispatch ([reference](docs/language-reference/generics-and-traits.md)) |
 | **Structs and enums** | Methods with `&self` / `&mut self` / `self` receivers, payload variants, newtypes, `@derive(Copy, Clone, Debug, PartialEq, Hashable)` ([reference](docs/language-reference/structs.md)) |
-| **Pattern matching** | Exhaustive `match` with or, range and guard patterns, `if val` / `while val`, `val-else`, destructuring `val` bindings |
+| **Pattern matching** | Exhaustive `match` with nested, binding-or, `@`, array, range and guard patterns, `if val` / `while val`, `val-else`, destructuring `val` bindings |
 | **Arrays and collections** | `[T; N]`, tuples, slices `&[T]` / `&mut [T]`, and `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` owning any sized element |
 | **Tensors** | `Tensor<T, [dims]>` with compile-time shapes: broadcasting, `@`, slicing, reductions, sorting, `einsum`, named and dynamic axes ([reference](docs/language-reference/tensors.md)) |
 | **GPU** | `@gpu` functions as NVIDIA or AMD kernels on Linux with an opt-in CPU fallback, hand-written `@kernel`s, tensors kept on a GPU with `.to(...)` |

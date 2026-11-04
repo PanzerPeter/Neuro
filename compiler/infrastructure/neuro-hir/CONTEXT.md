@@ -8,8 +8,8 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
 - Public types: `HirProgram`, `HirItem`, `HirFunction`, `HirTarget`, `HirParam`, `HirStruct`, `HirField`,
   `HirEnum`, `HirEnumVariant`, `HirEnumField`, `HirImpl`, `HirMethod`, `HirSelfParam`, `HirConst`,
   `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirPlace`, `HirExpr`, `HirExprKind`,
-  `HirFieldInit`, `HirBindingSource`, `HirGridIndex`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,
-  `HirMatchTest`, `HirMathOp`, `HirReduceOp`, `HirSortKind`, `HirTensorApply`, `HirTensorAxis`,
+  `HirFieldInit`, `HirGridIndex`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,
+  `HirMatchTest`, `HirPatternStep`, `HirMathOp`, `HirReduceOp`, `HirSortKind`, `HirTensorApply`, `HirTensorAxis`,
   `HirType`, `HirCollectionKind`, `AxisNames`
 - Pure functions over those types: `static_shape`, `extent_display`,
   `HirTarget::{has_gpu_body, requires_gpu, outlined}`, `HirType::referent`,
@@ -174,10 +174,13 @@ something, the value a `move` closure takes over. The value's `ty` is the ordina
 
 **Match arms are fully resolved, so backends need no pattern logic.** `HirExprKind::Match
 { scrutinee, arms }` carries `HirMatchArm { tests, bindings, guard, body }`.
-`HirMatchTest::{Wildcard, Tag, IntEq, IntRange}` are the refutable tests (an exclusive `a..b`
-is pre-normalized to `a..=b-1`) and `HirMatchBinding { name, ty, source }` with
-`HirBindingSource::{Scrutinee, EnumPayload { slot }}` describes each binding. No exhaustiveness
-reasoning reaches a backend.
+`HirMatchTest::{Wildcard, Never, Tag, IntEq, IntRange, SliceLen}` are the leaf tests (an exclusive
+`a..b` is pre-normalized to `a..=b-1`). `All` is a conjunction a backend must stop at the first
+failure of, and `Part { step, test }` applies a test to the part of the value one
+`HirPatternStep::{EnumPayload, Element, Rest, Deref}` reaches. `tests` holds the arm's
+alternatives. `HirMatchBinding { name, ty, paths }` has one path of steps per alternative, an empty
+path being the whole scrutinee, so an arm's names and types are stated once and the alternatives
+cannot disagree. No exhaustiveness reasoning reaches a backend.
 
 **`val-else` is a statement, not a `Match` variant.** `HirStmt::ValElse { scrutinee, test,
 bindings, else_binding, else_block, span }` reuses `HirMatchTest` / `HirMatchBinding` verbatim

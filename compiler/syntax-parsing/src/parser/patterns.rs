@@ -5,7 +5,7 @@ use shared_types::{Identifier, Literal, Span};
 
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
-use ast_types::{EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
+use ast_types::{ArrayPatternRest, EnumPatternPayload, Expr, FieldPattern, MatchArm, Pattern};
 
 use super::Parser;
 use super::statements::stmt_span;
@@ -97,8 +97,8 @@ impl Parser {
         }
     }
 
-    /// Parse a single pattern: a wildcard, binding, literal, range, or enum
-    /// variant pattern.
+    /// Parse a single pattern: a wildcard, binding, `@` binding, literal, range, array or
+    /// enum variant pattern.
     pub(super) fn parse_pattern(&mut self) -> ParseResult<Pattern> {
         self.nested(Self::parse_pattern_here)
     }
@@ -133,8 +133,19 @@ impl Parser {
                         payload,
                     });
                 }
-                Ok(Pattern::Binding(Identifier { name, span }))
+                let name = Identifier { name, span };
+                if self.check(&TokenKind::At) {
+                    self.advance(); // consume '@'
+                    let pattern = self.parse_pattern()?;
+                    return Ok(Pattern::At {
+                        span: span.merge(pattern.span()),
+                        name,
+                        pattern: Box::new(pattern),
+                    });
+                }
+                Ok(Pattern::Binding(name))
             }
+            TokenKind::LeftBracket => self.parse_array_match_pattern(),
             // `Self::Variant`: only the qualified form, since a bare `Self` would read
             // as a binding of that name.
             TokenKind::SelfUpper => {
@@ -170,6 +181,64 @@ impl Parser {
                 Ok(Pattern::Literal(start_lit, start_span))
             }
         }
+    }
+
+    /// Parse `[p0, p1, ..rest]`; the current token is the `[`. As in a destructuring
+    /// `val`, a rest closes the pattern.
+    fn parse_array_match_pattern(&mut self) -> ParseResult<Pattern> {
+        let open = self.consume(TokenKind::LeftBracket, "'[' to open array pattern")?;
+        self.skip_newlines();
+        let mut elements = Vec::new();
+        let mut rest = None;
+        while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
+            if self.check(&TokenKind::DotDot) {
+                rest = Some(self.parse_array_pattern_rest()?);
+                self.skip_newlines();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+                break;
+            }
+            elements.push(self.parse_pattern()?);
+            self.skip_newlines();
+            if !self.check(&TokenKind::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+            self.skip_newlines();
+        }
+        if rest.is_some()
+            && let Some(token) = self.peek().filter(|t| t.kind != TokenKind::RightBracket)
+        {
+            return Err(ParseError::UnexpectedToken {
+                found: token.kind.clone(),
+                expected: "no elements after a `..` rest pattern".to_string(),
+                span: token.span,
+            });
+        }
+        let close = self.consume(TokenKind::RightBracket, "']' to close array pattern")?;
+        Ok(Pattern::Array {
+            elements,
+            rest,
+            span: open.span.merge(close.span),
+        })
+    }
+
+    /// Parse `..` or `..name`; the current token is the `..`.
+    fn parse_array_pattern_rest(&mut self) -> ParseResult<ArrayPatternRest> {
+        let dots = self.consume(TokenKind::DotDot, "'..' rest pattern")?;
+        if !matches!(self.peek_kind(), Some(TokenKind::Identifier(_))) {
+            return Ok(ArrayPatternRest {
+                binding: None,
+                span: dots.span,
+            });
+        }
+        let name = self.consume_identifier("rest binding name")?;
+        Ok(ArrayPatternRest {
+            span: dots.span.merge(name.span),
+            binding: Some(name).filter(|n| n.name != "_"),
+        })
     }
 
     /// Parse the `::Variant payload?` tail of an enum pattern; `enum_name` and the
@@ -216,6 +285,12 @@ impl Parser {
             let mut fields = Vec::new();
             if !self.check(&TokenKind::RightBrace) {
                 loop {
+                    // Unlisted fields are ignored with or without it; `..` says so.
+                    if self.check(&TokenKind::DotDot) {
+                        self.advance();
+                        self.skip_newlines();
+                        break;
+                    }
                     fields.push(self.parse_field_pattern()?);
                     self.skip_newlines();
                     if !self.check(&TokenKind::Comma) {

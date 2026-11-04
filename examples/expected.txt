@@ -115,6 +115,7 @@ operators/operator_overloading.nr  24
 operators/pipeline.nr              195
 
 # --- control_flow: if, for, while, loop, match, iterators, panics, lints ----
+control_flow/advanced_patterns.nr     34
 control_flow/control_flow.nr          31
 control_flow/for_enumerate.nr         56
 control_flow/for_range.nr             10

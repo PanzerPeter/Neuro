@@ -512,6 +512,74 @@ The `|` alternative belongs to the arm: `1 | 2 =>` is one arm with two patterns.
 
 Enum variants deconstruct and bind their payloads (`E::Tuple(a)`, `E::Struct { field }`). A `match` must be exhaustive. See [Expressions → Match Expressions](expressions.md#match-expressions) for the full pattern grammar, exhaustiveness rules, and current limits.
 
+### Patterns Inside Patterns
+
+A payload takes any pattern, so one arm can test a value or another enum inside a variant. A struct variant field takes one after a colon, and `..` skips the rest:
+
+```neuro
+match result {
+    Ok(Some(0))                    => 1,    // tests the value
+    Ok(Some(n))                    => n,    // nests another enum
+    Ok(None)                       => 2,
+    Err(_)                         => 3
+}
+
+match shape {
+    Shape::Rect { w: 1, h }        => h,
+    Shape::Rect { w, .. }          => w,
+    Shape::Dot                     => 0
+}
+```
+
+Alternatives may bind, as long as each binds the same names at the same types. The arm has one body, and it sees the bindings of whichever alternative matched:
+
+```neuro
+match token {
+    Tok::Num(x) | Tok::Neg(x) if x > 10 => x * 2,
+    Tok::Num(x) | Tok::Neg(x)           => x,
+    Tok::End                            => 0
+}
+```
+
+With a guard, `A | B if g` means `A if g, B if g`: a failed guard moves on to the next alternative, so the guard can run more than once.
+
+### `@` Bindings
+
+`name @ pattern` matches what the pattern matches and also binds the whole value at that position:
+
+```neuro
+match code {
+    n @ 1..=9 => n * 10,
+    other     => other
+}
+
+match reading {
+    Some(n @ 1..=9) => n,
+    Some(_) | None  => 0
+}
+```
+
+When the value is not `Copy`, the pattern after `@` may not bind anything, because the value cannot sit in two names at once. Use `_` inside it: `whole @ Some(_)`.
+
+### Array Patterns
+
+An array pattern matches a `[T; N]` or a borrowed slice `&[T]`. It lists leading elements, each any pattern, and may close with `..` or `..rest`:
+
+```neuro
+func sum(s: &[i32]) -> i32 {
+    match s {
+        [] => 0,
+        [head, ..rest] => head + sum(rest)
+    }
+}
+```
+
+Over a slice, the pattern tests the length, and `rest` is a shorter `&[T]`. Over `[T; N]`, `rest` is a `[T; N - k]` value, and a pattern that cannot fit `N` is a compile error. A `Vec` is matched through a slice: `val s: &[i32] = &v`.
+
+Binding an element by value moves it, so an owning element cannot leave a borrowed slice. Bind it with `_` or take the tail with `..rest`.
+
+Runnable program: [`examples/control_flow/advanced_patterns.nr`](../../examples/control_flow/advanced_patterns.nr).
+
 ## `val-else`, Unwrap or Leave the Scope
 
 `val PATTERN = value else { ... }` binds a refutable pattern and hands the failure to an `else` branch. The bindings are live for the **rest of the enclosing block**, not just one arm, so it is the straight-line alternative to a `match` whose success arm would otherwise swallow the whole function:
@@ -605,7 +673,7 @@ func show(found: Option<i32>) -> i32 {
 }
 ```
 
-The pattern is one pattern, and it can be anything a `match` arm takes: a literal, a range, a variant with its payload (`Some(t)`, `Shape::Circle { radius }`), a binding, or `_`. Two arm-level forms are not accepted: an or-pattern (`A | B`) and a guard (`if ...`). Use a `match` for those.
+The pattern is one pattern, and it can be anything a `match` arm takes: a literal, a range, a variant with its payload (`Some(t)`, `Shape::Circle { radius }`), an `@` binding, an array pattern, a binding, or `_`. Two arm-level forms are not accepted: an or-pattern (`A | B`) and a guard (`if ...`). Use a `match` for those.
 
 With an `else` it is an expression, like `if`, and its branches must agree in type. Without one it is unit, and its block's value is discarded. Links chain with plain `else if` conditions and `else if val` links in any order:
 

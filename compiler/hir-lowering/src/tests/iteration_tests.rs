@@ -2,8 +2,9 @@
 //! must not disturb. No HIR node is added for the protocol, so these tests assert on
 //! the `VarDecl` + `While` + `Match` the desugar builds out of existing ones.
 
+use super::assert_payload_slot;
 use super::{function_body, lower};
-use neuro_hir::{HirBindingSource, HirExprKind, HirMatchTest, HirPlace, HirStmt, HirType};
+use neuro_hir::{HirExprKind, HirMatchTest, HirPlace, HirStmt, HirType};
 
 /// The protocol traits and a source iterator, declared exactly as the prelude declares
 /// them. The lowering slice sees no prelude, so each program brings its own.
@@ -172,10 +173,7 @@ fn the_loop_steps_through_a_two_arm_match_on_next() {
     assert_eq!(arms[0].bindings.len(), 1);
     assert_eq!(arms[0].bindings[0].name, "v");
     assert_eq!(arms[0].bindings[0].ty, HirType::I32);
-    assert_eq!(
-        arms[0].bindings[0].source,
-        HirBindingSource::EnumPayload { slot: 0 }
-    );
+    assert_payload_slot(&arms[0].bindings[0], 0);
 
     assert_eq!(arms[1].tests, vec![HirMatchTest::Wildcard]);
     let HirExprKind::Block { stmts: exit } = &arms[1].body.kind else {

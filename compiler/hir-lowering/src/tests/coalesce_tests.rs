@@ -1,8 +1,9 @@
 //! The `??` desugar: the shape of the `match` it lowers to, and the nesting a chain
 //! produces. No `HirExprKind` is added for `??`, so these tests assert on `Match`.
 
+use super::assert_payload_slot;
 use super::{binding_init, function_body, lower};
-use neuro_hir::{HirBindingSource, HirExprKind, HirMatchTest, HirType};
+use neuro_hir::{HirExprKind, HirMatchTest, HirType};
 
 /// The two fallible enums, declared exactly as the prelude declares them. The lowering
 /// slice sees no prelude, so each program brings its own.
@@ -30,10 +31,7 @@ fn coalesce_lowers_to_a_two_arm_match() {
     // Arm 0 tests the success tag and binds payload slot 0, which it then returns.
     assert_eq!(arms[0].tests, vec![HirMatchTest::Tag { tag: 0 }]);
     assert_eq!(arms[0].bindings.len(), 1);
-    assert_eq!(
-        arms[0].bindings[0].source,
-        HirBindingSource::EnumPayload { slot: 0 }
-    );
+    assert_payload_slot(&arms[0].bindings[0], 0);
     assert_eq!(arms[0].bindings[0].ty, HirType::I32);
     let HirExprKind::Variable(read) = &arms[0].body.kind else {
         panic!("the success arm should read its binding");

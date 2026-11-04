@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.27.0] - 2026-11-04
+
+### Added
+
+- **Patterns nest.** A variant payload, a struct variant field (`Shape::Rect { w: 1, h }`) and an array element take any pattern, so one arm can test a value or another enum: `Ok(Some(0))`, `Wrap::Pair(Tok::End, _)`. A struct variant pattern may end in `..`.
+- **Alternatives bind.** `Tok::Num(x) | Tok::Neg(x) => x` is one arm with one body, as long as every alternative binds the same names at the same types. A failed guard moves on to the next alternative.
+- **`@` bindings.** `n @ 1..=9` binds the value a pattern tested, at any depth. Over a value that is not `Copy`, the pattern after `@` may not bind anything.
+- **Array patterns in `match`.** `[first, second, ..rest]` matches a `[T; N]` or a borrowed `&[T]`, in `match`, `if val` and `while val`. A `&[T]` tests its length, and `..rest` is a shorter slice. Over `[T; N]`, `..rest` is a shorter array and a pattern that cannot fit is a compile error.
+
+### Changed
+
+- **Exhaustiveness reads inside patterns.** `Some(Some(x))`, `Some(None)` and `None` cover an `Option<Option<T>>`, and a gap is reported by the value no arm takes: ``no arm matches `Option::Some(Option::None)` ``. A match too complex to verify is an error.
+- **A borrow is matched through at every level.** `Some(Kind::Num(n))` over `Option<&Kind>` tests the `Kind`, and `val Some(x) = r else { ... }` accepts a `&Option<T>`. Nothing that owns may be bound past the borrow.
+- A float or `string` literal inside a payload now says to compare in a guard.
+
 ## [5.26.3] - 2026-11-04
 
 ### Changed

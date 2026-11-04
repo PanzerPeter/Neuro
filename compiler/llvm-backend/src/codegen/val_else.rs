@@ -31,25 +31,18 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let scrut_sem = Type::from_hir(&scrutinee.ty);
         let scrut_val = self.codegen_expr(scrutinee)?;
-        let scrut_llvm = scrut_val.get_type();
-        let scrut_alloca = self.entry_alloca(scrut_llvm, "valelse.scrut")?;
+        let scrut_alloca = self.entry_alloca(scrut_val.get_type(), "valelse.scrut")?;
         self.builder.build_store(scrut_alloca, scrut_val)?;
 
-        let ok_bb = self.context.append_basic_block(parent_fn, "valelse.ok");
         let else_bb = self.context.append_basic_block(parent_fn, "valelse.else");
 
-        let matched = self.codegen_single_test(test, scrut_alloca, scrut_llvm, &scrut_sem)?;
-        self.builder
-            .build_conditional_branch(matched, ok_bb, else_bb)?;
+        self.codegen_pattern_test(test, scrut_alloca, &scrut_sem, else_bb)?;
+        let ok_bb = self.builder.get_insert_block().ok_or_else(|| {
+            CodegenError::InternalError("val-else test left no block".to_string())
+        })?;
 
         self.builder.position_at_end(else_bb);
-        self.codegen_else_branch(
-            else_binding,
-            else_block,
-            scrut_alloca,
-            scrut_llvm,
-            &scrut_sem,
-        )?;
+        self.codegen_else_branch(else_binding, else_block, scrut_alloca, &scrut_sem)?;
 
         self.builder.position_at_end(ok_bb);
         // Deliberately not restored: these bindings belong to the enclosing block and
@@ -57,7 +50,6 @@ impl<'ctx> CodegenContext<'ctx> {
         let _ = self.bind_arm(
             bindings,
             scrut_alloca,
-            scrut_llvm,
             &scrut_sem,
             ArmOwnership::EnclosingString { scrutinee },
         )?;
@@ -72,20 +64,13 @@ impl<'ctx> CodegenContext<'ctx> {
         else_binding: Option<&HirMatchBinding>,
         else_block: &[HirStmt],
         scrut_alloca: inkwell::values::PointerValue<'ctx>,
-        scrut_llvm: inkwell::types::BasicTypeEnum<'ctx>,
         scrut_sem: &Type,
     ) -> CodegenResult<()> {
         let bound = match else_binding {
             Some(binding) => std::slice::from_ref(binding),
             None => &[],
         };
-        let saved = self.bind_arm(
-            bound,
-            scrut_alloca,
-            scrut_llvm,
-            scrut_sem,
-            ArmOwnership::Enclosing,
-        )?;
+        let saved = self.bind_arm(bound, scrut_alloca, scrut_sem, ArmOwnership::Enclosing)?;
 
         self.push_drop_scope();
         for stmt in else_block {

@@ -6,7 +6,7 @@
 //! arm's.
 
 use ast_types::{Expr, Pattern, Stmt};
-use neuro_hir::{HirBindingSource, HirMatchBinding, HirStmt, HirType};
+use neuro_hir::{HirMatchBinding, HirStmt, HirType};
 use shared_types::{Identifier, Span};
 
 use crate::{Lowerer, LoweringError};
@@ -32,8 +32,7 @@ impl Lowerer {
         let scrutinee = self.lower_expr(value, None)?;
         let scrut_ty = scrutinee.ty.clone();
 
-        let test = self.pattern_test(pattern, &scrut_ty)?;
-        let bindings = self.pattern_bindings(pattern, &scrut_ty)?;
+        let (test, bindings) = self.lower_pattern(pattern, &scrut_ty)?;
 
         let else_binding = match else_binding.filter(|ident| ident.name != "_") {
             Some(ident) => self.resolve_else_binding(&ident.name, &scrut_ty)?,
@@ -75,7 +74,7 @@ impl Lowerer {
             Some(HirMatchBinding {
                 name: name.to_string(),
                 ty: scrut_ty.clone(),
-                source: HirBindingSource::Scrutinee,
+                paths: vec![Vec::new()],
             })
         };
 
@@ -97,11 +96,11 @@ impl Lowerer {
                 let Some((_, ty)) = fields.first() else {
                     return Ok(None);
                 };
-                Ok(Some(HirMatchBinding {
-                    name: name.to_string(),
-                    ty: ty.clone(),
-                    source: HirBindingSource::EnumPayload { slot: 0 },
-                }))
+                Ok(Some(HirMatchBinding::of_payload_slot(
+                    name.to_string(),
+                    ty.clone(),
+                    0,
+                )))
             }
             _ => Ok(whole()),
         }

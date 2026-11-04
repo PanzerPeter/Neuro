@@ -382,8 +382,9 @@ written and resolves nothing: matching a label to a parameter needs the callee, 
   is `OneElementTuple`: there is no one-element tuple, so the value is written as itself.
 - **Match.** `parse_match_expr` parses the scrutinee with struct literals suppressed, then arms of
   the form `pattern ('|' pattern)* ('if' guard)? '=>' body`. `parse_pattern` reads
-  wildcard / binding / literal / range / `E::V` variant patterns with `(tuple)` or `{ named }`
-  payloads; a leading `-` on a numeric literal and the `..` / `..=` range forms are handled in
+  wildcard / binding / `name @ pattern` / literal / range / array / `E::V` variant patterns with
+  `(tuple)` or `{ named, .. }` payloads; `parse_array_match_pattern` keeps a rest last, as the
+  destructuring form does, and `|` stays at the arm, so it never nests. A leading `-` on a numeric literal and the `..` / `..=` range forms are handled in
   `parse_pattern_literal`. A bare identifier followed by `(` or `{` becomes
   `Pattern::UnqualifiedEnum`, sharing the payload parser with the qualified form; a bare `None`
   stays `Pattern::Binding`, since nothing at parse time tells the two apart.

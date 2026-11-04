@@ -1150,18 +1150,27 @@ the same set of types. It resolves a type to an `Option` / `Result` instance thr
 
 ### Pattern matching
 `type_checkers/matches.rs`. `check_match` types the scrutinee (restricted to enum / integer /
-`char` / `bool`, or a borrow of one, whose referent the patterns test, as `match self` and
-`match *r` already did), checks each arm's patterns against it, introduces pattern bindings into a
-per-arm scope for the guard and body, unifies arm-body types (the first arm drives literal
-inference), and verifies exhaustiveness: enum variant coverage, both `bool` values, or a `_`
-catch-all, with guarded arms never counting. Payload sub-patterns are restricted to bindings and
-`_` this phase, and or-patterns cannot bind. A pattern that binds one name twice is
+`char` / `bool` / array / borrowed slice, or a borrow of one, whose referent the patterns test, as
+`match self` and `match *r` already did; a `&[T]` stays the borrow, since a slice has no value of
+its own), checks each arm's patterns against it, introduces pattern bindings into a per-arm scope
+for the guard and body, and unifies arm-body types (the first arm drives literal inference).
+`check_pattern` recurses through payloads, array elements and `@`. A pattern that looks inside a
+value looks through a borrow of it at any depth, and refuses an owner bound past that borrow.
+`check_alternative_bindings` holds every `|` alternative to the first one's names and types: the
+arm has one body. `name @ P` over a move-tracked value may not bind inside `P`.
+`type_checkers/exhaustiveness.rs` is Maranget's usefulness check in its witness form: `cover_of`
+reduces each guardless alternative to a `Cover` row, and `witness` splits columns by constructor
+(enum variants, `bool`, one array width, one slice length per pattern length plus one for all the
+longer ones). Guarded arms never count. An open type (integer, `char`) reaches only the default
+matrix, so it needs a binding or `_`. The walk charges every cell against `MAX_STEPS`, because
+usefulness is NP-complete and source is untrusted; passing the budget is a `NonExhaustiveMatch`. A pattern that binds one name twice is
 `VariableAlreadyDefined` at the second binding, as in a destructuring `val`. An arm that binds a move-tracked value takes it
 out of the scrutinee, so `take_from_scrutinee` records a move of an owned scrutinee and reports
 `CannotMoveOutOfBorrow` for a borrowed one (a `&self` receiver, a `&Enum`, a `*r`): binding a
 `Vec` payload out of a borrow freed it twice. Errors: `NonExhaustiveMatch`,
 `UnsupportedMatchScrutinee`, `PatternTypeMismatch`, `MatchArmTypeMismatch`, `InvalidRangePattern`,
-`VariantPatternFormMismatch`, `OrPatternBinding`, `RefutablePayloadPattern`.
+`VariantPatternFormMismatch`, `OrPatternBindingMissing`, `OrPatternBindingType`,
+`AtPatternBindsOwner`, `UntestableLiteralPattern`, `ArrayPatternLengthMismatch`.
 
 ### Enums, newtypes, arrays, tuples
 - **Enums.** `enum_defs` (name → variants with `VariantForm` and resolved fields) is filled in

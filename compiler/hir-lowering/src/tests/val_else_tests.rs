@@ -1,8 +1,9 @@
 //! `val-else` lowering: the resolved success test, the enclosing-scope bindings, and
 //! the type-directed `else` binding.
 
+use super::assert_payload_slot;
 use super::*;
-use neuro_hir::{HirBindingSource, HirMatchTest, HirType};
+use neuro_hir::{HirMatchTest, HirType};
 
 /// The two fallible enums, declared exactly as the prelude declares them.
 const FALLIBLE_DECLS: &str = "enum Option<T> { Some(T), None }\n\
@@ -44,16 +45,13 @@ func main() -> i32 {{
     assert_eq!(bindings.len(), 1);
     assert_eq!(bindings[0].name, "data");
     assert_eq!(bindings[0].ty, HirType::I32);
-    assert_eq!(
-        bindings[0].source,
-        HirBindingSource::EnumPayload { slot: 0 }
-    );
+    assert_payload_slot(&bindings[0], 0);
 
     // `Result` binds the `Err` payload, which is also slot 0, of the other variant.
     let binding = else_binding.as_ref().expect("expected an else binding");
     assert_eq!(binding.name, "err");
     assert_eq!(binding.ty, HirType::I32);
-    assert_eq!(binding.source, HirBindingSource::EnumPayload { slot: 0 });
+    assert_payload_slot(binding, 0);
 
     assert_eq!(else_block.len(), 1);
     assert!(matches!(else_block[0], HirStmt::Return { .. }));
@@ -105,7 +103,7 @@ func main() -> i32 {
     let binding = else_binding.as_ref().expect("expected an else binding");
     assert_eq!(binding.name, "s");
     assert_eq!(binding.ty, HirType::Enum("Shape".to_string()));
-    assert_eq!(binding.source, HirBindingSource::Scrutinee);
+    assert_eq!(binding.paths, vec![Vec::new()]);
 }
 
 #[test]

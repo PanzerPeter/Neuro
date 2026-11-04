@@ -20,8 +20,7 @@
 use ast_types::{LoopAdapter, Stmt};
 use neuro_hir::HirPlace;
 use neuro_hir::{
-    HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt,
-    HirType,
+    HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt, HirType,
 };
 use shared_types::{Identifier, Literal, Span};
 
@@ -187,11 +186,11 @@ impl Lowerer {
                 arms: vec![
                     HirMatchArm {
                         tests: vec![HirMatchTest::Tag { tag: some_tag }],
-                        bindings: vec![HirMatchBinding {
-                            name: element_name.clone(),
-                            ty: item_ty,
-                            source: HirBindingSource::EnumPayload { slot: 0 },
-                        }],
+                        bindings: vec![HirMatchBinding::of_payload_slot(
+                            element_name.clone(),
+                            item_ty,
+                            0,
+                        )],
                         guard: None,
                         body: HirExpr::new(
                             HirExprKind::Block { stmts: arm_body },

@@ -7,7 +7,7 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
 - Type: Library (no entry function: pure data)
 - Public surface, re-exported from the crate root in four groups:
   - `expressions`: `Expr`, `BinaryOp`, `UnaryOp`, `Pattern`, `MatchArm`, `EnumPatternPayload`,
-    `FieldPattern`, `FieldInit`, `ClosureParam`, `InterpPart`, `TensorIndexArg`
+    `ArrayPatternRest`, `FieldPattern`, `FieldInit`, `ClosureParam`, `InterpPart`, `TensorIndexArg`
   - `items`: `Item`, `FunctionDef`, `StructDef`, `EnumDef`, `EnumVariant`, `VariantPayload`,
     `FieldDef`, `ImplDef`, `MethodDef`, `SelfParam`, `TraitDef`, `TraitMethod`, `ConstDef`,
     `NewtypeDef`, `ModuleDef`, `ModuleId`, `PRELUDE_MODULE`, `ImportDef`, `ImportName`,

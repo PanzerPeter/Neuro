@@ -9,4 +9,6 @@ drained (val-else break)   = 3
 retry: cost 60 -> 30
 retry: cost 0 has nothing to halve
 recovered (while val)      = 30
+audited (nested patterns)  = 48
+batched (array patterns)   = 81
 total                      = 169

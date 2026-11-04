@@ -1,19 +1,18 @@
 // Codegen for `match` expressions.
 //
-// The scrutinee is evaluated once into an alloca. Each arm becomes a test block that
-// ORs its alternatives (variant tag / scalar equality / range), branching to the arm
-// body on a hit and to the next arm otherwise. An arm body first materializes its
-// bindings (the whole scrutinee, or decoded enum payload slots), then, if the arm has
-// a guard, branches on the guard before evaluating the body into the shared result
-// slot. The frontend guarantees exhaustiveness, so the final fall-through is
-// `unreachable`.
+// The scrutinee is evaluated once into an alloca, and every test and binding walks to its
+// part of that place. An arm tries its alternatives in turn: each test branches away at
+// its first failure, since a later test may read a part that only exists when an earlier
+// one held, and an alternative that holds stores its bindings into the arm's slots and
+// jumps to the one shared body. There a guard decides, and a failing one resumes at the
+// alternative after the one that matched. The frontend guarantees exhaustiveness, so the
+// final fall-through is `unreachable`.
 
 use inkwell::IntPredicate;
+use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use neuro_hir::{
-    HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest,
-};
+use neuro_hir::{HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirPatternStep};
 
 use crate::codegen::context::{CodegenContext, DropTarget};
 use crate::codegen::drops::is_pure_place;
@@ -29,6 +28,13 @@ pub(crate) struct SavedBinding<'ctx> {
     ty: Option<BasicTypeEnum<'ctx>>,
     sem: Option<Type>,
     constant: Option<BasicValueEnum<'ctx>>,
+}
+
+/// The alloca one binding lives in, shared by the alternatives of its arm.
+struct BindingSlot<'ctx> {
+    alloca: PointerValue<'ctx>,
+    llvm_ty: BasicTypeEnum<'ctx>,
+    sem: Type,
 }
 
 /// Who releases what an arm's bindings take out of the scrutinee.
@@ -69,8 +75,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let scrut_sem = Type::from_hir(&scrutinee.ty);
         let scrut_val = self.codegen_expr(scrutinee)?;
-        let scrut_llvm = scrut_val.get_type();
-        let scrut_alloca = self.entry_alloca(scrut_llvm, "match.scrut")?;
+        let scrut_alloca = self.entry_alloca(scrut_val.get_type(), "match.scrut")?;
         self.builder.build_store(scrut_alloca, scrut_val)?;
 
         // A binding an arm takes by value carries whatever the scrutinee held out of it.
@@ -124,10 +129,15 @@ impl<'ctx> CodegenContext<'ctx> {
             let next_bb = test_bbs[i + 1];
 
             self.builder.position_at_end(test_bbs[i]);
-            let matched =
-                self.codegen_arm_tests(&arm.tests, scrut_alloca, scrut_llvm, &scrut_sem)?;
-            self.builder
-                .build_conditional_branch(matched, body_bb, next_bb)?;
+            let slots_of_arm = self.binding_slots(&arm.bindings)?;
+            let guard_failed = self.codegen_alternatives(
+                arm,
+                &slots_of_arm,
+                scrut_alloca,
+                &scrut_sem,
+                body_bb,
+                next_bb,
+            )?;
 
             self.builder.position_at_end(body_bb);
             if arm.bindings.is_empty() {
@@ -137,13 +147,11 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             self.codegen_arm_body(
                 arm,
+                &slots_of_arm,
                 ArmOwnership::Arm { scrutinee, shares },
-                scrut_alloca,
-                scrut_llvm,
-                &scrut_sem,
                 result_slot,
                 merge_bb,
-                next_bb,
+                guard_failed,
                 slots.as_deref(),
             )?;
         }
@@ -164,56 +172,106 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// OR together an arm's alternative tests into a single `i1` match predicate.
-    fn codegen_arm_tests(
+    /// Emit an arm's alternatives from the current block: each that holds stores its
+    /// bindings and jumps to `body_bb`, and the last that fails reaches `next_bb`. Returns
+    /// where a failed guard goes, which is the alternative after the one that matched.
+    fn codegen_alternatives(
         &mut self,
-        tests: &[HirMatchTest],
+        arm: &HirMatchArm,
+        binding_slots: &[BindingSlot<'ctx>],
         scrut_alloca: PointerValue<'ctx>,
-        scrut_llvm: BasicTypeEnum<'ctx>,
         scrut_sem: &Type,
-    ) -> CodegenResult<IntValue<'ctx>> {
-        let mut acc: Option<IntValue<'ctx>> = None;
-        for test in tests {
-            let one = self.codegen_single_test(test, scrut_alloca, scrut_llvm, scrut_sem)?;
-            acc = Some(match acc {
-                None => one,
-                Some(prev) => self.builder.build_or(prev, one, "match.or")?,
-            });
+        body_bb: BasicBlock<'ctx>,
+        next_bb: BasicBlock<'ctx>,
+    ) -> CodegenResult<BasicBlock<'ctx>> {
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("match outside function".to_string()))?;
+        let i32_ty = self.context.i32_type();
+        let retries = arm.guard.is_some() && arm.tests.len() > 1;
+        let matched = if retries {
+            Some(self.entry_alloca(i32_ty, "match.alt.index")?)
+        } else {
+            None
+        };
+
+        let mut resume = Vec::new();
+        for (alternative, test) in arm.tests.iter().enumerate() {
+            let miss_bb = if alternative + 1 == arm.tests.len() {
+                next_bb
+            } else {
+                let miss_bb = self.context.append_basic_block(parent_fn, "match.alt");
+                resume.push((i32_ty.const_int(alternative as u64, false), miss_bb));
+                miss_bb
+            };
+            self.codegen_pattern_test(test, scrut_alloca, scrut_sem, miss_bb)?;
+            self.store_bindings(
+                &arm.bindings,
+                binding_slots,
+                alternative,
+                scrut_alloca,
+                scrut_sem,
+            )?;
+            if let Some(matched) = matched {
+                self.builder
+                    .build_store(matched, i32_ty.const_int(alternative as u64, false))?;
+            }
+            self.builder.build_unconditional_branch(body_bb)?;
+            self.builder.position_at_end(miss_bb);
         }
-        match acc {
-            Some(v) => Ok(v),
-            // An empty test list never matches; fall through.
-            None => Ok(self.context.bool_type().const_int(0, false)),
-        }
+
+        let Some(matched) = matched else {
+            return Ok(next_bb);
+        };
+        let guard_failed = self
+            .context
+            .append_basic_block(parent_fn, "match.guard.retry");
+        self.builder.position_at_end(guard_failed);
+        let index = self
+            .builder
+            .build_load(i32_ty, matched, "match.alt.matched")?
+            .into_int_value();
+        self.builder.build_switch(index, next_bb, &resume)?;
+        Ok(guard_failed)
     }
 
-    /// Lower one refutable test to an `i1`.
-    pub(crate) fn codegen_single_test(
+    /// Lower `test` of the value at `place`, branching to `fail_bb` at the first failure
+    /// and leaving the builder where every test held.
+    pub(crate) fn codegen_pattern_test(
         &mut self,
         test: &HirMatchTest,
-        scrut_alloca: PointerValue<'ctx>,
-        scrut_llvm: BasicTypeEnum<'ctx>,
-        scrut_sem: &Type,
-    ) -> CodegenResult<IntValue<'ctx>> {
-        match test {
-            HirMatchTest::Wildcard => Ok(self.context.bool_type().const_int(1, false)),
+        place: PointerValue<'ctx>,
+        sem: &Type,
+        fail_bb: BasicBlock<'ctx>,
+    ) -> CodegenResult<()> {
+        let holds = match test {
+            HirMatchTest::Wildcard => return Ok(()),
+            HirMatchTest::Never => self.context.bool_type().const_zero(),
+            HirMatchTest::All(tests) => {
+                for test in tests {
+                    self.codegen_pattern_test(test, place, sem, fail_bb)?;
+                }
+                return Ok(());
+            }
+            HirMatchTest::Part { step, test } => {
+                let (part, part_sem) = self.pattern_part(place, sem, step)?;
+                return self.codegen_pattern_test(test, part, &part_sem, fail_bb);
+            }
             HirMatchTest::Tag { tag } => {
-                let tag_val = self.load_enum_tag(scrut_alloca, scrut_llvm)?;
+                let tag_val = self.load_enum_tag(place, sem)?;
                 let want = self.context.i32_type().const_int(*tag as u64, false);
                 self.builder
-                    .build_int_compare(IntPredicate::EQ, tag_val, want, "match.tag")
-                    .map_err(CodegenError::from)
+                    .build_int_compare(IntPredicate::EQ, tag_val, want, "match.tag")?
             }
             HirMatchTest::IntEq { value } => {
-                let scalar = self.load_match_scalar(scrut_alloca, scrut_llvm)?;
+                let scalar = self.load_match_scalar(place, sem)?;
                 let want = scalar.get_type().const_int(*value as u64, false);
                 self.builder
-                    .build_int_compare(IntPredicate::EQ, scalar, want, "match.eq")
-                    .map_err(CodegenError::from)
+                    .build_int_compare(IntPredicate::EQ, scalar, want, "match.eq")?
             }
             HirMatchTest::IntRange { lo, hi } => {
-                let scalar = self.load_match_scalar(scrut_alloca, scrut_llvm)?;
-                let unsigned = scrut_sem.is_unsigned_int() || matches!(scrut_sem, Type::Char);
+                let scalar = self.load_match_scalar(place, sem)?;
+                let unsigned = sem.is_unsigned_int() || matches!(sem, Type::Char);
                 let (ge_pred, le_pred) = if unsigned {
                     (IntPredicate::UGE, IntPredicate::ULE)
                 } else {
@@ -227,40 +285,170 @@ impl<'ctx> CodegenContext<'ctx> {
                 let le = self
                     .builder
                     .build_int_compare(le_pred, scalar, hi_c, "match.le")?;
-                self.builder
-                    .build_and(ge, le, "match.range")
-                    .map_err(CodegenError::from)
+                self.builder.build_and(ge, le, "match.range")?
             }
-        }
+            HirMatchTest::SliceLen { len, exact } => {
+                let (_, actual) = self.load_slice_parts(place, sem)?;
+                let want = actual.get_type().const_int(*len, false);
+                let predicate = if *exact {
+                    IntPredicate::EQ
+                } else {
+                    IntPredicate::UGE
+                };
+                self.builder
+                    .build_int_compare(predicate, actual, want, "match.len")?
+            }
+        };
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("match outside function".to_string()))?;
+        let pass_bb = self.context.append_basic_block(parent_fn, "match.pass");
+        self.builder
+            .build_conditional_branch(holds, pass_bb, fail_bb)?;
+        self.builder.position_at_end(pass_bb);
+        Ok(())
     }
 
-    /// Materialize the arm's bindings, evaluate its guard (if any), then its body into
-    /// the result slot, branching to `merge_bb` on success or `next_bb` when a guard
-    /// fails. Bindings are removed from the name maps before returning.
+    /// The place `step` reaches from the value of type `sem` at `place`, and its type.
+    fn pattern_part(
+        &mut self,
+        place: PointerValue<'ctx>,
+        sem: &Type,
+        step: &HirPatternStep,
+    ) -> CodegenResult<(PointerValue<'ctx>, Type)> {
+        let i64_ty = self.context.i64_type();
+        let part = match step {
+            HirPatternStep::EnumPayload { slot, .. } => {
+                let enum_llvm = self.get_any_llvm_type(sem)?.into_struct_type();
+                let payload =
+                    self.builder
+                        .build_struct_gep(enum_llvm, place, 1, "match.payload")?;
+                let payload_llvm = enum_llvm.get_field_type_at_index(1).ok_or_else(|| {
+                    CodegenError::InternalError("an enum with no payload field".to_string())
+                })?;
+                let indices = [i64_ty.const_zero(), i64_ty.const_int(*slot as u64, false)];
+                // SAFETY: the checker proved `slot` a field of the variant whose tag test
+                // guards this read, and the payload array has a slot per field.
+                unsafe {
+                    self.builder.build_in_bounds_gep(
+                        payload_llvm,
+                        payload,
+                        &indices,
+                        "match.slot",
+                    )?
+                }
+            }
+            HirPatternStep::Element { index, .. } => self.sequence_part(place, sem, *index)?,
+            HirPatternStep::Rest { start, .. } => {
+                let tail = self.sequence_part(place, sem, *start)?;
+                if matches!(sem, Type::Array { .. }) {
+                    tail
+                } else {
+                    let (_, len) = self.load_slice_parts(place, sem)?;
+                    let start = len.get_type().const_int(*start, false);
+                    let rest_len = self.builder.build_int_sub(len, start, "match.rest.len")?;
+                    let fat_llvm = self.get_any_llvm_type(sem)?;
+                    let fat = self.entry_alloca(fat_llvm, "match.rest")?;
+                    let value = fat_llvm.into_struct_type().get_undef();
+                    let value = self
+                        .builder
+                        .build_insert_value(value, tail, 0, "match.rest")?;
+                    let value =
+                        self.builder
+                            .build_insert_value(value, rest_len, 1, "match.rest")?;
+                    self.builder.build_store(fat, value.into_struct_value())?;
+                    fat
+                }
+            }
+            HirPatternStep::Deref { .. } => {
+                let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
+                self.builder
+                    .build_load(ptr_ty, place, "match.deref")?
+                    .into_pointer_value()
+            }
+        };
+        let ty = match step {
+            HirPatternStep::EnumPayload { ty, .. }
+            | HirPatternStep::Element { ty, .. }
+            | HirPatternStep::Rest { ty, .. }
+            | HirPatternStep::Deref { ty } => ty,
+        };
+        Ok((part, Type::from_hir(ty)))
+    }
+
+    /// The address of element `index` of the array or slice at `place`.
+    fn sequence_part(
+        &mut self,
+        place: PointerValue<'ctx>,
+        sem: &Type,
+        index: u64,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let i64_ty = self.context.i64_type();
+        let index = i64_ty.const_int(index, false);
+        if matches!(sem, Type::Array { .. }) {
+            let array_llvm = self.get_any_llvm_type(sem)?;
+            // SAFETY: the checker bounds a pattern's elements by the array's length.
+            return unsafe {
+                self.builder.build_in_bounds_gep(
+                    array_llvm,
+                    place,
+                    &[i64_ty.const_zero(), index],
+                    "match.elem",
+                )
+            }
+            .map_err(CodegenError::from);
+        }
+        let Type::Slice(element) = sem.referent() else {
+            return Err(CodegenError::InternalError(
+                "an array pattern needs an array or a slice".to_string(),
+            ));
+        };
+        let element_llvm = self.get_any_llvm_type(element)?;
+        let (data, _) = self.load_slice_parts(place, sem)?;
+        // SAFETY: a `SliceLen` test ahead of every element read proved the index in bounds.
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(element_llvm, data, &[index], "match.elem")
+        }
+        .map_err(CodegenError::from)
+    }
+
+    /// The data pointer and length of the slice borrow at `place`.
+    fn load_slice_parts(
+        &self,
+        place: PointerValue<'ctx>,
+        sem: &Type,
+    ) -> CodegenResult<(PointerValue<'ctx>, IntValue<'ctx>)> {
+        let fat = self
+            .builder
+            .build_load(self.get_any_llvm_type(sem)?, place, "match.slice")?
+            .into_struct_value();
+        let data = self.builder.build_extract_value(fat, 0, "match.data")?;
+        let len = self
+            .builder
+            .build_extract_value(fat, 1, "match.slice.len")?;
+        Ok((data.into_pointer_value(), len.into_int_value()))
+    }
+
+    /// Bring the arm's stored bindings into scope, evaluate its guard (if any), then its
+    /// body into the result slot, branching to `merge_bb` on success or `guard_failed`
+    /// when the guard fails. Bindings are removed from the name maps before returning.
     #[expect(clippy::too_many_arguments)]
     fn codegen_arm_body(
         &mut self,
         arm: &HirMatchArm,
+        binding_slots: &[BindingSlot<'ctx>],
         ownership: ArmOwnership<'_>,
-        scrut_alloca: PointerValue<'ctx>,
-        scrut_llvm: BasicTypeEnum<'ctx>,
-        scrut_sem: &Type,
         result_slot: Option<PointerValue<'ctx>>,
-        merge_bb: inkwell::basic_block::BasicBlock<'ctx>,
-        next_bb: inkwell::basic_block::BasicBlock<'ctx>,
+        merge_bb: BasicBlock<'ctx>,
+        guard_failed: BasicBlock<'ctx>,
         slots: Option<&[(Vec<String>, PointerValue<'ctx>)]>,
     ) -> CodegenResult<()> {
         // An arm binding takes its payload BY VALUE out of a scrutinee the match already
         // disowned, so for the arm's duration the binding is the only owner. Its own drop
         // scope keeps the release inside the arm, where the value is live.
         self.push_drop_scope();
-        let saved = self.bind_arm(
-            &arm.bindings,
-            scrut_alloca,
-            scrut_llvm,
-            scrut_sem,
-            ownership,
-        )?;
+        let saved = self.register_bindings(&arm.bindings, binding_slots, ownership)?;
 
         if let Some(guard) = &arm.guard {
             let parent_fn = self
@@ -269,7 +457,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let guard_val = self.codegen_expr(guard)?.into_int_value();
             let eval_bb = self.context.append_basic_block(parent_fn, "match.guard.ok");
             self.builder
-                .build_conditional_branch(guard_val, eval_bb, next_bb)?;
+                .build_conditional_branch(guard_val, eval_bb, guard_failed)?;
             self.builder.position_at_end(eval_bb);
         }
 
@@ -303,60 +491,97 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Create allocas for an arm's bindings and register them in the name maps,
-    /// returning the prior entries so they can be restored afterwards.
+    /// Create, fill and register a single alternative's bindings, returning the prior
+    /// entries in the name maps so they can be restored afterwards.
     pub(crate) fn bind_arm(
         &mut self,
         bindings: &[HirMatchBinding],
         scrut_alloca: PointerValue<'ctx>,
-        scrut_llvm: BasicTypeEnum<'ctx>,
         scrut_sem: &Type,
         ownership: ArmOwnership<'_>,
     ) -> CodegenResult<Vec<SavedBinding<'ctx>>> {
+        let binding_slots = self.binding_slots(bindings)?;
+        self.store_bindings(bindings, &binding_slots, 0, scrut_alloca, scrut_sem)?;
+        self.register_bindings(bindings, &binding_slots, ownership)
+    }
+
+    /// One alloca per binding, shared by the alternatives of its arm.
+    fn binding_slots(
+        &mut self,
+        bindings: &[HirMatchBinding],
+    ) -> CodegenResult<Vec<BindingSlot<'ctx>>> {
+        bindings
+            .iter()
+            .map(|binding| {
+                let sem = Type::from_hir(&binding.ty);
+                let llvm_ty = self.get_any_llvm_type(&sem)?;
+                let alloca = self.entry_alloca(llvm_ty, &binding.name)?;
+                Ok(BindingSlot {
+                    alloca,
+                    llvm_ty,
+                    sem,
+                })
+            })
+            .collect()
+    }
+
+    /// Read each binding out of the scrutinee along `alternative`'s path.
+    fn store_bindings(
+        &mut self,
+        bindings: &[HirMatchBinding],
+        binding_slots: &[BindingSlot<'ctx>],
+        alternative: usize,
+        scrut_alloca: PointerValue<'ctx>,
+        scrut_sem: &Type,
+    ) -> CodegenResult<()> {
+        for (binding, slot) in bindings.iter().zip(binding_slots) {
+            let path = binding.paths.get(alternative).ok_or_else(|| {
+                CodegenError::InternalError(format!("'{}' has no path here", binding.name))
+            })?;
+            let mut place = scrut_alloca;
+            let mut sem = scrut_sem.clone();
+            for step in path {
+                (place, sem) = self.pattern_part(place, &sem, step)?;
+            }
+            let value = self.builder.build_load(slot.llvm_ty, place, "match.bind")?;
+            self.builder.build_store(slot.alloca, value)?;
+        }
+        Ok(())
+    }
+
+    /// Put stored bindings in the name maps and hand what they took to `ownership`,
+    /// returning what each name meant before.
+    fn register_bindings(
+        &mut self,
+        bindings: &[HirMatchBinding],
+        binding_slots: &[BindingSlot<'ctx>],
+        ownership: ArmOwnership<'_>,
+    ) -> CodegenResult<Vec<SavedBinding<'ctx>>> {
         let mut saved = Vec::with_capacity(bindings.len());
-        for b in bindings {
-            let (value, sem, llvm_ty) = match &b.source {
-                HirBindingSource::Scrutinee => {
-                    let val = self
-                        .builder
-                        .build_load(scrut_llvm, scrut_alloca, "match.bind")?;
-                    (val, scrut_sem.clone(), scrut_llvm)
-                }
-                HirBindingSource::EnumPayload { slot } => {
-                    let Type::Enum(enum_name) = scrut_sem.referent() else {
-                        return Err(CodegenError::InternalError(
-                            "an enum-payload binding needs an enum scrutinee".to_string(),
-                        ));
-                    };
-                    let enum_name = enum_name.clone();
-                    let field_sem = Type::from_hir(&b.ty);
-                    let field_llvm = self.get_any_llvm_type(&field_sem)?;
-                    let raw = self.load_enum_payload_slot(scrut_alloca, scrut_llvm, *slot)?;
-                    let decoded = self.decode_enum_payload_field(raw, &field_sem, &enum_name)?;
-                    (decoded, field_sem, field_llvm)
-                }
-            };
-
-            let alloca = self.entry_alloca(llvm_ty, &b.name)?;
-            self.builder.build_store(alloca, value)?;
-
-            let payload = matches!(b.source, HirBindingSource::EnumPayload { .. });
+        for (binding, slot) in bindings.iter().zip(binding_slots) {
+            let BindingSlot {
+                alloca,
+                llvm_ty,
+                sem,
+            } = slot;
+            let payload = binding.paths.iter().any(|path| !path.is_empty());
             match (ownership, payload) {
                 (ArmOwnership::Arm { scrutinee, shares }, true) => {
-                    if shares && self.holds_function(&sem) {
-                        self.retain_held_functions(alloca, &sem)?;
+                    if shares && self.holds_function(sem) {
+                        self.retain_held_functions(*alloca, sem)?;
                     }
-                    self.register_arm_payload(&b.name, alloca, &sem, scrutinee)?;
+                    self.register_arm_payload(&binding.name, *alloca, sem, scrutinee)?;
                 }
                 (ArmOwnership::EnclosingString { scrutinee }, true)
                     if matches!(sem, Type::String)
                         && self.produces_owned_option_payload(scrutinee) =>
                 {
-                    let _ = self.register_local_drop(&b.name, alloca, DropTarget::HeapString)?;
+                    let _ =
+                        self.register_local_drop(&binding.name, *alloca, DropTarget::HeapString)?;
                 }
                 _ => {}
             }
-            saved.push(self.bind_name(&b.name, alloca, llvm_ty, sem));
+            saved.push(self.bind_name(&binding.name, *alloca, *llvm_ty, sem.clone()));
         }
         Ok(saved)
     }
@@ -446,66 +671,31 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    /// Load the discriminant tag (field 0) of an enum scrutinee.
+    /// Load the discriminant tag (field 0) of the enum at `place`.
     fn load_enum_tag(
         &self,
-        scrut_alloca: PointerValue<'ctx>,
-        scrut_llvm: BasicTypeEnum<'ctx>,
+        place: PointerValue<'ctx>,
+        sem: &Type,
     ) -> CodegenResult<IntValue<'ctx>> {
-        let agg = self
+        let enum_llvm = self.get_any_llvm_type(sem)?.into_struct_type();
+        let tag_ptr = self
             .builder
-            .build_load(scrut_llvm, scrut_alloca, "match.enum")?;
+            .build_struct_gep(enum_llvm, place, 0, "match.tag.ptr")?;
         let tag = self
             .builder
-            .build_extract_value(agg.into_struct_value(), 0, "match.tag")?;
+            .build_load(self.context.i32_type(), tag_ptr, "match.tag")?;
         Ok(tag.into_int_value())
     }
 
-    /// Load payload slot `slot` of an enum scrutinee: the raw `[K x i64]` words the
-    /// construction site wrote the field into.
-    fn load_enum_payload_slot(
-        &self,
-        scrut_alloca: PointerValue<'ctx>,
-        scrut_llvm: BasicTypeEnum<'ctx>,
-        slot: usize,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let agg = self
-            .builder
-            .build_load(scrut_llvm, scrut_alloca, "match.enum")?;
-        let payload =
-            self.builder
-                .build_extract_value(agg.into_struct_value(), 1, "match.payload")?;
-        self.builder
-            .build_extract_value(payload.into_array_value(), slot as u32, "match.slot")
-            .map_err(CodegenError::from)
-    }
-
-    /// Load a scalar scrutinee (integer / `char` / `bool`) as an integer value.
+    /// Load the scalar (integer / `char` / `bool`) at `place`.
     fn load_match_scalar(
         &self,
-        scrut_alloca: PointerValue<'ctx>,
-        scrut_llvm: BasicTypeEnum<'ctx>,
+        place: PointerValue<'ctx>,
+        sem: &Type,
     ) -> CodegenResult<IntValue<'ctx>> {
         let val = self
             .builder
-            .build_load(scrut_llvm, scrut_alloca, "match.scalar")?;
+            .build_load(self.get_any_llvm_type(sem)?, place, "match.scalar")?;
         Ok(val.into_int_value())
-    }
-
-    /// Decode a raw payload slot back to a field of `field_ty`: the inverse of the
-    /// construction encoding, reinterpreting the slot's words through a stack cell.
-    fn decode_enum_payload_field(
-        &self,
-        raw: BasicValueEnum<'ctx>,
-        field_ty: &Type,
-        enum_name: &str,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let slot_ty = self.type_mapper.enum_slot_type(enum_name)?;
-        let cell = self.enum_payload_cell(slot_ty)?;
-        self.builder.build_store(cell, raw)?;
-        let field_llvm = self.type_mapper.map_type(field_ty)?;
-        self.builder
-            .build_load(field_llvm, cell, "match.field")
-            .map_err(CodegenError::from)
     }
 }

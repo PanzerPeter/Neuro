@@ -4,9 +4,7 @@
 //! Every file here adds methods to the same `impl Lowerer` block.
 
 use ast_types::Expr;
-use neuro_hir::{
-    HirBindingSource, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirType,
-};
+use neuro_hir::{HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirType};
 
 use crate::{Lowerer, LoweringError};
 
@@ -75,11 +73,11 @@ impl Lowerer {
                 arms: vec![
                     HirMatchArm {
                         tests: vec![HirMatchTest::Tag { tag }],
-                        bindings: vec![HirMatchBinding {
-                            name: binding,
-                            ty: payload.clone(),
-                            source: HirBindingSource::EnumPayload { slot: 0 },
-                        }],
+                        bindings: vec![HirMatchBinding::of_payload_slot(
+                            binding,
+                            payload.clone(),
+                            0,
+                        )],
                         guard: None,
                         body: unwrapped,
                     },

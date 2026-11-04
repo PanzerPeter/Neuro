@@ -318,18 +318,15 @@ pub struct ClosureParam {
 /// and the guard (if present) evaluates `true`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
-    /// `|`-separated alternative patterns. Alternatives may not bind.
+    /// `|`-separated alternative patterns. Every alternative binds the same names at
+    /// the same types, which semantic analysis enforces.
     pub patterns: Vec<Pattern>,
     pub guard: Option<Box<Expr>>,
     pub body: Box<Expr>,
     pub span: Span,
 }
 
-/// A `match` arm pattern.
-///
-/// Payload sub-patterns of an enum variant are restricted to bindings and wildcards,
-/// which semantic analysis enforces; a literal in a payload position is expressed
-/// with a guard instead.
+/// A `match` arm pattern. Any pattern nests inside a variant payload or an array.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     /// `_`: matches anything, binds nothing.
@@ -365,6 +362,26 @@ pub enum Pattern {
         payload: EnumPatternPayload,
         span: Span,
     },
+    /// `name @ pattern`: binds the whole value at this position when `pattern` matches it.
+    At {
+        name: Identifier,
+        pattern: Box<Pattern>,
+        span: Span,
+    },
+    /// An array pattern `[first, second, ..rest]` over an array or a borrowed slice.
+    Array {
+        elements: Vec<Pattern>,
+        rest: Option<ArrayPatternRest>,
+        span: Span,
+    },
+}
+
+/// The trailing `..` / `..name` of an array pattern.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrayPatternRest {
+    /// The name bound to the remainder; a bare `..` discards it.
+    pub binding: Option<Identifier>,
+    pub span: Span,
 }
 
 /// The payload sub-patterns of an enum-variant pattern, matching the variant's
@@ -398,6 +415,8 @@ impl Pattern {
             Pattern::Range { span, .. } => *span,
             Pattern::Enum { span, .. } => *span,
             Pattern::UnqualifiedEnum { span, .. } => *span,
+            Pattern::At { span, .. } => *span,
+            Pattern::Array { span, .. } => *span,
         }
     }
 
@@ -413,6 +432,18 @@ impl Pattern {
         match self {
             Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range { .. } => {}
             Pattern::Binding(ident) => names.push(ident.name.clone()),
+            Pattern::At { name, pattern, .. } => {
+                names.push(name.name.clone());
+                pattern.collect_binding_names(names);
+            }
+            Pattern::Array { elements, rest, .. } => {
+                for element in elements {
+                    element.collect_binding_names(names);
+                }
+                if let Some(ident) = rest.as_ref().and_then(|r| r.binding.as_ref()) {
+                    names.push(ident.name.clone());
+                }
+            }
             Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => {
                 match payload {
                     EnumPatternPayload::Unit => {}

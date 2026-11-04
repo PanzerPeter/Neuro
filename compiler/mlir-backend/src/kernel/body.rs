@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    HirBindingSource, HirExpr, HirExprKind, HirFunction, HirGridIndex, HirItem, HirMatchArm,
-    HirMatchTest, HirMathOp, HirPlace, HirProgram, HirStmt, HirTensorAxis, HirType,
+    HirExpr, HirExprKind, HirFunction, HirGridIndex, HirItem, HirMatchArm, HirMatchTest, HirMathOp,
+    HirPlace, HirProgram, HirStmt, HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -1236,7 +1236,7 @@ impl<'f> BodyEmitter<'f> {
             self.start(&body);
             let mut bindings = Vec::with_capacity(arm.bindings.len());
             for binding in &arm.bindings {
-                if !matches!(binding.source, HirBindingSource::Scrutinee) {
+                if binding.paths.iter().any(|path| !path.is_empty()) {
                     return Err(Refused::new(expr.span, "a `match` binding of a payload"));
                 }
                 let bound = Binding::Param {
@@ -1303,6 +1303,7 @@ impl<'f> BodyEmitter<'f> {
         };
         Ok(match test {
             HirMatchTest::Wildcard => self.assign("arith.constant true"),
+            HirMatchTest::Never => self.assign("arith.constant false"),
             HirMatchTest::IntEq { value: want } => {
                 let want = self.assign(&constant(*want));
                 self.assign(&format!("arith.cmpi eq, {value}, {want} : {mlir}"))
@@ -1319,8 +1320,11 @@ impl<'f> BodyEmitter<'f> {
                 let below = self.assign(&format!("arith.cmpi {at_most}, {value}, {hi} : {mlir}"));
                 self.assign(&format!("arith.andi {above}, {below} : i1"))
             }
-            HirMatchTest::Tag { .. } => {
+            HirMatchTest::Tag { .. } | HirMatchTest::All(_) | HirMatchTest::Part { .. } => {
                 return Err(Refused::new(span, "a `match` on an enum"));
+            }
+            HirMatchTest::SliceLen { .. } => {
+                return Err(Refused::new(span, "a `match` on a slice"));
             }
         })
     }

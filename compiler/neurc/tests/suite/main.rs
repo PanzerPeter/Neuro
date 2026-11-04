@@ -9,6 +9,7 @@
 
 mod compile_harness;
 
+mod advanced_patterns;
 mod aggregate_ownership;
 mod arrays;
 mod assignments;

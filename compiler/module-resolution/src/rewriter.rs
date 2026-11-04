@@ -225,7 +225,11 @@ fn resolve_pattern(
             }
             Ok(())
         }
-        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range { .. } => Ok(()),
+        Pattern::Wildcard(_)
+        | Pattern::Literal(_, _)
+        | Pattern::Range { .. }
+        | Pattern::At { .. }
+        | Pattern::Array { .. } => Ok(()),
     }
 }
 

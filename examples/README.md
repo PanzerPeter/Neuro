@@ -19,7 +19,7 @@ one and checks two things:
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes, `@gpu` kernels, hand-written `@kernel` functions and their `partition` write form, device transfer with `.to` and the operations that then run on the device | [Tensors](../docs/language-reference/tensors.md) |
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, collections of owned values, deterministic `Drop`, `pool` arena blocks | [Ownership](../docs/language-reference/ownership.md) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
-| `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match`, `val-else`, `if val` / `while val`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
+| `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match` and its nested, `@` and array patterns, `val-else`, `if val` / `while val`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
 | `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs and Enums](../docs/language-reference/structs.md) |
 | `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
 | `showcase/`     | Bigger programs proving many features work **together** | see the index below |
@@ -176,7 +176,7 @@ in each program has the full description. The three module files under
 
 ### Control flow and errors
 
-- [`job_queue.nr`](showcase/job_queue.nr): `val-else` in its three forms, with `if val` and a `while val` loop that drains a retry queue with `continue`.
+- [`job_queue.nr`](showcase/job_queue.nr): `val-else` in its three forms, with `if val`, a `while val` loop that drains a retry queue with `continue`, nested and `@` patterns over `Option<Result<..>>`, and an array pattern walking the costs.
 - [`sample_audit.nr`](showcase/sample_audit.nr): `?` on `Result` and `Option` that leaves the whole function from inside a loop, with a `val-else` error binding.
 - [`scan_guard.nr`](showcase/scan_guard.nr): Deterministic `Drop` with labeled exits: `break 'label` out of nested loops, and a labeled `loop` whose `break` carries a value.
 - [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` and `Result` used as generic enums with structs, borrowed parameters, a generic `choose<T>` and a guarded `match`.

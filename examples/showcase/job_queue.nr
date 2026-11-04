@@ -2,7 +2,8 @@
 // example: `val-else` in its three `else` forms (`|reason|` on a `Result`, `|verdict|` on a
 // plain enum, and a bare `else` on an `Option`), `if val` with a plain `else if`, `while
 // val` draining a retry queue with `continue`, `??`, `Vec` operations, `Copy` structs, and
-// a `match` guard. `val-else` replaces a `match` whose success arm would swallow the rest
+// a `match` guard, nested and `@` patterns over `Option<Result<..>>`, and an array pattern
+// walking the costs as a slice. `val-else` replaces a `match` whose success arm would swallow the rest
 // of the function, so each stage validates, exits on failure and keeps straight-line code.
 // `if val` and `while val` write only the branch that does work.
 
@@ -46,6 +47,36 @@ func slot_cost(costs: [i32; 5], index: i32) -> Option<i32> {
         Option::Some(costs[index])
     } else {
         Option::None
+    }
+}
+
+// A slot read and priced in one value, so a `match` can look through both layers.
+func audit_slot(costs: [i32; 5], index: i32) -> Option<Result<i32, i32>> {
+    match slot_cost(costs, index) {
+        Some(cost) => Some(priced(cost)),
+        None => None
+    }
+}
+
+// Cheap jobs count double. A valid cost and a rejection's reason code otherwise weigh the
+// same, so one arm with two alternatives takes both.
+func audited(slot: Option<Result<i32, i32>>) -> i32 {
+    match slot {
+        Some(Ok(cost @ 1..=9)) => cost * 2,
+        Some(Ok(amount)) | Some(Err(amount)) => amount,
+        None => 0
+    }
+}
+
+// Two jobs share a worker, so a pair costs its larger job.
+func batched(costs: &[i32]) -> i32 {
+    match costs {
+        [] => 0,
+        [last] => last,
+        [first, second, ..rest] => {
+            val larger = if first > second { first } else { second }
+            larger + batched(rest)
+        }
     }
 }
 
@@ -138,6 +169,17 @@ func main() -> i32 {
     // costs 0 and 60 were rejected: 60 / 2 = 30 is within budget, 0 stays 0  => recovered 30
 
     println("recovered (while val)      = {recovered}")
+
+    // Nested patterns read each slot past the end of the queue: 8 + 12 + 7 + 3 + 18 + 0.
+    mut audit_total: i32 = 0
+    for i in 0..6 {
+        audit_total = audit_total + audited(audit_slot(costs, i))
+    }
+    println("audited (nested patterns)  = {audit_total}")
+
+    // Pairs (4, 12) and (0, 60), then 9 alone: 12 + 60 + 9.
+    val all_costs: &[i32] = &costs
+    println("batched (array patterns)   = {batched(all_costs)}")
 
     val sum = total + settled + drained + recovered
     println("total                      = {sum}")

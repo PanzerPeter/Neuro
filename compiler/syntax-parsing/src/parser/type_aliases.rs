@@ -188,6 +188,13 @@ fn rename_self_in_pattern(pattern: &mut Pattern, resolved: &HashMap<String, Type
             payload
         }
         Pattern::UnqualifiedEnum { payload, .. } => payload,
+        Pattern::At { pattern, .. } => return rename_self_in_pattern(pattern, resolved),
+        Pattern::Array { elements, .. } => {
+            for element in elements {
+                rename_self_in_pattern(element, resolved);
+            }
+            return;
+        }
         Pattern::Wildcard(_)
         | Pattern::Binding(_)
         | Pattern::Literal(_, _)

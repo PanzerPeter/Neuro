@@ -1247,7 +1247,7 @@ pub enum TypeError {
     CannotInferEmptyArray { span: Span },
 
     #[error(
-        "array destructuring pattern binds {expected} element(s) but the array has {found}: list every element or add a `..rest` pattern"
+        "array pattern binds {expected} element(s) but the array has {found}: list every element or add a `..rest` pattern"
     )]
     ArrayPatternLengthMismatch {
         expected: usize,
@@ -1336,7 +1336,7 @@ pub enum TypeError {
     NonExhaustiveMatch { reason: String, span: Span },
 
     #[error(
-        "cannot match on a value of type {ty}: `match` supports enums, integers, `char`, and `bool` in this phase"
+        "cannot match on a value of type {ty}: `match` supports enums, integers, `char`, `bool`, arrays and borrowed slices"
     )]
     UnsupportedMatchScrutinee { ty: Type, span: Span },
 
@@ -1375,14 +1375,29 @@ pub enum TypeError {
     },
 
     #[error(
-        "an alternative (`|`) pattern may not bind a variable: move the binding to a separate arm"
+        "'{name}' is not bound in every alternative of this `|` pattern: bind it in all of them"
     )]
-    OrPatternBinding { span: Span },
+    OrPatternBindingMissing { name: String, span: Span },
 
     #[error(
-        "a payload sub-pattern must be a binding or `_`: match a payload value with a guard instead (e.g. `Some(n) if n == 0`)"
+        "'{name}' has type {first} in one alternative of this `|` pattern and {other} in another: an arm's bindings have one type"
     )]
-    RefutablePayloadPattern { span: Span },
+    OrPatternBindingType {
+        name: String,
+        first: Type,
+        other: Type,
+        span: Span,
+    },
+
+    #[error(
+        "a pattern cannot test a {ty} value: bind it and compare in a guard (e.g. `Some(s) if s == ...`)"
+    )]
+    UntestableLiteralPattern { ty: Type, span: Span },
+
+    #[error(
+        "'{name} @' moves the whole value, so its pattern cannot bind a part of it as well: use `_` inside the pattern"
+    )]
+    AtPatternBindsOwner { name: String, span: Span },
 
     #[error(
         "closure parameter '{name}' needs a type: annotate it (`|{name}: T| ...`), or write the closure where a function type says what it takes, such as a typed binding `val f: (T) -> R = ...` or an argument to a function-typed parameter"
@@ -1769,8 +1784,10 @@ impl TypeError {
             | Self::InvalidRangePattern { span, .. }
             | Self::UnimportedVariantPattern { span, .. }
             | Self::VariantPatternFormMismatch { span, .. }
-            | Self::OrPatternBinding { span, .. }
-            | Self::RefutablePayloadPattern { span, .. }
+            | Self::OrPatternBindingMissing { span, .. }
+            | Self::OrPatternBindingType { span, .. }
+            | Self::AtPatternBindsOwner { span, .. }
+            | Self::UntestableLiteralPattern { span, .. }
             | Self::ClosureParamNeedsType { span, .. }
             | Self::ClosureCapturesNonCopy { span, .. }
             | Self::ClosureAssignsCapture { span, .. }

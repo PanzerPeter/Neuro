@@ -529,6 +529,13 @@ fn walk_pattern(pattern: &mut Pattern, f: SiteFn) -> Result<(), ModuleError> {
     let payload = match pattern {
         Pattern::Wildcard(_) | Pattern::Binding(_) | Pattern::Literal(_, _) => return Ok(()),
         Pattern::Range { .. } => return Ok(()),
+        Pattern::At { pattern, .. } => return walk_pattern(pattern, f),
+        Pattern::Array { elements, .. } => {
+            for element in elements {
+                walk_pattern(element, f)?;
+            }
+            return Ok(());
+        }
         Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => payload,
     };
     match payload {

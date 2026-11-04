@@ -947,7 +947,7 @@ exhaustiveness is a frontend guarantee.
 Ownership of an enum payload crosses at the arm. The match disowns every held drop flag of the
 scrutinee as soon as ANY arm binds (which arm ran is a runtime fact and the flags are static)
 so the arm's binding has to be what releases what it took. Each arm body therefore runs in a drop
-scope of its own, and `bind_arm` registers an owning payload binding in it (`owns_payload`); an
+scope of its own, and `register_bindings` registers an owning payload binding in it; an
 arm that MOVES the payload out disarms the flag first, through the ordinary
 `mark_moved_for_drop` on the arm body, and the scope then releases nothing. The disowning hands
 back each flag with the value it held, and an arm that binds NOTHING (`B(_)`, `_`) stores them
@@ -956,12 +956,25 @@ releases it. What still leaks is the part of a variant an arm that binds did not
 (`A(x, _)` over two owning fields): that is the safe direction, since which part left is known
 only per pattern.
 
-`codegen_single_test`, `SavedBinding`, `bind_arm`, and `restore_bindings` are `pub(crate)` so
-`val_else.rs` can share them. `val_else` passes `owns_payload: false`: its binding belongs to the
-enclosing block, which registers it, rather than to the pattern.
+`codegen_pattern_test` walks a test tree over a place: `pattern_part` turns each `HirPatternStep`
+into the address of that part (a GEP into the enum's payload slot or the array, a load through a
+borrow, or a fresh fat pointer for a slice's rest), so nothing copies an aggregate to test one
+field. Every failing test branches straight to `fail_bb` rather than folding into one `i1`: a
+payload of the wrong variant holds undefined bytes, and `and false, poison` is poison.
+
+An arm's alternatives share one body. `binding_slots` makes one alloca per binding,
+`codegen_alternatives` tests each alternative and `store_bindings` fills the slots along that
+alternative's path before jumping to the body, where `register_bindings` runs once. A guarded arm
+of several alternatives records which one matched, and a failed guard switches on that to resume at
+the next. An arm's drop flags are only armed past the tests, so a failed guard leaves the scrutinee
+to the arm that runs.
+
+`codegen_pattern_test`, `SavedBinding`, `bind_arm`, and `restore_bindings` are `pub(crate)` so
+`val_else.rs` can share them. `val_else` passes `ArmOwnership::Enclosing`: its binding belongs to
+the enclosing block, which registers it, rather than to the pattern.
 
 ## val-else Lowering
-`codegen/val_else.rs`. The scrutinee is stored once into an alloca, `codegen_single_test` picks
+`codegen/val_else.rs`. The scrutinee is stored once into an alloca, `codegen_pattern_test` picks
 the branch, and the else block runs in its own drop scope with its binding saved and restored. The
 success block's bindings are materialized by `bind_arm` and deliberately **not** restored: they
 belong to the enclosing block, which is the whole difference from a match arm. For the same reason

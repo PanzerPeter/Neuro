@@ -30,6 +30,17 @@ pub(super) fn lower(src: &str) -> HirProgram {
 }
 
 /// The body of the first function named `name`.
+/// Assert `binding` reads payload slot `slot` of the scrutinee, in its only alternative.
+pub(super) fn assert_payload_slot(binding: &neuro_hir::HirMatchBinding, want: usize) {
+    let [path] = binding.paths.as_slice() else {
+        panic!("expected one alternative: {binding:?}");
+    };
+    assert!(
+        matches!(path.as_slice(), [neuro_hir::HirPatternStep::EnumPayload { slot, .. }] if *slot == want),
+        "expected payload slot {want}: {binding:?}"
+    );
+}
+
 pub(super) fn function_body<'a>(program: &'a HirProgram, name: &str) -> &'a [HirStmt] {
     for item in &program.items {
         if let HirItem::Function(f) = item

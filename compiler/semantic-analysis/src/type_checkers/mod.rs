@@ -436,6 +436,7 @@ mod collections;
 mod const_eval;
 mod declarations;
 mod derivable;
+mod exhaustiveness;
 mod expressions;
 mod gpu;
 mod grad;
