@@ -10,6 +10,17 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.28.4] - 2026-11-05
+
+### Added
+
+- `examples/showcase/train_predict.nr`: a `@grad` fit trained on the CPU, then a `@gpu` prediction from the learned weights.
+
+### Changed
+
+- The README opens with a plain-language "What Neuro is" section, written for readers new to compilers and AI.
+- The README demo GIF is re-recorded around `train_predict.nr`. It now shows Neuro source, a shape error caught at compile time, and a GPU prediction.
+
 ## [5.28.3] - 2026-11-05
 
 ### Fixed

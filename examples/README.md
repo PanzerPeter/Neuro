@@ -113,6 +113,7 @@ in each program has the full description. The three module files under
 - [`gpu_fallback.nr`](showcase/gpu_fallback.nr): A two-layer classifier with `@gpu(fallback: true)` layers that run as kernels where a GPU is usable and on the CPU otherwise, with identical output.
 - [`gpu_layer.nr`](showcase/gpu_layer.nr): A dense layer whose forward pass runs as `@gpu` kernels on device-resident weights, checked against the host. Stops without a usable NVIDIA GPU.
 - [`heat_diffusion.nr`](showcase/heat_diffusion.nr): Heat along a rod, one GPU thread per cell in a `@kernel` with `partition` writes, checked against a host run. Stops without a usable NVIDIA GPU.
+- [`train_predict.nr`](showcase/train_predict.nr): A `@grad` fit trained on the CPU, then a `@gpu` prediction from the learned weights. The program in the README demo. Stops without a usable NVIDIA GPU.
 
 ### Tensors
 

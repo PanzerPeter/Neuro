@@ -1,0 +1,7 @@
+step  0: loss  14.5000
+step 15: loss   0.0998
+step 30: loss   0.0059
+step 45: loss   0.0003
+step 60: loss   0.0000
+learned w = [1.00, 2.00]
+predicted on the GPU: 3.00

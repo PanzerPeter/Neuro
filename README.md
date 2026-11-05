@@ -3,7 +3,7 @@
 > An AOT-compiled language for high-performance AI development.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="neurc type-checks, compiles and runs a Neuro program that fits a model with @grad, in under a second" width="880">
+  <img src="assets/demo.gif" alt="neurc rejects a swapped matrix product at compile time, then the fixed program trains a model with @grad and predicts on the GPU" width="880">
 </p>
 
 [![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
@@ -13,6 +13,26 @@
 
 **Status: alpha.** Breaking changes are expected. Per-phase status lives in one place, the
 [Quick Roadmap](#quick-roadmap).
+
+---
+
+## What Neuro is
+
+Neuro is a programming language for building AI. You write your program in a text file, and
+Neuro's compiler, `neurc`, turns it into a standalone program that runs directly on your computer,
+the way a program written in C or Rust does. You can hand that program to someone else, and they
+can run it without installing Python.
+
+The building blocks of AI code are part of the language, so you don't need add-on libraries to get
+them. A tensor, the grid of numbers a model does its maths on and stores what it has learned in, is
+a built-in type. Training a model means working out how each of those numbers should change so the
+model makes fewer mistakes. Put `@grad` on a function and the compiler writes that calculation for
+you. Put `@gpu` on a function and, on Linux, it runs on an NVIDIA or AMD graphics card.
+
+The recording at the top of this page shows these pieces in
+[one short program](examples/showcase/train_predict.nr). The compiler refuses a multiplication
+whose tensor sizes don't fit, before anything runs. Once that line is fixed, the program builds into
+a small native file, learns the right numbers, and makes a prediction on the GPU.
 
 ---
 
