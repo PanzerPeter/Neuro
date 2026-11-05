@@ -3,7 +3,7 @@
 The MLIR backend computes every tensor operation, on the CPU and as NVIDIA or AMD GPU kernels. It lowers the typed HIR to `linalg`, `tensor` and `memref` IR, carries that through bufferization into LLVM IR, and hands the result to the [LLVM backend](llvm-backend.md) to link into each program. Read it when a change adds or alters a tensor operation, its GPU kernel, or the way the bodies link into a compile.
 
 **Crate**: `compiler/mlir-backend`
-**Library**: melior 0.28.2 (Rust MLIR bindings, LLVM and MLIR 23)
+**Library**: melior (Rust MLIR bindings, LLVM and MLIR 23)
 
 ## Overview
 
@@ -39,7 +39,7 @@ Every build compiles this crate, so every build needs MLIR 23 in the same prefix
 
 ### Coexistence with inkwell
 
-`mlir-sys` carries no `llvm-sys` dependency and no Cargo `links` key that clashes with inkwell's. It finds MLIR by running `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR must be installed into the same prefix as the LLVM that `LLVM_SYS_231_PREFIX` names, and `TABLEGEN_230_PREFIX` names it too. Both bindings then load one `libLLVM` 23, which the handoff in [MLIR to LLVM IR](#mlir-to-llvm-ir) relies on. `melior 0.28.x` is the MLIR 23 line, via `mlir-sys 230`.
+`mlir-sys` carries no `llvm-sys` dependency and no Cargo `links` key that clashes with inkwell's. It finds MLIR by running `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR must be installed into the same prefix as the LLVM that `LLVM_SYS_231_PREFIX` names, and `TABLEGEN_230_PREFIX` names it too. Both bindings then load one `libLLVM` 23, which the handoff in [MLIR to LLVM IR](#mlir-to-llvm-ir) relies on. The root `Cargo.toml` pins the `melior` line built on MLIR 23, through `mlir-sys`.
 
 ## Behavior
 

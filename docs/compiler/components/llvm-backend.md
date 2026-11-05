@@ -93,8 +93,6 @@ The backend emits the operations that have no loop: building a handle, element r
 
 Releasing a tensor calls the handle's own `deleter`, so scope exit and a foreign owner run the same code. `__neuro_dlpack_deleter` frees the gradient and Hessian slots, then the buffer, then the structure. The structure and its control block share one `malloc`. The buffer is a separate allocation, because DLPack needs a 64-byte alignment that `malloc` does not promise. On Windows the buffer comes from `_aligned_malloc`, which only `_aligned_free` can release. The [CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md) covers the layout in full.
 
-A tensor held in a struct field is not freed by the struct's drop, the same gap collection fields have.
-
 ### Integer arithmetic
 
 The overflow rule follows the optimization level (see the [CLI help](../../getting-started/installation.md) for the user-facing wording):

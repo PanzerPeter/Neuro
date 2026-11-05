@@ -2,12 +2,42 @@
 
 All notable changes to the Neuro programming language compiler will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version numbers
+track the roadmap rather than Semantic Versioning: MAJOR is the phase, MINOR is one roadmap item,
+and PATCH is a fix, a test or a docs change. A breaking change can land in any MINOR during alpha.
 
 ---
 
 ## [Unreleased]
+
+## [5.28.2] - 2026-11-05
+
+### Added
+
+- The docs hygiene gate fails on a quoted `inkwell` or `melior` version and on a `neuro-language-support/LICENSE` that differs from the root `LICENSE`, and it now scans `CONTRIBUTING.md`.
+- `.gitattributes` stops GitHub counting `.nr` files as Noir and marks the generated `.ll` runtimes.
+- `DESIGN.md` says who Neuro is for and adds reproducibility as a design principle.
+- `neuro-language-support/README.md`.
+
+### Changed
+
+- `CONTRIBUTING.md` links to the install recipes, crate layout and PR checklist instead of copying them, and gains the versioning rule, the full gate list and a table of `tools/`.
+- The claim form and `CONTRIBUTING.md` no longer ask for a roadmap line, which contributors cannot see. They name Quick Roadmap goals.
+- GPU benchmark internals moved from the README to `benchmarks/README.md`, and the alpha memory note is shorter.
+
+### Fixed
+
+- `neuro-language-support/LICENSE` carried older text under the same version number. It is now a copy of the root `LICENSE`.
+- A typo in the heading of section 16.2 of the `LICENSE`.
+- This file claimed Semantic Versioning, which the roadmap-based numbers do not follow.
+- `.gitignore` silently ignored any file or folder named `core`, `core.rs`, `build`, `out`, `release` or `result` anywhere in the tree. Those patterns are now anchored.
+- `DESIGN.md`: the shape-mismatch example multiplied two compatible matrices, a named function's return type is not inferred, finite differences are a test-suite check rather than a compile step, and the GIL bullet now covers free-threaded CPython.
+- `SECURITY.md` named `miette`, which the compiler does not use, and left out the MLIR backend.
+- `CONTRIBUTING.md` and the PR template claimed a DCO check in CI, and `AGENTS.md` claimed CI enforces `cargo audit`. Neither job exists.
+- The README, `AGENTS.md` and `CONTRIBUTING.md` quoted an old `inkwell` version, and the `AGENTS.md` pipeline left out three stages.
+- The README's Ubuntu recipe matches what CI installs and sets, and its shell-profile advice now includes the `prefix=` line the `export` depends on.
+- The `llvm-backend` docs said a tensor or collection held in a struct field is not freed. Both are.
+- `docs/README.md` described GPU support as just begun, and one link in the generics reference had a dead anchor.
 
 ## [5.28.1] - 2026-11-05
 

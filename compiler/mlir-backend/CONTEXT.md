@@ -1,7 +1,13 @@
 # mlir-backend
 
 ## Purpose
-Compute every tensor operation, on the CPU and as NVIDIA or AMD GPU kernels: the LLVM backend has no tensor loops of its own. It consumes `neuro_hir::HirProgram`, in which lowering has outlined each tensor operation into a function of its own, and builds each one's body from the `linalg`, `tensor` and `memref` dialects. The module carries on through bufferization and the `llvm` dialect into a verified inkwell LLVM module, handed to the driver as linkable LLVM IR, which `neurc` links into every compile. `lower_program` still emits the debugging view: a `func.func` declaration per function, or a definition where the body is one this crate builds.
+Compute every tensor operation, on the CPU and as NVIDIA or AMD GPU kernels: the LLVM backend has
+no tensor loops of its own. It consumes `neuro_hir::HirProgram`, in which lowering has outlined each
+tensor operation into a function of its own, and builds each one's body from the `linalg`, `tensor`
+and `memref` dialects. The module carries on through bufferization and the `llvm` dialect into a
+verified inkwell LLVM module, handed to the driver as linkable LLVM IR, which `neurc` links into
+every compile. `lower_program` still emits the debugging view: a `func.func` declaration per
+function, or a definition where the body is one this crate builds.
 
 ## Toolchain
 Every build compiles the crate, so every build needs MLIR 23 in the LLVM 23 prefix (see
@@ -58,13 +64,10 @@ caches.
   (probed once, see Notes) a `FollowsOperands` one keeps its host body, a `@gpu` one is
   `GpuBodiesNotLowered` and a `@kernel` one a `KernelRefusal` at the call. `neurc` calls it for a
   program with a `@gpu`, `@kernel` or `FollowsOperands` function.
-The HIR-independent wiring check that used to sit beside them, `emit_smoke_module`, is gone
-from the public surface: `build_smoke_module` is `pub(crate)` and compiled only under `test`,
-because the Phase 1.8 condition it was written for ("until real HIR lowering exists") is met
-and nothing outside the crate ever called it. It still builds
+`build_smoke_module` is `pub(crate)` and compiled only under `test`. It builds
 `func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, and `bridge`'s
-tests still carry that module across to LLVM IR, because it is the one module with a real body
-rather than only declarations.
+tests carry that module across to LLVM IR, because it is the one module with a real body rather
+than only declarations.
 
 ## Shared Kernel
 - `neuro-hir`: the typed HIR contract `lower_program` consumes.
@@ -120,7 +123,7 @@ rather than miscompiling later. Each binding declares its own opaque `LLVMContex
 `register_all_llvm_translations` runs in `new_context()` for every path, not only the translating
 one: the translation interfaces have to be on the context that *built* the module.
 
-**Toolchain pinning.** `melior 0.28.x` is the MLIR 23 line (via `mlir-sys 230`). `mlir-sys` carries no `llvm-sys` dependency and no Cargo
+**Toolchain pinning.** The root `Cargo.toml` pins the `melior` line built on MLIR 23, through `mlir-sys`. `mlir-sys` carries no `llvm-sys` dependency and no Cargo
 `links` key clashing with inkwell's. It finds MLIR by running
 `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR has to be installed into the same prefix as the
 LLVM that `LLVM_SYS_231_PREFIX` names; `TABLEGEN_230_PREFIX` names that prefix too. One prefix

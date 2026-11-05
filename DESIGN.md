@@ -1,6 +1,17 @@
 # Neuro Language Design
 
-This document captures the core design principles, non-goals, and AI-first rationale behind Neuro. It is intended for contributors, language designers, and technically curious users, the people who want to know why Neuro works the way it does rather than only how.
+This document records the design principles, non-goals and AI-first rationale behind Neuro: why it works the way it does, rather than how.
+
+---
+
+## Who It Is For
+
+Neuro does not try to replace PyTorch's ecosystem. It aims at the work that ecosystem serves badly:
+
+- **Programs that ship as one binary.** Training and inference with no Python runtime and, on a GPU, nothing to install beyond the driver.
+- **Research code that should not fail an hour in.** A shape mismatch or a swapped named axis is a compile error, not a crash after the data loader has warmed up.
+- **Results that must reproduce.** A float sum gives the same bits on the host and on a GPU, run after run.
+- **Code that has to be fast without a second rewrite.** No prototype in Python followed by a port of the hot path to C++.
 
 ---
 
@@ -11,7 +22,7 @@ This document captures the core design principles, non-goals, and AI-first ratio
 Neuro's central premise is that bugs caught at compile time are cheaper than bugs caught during a GPU training run that took six hours to reach the failure. Every design decision that moves an error earlier in the pipeline is a win.
 
 This motivates:
-- Static typing with full type inference, so you get type safety without the ceremony.
+- Static typing with local type inference, so you get type safety without the ceremony.
 - Mandatory explicit mutability (`val` / `mut`), which puts mutation at the declaration site instead of burying it in an assignment.
 - Tensor shapes as compile-time parameters of the type, so shape mismatches are rejected before a single weight is allocated.
 
@@ -19,7 +30,7 @@ This motivates:
 
 Neuro is not terse at the expense of clarity. Implicit numeric type coercions are rejected. Casting between numeric types requires an explicit `as`. Mutable borrowing requires an explicit `mut`. These rules feel strict at first and save debugging time later.
 
-Inference is permitted where it is unambiguous and adds no semantic risk: local variable types, return types of single-expression functions, literal types in context. Inference is not permitted where it could silently produce a wrong type.
+Inference is permitted where it is unambiguous and adds no semantic risk: local variable types, closure parameters and return types, literal types in context. A function signature is always written out, and omitting `-> T` means the function returns `()`. Inference is not permitted where it could silently produce a wrong type.
 
 ### 3. Ownership without a GC
 
@@ -42,6 +53,10 @@ Neuro compiles directly to native binaries via LLVM. There is no interpreter, no
 ### 6. Errors as values
 
 Neuro uses `Result<T, E>` and `Option<T>` for error handling, not exceptions. Exceptions make control flow non-local and difficult to reason about in a system without a GC. `?` propagation and pattern matching provide ergonomic error handling without hidden jumps.
+
+### 7. Reproducible by construction
+
+A float reduction folds in an order the language fixes, so `.sum()` gives the same bits on the host and on a GPU. A GPU matrix product on `f32` or `f64` keeps the host's bits too, which is why it does not run on tensor cores: they would trade that identity for speed. Seeded random numbers, still on the roadmap, extend the rule to a whole training run.
 
 ---
 
@@ -73,7 +88,7 @@ There is no `reflect` package, no `typeof`, and no dynamic dispatch on arbitrary
 
 ### No backwards compatibility promise during alpha
 
-Until the language stabilizes, syntax and semantics may change between minor versions. Contributors should not build critical infrastructure on Neuro yet. The CHANGELOG documents all breaking changes.
+Until the language stabilizes, syntax and semantics may change between minor versions. Do not build critical infrastructure on Neuro yet. The CHANGELOG documents all breaking changes.
 
 ---
 
@@ -83,9 +98,9 @@ Until the language stabilizes, syntax and semantics may change between minor ver
 
 Python is the dominant language for AI today. It has an enormous ecosystem, excellent tooling, and a huge community. Neuro is not competing with Python on any of that. It addresses Python's structural limitations as a performance language:
 
-- Dynamic typing. Shape errors in tensor operations surface at runtime, often deep into a training run. A `(784, 128)` weight matrix multiplied by a `(128, 784)` input does not fail until the operation executes.
+- Dynamic typing. Shape errors in tensor operations surface at runtime, often deep into a training run. A `(784, 128)` weight matrix multiplied by another `(784, 128)` matrix does not fail until the operation executes.
 - Interpreted execution. The CPython interpreter adds overhead in tight loops. Frameworks like NumPy and PyTorch work around this by dropping into C extensions, but the Python layer between operations still costs.
-- The GIL. CPython's global interpreter lock makes true parallelism on the CPU difficult without subprocess gymnastics.
+- The GIL. The default CPython build runs bytecode under a global interpreter lock, so CPU parallelism means subprocesses. The free-threaded build removes the lock, but it stays optional and separate from the default.
 - Memory opacity. Python abstracts memory layout. Writing a CUDA kernel that operates on a Python object requires navigating framework-specific buffer protocols.
 
 Neuro addresses these at the language level: types are static, tensor shapes are compile-time, execution is native, and memory layout is explicit.
@@ -105,7 +120,7 @@ Neuro differentiates at compile time instead. `@grad` is a compiler annotation: 
 - Tensor shapes are still in the types there, so a gradient comes back as a tensor with its parameter's static shape. An IR-level tool such as Enzyme hands back an untyped shadow buffer, and the shape would have to be rebuilt in the frontend anyway.
 - It runs before any MLIR or GPU lowering, so the derivative is ordinary code that later lowering stages carry to every target. A pass over LLVM IR runs after GPU lowering and cannot differentiate a kernel launch.
 
-The derivative is optimized by the same LLVM passes as the forward pass, and every derivative the compiler generates is checked against finite differences of the compiled function. The user-facing rules are in the [automatic differentiation reference](docs/language-reference/autodiff.md).
+The derivative is optimized by the same LLVM passes as the forward pass, and the test suite checks generated derivatives against finite differences of the compiled function. The user-facing rules are in the [automatic differentiation reference](docs/language-reference/autodiff.md).
 
 ### Why tensor shapes as type parameters?
 
@@ -114,6 +129,8 @@ A `Tensor<f32, [784, 128]>` has its shape encoded in its type. This means:
 - Matrix multiply `[A, B] × [B, C] → [A, C]` is type-checked: passing `[784, 128]` and `[256, 10]` is a compile error.
 - Batch dimension mismatches between model layers are caught before the model runs.
 - The optimizer can use shape information to select loop tile sizes and memory access patterns.
+
+An axis known only at run time is spelled `?`: `Tensor<f32, [?, 784]>` keeps the static axes checked and leaves that one open.
 
 The frontend checks shapes itself. Past the frontend, only MLIR keeps them: the LLVM IR type system does not represent n-dimensional arrays with static shape constraints, and MLIR's parametric type system does.
 
@@ -125,7 +142,7 @@ The frontend checks shapes itself. Past the frontend, only MLIR keeps them: the 
 |---|---|
 | **Rust** | Ownership model, `Result`/`Option`, `pub(crate)` visibility, no GC |
 | **Swift** | Ergonomic syntax, implicit return, struct/method design |
-| **Python** | Whitespace-tolerant style, AI ecosystem mindset |
+| **Python** | Newline-terminated statements, AI ecosystem mindset |
 | **Mojo** | AI-first language goals, MLIR lowering strategy |
 | **Zig** | Explicit allocators, no hidden control flow |
 

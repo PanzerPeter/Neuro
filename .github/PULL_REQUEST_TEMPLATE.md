@@ -31,6 +31,6 @@ If this touches the lexer, one more:
 
 - [ ] `neuro-language-support/syntaxes/neuro.tmLanguage.json` updated by hand, and `cargo test -p lexical-analysis --test tmlanguage_sync` passes
 
-<!-- Unsigned commits will not be merged. The DCO check runs in CI, and signing off
-     accepts the relicensing terms in the LICENSE. Amend with
+<!-- Unsigned commits will not be merged, and signing off accepts the relicensing
+     terms in the LICENSE. Amend with
      `git commit --amend --signoff`, or `git rebase --signoff <base>` for a series. -->

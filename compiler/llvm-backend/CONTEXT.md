@@ -1671,9 +1671,7 @@ A tensor binding is registered the same way, with `DropTarget::TensorBuffer`: th
 holds the DLPack handle, so scope exit loads it and calls the handle's own `deleter` under the same
 flag, which releases the element buffer and the structure together. Unlike
 `HeapString` the ownership comes from the type alone: every tensor construction allocates, and
-there is no borrowed value of tensor type to confuse it with. **A tensor held in a struct field is
-not freed**, exactly as a collection field is not; recursing into a struct's fields is one gap, not
-one per element type.
+there is no borrowed value of tensor type to confuse it with.
 
 New libc declarations these need: `free`, `realloc`, `memmove`, `memset`, `aligned_alloc`
 (alongside the existing `malloc`, `memcpy`, `memcmp`, `write`, `abort`, `snprintf`), each declared

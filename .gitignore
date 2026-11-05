@@ -87,8 +87,8 @@ cross/
 *.pdb
 *.pdb.lock
 *.dmp
-core
-core.*
+/core
+core.[0-9]*
 
 # ---------------------------
 # Generated sources / codegen
@@ -130,7 +130,7 @@ pytest_cache/
 /.circleci/ci-outputs/
 /.gitlab/ci-artifacts/
 artifacts/
-release/
+/release/
 dist/
 _build/
 tmp/
@@ -150,8 +150,8 @@ yarn.lock
 .pnpm-store/
 .npm/
 .npm-cache/
-build/
-out/
+/build/
+/out/
 .esbuild/
 .vite/
 .next/
@@ -188,6 +188,7 @@ coverage.xml
 
 # JetBrains (IntelliJ, CLion, GoLand, Rider, etc.)
 .idea/
+.idea.bak/
 *.iml
 workspace.xml
 tasks.xml
@@ -337,7 +338,7 @@ debug.log
 *.vsix
 
 # Nix
-result
+/result
 .nix-store/
 .nix-binary-cache/
 

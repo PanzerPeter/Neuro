@@ -107,15 +107,16 @@ several features at once.
 ### 1. LLVM 23 and MLIR 23
 
 This is the only step that differs between systems. Every build compiles the MLIR backend, so
-MLIR must sit in the same prefix as LLVM, and three variables name that prefix. Put the
-`export` in your shell profile (`~/.bashrc`, `~/.zshrc`) so it survives a new terminal.
+MLIR must sit in the same prefix as LLVM, and three variables name that prefix. Put the `prefix=`
+and `export` lines in your shell profile (`~/.bashrc`, `~/.zshrc`) so they survive a new terminal.
 
 ```bash
 # Ubuntu / Debian
 wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 23
-sudo apt-get install -y llvm-23-dev libpolly-23-dev libmlir-23-dev mlir-23-tools \
-  libclang-23-dev libclang-common-23-dev
+sudo apt-get install -y llvm-23-dev llvm-23-tools libpolly-23-dev libmlir-23-dev mlir-23-tools \
+  libclang-23-dev libclang-common-23-dev lld-23 libzstd-dev zlib1g-dev
 prefix=/usr/lib/llvm-23
+export LIBCLANG_PATH=$prefix/lib LLVM_LINK_LLVM_DYLIB=1
 
 # macOS (Homebrew)
 brew install llvm
@@ -178,12 +179,10 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Ownership** | Moves, `Copy`, borrow exclusivity, references in fields, lifetimes, deterministic `Drop`, `pool { }` arenas ([reference](docs/language-reference/ownership.md)) |
 | **Modules and toolchain** | File modules, `import` and re-exports, the prelude; `neurc check` / `run` / `compile` on LLVM 23, `--emit obj` for C and NumPy ([reference](docs/language-reference/modules.md)) |
 
-> **Alpha memory note.** Stack values, literals, the owning collections and reassigned bindings
-> are all reclaimed, and so is a heap `string` stored into a struct field, an array or tuple
-> element, a call's argument, a call's return value, or a collection slot. What still leaks is the
-> handful of storing positions whose owner the compiler cannot prove, each of which holds one
-> buffer rather than handing out a dangling one. Full detail, and the reason the analysis answers
-> conservatively, is in the [memory model](docs/language-reference/memory-model.md).
+> **Alpha memory note.** Memory is reclaimed deterministically, except in the handful of positions
+> whose owner the compiler cannot prove, which leak a buffer rather than risk a dangling one. The
+> [memory model](docs/language-reference/memory-model.md#what-still-leaks) lists them, and this note
+> goes when that list is empty.
 
 ---
 
@@ -232,10 +231,9 @@ NumPy on the CPU. Each moves the same data between host and device:
 These are whole-program times, and both GPU columns start with a fixed cost: about 220 ms for a
 Neuro program, most of it the CUDA driver starting up, and about 1100 ms for PyTorch's import and
 CUDA setup. Past that, timed warm inside one process, PyTorch takes 23, 56, 37 and 13 ms against
-Neuro's roughly 44, 530, 40 and 25. A long reduction folds in 4096 lanes, one GPU thread each, in
-the order the host folds in too, so the two agree bit for bit. Each GPU thread computes a block of
-up to 4 × 4 elements of a matrix product, every element summed in order, so the device keeps the
-host's bits; there is no shared-memory staging and no tensor-core path.
+Neuro's roughly 44, 530, 40 and 25. Neuro's GPU results keep the host's exact bits, and there is no
+shared-memory staging or tensor-core path yet; [benchmarks/](benchmarks/README.md#reading-the-results)
+has the detail.
 
 ---
 
@@ -275,7 +273,7 @@ compiler/
 ├── argument-binding/        # Named arguments -> positional calls
 ├── semantic-analysis/       # Type checker, scope and borrow analysis
 ├── hir-lowering/            # Type-checked AST -> typed HIR
-├── llvm-backend/            # HIR -> object code (inkwell 0.10 / LLVM 23)
+├── llvm-backend/            # HIR -> object code (inkwell / LLVM 23)
 ├── mlir-backend/            # HIR -> MLIR linalg and GPU kernels
 └── neurc/                   # CLI compiler driver
 ```
@@ -283,7 +281,8 @@ compiler/
 Today a `.nr` file travels: **tokens → AST → merged program → type-checked AST → typed HIR →
 LLVM object code → system linker**. Automatic differentiation runs inside HIR lowering. The
 `mlir-backend` slice lowers the same typed HIR to MLIR `linalg`; `neurc` links the tensor
-bodies it computes into the program, and on Linux lowers `@gpu` and `@kernel` bodies on through the MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
+bodies it computes into the program, and on Linux lowers `@gpu` and `@kernel` bodies on through the
+MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).
 
 ---
@@ -321,9 +320,9 @@ with it.
 
 You may freely use, study and modify the compiler for any personal or internal purpose, write
 Neuro programs and distribute or sell the compiled output under any terms you choose, build tools
-and editor integrations that call into the compiler, and contribute code back. Only redistributing
-the compiler itself, or a fork of it, as part of a commercial product requires a commercial
-license.
+and editor integrations that call into the compiler, and contribute code back. Redistributing the
+compiler itself, or a fork of it, as part of a commercial product requires a commercial license,
+unless the fork is renamed and fully source-available under section 3.6 of the license.
 
 Neuro is pre-stabilization, and the license guards three risks specific to that: commercial
 re-packaging before the spec is stable, AI-assisted reproduction of the compiler for a competing
@@ -334,4 +333,5 @@ possible once the language stabilizes.
 
 Inspired by Rust (ownership, type system), Python (AI ecosystem simplicity), Swift (ergonomics)
 and Mojo (AI-first design). Built with [inkwell](https://github.com/TheDan64/inkwell),
-[logos](https://github.com/maciejhirsz/logos) and [LLVM](https://llvm.org/).
+[melior](https://github.com/mlir-rs/melior), [logos](https://github.com/maciejhirsz/logos),
+[LLVM](https://llvm.org/) and [MLIR](https://mlir.llvm.org/).

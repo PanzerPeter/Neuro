@@ -25,8 +25,9 @@ fastest of several runs, since noise only ever adds time. A missing toolchain is
 note, so the harness still runs where only some of them are installed.
 
 The `gpu_*` benchmarks run their Neuro side as `@gpu` kernels, which needs a Linux `neurc` and
-an NVIDIA GPU. Without them the Neuro rows are skipped with a note. They have no C++ or Rust row: a CPU loop says
-nothing about a GPU kernel. Their comparisons are PyTorch on the same GPU and NumPy on the CPU.
+an NVIDIA GPU. Without them the Neuro rows are skipped with a note. They have no C++ or Rust row:
+a CPU loop says nothing about a GPU kernel. Their comparisons are PyTorch on the same GPU and
+NumPy on the CPU.
 
 ## Adding a benchmark
 
@@ -51,6 +52,11 @@ with its debug assertions.
 Every row is a whole-program wall time, startup included. That is a fixed cost worth knowing
 on the GPU rows: about 220 ms for a Neuro program, most of it the CUDA driver, and about
 1100 ms for PyTorch's import and CUDA setup, which is most of each PyTorch row.
+
+The GPU rows measure code that keeps the host's bits. A long reduction folds in 4096 lanes, one
+GPU thread each, in the order the host folds in too, so the two agree bit for bit. Each GPU thread
+computes a block of up to 4 × 4 elements of a matrix product, every element summed in order. There
+is no shared-memory staging and no tensor-core path.
 
 Run on an idle machine. The compiled rows barely notice other work, but the NumPy rows that call
 BLAS do: OpenBLAS starts a thread per logical CPU, and a busy browser on the same machine put

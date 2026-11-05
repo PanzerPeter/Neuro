@@ -193,7 +193,7 @@ func main() -> i32 {
 }
 ```
 
-A type argument carries no `Copy` requirement. An instance holds its value and moves with it, so `Cell<string>` owns the string it holds (see [Ownership of an element](ownership.md#ownership-of-an-element)). A generic struct is usable only with type arguments:
+A type argument carries no `Copy` requirement. An instance holds its value and moves with it, so `Cell<string>` owns the string it holds (see [Ownership of an element](ownership.md#ownership-of-elements)). A generic struct is usable only with type arguments:
 
 ```neuro
 func f(p: Pair) -> i32 { 0 }   // error: generic struct 'Pair' requires type arguments, e.g. `Pair<...>`

@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "5.28.1"
+version = "5.28.2"
 edition = "2024"
 rust-version = "1.98.1"
 authors = ["Neuro Contributors"]
@@ -41,8 +41,8 @@ logos = "0.16"
 
 # LLVM Backend
 # Requires LLVM 23 with dev libraries (the backend emits LLVM IR via inkwell).
-# LLVM_SYS_231_PREFIX points at that install: /usr on Arch/CachyOS, whose stock
-# `llvm` is 23. Feature flag llvm23-1 (inkwell's minor-version suffix scheme).
+# LLVM_SYS_231_PREFIX points at that install; docs/getting-started/installation.md
+# has each platform's prefix. Feature flag llvm23-1 (inkwell's minor-version suffix scheme).
 # default-features = false disables inkwell's `target-all` default, which would
 # otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
 # That fails to link against LLVM's official Windows build, which ships only a

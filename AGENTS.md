@@ -13,8 +13,9 @@ written in Rust and laid out as a Cargo workspace.
 Pipeline:
 
 ```text
-source (.nr) -> lexical analysis -> syntax parsing -> semantic analysis
-             -> HIR lowering -> LLVM backend -> linker -> native binary
+source (.nr) -> lexical analysis -> syntax parsing -> module resolution
+             -> argument binding -> semantic analysis -> HIR lowering
+             -> MLIR tensor bodies -> LLVM backend -> linker -> native binary
 ```
 
 Workspace layout (`compiler/`):
@@ -30,7 +31,7 @@ Workspace layout (`compiler/`):
 | `argument-binding` | Named/positional argument binding |
 | `semantic-analysis` | Type checking, scope resolution |
 | `hir-lowering` | AST → typed HIR |
-| `llvm-backend` | Codegen via inkwell 0.10.0 (LLVM 23) |
+| `llvm-backend` | Codegen via inkwell (LLVM 23) |
 | `mlir-backend` | MLIR/melior codegen for tensor bodies and GPU kernels |
 | `neurc` | CLI driver; the only crate allowed to depend on every slice |
 
@@ -106,7 +107,7 @@ python tools/check_docs_hygiene.py
 
 ## Code Style Guidelines
 
-Rust, edition 2024, MSRV 1.98.1. Formatting is whatever `cargo fmt` produces:
+Rust, edition 2024, MSRV in the root `Cargo.toml`. Formatting is whatever `cargo fmt` produces:
 never hand-format around it.
 
 - **No `unwrap()` / `expect()` in production code paths.** Return
@@ -142,9 +143,14 @@ its entry point, public surface, or dependencies.
 
 **Commits.** Format: `scope: short summary` (50 chars or less), with an
 optional body explaining what and why. Valid scopes: `lexer`, `parser`,
-`semantic`, `codegen`, `infra`, `tests`, `docs`, `build`, `ci`. Every commit
-carries a `Signed-off-by:` trailer (`git commit -s`) per the DCO in
-CONTRIBUTING.md. No co-author trailers.
+`semantic`, `codegen`, `infra`, `tests`, `docs`, `build`, `ci`. A contributed
+commit carries a `Signed-off-by:` trailer (`git commit -s`) per the DCO in
+CONTRIBUTING.md. The human committer adds it, so an agent never writes one into
+a message. No co-author trailers.
+
+**Versioning.** The number lives once, in `[workspace.package].version`, and
+tracks the roadmap rather than SemVer: see
+[CONTRIBUTING.md](CONTRIBUTING.md#project-status).
 
 **Docs ride with the code.** CHANGELOG entry, README rows, and `CONTEXT.md`
 updates ship in the same commit as the change they describe.
@@ -185,8 +191,8 @@ source, and `tools/check_docs_hygiene.py` fails the build on hard-coded
 counts, on prose copies of the workspace version, and on references to
 local-only paths.
 
-CI additionally runs the suite on Linux/macOS/Windows against stable and
-nightly, OSV-Scanner over the dependency graph, benchmark regression budgets,
+CI additionally runs the suite on Linux/macOS/Windows against stable, plus a
+Linux nightly leg, OSV-Scanner over the dependency graph, benchmark regression budgets,
 release smoke tests (compile and run two examples with the release `neurc`), and coverage.
 
 ## Security Considerations
@@ -203,7 +209,7 @@ places, and agent changes should be read with them in mind:
   or bounds guards). Codegen changes need runtime tests that execute the
   produced binary, not just IR inspection.
 - **Dependency vulnerabilities**: run `cargo audit` when touching
-  `Cargo.toml`; CI enforces it. Do not add a dependency without a clear reason,
+  `Cargo.toml`; CI runs OSV-Scanner. Do not add a dependency without a clear reason,
   and never pin to an unmaintained crate.
 
 Rules for agents:

@@ -1,6 +1,6 @@
 """Documentation hygiene gate.
 
-Three classes of documentation rot are cheap to introduce and expensive to
+Five classes of documentation rot are cheap to introduce and expensive to
 notice, so they are enforced mechanically instead of by review:
 
 1. Hand-maintained counts (test totals) drift the moment a test is added.
@@ -10,6 +10,10 @@ notice, so they are enforced mechanically instead of by review:
 3. Local-only paths (assistant configuration, private working notes, generated
    caches) are gitignored, so a committed file referencing one points nowhere
    for everyone but the author.
+4. Dependency pins are declared in Cargo.toml. A version quoted in prose goes
+   stale at the next bump.
+5. The editor extension ships its own LICENSE, which must stay a byte-for-byte
+   copy of the root one.
 
 Run: python tools/check_docs_hygiene.py
 """
@@ -29,7 +33,6 @@ TEXT_SUFFIXES = {".md", ".rs", ".nr", ".toml", ".yml", ".yaml", ".json", ".py", 
 EXEMPT = {
     "CHANGELOG.md",
     "LICENSE",
-    "CONTRIBUTING.md",
     "neuro-language-support/LICENSE",
     "tools/check_docs_hygiene.py",
 }
@@ -55,6 +58,9 @@ PRIVATE_PATH_PATTERNS = [
 
 # Internal specification section markers, e.g. "(§3.12)".
 SPEC_MARKER = re.compile(r"§\s?\d")
+
+# A dependency pin quoted in prose, e.g. "inkwell 0.10".
+QUOTED_PIN = re.compile(r"\b(?:inkwell|melior)`?\s+v?\d")
 
 
 def workspace_version() -> str:
@@ -101,6 +107,10 @@ def main() -> int:
                 problems.append(
                     f"{where}: hard-coded workspace version; cite Cargo.toml instead"
                 )
+            if is_markdown and QUOTED_PIN.search(line):
+                problems.append(
+                    f"{where}: quoted dependency version; cite Cargo.toml instead"
+                )
             for pattern in PRIVATE_PATH_PATTERNS:
                 if pattern.search(line):
                     problems.append(
@@ -110,6 +120,12 @@ def main() -> int:
                 problems.append(
                     f"{where}: internal spec section marker; describe the feature in plain terms"
                 )
+
+    extension_license = ROOT / "neuro-language-support" / "LICENSE"
+    if extension_license.read_bytes() != (ROOT / "LICENSE").read_bytes():
+        problems.append(
+            "neuro-language-support/LICENSE: differs from the root LICENSE; copy it over"
+        )
 
     if problems:
         print("Documentation hygiene violations:\n")

@@ -1,13 +1,13 @@
-name: Claim a bug fix or roadmap item
-description: Tell the project you are starting work on a known defect or an open roadmap line, so nobody duplicates it.
+name: Claim a bug fix or roadmap goal
+description: Tell the project you are starting work on a known defect or a Quick Roadmap goal, so nobody duplicates it.
 title: "Claim: "
 body:
   - type: markdown
     attributes:
       value: |
-        Claim before you write code, not after. Fixes for `docs/BUGS.md` entries and the
-        topmost open roadmap items are the two contributions most likely to collide with
-        someone else's branch.
+        Claim before you write code, not after. Fixes for `docs/BUGS.md` entries and work on
+        the phase the Quick Roadmap marks in progress are the two contributions most likely
+        to collide with someone else's branch.
 
         Some `docs/BUGS.md` entries are language-design decisions rather than patches.
         Those say so in the entry, and they need a maintainer ruling in this issue before
@@ -17,8 +17,8 @@ body:
     id: item
     attributes:
       label: What you are claiming
-      description: A `BUG-NNN` id from `docs/BUGS.md`, or the exact roadmap line.
-      placeholder: 'BUG-021, or the roadmap line verbatim'
+      description: A `BUG-NNN` id from `docs/BUGS.md`, or a goal named in the README's Quick Roadmap.
+      placeholder: 'BUG-021, or the Quick Roadmap goal'
     validations:
       required: true
 

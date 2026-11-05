@@ -1,0 +1,7 @@
+# GitHub would count .nr files as Noir, which shares the extension.
+*.nr linguist-detectable=false
+
+# Compiled from the C sources beside them by tools/regen_gpu_runtime.sh.
+compiler/llvm-backend/src/codegen/gpu_runtime.ll linguist-generated
+compiler/llvm-backend/src/codegen/gpu_runtime_hip.ll linguist-generated
+compiler/llvm-backend/src/codegen/text_parse.ll linguist-generated

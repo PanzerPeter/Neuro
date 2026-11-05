@@ -10,10 +10,9 @@ once, in the page that owns it.
 ## What is Neuro?
 
 A compiled language for high-performance AI workloads. It generates native code through an LLVM 23
-backend, and it checks tensor shapes and differentiates tensor code while compiling. GPU
-acceleration through MLIR GPU dialects has begun: a `@gpu` function runs as NVIDIA or AMD kernels, a
-`@kernel` function is one you write per thread, and `.to(Device::GPU(n))` keeps a tensor on a GPU
-between calls.
+backend, and it checks tensor shapes and differentiates tensor code while compiling. On a GPU, a
+`@gpu` function runs as NVIDIA or AMD kernels through the MLIR GPU dialects, a `@kernel` function is
+one you write per thread, and `.to(Device::GPU(n))` keeps a tensor on a GPU between calls.
 
 Design goals:
 
@@ -79,7 +78,7 @@ current entry points when this directory disagrees.
 | CPU codegen | inkwell (LLVM 23) | In use |
 | MLIR construction | melior (LLVM/MLIR 23) | Every tensor operation to linalg, bufferized through to LLVM IR and linked into every compiled program |
 | Autodiff | Neuro's own reverse-mode HIR transform | Generates `@grad` derivatives, checked against finite differences |
-| GPU | MLIR `gpu` to `nvvm` (PTX) or `rocdl` (code object) | `@gpu` functions compiled on Linux run as NVIDIA kernels, or AMD ones with `--gpu-arch gfxNNN`, with an opt-in CPU fallback chosen at startup; `@kernel` functions launch their own per-thread body over a grid; `.to(Device::GPU(n))` keeps tensors on any of the machine's GPUs between calls, and a call or a tensor operation runs on the GPU its tensors are on |
+| GPU | MLIR `gpu` to `nvvm` (PTX) or `rocdl` (code object) | Compiled on Linux: NVIDIA kernels, or AMD ones with `--gpu-arch gfxNNN`, with an opt-in CPU fallback chosen at startup. [Tensors](language-reference/tensors.md) has the surface |
 
 Exact dependency versions live in the workspace `Cargo.toml` files, not here.
 
