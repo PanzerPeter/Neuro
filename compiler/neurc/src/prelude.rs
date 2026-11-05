@@ -19,6 +19,10 @@ use syntax_parsing::Item;
 /// write them and stay in one place as more items join them.
 const PRELUDE_SOURCE: &str = include_str!("prelude.nr");
 
+/// Prelude enums whose variants are written with the enum's name, so a module's bare names
+/// stay its own.
+const QUALIFIED_ENUMS: &[&str] = &["ParseError"];
+
 /// The parsed prelude: the declarations to prepend, and the variant names every module
 /// may write bare.
 pub struct Prelude {
@@ -43,7 +47,7 @@ pub fn load() -> Result<Prelude> {
     let variants = items
         .iter()
         .filter_map(|item| match item {
-            Item::Enum(def) => Some(def),
+            Item::Enum(def) if !QUALIFIED_ENUMS.contains(&def.name.name.as_str()) => Some(def),
             _ => None,
         })
         .flat_map(|def| {
@@ -175,7 +179,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binds_every_prelude_enum_variant() {
+    fn binds_every_unqualified_prelude_enum_variant() {
         let prelude = load().expect("the prelude parses");
         let bound: Vec<String> = prelude
             .variants()
@@ -186,6 +190,7 @@ mod tests {
         assert!(bound.contains(&"Option::None".to_string()));
         assert!(bound.contains(&"Result::Ok".to_string()));
         assert!(bound.contains(&"Result::Err".to_string()));
+        assert!(!bound.contains(&"ParseError::Empty".to_string()));
     }
 
     #[test]

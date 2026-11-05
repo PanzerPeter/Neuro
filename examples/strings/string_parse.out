@@ -1,0 +1,9 @@
+'200': 200 fits a u8
+'': there is no text
+'twelve': not a number
+'300': a number, but not a u8
+8080 -> 8080, fallback 80
+area 10.0
+failed: Invalid
+0.099976 0.100000
+inf true

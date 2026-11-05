@@ -330,7 +330,7 @@ coexistence rule as a `&mut place` borrow), registering a transient exclusive bo
 at statement end. A `&T` receiver or a non-`mut` binding is `CannotBorrowMutably`; a live borrow is
 `CannotMutablyBorrowWhileBorrowed`. No method declares type parameters, so a turbofish on a
 method call is `TurbofishCountMismatch` with `expected: 0`, except `.to_checked::<T>()` on a
-float, the one method that reads its turbofish.
+float and `.parse::<T>()` on a string, the two methods that read their turbofish.
 
 **Associated calls** (`TypeName::func(args)`) are recognised when `func` is an `Expr::Path`; the
 mangled `TypeName__funcName` is looked up directly in `functions`.
@@ -370,10 +370,15 @@ a wrong count):
   instantiated through the shared `option_of` (`collections.rs`) so the overflow-reporting
   intrinsics and the fallible collection readers materialize the same prelude enum instance. A
   program with no `Option` in scope gets `UnknownTypeName`.
-- a float's `to_checked::<T>()` returns `Option<T>` through the same `option_of`. It is the one
-  builtin that reads the call's turbofish (`resolve_builtin_method` takes `type_args` for it):
-  exactly one type argument, an integer (`ToCheckedTargetNotInteger` otherwise), and no value
-  arguments. A value receiver only, as for `is_nan`.
+- a float's `to_checked::<T>()` returns `Option<T>` through the same `option_of`.
+  `resolve_builtin_method` takes `type_args` for it: exactly one type argument, an integer
+  (`ToCheckedTargetNotInteger` otherwise), and no value arguments (`nullary_turbofish_target`). A
+  value receiver only, as for `is_nan`.
+- a string's `parse::<T>()` shares that turbofish check and returns `Result<T, ParseError>`. `T` is
+  an integer, a float or `bool` (`ParseTargetUnsupported` otherwise). The backend builds the value
+  by variant name, so `check_parse` tests the shape of the `Result` and `ParseError` in scope and
+  reports `ParseNeedsPrelude` for a program that replaced or removed either. It registers no
+  borrow: nothing of the receiver survives the call.
 - `check_supplied_trait_method` (`derivable.rs`) types a derivable trait's method on a receiver
   that implements the trait with no impl: `.clone()` on a `Copy` value or a `Clone`-deriving
   struct returns the referent type, `.hash()` on a hashable builtin or a `Hashable`-deriving

@@ -250,7 +250,7 @@ fn user_function_shadows_println_builtin() {
 }
 
 /// No method declares type parameters, so a turbofish on one is refused as it is on a
-/// non-generic function. `.to_checked::<T>()` is the one method that reads its own.
+/// non-generic function. `.to_checked::<T>()` and `.parse::<T>()` read their own.
 #[test]
 fn regression_bug_080_a_turbofish_on_a_method_is_refused() {
     let errors = semantic_errors(
@@ -262,6 +262,7 @@ func main() -> i32 {
     val a = x.is_nan::<u8>()
     val b = P { x: 1 }.get::<i32>()
     val c = x.to_checked::<u8>()
+    val d = "1".parse::<u8>()
     return 0
 }
 "#,

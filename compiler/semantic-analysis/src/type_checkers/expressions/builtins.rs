@@ -46,6 +46,15 @@ const FLAT_METHOD: &str = "flat";
 /// cannot hold instead of saturating it.
 pub(super) const TO_CHECKED_METHOD: &str = "to_checked";
 
+/// `string.parse::<T>()`, which reads the text as a value of `T`.
+pub(super) const PARSE_METHOD: &str = "parse";
+
+/// The prelude types `.parse` answers with, and the variants the backend builds.
+const RESULT_ENUM: &str = "Result";
+const RESULT_VARIANTS: [&str; 2] = ["Ok", "Err"];
+const PARSE_ERROR_ENUM: &str = "ParseError";
+const PARSE_ERROR_VARIANTS: [&str; 3] = ["Empty", "Invalid", "OutOfRange"];
+
 /// The one elementwise math method with an argument, its exponent.
 const POW_METHOD: &str = "pow";
 
@@ -64,7 +73,8 @@ impl TypeChecker {
     /// `object` is the receiver expression, needed by the borrowing intrinsics: a
     /// `.slice(range)` result points into the receiver's storage, so the receiver has to
     /// be a place and the borrow it hands out has to be registered against that place.
-    /// `type_args` is the call's turbofish, which only `.to_checked::<T>()` reads.
+    /// `type_args` is the call's turbofish, which `.to_checked::<T>()` and `.parse::<T>()`
+    /// read.
     pub(super) fn resolve_builtin_method(
         &mut self,
         recv: &Type,
@@ -148,6 +158,9 @@ impl TypeChecker {
                 }
                 Some(Type::U64)
             }
+            // Text to number. Reads the receiver and keeps nothing of it, so it registers
+            // no borrow.
+            (Type::String, PARSE_METHOD) => Some(self.check_parse(type_args, args, call_span)),
             // Array length, the compile-time `N` of `[T; N]`. Auto-derefs through
             // a borrow of an array (`&[T; N]`). Takes no arguments and yields `u64`.
             // `.chars()`: the codepoint iterator. Nullary, and a borrow rather
@@ -721,34 +734,8 @@ impl TypeChecker {
     /// Type `.to_checked::<T>()`: exactly one turbofish type, an integer, and no value
     /// arguments. Yields `Option<T>`, or `Unknown` once an error is recorded.
     fn check_to_checked(&mut self, type_args: &[GenericArg], args: &[Expr], span: Span) -> Type {
-        if !args.is_empty() {
-            self.record_error(TypeError::ArgumentCountMismatch {
-                expected: 0,
-                found: args.len(),
-                span,
-            });
-        }
-        let target = match type_args {
-            [GenericArg::Type(ty)] => ty,
-            [GenericArg::Const { .. }] => {
-                self.record_error(TypeError::TurbofishKindMismatch {
-                    param: "T".to_string(),
-                    expected: "type".to_string(),
-                    span,
-                });
-                return Type::Unknown;
-            }
-            _ => {
-                self.record_error(TypeError::TurbofishCountMismatch {
-                    name: TO_CHECKED_METHOD.to_string(),
-                    expected: 1,
-                    found: type_args.len(),
-                    span,
-                });
-                return Type::Unknown;
-            }
-        };
-        let Some(target) = self.resolve_type(target) else {
+        let Some(target) = self.nullary_turbofish_target(TO_CHECKED_METHOD, type_args, args, span)
+        else {
             return Type::Unknown;
         };
         if !target.is_integer() {
@@ -758,5 +745,84 @@ impl TypeChecker {
             return Type::Unknown;
         }
         self.option_of(target, span)
+    }
+
+    /// `string.parse::<T>()`: nullary, `T` an integer, a float or `bool`, and the result
+    /// `Result<T, ParseError>`. The backend builds that value by variant name, so a program
+    /// that declares its own `Result` or `ParseError` of another shape is told here.
+    fn check_parse(&mut self, type_args: &[GenericArg], args: &[Expr], span: Span) -> Type {
+        let Some(target) = self.nullary_turbofish_target(PARSE_METHOD, type_args, args, span)
+        else {
+            return Type::Unknown;
+        };
+        let parsable =
+            target.is_integer() || target.is_float() || target.is_half_float() || target.is_bool();
+        if !parsable {
+            if !matches!(target, Type::Unknown) {
+                self.record_error(TypeError::ParseTargetUnsupported { ty: target, span });
+            }
+            return Type::Unknown;
+        }
+        let result_is_the_prelude_s = self.generic_enums.get(RESULT_ENUM).is_some_and(|def| {
+            def.generics.len() == 2
+                && RESULT_VARIANTS
+                    .iter()
+                    .all(|name| def.variants.iter().any(|v| v.name.name == *name))
+        });
+        let error_is_the_prelude_s = PARSE_ERROR_VARIANTS.iter().all(|name| {
+            self.lookup_enum_variant(PARSE_ERROR_ENUM, name)
+                .is_some_and(|variant| variant.fields.is_empty())
+        });
+        let missing = match (result_is_the_prelude_s, error_is_the_prelude_s) {
+            (false, _) => RESULT_ENUM,
+            (true, false) => PARSE_ERROR_ENUM,
+            (true, true) => {
+                let error = Type::Enum(PARSE_ERROR_ENUM.to_string());
+                return self.instantiate_generic(RESULT_ENUM, &[target, error], span);
+            }
+        };
+        self.record_error(TypeError::ParseNeedsPrelude {
+            name: missing.to_string(),
+            span,
+        });
+        Type::Unknown
+    }
+
+    /// The one type argument of a nullary conversion method, recording a diagnostic for a
+    /// call with arguments and answering `None` when the turbofish gives no usable type.
+    fn nullary_turbofish_target(
+        &mut self,
+        method: &str,
+        type_args: &[GenericArg],
+        args: &[Expr],
+        span: Span,
+    ) -> Option<Type> {
+        if !args.is_empty() {
+            self.record_error(TypeError::ArgumentCountMismatch {
+                expected: 0,
+                found: args.len(),
+                span,
+            });
+        }
+        match type_args {
+            [GenericArg::Type(ty)] => self.resolve_type(ty),
+            [GenericArg::Const { .. }] => {
+                self.record_error(TypeError::TurbofishKindMismatch {
+                    param: "T".to_string(),
+                    expected: "type".to_string(),
+                    span,
+                });
+                None
+            }
+            _ => {
+                self.record_error(TypeError::TurbofishCountMismatch {
+                    name: method.to_string(),
+                    expected: 1,
+                    found: type_args.len(),
+                    span,
+                });
+                None
+            }
+        }
     }
 }

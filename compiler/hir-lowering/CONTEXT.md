@@ -798,6 +798,9 @@ compiler bug, not a diagnostic.
   `Option<T>`, `T` resolved from the turbofish, which `lower_method_call` passes through for this
   one method. With `checked_*` these are the builtin intrinsics whose result is a monomorphized
   enum rather than a fixed type.
+- **`.parse::<T>()`**: `lower_builtin_method` types it on a `string` receiver as
+  `Result<T, ParseError>`, `T` resolved from the turbofish and the instance built with
+  `instantiate_generic_enum`. The checker has already refused every other `T`.
 - **Interpolated strings** (`expressions/interpolation.rs`): `Expr::InterpString` lowers to
   `HirExprKind::InterpString`, typed `string`. Each hole lowers with **no** expected type: the
   hole's own expression decides its type, and the rendering follows from that.

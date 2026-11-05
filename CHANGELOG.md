@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.28.0] - 2026-11-05
+
+### Added
+
+- **`.parse::<T>()` on strings.** `"42".parse::<i32>()` reads text as any integer type, `f16`, `bf16`, `f32`, `f64` or `bool`, and returns `Result<T, ParseError>`. The receiver is read, not moved.
+- **`ParseError`** joins the prelude, with variants `Empty`, `Invalid` and `OutOfRange` and a `Debug` impl for `{e:?}`. The variants keep their `ParseError::` prefix. A program with its own `ParseError` still compiles, and only a `.parse` call in it is refused.
+- A float is rounded once, directly to `T`, by an exact conversion linked into programs that call `.parse`. Text just past a midpoint of `f16` or `bf16` lands on the right side, and every platform gives the same bits.
+
+### Changed
+
+- `showcase/settings_loader` uses `.parse::<i32>()` in place of its hand-written digit scanner.
+
+### Fixed
+
+- A `string` parameter that a function only read under a `match` or `??` leaked the caller's owned argument: `match s.len() { ... }` counted as keeping the buffer. Reading it there now counts as a read.
+
 ## [5.27.1] - 2026-11-05
 
 ### Fixed

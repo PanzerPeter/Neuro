@@ -3,7 +3,7 @@
 // Reached from the `check_expr` dispatch in this module's `mod.rs`. Every file
 // here adds methods to the same `impl TypeChecker` block.
 
-use super::builtins::TO_CHECKED_METHOD;
+use super::builtins::{PARSE_METHOD, TO_CHECKED_METHOD};
 use super::lending::Lend;
 use super::{COLLECTION_CTOR, TypeChecker, VEC_WITH_CAPACITY, declarations, eval_const_predicate};
 use crate::errors::TypeError;
@@ -837,10 +837,12 @@ impl TypeChecker {
                 }
                 // A turbofish names a generic method's own parameters, so on any other
                 // method it names nothing, exactly as on a non-generic free function.
-                // `.to_checked::<T>()` is the one builtin that reads its turbofish, as its
-                // target type.
-                let reads_turbofish = field.name == TO_CHECKED_METHOD
-                    && (obj_ty.referent().is_float() || obj_ty.referent().is_half_float());
+                // `.to_checked::<T>()` and `.parse::<T>()` are the builtins that read their
+                // turbofish, as their target type.
+                let receiver = obj_ty.referent();
+                let reads_turbofish = (field.name == TO_CHECKED_METHOD
+                    && (receiver.is_float() || receiver.is_half_float()))
+                    || (field.name == PARSE_METHOD && matches!(receiver, Type::String));
                 if !type_args.is_empty()
                     && !reads_turbofish
                     && self.generic_method_key(&obj_ty, &field.name).is_none()

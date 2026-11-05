@@ -81,6 +81,15 @@ impl<T, E> Result<T, E> {
     }
 }
 
+// Why `string.parse::<T>()` refused its text. The backend builds these by name, and the
+// driver leaves them out of the names a module may write bare: a word as plain as `Empty`
+// stays the program's own.
+export enum ParseError {
+    Empty,
+    Invalid,
+    OutOfRange
+}
+
 // The derivable traits. `@derive` writes each of these impls field by field; a program
 // may write one by hand instead and name any of them as a bound. The scalars, `string`,
 // and a struct carrying the derive implement them with no impl block here.
@@ -102,6 +111,16 @@ export trait Debug {
 // What a `HashMap` key hashes with. Two values `==` treats as equal must hash alike.
 export trait Hashable {
     func hash(&self) -> u64
+}
+
+impl Debug for ParseError {
+    func fmt_debug(&self, out: &mut StringBuilder) {
+        match self {
+            ParseError::Empty => out.push_str("Empty"),
+            ParseError::Invalid => out.push_str("Invalid"),
+            ParseError::OutOfRange => out.push_str("OutOfRange")
+        }
+    }
 }
 
 // Total-order wrappers over the floating-point types.

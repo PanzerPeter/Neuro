@@ -40,6 +40,16 @@ const GPU_USABLE_FN: &str = "__neuro_gpu_usable";
 const GPU_BODY_SUFFIX: &str = ".gpu";
 const HOST_BODY_SUFFIX: &str = ".host";
 
+/// The text parser behind `string.parse::<T>()`, generated from `text_parse.c`.
+const TEXT_PARSER_IR: &str = include_str!("text_parse.ll");
+
+/// What the text parser defines, made internal once linked.
+pub(crate) const TEXT_PARSER_ENTRY_POINTS: [&str; 3] = [
+    "__neuro_parse_int",
+    "__neuro_parse_float",
+    "__neuro_parse_bool",
+];
+
 /// What the runtime defines for the launchers, the staging and device tensors, made
 /// internal once linked.
 const GPU_RUNTIME_ENTRY_POINTS: [&str; 26] = [
@@ -552,6 +562,17 @@ pub(crate) fn link_gpu_runtime<'ctx>(
     Ok(())
 }
 
+/// Link the text parser into `module`, which calls it, and make its entry points internal:
+/// nothing outside the program calls them.
+pub(crate) fn link_text_parser<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+) -> CodegenResult<()> {
+    link_ir(context, module, TEXT_PARSER_IR, "the text parser")?;
+    internalize(module, &TEXT_PARSER_ENTRY_POINTS);
+    Ok(())
+}
+
 fn link_ir<'ctx>(
     context: &'ctx Context,
     module: &Module<'ctx>,
@@ -953,6 +974,41 @@ mod tests {
     fn definition<'a>(ir: &'a str, name: &str) -> Option<&'a str> {
         ir.lines()
             .find(|line| line.starts_with("define") && line.contains(&format!("@{name}(")))
+    }
+
+    fn plain_ir(source: &str) -> String {
+        let ast = syntax_parsing::parse(source).expect("parsing failed");
+        let hir = hir_lowering::lower_program(&ast).expect("HIR lowering failed");
+        let context = Context::create();
+        let codegen_ctx = build_module(
+            &context,
+            &hir,
+            OptimizationLevelSetting::O0,
+            source,
+            "plain.nr",
+            &[],
+            GpuVendor::Nvidia,
+        )
+        .expect("the module should build and verify");
+        codegen_ctx.module.print_to_string().to_string()
+    }
+
+    #[test]
+    fn a_parse_call_links_the_text_parser_and_no_other_module_carries_it() {
+        const PARSE_PRELUDE: &str = "
+enum Result<T, E> { Ok(T), Err(E) }
+enum ParseError { Empty, Invalid, OutOfRange }
+";
+        let ir = plain_ir(&format!(
+            "{PARSE_PRELUDE}func main() -> i32 {{\n    val r = \"1\".parse::<i32>()\n    val f = \"1\".parse::<f32>()\n    val b = \"1\".parse::<bool>()\n    0\n}}"
+        ));
+        for name in super::TEXT_PARSER_ENTRY_POINTS {
+            let line = definition(&ir, name)
+                .unwrap_or_else(|| panic!("expected `{name}` defined by the parser:\n{ir}"));
+            assert!(line.starts_with("define internal"), "{line}");
+        }
+        let ir = plain_ir("func main() -> i32 { 0 }");
+        assert!(!ir.contains("__neuro_parse"), "{ir}");
     }
 
     #[test]

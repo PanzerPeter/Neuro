@@ -15,7 +15,7 @@ one and checks two things:
 | --------------- | -------------- | --------- |
 | `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md), [Generics and traits](../docs/language-reference/generics-and-traits.md) |
-| `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, the growable `StringBuilder` | [Strings](../docs/language-reference/strings.md) |
+| `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, `.parse::<T>()`, the growable `StringBuilder` | [Strings](../docs/language-reference/strings.md) |
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes, `@gpu` kernels, hand-written `@kernel` functions and their `partition` write form, device transfer with `.to` and the operations that then run on the device | [Tensors](../docs/language-reference/tensors.md) |
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, collections of owned values, deterministic `Drop`, `pool` arena blocks | [Ownership](../docs/language-reference/ownership.md) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
@@ -180,7 +180,7 @@ in each program has the full description. The three module files under
 - [`sample_audit.nr`](showcase/sample_audit.nr): `?` on `Result` and `Option` that leaves the whole function from inside a loop, with a `val-else` error binding.
 - [`scan_guard.nr`](showcase/scan_guard.nr): Deterministic `Drop` with labeled exits: `break 'label` out of nested loops, and a labeled `loop` whose `break` carries a value.
 - [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` and `Result` used as generic enums with structs, borrowed parameters, a generic `choose<T>` and a guarded `match`.
-- [`settings_loader.nr`](showcase/settings_loader.nr): Typed settings parsed from raw text: `.ok_or`, `.map_err`, `?` lifting errors into one enum, and `??` with a default.
+- [`settings_loader.nr`](showcase/settings_loader.nr): Typed settings read from raw text: `.parse::<i32>()`, `.ok_or`, `.map_err`, `?` lifting errors into one enum, and `??` with a default.
 
 ### Multi-file
 

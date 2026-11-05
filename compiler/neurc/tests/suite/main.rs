@@ -129,6 +129,7 @@ mod statement_boundaries;
 mod string_builder;
 mod string_concat;
 mod string_interpolation;
+mod string_parse;
 mod string_slice;
 mod string_temporaries;
 mod string_type;

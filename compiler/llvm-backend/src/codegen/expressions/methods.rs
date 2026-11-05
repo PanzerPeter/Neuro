@@ -64,6 +64,8 @@ impl<'ctx> CodegenContext<'ctx> {
             // `string.__char_at(offset)`, the decode step behind the prelude's codepoint
             // iterator, and the only byte-indexed read of a string anywhere.
             BuiltinMethod::StringCharAt => self.codegen_char_at(receiver, args),
+            // `string.parse::<T>()`, one call into the embedded text parser.
+            BuiltinMethod::StringParse => self.codegen_string_parse(result_ty, receiver),
             // `array.len()`, the static length `N` of `[T; N]`, read from the
             // receiver type recorded by the type pass. A compile-time constant `u64`;
             // the receiver is not evaluated (length is independent of its value).
@@ -447,6 +449,7 @@ impl<'ctx> CodegenContext<'ctx> {
             | BuiltinMethod::StringSlice
             | BuiltinMethod::StringCharSlice
             | BuiltinMethod::StringCharAt
+            | BuiltinMethod::StringParse
             | BuiltinMethod::StructClone
             | BuiltinMethod::TensorClone
             | BuiltinMethod::TensorTo

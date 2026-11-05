@@ -17,7 +17,7 @@ The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the A
 
 - **Dependencies**: `neuro-hir` (the HIR it consumes), `ast-types` (the operator enums), `shared-types`, `inkwell`, `thiserror`. The `syntax-parsing`, `hir-lowering` and `mlir-backend` crates are dev-dependencies only: tests and benches lower source before compiling, and a test that compiles a tensor operation links the body MLIR computes for it.
 - **Public API**: `compile`, `compile_to_ir`, `ExternalBodies`, `BodyGuard`, `BodyGuardKind`, `BodyMemory`, `GpuVendor`, `OptimizationLevelSetting`, `CodegenError`, `CodegenResult`
-- **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins.
+- **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins, and `codegen/text_parse.c` the text parser behind `.parse::<T>()`.
 - **Output**: a platform object file, or the textual module from `compile_to_ir`.
 
 ### Module emission order
@@ -104,7 +104,7 @@ The overflow rule follows the optimization level (see the [CLI help](../../getti
 
 Zero divisors are checked in every build, because there is no two's-complement answer to wrap to. `MIN / -1` follows the overflow rule. A `const` never wraps: an initializer that overflows its type is a compile error (`constant expression overflows`), not a silent value.
 
-`.wrapping_*`, `.saturating_*`, `.checked_*`, `.abs()` and `.to_checked::<T>()` are intrinsics on the receiver type. Float-to-integer `as` casts saturate, and NaN maps to zero, so no cast yields `poison`.
+`.wrapping_*`, `.saturating_*`, `.checked_*`, `.abs()`, `.to_checked::<T>()` and `.parse::<T>()` are intrinsics on the receiver type. Float-to-integer `as` casts saturate, and NaN maps to zero, so no cast yields `poison`.
 
 ### Control flow and stack slots
 
@@ -241,6 +241,8 @@ Element reads and writes and `.clone()` need no kernel. They branch on the tenso
 ### Soft-float builtins
 
 On generic x86-64, LLVM lowers `half` and `bfloat` conversions to runtime calls such as `__extendhfsf2` and `__truncsfhf2`. Linux and macOS get them from libgcc or compiler-rt. The Windows linkers provide none, so `src/softfloat/` defines them. They are `weak_odr` (a platform runtime may override them) and integer-only, so they never call back into these conversions. `compile` links them only when the module uses `half` or `bfloat`. [`builtins.ll`](../../../compiler/llvm-backend/src/softfloat/builtins.ll) is generated from `reference.c` and was checked exhaustively against clang's native `_Float16` and `__bf16`.
+
+`.parse::<T>()` calls a small runtime linked only into a module that uses it. [`text_parse.ll`](../../../compiler/llvm-backend/src/codegen/text_parse.ll) is generated from `text_parse.c`. It converts decimal text to a float exactly, with big integers, instead of calling `strtod`: no libc parses to `f16` or `bf16`, and going through `f64` would round twice. One path serves all four formats and gives the same bits on every platform. It was checked against glibc's `strtod` and `strtof`, and against exact rational arithmetic for the half formats.
 
 ## Diagnostics
 

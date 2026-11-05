@@ -95,7 +95,10 @@ Every module begins as if it had written
 import std::prelude::{Option, Some, None, Result, Ok, Err}
 ```
 
-so the two fallible types and their four variants are in scope in every file, with no `import` at all:
+so the two fallible types and their four variants are in scope in every file, with no `import` at all.
+`ParseError`, the error [`.parse`](strings.md#parsing-text) returns, is in scope the same way, but its
+variants keep the `ParseError::` prefix.
+
 
 ```neuro
 func halve(n: i32) -> Option<i32> {

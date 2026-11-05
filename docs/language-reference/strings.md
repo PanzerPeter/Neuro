@@ -149,6 +149,7 @@ val world: &string = s.slice(7..=11)  // "world", inclusive upper bound
 | `.char_slice(range)` | `&string` | Borrowed view by code point offsets. See [Slicing](#slicing). |
 | `.chars()` | `Chars` | Iterator over Unicode scalar values. See [Iterating Characters](#iterating-characters). |
 | `.char_indices()` | pair in a `for` head | Scalar with its byte offset. See [Iterating Characters](#iterating-characters). |
+| `.parse::<T>()` | `Result<T, ParseError>` | The text read as a number or a `bool`. See [Parsing Text](#parsing-text). |
 
 ## Slicing
 
@@ -223,6 +224,53 @@ val t = "abc"
 for c in t.char_indices() {   // error: `.char_indices()` yields a position and a value; bind both with a pair pattern `for (index, value) in ...`
 }
 ```
+
+## Parsing Text
+
+`.parse::<T>()` reads a string as a value of `T`, which is any integer type, `f16`, `bf16`, `f32`, `f64` or `bool`. It returns `Result<T, ParseError>`, so it works with `?`, `??`, `match` and [`val ... else`](control-flow.md):
+
+```neuro
+val port = "8080".parse::<i32>() ?? 80           // 8080
+val fallback = "not a port".parse::<i32>() ?? 80 // 80
+
+func area(width: &string, height: &string) -> Result<f64, ParseError> {
+    val w = width.parse::<f64>()?
+    val h = height.parse::<f64>()?
+    Ok(w * h)
+}
+```
+
+The receiver is read, not moved. A `&string`, a `.slice` view and a temporary all work. The turbofish is required, and `T` must be a concrete type, so `.parse::<T>()` on a type parameter is an error.
+
+The text must be the whole value. Whitespace around it is `Invalid`.
+
+| `T` | Accepted text |
+|---|---|
+| Integers | An optional `+` or `-`, then ASCII decimal digits. A `0x` prefix or a `_` is `Invalid`. |
+| Floats | An optional sign, digits with an optional `.` (at least one digit), an optional `e` or `E` exponent. Also `inf`, `infinity` and `nan` in any case, the words `{x}` prints. |
+| `bool` | Exactly `true` or `false`. |
+
+A float is rounded once, to nearest with ties to even, directly to `T`. An `f16` or `bf16` does not pass through a wider type on the way, and every platform gives the same bits. A value past `T`'s range rounds to an infinity or a zero as IEEE 754 says, so `"1e400".parse::<f64>()` is `Ok` with infinity.
+
+A failure names its reason:
+
+| `ParseError` variant | Meaning |
+|---|---|
+| `ParseError::Empty` | The text is empty. |
+| `ParseError::Invalid` | The text is not a `T`. |
+| `ParseError::OutOfRange` | The text is a number that `T` cannot hold: `"300"` as a `u8`, or `"-1"` as any unsigned type. |
+
+```neuro
+match "300".parse::<u8>() {
+    Ok(n) => println("{n}"),
+    Err(ParseError::OutOfRange) => println("too large"),
+    Err(e) => println("failed: {e:?}")
+}
+```
+
+`{e:?}` prints the variant's name. The variants always take the `ParseError::` prefix. They are not bare names the way `Some` and `Ok` are.
+
+A program may declare its own `ParseError` or `Result`, as with any prelude name. A call to `.parse` in that program is then a compile error, unless the declaration has the same variants as the prelude's.
 
 ## Growable Strings (`StringBuilder`)
 

@@ -564,6 +564,10 @@ fn build_module<'ctx>(
         )?;
     }
 
+    if codegen_ctx.requires_text_parser() {
+        codegen::external_bodies::link_text_parser(codegen_ctx.context, &codegen_ctx.module)?;
+    }
+
     // Link self-contained soft-float conversion builtins when the module uses
     // f16/bf16, so the emitted object resolves the half-precision libcalls
     // itself instead of depending on a platform runtime (libgcc/compiler-rt),

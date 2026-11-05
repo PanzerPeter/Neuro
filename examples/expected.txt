@@ -68,6 +68,7 @@ strings/string_clone.nr          5
 strings/string_concat.nr         10
 strings/string_interpolation.nr  20
 strings/string_len.nr            0
+strings/string_parse.nr          42
 strings/string_slice.nr          0
 strings/string_slice_method.nr   12
 strings/strings.nr               0

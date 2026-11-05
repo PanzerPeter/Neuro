@@ -17,6 +17,7 @@ mod literals;
 pub(crate) mod matches;
 mod methods;
 mod slices;
+mod string_parse;
 mod struct_eq;
 mod tensor_grad;
 mod tensor_index;

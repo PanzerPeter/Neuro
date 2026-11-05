@@ -1,14 +1,14 @@
 // Showcase: typed settings read from raw key/value text, where each step can fail and keeps
 // its reason until the code no longer needs it. Integration example: `Option` and `Result`
-// methods (`.ok_or`, `.map_err`, `.map`, `.ok`, `.is_ok`, `.is_err`), `?`, an enum variant
-// passed as a function, `??` with a default, `continue` or `panic`, closures and named
-// functions as values, and `.chars()`. `?` converts nothing, so a missing key's `Option`
-// and a parse's `string` error are both lifted into `LoadError` before they propagate. The
-// exit code is the sum of the values that loaded.
+// methods (`.ok_or`, `.map_err`, `.map`, `.ok`, `.is_ok`, `.is_err`), `.parse::<T>()`, `?`, an
+// enum variant passed as a function, `??` with a default, `continue` or `panic`, and closures
+// and named functions as values. `?` converts nothing, so a missing key's `Option` and a
+// parse's `ParseError` are both lifted into `LoadError` before they propagate. The exit code
+// is the sum of the values that loaded.
 
 enum LoadError {
     Missing(string),
-    Parse(string),
+    Parse(ParseError),
     Range(i32)
 }
 
@@ -26,26 +26,10 @@ func lookup(settings: &[Setting; 4], key: &string) -> Option<string> {
     None
 }
 
-// Base-10 digits only: anything else is reported with the character that broke it.
-func parse_digits(text: &string) -> Result<i32, string> {
-    if text.len() == 0 {
-        return Err("empty value")
-    }
-    mut n = 0
-    for c in text.chars() {
-        val code = c as u32
-        if code < 48 || code > 57 {
-            return Err("'{c}' is not a digit")
-        }
-        n = n * 10 + (code - 48) as i32
-    }
-    Ok(n)
-}
-
 func setting_int(settings: &[Setting; 4], key: string) -> Result<i32, LoadError> {
     val found = lookup(settings, &key)
     val text = found.ok_or(LoadError::Missing(key))?
-    val n = parse_digits(&text).map_err(LoadError::Parse)?
+    val n = text.parse::<i32>().map_err(LoadError::Parse)?
     if n > 64 {
         return Err(LoadError::Range(n))
     }
@@ -55,7 +39,7 @@ func setting_int(settings: &[Setting; 4], key: string) -> Result<i32, LoadError>
 func explain(e: LoadError) -> string {
     match e {
         LoadError::Missing(key) => "no key '{key}'",
-        LoadError::Parse(why) => "unparsable, {why}",
+        LoadError::Parse(why) => "unparsable: {why:?}",
         LoadError::Range(n) => "{n} is above 64"
     }
 }

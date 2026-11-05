@@ -29,6 +29,7 @@ const TO_OWNED_METHOD: &str = "to_string";
 /// `string.clone()`, which copies the bytes into a buffer of their own.
 const CLONE_METHOD: &str = "clone";
 const LEN_METHOD: &str = "len";
+const PARSE_METHOD: &str = "parse";
 const PUSH_STR_METHOD: &str = "push_str";
 /// The `string` methods that hand back a view into their receiver.
 const VIEW_METHODS: [&str; 2] = ["slice", "char_slice"];
@@ -1386,6 +1387,14 @@ fn retains(expr: &HirExpr, name: &Param) -> bool {
                     .as_ref()
                     .is_some_and(|block| block.iter().any(|s| stmt_retains(s, name)))
         }
+        // A pattern binds out of the scrutinee alone, so a scrutinee that holds nothing of
+        // the buffer leaves only the arms to answer. `s.parse::<i32>() ?? 0` is one of these.
+        HirExprKind::Match { scrutinee, arms } => {
+            retains(scrutinee, name)
+                || arms.iter().any(|arm| {
+                    arm.guard.as_ref().is_some_and(|g| retains(g, name)) || retains(&arm.body, name)
+                })
+        }
         // Every remaining shape may store the fat pointer or hand back a view into it,
         // so any mention of the parameter under one is a retention.
         _ => mentions(expr, name.name),
@@ -1399,12 +1408,14 @@ fn call_retains(callee: &HirExpr, args: &[HirExpr], name: &Param) -> bool {
         HirExprKind::Variable(func) if IO_BUILTINS.contains(&func.as_str()) => {
             args.iter().any(|arg| read_retains(arg, name))
         }
-        // `s.len()` takes the length word out; `b.push_str(s)` appends a copy. A method
+        // `s.len()` takes the length word out; `s.parse::<T>()` keeps nothing of the text;
+        // `b.push_str(s)` appends a copy. A method
         // this program declares reads an argument whose parameter is already known to be
         // read only, keyed `Type__method` as the call site mangles it. Every other method
         // may hand back a view (`.slice`, `.chars`) or store the pointer.
         HirExprKind::FieldAccess { object, field } => {
-            let receiver_is_read = field == LEN_METHOD || field == CLONE_METHOD;
+            let receiver_is_read =
+                field == LEN_METHOD || field == CLONE_METHOD || field == PARSE_METHOD;
             let declared = match object.ty.referent() {
                 HirType::Struct(type_name) | HirType::Enum(type_name) => {
                     Some(format!("{type_name}__{field}"))
@@ -1755,6 +1766,18 @@ mod tests {
         let hir = hir_lowering::lower_program(&ast).expect("lowering failed");
         let promoted = promote_literal_exits(&hir.items);
         analyze(promoted.as_deref().unwrap_or(&hir.items))
+    }
+
+    /// `s.parse::<i32>() ?? 0` is a `match` underneath. Reading the parameter there keeps
+    /// nothing of it, while binding or handing it out of an arm does.
+    #[test]
+    fn a_parameter_only_read_under_a_match_stays_read_only() {
+        let owned = summary(
+            "func probe(s: string) -> u64 {\n    match s.len() {\n        0 => 1,\n        _ => s.len()\n    }\n}\nfunc scrutinee(s: string) -> string {\n    match s {\n        t => t\n    }\n}\nfunc arm(s: string, c: bool) -> string {\n    match c {\n        true => s,\n        false => \"no\"\n    }\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(owned.param_is_read_only("probe", 0));
+        assert!(!owned.param_is_read_only("scrutinee", 0));
+        assert!(!owned.param_is_read_only("arm", 0));
     }
 
     #[test]

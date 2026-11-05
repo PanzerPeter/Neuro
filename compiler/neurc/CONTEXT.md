@@ -123,7 +123,8 @@ module carries the linked MLIR bodies exactly as an executable does.
 
 ### The prelude
 `prelude::load()` parses `prelude.nr` once into a `Prelude` value that answers two questions:
-`variants()`, every variant of every enum it declares, handed to
+`variants()`, every variant of the enums it declares except those in `QUALIFIED_ENUMS`
+(`ParseError`, whose `Empty` and `Invalid` are too plain to take from every module), handed to
 `module_resolution::resolve_program` so each module may write `Some` / `Ok` bare, and
 `prepend()`, the declarations themselves. Reading the variant list **off the parsed prelude** is
 what keeps `prelude.nr` the single place the prelude's contents are stated; module resolution is

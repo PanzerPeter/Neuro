@@ -58,6 +58,9 @@ pub(crate) enum BuiltinMethod {
     /// `string.__char_at(offset)` → the Unicode scalar whose UTF-8 encoding begins at
     /// that byte. Private to the prelude, which writes its codepoint iterator against it.
     StringCharAt,
+    /// `string.parse::<T>()` → `Result::Ok(value)`, or `Result::Err(ParseError)` naming
+    /// why the text is not a `T`.
+    StringParse,
     /// `struct.clone()` → a copy of the struct aggregate value, for `@derive(Clone)` types.
     StructClone,
     /// `tensor.clone()` → a copy of the tensor buffer aggregate.
@@ -123,6 +126,7 @@ pub(crate) fn resolve_builtin_method(recv: &Type, method: &str) -> Option<Builti
         (Type::String, "slice") => Some(BuiltinMethod::StringSlice),
         (Type::String, "char_slice") => Some(BuiltinMethod::StringCharSlice),
         (Type::String, "__char_at") => Some(BuiltinMethod::StringCharAt),
+        (Type::String, "parse") => Some(BuiltinMethod::StringParse),
         // `array.len()` → the static element count as `u64`. Auto-derefs a
         // borrow of an array (`&[T; N]`) like the string builtins above.
         (Type::Array { .. }, "len") => Some(BuiltinMethod::ArrayLen),
@@ -962,6 +966,21 @@ mod tests {
             resolve_builtin_method(&Type::I64, "checked_mul"),
             Some(BuiltinMethod::CheckedMul)
         ));
+    }
+
+    #[test]
+    fn parse_resolves_on_a_string_through_a_borrow() {
+        let borrowed = Type::Reference {
+            inner: Box::new(Type::String),
+            mutable: false,
+        };
+        for recv in [Type::String, borrowed] {
+            assert!(matches!(
+                resolve_builtin_method(&recv, "parse"),
+                Some(BuiltinMethod::StringParse)
+            ));
+        }
+        assert!(resolve_builtin_method(&Type::I32, "parse").is_none());
     }
 
     #[test]

@@ -329,6 +329,95 @@ fn to_checked_rejects_a_malformed_call() {
     );
 }
 
+const PARSE_PRELUDE: &str = "
+enum Result<T, E> { Ok(T), Err(E) }
+enum ParseError { Empty, Invalid, OutOfRange }
+";
+
+fn parse_errors(call: &str) -> Vec<TypeError> {
+    semantic_errors(&format!(
+        "{PARSE_PRELUDE}func main() -> i32 {{\n    val r = {call}\n    return 0\n}}"
+    ))
+}
+
+#[test]
+fn parse_resolves_to_a_result_of_its_turbofish() {
+    for target in [
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "bf16", "f32", "f64", "bool",
+    ] {
+        let errors = semantic_errors(&format!(
+            "{PARSE_PRELUDE}func main() -> i32 {{
+    val s = \"1\"
+    val r: Result<{target}, ParseError> = s.parse::<{target}>()
+    println(s)
+    return 0
+}}"
+        ));
+        assert!(errors.is_empty(), "`.parse::<{target}>()`: {errors:?}");
+    }
+}
+
+#[test]
+fn parse_rejects_a_malformed_call() {
+    let errors = parse_errors("\"1\".parse()");
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            TypeError::TurbofishCountMismatch {
+                expected: 1,
+                found: 0,
+                ..
+            }
+        )),
+        "{errors:?}"
+    );
+    let errors = parse_errors("\"1\".parse::<3>()");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::TurbofishKindMismatch { .. })),
+        "{errors:?}"
+    );
+    let errors = parse_errors("\"1\".parse::<i32>(1)");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::ArgumentCountMismatch { .. })),
+        "{errors:?}"
+    );
+    for target in ["string", "char"] {
+        let errors = parse_errors(&format!("\"1\".parse::<{target}>()"));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::ParseTargetUnsupported { .. })),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
+fn parse_needs_the_prelude_result_and_error() {
+    let call = "func main() -> i32 {\n    val r = \"1\".parse::<i32>()\n    return 0\n}";
+    for (declared, missing) in [
+        ("enum ParseError { Empty, Invalid, OutOfRange }", "Result"),
+        ("enum Result<T, E> { Good(T), Bad(E) }", "Result"),
+        ("enum Result<T, E> { Ok(T), Err(E) }", "ParseError"),
+        (
+            "enum Result<T, E> { Ok(T), Err(E) }\nenum ParseError { Bad }",
+            "ParseError",
+        ),
+    ] {
+        let errors = semantic_errors(&format!("{declared}\n{call}"));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::ParseNeedsPrelude { name, .. } if name == missing)),
+            "`{declared}`: {errors:?}"
+        );
+    }
+}
+
 #[test]
 fn to_checked_needs_a_float_receiver() {
     let errors = semantic_errors(&program_with_option(

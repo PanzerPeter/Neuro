@@ -14,6 +14,10 @@ use super::{
 };
 use crate::{Lowerer, LoweringError, is_float, is_integer};
 
+/// The prelude types `string.parse::<T>()` answers with.
+const RESULT_ENUM: &str = "Result";
+const PARSE_ERROR_ENUM: &str = "ParseError";
+
 /// The gradient slot's two surface accessors. `.backward()` is a statement the block
 /// lowering pairs with its `@grad` call, never an expression.
 /// The scalar types a parameter may name. An argument to one is typed by it in a
@@ -1251,6 +1255,22 @@ impl Lowerer {
                     mutable: false,
                 };
                 Ok((vec![range], slice_ty))
+            }
+            // `string.parse::<T>()`: nullary, `Result<T, ParseError>` over the turbofish's
+            // type, which the checker has already required to be parsable.
+            (HirType::String, "parse") => {
+                let [ast_types::GenericArg::Type(target)] = type_args else {
+                    return Err(LoweringError::Malformed {
+                        detail: "`.parse` expects one type argument".to_string(),
+                    });
+                };
+                let target = self.resolve_type(target)?;
+                let error = HirType::Enum(PARSE_ERROR_ENUM.to_string());
+                let result = self.instantiate_generic_enum(
+                    RESULT_ENUM,
+                    &[crate::MonoArg::Type(target), crate::MonoArg::Type(error)],
+                )?;
+                Ok((self.lower_args(args, &[])?, HirType::Enum(result)))
             }
             // The prelude-private decode step behind `Chars::next`. The semantic pass has
             // already refused it to every module but the prelude's own.

@@ -156,6 +156,13 @@ reaches a GPU body never touches the device), 256-byte alignment, and a spill to
 staging's declarations resolve to the runtime at its link. An allocation that comes back null
 aborts with a diagnostic rather than hand a kernel a null buffer.
 
+**The text parser.** A module that calls `string.parse::<T>()` links `codegen/text_parse.ll`
+(`link_text_parser`), and `requires_text_parser` decides by looking for a declared entry point.
+Its three entries (`__neuro_parse_int` / `_float` / `_bool`) are internalized after the link. It is
+generated from `text_parse.c`, like the GPU runtime, by `tools/regen_gpu_runtime.sh`. The float path
+holds the text as an exact fraction of big integers, so all four formats round once and no libc
+behaviour shows through.
+
 **The GPU runtime.** A module that defines `__neuro_gpu_panic` links `codegen/gpu_runtime.ll`
 for `GpuVendor::Nvidia` or `codegen/gpu_runtime_hip.ll` for `GpuVendor::Amd`
 (`link_gpu_runtime`): one with any `Device` bodies defines it before the first function, and a
@@ -625,6 +632,12 @@ the receiver type (from `object.ty`) and that result type into `codegen_builtin_
   `Some(result)` / `None` on the negated overflow bit. Branchless: both variants are materialized
   and `select`ed. The `Option<T>` instance, its variant tags, and its payload layout all come from
   the call's result type; nothing about `Option` is assumed here.
+- `.parse::<T>()` → `BuiltinMethod::StringParse` → `codegen_string_parse`
+  (`expressions/string_parse.rs`): `T` is read from the result's `Ok` payload. One call into the
+  text parser writes the value's bits to a zeroed `u64` entry slot and returns a status, and the
+  bits are narrowed and bitcast to `T`. Both variants are materialized and `select`ed on the status,
+  as in `build_option_value`. The status numbers are shared with `text_parse.c`. A temporary
+  receiver is released after the call, and `call_retains` counts the receiver as read.
 - `.to_checked::<T>()` → `codegen_to_checked`: `T` is read from the result `Option`'s `Some`
   payload. `llvm.trunc`, then `fcmp oge lo` and `fcmp olt hi` with `lo` = `0` or `-2^(bits-1)`
   and `hi` = `2^bits` or `2^(bits-1)`: both powers of two, so exact in `f32` and `f64`,

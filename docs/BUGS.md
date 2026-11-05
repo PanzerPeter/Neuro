@@ -5,6 +5,36 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-140: `Device`'s variants are bare names in every module
+
+- **Status**: open, confirmed
+- **Area**: `neurc` (`prelude.rs`, `Prelude::variants`)
+- **Severity**: minor. A program that should need `Device::CPU` compiles; nothing is read out of
+  bounds
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val t: Tensor<f32, [2]> = [1.0, 2.0]
+    val moved = t.to(CPU)
+    0
+}
+```
+
+Expected: `CPU` is undefined. The prelude names `Device` but not its variants, so only `Option`'s
+and `Result`'s are bare, as [Modules](language-reference/modules.md#the-implicit-prelude) says.
+Observed: the program compiles.
+
+**Root cause**: confirmed in the code. `load` binds the variants of every prelude enum except those
+in `QUALIFIED_ENUMS`.
+
+**Workaround**: write `Device::CPU`.
+
+**Fix sketch**: add `Device` to `QUALIFIED_ENUMS`, or invert the list to name `Option` and `Result`.
+Any program using a bare `CPU` or `GPU(0)` then needs the prefix. Regression test: the repro is
+refused, and `Device::CPU` still works.
+
 ## BUG-139: the unit type `()` cannot be written in a type position
 
 - **Status**: open, confirmed

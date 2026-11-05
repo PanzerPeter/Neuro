@@ -1,5 +1,5 @@
 workers = 8
-batch   ! unparsable, 'x' is not a digit
+batch   ! unparsable: Invalid
 depth   ! no key 'depth'
 retries ! 900 is above 64
 seed    = 42

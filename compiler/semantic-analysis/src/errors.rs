@@ -83,6 +83,14 @@ pub enum TypeError {
     #[error("`.to_checked::<{ty}>()` converts a float to an integer type, and `{ty}` is not one")]
     ToCheckedTargetNotInteger { ty: Type, span: Span },
 
+    #[error("`.parse::<{ty}>()` reads an integer, a float or a `bool`, and `{ty}` is not one")]
+    ParseTargetUnsupported { ty: Type, span: Span },
+
+    #[error(
+        "`.parse` answers with the prelude's `Result<T, ParseError>`, and this program replaces or removes `{name}`: rename the local `{name}` or drop `@no_prelude`"
+    )]
+    ParseNeedsPrelude { name: String, span: Span },
+
     #[error(
         "turbofish argument for parameter '{param}' has the wrong kind: a {expected} argument was expected"
     )]
@@ -1571,6 +1579,8 @@ impl TypeError {
             | Self::ConstPredicateViolated { span, .. }
             | Self::TurbofishCountMismatch { span, .. }
             | Self::ToCheckedTargetNotInteger { span, .. }
+            | Self::ParseTargetUnsupported { span, .. }
+            | Self::ParseNeedsPrelude { span, .. }
             | Self::TurbofishKindMismatch { span, .. }
             | Self::GenericStructNeedsArgs { span, .. }
             | Self::GenericEnumNeedsArgs { span, .. }
