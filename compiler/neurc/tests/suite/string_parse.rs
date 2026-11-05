@@ -419,7 +419,7 @@ func main() -> i32 {
     let exe = test.compile(&source).expect("the program compiles");
     let output = Command::new(&exe).output().expect("the program runs");
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
         "Empty\nInvalid\nOutOfRange\n"
     );
 }

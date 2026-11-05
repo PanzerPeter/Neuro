@@ -10,6 +10,12 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.28.3] - 2026-11-05
+
+### Fixed
+
+- The string parse debug test failed on Windows, where text-mode stdout writes `\r\n`. It now normalizes line endings like the other output tests.
+
 ## [5.28.2] - 2026-11-05
 
 ### Added
