@@ -27,14 +27,15 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      # rustfmt needs neither LLVM nor the cache, so a formatting slip fails in seconds.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.8.1
 
       - name: Setup LLVM 23 + MLIR 23
         uses: ./.github/actions/setup-llvm
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -71,9 +72,21 @@ jobs:
     # The VSA architecture tests run here too: they are part of the neurc test
     # target that `cargo test --workspace` builds, so a separate job would only
     # install LLVM a second time to run them again.
-    needs: [lint, windows_toolchain]
+    #
+    # Nothing here reads another job's output, so lint does not gate it: the long Windows
+    # leg starts at once. windows_toolchain stays, because a Windows leg fails on a cold
+    # LLVM cache rather than building the prefix itself.
+    needs: [windows_toolchain]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      # Full debuginfo only slows the link of every binary that embeds LLVM. Line tables
+      # keep RUST_BACKTRACE useful.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      # Only read for this target, so the other legs ignore it. The Windows leg spends
+      # most of its time compiling and linking, and link.exe is the slow part.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +120,9 @@ jobs:
         with:
           # Separate cache keys per OS + toolchain to avoid poisoning
           key: ${{ matrix.os }}-${{ matrix.rust_version }}
+          # Each new nightly changes the key, so a saved nightly cache is rarely restored
+          # and only pushes stable caches toward the repository's size limit.
+          save-if: ${{ matrix.rust_version == 'stable' }}
 
       - name: Setup LLVM 23 + MLIR 23
         uses: ./.github/actions/setup-llvm
@@ -121,12 +137,18 @@ jobs:
       - name: Install NumPy for the DLPack differential harness
         run: python -m pip install --upgrade "numpy>=2.1"
 
+      # Not --all-targets: it skips doctests and builds the bench binary, which the
+      # benchmark job and Clippy already cover.
       - name: Run Tests
-        run: cargo test --workspace --all-targets --verbose
+        run: cargo test --workspace --lib --bins --tests
+
+      # Doctests are not OS-specific, and each one links its own binary.
+      - name: Run Doctests
+        if: matrix.os == 'ubuntu-latest' && matrix.rust_version == 'stable'
+        run: cargo test --workspace --doc
 
   benchmark_regression:
     name: Benchmark Regression
-    needs: [lint]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -154,7 +176,9 @@ jobs:
 
   release:
     name: Release Build, Smoke Test & Artifacts
-    needs: [test]
+    # Builds on its own, so it runs beside the tests. A run with failing tests can still
+    # upload an artifact, and the red run is what says not to use it.
+    needs: [windows_toolchain]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -198,7 +222,6 @@ jobs:
 
   coverage:
     name: Code Coverage
-    needs: [test]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -220,8 +243,9 @@ jobs:
       - name: Generate Coverage
         # The default ptrace engine reports a SIGSEGV it intercepts while a test spawns
         # threads (the parser depth tests do) as a test segfault; source-based coverage
-        # does not trace the process.
-        run: cargo tarpaulin --workspace --engine llvm --verbose --timeout 300 --out Xml
+        # does not trace the process. Without --skip-clean tarpaulin wipes the dependencies
+        # Rust Cache just restored and rebuilds them all.
+        run: cargo tarpaulin --workspace --engine llvm --skip-clean --verbose --timeout 300 --out Xml
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5.5.1
         with:

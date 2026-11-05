@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.28.1] - 2026-11-05
+
+### Changed
+
+- CI jobs no longer wait on each other: tests, benchmarks, the release build and coverage all start at once. Only `windows_toolchain` still gates the jobs that need its LLVM prefix.
+- The test job builds with line tables instead of full debuginfo, and the Windows leg links with `rust-lld`.
+- `cargo fmt` runs before LLVM is installed, so a formatting failure reports in seconds.
+- Coverage keeps its restored dependencies instead of rebuilding them, and the nightly leg no longer saves a cache it would rarely restore.
+- `actions/cache` is pinned by SHA in the `setup-llvm` action, like every other action.
+
+### Fixed
+
+- CI now runs doctests. `--all-targets` had been skipping them, while the local gate ran them.
+
 ## [5.28.0] - 2026-11-05
 
 ### Added
