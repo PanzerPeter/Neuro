@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.27.1] - 2026-11-05
+
+### Fixed
+
+- Two advanced pattern tests failed on Windows: their programs returned 321 and 323 from `main` and
+  expected the exit status to wrap at 256, which only POSIX does. Each program now reduces its own
+  result, as the rest of the suite does.
+
 ## [5.27.0] - 2026-11-04
 
 ### Added

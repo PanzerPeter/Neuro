@@ -28,7 +28,7 @@ func value(t: Tok) -> i32 {{
     }}
 }}
 func main() -> i32 {{
-    value(Tok::Num(1)) + value(Tok::Neg(2)) * 10 + value(Tok::Word(3, true)) * 100
+    (value(Tok::Num(1)) + value(Tok::Neg(2)) * 10 + value(Tok::Word(3, true)) * 100) % 256
 }}
 "#
     );
@@ -358,7 +358,7 @@ func unwrap(r: Result<Option<i32>, i32>) -> i32 {
 func main() -> i32 {
     val a = [1, 2, 3, 4, 5]
     val s: &[i32] = &a
-    pairs(s) + unwrap(Ok(Some(4))) + unwrap(Ok(Some(40))) + unwrap(Ok(None)) + unwrap(Err(1))
+    (pairs(s) + unwrap(Ok(Some(4))) + unwrap(Ok(Some(40))) + unwrap(Ok(None)) + unwrap(Err(1))) % 256
 }
 "#;
     assert_eq!(run("single_pattern.nr", source), (19 + 4 + 300) % 256);
