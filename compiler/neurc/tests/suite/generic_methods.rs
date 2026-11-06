@@ -333,40 +333,6 @@ func main() -> i32 { 0 }
 }
 
 #[test]
-fn trait_methods_and_trait_impls_may_not_be_generic() {
-    let declared = rejected(
-        "trait_decl.nr",
-        r#"
-trait Show {
-    func show<U>(&self, u: U) -> i32
-}
-func main() -> i32 { 0 }
-"#,
-    );
-    assert!(
-        declared.contains("a trait method declares no type parameters"),
-        "{declared}"
-    );
-    let implemented = rejected(
-        "trait_impl.nr",
-        r#"
-trait Show {
-    func show(&self) -> i32
-}
-struct S { v: i32 }
-impl Show for S {
-    func show<U>(&self) -> i32 { self.v }
-}
-func main() -> i32 { 0 }
-"#,
-    );
-    assert!(
-        implemented.contains("only an inherent `impl` method may be generic"),
-        "{implemented}"
-    );
-}
-
-#[test]
 fn a_method_parameter_named_like_the_impls_is_refused() {
     let err = rejected(
         "shadow.nr",

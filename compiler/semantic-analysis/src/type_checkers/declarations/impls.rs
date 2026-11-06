@@ -66,8 +66,11 @@ impl TypeChecker {
                 self.consuming_self_methods.insert(mangled.clone());
             }
 
+            // Conformance checks a declared trait's method against its declaration; these
+            // two lang-item families have no declaration to compare with.
             if let Some(trait_name) = &def.trait_name
                 && !method.generics.is_empty()
+                && (trait_name.name == DROP_TRAIT || is_operator_trait(&trait_name.name))
             {
                 self.record_error(TypeError::GenericMethodInTraitImpl {
                     trait_name: trait_name.name.clone(),
@@ -78,7 +81,7 @@ impl TypeChecker {
 
             // Build the full parameter type list: implicit `self` first for instance methods.
             self.check_method_generic_names(method);
-            let saved_scope = self.enter_method_generics(method);
+            let saved_scope = self.enter_method_generics(&method.generics, &method.lifetimes);
             let mut param_types: Vec<Type> = Vec::new();
             if method.self_param.is_some() {
                 param_types.push(self_ty.clone());
@@ -96,7 +99,8 @@ impl TypeChecker {
             } else {
                 Type::Void
             };
-            let own_generics = (!method.generics.is_empty()).then(|| self.method_generics(method));
+            let own_generics = (!method.generics.is_empty())
+                .then(|| self.method_generics(&method.generics, &method.where_predicates));
             self.exit_method_generics(saved_scope);
 
             let func_ty = Type::Function {
@@ -150,9 +154,12 @@ impl TypeChecker {
 
     /// What a generic method declares itself, read while its parameters are in scope so
     /// the const types and bounds resolve against them.
-    fn method_generics(&self, method: &ast_types::MethodDef) -> MethodGenerics {
-        let const_types = method
-            .generics
+    pub(super) fn method_generics(
+        &self,
+        generics: &[ast_types::GenericParam],
+        where_predicates: &[ast_types::Expr],
+    ) -> MethodGenerics {
+        let const_types = generics
             .iter()
             .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
             .map(|g| {
@@ -160,8 +167,7 @@ impl TypeChecker {
                 (g.name.name.clone(), ty.unwrap_or(Type::Unknown))
             })
             .collect();
-        let bounds = method
-            .generics
+        let bounds = generics
             .iter()
             .filter(|g| !g.bounds.is_empty())
             .map(|g| {
@@ -170,13 +176,9 @@ impl TypeChecker {
             })
             .collect();
         MethodGenerics {
-            param_names: method
-                .generics
-                .iter()
-                .map(|g| g.name.name.clone())
-                .collect(),
+            param_names: generics.iter().map(|g| g.name.name.clone()).collect(),
             const_types,
-            where_predicates: method.where_predicates.clone(),
+            where_predicates: where_predicates.to_vec(),
             bounds,
         }
     }
@@ -563,7 +565,7 @@ impl TypeChecker {
 
             // The signature in `functions` was resolved with these in scope; the body
             // names the same placeholders.
-            let saved_scope = self.enter_method_generics(method);
+            let saved_scope = self.enter_method_generics(&method.generics, &method.lifetimes);
             self.symbols.push_scope();
             self.current_function_return_type = Some(return_type.clone());
             let warnings_before = self.warnings.len();

@@ -453,7 +453,9 @@ parameters, its `Self::Assoc` bindings, its const types) and register no signatu
 `unify_ast_hir` against the lowered arguments, registers `Type__method__g_<args>` in
 `functions` and queues a `MonoMethod` once; `emit_mono_method` lowers the body under the merged
 substitution and emits it as a one-method `HirImpl` of the receiver's type, so the backend
-lowers it, receiver mode and symbol included, as a written method. The three call shapes all
+lowers it, receiver mode and symbol included, as a written method. A trait's generic method needs
+nothing of its own: a call through a bound re-lowers on the concrete receiver, and it takes no
+`traits` entry and no `HirTrait.methods` slot, both of which serve `dyn`. The three call shapes all
 route there: `lower_method_call` (receiver), the plain `Type::f` arm of `lower_call` (ahead of
 the enum-variant arm, since a template registers no `Type__f`), and `lower_generic_assoc_call`,
 where the turbofish lists the type's parameters first and the function's own after them.

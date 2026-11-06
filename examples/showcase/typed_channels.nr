@@ -1,7 +1,7 @@
 // Showcase: associated types, one trait with three implementors. Integration example: `type
 // Sample` with `Self::Sample` paths, `Channel<Sample = i32>` bounds on a type parameter, a
-// trait with a default method, `@derive(Copy)` structs with `&self` methods, `Option` and
-// `match`, and `Vec` iteration. A trait without an associated type would have to pick one
+// trait with default methods, one of them generic, `@derive(Copy)` structs with `&self`
+// methods, `Option` and `match`, and `Vec` iteration. A trait without an associated type would have to pick one
 // sample type for every instrument, so a thermocouple's `f64`, a tally's `i32` and an
 // interlock's `bool` could not share it. `T: Channel<Sample = i32>` puts the answer in the
 // bound, so one body serves every counted channel and no float channel.
@@ -14,6 +14,12 @@ trait Channel {
 
     // ...and inherits this, unless it has a better answer.
     func channel_id(&self) -> i32 { 0 }
+
+    // `U` belongs to the method, not the trait: every implementor inherits this one template,
+    // and each call picks the type its reading converts to.
+    func read_as<U>(&self, convert: (Self::Sample) -> U) -> U {
+        convert(self.sample())
+    }
 }
 
 @derive(Copy, Clone)
@@ -79,6 +85,12 @@ func labelled(source: &impl Channel<Sample = i32>) -> i32 {
     source.sample() + source.channel_id()
 }
 
+// A generic trait method called through the bound: `U` is inferred here, per call, on top of
+// the `Sample` the bound fixed. A trait declaring one is never `dyn Channel`.
+func over_limit<T: Channel<Sample = i32>>(source: &T, limit: i32) -> bool {
+    source.read_as(|n| n > limit)
+}
+
 // A drain whose element type is its own associated type: the loop below never names
 // `i32`, only `Self::Sample`.
 struct Backlog {
@@ -139,6 +151,10 @@ func main() -> i32 {
     val scaled_cycle = scaled(&ticker, 1)    //  6
     val marked = labelled(&ticker)           //  6 + 4 = 10
     println("scaled tally {scaled_tally}, scaled cycle {scaled_cycle}, labelled {marked}")
+
+    val hot = probe.read_as(|c| c > 50.0)
+    val wide_count = counter.read_as::<i64>(|n| n as i64 * 1000000000i64)
+    println("hot {hot}, wide count {wide_count}, tally over 10: {over_limit(&counter, 10)}")
 
     val holdover = backlog.sample()
     val temperature = degrees as i32

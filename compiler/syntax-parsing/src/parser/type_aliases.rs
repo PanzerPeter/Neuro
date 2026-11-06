@@ -427,6 +427,8 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
                 rewrite_type(ty, resolved);
             }
             for method in &mut def.methods {
+                let resolved = &*without_shadowed(resolved, &method.generics);
+                rewrite_generics(&mut method.generics, resolved);
                 for param in &mut method.params {
                     rewrite_type(&mut param.ty, resolved);
                 }
@@ -445,6 +447,8 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
         // their own, and nothing downstream reads the trait's copy.
         Item::Trait(def) => {
             for method in &mut def.methods {
+                let resolved = &*without_shadowed(resolved, &method.generics);
+                rewrite_generics(&mut method.generics, resolved);
                 for param in &mut method.params {
                     rewrite_type(&mut param.ty, resolved);
                 }

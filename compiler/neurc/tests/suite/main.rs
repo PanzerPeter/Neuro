@@ -63,6 +63,7 @@ mod function_values;
 mod functions;
 mod generic_methods;
 mod generic_structs;
+mod generic_trait_methods;
 mod generics;
 mod gpu_amd;
 mod gpu_attribute;

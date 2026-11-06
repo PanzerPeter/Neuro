@@ -9,15 +9,13 @@ use crate::errors::{ParseError, ParseResult};
 use ast_types::{ImplDef, TraitDef, TraitMethod};
 
 use super::Parser;
+use super::item_functions::rekind_shape_params;
+use super::items::desugar_impl_trait_params;
 
 /// What a trait's `type` item must look like, for the diagnostic that rejects a binding
 /// where a declaration belongs.
 const TRAIT_ASSOC_DECL_FORM: &str =
     "a newline; a trait declares `type Name`, an impl binds it with `type Name = T`";
-
-/// What a trait method must look like after its name, for the diagnostic that rejects a
-/// type-parameter list there.
-const TRAIT_METHOD_GENERICS_FORM: &str = "'('; a trait method declares no type parameters of its own, only an inherent `impl` method may";
 
 impl Parser {
     /// Parse an `impl TypeName { … }` block
@@ -220,16 +218,8 @@ impl Parser {
         self.skip_newlines();
         let name = self.consume_identifier("method name")?;
 
-        // Generic methods are inherent-only: a trait declaring one would need conformance
-        // over the parameters, calls through a bound and the object-safety rule, none of
-        // which exist yet. Refused here so the message names the rule, not a stray `<`.
-        if let Some(less) = self.peek().filter(|t| t.kind == TokenKind::Less) {
-            return Err(ParseError::UnexpectedToken {
-                found: TokenKind::Less,
-                expected: TRAIT_METHOD_GENERICS_FORM.to_string(),
-                span: less.span,
-            });
-        }
+        let lifetime_mark = self.lifetime_scope.len();
+        let (mut generics, lifetimes) = self.parse_generic_params()?;
 
         self.consume(TokenKind::LeftParen, "'('")?;
         self.skip_newlines();
@@ -242,7 +232,7 @@ impl Parser {
             }
         }
 
-        let params = self.parse_parameter_list()?;
+        let mut params = self.parse_parameter_list()?;
         self.consume(TokenKind::RightParen, "')'")?;
 
         let return_type = if self.check(&TokenKind::Arrow) {
@@ -253,6 +243,19 @@ impl Parser {
             None
         };
 
+        // A required method has no `{` to end its header, so a `where` is looked for
+        // across the newline that would otherwise close the signature.
+        if matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::Where)) {
+            self.skip_newlines();
+        }
+        let where_predicates = self.parse_where_clause(&mut generics)?;
+
+        let mut impl_counter = 0usize;
+        for param in &mut params {
+            param.ty = desugar_impl_trait_params(&param.ty, &mut impl_counter, &mut generics);
+        }
+        rekind_shape_params(&params, return_type.as_ref(), &mut generics);
+
         // A brace on the same logical line begins a default-method body; anything else
         // (newline, next `func`, or `}`) means this is a required method with no body.
         let default_body = if matches!(self.peek_next_nonnewline_kind(), Some(TokenKind::LeftBrace))
@@ -262,10 +265,14 @@ impl Parser {
         } else {
             None
         };
+        self.lifetime_scope.truncate(lifetime_mark);
 
         let end_span = self.previous_span(start.span);
         Ok(TraitMethod {
             name,
+            generics,
+            lifetimes,
+            where_predicates,
             self_param,
             params,
             return_type,

@@ -83,6 +83,10 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
         }
         Item::Trait(def) => {
             for method in &mut def.methods {
+                walk_generics(&mut method.generics, f)?;
+                for predicate in &mut method.where_predicates {
+                    walk_expr(predicate, f)?;
+                }
                 for param in &mut method.params {
                     walk_type(&mut param.ty, f)?;
                 }
@@ -148,6 +152,10 @@ fn walk_generics(params: &mut [GenericParam], f: SiteFn) -> Result<(), ModuleErr
 }
 
 fn walk_method(method: &mut MethodDef, f: SiteFn) -> Result<(), ModuleError> {
+    walk_generics(&mut method.generics, f)?;
+    for predicate in &mut method.where_predicates {
+        walk_expr(predicate, f)?;
+    }
     for param in &mut method.params {
         walk_type(&mut param.ty, f)?;
     }

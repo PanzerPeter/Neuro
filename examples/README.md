@@ -161,7 +161,7 @@ in each program has the full description. The three module files under
 - [`derived_records.nr`](showcase/derived_records.nr): `@derive(Debug, PartialEq)` and `@derive(Copy, Clone)` on nested structs, with the `:?` spec and structural `==`.
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): Generic structs and functions with const parameters, `where` clauses, turbofish, a non-`Copy` type argument, and `?` at a generic parameter.
 - [`shape_traits.nr`](showcase/shape_traits.nr): Trait declarations with default methods, `impl Trait` and `dyn Trait` dispatch, and a generic bounded by two traits.
-- [`typed_channels.nr`](showcase/typed_channels.nr): Associated types (`type Sample`) with one trait and three implementors, and `Channel<Sample = i32>` bounds.
+- [`typed_channels.nr`](showcase/typed_channels.nr): Associated types (`type Sample`) with one trait and three implementors, `Channel<Sample = i32>` bounds, and a generic trait method called through one.
 
 ### Structs, enums and numbers
 

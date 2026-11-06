@@ -783,8 +783,8 @@ copied to each generic-impl instance by `instantiate_impls_for`. A call builds a
 from it over the visible parameters and goes through `check_generic_call_with`, which takes the
 receiver so the reborrow-exclusivity check still sees it. An associated function of a generic
 type appends its own names after the type's, so one turbofish lists both. A method parameter
-reusing an impl parameter's name is `MethodGenericShadowsImpl`; one in a trait impl is
-`GenericMethodInTraitImpl`; `@grad` on one is `GradFormUnsupported`. `TurbofishCountMismatch`
+reusing an impl parameter's name is `MethodGenericShadowsImpl`; one in a `Drop` or operator impl,
+which has no declaration to conform to, is `GenericMethodInTraitImpl`; `@grad` on one is `GradFormUnsupported`. `TurbofishCountMismatch`
 names the callee (it used to print the first parameter's name).
 
 A bounded generic `impl` (`impl<T: Show> Cell<T>`) records its bounds in `impl_bounds`. A method or
@@ -927,6 +927,18 @@ trait member (`NotATraitMethod`) with a matching signature (`TraitMethodSignatur
 `resolve_generic_trait_method`. Traits are otherwise fully erased: the parser injects default
 methods into impls, so they check as ordinary methods.
 
+**Generic trait methods.** A `TraitMethod` declares `generics`, `lifetimes` and
+`where_predicates`. `open_trait_signature` resolves one with `Self` and each associated type held
+open as `Type::Generic` placeholders spelled `Self` and `Self::Item`: substitution is by name, and
+the type standing for them can be a parameter spelled like the method's own. Conformance
+(`expected_trait_types`) compares the two lists per position, kind, bounds (`same_bounds`, in any
+order) and `where` (`same_predicate`), then fills the signature in one simultaneous substitution:
+own names to the impl's, `Self` to the impl's type, each associated type to its binding.
+A call through a bound (`BoundMethod::Generic`) keeps the method's names and carries the
+placeholders' values in `GenericFnSig.fixed`, which seeds `subst` before inference. A bound's
+by-value receiver moves, generic or not (`trait_method_sig`). `trait_object_safety` refuses a
+trait declaring a generic method.
+
 **`Self`.** The parser replaces `Self` inside every `impl`, so a `Type::Named` spelled `Self`
 reaching `resolve_type` is a trait's own or misplaced. `self_type` answers it: the implementing
 type while `register_impl` runs conformance (for a generic impl that is the template, which is
@@ -956,8 +968,8 @@ never declared is `UnknownAssociatedType`. `resolve_generic_trait_method` then t
 whose signature names an associated type by installing the bound's constraints as `self_assoc`
 and re-resolving `TraitMethodSig.decl`: the same per-impl re-resolution conformance does. A
 bare bound leaves the position open and still reports `UnconstrainedAssociatedType`. At the call
-site `check_assoc_bindings` compares the constraint against `impl_assoc` for the concrete type
-argument (or, for a type parameter passed through from an enclosing generic, against that
+site `check_trait_bounds` substitutes the constraint with what the call inferred, and
+`check_assoc_bindings` compares it against `impl_assoc` for the concrete type argument (or, for a type parameter passed through from an enclosing generic, against that
 parameter's own bound), reporting `AssociatedTypeBoundMismatch`; `resolve_impl_return` runs the
 same check for return-position `impl Trait<Assoc = U>`.
 

@@ -216,10 +216,11 @@ the tuple-index parse, so it needs no expression grammar of its own.
 - **Methods take a parameter list and a `where` clause.** `parse_method_def` reads `<...>`
   after the method name with the function parser's `parse_generic_params`, then `where`,
   `desugar_impl_trait_params` and `rekind_shape_params`, so a method's own parameters, an
-  argument-position `impl Trait` among them, reach the checker as a function's do. A
-  trait method refuses a `<` after its name with a message naming the rule rather than a bare
-  "expected '('": generic trait methods need conformance and object-safety rules that do not
-  exist yet.
+  argument-position `impl Trait` among them, reach the checker as a function's do.
+  `parse_trait_method_def` does the same, looking for `where` past the newline because a
+  required method has no `{` to end its header, and `inject_trait_defaults` copies all three
+  fields into the impl. An impl method's parameters shadow a `type` alias of the same name, as a
+  function's do.
 - **Shape parameters are const parameters.** A bare name used as a tensor extent is sugar for
   a `const NAME: u32` parameter, so `rekind_shape_params` (`parser/item_functions.rs`) rewrites
   every bound-less `GenericParamKind::Type` a signature uses as an extent into

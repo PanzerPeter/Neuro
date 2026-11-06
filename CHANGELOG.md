@@ -10,6 +10,25 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.29.0] - 2026-11-06
+
+### Added
+
+- **Generic trait methods.** A trait method declares its own type parameters, with bounds, a `where` clause and `impl Trait` parameters: `func label<U>(&self, value: U) -> (bool, U)`. An implementor declares the same list up to renaming, a default method carries it into each implementor, and a call through `T: Trait` infers the parameters or takes a turbofish. A trait declaring one is not object-safe.
+
+### Changed
+
+- `GenericMethodInTraitImpl` now covers `Drop` and operator-trait impls only. On any other trait, an impl method whose parameters differ from the declaration is `TraitMethodSignatureMismatch`.
+- `showcase/typed_channels` and `structs/generic_methods` call a generic trait method through a bound.
+
+### Fixed
+
+- A by-value `self` method called through a bound did not move the receiver, so `t.eat() + t.eat()` compiled and used a moved value.
+- `T: Source<Item = U>` was compared against the name `U`, so every call with a concrete `Item` was refused. It now compares against what the call inferred for `U`.
+- A `Trait<Assoc = T>` bound refused every enum and newtype implementor.
+- An import rename did not reach a bound on a method's own parameter: `func g<U: Tg>` after `import lib::{Tag as Tg}` reported `struct 'U' has no method`.
+- A method's own parameter now shadows a `type` alias of the same name. The alias was expanded over it, so `U` meant `i32` in the method's signature.
+
 ## [5.28.4] - 2026-11-05
 
 ### Added

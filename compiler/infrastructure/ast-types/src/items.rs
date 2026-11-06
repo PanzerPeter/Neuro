@@ -365,6 +365,14 @@ pub struct NewtypeDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitMethod {
     pub name: Identifier,
+    /// The method's own `<U>` parameters. See [`MethodDef::generics`]. Every implementor
+    /// declares the same list up to renaming, and one makes its trait non-object-safe.
+    pub generics: Vec<GenericParam>,
+    /// Lifetime names the method declares itself. See [`FunctionDef::lifetimes`].
+    pub lifetimes: Vec<Identifier>,
+    /// Value predicates from the method's `where` clause. See
+    /// [`FunctionDef::where_predicates`].
+    pub where_predicates: Vec<Expr>,
     pub self_param: Option<SelfParam>,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,

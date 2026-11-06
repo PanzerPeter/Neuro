@@ -312,3 +312,43 @@ func head<T: Source<i32>>(src: &T) -> i32 { 0 }
         "{err}"
     );
 }
+
+#[test]
+fn a_trait_method_declares_parameters_bounds_and_where() {
+    let source = r#"
+trait Tagged {
+    func tag<U: Copy>(&self, u: U) -> U
+    func late<U>(&self, u: U) -> i32
+        where U: Copy
+    func sized<const N: u32>(&self, xs: [i32; N]) -> i32 where N > 0
+    func sugar(&self, u: impl Copy) -> i32
+    func after(&self) -> i32
+}
+"#;
+    let items = parse(source).expect("trait should parse");
+    let Item::Trait(def) = &items[0] else {
+        panic!("expected a trait item");
+    };
+    assert_eq!(def.methods.len(), 5);
+    assert_eq!(def.methods[0].generics[0].name.name, "U");
+    assert_eq!(def.methods[1].generics[0].bounds.len(), 1);
+    assert_eq!(def.methods[2].where_predicates.len(), 1);
+    assert_eq!(def.methods[3].generics.len(), 1, "`impl Trait` desugars");
+    assert!(def.methods[4].generics.is_empty());
+}
+
+#[test]
+fn a_default_method_carries_its_parameters_into_the_impl() {
+    let source = r#"
+trait Tagged {
+    func tag<U: Copy>(&self, u: U) -> U where U: Clone { u }
+}
+struct S { v: i32 }
+impl Tagged for S {}
+"#;
+    let items = parse(source).expect("program should parse");
+    let Item::Impl(imp) = &items[2] else {
+        panic!("expected an impl item");
+    };
+    assert_eq!(imp.methods[0].generics[0].bounds.len(), 2);
+}

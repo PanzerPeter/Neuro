@@ -209,7 +209,7 @@ walkers.
   type checker gates the intrinsics the prelude's bodies are written against on it.
 - **Generic methods.** `MethodDef` carries its own `generics`, `lifetimes` and
   `where_predicates`, the same three a `FunctionDef` does, declared after the method's name and
-  on top of its impl's. `TraitMethod` has none: a trait method declares no type parameters.
+  on top of its impl's. `TraitMethod` carries the same three.
 - **Lifetimes.** `lifetimes: Vec<Identifier>` on `FunctionDef` / `StructDef` / `EnumDef` /
   `ImplDef` / `MethodDef` and `lifetime: Option<Identifier>` on `Type::Reference` are kept apart
   from `generics` because lifetimes are a distinct namespace and do not drive monomorphization.

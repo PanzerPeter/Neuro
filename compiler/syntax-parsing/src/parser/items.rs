@@ -441,9 +441,9 @@ fn apply_trait_defaults(
             };
             imp.methods.push(MethodDef {
                 name: method.name.clone(),
-                generics: Vec::new(),
-                lifetimes: Vec::new(),
-                where_predicates: Vec::new(),
+                generics: method.generics.clone(),
+                lifetimes: method.lifetimes.clone(),
+                where_predicates: method.where_predicates.clone(),
                 self_param: method.self_param.clone(),
                 params: method.params.clone(),
                 return_type: method.return_type.clone(),

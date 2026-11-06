@@ -622,7 +622,7 @@ func main() -> i32 { 0 }
 }
 
 #[test]
-fn trait_impl_method_may_not_be_generic() {
+fn a_generic_impl_method_must_match_the_traits_list() {
     let source = r#"
 trait Show { func show(&self) -> i32 }
 struct B { v: i32 }
@@ -632,7 +632,147 @@ func main() -> i32 { 0 }
     let errors = semantic_errors(source);
     assert!(
         errors.iter().any(|e| matches!(e,
-            TypeError::GenericMethodInTraitImpl { method, .. } if method == "show")),
+            TypeError::TraitMethodSignatureMismatch { method, detail, .. }
+                if method == "show" && detail.contains("declares 1 type parameter(s)"))),
+        "got {errors:?}"
+    );
+}
+
+#[test]
+fn a_lang_item_impl_method_may_not_be_generic() {
+    let source = r#"
+struct B { v: i32 }
+impl Drop for B { func drop<U>(&mut self) {} }
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(source);
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            TypeError::GenericMethodInTraitImpl { method, .. } if method == "drop")),
+        "got {errors:?}"
+    );
+}
+
+/// Each way two parameter lists can disagree once names are set aside.
+#[test]
+fn conformance_compares_parameter_lists_up_to_renaming() {
+    let mismatch = |trait_method: &str, impl_method: &str| {
+        let source = format!(
+            "trait Tr {{ {trait_method} }}\nstruct S {{ v: i32 }}\n\
+             impl Tr for S {{ {impl_method} {{ 0 }} }}\nfunc main() -> i32 {{ 0 }}\n"
+        );
+        semantic_errors(&source).into_iter().find_map(|e| match e {
+            TypeError::TraitMethodSignatureMismatch { detail, .. } => Some(detail),
+            _ => None,
+        })
+    };
+    let same = [
+        (
+            "func f<A>(&self, a: A) -> i32",
+            "func f<B>(&self, a: B) -> i32",
+        ),
+        (
+            "func f<A: Copy + Clone>(&self, a: A) -> i32",
+            "func f<B: Clone + Copy>(&self, a: B) -> i32",
+        ),
+        (
+            "func f<A>(&self, a: A) -> i32 where A: Copy",
+            "func f<B: Copy>(&self, a: B) -> i32",
+        ),
+        (
+            "func f(&self, a: impl Copy) -> i32",
+            "func f<B: Copy>(&self, a: B) -> i32",
+        ),
+        (
+            "func f<const N: u32>(&self, a: [i32; N]) -> i32 where N > 0",
+            "func f<const M: u32>(&self, a: [i32; M]) -> i32 where (M > 0)",
+        ),
+    ];
+    for (declared, written) in same {
+        assert_eq!(mismatch(declared, written), None, "{declared} / {written}");
+    }
+    let different = [
+        (
+            "func f<A, B>(&self, a: A, b: B) -> i32",
+            "func f<X, Y>(&self, a: Y, b: X) -> i32",
+            "parameter 'a'",
+        ),
+        (
+            "func f<A: Copy>(&self, a: A) -> i32",
+            "func f<B>(&self, a: B) -> i32",
+            "bounds",
+        ),
+        (
+            "func f<A>(&self, a: A) -> i32",
+            "func f<B: Copy>(&self, a: B) -> i32",
+            "bounds",
+        ),
+        (
+            "func f<A>(&self, a: A) -> i32",
+            "func f(&self, a: i32) -> i32",
+            "type parameter(s)",
+        ),
+        (
+            "func f<A>(&self) -> i32",
+            "func f<const N: u32>(&self) -> i32",
+            "differs in kind",
+        ),
+        (
+            "func f<const N: u32>(&self, a: [i32; N]) -> i32 where N > 0",
+            "func f<const M: u32>(&self, a: [i32; M]) -> i32 where M > 1",
+            "`where`",
+        ),
+    ];
+    for (declared, written, expected) in different {
+        let detail = mismatch(declared, written).unwrap_or_default();
+        assert!(
+            detail.contains(expected),
+            "{declared} / {written}: {detail}"
+        );
+    }
+}
+
+/// `Self` under an impl whose `T` is spelled like the trait method's: the two stay apart.
+#[test]
+fn conformance_keeps_self_apart_from_a_same_named_method_parameter() {
+    let source = r#"
+trait Tr { func f<T>(&self, other: &Self, t: T) -> T }
+struct C<T> { v: T }
+impl<T> Tr for C<T> { func f<U>(&self, other: &Self, t: U) -> U { t } }
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(source);
+    assert!(errors.is_empty(), "got {errors:?}");
+}
+
+#[test]
+fn a_generic_trait_method_is_not_object_safe() {
+    let source = r#"
+trait G { func f<U>(&self, u: U) -> U }
+func take(g: &dyn G) {}
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(source);
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            TypeError::TraitNotObjectSafe { reason, .. }
+                if reason.contains("declares type parameters"))),
+        "got {errors:?}"
+    );
+}
+
+/// `Self::Nope` inside a bound on the method's own parameter is an undeclared name, once.
+#[test]
+fn an_undeclared_associated_type_in_an_own_bound_is_reported_once() {
+    let source = r#"
+trait Src { type Item }
+trait Tr { func f<O: Src<Item = Self::Nope>>(&self, o: O) -> i32 }
+func main() -> i32 { 0 }
+"#;
+    let errors = semantic_errors(source);
+    assert_eq!(errors.len(), 1, "got {errors:?}");
+    assert!(
+        matches!(&errors[0], TypeError::UnknownAssociatedType { name, .. } if name == "Nope"),
         "got {errors:?}"
     );
 }

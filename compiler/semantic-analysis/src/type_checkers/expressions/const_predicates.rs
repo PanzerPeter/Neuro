@@ -54,6 +54,39 @@ pub(crate) fn eval_const_predicate(
     }
 }
 
+/// Whether two `where` predicates say the same thing once `renames` maps the first's const
+/// parameters onto the second's. A form the evaluator cannot fold compares as different.
+pub(crate) fn same_predicate(
+    declared: &Expr,
+    written: &Expr,
+    renames: &HashMap<String, Type>,
+) -> bool {
+    match (declared, written) {
+        (Expr::Paren(inner, _), other) => same_predicate(inner, other, renames),
+        (other, Expr::Paren(inner, _)) => same_predicate(other, inner, renames),
+        (Expr::Literal(a, _), Expr::Literal(b, _)) => a == b,
+        (Expr::Identifier(a), Expr::Identifier(b)) => match renames.get(&a.name) {
+            Some(Type::Generic(renamed)) => *renamed == b.name,
+            _ => a.name == b.name,
+        },
+        (
+            Expr::Binary {
+                left: al,
+                op: aop,
+                right: ar,
+                ..
+            },
+            Expr::Binary {
+                left: bl,
+                op: bop,
+                right: br,
+                ..
+            },
+        ) => aop == bop && same_predicate(al, bl, renames) && same_predicate(ar, br, renames),
+        _ => false,
+    }
+}
+
 /// Evaluate a const-integer expression that names no const parameter: the literal
 /// arithmetic a tensor slice bound may be written as, where the folded value
 /// becomes part of the result's type rather than a run-time index.

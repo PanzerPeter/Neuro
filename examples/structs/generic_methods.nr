@@ -17,6 +17,22 @@ impl Shelf {
     }
 }
 
+// A trait method takes parameters of its own too. An implementor may rename them, and a call
+// through a bound infers them as any other call does.
+trait Labeler {
+    func label<U>(&self, value: U) -> (bool, U)
+}
+
+impl Labeler for Shelf {
+    func label<V>(&self, value: V) -> (bool, V) {
+        (self.left, value)
+    }
+}
+
+func labeled_value<T: Labeler>(source: &T) -> i32 {
+    source.label(7).1
+}
+
 func main() -> i32 {
     val shelf = Shelf { left: true }
 
@@ -29,5 +45,6 @@ func main() -> i32 {
     println("name    = {name}")
     println("wide    = {wide}")
     println("nothing = {nothing ?? 0.5}")
+    println("labeled = {labeled_value(&shelf)}")
     count + wide as i32
 }

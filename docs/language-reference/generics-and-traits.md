@@ -216,7 +216,27 @@ impl<T> Cell<T> {
 // Cell::new(true).with::<i64>(40i64) takes U = i64 from the turbofish.
 ```
 
-An associated function takes its own parameters the same way. On a generic type, one turbofish lists the type's parameters first and the function's own after them: `Cell::empty::<i32, f64>()`. A method's parameter may not reuse a name its impl declares, and trait methods declare no type parameters of their own, so a generic method lives in an inherent `impl`. [`generic_methods.nr`](../../examples/structs/generic_methods.nr) runs these forms.
+An associated function takes its own parameters the same way. On a generic type, one turbofish lists the type's parameters first and the function's own after them: `Cell::empty::<i32, f64>()`. A method's parameter may not reuse a name its impl declares. [`generic_methods.nr`](../../examples/structs/generic_methods.nr) runs these forms.
+
+A trait method declares parameters the same way, and a call through a bound infers them or takes a turbofish:
+
+```neuro
+trait Labeler {
+    func label<U>(&self, value: U) -> (bool, U)
+}
+
+impl Labeler for Shelf {
+    func label<V>(&self, value: V) -> (bool, V) {
+        (self.left, value)
+    }
+}
+
+func labeled_value<T: Labeler>(source: &T) -> i32 {
+    source.label(7).1
+}
+```
+
+An implementor declares the same list up to renaming: as many parameters in the same order, each of the same kind, with the same bounds and the same `where` predicates. An `impl Trait` parameter counts as one of them, so either side may spell it either way. A default method carries its parameters into each implementor, where they may not reuse a name of that `impl`. `Drop` and the operator traits declare none. A trait declaring a generic method is not [object-safe](#object-safety).
 
 ## Traits and Impls
 
@@ -412,12 +432,13 @@ Named bounds (`<T: Shape>`) dispatch statically, like `impl Trait`. Use `dyn` wh
 
 ## Object Safety
 
-A trait is usable as `dyn` only if it is **object-safe**: every method must take a `&self` or `&mut self` receiver and name `Self` nowhere else, so the vtable has a fixed layout. A method that consumes `self` by value, a method with no receiver, and a method that names `Self` outside its receiver each make the trait unusable as a trait object. Such a trait still works through `impl Trait` and named bounds.
+A trait is usable as `dyn` only if it is **object-safe**: every method must take a `&self` or `&mut self` receiver, name `Self` nowhere else and declare no type parameters of its own, so the vtable has a fixed layout. A method that consumes `self` by value, a method with no receiver, a method that names `Self` outside its receiver, and a generic method each make the trait unusable as a trait object. Such a trait still works through `impl Trait` and named bounds.
 
 ```neuro
 trait Consume { func take(self) -> i32 }        // consumes self
 trait Maker   { func build() -> i32 }           // no receiver
 trait Grow    { func grown(&self) -> Self }     // names Self outside its receiver
+trait Echo    { func echo<U>(&self, u: U) -> U } // one instance per U
 ```
 
 Using one of them as a trait object is an error that names the rule, for example ``trait 'Consume' is not object-safe and cannot be used as `dyn Consume`: method 'take' takes `self` by value``.

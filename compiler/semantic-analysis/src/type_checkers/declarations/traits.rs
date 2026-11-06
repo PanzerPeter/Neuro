@@ -5,10 +5,11 @@
 
 use super::is_builtin_type_name;
 use crate::errors::TypeError;
+use crate::type_checkers::expressions::const_predicates::same_predicate;
 use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
-use crate::type_checkers::{TraitInfo, TraitMethodSig, TypeChecker};
+use crate::type_checkers::{BoundInfo, GenericFnSig, TraitInfo, TraitMethodSig, TypeChecker};
 use crate::types::Type;
-use ast_types::{ImplDef, TraitDef};
+use ast_types::{ImplDef, TraitDef, TraitMethod};
 use shared_types::Identifier;
 use std::collections::HashMap;
 
@@ -40,7 +41,7 @@ impl TypeChecker {
         for m in &def.methods {
             let mut named = Vec::new();
             let mut names_self_type = false;
-            for ty in m.params.iter().map(|p| &p.ty).chain(m.return_type.iter()) {
+            for ty in signature_types(m) {
                 collect_self_assoc(ty, &mut named);
                 names_self_type |= names_self(ty);
             }
@@ -53,16 +54,26 @@ impl TypeChecker {
                     });
                 }
             }
-            let params: Vec<Type> = m
-                .params
-                .iter()
-                .map(|p| self.resolve_trait_sig_type(&p.ty))
-                .collect();
-            let ret = m
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_trait_sig_type(t))
-                .unwrap_or(Type::Void);
+            let (params, ret) = if declares_generics(m) {
+                // An undeclared `Self::X` is reported above, so it is held open like the
+                // declared ones rather than reported a second time as unbound.
+                let mut open: Vec<String> = declared.clone();
+                open.extend(named.iter().map(|a| a.name.clone()));
+                let sig = self.open_trait_signature(m, &open);
+                (sig.params, sig.ret)
+            } else {
+                let params: Vec<Type> = m
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_trait_sig_type(&p.ty))
+                    .collect();
+                let ret = m
+                    .return_type
+                    .as_ref()
+                    .map(|t| self.resolve_trait_sig_type(t))
+                    .unwrap_or(Type::Void);
+                (params, ret)
+            };
             if methods.contains_key(&m.name.name) {
                 self.record_error(TypeError::FunctionAlreadyDefined {
                     name: format!("{}::{}", def.name.name, m.name.name),
@@ -102,6 +113,46 @@ impl TypeChecker {
             return Type::Unknown;
         }
         self.resolve_type(ty).unwrap_or(Type::Unknown)
+    }
+
+    /// A generic trait method's signature with `Self` and each of `assoc_types` left open,
+    /// as [`Type::Generic`] placeholders named `Self` and `Self::Item`.
+    ///
+    /// The type standing for them can itself be a parameter spelled like one of the
+    /// method's own (a caller's `U`, an impl's `T`), and substitution is by name. Holding
+    /// them open lets one simultaneous substitution fill both without capture.
+    pub(crate) fn open_trait_signature(
+        &mut self,
+        decl: &TraitMethod,
+        assoc_types: &[String],
+    ) -> GenericFnSig {
+        let placeholders = assoc_types
+            .iter()
+            .map(|name| {
+                let open = Type::Generic(format!("{SELF_ASSOC_PREFIX}{name}"));
+                (name.clone(), open)
+            })
+            .collect();
+        let saved_assoc = std::mem::replace(&mut self.self_assoc, placeholders);
+        let saved_self = self
+            .self_type
+            .replace(Type::Generic(SELF_TYPE_NAME.to_string()));
+        let scope = self.enter_method_generics(&decl.generics, &decl.lifetimes);
+        let params: Vec<Type> = decl
+            .params
+            .iter()
+            .map(|p| self.resolve_type(&p.ty).unwrap_or(Type::Unknown))
+            .collect();
+        let ret = decl
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type(t).unwrap_or(Type::Unknown))
+            .unwrap_or(Type::Void);
+        let own = self.method_generics(&decl.generics, &decl.where_predicates);
+        self.exit_method_generics(scope);
+        self.self_type = saved_self;
+        self.self_assoc = saved_assoc;
+        own.signature(params, ret)
     }
 
     /// Validate an `impl Trait for Type` block against the trait's declaration and
@@ -161,7 +212,7 @@ impl TypeChecker {
                 });
                 continue;
             };
-            if let Some(detail) = self.trait_signature_mismatch(method, sig) {
+            if let Some(detail) = self.trait_signature_mismatch(method, sig, &info.assoc_types) {
                 errors.push(TypeError::TraitMethodSignatureMismatch {
                     trait_name: trait_name.to_string(),
                     type_name: struct_name.to_string(),
@@ -214,6 +265,7 @@ impl TypeChecker {
         &mut self,
         method: &ast_types::MethodDef,
         sig: &TraitMethodSig,
+        assoc_types: &[String],
     ) -> Option<String> {
         if method.self_param != sig.self_param {
             return Some("receiver (`self`) form differs from the trait".to_string());
@@ -225,22 +277,40 @@ impl TypeChecker {
                 method.params.len()
             ));
         }
-        for (p, declared) in method.params.iter().zip(sig.decl.params.iter()) {
-            let expected = self.resolve_type(&declared.ty).unwrap_or(Type::Unknown);
+        if method.generics.len() != sig.decl.generics.len() {
+            return Some(format!(
+                "declares {} type parameter(s), trait declares {}",
+                method.generics.len(),
+                sig.decl.generics.len()
+            ));
+        }
+        let scope = self.enter_method_generics(&method.generics, &method.lifetimes);
+        let mismatch = self.trait_types_mismatch(method, sig, assoc_types);
+        self.exit_method_generics(scope);
+        mismatch
+    }
+
+    /// The comparison of [`Self::trait_signature_mismatch`] past its counts, with the impl
+    /// method's own parameters in scope.
+    fn trait_types_mismatch(
+        &mut self,
+        method: &ast_types::MethodDef,
+        sig: &TraitMethodSig,
+        assoc_types: &[String],
+    ) -> Option<String> {
+        let (expected, expected_ret) = match self.expected_trait_types(method, sig, assoc_types) {
+            Ok(types) => types,
+            Err(detail) => return Some(detail),
+        };
+        for (p, expected) in method.params.iter().zip(expected.iter()) {
             let got = self.resolve_type(&p.ty).unwrap_or(Type::Unknown);
-            if !got.is_compatible_with(&expected) {
+            if !got.is_compatible_with(expected) {
                 return Some(format!(
                     "parameter '{}' has type {}, trait requires {}",
                     p.name.name, got, expected
                 ));
             }
         }
-        let expected_ret = sig
-            .decl
-            .return_type
-            .as_ref()
-            .map(|t| self.resolve_type(t).unwrap_or(Type::Unknown))
-            .unwrap_or(Type::Void);
         let ret = method
             .return_type
             .as_ref()
@@ -254,6 +324,117 @@ impl TypeChecker {
         }
         None
     }
+
+    /// The parameter and return types `method` must have to implement `sig`. A generic
+    /// trait method's are written in the impl's names for its parameters, after the two
+    /// lists are checked to agree up to renaming; `Err` says where they do not.
+    fn expected_trait_types(
+        &mut self,
+        method: &ast_types::MethodDef,
+        sig: &TraitMethodSig,
+        assoc_types: &[String],
+    ) -> Result<(Vec<Type>, Type), String> {
+        if !declares_generics(&sig.decl) {
+            let params = sig
+                .decl
+                .params
+                .iter()
+                .map(|p| self.resolve_type(&p.ty).unwrap_or(Type::Unknown))
+                .collect();
+            let ret = sig
+                .decl
+                .return_type
+                .as_ref()
+                .map(|t| self.resolve_type(t).unwrap_or(Type::Unknown))
+                .unwrap_or(Type::Void);
+            return Ok((params, ret));
+        }
+        let span = method.name.span;
+        let open = self.open_trait_signature(&sig.decl, assoc_types);
+        let own = self.method_generics(&method.generics, &method.where_predicates);
+        let mut subst: HashMap<String, Type> = self
+            .self_assoc
+            .iter()
+            .map(|(name, ty)| (format!("{SELF_ASSOC_PREFIX}{name}"), ty.clone()))
+            .collect();
+        subst.extend(
+            self.self_type
+                .clone()
+                .map(|ty| (SELF_TYPE_NAME.to_string(), ty)),
+        );
+        for (declared, written) in open.param_names.iter().zip(&own.param_names) {
+            subst.insert(declared.clone(), Type::Generic(written.clone()));
+        }
+        for (declared, written) in open.param_names.iter().zip(&own.param_names) {
+            if open.const_types.get(declared) != own.const_types.get(written) {
+                return Err(format!(
+                    "type parameter '{written}' differs in kind from the trait's '{declared}'"
+                ));
+            }
+            let mut expected = open.bounds.get(declared).cloned().unwrap_or_default();
+            for (_, ty) in expected.iter_mut().flat_map(|b| b.assoc.iter_mut()) {
+                *ty = self.substitute_generic(ty, &subst, span);
+            }
+            let got = own.bounds.get(written).map_or(&[][..], Vec::as_slice);
+            if !same_bounds(&expected, got) {
+                return Err(format!(
+                    "type parameter '{written}' has different bounds from the trait's '{declared}'"
+                ));
+            }
+        }
+        let same_where = open.where_predicates.len() == own.where_predicates.len()
+            && open
+                .where_predicates
+                .iter()
+                .zip(&own.where_predicates)
+                .all(|(a, b)| same_predicate(a, b, &subst));
+        if !same_where {
+            return Err("its `where` predicates differ from the trait's".to_string());
+        }
+        let params = open
+            .params
+            .iter()
+            .map(|p| self.substitute_generic(p, &subst, span))
+            .collect();
+        let ret = self.substitute_generic(&open.ret, &subst, span);
+        Ok((params, ret))
+    }
+}
+
+/// Whether a trait method declares parameters of its own, lifetimes included, so its
+/// signature resolves only with them in scope.
+pub(crate) fn declares_generics(method: &TraitMethod) -> bool {
+    !method.generics.is_empty() || !method.lifetimes.is_empty()
+}
+
+/// Every type a trait method's signature writes: parameters, return type, and the
+/// `Trait<Assoc = T>` bindings on its own parameters.
+pub(crate) fn signature_types(method: &TraitMethod) -> impl Iterator<Item = &ast_types::Type> {
+    let bound_types = method
+        .generics
+        .iter()
+        .flat_map(|g| &g.bounds)
+        .flat_map(|b| &b.assoc_bindings)
+        .map(|(_, ty)| ty);
+    method
+        .params
+        .iter()
+        .map(|p| &p.ty)
+        .chain(&method.return_type)
+        .chain(bound_types)
+}
+
+/// Two bound lists are the same set of traits with the same associated-type constraints,
+/// in any order: `A + B` and `B + A` promise one thing.
+fn same_bounds(a: &[BoundInfo], b: &[BoundInfo]) -> bool {
+    a.len() == b.len()
+        && a.iter().all(|x| {
+            b.iter().any(|y| {
+                x.trait_name == y.trait_name
+                    && x.assoc.len() == y.assoc.len()
+                    && x.assoc.iter().all(|pair| y.assoc.contains(pair))
+            })
+        })
 }
 
 /// Collect every associated-type path an annotation names, nested positions included:

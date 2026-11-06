@@ -199,9 +199,10 @@ impl TypeChecker {
     /// declares none, which leaves the scope untouched.
     pub(crate) fn enter_method_generics(
         &mut self,
-        method: &ast_types::MethodDef,
+        generics: &[ast_types::GenericParam],
+        lifetimes: &[shared_types::Identifier],
     ) -> Option<GenericScope> {
-        if method.generics.is_empty() && method.lifetimes.is_empty() {
+        if generics.is_empty() && lifetimes.is_empty() {
             return None;
         }
         let saved = GenericScope {
@@ -210,7 +211,7 @@ impl TypeChecker {
             lifetimes: self.lifetime_scope.clone(),
             bounds: self.generic_bounds.clone(),
         };
-        self.add_generic_params(&method.generics, &method.lifetimes);
+        self.add_generic_params(generics, lifetimes);
         Some(saved)
     }
 
@@ -661,6 +662,8 @@ pub(super) fn substitute_array_len(size: &ArrayLen, subst: &HashMap<String, Type
     match size {
         ArrayLen::Param(name) => match subst.get(name) {
             Some(Type::ConstValue(v)) => ArrayLen::Fixed(*v as usize),
+            // A rename: conformance maps a trait method's const parameter to the impl's.
+            Some(Type::Generic(renamed)) => ArrayLen::Param(renamed.clone()),
             _ => size.clone(),
         },
         ArrayLen::Fixed(_) | ArrayLen::Dynamic => size.clone(),

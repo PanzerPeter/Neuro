@@ -287,6 +287,11 @@ pub(crate) struct GenericFnSig {
     /// Trait bounds per type parameter, e.g. `T: Drawable`. Checked at each call
     /// site against the inferred concrete type argument.
     pub(crate) bounds: HashMap<String, Vec<BoundInfo>>,
+    /// What the call already knows before it infers anything: a generic trait method's
+    /// `Self` and associated-type placeholders, keyed as
+    /// [`TypeChecker::open_trait_signature`] names them. Not in `param_names`, so no
+    /// turbofish reaches them.
+    pub(crate) fixed: HashMap<String, Type>,
 }
 
 /// One resolved trait bound on a type parameter.
@@ -324,6 +329,7 @@ impl MethodGenerics {
             ret,
             where_predicates: self.where_predicates.clone(),
             bounds: self.bounds.clone(),
+            fixed: HashMap::new(),
         }
     }
 }

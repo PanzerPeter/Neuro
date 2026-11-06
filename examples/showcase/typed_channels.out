@@ -6,5 +6,6 @@ drained 3
 drained 2
 drained 1
 scaled tally 17, scaled cycle 6, labelled 10
+hot true, wide count 17000000000, tally over 10: true
 sum 10, holdover 0, temperature 60, bonus 5
 total = 108

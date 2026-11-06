@@ -8,17 +8,28 @@ use super::lending::Lend;
 use super::{COLLECTION_CTOR, TypeChecker, VEC_WITH_CAPACITY, declarations, eval_const_predicate};
 use crate::errors::TypeError;
 use crate::type_checkers::closures::closure_context;
-use crate::type_checkers::declarations::traits::collect_self_assoc;
+use crate::type_checkers::declarations::traits::{
+    collect_self_assoc, declares_generics, signature_types,
+};
 use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, EQ_METHOD, PARTIAL_EQ_TRAIT};
+use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::statements::{
     borrow_target_of, function_value_position, temporary_borrow_position,
 };
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::{BoundInfo, GenericFnSig};
 use crate::types::{CollectionKind, FunctionMode, Type};
-use ast_types::{Expr, GenericArg};
+use ast_types::{Expr, GenericArg, SelfParam};
 use shared_types::{Identifier, Span};
 use std::collections::HashMap;
+
+/// A trait method reached through a bound: its visible parameter types and return type, or,
+/// when it declares parameters of its own, the signature a call infers them against and
+/// whether its receiver is taken `&mut`.
+pub(super) enum BoundMethod {
+    Plain(Vec<Type>, Type),
+    Generic(GenericFnSig, bool),
+}
 
 impl TypeChecker {
     /// Type-check a plain identifier call (free function or previously registered
@@ -111,8 +122,7 @@ impl TypeChecker {
         Some(return_type)
     }
 
-    /// Resolve a method call on a bounded type parameter to a trait method signature
-    /// Returning the visible (non-`self`) parameter types and the return type.
+    /// Resolve a method call on a bounded type parameter to a trait method signature.
     ///
     /// Searches every trait named in the parameter's bounds; the first trait declaring a
     /// method of this name wins. Returns `None` when no bound trait declares it.
@@ -127,7 +137,7 @@ impl TypeChecker {
         param: &str,
         method: &str,
         span: Span,
-    ) -> Option<(Vec<Type>, Type)> {
+    ) -> Option<BoundMethod> {
         let mut bounds = self.generic_bounds.get(param)?.clone();
         // `Copy: Clone`, so a `Copy` bound reaches `.clone()` as a `Clone` bound would.
         if bounds.iter().any(|b| b.trait_name == COPY_TRAIT) {
@@ -145,17 +155,12 @@ impl TypeChecker {
             else {
                 continue;
             };
-            if !sig.resolved_per_use {
-                return Some((sig.params.clone(), sig.ret));
+            let generic = declares_generics(&sig.decl);
+            if !sig.resolved_per_use && !generic {
+                return Some(BoundMethod::Plain(sig.params.clone(), sig.ret));
             }
             let mut named = Vec::new();
-            for ty in sig
-                .decl
-                .params
-                .iter()
-                .map(|p| &p.ty)
-                .chain(sig.decl.return_type.iter())
-            {
+            for ty in signature_types(&sig.decl) {
                 collect_self_assoc(ty, &mut named);
             }
             if let Some(open) = named
@@ -168,7 +173,24 @@ impl TypeChecker {
                     assoc: open.name.clone(),
                     span,
                 });
-                return Some((sig.params.clone(), sig.ret.clone()));
+                return Some(BoundMethod::Plain(sig.params.clone(), sig.ret.clone()));
+            }
+            if generic {
+                let assoc_types = self
+                    .traits
+                    .get(&bound.trait_name)
+                    .map(|info| info.assoc_types.clone())
+                    .unwrap_or_default();
+                let mut open = self.open_trait_signature(&sig.decl, &assoc_types);
+                open.fixed = bound
+                    .assoc
+                    .iter()
+                    .map(|(name, ty)| (format!("{SELF_ASSOC_PREFIX}{name}"), ty.clone()))
+                    .collect();
+                open.fixed
+                    .insert(SELF_TYPE_NAME.to_string(), Type::Generic(param.to_string()));
+                let exclusive = sig.self_param == Some(SelfParam::RefMut);
+                return Some(BoundMethod::Generic(open, exclusive));
             }
             let saved = std::mem::replace(
                 &mut self.self_assoc,
@@ -189,7 +211,7 @@ impl TypeChecker {
                 .unwrap_or(Type::Void);
             self.self_assoc = saved;
             self.self_type = saved_self;
-            return Some((params, ret));
+            return Some(BoundMethod::Plain(params, ret));
         }
         None
     }
@@ -457,7 +479,13 @@ impl TypeChecker {
                     });
                     continue;
                 }
-                self.check_assoc_bindings(bound, concrete, span);
+                // `T: Source<Item = U>` constrains by another parameter of the same list,
+                // so the binding is compared at what this call made of `U`.
+                let mut bound = bound.clone();
+                for (_, ty) in &mut bound.assoc {
+                    *ty = self.substitute_generic(ty, subst, span);
+                }
+                self.check_assoc_bindings(&bound, concrete, span);
             }
         }
     }
@@ -474,7 +502,7 @@ impl TypeChecker {
     pub(crate) fn check_assoc_bindings(&mut self, bound: &BoundInfo, concrete: &Type, span: Span) {
         for (assoc, expected) in &bound.assoc {
             let found = match concrete {
-                Type::Struct(name) => self
+                Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => self
                     .impl_assoc
                     .get(&(bound.trait_name.clone(), name.clone()))
                     .and_then(|b| b.get(assoc))
@@ -551,7 +579,7 @@ impl TypeChecker {
 
         // Seed the substitution with explicit turbofish arguments, then infer the
         // rest from the call arguments. A const parameter binds to `Type::ConstValue`.
-        let mut subst: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
+        let mut subst = sig.fixed.clone();
         self.seed_turbofish(
             func_name,
             &sig.param_names,
@@ -845,6 +873,7 @@ impl TypeChecker {
                     || (field.name == PARSE_METHOD && matches!(receiver, Type::String));
                 if !type_args.is_empty()
                     && !reads_turbofish
+                    && !matches!(receiver, Type::Generic(_))
                     && self.generic_method_key(&obj_ty, &field.name).is_none()
                 {
                     self.record_error(TypeError::TurbofishCountMismatch {
@@ -874,11 +903,36 @@ impl TypeChecker {
                     // to the trait's declared signature. Monomorphization later
                     // rebinds it to the concrete type's impl method.
                     Type::Generic(param) => {
-                        if let Some((visible_params, ret)) =
-                            self.resolve_generic_trait_method(param, &field.name, *span)
+                        if self
+                            .trait_method_sig(func)
+                            .is_some_and(|sig| sig.self_param == Some(SelfParam::Owned))
                         {
-                            self.check_call_args(args, &visible_params, *span);
-                            return Some(ret);
+                            self.record_move(object);
+                        }
+                        match self.resolve_generic_trait_method(param, &field.name, *span) {
+                            Some(BoundMethod::Plain(visible_params, ret)) => {
+                                if !type_args.is_empty() {
+                                    self.record_error(TypeError::TurbofishCountMismatch {
+                                        name: field.name.clone(),
+                                        expected: 0,
+                                        found: type_args.len(),
+                                        span: *span,
+                                    });
+                                }
+                                self.check_call_args(args, &visible_params, *span);
+                                return Some(ret);
+                            }
+                            Some(BoundMethod::Generic(sig, exclusive)) => {
+                                return Some(self.check_generic_call_with(
+                                    &field.name,
+                                    &sig,
+                                    type_args,
+                                    args,
+                                    Some((object, exclusive)),
+                                    *span,
+                                ));
+                            }
+                            None => {}
                         }
                         // `PartialEq` is the operator lang-item, not a declared trait, so
                         // its `eq` is typed here; `Comparable: PartialEq` reaches it too.
@@ -1144,6 +1198,7 @@ impl TypeChecker {
                         ret: return_type,
                         where_predicates: Vec::new(),
                         bounds: HashMap::new(),
+                        fixed: HashMap::new(),
                     };
                     if let Some(own) = method_generics {
                         sig.param_names.extend(own.param_names);

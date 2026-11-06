@@ -416,7 +416,7 @@ A `T: PartialEq` body may call `v.eq(&w)`, and a `T: Hashable` body may call `v.
 | `TraitMethodSignatureMismatch` | An impl method's signature differs from the trait's |
 | `TraitBoundNotSatisfied` | A generic argument does not implement a required trait |
 | `MethodGenericShadowsImpl` | A generic method's parameter reuses a name its `impl` declares |
-| `GenericMethodInTraitImpl` | A method of a trait `impl` declares type parameters of its own |
+| `GenericMethodInTraitImpl` | A method of a `Drop` or operator-trait `impl` declares type parameters of its own |
 | `UnknownDerive` | A `@derive` argument that names no derivable trait |
 | `DuplicateDerive` | The same trait listed twice in a `@derive` list |
 | `DeriveFieldUnsupported` | A field a derive cannot render, compare, clone or hash |

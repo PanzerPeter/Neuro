@@ -568,7 +568,7 @@ const SHAPE_PARAM_TYPE: &str = "u32";
 /// A parameter carrying trait bounds is left alone: a bound names a type, so the two
 /// readings cannot both be right, and leaving it makes the checker report the extent as
 /// an unknown dimension rather than silently changing what the bound meant.
-fn rekind_shape_params(
+pub(super) fn rekind_shape_params(
     params: &[Parameter],
     return_type: Option<&Type>,
     generics: &mut [GenericParam],

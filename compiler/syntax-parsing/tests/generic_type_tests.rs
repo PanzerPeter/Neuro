@@ -180,12 +180,3 @@ fn test_parse_method_turbofish_call() {
     assert!(matches!(callee.as_ref(), Expr::FieldAccess { field, .. } if field.name == "pick"));
     assert_eq!(type_args.len(), 1);
 }
-
-#[test]
-fn test_trait_method_may_not_declare_type_parameters() {
-    let source = "trait Show {\n    func show<U>(&self, u: U) -> i32\n}";
-    let err = parse(source)
-        .expect_err("a trait method declares no type parameters of its own")
-        .to_string();
-    assert!(err.contains("only an inherent `impl` method may"), "{err}");
-}

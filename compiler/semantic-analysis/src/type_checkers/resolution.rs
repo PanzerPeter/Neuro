@@ -422,10 +422,11 @@ impl TypeChecker {
     }
 
     /// Whether a trait is object-safe: every method must dispatch on a `&self`
-    /// or `&mut self` receiver and name `Self` nowhere else, and the trait must declare no
-    /// associated type. A method with no receiver (associated function), one that
-    /// consumes `self` by value, or one whose signature needs the erased type's size or
-    /// identity cannot be placed behind a fixed-layout vtable. The associated-type clause is narrower: it
+    /// or `&mut self` receiver, name `Self` nowhere else and declare no type parameters, and
+    /// the trait must declare no associated type. A method with no receiver (associated
+    /// function), one that consumes `self` by value, one whose signature needs the erased
+    /// type's size or identity, or a template with one instance per call cannot be placed
+    /// behind a fixed-layout vtable. The associated-type clause is narrower: it
     /// holds only until a trait-object type can bind one (`&dyn Iterator<Item = u32>`),
     /// which is a Phase 5 item, so the reason it reports names the missing form.
     /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending member.
@@ -450,6 +451,12 @@ impl TypeChecker {
                 }
             }
             let decl = &sig.decl;
+            if !decl.generics.is_empty() {
+                return Err(format!(
+                    "method '{}' declares type parameters of its own",
+                    name
+                ));
+            }
             if decl
                 .params
                 .iter()

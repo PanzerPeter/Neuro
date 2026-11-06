@@ -171,6 +171,7 @@ impl TypeChecker {
                     params: param_types.clone(),
                     ret: return_type.clone(),
                     where_predicates: func.where_predicates.clone(),
+                    fixed: HashMap::new(),
                     bounds,
                 },
             );

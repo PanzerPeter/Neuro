@@ -678,7 +678,7 @@ impl TypeChecker {
 
     /// The trait signature of a method called through a trait object, or through a type
     /// parameter one of whose bounds declares it.
-    fn trait_method_sig(&self, func: &Expr) -> Option<&TraitMethodSig> {
+    pub(crate) fn trait_method_sig(&self, func: &Expr) -> Option<&TraitMethodSig> {
         let Expr::FieldAccess { object, field, .. } = func else {
             return None;
         };

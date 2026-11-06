@@ -38,7 +38,7 @@ pub enum TypeError {
     MethodGenericShadowsImpl { name: String, span: Span },
 
     #[error(
-        "method '{method}' of the `impl {trait_name}` declares type parameters of its own; a trait method declares none, so only an inherent `impl` method may be generic"
+        "method '{method}' of the `impl {trait_name}` declares type parameters of its own; `{trait_name}` is compiler-known and its methods take none"
     )]
     GenericMethodInTraitImpl {
         trait_name: String,

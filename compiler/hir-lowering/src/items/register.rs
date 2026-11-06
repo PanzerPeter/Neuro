@@ -186,6 +186,11 @@ impl Lowerer {
     ) -> Result<(), LoweringError> {
         let mut methods = Vec::with_capacity(def.methods.len());
         for method in &def.methods {
+            // This list serves dynamic dispatch, which the checker refuses on a trait
+            // declaring a generic method, and such a signature resolves only per instance.
+            if !method.generics.is_empty() {
+                continue;
+            }
             let mut params = Vec::with_capacity(method.params.len());
             for param in &method.params {
                 params.push(self.resolve_trait_sig_type(&param.ty)?);
