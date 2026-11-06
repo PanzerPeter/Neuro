@@ -137,6 +137,7 @@ mod string_type;
 mod struct_by_value;
 mod struct_shorthand_update;
 mod structs;
+mod supertraits;
 mod tail_if_return;
 mod tensor_apply;
 mod tensor_compound_assign;

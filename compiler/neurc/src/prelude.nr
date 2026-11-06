@@ -95,9 +95,7 @@ export enum ParseError {
 // and a struct carrying the derive implement them with no impl block here.
 //
 // `Copy` has no methods: it is the promise that a value duplicates instead of moving.
-// It requires `Clone` (`Copy: Clone`), which the compiler enforces, because a trait
-// here cannot declare a supertrait yet.
-export trait Copy {}
+export trait Copy: Clone {}
 
 export trait Clone {
     func clone(&self) -> Self

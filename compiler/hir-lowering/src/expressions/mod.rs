@@ -75,7 +75,10 @@ impl Lowerer {
                     trait_name: trait_name.clone(),
                 });
             }
-            self.emit_supplied_vtable_impl(trait_name, value.ty.referent(), coerced.span);
+            // A supertrait's slots sit in this table, so a derived one needs its methods too.
+            for name in self.trait_closure(trait_name) {
+                self.emit_supplied_vtable_impl(&name, value.ty.referent(), coerced.span);
+            }
         }
         Ok(coerced)
     }

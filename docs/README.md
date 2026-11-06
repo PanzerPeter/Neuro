@@ -39,7 +39,7 @@ Design goals:
 | [Automatic Differentiation](language-reference/autodiff.md) | `@grad` on functions and methods, `wrt:` selection, `.backward()` / `.grad()` / `.zero_grad()`, second derivatives with `order: 2`, `.detach()` and `@no_grad`, what a differentiated body may contain |
 | [Variables](language-reference/variables.md) | `const`, `val`, `mut`, reassignment, destructuring, scoping and shadowing |
 | [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, recursion, the panic and output builtins, closures |
-| [Generics and Traits](language-reference/generics-and-traits.md) | Generic functions, structs and methods, const parameters, `where` clauses, turbofish, traits, associated types, `impl Trait` and `dyn Trait` dispatch |
+| [Generics and Traits](language-reference/generics-and-traits.md) | Generic functions, structs and methods, const parameters, `where` clauses, turbofish, traits, supertraits, associated types, `impl Trait` and `dyn Trait` dispatch |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |
 | [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `if val` / `while val`, `pool` arena blocks |
 | [Operators](language-reference/operators.md) | Arithmetic, comparison, logical, bitwise, cast, overloading, assignment places, `??`, `?`, `\|>`, `>>` |

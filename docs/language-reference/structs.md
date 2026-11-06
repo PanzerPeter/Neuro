@@ -423,7 +423,7 @@ A `T: PartialEq` body may call `v.eq(&w)`, and a `T: Hashable` body may call `v.
 | `CopyDeriveNonCopyField` | `@derive(Copy)` or `impl Copy` on a struct with a field that is not `Copy` |
 | `DeriveConflictsWithImpl` | A struct both derives a trait and declares an `impl` of it |
 | `InvalidCopyImpl` | `impl Copy` on an enum or a newtype, or a generic `impl Copy` bounding a parameter by another trait |
-| `MissingSupertraitImpl` | `impl Copy` without `Clone`, or `impl Comparable` without `PartialEq` |
+| `MissingSupertraitImpl` | `impl Copy` without `Clone`, `impl Comparable` without `PartialEq`, or any trait without one of its [supertraits](generics-and-traits.md#supertraits) |
 | `UnrenderableStruct` | A struct hole with no `Debug`, derived or by hand, or missing the `:?` specifier |
 
 ## Enum Types

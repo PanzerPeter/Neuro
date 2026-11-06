@@ -1,9 +1,9 @@
 // Showcase: traits and both dispatch forms, alongside earlier features. Integration
 // example: trait declarations with a required and a default method, impls for several
 // types, a generic bounded by two traits (`<T: Shape + Resizable>`), `impl Trait` and `dyn
-// Trait` dispatch, `Self` in signatures, fixed arrays, and `@derive(Copy)`. `impl Trait`
-// and `<T: Shape>` are monomorphized, one copy per concrete type, so they cost nothing at
-// run time. `dyn Trait` is a single runtime type: the reference carries a value pointer and
+// Trait` dispatch, `Self` in signatures, a supertrait reached by a default body, a bound and
+// a trait object, fixed arrays, and `@derive(Copy)`. `impl Trait` and `<T: Shape>` are
+// monomorphized, one copy per concrete type, so they cost nothing at run time. `dyn Trait` is a single runtime type: the reference carries a value pointer and
 // a method-table pointer, and each call goes through the table. A method returning `Self`
 // cannot sit in a method table, so `Resizable` is used through bounds only.
 
@@ -66,6 +66,39 @@ impl Resizable for Rect {
     }
 }
 
+// `Solid` requires `Shape`, so its default body may call `area` and every `Solid` is a
+// `Shape`. A `Square` without `impl Shape` would be refused at `impl Solid`.
+trait Solid: Shape {
+    func depth(&self) -> i32
+
+    func volume(&self) -> i32 {
+        self.area() * self.depth()
+    }
+}
+
+impl Solid for Square {
+    func depth(&self) -> i32 {
+        self.side
+    }
+}
+
+impl Solid for Rect {
+    func depth(&self) -> i32 {
+        2
+    }
+}
+
+// `T: Solid` reaches `Shape`'s methods and meets `scaled_area`'s `T: Shape`.
+func solid_score<T: Solid>(s: &T) -> i32 {
+    s.volume() + scaled_area(s, 1) + s.is_big()
+}
+
+// The table behind `&dyn Solid` carries `Shape`'s methods after `Solid`'s own, so one body
+// reaches both, overridden `is_big` included.
+func dyn_solid(s: &dyn Solid) -> i32 {
+    s.volume() + s.area() + s.is_big()
+}
+
 // Through the bound, `grown_twice` returns `T`, so `area()` resolves on the result.
 func area_gain<T: Shape + Resizable>(s: &T, by: i32) -> i32 {
     s.grown_twice(by).area() - s.area()
@@ -124,6 +157,10 @@ func main() -> i32 {
     // gains 48 - 24.
     val gain = area_gain(&sq, 1) + area_gain(&r, 1) // 48
 
+    // Square: 125 + 25 + 1. Rect: 48 + 24 + 0.
+    val solid = solid_score(&sq) + solid_score(&r) // 223
+    val dyn_solids = dyn_solid(&sq) + dyn_solid(&r) // 223
+
     println("scaled_area(&Square, 2)  bound generic = {a}")
     println("scaled_area(&Rect, 1)    bound generic = {b}")
     println("is_big(): default + override           = {big}")
@@ -132,9 +169,12 @@ func main() -> i32 {
     println("dyn_area over both       dynamic       = {dyn_sum}")
     println("dyn_flag over both       dynamic       = {dyn_flags}")
     println("area_gain over both      Self type     = {gain}")
+    println("solid_score over both    supertrait    = {solid}")
+    println("dyn_solid over both      supertrait    = {dyn_solids}")
 
-    // 50 + 24 + 1 + 10 + 26 + 49 + 1 + 48 = 209
-    val total = a + b + big + acc + stat + dyn_sum + dyn_flags + gain
+    // 50 + 24 + 1 + 10 + 26 + 49 + 1 + 48 + 223 + 223 = 655. A process exit code keeps the
+    // low byte, so the pin reads 143.
+    val total = a + b + big + acc + stat + dyn_sum + dyn_flags + gain + solid + dyn_solids
     println("total                                  = {total}")
     total
 }

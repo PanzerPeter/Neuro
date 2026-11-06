@@ -305,8 +305,11 @@ impl Lowerer {
             let Some(concrete) = impl_subst.get(&param.name.name) else {
                 return true;
             };
-            param.bounds.iter().all(|bound| {
-                let trait_name = &bound.trait_name.name;
+            let reached = param
+                .bounds
+                .iter()
+                .flat_map(|bound| self.trait_closure(&bound.trait_name.name));
+            reached.collect::<Vec<_>>().iter().all(|trait_name| {
                 !self.traits.contains_key(trait_name)
                     || self.implements_derivable(concrete, trait_name)
                     || match concrete {

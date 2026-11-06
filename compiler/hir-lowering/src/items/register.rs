@@ -206,7 +206,45 @@ impl Lowerer {
             });
         }
         self.traits.insert(def.name.name.clone(), methods);
+        self.supertraits.insert(
+            def.name.name.clone(),
+            def.supertraits
+                .iter()
+                .map(|bound| bound.trait_name.name.clone())
+                .collect(),
+        );
         Ok(())
+    }
+
+    /// `trait_name` and every trait it reaches through supertraits, nearest first.
+    pub(crate) fn trait_closure(&self, trait_name: &str) -> Vec<String> {
+        let mut closure = vec![trait_name.to_string()];
+        let mut next = 0;
+        while next < closure.len() {
+            for sup in self.supertraits.get(&closure[next]).into_iter().flatten() {
+                if !closure.contains(sup) {
+                    closure.push(sup.clone());
+                }
+            }
+            next += 1;
+        }
+        closure
+    }
+
+    /// A `dyn trait_name`'s vtable slots: its own methods, then each supertrait's. A
+    /// `&dyn` holds one table, so the table must carry everything a call through it
+    /// can reach. A name two traits declare takes one slot, since a type implementing
+    /// both has one method of that name.
+    pub(super) fn vtable_slots(&self, trait_name: &str) -> Vec<String> {
+        let mut slots: Vec<String> = Vec::new();
+        for name in self.trait_closure(trait_name) {
+            for method in self.traits.get(&name).into_iter().flatten() {
+                if !slots.contains(&method.name) {
+                    slots.push(method.name.clone());
+                }
+            }
+        }
+        slots
     }
 
     /// Record a hand-written `impl Copy`, as the checker does: a plain struct is `Copy`,

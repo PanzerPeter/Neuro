@@ -6,4 +6,6 @@ describe(&impl Shape)    static        = 26
 dyn_area over both       dynamic       = 49
 dyn_flag over both       dynamic       = 1
 area_gain over both      Self type     = 48
-total                                  = 209
+solid_score over both    supertrait    = 223
+dyn_solid over both      supertrait    = 223
+total                                  = 655

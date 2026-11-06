@@ -148,7 +148,7 @@ so there is no generic node to define.
 
 **Traits are erased except for one thing.** `HirItem::Trait(HirTrait { name, methods, span })`
 exists ONLY to give dynamic dispatch a canonical vtable slot order: the trait's declaration
-order. Static-dispatch traits are fully erased. `HirType::DynObject(String)` is valid only as a
+order, then each supertrait's. Static-dispatch traits are fully erased. `HirType::DynObject(String)` is valid only as a
 `HirType::Reference` referent (backends lower `&dyn T` to a `{ data ptr, vtable ptr }` fat
 pointer), and `HirExprKind::DynCoerce { value }` is the `&T` → `&dyn Trait` unsizing: `value.ty`
 names the concrete type that selects the vtable, the node's `ty` is the trait-object reference.

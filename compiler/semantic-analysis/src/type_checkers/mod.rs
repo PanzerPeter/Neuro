@@ -119,6 +119,9 @@ pub(crate) struct TypeChecker {
     /// `dyn Trait` types resolved before their trait was registered, with where they
     /// were written: object safety needs the methods, so it is checked once they exist.
     deferred_object_safety: Vec<(String, shared_types::Span)>,
+    /// Whether every trait and its supertraits are registered, so an object-safety
+    /// verdict can be reached rather than deferred.
+    traits_registered: bool,
     /// Generic-struct instances made before any impl is registered, as (instance, template,
     /// where it was written): their derives' field rules wait for the impls a field may
     /// implement a derived trait through. `None` once those rules can run as instances arrive.
@@ -352,6 +355,11 @@ pub(crate) struct TraitInfo {
     /// a trait object (`&dyn Iterator<Item = u32>`) is unimplemented, not because such a
     /// trait is undispatchable: binding it is what fixes the vtable's layout. Phase 5.
     pub(crate) assoc_types: Vec<String>,
+    /// The direct supertraits. A binding is held open as [`open_trait_signature`] holds a
+    /// signature, `Self` and `Self::Item` standing for what each use fills in.
+    ///
+    /// [`open_trait_signature`]: TypeChecker::open_trait_signature
+    pub(crate) supertraits: Vec<BoundInfo>,
 }
 
 /// How a binary operator dispatches to an operator-trait method.
@@ -501,6 +509,7 @@ impl TypeChecker {
             traits: HashMap::new(),
             trait_names: HashSet::new(),
             deferred_object_safety: Vec::new(),
+            traits_registered: false,
             deferred_instance_derives: Some(Vec::new()),
             self_assoc: HashMap::new(),
             self_type: None,
@@ -1198,6 +1207,15 @@ impl TypeChecker {
                 self.register_trait(def);
             }
         }
+        // Every trait is known now, which a supertrait's bindings are checked against and
+        // an object-safety verdict reads through.
+        for item in items {
+            if let Item::Trait(def) = item {
+                self.register_supertraits(def);
+            }
+        }
+        self.reject_supertrait_cycles(items);
+        self.traits_registered = true;
         self.check_deferred_object_safety();
 
         // Pass 2: register impl method signatures (uses struct_defs from pass 1).
@@ -1221,9 +1239,9 @@ impl TypeChecker {
             }
         }
 
-        // Pass 2b: supertrait check, after all impls are registered so
-        // `Comparable: PartialEq` and `Copy: Clone` are order-independent.
-        self.check_operator_supertraits(items);
+        // Pass 2b: supertrait check, after all impls are registered so it is
+        // independent of source order.
+        self.check_supertraits(items);
 
         // Pass 2c: a derived trait and a hand-written impl of the same trait are two
         // implementations, and each consumer would silently pick one. Runs after every

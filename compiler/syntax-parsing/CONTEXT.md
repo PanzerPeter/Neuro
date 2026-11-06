@@ -350,8 +350,9 @@ associated-type bindings `type Name = Type` alongside methods, collected into
 method goes through `parse_method_def`, which calls `try_parse_self_param` to detect
 `&self` / `&mut self` / `self` before the parameter list.
 
-`parse_trait_def` reads method signatures via `parse_trait_method_def`: a `{` after the return
-type opens a default-method body, otherwise the method is required and ends at the newline.
+`parse_trait_def` reads an optional `: A + B` supertrait list through `parse_trait_bounds`, then
+method signatures via `parse_trait_method_def`: a `{` after the return type opens a default-method
+body, otherwise the method is required and ends at the newline.
 
 ### Parameters and call arguments
 One `parse_parameter_list` serves `parse_function`, `parse_method_def`, and
@@ -458,7 +459,8 @@ as the first token of its right operand.
 token in a `<...>` list is collected into a separate `lifetimes` vector, kept apart from
 type/const generics because a lifetime does not monomorphize, with a duplicate-lifetime check.
 It also accepts `const N: T` (setting `GenericParamKind::Const`). Bounds after `:` are
-`+`-separated `TraitBound`s, each an optionally-constrained trait name: `parse_trait_bound`
+`+`-separated `TraitBound`s (`parse_trait_bounds`, shared with `where` and supertrait lists), each
+an optionally-constrained trait name: `parse_trait_bound`
 reads the name then `parse_assoc_bindings`, which takes the `<Assoc = T, ...>` form and rejects
 a positional argument, since a trait's own generic parameters are not bindable in a bound.
 `parse_where_clause` folds trait

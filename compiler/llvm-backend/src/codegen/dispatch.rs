@@ -8,7 +8,8 @@
 use inkwell::AddressSpace;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::*;
-use neuro_hir::{HirExpr, HirImpl, HirItem, HirSelfParam};
+use neuro_hir::{HirExpr, HirImpl, HirItem, HirMethod, HirSelfParam};
+use std::collections::HashMap;
 
 use crate::codegen::context::CodegenContext;
 use crate::codegen::string_ownership::dyn_callee;
@@ -28,10 +29,21 @@ impl<'ctx> CodegenContext<'ctx> {
     /// body is generated, so a `&dyn Trait` construction anywhere in the module finds its
     /// table already emitted regardless of item order.
     pub(crate) fn emit_vtables(&mut self, items: &[HirItem]) -> CodegenResult<()> {
-        for item in items {
-            let HirItem::Impl(impl_def) = item else {
-                continue;
-            };
+        let impls: Vec<&HirImpl> = items
+            .iter()
+            .filter_map(|item| match item {
+                HirItem::Impl(impl_def) => Some(impl_def),
+                _ => None,
+            })
+            .collect();
+        let mut methods: HashMap<&str, Vec<&HirMethod>> = HashMap::new();
+        for impl_def in &impls {
+            methods
+                .entry(&impl_def.type_name)
+                .or_default()
+                .extend(&impl_def.methods);
+        }
+        for impl_def in impls {
             let Some(trait_name) = impl_def.trait_name.clone() else {
                 continue;
             };
@@ -40,15 +52,27 @@ impl<'ctx> CodegenContext<'ctx> {
             if !self.trait_methods.contains_key(&trait_name) {
                 continue;
             }
-            self.emit_vtable_for(&trait_name, impl_def)?;
+            let type_methods = methods.get(impl_def.type_name.as_str());
+            let type_methods = type_methods.map_or(&[][..], Vec::as_slice);
+            self.emit_vtable_for(&trait_name, &impl_def.type_name, type_methods)?;
         }
         Ok(())
     }
 
-    /// Emit one concrete type's method table for one trait: a thunk per trait method, in
-    /// the trait's declaration order, collected into a private global array of pointers.
-    fn emit_vtable_for(&mut self, trait_name: &str, impl_def: &HirImpl) -> CodegenResult<()> {
-        let type_name = impl_def.type_name.clone();
+    /// Emit one concrete type's method table for one trait: a thunk per slot, in the
+    /// trait's slot order, collected into a private global array of pointers. A slot can
+    /// belong to a supertrait, so `type_methods` is every method the type has.
+    ///
+    /// A type with no method for a slot gets no table: the supertrait is derived, whose
+    /// methods exist only when a coercion to the trait object asked lowering to supply
+    /// them. Without that coercion nothing reads the table; with it, a slot is never empty.
+    fn emit_vtable_for(
+        &mut self,
+        trait_name: &str,
+        type_name: &str,
+        type_methods: &[&HirMethod],
+    ) -> CodegenResult<()> {
+        let type_name = type_name.to_string();
         let key = (trait_name.to_string(), type_name.clone());
         if self.vtables.contains_key(&key) {
             return Ok(());
@@ -64,16 +88,12 @@ impl<'ctx> CodegenContext<'ctx> {
             // A derived or builtin implementor's impl is supplied by lowering, its
             // methods suffixed so the type keeps no method of the trait's name.
             let supplied = format!("{}{}", method_name, SUPPLIED_SUFFIX);
-            let method = impl_def
-                .methods
+            let Some(method) = type_methods
                 .iter()
                 .find(|m| &m.name == method_name || m.name == supplied)
-                .ok_or_else(|| {
-                    CodegenError::InternalError(format!(
-                        "`impl {} for {}` is missing trait method '{}'",
-                        trait_name, type_name, method_name
-                    ))
-                })?;
+            else {
+                return Ok(());
+            };
             let thunk = self.emit_vtable_thunk(trait_name, &type_name, &method.name, method)?;
             slots.push(thunk.as_global_value().as_pointer_value().into());
         }

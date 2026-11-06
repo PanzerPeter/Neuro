@@ -6,7 +6,8 @@
 
 use ast_types::{
     ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParam, GenericParamKind, InterpPart,
-    Item, MatchArm, MethodDef, Pattern, Place, Stmt, TensorIndexArg, Type, VariantPayload,
+    Item, MatchArm, MethodDef, Pattern, Place, Stmt, TensorIndexArg, TraitBound, Type,
+    VariantPayload,
 };
 use shared_types::Identifier;
 
@@ -82,6 +83,7 @@ fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
             Ok(())
         }
         Item::Trait(def) => {
+            walk_bounds(&mut def.supertraits, f)?;
             for method in &mut def.methods {
                 walk_generics(&mut method.generics, f)?;
                 for predicate in &mut method.where_predicates {
@@ -141,11 +143,17 @@ fn walk_generics(params: &mut [GenericParam], f: SiteFn) -> Result<(), ModuleErr
         if let GenericParamKind::Const(ty) = &mut param.kind {
             walk_type(ty, f)?;
         }
-        for bound in &mut param.bounds {
-            f(Site::TypeName(&mut bound.trait_name))?;
-            for (_, ty) in &mut bound.assoc_bindings {
-                walk_type(ty, f)?;
-            }
+        walk_bounds(&mut param.bounds, f)?;
+    }
+    Ok(())
+}
+
+/// Walk a bound list: each trait it names, and the types its `Trait<Assoc = T>` bind.
+fn walk_bounds(bounds: &mut [TraitBound], f: SiteFn) -> Result<(), ModuleError> {
+    for bound in bounds {
+        f(Site::TypeName(&mut bound.trait_name))?;
+        for (_, ty) in &mut bound.assoc_bindings {
+            walk_type(ty, f)?;
         }
     }
     Ok(())

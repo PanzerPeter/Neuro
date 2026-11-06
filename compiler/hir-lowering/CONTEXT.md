@@ -572,8 +572,11 @@ names the operation's position.
 
 ### Dynamic dispatch
 A `traits` table (name → methods in declaration order, with their visible parameter and return
-types) is registered before impls, and each `Item::Trait` lowers to a `HirItem::Trait` carrying
-that order: the canonical vtable slot layout backends need. `resolve_type` delegates to
+types) and a `supertraits` table (name → direct supertraits) are registered before impls.
+`trait_closure` walks the second. Each `Item::Trait` lowers to a `HirItem::Trait` carrying
+`vtable_slots`, the trait's own methods then each supertrait's, one slot per name: the canonical
+layout backends need. A call on `&dyn Sub` finds its signature through the closure, and the
+coercion supplies methods for every trait in the closure, so a derived supertrait fills its slot. `resolve_type` delegates to
 `resolve_type_ctx(ty, behind_ref)` so `&dyn Trait` resolves to `Reference(DynObject)` while a bare
 `dyn` is an internal error (the checker rejects it first). `[T]` rides the same flag: it lowers to
 `HirType::Slice` only behind a reference.

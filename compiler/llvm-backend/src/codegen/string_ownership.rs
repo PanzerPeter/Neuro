@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use crate::types::Type;
 use neuro_hir::{
     HirCollectionKind, HirExpr, HirExprKind, HirInterpPart, HirItem, HirPlace, HirStmt,
-    HirTensorAxis, HirType,
+    HirTensorAxis, HirTrait, HirType,
 };
 
 /// The `StringBuilder` builder method that copies its bytes out into an owned `string`, and
@@ -159,17 +159,28 @@ pub(crate) fn analyze(items: &[HirItem]) -> StringOwnership {
         read_only_params.extend(grown);
     }
     // A call through a trait object reaches whichever implementor the vtable holds, so
-    // its argument is read only when every implementor's parameter is.
+    // its argument is read only when every implementor's parameter is. The slot can
+    // be a supertrait's, so the trait is the one listing the slot, not the impl's own.
+    let traits: Vec<&HirTrait> = items
+        .iter()
+        .filter_map(|item| match item {
+            HirItem::Trait(def) => Some(def),
+            _ => None,
+        })
+        .collect();
     let through_dyn: Vec<(String, usize)> = items
         .iter()
         .filter_map(|item| match item {
-            HirItem::Impl(impl_def) => Some(impl_def),
+            HirItem::Impl(impl_def) if impl_def.trait_name.is_some() => Some(impl_def),
             _ => None,
         })
-        .filter_map(|impl_def| Some((impl_def.trait_name.as_deref()?, impl_def)))
-        .flat_map(|(trait_name, impl_def)| {
-            impl_def.methods.iter().flat_map(move |method| {
-                (0..method.params.len()).map(move |index| (trait_name, &method.name, index))
+        .flat_map(|impl_def| &impl_def.methods)
+        .flat_map(|method| {
+            let listing = traits
+                .iter()
+                .filter(|def| def.methods.contains(&method.name));
+            listing.flat_map(move |def| {
+                (0..method.params.len()).map(move |index| (def.name.as_str(), &method.name, index))
             })
         })
         .filter(|(trait_name, method, index)| {
@@ -1778,6 +1789,16 @@ mod tests {
         assert!(owned.param_is_read_only("probe", 0));
         assert!(!owned.param_is_read_only("scrutinee", 0));
         assert!(!owned.param_is_read_only("arm", 0));
+    }
+
+    // The slot is `Sink`'s, so `Log`'s implementors are found through the slot list.
+    #[test]
+    fn a_supertrait_slot_reads_through_the_subtrait_object() {
+        let owned = summary(
+            "trait Sink {\n    func eat(&self, s: string) -> i32\n}\ntrait Log: Sink {}\nstruct A { k: i32 }\nimpl Sink for A {\n    func eat(&self, s: string) -> i32 { s.len() as i32 }\n}\nimpl Log for A {}\nfunc relay(d: &dyn Log, s: string) -> i32 { d.eat(s) }\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(owned.param_is_read_only(&dyn_callee("Log", "eat"), 0));
+        assert!(owned.param_is_read_only("relay", 1));
     }
 
     #[test]

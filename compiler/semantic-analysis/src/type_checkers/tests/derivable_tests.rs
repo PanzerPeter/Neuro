@@ -7,7 +7,7 @@ use crate::errors::TypeError;
 /// The prelude's declarations of the four derivable traits it states as source. The unit
 /// tests run the checker without the prelude, so each program carries them.
 const TRAITS: &str = r#"
-    trait Copy {}
+    trait Copy: Clone {}
     trait Clone { func clone(&self) -> Self }
     trait Debug { func fmt_debug(&self, out: &mut StringBuilder) }
     trait Hashable { func hash(&self) -> u64 }

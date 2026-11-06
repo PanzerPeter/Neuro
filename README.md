@@ -187,7 +187,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Types and inference** | `i8`-`u64`, `f16` / `bf16` / `f32` / `f64`, `bool`, `char`, `string`; literal suffixes, digit separators, `as` casts, aliases ([reference](docs/language-reference/types.md)) |
 | **Control flow** | `if`, `while`, `loop`, `for` over ranges, collections and the iterator protocol, `'label` breaks, blocks as values ([reference](docs/language-reference/control-flow.md)) |
 | **Functions and closures** | Named arguments, implicit returns, `\|>` pipelines, `>>` composition; closures that capture by copy, borrow or `move` ([reference](docs/language-reference/functions.md)) |
-| **Generics and traits** | Monomorphized generics with const parameters and `where` clauses, associated types, operator traits, `impl` / `dyn` dispatch ([reference](docs/language-reference/generics-and-traits.md)) |
+| **Generics and traits** | Monomorphized generics with const parameters and `where` clauses, supertraits, associated types, operator traits, `impl` / `dyn` dispatch ([reference](docs/language-reference/generics-and-traits.md)) |
 | **Structs and enums** | Methods with `&self` / `&mut self` / `self` receivers, payload variants, newtypes, `@derive(Copy, Clone, Debug, PartialEq, Hashable)` ([reference](docs/language-reference/structs.md)) |
 | **Pattern matching** | Exhaustive `match` with nested, binding-or, `@`, array, range and guard patterns, `if val` / `while val`, `val-else`, destructuring `val` bindings |
 | **Arrays and collections** | `[T; N]`, tuples, slices `&[T]` / `&mut [T]`, and `Vec<T>` / `HashMap<K, V>` / `BTreeMap<K, V>` owning any sized element |

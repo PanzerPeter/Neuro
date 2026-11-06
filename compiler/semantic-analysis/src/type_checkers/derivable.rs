@@ -28,22 +28,14 @@ pub(crate) const EQ_METHOD: &str = "eq";
 impl TypeChecker {
     /// Whether type parameter `param` carries a `Copy` bound in the scope being checked.
     pub(crate) fn has_copy_bound(&self, param: &str) -> bool {
-        self.generic_bounds
-            .get(param)
-            .is_some_and(|bounds| bounds.iter().any(|b| b.trait_name == COPY_TRAIT))
+        self.param_traits(param).iter().any(|t| t == COPY_TRAIT)
     }
 
     /// Whether `concrete` meets a `Trait` bound: a type parameter through a bound of its
     /// own, any other type through what the compiler supplies or through an `impl`.
     pub(crate) fn satisfies_bound(&self, concrete: &Type, trait_name: &str) -> bool {
         if let Type::Generic(param) = concrete {
-            // `Copy: Clone`, so a `Copy` bound answers for `Clone` as well.
-            return self.generic_bounds.get(param).is_some_and(|bounds| {
-                bounds.iter().any(|b| {
-                    b.trait_name == trait_name
-                        || (trait_name == CLONE_TRAIT && b.trait_name == COPY_TRAIT)
-                })
-            });
+            return self.param_traits(param).iter().any(|t| t == trait_name);
         }
         self.implements_without_impl(concrete, trait_name)
             || self.type_implements_trait(concrete, trait_name)

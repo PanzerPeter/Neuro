@@ -7,6 +7,7 @@
 use super::{CLONE_TRAIT, COPY_TRAIT, DERIVABLE_TRAITS, DERIVE_ATTRIBUTE, DROP_METHOD, DROP_TRAIT};
 use crate::errors::TypeError;
 use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
+use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::val_else::stmts_diverge;
 use crate::type_checkers::{MethodGenerics, TypeChecker};
 use crate::types::{FunctionMode, Type};
@@ -139,7 +140,9 @@ impl TypeChecker {
         let saved_self = self.self_type.replace(self_ty.clone());
         if let Some(t) = &def.trait_name {
             if t.name == DROP_TRAIT {
-                // handled above
+                // The body is handled above; a supertrait list can still ask for the pair.
+                self.trait_impls
+                    .insert((DROP_TRAIT.to_string(), struct_name.clone()));
             } else if is_operator_trait(&t.name) {
                 self.register_operator_impl(def, &struct_name, &t.name.clone(), struct_is_copy);
             } else {
@@ -337,46 +340,55 @@ impl TypeChecker {
             .insert((trait_name.to_string(), struct_name.to_string()));
     }
 
-    /// Verify each trait impl also has its required supertrait (`Comparable: PartialEq`,
-    /// `Copy: Clone`). Runs after every impl is registered so the check is independent of
-    /// source order. A derive provides a supertrait as well as an impl does.
-    pub(crate) fn check_operator_supertraits(&mut self, items: &[Item]) {
+    /// Verify each trait impl also has its required supertraits, and that a supertrait's
+    /// `Trait<Assoc = T>` holds of them. Runs after every impl is registered so the check
+    /// is independent of source order. A derive provides a supertrait as well as an impl
+    /// does. Each impl answers for its direct supertraits; those answer for their own.
+    pub(crate) fn check_supertraits(&mut self, items: &[Item]) {
         for item in items {
             let Item::Impl(def) = item else {
                 continue;
             };
             let Some(t) = &def.trait_name else { continue };
             let type_name = &def.type_name.name;
-            let supertrait = if t.name == COPY_TRAIT {
-                // An `impl Copy` already refused for its target has nothing left to need.
-                if !self.declares_copy(type_name) {
-                    continue;
-                }
-                CLONE_TRAIT
-            } else if let Some(sup) = operator_trait_spec(&t.name).and_then(|spec| spec.supertrait)
-            {
-                sup
-            } else {
+            // An `impl Copy` already refused for its target has nothing left to need.
+            if t.name == COPY_TRAIT && !self.declares_copy(type_name) {
+                continue;
+            }
+            let Some(ty) = self.impl_target_type(type_name) else {
                 continue;
             };
-            let has_super = if supertrait == CLONE_TRAIT {
-                // Not `satisfies_bound`: every `Copy` type answers `Clone` there, and the
-                // `Copy` impl being checked is what made this type `Copy`.
-                self.clone_structs.contains(type_name)
+            for mut sup in self.supertraits_of(&t.name) {
+                // Not `satisfies_bound`: that asks for the supertrait's own supertraits
+                // as well, which its impl reports with the right name.
+                let implemented = self.implements_without_impl(&ty, &sup.trait_name)
                     || self
                         .trait_impls
-                        .contains(&(CLONE_TRAIT.to_string(), type_name.clone()))
-            } else {
-                self.impl_target_type(type_name)
-                    .is_some_and(|ty| self.satisfies_bound(&ty, supertrait))
-            };
-            if !has_super {
-                self.record_error(TypeError::MissingSupertraitImpl {
-                    trait_name: t.name.clone(),
-                    supertrait: supertrait.to_string(),
-                    type_name: type_name.clone(),
-                    span: t.span,
-                });
+                        .contains(&(sup.trait_name.clone(), type_name.clone()));
+                if !implemented {
+                    self.record_error(TypeError::MissingSupertraitImpl {
+                        trait_name: t.name.clone(),
+                        supertrait: sup.trait_name,
+                        type_name: type_name.clone(),
+                        span: t.span,
+                    });
+                    continue;
+                }
+                if !self.traits.contains_key(&sup.trait_name) {
+                    continue;
+                }
+                let mut subst: HashMap<String, Type> = self
+                    .impl_assoc
+                    .get(&(t.name.clone(), type_name.clone()))
+                    .into_iter()
+                    .flatten()
+                    .map(|(name, ty)| (format!("{SELF_ASSOC_PREFIX}{name}"), ty.clone()))
+                    .collect();
+                subst.insert(SELF_TYPE_NAME.to_string(), ty.clone());
+                for (_, bound_ty) in &mut sup.assoc {
+                    *bound_ty = self.substitute_generic(bound_ty, &subst, t.span);
+                }
+                self.check_assoc_bindings(&sup, &ty, t.span);
             }
         }
     }

@@ -1343,8 +1343,11 @@ capture's address does not, so the checker keeps every closure that may borrow i
 
 ## Dynamic Dispatch ABI
 `codegen/dispatch.rs`. `emit_vtables` walks every `impl Trait for Type` whose trait is
-user-declared and emits a private constant global `[N x ptr]` per `(trait, type)`, in the trait's
-declaration order, filled with per-method **thunks**. A thunk is needed because a `&self` method
+user-declared and emits a private constant global `[N x ptr]` per `(trait, type)`, in
+`HirTrait.methods` slot order, filled with per-method **thunks**. A slot can be a supertrait's, so
+it is filled from every method the type has, not the one impl. A type with no method for a slot
+gets no table: the supertrait is derived, and its methods exist only once a coercion asks
+hir-lowering to supply them, so nothing can read a table left out here. A thunk is needed because a `&self` method
 takes its struct by value while a trait object holds only a pointer, so the thunk loads the
 receiver and forwards; a `&mut self` method is already pointer-passed and forwards directly.
 A derived or builtin implementor has no method of the trait's name: hir-lowering emits the impl
@@ -1357,7 +1360,8 @@ reads off the HIR type.
 `codegen_dyn_method_call` extracts both words, GEPs the method's fixed slot, and issues an indirect
 call. Its arguments move and are released as a direct call's are, under the name `dyn_callee`
 gives the `(trait, method)` pair: a parameter is read only there when it is in every implementor,
-so a by-value argument otherwise moves into the callee. `CodegenContext` carries `trait_methods`
+so a by-value argument otherwise moves into the callee. The pair comes from each trait listing the
+slot, so a call on `&dyn Sub` of a supertrait's method is summarized under `Sub`. `CodegenContext` carries `trait_methods`
 (vtable slot order, via `set_trait_methods`) and `vtables`.
 
 Static dispatch needs nothing here: `impl Trait` is monomorphized away before the HIR arrives.

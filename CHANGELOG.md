@@ -10,6 +10,19 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.30.0] - 2026-11-06
+
+### Added
+
+- **Supertraits.** `trait Priced: Named + Source<Item = u32>` requires each listed trait of every implementor. A default method calls their methods, `T: Priced` reaches them and meets a bound naming them, and `&dyn Priced` calls them through its vtable. A derive counts as an impl, and a generic impl holds per instance.
+- `SupertraitCycle`: a trait that reaches itself through its supertrait list.
+
+### Changed
+
+- The prelude writes `trait Copy: Clone {}`, so `T: Sub` with `Sub: Copy` copies, and the checker's `Copy` / `Clone` rule is gone.
+- `&dyn Copy` is refused. `Copy` now has `Clone` as a supertrait, whose `clone` returns `Self`, and a trait is object-safe only if its supertraits are.
+- `showcase/shape_traits` adds a supertrait, so its exit code reads 143.
+
 ## [5.29.0] - 2026-11-06
 
 ### Added

@@ -20,7 +20,7 @@ one and checks two things:
 | `ownership/`    | Moves, `Copy` / `.clone()`, consuming `self` receivers, immutable and mutable borrows, borrow exclusivity, returned references, collections of owned values, deterministic `Drop`, `pool` arena blocks | [Ownership](../docs/language-reference/ownership.md) |
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match` and its nested, `@` and array patterns, `val-else`, `if val` / `while val`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
-| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs and Enums](../docs/language-reference/structs.md) |
+| `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, supertraits, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs and Enums](../docs/language-reference/structs.md) |
 | `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
 | `showcase/`     | Bigger programs proving many features work **together** | see the index below |
 
@@ -160,7 +160,7 @@ in each program has the full description. The three module files under
 - [`closures.nr`](showcase/closures.nr): Closures and higher-order functions: capture by copy, by reference or by `move`, `(i32) -> i32` parameters, and closures returned or stored in fields.
 - [`derived_records.nr`](showcase/derived_records.nr): `@derive(Debug, PartialEq)` and `@derive(Copy, Clone)` on nested structs, with the `:?` spec and structural `==`.
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): Generic structs and functions with const parameters, `where` clauses, turbofish, a non-`Copy` type argument, and `?` at a generic parameter.
-- [`shape_traits.nr`](showcase/shape_traits.nr): Trait declarations with default methods, `impl Trait` and `dyn Trait` dispatch, and a generic bounded by two traits.
+- [`shape_traits.nr`](showcase/shape_traits.nr): Trait declarations with default methods, `impl Trait` and `dyn Trait` dispatch, a generic bounded by two traits, and a supertrait reached through a default body, a bound and a trait object.
 - [`typed_channels.nr`](showcase/typed_channels.nr): Associated types (`type Sample`) with one trait and three implementors, `Channel<Sample = i32>` bounds, and a generic trait method called through one.
 
 ### Structs, enums and numbers

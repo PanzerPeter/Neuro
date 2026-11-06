@@ -352,3 +352,32 @@ impl Tagged for S {}
     };
     assert_eq!(imp.methods[0].generics[0].bounds.len(), 2);
 }
+
+#[test]
+fn a_supertrait_list_keeps_its_order_and_bindings() {
+    let source = r#"
+type Whole = i32
+trait Numbers: Named + Source<Item = Whole> {}
+trait Plain {}
+"#;
+    let items = parse(source).expect("trait should parse");
+    let Item::Trait(def) = &items[0] else {
+        panic!("expected a trait item");
+    };
+    let names: Vec<&str> = def
+        .supertraits
+        .iter()
+        .map(|b| b.trait_name.name.as_str())
+        .collect();
+    assert_eq!(names, ["Named", "Source"]);
+    let (assoc, ty) = &def.supertraits[1].assoc_bindings[0];
+    assert_eq!(assoc.name, "Item");
+    assert!(
+        matches!(ty, ast_types::Type::Named(id) if id.name == "i32"),
+        "an alias in a binding is expanded, got {ty:?}"
+    );
+    let Item::Trait(plain) = &items[1] else {
+        panic!("expected a trait item");
+    };
+    assert!(plain.supertraits.is_empty());
+}

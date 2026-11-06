@@ -219,6 +219,8 @@ struct Lowerer {
     /// visible (non-`self`) parameter types and return type so a call through a
     /// `&dyn Trait` receiver types without consulting any implementor.
     traits: HashMap<String, Vec<TraitMethodInfo>>,
+    /// The direct supertraits each declared trait names.
+    supertraits: HashMap<String, Vec<String>>,
     /// Operator-trait dispatch: `(struct name, binary operator)` → how the
     /// operator desugars to a method call. Present when the struct has an operator impl.
     operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OpDispatch>,
@@ -455,6 +457,7 @@ impl Lowerer {
             impl_methods: HashMap::new(),
             trait_impls: HashSet::new(),
             traits: HashMap::new(),
+            supertraits: HashMap::new(),
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
             constants: HashMap::new(),

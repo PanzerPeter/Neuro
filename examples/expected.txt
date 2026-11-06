@@ -145,6 +145,7 @@ structs/mut_self_accumulator.nr  42
 structs/neuron.nr                4
 structs/struct_update.nr         14
 structs/structs.nr               50
+structs/supertraits.nr           45
 
 # --- modules: multi-file programs, imports, visibility, re-exports ----------
 modules/api.nr          module
@@ -211,7 +212,7 @@ showcase/scan_guard.nr               160
 showcase/sensor_pipeline.nr          57
 showcase/sensor_windows.nr           85
 showcase/settings_loader.nr          77
-showcase/shape_traits.nr             209
+showcase/shape_traits.nr             143
 showcase/simulation.nr               2
 showcase/status_report.nr            34
 showcase/stored_text.nr              95

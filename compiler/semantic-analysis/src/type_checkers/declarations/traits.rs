@@ -3,14 +3,15 @@
 //! One of the declaration-kind modules under `declarations`; each adds methods
 //! to the same `impl TypeChecker` block.
 
-use super::is_builtin_type_name;
+use super::{DROP_TRAIT, is_builtin_type_name};
 use crate::errors::TypeError;
 use crate::type_checkers::expressions::const_predicates::same_predicate;
+use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
 use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::{BoundInfo, GenericFnSig, TraitInfo, TraitMethodSig, TypeChecker};
 use crate::types::Type;
-use ast_types::{ImplDef, TraitDef, TraitMethod};
-use shared_types::Identifier;
+use ast_types::{ImplDef, Item, TraitDef, TraitMethod};
+use shared_types::{Identifier, Span};
 use std::collections::HashMap;
 
 impl TypeChecker {
@@ -99,8 +100,159 @@ impl TypeChecker {
             TraitInfo {
                 methods,
                 assoc_types: declared,
+                supertraits: Vec::new(),
             },
         );
+    }
+
+    /// Resolve a trait's `: A + B` list. A supertrait is a declared trait or one the
+    /// compiler knows by name; a typo here would otherwise read as a trait nothing can
+    /// implement.
+    pub(crate) fn register_supertraits(&mut self, def: &TraitDef) {
+        let mut written = Vec::new();
+        for bound in &def.supertraits {
+            let name = &bound.trait_name;
+            if self.traits.contains_key(&name.name)
+                || is_operator_trait(&name.name)
+                || name.name == DROP_TRAIT
+            {
+                written.push(bound.clone());
+            } else {
+                self.record_error(TypeError::UnknownTrait {
+                    trait_name: name.name.clone(),
+                    span: name.span,
+                });
+            }
+        }
+        let assoc_types = self
+            .traits
+            .get(&def.name.name)
+            .map(|info| info.assoc_types.clone())
+            .unwrap_or_default();
+        let supertraits = self.with_open_self(&assoc_types, |this| this.resolve_bounds(&written));
+        if let Some(info) = self.traits.get_mut(&def.name.name) {
+            info.supertraits = supertraits;
+        }
+    }
+
+    /// Report each trait that is its own supertrait, directly or through others, and cut
+    /// its list: every walk of the relation after this one can then assume it terminates.
+    pub(crate) fn reject_supertrait_cycles(&mut self, items: &[Item]) {
+        let cyclic: Vec<&TraitDef> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Trait(def) => Some(def),
+                _ => None,
+            })
+            .filter(|def| {
+                let name = &def.name.name;
+                self.supertraits_of(name)
+                    .iter()
+                    .any(|sup| self.trait_closure(&sup.trait_name).contains(name))
+            })
+            .collect();
+        for def in cyclic {
+            self.record_error(TypeError::SupertraitCycle {
+                trait_name: def.name.name.clone(),
+                span: def.name.span,
+            });
+            if let Some(info) = self.traits.get_mut(&def.name.name) {
+                info.supertraits.clear();
+            }
+        }
+    }
+
+    /// The direct supertraits of a trait, `Comparable: PartialEq` among them, which has no
+    /// declaration to carry it.
+    pub(crate) fn supertraits_of(&self, trait_name: &str) -> Vec<BoundInfo> {
+        if let Some(info) = self.traits.get(trait_name) {
+            return info.supertraits.clone();
+        }
+        operator_trait_spec(trait_name)
+            .and_then(|spec| spec.supertrait)
+            .map(|sup| BoundInfo {
+                trait_name: sup.to_string(),
+                assoc: Vec::new(),
+            })
+            .into_iter()
+            .collect()
+    }
+
+    /// `trait_name` and every trait it reaches through supertraits, nearest first.
+    pub(crate) fn trait_closure(&self, trait_name: &str) -> Vec<String> {
+        let mut closure = vec![trait_name.to_string()];
+        let mut next = 0;
+        while next < closure.len() {
+            for sup in self.supertraits_of(&closure[next]) {
+                if !closure.contains(&sup.trait_name) {
+                    closure.push(sup.trait_name);
+                }
+            }
+            next += 1;
+        }
+        closure
+    }
+
+    /// Every trait a type parameter's bounds reach, supertraits included.
+    pub(crate) fn param_traits(&self, param: &str) -> Vec<String> {
+        self.generic_bounds
+            .get(param)
+            .into_iter()
+            .flatten()
+            .flat_map(|bound| self.trait_closure(&bound.trait_name))
+            .collect()
+    }
+
+    /// A type parameter's bounds with each supertrait spelled out as a bound of its own,
+    /// its bindings filled in from `param` and from the subtrait's bound.
+    pub(crate) fn param_bounds(&mut self, param: &str, span: Span) -> Vec<BoundInfo> {
+        let mut bounds = self.generic_bounds.get(param).cloned().unwrap_or_default();
+        let mut next = 0;
+        while next < bounds.len() {
+            let sub = bounds[next].clone();
+            next += 1;
+            let mut subst: HashMap<String, Type> = sub
+                .assoc
+                .iter()
+                .map(|(name, ty)| (format!("{SELF_ASSOC_PREFIX}{name}"), ty.clone()))
+                .collect();
+            subst.insert(SELF_TYPE_NAME.to_string(), Type::Generic(param.to_string()));
+            // The bound may leave one of the subtrait's own associated types open, and the
+            // type behind a binding through it is then not known here.
+            let declared = self
+                .traits
+                .get(&sub.trait_name)
+                .map(|info| info.assoc_types.clone())
+                .unwrap_or_default();
+            for name in declared {
+                subst
+                    .entry(format!("{SELF_ASSOC_PREFIX}{name}"))
+                    .or_insert(Type::Unknown);
+            }
+            for mut sup in self.supertraits_of(&sub.trait_name) {
+                for (_, ty) in &mut sup.assoc {
+                    *ty = self.substitute_generic(ty, &subst, span);
+                }
+                match bounds.iter_mut().find(|b| b.trait_name == sup.trait_name) {
+                    Some(seen) => {
+                        for pair in sup.assoc {
+                            if !seen.assoc.iter().any(|(name, _)| *name == pair.0) {
+                                seen.assoc.push(pair);
+                            }
+                        }
+                    }
+                    None => bounds.push(sup),
+                }
+            }
+        }
+        bounds
+    }
+
+    /// The signature of `method` on `trait_name` or on the nearest supertrait declaring it.
+    pub(crate) fn trait_member(&self, trait_name: &str, method: &str) -> Option<&TraitMethodSig> {
+        self.trait_closure(trait_name)
+            .iter()
+            .find_map(|name| self.traits.get(name)?.methods.get(method))
     }
 
     /// Resolve one position of a trait's declared signature. A `Self` or associated-type
@@ -126,6 +278,30 @@ impl TypeChecker {
         decl: &TraitMethod,
         assoc_types: &[String],
     ) -> GenericFnSig {
+        self.with_open_self(assoc_types, |this| {
+            let scope = this.enter_method_generics(&decl.generics, &decl.lifetimes);
+            let params: Vec<Type> = decl
+                .params
+                .iter()
+                .map(|p| this.resolve_type(&p.ty).unwrap_or(Type::Unknown))
+                .collect();
+            let ret = decl
+                .return_type
+                .as_ref()
+                .map(|t| this.resolve_type(t).unwrap_or(Type::Unknown))
+                .unwrap_or(Type::Void);
+            let own = this.method_generics(&decl.generics, &decl.where_predicates);
+            this.exit_method_generics(scope);
+            own.signature(params, ret)
+        })
+    }
+
+    /// Run `body` with `Self` and each of `assoc_types` resolving to their placeholders.
+    fn with_open_self<R>(
+        &mut self,
+        assoc_types: &[String],
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         let placeholders = assoc_types
             .iter()
             .map(|name| {
@@ -137,22 +313,10 @@ impl TypeChecker {
         let saved_self = self
             .self_type
             .replace(Type::Generic(SELF_TYPE_NAME.to_string()));
-        let scope = self.enter_method_generics(&decl.generics, &decl.lifetimes);
-        let params: Vec<Type> = decl
-            .params
-            .iter()
-            .map(|p| self.resolve_type(&p.ty).unwrap_or(Type::Unknown))
-            .collect();
-        let ret = decl
-            .return_type
-            .as_ref()
-            .map(|t| self.resolve_type(t).unwrap_or(Type::Unknown))
-            .unwrap_or(Type::Void);
-        let own = self.method_generics(&decl.generics, &decl.where_predicates);
-        self.exit_method_generics(scope);
+        let result = body(self);
         self.self_type = saved_self;
         self.self_assoc = saved_assoc;
-        own.signature(params, ret)
+        result
     }
 
     /// Validate an `impl Trait for Type` block against the trait's declaration and

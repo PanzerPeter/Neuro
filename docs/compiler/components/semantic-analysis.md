@@ -54,7 +54,7 @@ val c: i64 = a as i64  // ok
 | 1d | Register traits, then check object safety of each `dyn Trait` a struct field names | conformance and generic bounds need the trait's method signatures, and so does object safety |
 | 2 | Register `impl` method signatures (generic ones via `register_generic_impl`) | uses the struct types from pass 1 |
 | 2a | Give generic instances made before their impls those impls | a bound or derive rule must see every conformance, whatever the order |
-| 2b | Supertrait check (`check_operator_supertraits`) | all impls are known, so `Comparable: PartialEq` and `Copy: Clone` are order-independent |
+| 2b | Supertrait check (`check_supertraits`) | all impls are known, so a supertrait's impl may appear after the subtrait's |
 | 2c | Reject a type that both derives a trait and implements it by hand | the two are separate implementations, and each consumer would silently pick one |
 | 2d | Field rules of `@derive(Debug, Clone, PartialEq, Hashable)` | a field may implement the trait by hand, so this waits for every impl |
 | 3 | Register module-level constants | they must be visible in every function body |

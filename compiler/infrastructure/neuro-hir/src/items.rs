@@ -66,11 +66,13 @@ pub struct HirCapture {
 /// Trait declarations are otherwise erased: an `impl Trait for T` lowers to ordinary
 /// inherent methods. What dynamic dispatch additionally needs is a *canonical method
 /// order*, shared by every implementor, so a vtable slot index is meaningful. That
-/// order is the trait's declaration order, recorded here.
+/// order is the trait's declaration order, then each supertrait's, recorded here. A
+/// generic method has no one symbol to fill a slot with, and its trait is never `dyn`,
+/// so it takes none.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirTrait {
     pub name: String,
-    /// Method names in declaration order: the vtable slot order.
+    /// Method names in vtable slot order, supertraits' included.
     pub methods: Vec<String>,
     pub span: Span,
 }

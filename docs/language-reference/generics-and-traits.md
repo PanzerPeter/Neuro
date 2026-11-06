@@ -279,7 +279,43 @@ impl Resizable for Square {
 
 Enums and newtypes take trait impls the same way structs do. A trait that names `Self` outside its receiver cannot be used as `dyn Trait` (see [Object Safety](#object-safety)).
 
-Supertraits are not yet supported: `trait Loud: Named { ... }` is a parse error. The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
+The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
+
+## Supertraits
+
+A trait may require other traits, written with the same `: A + B` syntax as a bound. Every `Priced` type is then also `Named`, so a default method can call what `Named` declares:
+
+```neuro
+trait Named {
+    func name(&self) -> string
+}
+
+trait Priced: Named {
+    func cents(&self) -> i32
+
+    func label(&self) -> string {
+        "{self.name()} costs {self.cents()}"
+    }
+}
+```
+
+`impl Priced for Book` needs `impl Named for Book` as well, or the program is rejected with ``` `impl Priced for Book` requires `impl Named for Book` ```. The two impls may come in either order, and a derive counts as an impl. A supertrait may be any declared trait, derivable trait or operator trait, or `Drop`. An unknown name is `UnknownTrait`, and a trait that reaches itself through its list is `SupertraitCycle`.
+
+A bound brings its supertraits with it, all the way up. Inside `func f<T: Priced>`, `T` has `Named`'s methods and satisfies a `Named` bound. If a supertrait is `Copy`, `T` copies. The prelude's `Copy` is itself one of these: `trait Copy: Clone {}`.
+
+A supertrait may fix an associated type, which then holds for every implementor and types its methods through a bare bound:
+
+```neuro
+trait Numbers: Source<Item = u32> {}
+
+func head<T: Numbers>(t: &mut T) -> Option<u32> { t.next() }
+```
+
+An impl whose binding differs is `AssociatedTypeBoundMismatch`. A subtrait does not inherit a supertrait's associated types: it cannot write `Self::Item` in its own signatures, and `T: Numbers<Item = u32>` is refused. To constrain a supertrait the list leaves open, name it too, as in `T: Named + Source<Item = u32>`.
+
+A generic impl holds per instance. With `impl<T: Tag> Base for Wrap<T>` and `impl<T> Top for Wrap<T>`, where `Top: Base`, a `Wrap<i32>` meets `Top` only if `i32` is `Tag`.
+
+Two traits on one type cannot share a method name, so a subtrait redeclaring a supertrait's method cannot be implemented beside it. [`supertraits.nr`](../../examples/structs/supertraits.nr) runs these forms.
 
 ## Trait Bounds and Where Clauses
 
@@ -419,6 +455,8 @@ func measure(s: &dyn Shape) -> i32 { s.area() }
 
 A trait object is unsized, so it appears only behind a reference, `&dyn Trait` or `&mut dyn Trait`. A bare `dyn Shape` is rejected with ``` `dyn Shape` is unsized and must appear behind a reference ```. A `&mut self` method requires a `&mut dyn Trait` receiver, and a call through a `&dyn` receiver is rejected.
 
+A trait object reaches its supertraits' methods as well: the table behind a `&dyn Priced` carries `Named`'s methods after `Priced`'s own, so `item.name()` works. A `&dyn Priced` does not coerce to a `&dyn Named`.
+
 A derived or builtin implementor coerces too: a struct with `@derive(Debug)` becomes a `&dyn Debug`, and so does `&n` for an `i32`. A `&string` does not yet, see [BUG-126](../BUGS.md).
 
 A default method reached through `dyn` runs the trait's body, and an override runs the implementor's.
@@ -443,6 +481,8 @@ trait Echo    { func echo<U>(&self, u: U) -> U } // one instance per U
 
 Using one of them as a trait object is an error that names the rule, for example ``trait 'Consume' is not object-safe and cannot be used as `dyn Consume`: method 'take' takes `self` by value``.
 
+A trait is object-safe only if its supertraits are, since their methods share the vtable. `Clone` names `Self` in its return type, so neither `dyn Clone` nor `dyn Copy` is accepted, nor a `dyn` of any trait requiring them. Operator traits fail the same test, whereas `Debug` and `Hashable` pass it.
+
 A trait that declares an associated type is rejected as `dyn` as well. A trait object would have to bind the type (`&dyn Channel<Sample = i32>`), and that form is not implemented.
 
 ## See also
@@ -451,4 +491,4 @@ A trait that declares an associated type is rejected as `dyn` as well. A trait o
 - [Structs](structs.md): generic enums, `@derive`, and the derivable traits.
 - [Operators](operators.md#operator-overloading): the operator traits.
 - [Ownership](ownership.md): moves, `Drop`, and element ownership.
-- Examples: [`structs/generic_methods.nr`](../../examples/structs/generic_methods.nr), [`types/assoc_bounds.nr`](../../examples/types/assoc_bounds.nr), [`types/dispatch.nr`](../../examples/types/dispatch.nr), [`showcase/shape_traits.nr`](../../examples/showcase/shape_traits.nr), [`showcase/typed_channels.nr`](../../examples/showcase/typed_channels.nr), [`showcase/generic_toolkit.nr`](../../examples/showcase/generic_toolkit.nr).
+- Examples: [`structs/generic_methods.nr`](../../examples/structs/generic_methods.nr), [`structs/supertraits.nr`](../../examples/structs/supertraits.nr), [`types/assoc_bounds.nr`](../../examples/types/assoc_bounds.nr), [`types/dispatch.nr`](../../examples/types/dispatch.nr), [`showcase/shape_traits.nr`](../../examples/showcase/shape_traits.nr), [`showcase/typed_channels.nr`](../../examples/showcase/typed_channels.nr), [`showcase/generic_toolkit.nr`](../../examples/showcase/generic_toolkit.nr).

@@ -11,7 +11,7 @@ use crate::type_checkers::closures::closure_context;
 use crate::type_checkers::declarations::traits::{
     collect_self_assoc, declares_generics, signature_types,
 };
-use crate::type_checkers::derivable::{CLONE_TRAIT, COPY_TRAIT, EQ_METHOD, PARTIAL_EQ_TRAIT};
+use crate::type_checkers::derivable::{EQ_METHOD, PARTIAL_EQ_TRAIT};
 use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::statements::{
     borrow_target_of, function_value_position, temporary_borrow_position,
@@ -124,8 +124,8 @@ impl TypeChecker {
 
     /// Resolve a method call on a bounded type parameter to a trait method signature.
     ///
-    /// Searches every trait named in the parameter's bounds; the first trait declaring a
-    /// method of this name wins. Returns `None` when no bound trait declares it.
+    /// Searches every trait the parameter's bounds reach, supertraits included; the first
+    /// trait declaring a method of this name wins. Returns `None` when no bound trait declares it.
     ///
     /// A signature naming `Self` or an associated type is re-resolved from the trait's
     /// declaration, with `Self` standing for the parameter and each associated type for
@@ -138,15 +138,7 @@ impl TypeChecker {
         method: &str,
         span: Span,
     ) -> Option<BoundMethod> {
-        let mut bounds = self.generic_bounds.get(param)?.clone();
-        // `Copy: Clone`, so a `Copy` bound reaches `.clone()` as a `Clone` bound would.
-        if bounds.iter().any(|b| b.trait_name == COPY_TRAIT) {
-            bounds.push(BoundInfo {
-                trait_name: CLONE_TRAIT.to_string(),
-                assoc: Vec::new(),
-            });
-        }
-        for bound in bounds {
+        for bound in self.param_bounds(param, span) {
             let Some(sig) = self
                 .traits
                 .get(&bound.trait_name)
@@ -508,9 +500,9 @@ impl TypeChecker {
                     .and_then(|b| b.get(assoc))
                     .cloned(),
                 Type::Generic(name) => self
-                    .generic_bounds
-                    .get(name)
-                    .and_then(|bounds| bounds.iter().find(|o| o.trait_name == bound.trait_name))
+                    .param_bounds(name, span)
+                    .iter()
+                    .find(|o| o.trait_name == bound.trait_name)
                     .and_then(|outer| {
                         outer
                             .assoc
@@ -935,11 +927,9 @@ impl TypeChecker {
                             None => {}
                         }
                         // `PartialEq` is the operator lang-item, not a declared trait, so
-                        // its `eq` is typed here; `Comparable: PartialEq` reaches it too.
+                        // its `eq` is typed here.
                         let this = Type::Generic(param.clone());
-                        if field.name == EQ_METHOD
-                            && (self.satisfies_bound(&this, PARTIAL_EQ_TRAIT)
-                                || self.satisfies_bound(&this, "Comparable"))
+                        if field.name == EQ_METHOD && self.satisfies_bound(&this, PARTIAL_EQ_TRAIT)
                         {
                             let rhs = Type::Reference {
                                 inner: Box::new(this),
@@ -961,12 +951,7 @@ impl TypeChecker {
                     // vtable. A `&mut self` method needs a `&mut dyn Trait`.
                     Type::DynObject(trait_name) => {
                         let trait_name = trait_name.clone();
-                        let Some(sig) = self
-                            .traits
-                            .get(&trait_name)
-                            .and_then(|t| t.methods.get(&field.name))
-                            .cloned()
-                        else {
+                        let Some(sig) = self.trait_member(&trait_name, &field.name).cloned() else {
                             self.record_error(TypeError::MethodNotFound {
                                 struct_name: format!("dyn {}", trait_name),
                                 method_name: field.name.clone(),

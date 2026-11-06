@@ -2,6 +2,7 @@ use ast_types::{ArraySize, GenericArg};
 
 use super::TypeChecker;
 use super::declarations::traits::names_self;
+use super::operator_traits::is_operator_trait;
 use super::tensors::TENSOR_TYPE_NAME;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type};
@@ -57,9 +58,7 @@ impl TypeChecker {
                     });
                     return None;
                 }
-                if !self.traits.contains_key(&trait_name.name)
-                    && self.trait_names.contains(&trait_name.name)
-                {
+                if !self.traits_registered && self.trait_names.contains(&trait_name.name) {
                     self.deferred_object_safety
                         .push((trait_name.name.clone(), *span));
                     return Some(Type::DynObject(trait_name.name.clone()));
@@ -429,10 +428,31 @@ impl TypeChecker {
     /// behind a fixed-layout vtable. The associated-type clause is narrower: it
     /// holds only until a trait-object type can bind one (`&dyn Iterator<Item = u32>`),
     /// which is a Phase 5 item, so the reason it reports names the missing form.
+    /// Every supertrait is held to the same test, since its methods fill the same vtable.
     /// Returns `Ok(())` when safe, or `Err(reason)` naming the first offending member.
     pub(crate) fn trait_object_safety(&self, trait_name: &str) -> Result<(), String> {
+        for name in self.trait_closure(trait_name) {
+            self.own_object_safety(&name).map_err(|reason| {
+                if name == trait_name {
+                    reason
+                } else {
+                    format!("its supertrait '{name}' is not: {reason}")
+                }
+            })?;
+        }
+        Ok(())
+    }
+
+    /// [`Self::trait_object_safety`] for one trait's own members.
+    fn own_object_safety(&self, trait_name: &str) -> Result<(), String> {
         let Some(info) = self.traits.get(trait_name) else {
-            return Ok(());
+            // `Drop` runs with the value, never through a vtable slot; every operator
+            // method consumes `self` or names `Self`.
+            return if is_operator_trait(trait_name) {
+                Err("it is an operator trait".to_string())
+            } else {
+                Ok(())
+            };
         };
         if let Some(assoc) = info.assoc_types.first() {
             return Err(format!(
@@ -550,14 +570,18 @@ impl TypeChecker {
         let name = match ty {
             Type::Struct(n) | Type::Enum(n) | Type::Newtype(n) => n,
             Type::Generic(p) => {
-                return self
-                    .generic_bounds
-                    .get(p)
-                    .is_some_and(|b| b.iter().any(|t| t.trait_name == trait_name));
+                return self.param_traits(p).iter().any(|t| t == trait_name);
             }
             _ => return false,
         };
+        // Supertraits are asked again here because an impl on a generic template answers
+        // for its instances only by name: an instance can fall short of a supertrait's
+        // bounds, or of a derive's field rule, that the template met.
         self.trait_impls
             .contains(&(trait_name.to_string(), name.clone()))
+            && self
+                .supertraits_of(trait_name)
+                .iter()
+                .all(|sup| self.satisfies_bound(ty, &sup.trait_name))
     }
 }

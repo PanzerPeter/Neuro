@@ -683,12 +683,12 @@ impl TypeChecker {
             return None;
         };
         match self.projection_type(object)?.referent() {
-            Type::DynObject(name) => self.traits.get(name)?.methods.get(&field.name),
+            Type::DynObject(name) => self.trait_member(name, &field.name),
             Type::Generic(name) => self
                 .generic_bounds
                 .get(name)?
                 .iter()
-                .find_map(|bound| self.traits.get(&bound.trait_name)?.methods.get(&field.name)),
+                .find_map(|bound| self.trait_member(&bound.trait_name, &field.name)),
             _ => None,
         }
     }

@@ -393,6 +393,9 @@ pub struct TraitDef {
     pub name: Identifier,
     /// `true` when the declaration carries `export`. See [`FunctionDef::exported`].
     pub exported: bool,
+    /// The `: A + B` list: traits every implementor must implement as well, in written
+    /// order. A bound on this trait reaches their methods.
+    pub supertraits: Vec<TraitBound>,
     /// Associated type names the trait declares (`type Item`), in declaration order.
     /// A declaration carries the name only: what it stands for is chosen by each
     /// implementor's `type Item = T` binding, which is why the two sides live on

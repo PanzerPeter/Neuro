@@ -446,6 +446,13 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
         // were already copied into the impls that omit them, which are rewritten on
         // their own, and nothing downstream reads the trait's copy.
         Item::Trait(def) => {
+            for (_, ty) in def
+                .supertraits
+                .iter_mut()
+                .flat_map(|b| &mut b.assoc_bindings)
+            {
+                rewrite_type(ty, resolved);
+            }
             for method in &mut def.methods {
                 let resolved = &*without_shadowed(resolved, &method.generics);
                 rewrite_generics(&mut method.generics, resolved);

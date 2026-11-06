@@ -157,6 +157,39 @@ func main() -> i32 { 0 }
     );
 }
 
+/// A `&dyn` holds one table, so a trait's slots run on through its supertraits. A trait
+/// reached twice, or a method declared twice, takes one slot.
+#[test]
+fn vtable_slots_run_through_the_supertraits() {
+    let program = lower(
+        r#"
+trait Both: Left + Right {
+    func own(&self) -> i32
+    func shared(&self) -> i32
+}
+trait Left: Root { func left(&self) -> i32 }
+trait Right: Root { func right(&self) -> i32 }
+trait Root {
+    func root(&self) -> i32
+    func shared(&self) -> i32
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    let trait_item = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Trait(t) if t.name == "Both" => Some(t),
+            _ => None,
+        })
+        .expect("trait item should be lowered");
+    assert_eq!(
+        trait_item.methods,
+        ["own", "shared", "left", "right", "root"].map(String::from)
+    );
+}
+
 /// Passing `&Concrete` where `&dyn Trait` is expected inserts the unsizing coercion, so
 /// the backend has an explicit node at which to build the fat pointer.
 #[test]

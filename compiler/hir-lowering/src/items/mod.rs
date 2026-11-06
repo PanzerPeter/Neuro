@@ -280,17 +280,10 @@ impl Lowerer {
                 // A trait emits no code of its own: each `impl Trait for Type`
                 // lowers via the ordinary impl path above, with any omitted default
                 // method already injected by the parser. The item carries only the
-                // declaration-ordered method list backends need to lay out vtables for
-                // dynamic dispatch. A generic method has no one symbol to fill a slot with,
-                // and its trait is never `dyn`, so it takes none.
+                // method list backends need to lay out vtables for dynamic dispatch.
                 Item::Trait(def) => hir_items.push(HirItem::Trait(neuro_hir::HirTrait {
                     name: def.name.name.clone(),
-                    methods: def
-                        .methods
-                        .iter()
-                        .filter(|m| m.generics.is_empty())
-                        .map(|m| m.name.name.clone())
-                        .collect(),
+                    methods: self.vtable_slots(&def.name.name),
                     span: def.span,
                 })),
             }

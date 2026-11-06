@@ -58,7 +58,11 @@ module per declaration kind beside it. `tests/` is split by subject.
 - **1d. `register_trait`** runs before impl registration. Trait NAMES are collected first
   (pass 0b, `trait_names`), so a struct field's `&dyn Trait` resolves in pass 1; its object
   safety needs the methods, so it is queued and checked right after 1d
-  (`check_deferred_object_safety`).
+  (`check_deferred_object_safety`). `register_supertraits` then resolves each `: A + B` list,
+  so a binding can be checked against the trait it names, and `reject_supertrait_cycles`
+  reports and cuts every cycle (`SupertraitCycle`): each later walk of the relation may assume
+  it ends. `traits_registered` holds a `dyn` verdict back until here, because one reads through
+  supertraits that may not be registered yet.
 - **2. impl method signatures** into `functions` (mangled `TypeName__methodName`) and
   `impl_methods` (type → method → mangled key). The target is a struct or an enum
   (`impl_target_type`); on an enum a member sharing a variant's name is refused
@@ -67,8 +71,9 @@ module per declaration kind beside it. `tests/` is split by subject.
   generic impls were registered (a struct field naming `Wrap<i32>`) receives them through
   `instantiate_impls_for`, from the instances `deferred_instance_derives` still lists, so the
   derive field rules of 2d and every later bound see its conformances.
-- **2b. `check_operator_supertraits`** enforces `Comparable: PartialEq` and `Copy: Clone`
-  order-independently (`MissingSupertraitImpl`); a derive supplies a supertrait as an impl does.
+- **2b. `check_supertraits`** enforces every direct supertrait order-independently
+  (`MissingSupertraitImpl`), `Comparable: PartialEq` included; a derive supplies a supertrait as
+  an impl does. A supertrait's `Trait<Assoc = T>` is checked against the impl's binding.
   **2c. `check_derive_impl_conflicts`** rejects a struct that both derives one of the five
   derivable traits and declares an `impl` of it (`DeriveConflictsWithImpl`), reading the derives
   off the struct's attributes, since a hand `impl Copy` lands in `copy_structs` (or `generic_copy_bounds`) as well.
@@ -900,7 +905,7 @@ is what needs no extent: binding, passing, returning, moving and dropping.
 ### Traits
 **The derivable traits** (`derivable.rs`). The prelude declares `Copy`, `Clone`, `Debug` and
 `Hashable` as ordinary traits, so a hand-written impl goes through conformance and a bound
-dispatches through `resolve_generic_trait_method` (a `Copy` bound reaches `Clone`'s `clone`).
+dispatches through `resolve_generic_trait_method`.
 `PartialEq` stays the operator lang-item, since `PartialEq<Rhs = Self>` needs trait type
 parameters; `is_checkable_bound` still checks a bound naming it at the call. A bound is met
 through `satisfies_bound`: a type parameter by its own bounds, anything else by
@@ -916,6 +921,17 @@ a type parameter bounded by the map's traits and `Copy`. `.eq(&rhs)` is typed by
 type parameter bounded by `PartialEq` or `Comparable`; lowering turns it into the binary `==`.
 `{x:?}` on a struct accepts a hand-written `Debug` as well as the derive, and on an enum, a
 newtype or a `T: Debug` parameter accepts the trait (`debugs_by_trait`).
+
+**Supertraits.** `TraitInfo.supertraits` holds the direct list, each binding kept open as
+`open_trait_signature` keeps a signature. `generic_bounds` stores what was written and every
+reader goes through the relation: `trait_closure` and `param_traits` answer by name,
+`param_bounds` spells each supertrait out as a bound with its bindings filled in, and
+`trait_member` finds a method on a trait or the nearest supertrait, for `dyn` receivers.
+`supertraits_of` is the one entry point, and it also answers `Comparable: PartialEq`, which has no
+declaration. Elaborating on read, not when a bound is stored, keeps a call's bound check reporting
+the trait the program wrote, and leaves bounds read before pass 1d untouched.
+`type_implements_trait` asks for the supertraits as well as the impl: a generic impl answers for
+its instances by name only, so an instance can fall short of what the template met.
 
 `traits` (name → `TraitInfo` of resolved method signatures), `trait_impls` (the `(trait, type)`
 pairs with an impl), `impl_assoc` (`(trait, type)` → what that impl bound each associated type

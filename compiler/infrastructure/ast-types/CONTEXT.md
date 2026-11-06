@@ -230,6 +230,8 @@ walkers.
   `FunctionDef` / `StructDef` / `ImplDef`.
 
 ### Method receivers
+`TraitDef.supertraits` is the `: A + B` list, `TraitBound`s as a generic parameter's bounds are.
+
 `ImplDef` holds an optional `trait_name`: `Some` for a trait implementation (`impl Drop for T`),
 `None` for an inherent block, plus `assoc_types: Vec<(Identifier, Type)>` for `type Name = T`
 bindings: the operator traits' `type Output = T`, and the answer to whatever a user trait's

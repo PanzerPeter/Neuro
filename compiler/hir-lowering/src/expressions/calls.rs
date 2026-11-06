@@ -1043,9 +1043,11 @@ impl Lowerer {
             // runtime through the vtable. The backend keys off the receiver's type.
             let trait_name = trait_name.clone();
             let sig = self
-                .traits
-                .get(&trait_name)
-                .and_then(|ms| ms.iter().find(|m| m.name == method))
+                .trait_closure(&trait_name)
+                .iter()
+                .filter_map(|name| self.traits.get(name))
+                .flatten()
+                .find(|m| m.name == method)
                 .ok_or_else(|| LoweringError::UnresolvedCall {
                     target: format!("dyn {}.{}", trait_name, method),
                 })?;

@@ -1317,7 +1317,6 @@ func main() -> i32 {
     mut m: HashMap<P, i32> = HashMap::new()
     m.insert(p, 5)
     val same = hd(&p) == p.hash() && hd(&n) == n.hash()
-    val marker: &dyn Copy = &p
     (m.get(p) ?? 0) + same as i32
 }
 "#;

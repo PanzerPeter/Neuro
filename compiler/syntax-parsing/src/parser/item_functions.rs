@@ -277,16 +277,7 @@ impl Parser {
                 if self.check(&TokenKind::Colon) {
                     self.advance(); // ':'
                     self.skip_newlines();
-                    loop {
-                        let (bound, bound_span) = self.parse_trait_bound()?;
-                        end_span = bound_span;
-                        bounds.push(bound);
-                        if !self.check(&TokenKind::Plus) {
-                            break;
-                        }
-                        self.advance(); // '+'
-                        self.skip_newlines();
-                    }
+                    (bounds, end_span) = self.parse_trait_bounds()?;
                 }
                 GenericParamKind::Type
             };
@@ -354,16 +345,7 @@ impl Parser {
                 };
                 self.consume(TokenKind::Colon, "':'")?;
                 self.skip_newlines();
-                let mut bounds: Vec<TraitBound> = Vec::new();
-                loop {
-                    let (bound, _) = self.parse_trait_bound()?;
-                    bounds.push(bound);
-                    if !self.check(&TokenKind::Plus) {
-                        break;
-                    }
-                    self.advance(); // '+'
-                    self.skip_newlines();
-                }
+                let (bounds, _) = self.parse_trait_bounds()?;
                 // Fold the bounds onto the matching type parameter; a bound naming an
                 // unknown parameter is accepted and ignored (bounds are unenforced).
                 if let Some(gp) = generics.iter_mut().find(|g| g.name.name == name) {
@@ -385,6 +367,20 @@ impl Parser {
         }
 
         Ok(predicates)
+    }
+
+    /// Parse a `+`-separated bound list, returning it with the span of its last token.
+    pub(super) fn parse_trait_bounds(&mut self) -> ParseResult<(Vec<TraitBound>, Span)> {
+        let mut bounds = Vec::new();
+        loop {
+            let (bound, end_span) = self.parse_trait_bound()?;
+            bounds.push(bound);
+            if !self.check(&TokenKind::Plus) {
+                return Ok((bounds, end_span));
+            }
+            self.advance(); // '+'
+            self.skip_newlines();
+        }
     }
 
     /// Parse one trait bound: `Trait`, or `Trait<Assoc = T>` constraining an associated

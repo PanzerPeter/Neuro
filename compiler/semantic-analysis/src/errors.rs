@@ -861,6 +861,9 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("trait '{trait_name}' is its own supertrait")]
+    SupertraitCycle { trait_name: String, span: Span },
+
     #[error("return type mismatch: expected {expected}, found {found}")]
     ReturnTypeMismatch {
         expected: Type,
@@ -1691,6 +1694,7 @@ impl TypeError {
             | Self::UnconstrainedAssociatedType { span, .. }
             | Self::AssociatedTypeBoundMismatch { span, .. }
             | Self::MissingSupertraitImpl { span, .. }
+            | Self::SupertraitCycle { span, .. }
             | Self::ReturnTypeMismatch { span, .. }
             | Self::MissingReturn { span, .. }
             | Self::UnknownTypeName { span, .. }

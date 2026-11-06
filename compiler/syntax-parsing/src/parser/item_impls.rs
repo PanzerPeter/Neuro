@@ -151,7 +151,8 @@ impl Parser {
         Ok((name, ty))
     }
 
-    /// Parse a `trait` declaration: `trait Name { <associated types> <method signatures> }`.
+    /// Parse a `trait` declaration:
+    /// `trait Name: Super + Super { <associated types> <method signatures> }`.
     ///
     /// Each method is either **required** (signature terminated by a newline, no body)
     /// or a **default** method (signature followed by a `{ ... }` block). An associated
@@ -163,6 +164,13 @@ impl Parser {
         self.skip_newlines();
         let name = self.consume_identifier("trait name")?;
         self.skip_newlines();
+        let mut supertraits = Vec::new();
+        if self.check(&TokenKind::Colon) {
+            self.advance(); // ':'
+            self.skip_newlines();
+            (supertraits, _) = self.parse_trait_bounds()?;
+            self.skip_newlines();
+        }
         self.consume(TokenKind::LeftBrace, "'{'")?;
         self.skip_newlines();
 
@@ -182,6 +190,7 @@ impl Parser {
         Ok(TraitDef {
             name,
             exported: false,
+            supertraits,
             assoc_types,
             methods,
             span: start.span.merge(close.span),
