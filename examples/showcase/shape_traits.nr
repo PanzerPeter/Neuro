@@ -172,9 +172,9 @@ func main() -> i32 {
     println("solid_score over both    supertrait    = {solid}")
     println("dyn_solid over both      supertrait    = {dyn_solids}")
 
-    // 50 + 24 + 1 + 10 + 26 + 49 + 1 + 48 + 223 + 223 = 655. A process exit code keeps the
-    // low byte, so the pin reads 143.
+    // 50 + 24 + 1 + 10 + 26 + 49 + 1 + 48 + 223 + 223 = 655. Linux keeps only the low byte of
+    // an exit code and Windows keeps all of it, so `main` reduces the total to pin 143 on both.
     val total = a + b + big + acc + stat + dyn_sum + dyn_flags + gain + solid + dyn_solids
     println("total                                  = {total}")
-    total
+    total % 256
 }

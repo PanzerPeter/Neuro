@@ -10,6 +10,12 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.30.1] - 2026-11-06
+
+### Fixed
+
+- `showcase/shape_traits` returns its total `% 256`. It returned 655 and relied on Linux keeping only the low byte of an exit code, so the example test failed on Windows, which keeps the full value.
+
 ## [5.30.0] - 2026-11-06
 
 ### Added
