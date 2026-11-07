@@ -1,20 +1,7 @@
 // `Self` as a type: inside an `impl` it names the type being extended, in signatures,
 // annotations, struct literals, paths and patterns; inside a `trait` it names the
 // implementing type, which conformance, bounded calls and object safety each answer.
-use crate::compile_harness::CompileTest;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-fn rejected(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    test.compile(&path)
-        .expect_err("the program must be rejected")
-}
+use crate::compile_harness::{compile_rejected, run};
 
 #[test]
 fn self_names_the_extended_struct_in_signatures_and_bodies() {
@@ -189,7 +176,7 @@ impl Scalable for Meters {
 
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("self_mismatch.nr", source);
+    let err = compile_rejected("self_mismatch.nr", source);
     assert!(
         err.contains("scaled") && err.contains("Meters"),
         "the diagnostic should name the method and the type Self stands for; got: {err}"
@@ -213,7 +200,7 @@ func grow(s: &dyn Scalable) -> i32 { 0 }
 
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("self_dyn.nr", source);
+    let err = compile_rejected("self_dyn.nr", source);
     assert!(
         err.contains("object-safe") && err.contains("Self"),
         "the diagnostic should say the trait names `Self`; got: {err}"
@@ -227,7 +214,7 @@ func make() -> Self { 0 }
 
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("self_free_function.nr", source);
+    let err = compile_rejected("self_free_function.nr", source);
     assert!(
         err.contains("`Self`") && err.contains("impl"),
         "the diagnostic should say where `Self` is valid; got: {err}"

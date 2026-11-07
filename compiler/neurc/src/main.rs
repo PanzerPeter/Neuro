@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use llvm_backend::OptimizationLevelSetting;
 use shared_types::Span;
 use std::ffi::OsStr;
@@ -89,6 +89,18 @@ enum EmitKind {
     LlvmIr,
 }
 
+/// The flags every command that builds a binary takes.
+#[derive(Args)]
+struct BuildArgs {
+    /// Optimization level (0-3). 0 is a debug build: integer overflow panics. 1-3 are release builds: overflow wraps. Use 2 for speed
+    #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
+    optimization: u8,
+
+    /// GPU chip for `@gpu` kernels and device tensors: an NVIDIA `sm_NN` (default `sm_60`) or an AMD `gfxNNN`, which builds for HIP and needs ROCm
+    #[arg(long, value_name = "CHIP", value_parser = parse_gpu_arch)]
+    gpu_arch: Option<GpuArch>,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Compile Neuro source files
@@ -101,17 +113,12 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
 
-        /// Optimization level (0-3). 0 is a debug build: integer overflow panics. 1-3 are release builds: overflow wraps. Use 2 for speed
-        #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
-        optimization: u8,
-
         /// Artifact to write
         #[arg(long, value_name = "KIND", default_value = "exe")]
         emit: EmitKind,
 
-        /// GPU chip for `@gpu` kernels and device tensors: an NVIDIA `sm_NN` (default `sm_60`) or an AMD `gfxNNN`, which builds for HIP and needs ROCm
-        #[arg(long, value_name = "CHIP", value_parser = parse_gpu_arch)]
-        gpu_arch: Option<GpuArch>,
+        #[command(flatten)]
+        build: BuildArgs,
     },
 
     /// Compile a Neuro source file and run it immediately
@@ -120,13 +127,8 @@ enum Commands {
         #[arg(value_name = "FILE")]
         input: PathBuf,
 
-        /// Optimization level (0-3). 0 is a debug build: integer overflow panics. 1-3 are release builds: overflow wraps. Use 2 for speed
-        #[arg(short = 'O', long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=3))]
-        optimization: u8,
-
-        /// GPU chip for `@gpu` kernels and device tensors: an NVIDIA `sm_NN` (default `sm_60`) or an AMD `gfxNNN`, which builds for HIP and needs ROCm
-        #[arg(long, value_name = "CHIP", value_parser = parse_gpu_arch)]
-        gpu_arch: Option<GpuArch>,
+        #[command(flatten)]
+        build: BuildArgs,
     },
 
     /// Check syntax and types without generating code
@@ -169,15 +171,14 @@ fn drive(cli: Cli) {
         Commands::Compile {
             input,
             output,
-            optimization,
             emit,
-            gpu_arch,
+            build,
         } => match compile_file(
             &input,
             output.as_deref(),
-            optimization,
+            build.optimization,
             emit,
-            &gpu_arch.unwrap_or_default(),
+            &build.gpu_arch.unwrap_or_default(),
         ) {
             Ok(output_path) => {
                 println!(
@@ -191,11 +192,11 @@ fn drive(cli: Cli) {
 
         // `run` forwards the program's own exit code, so a Neuro program's status is
         // what the shell sees; a compiler or linker failure is the driver's own 1.
-        Commands::Run {
-            input,
-            optimization,
-            gpu_arch,
-        } => match run_file(&input, optimization, &gpu_arch.unwrap_or_default()) {
+        Commands::Run { input, build } => match run_file(
+            &input,
+            build.optimization,
+            &build.gpu_arch.unwrap_or_default(),
+        ) {
             Ok(code) => process::exit(code),
             Err(e) => report_failure("Run failed", &e),
         },

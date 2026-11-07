@@ -7,21 +7,7 @@
 //
 // An exit code is one byte, so each expected value is kept below 256.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-/// The diagnostics from a program that must not check.
-fn rejection(name: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(name, source)
-        .expect_err(&format!("{name} should be rejected"))
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn a_transpose_moves_the_elements() {
@@ -36,7 +22,7 @@ func main() -> i32 {
     return t[0, 1] * 50 + t[2, 0] * 10 + t[1, 1]
 }
 "#;
-    assert_eq!(run_program("tensor_transpose.nr", source), 235);
+    assert_eq!(run("tensor_transpose.nr", source), 235);
 }
 
 #[test]
@@ -51,7 +37,7 @@ func main() -> i32 {
     return flat[0] * 100 + flat[3] * 10 + flat[5]
 }
 "#;
-    assert_eq!(run_program("tensor_reshape_flat.nr", source), 146);
+    assert_eq!(run("tensor_reshape_flat.nr", source), 146);
 }
 
 #[test]
@@ -67,7 +53,7 @@ func main() -> i32 {
     return r[1, 0] * 10 + r[2, 3]
 }
 "#;
-    assert_eq!(run_program("tensor_reshape_infer.nr", source), 62);
+    assert_eq!(run("tensor_reshape_infer.nr", source), 62);
 }
 
 /// The named spelling: dimension names in place of positional indices.
@@ -84,7 +70,7 @@ func main() -> i32 {
     return hwc[0, 0, 0] * 100 + hwc[0, 0, 1] * 10 + hwc[1, 2, 1]
 }
 "#;
-    assert_eq!(run_program("tensor_permute_named.nr", source), 182);
+    assert_eq!(run("tensor_permute_named.nr", source), 182);
 }
 
 #[test]
@@ -99,7 +85,7 @@ func main() -> i32 {
     return p[0, 0, 1] * 10 + p[1, 2, 0]
 }
 "#;
-    assert_eq!(run_program("tensor_permute_positional.nr", source), 76);
+    assert_eq!(run("tensor_permute_positional.nr", source), 76);
 }
 
 #[test]
@@ -115,7 +101,7 @@ func main() -> i32 {
     return flat[0, 5] * 10 + flat[1, 5]
 }
 "#;
-    assert_eq!(run_program("tensor_flatten_named.nr", source), 24);
+    assert_eq!(run("tensor_flatten_named.nr", source), 24);
 }
 
 #[test]
@@ -130,7 +116,7 @@ func main() -> i32 {
     return flat[1] * 100 + flat[2] * 10 + flat[3]
 }
 "#;
-    assert_eq!(run_program("tensor_flatten_all.nr", source), 234);
+    assert_eq!(run("tensor_flatten_all.nr", source), 234);
 }
 
 /// A shape cast consumes its receiver, so the transposed matrix and the original cannot
@@ -144,7 +130,7 @@ func main() -> i32 {
     return m[0, 0]
 }
 "#;
-    let out = rejection("tensor_shape_move.nr", source);
+    let out = rejected("tensor_shape_move.nr", source);
     assert!(
         out.contains("moved"),
         "the receiver should be moved; got: {out}"
@@ -165,7 +151,7 @@ func main() -> i32 {
     return t[2, 1] * 10 + m[0, 2]
 }
 "#;
-    assert_eq!(run_program("tensor_shape_clone.nr", source), 63);
+    assert_eq!(run("tensor_shape_clone.nr", source), 63);
 }
 
 #[test]
@@ -177,7 +163,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let out = rejection("tensor_permute_unknown.nr", source);
+    let out = rejected("tensor_permute_unknown.nr", source);
     assert!(
         out.contains("depth") && out.contains("channels") && out.contains("width"),
         "the diagnostic should list the declared names; got: {out}"
@@ -193,7 +179,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let out = rejection("tensor_reshape_count.nr", source);
+    let out = rejected("tensor_reshape_count.nr", source);
     assert!(
         out.contains("8") && out.contains("6"),
         "the diagnostic should name both counts; got: {out}"
@@ -216,7 +202,7 @@ func main() -> i32 {
     return r[1, 0] * 10 + q[1, 0]
 }
 "#;
-    assert_eq!(run_program("tensor_reshape_const.nr", source), 43);
+    assert_eq!(run("tensor_reshape_const.nr", source), 43);
 }
 
 /// A local binding shadows the constant of its name, and a binding is a run-time value.
@@ -232,7 +218,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let out = rejection("tensor_reshape_shadowed_const.nr", source);
+    let out = rejected("tensor_reshape_shadowed_const.nr", source);
     assert!(
         out.contains("not a constant"),
         "a shadowed constant should not fold; got: {out}"
@@ -252,7 +238,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let out = rejection("tensor_transpose_names.nr", source);
+    let out = rejected("tensor_transpose_names.nr", source);
     assert!(
         out.contains("height") && out.contains("width"),
         "the diagnostic should name the disagreeing axis; got: {out}"
@@ -275,5 +261,5 @@ func main() -> i32 {
     return row[2, 1]
 }
 "#;
-    assert_eq!(run_program("tensor_permute_compose.nr", source), 10);
+    assert_eq!(run("tensor_permute_compose.nr", source), 10);
 }

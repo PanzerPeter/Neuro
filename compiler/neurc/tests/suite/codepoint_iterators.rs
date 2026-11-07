@@ -11,39 +11,7 @@
 // continuation byte, or a cursor that advanced by the wrong width, would produce the
 // wrong exit code here rather than merely type-check.
 
-use crate::compile_harness::CompileTest;
-
-use std::fs;
-use std::process::Command;
-use tempfile::TempDir;
-
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
-
-/// Type-check `source`, reporting whether it was accepted and what it said.
-fn check_source(source: &str) -> (bool, String) {
-    let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    let source_path = temp_dir.path().join("test.nr");
-    fs::write(&source_path, source).expect("Failed to write source file");
-
-    let output = Command::new(neurc_path())
-        .arg("check")
-        .arg(&source_path)
-        .output()
-        .expect("Failed to execute neurc check");
-
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    (output.status.success(), stderr)
-}
-
-fn run_expecting(source: &str, expected: i32) {
-    let test = CompileTest::new();
-    let code = test
-        .compile_and_run("test.nr", source)
-        .expect("program should compile and run");
-    assert_eq!(code, expected, "unexpected exit code");
-}
+use crate::compile_harness::{check_source, run_expecting};
 
 /// The count that separates a codepoint walk from a byte walk: `.len()` is 9 bytes here
 /// and the text is 5 scalars, one from each UTF-8 width.

@@ -4,22 +4,7 @@
 // The unit tests in the `module-resolution` slice cover the binding table against a stub
 // parser; these compile and run the real thing.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile `root` after writing every `(path, source)` pair, and return the exit code.
-fn run_program(files: &[(&str, &str)], root: &str) -> Result<i32, String> {
-    let test = CompileTest::new();
-    let mut root_path = None;
-    for (path, source) in files {
-        let written = test.write_source(path, source);
-        if *path == root {
-            root_path = Some(written);
-        }
-    }
-    let root_path = root_path.ok_or_else(|| format!("{} is not among the written files", root))?;
-    let exe = test.compile(&root_path)?;
-    test.run_executable(&exe)
-}
+use crate::compile_harness::{CompileTest, run_program};
 
 fn run(source: &str) -> Result<i32, String> {
     CompileTest::new().compile_and_run("main.nr", source)

@@ -6,26 +6,7 @@
 // pass that silently ignored a label would still compile, and only the answer would be
 // wrong.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, asserting it exits with `expected_exit`.
-fn assert_exit(name: &str, source: &str, expected_exit: i32) {
-    let test = CompileTest::new();
-    let exit_code = test
-        .compile_and_run(name, source)
-        .expect("compilation or execution failed");
-    assert_eq!(exit_code, expected_exit, "{name} returned the wrong value");
-}
-
-/// Compile a program expected to be rejected, returning the diagnostic text.
-fn compile_error(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    match test.compile(&path) {
-        Ok(_) => panic!("{name} compiled but should have been rejected"),
-        Err(message) => message,
-    }
-}
+use crate::compile_harness::{CompileTest, assert_exit, compile_rejected};
 
 #[test]
 fn a_named_argument_binds_by_name_not_position() {
@@ -192,7 +173,7 @@ fn a_named_argument_is_bound_inside_every_nested_position() {
 
 #[test]
 fn a_positional_argument_may_not_follow_a_named_one() {
-    let message = compile_error(
+    let message = compile_rejected(
         "positional_after_named.nr",
         "func f(a: i32, b: i32) -> i32 { return a }\n\
          func main() -> i32 { return f(b: 1, 2) }\n",
@@ -205,7 +186,7 @@ fn a_positional_argument_may_not_follow_a_named_one() {
 
 #[test]
 fn an_unknown_label_is_rejected() {
-    let message = compile_error(
+    let message = compile_rejected(
         "unknown_label.nr",
         "func f(a: i32) -> i32 { return a }\n\
          func main() -> i32 { return f(nope: 1) }\n",
@@ -218,7 +199,7 @@ fn an_unknown_label_is_rejected() {
 
 #[test]
 fn omitting_a_required_label_is_rejected() {
-    let message = compile_error(
+    let message = compile_rejected(
         "missing_label.nr",
         "func f(_ v: i32, min lo: i32) -> i32 { return v + lo }\n\
          func main() -> i32 { return f(1, 2) }\n",
@@ -231,7 +212,7 @@ fn omitting_a_required_label_is_rejected() {
 
 #[test]
 fn a_positional_only_parameter_may_not_be_named() {
-    let message = compile_error(
+    let message = compile_rejected(
         "suppressed_label.nr",
         "func f(_ v: i32) -> i32 { return v }\n\
          func main() -> i32 { return f(v: 1) }\n",
@@ -244,7 +225,7 @@ fn a_positional_only_parameter_may_not_be_named() {
 
 #[test]
 fn one_parameter_may_not_be_named_twice() {
-    let message = compile_error(
+    let message = compile_rejected(
         "duplicate_label.nr",
         "func f(a: i32, b: i32) -> i32 { return a + b }\n\
          func main() -> i32 { return f(a: 1, a: 2) }\n",
@@ -257,7 +238,7 @@ fn one_parameter_may_not_be_named_twice() {
 
 #[test]
 fn two_parameters_may_not_share_a_call_site_name() {
-    let message = compile_error(
+    let message = compile_rejected(
         "clashing_labels.nr",
         "func f(width w: i32, width h: i32) -> i32 { return w + h }\n\
          func main() -> i32 { return f(width: 1) }\n",
@@ -270,7 +251,7 @@ fn two_parameters_may_not_share_a_call_site_name() {
 
 #[test]
 fn a_closure_call_rejects_a_named_argument() {
-    let message = compile_error(
+    let message = compile_rejected(
         "closure_label.nr",
         "func main() -> i32 {\n\
          \x20   val double = |x: i32| x * 2\n\

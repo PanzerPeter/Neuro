@@ -5,14 +5,7 @@
 // makes possible for the first time: before it, a tensor could only be asserted on
 // through its shape and its parameter count.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
+use crate::compile_harness::run;
 
 #[test]
 fn an_element_is_read_by_naming_every_axis() {
@@ -26,7 +19,7 @@ func main() -> i32 {
     return m[2, 1]
 }
 "#;
-    assert_eq!(run_program("tensor_element.nr", source), 21);
+    assert_eq!(run("tensor_element.nr", source), 21);
 }
 
 /// A run-time position is legal on every axis, so a loop can walk a tensor.
@@ -46,7 +39,7 @@ func main() -> i32 {
     return trace
 }
 "#;
-    assert_eq!(run_program("tensor_trace.nr", source), 15);
+    assert_eq!(run("tensor_trace.nr", source), 15);
 }
 
 /// `matrix[0, ..]` and `matrix[.., 1]`: an axis given a position is dropped, so
@@ -65,7 +58,7 @@ func main() -> i32 {
     return row[3] + column[0] + column[2]
 }
 "#;
-    assert_eq!(run_program("tensor_axis_slice.nr", source), 13 + 2 + 22);
+    assert_eq!(run("tensor_axis_slice.nr", source), 13 + 2 + 22);
 }
 
 /// `matrix[1..3, 2..5]` and `matrix[0..=2, 0..=2]`, on one tensor.
@@ -84,7 +77,7 @@ func main() -> i32 {
     return exclusive[0, 0] + exclusive[1, 2] + inclusive[2, 2]
 }
 "#;
-    assert_eq!(run_program("tensor_range_slice.nr", source), 12 + 24 + 22);
+    assert_eq!(run("tensor_range_slice.nr", source), 12 + 24 + 22);
 }
 
 /// `image[.., 10..42, 10..42]`: a rank-3 tensor sliced on two axes while the
@@ -102,7 +95,7 @@ func main() -> i32 {
     return patch[0, 0, 0] + patch[1, 1, 1] + plane[2, 3]
 }
 "#;
-    assert_eq!(run_program("tensor_patch.nr", source), 5 + 22 + 23);
+    assert_eq!(run("tensor_patch.nr", source), 5 + 22 + 23);
 }
 
 /// A slice is an owned tensor of its own, so it may be sliced again, moved into a
@@ -126,7 +119,7 @@ func main() -> i32 {
     return total(row) + total(copy)
 }
 "#;
-    assert_eq!(run_program("tensor_slice_owned.nr", source), 2 * 15);
+    assert_eq!(run("tensor_slice_owned.nr", source), 2 * 15);
 }
 
 /// Indexing reads through a borrow: the caller still owns the tensor afterwards, which
@@ -150,7 +143,7 @@ func main() -> i32 {
     return a + b + row[1]
 }
 "#;
-    assert_eq!(run_program("tensor_borrow_index.nr", source), 4 + 4 + 2);
+    assert_eq!(run("tensor_borrow_index.nr", source), 4 + 4 + 2);
 }
 
 /// A slice of a float tensor keeps its element type and its values.
@@ -167,7 +160,7 @@ func main() -> i32 {
     return doubled as i32
 }
 "#;
-    assert_eq!(run_program("tensor_float_slice.nr", source), 11);
+    assert_eq!(run("tensor_float_slice.nr", source), 11);
 }
 
 /// The in-place update and the index meet on one buffer: `w -= g` writes through the
@@ -183,7 +176,7 @@ func main() -> i32 {
     return w[0, 0] + w[1, 1]
 }
 "#;
-    assert_eq!(run_program("tensor_index_after_update.nr", source), 8 + 32);
+    assert_eq!(run("tensor_index_after_update.nr", source), 8 + 32);
 }
 
 /// A position outside its axis panics on the debug tier, the tier an array's bounds
@@ -204,7 +197,7 @@ func main() -> i32 {
     return acc
 }
 "#;
-    let exit_code = run_program("tensor_index_oob.nr", source);
+    let exit_code = run("tensor_index_oob.nr", source);
     assert!(
         exit_code < 0,
         "an out-of-range tensor index aborts; got {exit_code}"

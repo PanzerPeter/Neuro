@@ -4,19 +4,7 @@
 //! and a closure that borrows nothing owns its environment, so it may be returned, stored
 //! and copied, its environment released with the last copy.
 
-use crate::compile_harness::CompileTest;
-
-fn run(filename: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(filename, source)
-        .expect("compile/run failed")
-}
-
-fn refused(filename: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(filename, source)
-        .expect_err("the program should be refused")
-}
+use crate::compile_harness::{CompileTest, rejected, run};
 
 /// The program's stdout and exit code.
 fn output(filename: &str, source: &str) -> (String, Option<i32>) {
@@ -118,7 +106,7 @@ func main() -> i32 {
 
 #[test]
 fn a_parameter_nothing_types_is_refused() {
-    let err = refused(
+    let err = rejected(
         "untyped.nr",
         r#"
 func main() -> i32 {
@@ -132,7 +120,7 @@ func main() -> i32 {
 
 #[test]
 fn a_return_in_a_body_with_no_return_type_is_refused() {
-    let err = refused(
+    let err = rejected(
         "inferred_return.nr",
         r#"
 func main() -> i32 {
@@ -238,7 +226,7 @@ fn a_value_that_may_borrow_cannot_leave_its_scope() {
             "func len_of(s: &string) -> () -> u64 {\n    val g = {\n        val r = s\n        move || r.len()\n    }\n    g\n}",
         ),
     ] {
-        let err = refused(name, &format!("{item}\nfunc main() -> i32 {{ 0 }}\n"));
+        let err = rejected(name, &format!("{item}\nfunc main() -> i32 {{ 0 }}\n"));
         assert!(
             err.contains("lives only as long as that scope"),
             "{name}: {err}"

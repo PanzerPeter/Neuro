@@ -8,38 +8,13 @@
 // machinery was inline. The `-O2` cases matter most: the thunks are `noinline`, so the
 // optimizer must not fold them back in and must not lose the message.
 
+use crate::compile_harness::compile_tagged;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-/// Path to the `neurc` binary Cargo built for this test run.
-fn neurc_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
-
 /// Compile `source` at the given optimization level, returning the executable path.
 fn compile_source(source: &str, tag: &str, optimization: &str) -> PathBuf {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_outline_{tag}.nr"));
-    let exe = dir.join(format!("neuro_outline_{tag}"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("compile")
-        .arg(&src)
-        .arg("-O")
-        .arg(optimization)
-        .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-
-    assert!(
-        output.status.success(),
-        "compile failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    exe
+    compile_tagged(source, &format!("outline_{tag}"), optimization)
 }
 
 fn run(exe: &PathBuf) -> Output {

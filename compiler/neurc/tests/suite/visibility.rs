@@ -5,22 +5,7 @@
 // the type checker against the module each item carries: these tests exercise both paths
 // through the real compiler.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile `root` after writing every `(path, source)` pair, and return the exit code.
-fn run_program(files: &[(&str, &str)], root: &str) -> Result<i32, String> {
-    let test = CompileTest::new();
-    let mut root_path = None;
-    for (path, source) in files {
-        let written = test.write_source(path, source);
-        if *path == root {
-            root_path = Some(written);
-        }
-    }
-    let root_path = root_path.ok_or_else(|| format!("{} is not among the written files", root))?;
-    let exe = test.compile(&root_path)?;
-    test.run_executable(&exe)
-}
+use crate::compile_harness::{CompileTest, run_program};
 
 /// The module a program's public surface is taken from throughout these tests.
 const LIB: &str = r#"

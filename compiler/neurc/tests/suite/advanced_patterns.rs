@@ -4,18 +4,12 @@
 
 use std::process::Command;
 
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, run};
 
 const TOKENS: &str = r#"
 enum Tok { Num(i32), Neg(i32), Word(i32, bool), End }
 enum Wrap { Inner(Tok), Pair(Tok, Tok), Nothing }
 "#;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .expect("compile/run failed")
-}
 
 #[test]
 fn alternatives_bind_from_whichever_one_matched() {

@@ -8,42 +8,12 @@
 //
 // Each program is compiled at both `-O0` and `-O3` and the exit codes must agree: the
 // disagreement is the defect, independently of which answer is the right one.
-use std::path::PathBuf;
+use crate::compile_harness::compile_tagged;
 use std::process::Command;
-
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
 
 /// Compile `source` at optimization level `opt` and return its exit code.
 fn compile_and_run(source: &str, tag: &str, opt: &str) -> i32 {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_f2i_{tag}_{opt}.nr"));
-    let exe = dir.join(format!("neuro_f2i_{tag}_{opt}"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("compile")
-        .arg(&src)
-        .arg("-O")
-        .arg(opt)
-        .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-    assert!(
-        output.status.success(),
-        "compile at -O{opt} failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
+    let exe = compile_tagged(source, &format!("f2i_{tag}_{opt}"), opt);
     Command::new(&exe)
         .output()
         .expect("run executable")

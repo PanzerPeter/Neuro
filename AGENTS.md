@@ -172,7 +172,9 @@ Where tests go:
   binary). These compile real `.nr` source with the built `neurc` binary and
   run it. Use the `CompileTest` helper in
   `compiler/neurc/tests/suite/compile_harness/mod.rs`; it writes sources to a
-  temp dir and resolves the binary through `CARGO_BIN_EXE_neurc`.
+  temp dir and resolves the binary through `CARGO_BIN_EXE_neurc`. That module
+  also holds the free functions tests share (`run`, `rejected`, `stdout_of`,
+  `compile_tagged` and others). Reach for them before writing a local helper.
 - **Example programs**: `examples/`, grouped by topic. Each program is pinned
   two ways: its `main` return value is its process exit code, registered in
   `examples/expected.txt`, and its stdout is fixed byte for byte in a sibling

@@ -7,21 +7,7 @@
 //
 // An exit code is one byte, so each expected value is kept below 256.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-/// The diagnostics from a program that must not check.
-fn rejection(name: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(name, source)
-        .expect_err(&format!("{name} should be rejected"))
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn a_whole_tensor_reduction_folds_every_element() {
@@ -35,7 +21,7 @@ func main() -> i32 {
     return m.sum() + m.max() * 10 + m.min() * 100
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_whole.nr", source), 181);
+    assert_eq!(run("tensor_reduce_whole.nr", source), 181);
 }
 
 /// The two axes of the same matrix reduce over different runs, which is what a
@@ -54,7 +40,7 @@ func main() -> i32 {
     return rows[0] * 10 + rows[1] + cols[0] + cols[2] * 10
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_axis.nr", source), 170);
+    assert_eq!(run("tensor_reduce_axis.nr", source), 170);
 }
 
 #[test]
@@ -70,7 +56,7 @@ func main() -> i32 {
     return middle[0, 0] * 10 + middle[0, 1] + middle[1, 0] + middle[1, 1]
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_rank3.nr", source), 72);
+    assert_eq!(run("tensor_reduce_rank3.nr", source), 72);
 }
 
 #[test]
@@ -87,7 +73,7 @@ func main() -> i32 {
     return (all as i32) * 10 + (rows[0] as i32) + (rows[1] as i32)
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_mean.nr", source), 60);
+    assert_eq!(run("tensor_reduce_mean.nr", source), 60);
 }
 
 /// A negative axis counts from the end, and a dimension name selects the same axis its
@@ -106,7 +92,7 @@ func main() -> i32 {
     return by_name[2] * 10 + by_index[0] * 5 + by_index[1]
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_named_axis.nr", source), 81);
+    assert_eq!(run("tensor_reduce_named_axis.nr", source), 81);
 }
 
 /// A reduction reads its receiver: the tensor is still there afterwards, and a borrow is
@@ -125,7 +111,7 @@ func main() -> i32 {
     return range * 10 + total
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_borrowed.nr", source), 92);
+    assert_eq!(run("tensor_reduce_borrowed.nr", source), 92);
 }
 
 /// Reducing a vector along its only axis yields the rank-0 tensor. Indexing cannot read
@@ -140,7 +126,7 @@ func main() -> i32 {
     return folded.sum()
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_rank0.nr", source), 22);
+    assert_eq!(run("tensor_reduce_rank0.nr", source), 22);
 }
 
 /// `.max()` / `.min()` fold with the sorting comparator, where a `NaN` is the worst
@@ -169,7 +155,7 @@ func main() -> i32 {
     return total
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_nan.nr", source), 103);
+    assert_eq!(run("tensor_reduce_nan.nr", source), 103);
 }
 
 /// A float run longer than 4096 folds in lanes: lane `l` takes run positions `l`, `l + 4096`,
@@ -195,7 +181,7 @@ func main() -> i32 {
     return ((rows[0] - 16777216.0f32) / 8.0f32) as i32
 }
 "#;
-    assert_eq!(run_program("tensor_reduce_lanes.nr", source), 226);
+    assert_eq!(run("tensor_reduce_lanes.nr", source), 226);
 }
 
 /// The lane order written out in scalar code: `reference` folds the first `n` elements of a
@@ -418,7 +404,7 @@ fn every_reduction_keeps_the_lane_order_bits() {
         LANE_MODEL
     )
     .replace("RUN", &longest.to_string());
-    assert_eq!(run_program("tensor_reduce_lane_bits.nr", &source), 0);
+    assert_eq!(run("tensor_reduce_lane_bits.nr", &source), 0);
 }
 
 #[test]
@@ -430,7 +416,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let errors = rejection("tensor_reduce_bool.nr", source);
+    let errors = rejected("tensor_reduce_bool.nr", source);
     assert!(
         errors.contains("integer or float element type"),
         "a bool tensor should be rejected: {errors}"
@@ -446,7 +432,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let errors = rejection("tensor_reduce_int_mean.nr", source);
+    let errors = rejected("tensor_reduce_int_mean.nr", source);
     assert!(
         errors.contains("no rounding rule"),
         "an integer mean should be rejected: {errors}"
@@ -462,7 +448,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let errors = rejection("tensor_reduce_empty.nr", source);
+    let errors = rejected("tensor_reduce_empty.nr", source);
     assert!(
         errors.contains("reduces over no elements"),
         "an empty reduction should be rejected: {errors}"
@@ -478,7 +464,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let errors = rejection("tensor_reduce_bad_axis.nr", source);
+    let errors = rejected("tensor_reduce_bad_axis.nr", source);
     assert!(
         errors.contains("out of range"),
         "an out-of-range axis should be rejected: {errors}"
@@ -494,7 +480,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let errors = rejection("tensor_reduce_bad_name.nr", source);
+    let errors = rejected("tensor_reduce_bad_name.nr", source);
     assert!(
         errors.contains("no dimension named 'depth'"),
         "an unknown dimension should be rejected: {errors}"

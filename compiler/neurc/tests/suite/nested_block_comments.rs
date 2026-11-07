@@ -5,26 +5,7 @@
 // the first `*/` closed the outer comment, the remaining body would reach the
 // parser as garbage and compilation would fail outright.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, asserting it exits with `expected_exit`.
-fn assert_exit(name: &str, source: &str, expected_exit: i32) {
-    let test = CompileTest::new();
-    let exit_code = test
-        .compile_and_run(name, source)
-        .expect("compilation or execution failed");
-    assert_eq!(exit_code, expected_exit, "{name} returned the wrong value");
-}
-
-/// Compile a program expected to be rejected, returning the diagnostic text.
-fn compile_error(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    match test.compile(&path) {
-        Ok(_) => panic!("{name} compiled but should have been rejected"),
-        Err(message) => message,
-    }
-}
+use crate::compile_harness::{assert_exit, compile_rejected};
 
 #[test]
 fn a_nested_comment_is_skipped_whole() {
@@ -90,7 +71,7 @@ fn comment_delimiters_inside_string_literals_are_inert() {
 /// never exists and the error must name the comment, not the missing function.
 #[test]
 fn an_unclosed_inner_comment_is_reported() {
-    let message = compile_error(
+    let message = compile_rejected(
         "nested_comment_unclosed.nr",
         "func main() -> i32 {\n\
          \x20   /* outer /* inner */\n\

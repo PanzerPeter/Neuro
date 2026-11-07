@@ -7,21 +7,7 @@
 //
 // An exit code is one byte, so each expected value is kept below 256.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-/// The diagnostics from a program that must not check.
-fn rejection(name: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(name, source)
-        .expect_err(&format!("{name} should be rejected"))
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn a_map_rewrites_every_element_and_keeps_the_shape() {
@@ -36,10 +22,7 @@ func main() -> i32 {
     return doubled[0, 0] + doubled[0, 2] * 2 + doubled[1, 0] * 3 + doubled[1, 2] * 4
 }
 "#;
-    assert_eq!(
-        run_program("apply_map.nr", source),
-        2 + 6 * 2 + 8 * 3 + 12 * 4
-    );
+    assert_eq!(run("apply_map.nr", source), 2 + 6 * 2 + 8 * 3 + 12 * 4);
 }
 
 /// The result's element type is the FUNCTION's return type, not the receiver's element
@@ -53,7 +36,7 @@ func main() -> i32 {
     return (halves[3] * 10.0) as i32
 }
 "#;
-    assert_eq!(run_program("apply_map_retype.nr", source), 20);
+    assert_eq!(run("apply_map_retype.nr", source), 20);
 }
 
 #[test]
@@ -72,7 +55,7 @@ func main() -> i32 {
     return paired[0, 0] + paired[0, 1] + paired[1, 0] + paired[1, 1]
 }
 "#;
-    assert_eq!(run_program("apply_zip.nr", source), 5 + 12 + 21 + 32);
+    assert_eq!(run("apply_zip.nr", source), 5 + 12 + 21 + 32);
 }
 
 /// The two operands need not hold the same element type: the function's parameters name
@@ -87,7 +70,7 @@ func main() -> i32 {
     return (scaled[0] * 10.0 + scaled[1] * 10.0 + scaled[2] * 10.0) as i32
 }
 "#;
-    assert_eq!(run_program("apply_zip_mixed.nr", source), 5 + 30 + 60);
+    assert_eq!(run("apply_zip_mixed.nr", source), 5 + 30 + 60);
 }
 
 /// A fold yields ONE value of the seed's type, the way a whole-tensor `.sum()` does, not
@@ -104,7 +87,7 @@ func main() -> i32 {
     return total
 }
 "#;
-    assert_eq!(run_program("apply_reduce.nr", source), 21);
+    assert_eq!(run("apply_reduce.nr", source), 21);
 }
 
 /// The accumulator is handed over FIRST, which is what `|acc, x|` means. A fold that
@@ -119,7 +102,7 @@ func main() -> i32 {
     return t.reduce(10, |acc: i32, x: i32| -> i32 { acc * 2 + x })
 }
 "#;
-    assert_eq!(run_program("apply_reduce_order.nr", source), 91);
+    assert_eq!(run("apply_reduce_order.nr", source), 91);
 }
 
 /// Every traversal READS its operands. A borrowed receiver is accepted and the caller's
@@ -141,7 +124,7 @@ func main() -> i32 {
     return s[1, 1] + w[1, 1]
 }
 "#;
-    assert_eq!(run_program("apply_borrowed.nr", source), 20 + 4);
+    assert_eq!(run("apply_borrowed.nr", source), 20 + 4);
 }
 
 /// Traversals compose: a `.map` produces an ordinary tensor value, so the next call in
@@ -157,7 +140,7 @@ func main() -> i32 {
         .reduce(0, |acc: i32, x: i32| -> i32 { acc + x })
 }
 "#;
-    assert_eq!(run_program("apply_chain.nr", source), 4 + 9 + 16 + 25);
+    assert_eq!(run("apply_chain.nr", source), 4 + 9 + 16 + 25);
 }
 
 /// The function is an ordinary function VALUE, so anything that produces one works:
@@ -174,7 +157,7 @@ func main() -> i32 {
     return t.map(rescale).reduce(0, |acc: i32, x: i32| -> i32 { acc + x })
 }
 "#;
-    assert_eq!(run_program("apply_composed.nr", source), 2 + 3 + 4 + 5);
+    assert_eq!(run("apply_composed.nr", source), 2 + 3 + 4 + 5);
 }
 
 /// An untyped seed takes its type from the accumulator parameter, which is the only thing
@@ -188,7 +171,7 @@ func main() -> i32 {
     return (total * 10.0) as i32
 }
 "#;
-    assert_eq!(run_program("apply_seed_type.nr", source), 70);
+    assert_eq!(run("apply_seed_type.nr", source), 70);
 }
 
 #[test]
@@ -200,7 +183,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_not_callable.nr", source);
+    let diagnostics = rejected("apply_not_callable.nr", source);
     assert!(
         diagnostics.contains("`.map` takes a function"),
         "unexpected diagnostics: {diagnostics}"
@@ -216,7 +199,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_param_type.nr", source);
+    let diagnostics = rejected("apply_param_type.nr", source);
     assert!(
         diagnostics.contains("parameter 0 of its function"),
         "unexpected diagnostics: {diagnostics}"
@@ -232,7 +215,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_arity.nr", source);
+    let diagnostics = rejected("apply_arity.nr", source);
     assert!(
         diagnostics.contains("calls its function with 1 argument"),
         "unexpected diagnostics: {diagnostics}"
@@ -251,7 +234,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_zip_shape.nr", source);
+    let diagnostics = rejected("apply_zip_shape.nr", source);
     assert!(
         diagnostics.contains("`.zip` walks two tensors at the same index"),
         "unexpected diagnostics: {diagnostics}"
@@ -267,7 +250,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_zip_operand.nr", source);
+    let diagnostics = rejected("apply_zip_operand.nr", source);
     assert!(
         diagnostics.contains("`.zip` takes a tensor"),
         "unexpected diagnostics: {diagnostics}"
@@ -284,7 +267,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_reduce_acc.nr", source);
+    let diagnostics = rejected("apply_reduce_acc.nr", source);
     assert!(
         diagnostics.contains("must answer the seed's type"),
         "unexpected diagnostics: {diagnostics}"
@@ -302,7 +285,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_result_element.nr", source);
+    let diagnostics = rejected("apply_result_element.nr", source);
     assert!(
         diagnostics.contains("requires an integer or a float"),
         "unexpected diagnostics: {diagnostics}"
@@ -320,7 +303,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_no_filter.nr", source);
+    let diagnostics = rejected("apply_no_filter.nr", source);
     assert!(
         diagnostics.contains("has no method 'filter'"),
         "unexpected diagnostics: {diagnostics}"
@@ -342,7 +325,7 @@ func main() -> i32 {
     return m[0]
 }
 "#;
-    let diagnostics = rejection("apply_symbolic.nr", source);
+    let diagnostics = rejected("apply_symbolic.nr", source);
     assert!(
         diagnostics.contains("`.map` needs every extent of the receiver to be known here"),
         "unexpected diagnostics: {diagnostics}"
@@ -366,7 +349,7 @@ func main() -> i32 {
     return fold(&t)
 }
 "#;
-    let diagnostics = rejection("apply_dynamic_reduce.nr", source);
+    let diagnostics = rejected("apply_dynamic_reduce.nr", source);
     assert!(
         diagnostics.contains("but an axis is `?`"),
         "unexpected diagnostics: {diagnostics}"
@@ -394,7 +377,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("apply_dynamic_map_zip.nr", source);
+    let diagnostics = rejected("apply_dynamic_map_zip.nr", source);
     assert!(
         diagnostics.contains("`.map` needs every extent of `Tensor<i32, [?, 3]>`"),
         "unexpected diagnostics: {diagnostics}"

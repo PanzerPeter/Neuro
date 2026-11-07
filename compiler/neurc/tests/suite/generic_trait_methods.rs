@@ -1,19 +1,6 @@
 // Generic trait methods: a trait method's own type parameters, declared, implemented up to
 // renaming, carried by a default body, and called through a bound.
-use crate::compile_harness::CompileTest;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-fn rejected(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    test.compile(&path)
-        .expect_err("the program must be rejected")
-}
+use crate::compile_harness::{CompileTest, compile_rejected, run};
 
 #[test]
 fn a_call_through_a_bound_infers_or_takes_a_turbofish() {
@@ -191,7 +178,7 @@ func main() -> i32 { go(R { base: 10 }) }
 
 #[test]
 fn a_where_predicate_is_checked_at_a_call_through_a_bound() {
-    let err = rejected(
+    let err = compile_rejected(
         "where_call.nr",
         r#"
 trait Reg { func head<const K: u32>(&self, xs: [i32; K]) -> i32 where K > 1 }
@@ -288,7 +275,7 @@ func main() -> i32 {
 
 #[test]
 fn a_call_through_a_bound_reports_its_arguments() {
-    let err = rejected(
+    let err = compile_rejected(
         "bad_calls.nr",
         r#"
 trait Pl {
@@ -321,7 +308,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn an_argument_moves_into_a_call_through_a_bound() {
-    let err = rejected(
+    let err = compile_rejected(
         "moved_arg.nr",
         r#"
 trait Take { func take<U>(&self, u: U) -> i32 }
@@ -348,7 +335,7 @@ func go<T: P>(t: T) -> i32 {{ {call} + {call} }}
 func main() -> i32 {{ 0 }}
 "#
         );
-        let err = rejected(name, &source);
+        let err = compile_rejected(name, &source);
         assert!(err.contains("use of moved value 't'"), "{err}");
     }
     let source = r#"
@@ -364,7 +351,7 @@ func main() -> i32 { go(S { v: 21 }) }
 
 #[test]
 fn a_trait_with_one_is_refused_as_dyn_and_others_keep_their_vtable() {
-    let err = rejected(
+    let err = compile_rejected(
         "dyn_refused.nr",
         r#"
 trait G { func f<U>(&self, u: U) -> U }
@@ -395,7 +382,7 @@ func main() -> i32 {
 
 #[test]
 fn a_lang_item_impl_still_declares_none() {
-    let err = rejected(
+    let err = compile_rejected(
         "lang_items.nr",
         r#"
 struct S { v: i32 }
@@ -416,7 +403,7 @@ func main() -> i32 { 0 }
 // The body of a default is copied into the impl, where the name would mean two parameters.
 #[test]
 fn a_default_method_parameter_named_like_the_impls_is_refused() {
-    let err = rejected(
+    let err = compile_rejected(
         "default_shadow.nr",
         r#"
 trait Tr { func f<T>(&self, t: T) -> T { t } }
@@ -469,7 +456,7 @@ func main() -> i32 {
 }
 "#;
     assert_eq!(run("bound_by_parameter.nr", source), 42);
-    let err = rejected(
+    let err = compile_rejected(
         "bound_by_parameter_wrong.nr",
         &source.replace("keep(&c, 42)", "keep(&c, true)\n    0"),
     );

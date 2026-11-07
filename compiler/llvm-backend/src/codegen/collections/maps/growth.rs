@@ -4,7 +4,7 @@
 // `impl CodegenContext` block.
 
 use inkwell::IntPredicate;
-use inkwell::values::{FunctionValue, IntValue, PointerValue};
+use inkwell::values::{IntValue, PointerValue};
 
 use super::probing::ProbeCursor;
 use super::{LOAD_DENOMINATOR, LOAD_NUMERATOR, STATE_FULL, SlotField};
@@ -250,15 +250,11 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let slot_ty = self.map_slot_type(CollectionKind::BTreeMap, key_ty, value_ty)?;
         let stride = self.size_of_type(slot_ty.into())?;
-        let reserve = self.build_ordered_reserve_helper()?;
+        // The ordered map's growth is the same doubling `realloc` a `Vec` uses, since its
+        // slots are a dense array too; only the stride differs, and that is a parameter.
+        let reserve = self.build_reserve_helper()?;
         self.builder
             .build_call(reserve, &[header.into(), stride.into()], "")?;
         Ok(())
-    }
-
-    /// The ordered map's growth is the same doubling `realloc` a `Vec` uses, since its
-    /// slots are a dense array too; only the stride differs, and that is a parameter.
-    pub(super) fn build_ordered_reserve_helper(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
-        self.build_reserve_helper()
     }
 }

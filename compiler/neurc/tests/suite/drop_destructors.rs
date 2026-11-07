@@ -5,36 +5,9 @@
 // once the dropping scope has closed. This exercises scope-exit insertion, LIFO
 // order, move elision (a moved value is not double-dropped), and the Copy/Drop
 // conflict rule end-to-end.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, check_source};
 
-use std::fs;
 use std::process::Command;
-use tempfile::TempDir;
-
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
-
-fn check_source(source: &str) -> (bool, String) {
-    let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    let source_path = temp_dir.path().join("test.nr");
-    fs::write(&source_path, source).expect("Failed to write source file");
-
-    let output = Command::new(neurc_path())
-        .arg("check")
-        .arg(&source_path)
-        .output()
-        .expect("Failed to execute neurc check");
-
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    (output.status.success(), stderr)
-}
 
 const PROBE: &str = r#"
 struct Probe { sink: &mut i32 }

@@ -2,7 +2,7 @@
 // coercion from an array and a `Vec`, `.slice(range)` sub-ranges, `.len()`,
 // indexing, iteration, writes through a mutable slice, and the runtime bounds
 // panics on both the range and the index paths.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, compile_tagged};
 
 use std::process::Command;
 
@@ -240,35 +240,11 @@ func main() -> i32 {
 /// Compile `source` at `-O0` under `name`, run it, and return the standard error
 /// of a run that must abort. Panics if it compiles badly or exits cleanly.
 fn run_expecting_abort(name: &str, source: &str) -> String {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("{name}.nr"));
-    let exe = dir.join(name);
-    std::fs::write(&src, source).expect("write source");
-
-    let compile = Command::new(neurc_path())
-        .arg("compile")
-        .arg(&src)
-        .arg("-O")
-        .arg("0")
-        .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-    assert!(
-        compile.status.success(),
-        "compile failed: {}",
-        String::from_utf8_lossy(&compile.stderr)
-    );
-
+    let exe = compile_tagged(source, name, "0");
     let run = Command::new(&exe).output().expect("run executable");
     assert!(
         !run.status.success(),
         "an out-of-bounds slice access must abort, not exit cleanly"
     );
     String::from_utf8_lossy(&run.stderr).into_owned()
-}
-
-/// Path to the `neurc` binary Cargo built for this test run.
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }

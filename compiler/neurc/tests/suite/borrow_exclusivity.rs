@@ -6,7 +6,7 @@
 // until that binding leaves scope; a borrow passed to a call or used inline ends
 // with the statement that took it. Covers both end-to-end accept+run and the
 // rejection diagnostics emitted by `neurc compile`.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, run_expecting};
 
 fn expect_compile_error(source: &str, needle: &str) {
     let test = CompileTest::new();
@@ -20,17 +20,6 @@ fn expect_compile_error(source: &str, needle: &str) {
     assert!(
         message.contains(needle),
         "expected diagnostic to contain {needle:?}, got:\n{message}"
-    );
-}
-
-fn run_expecting(source: &str, expected: i32) {
-    let test = CompileTest::new();
-    let code = test
-        .compile_and_run("test.nr", source)
-        .expect("program should compile and run");
-    assert_eq!(
-        code, expected,
-        "unexpected exit code for program:\n{source}"
     );
 }
 

@@ -4,13 +4,7 @@
 // second handle, and a handle crossing every ownership boundary the language has without a
 // double free or a leak.
 
-use crate::compile_harness::CompileTest;
-
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
+use crate::compile_harness::run;
 
 /// Every element type with a DLPack dtype allocates its buffer and releases it through
 /// the handle's deleter. Widths differ, so this also exercises the buffer sizing that the
@@ -34,7 +28,7 @@ func main() -> i32 {
     return 9
 }
 "#;
-    assert_eq!(run_program("dlpack_dtypes.nr", source), 9);
+    assert_eq!(run("dlpack_dtypes.nr", source), 9);
 }
 
 /// A tensor smaller than one alignment unit still gets a whole 64-byte allocation, and
@@ -48,7 +42,7 @@ func main() -> i32 {
     return 4
 }
 "#;
-    assert_eq!(run_program("dlpack_small.nr", source), 4);
+    assert_eq!(run("dlpack_small.nr", source), 4);
 }
 
 /// `.clone()` is the one operation that produces a second handle and a second buffer, so
@@ -63,7 +57,7 @@ func main() -> i32 {
     return 5
 }
 "#;
-    assert_eq!(run_program("dlpack_clone.nr", source), 5);
+    assert_eq!(run("dlpack_clone.nr", source), 5);
 }
 
 /// The handle crosses every ownership boundary the language has: a call, a return, a
@@ -92,7 +86,7 @@ func main() -> i32 {
     return consume(hosted) + 5
 }
 "#;
-    assert_eq!(run_program("dlpack_ownership.nr", source), 6);
+    assert_eq!(run("dlpack_ownership.nr", source), 6);
 }
 
 /// The control block `manager_ctx` points at rides inside the handle's own allocation, so
@@ -117,5 +111,5 @@ func main() -> i32 {
     return 7
 }
 "#;
-    assert_eq!(run_program("dlpack_control_block.nr", source), 7);
+    assert_eq!(run("dlpack_control_block.nr", source), 7);
 }

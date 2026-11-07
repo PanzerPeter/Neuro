@@ -1,14 +1,7 @@
 // Tensor value construction (Phase 2B): nested-array-literal coercion and the
 // six construction helpers, end to end through `neurc compile` and the linked binary.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
+use crate::compile_harness::{CompileTest, run};
 
 #[test]
 fn a_coerced_tensor_literal_compiles_and_runs() {
@@ -26,7 +19,7 @@ func main() -> i32 {
     return 7
 }
 "#;
-    assert_eq!(run_program("tensor_literal.nr", source), 7);
+    assert_eq!(run("tensor_literal.nr", source), 7);
 }
 
 #[test]
@@ -42,7 +35,7 @@ func main() -> i32 {
     return 3
 }
 "#;
-    assert_eq!(run_program("tensor_ctors.nr", source), 3);
+    assert_eq!(run("tensor_ctors.nr", source), 3);
 }
 
 /// A tensor is a first-class value: it passes to a function, comes back from one, and
@@ -68,7 +61,7 @@ func main() -> i32 {
     return consume(row)
 }
 "#;
-    assert_eq!(run_program("tensor_boundaries.nr", source), 5);
+    assert_eq!(run("tensor_boundaries.nr", source), 5);
 }
 
 /// The counter-example: without an annotation the literal stays a plain array, so
@@ -81,7 +74,7 @@ func main() -> i32 {
     return arr[2] as i32
 }
 "#;
-    assert_eq!(run_program("tensor_vs_array.nr", source), 3);
+    assert_eq!(run("tensor_vs_array.nr", source), 3);
 }
 
 /// The generator is seeded from a fixed constant, so a compiled program draws the same
@@ -114,7 +107,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    assert_eq!(run_program("tensor_large.nr", source), 0);
+    assert_eq!(run("tensor_large.nr", source), 0);
 }
 
 /// The other half of the representation change: a large tensor crosses a call boundary by
@@ -139,7 +132,7 @@ func main() -> i32 {
     return count_rows(on_host) - count_rows(w)
 }
 "#;
-    assert_eq!(run_program("tensor_large_return.nr", source), 0);
+    assert_eq!(run("tensor_large_return.nr", source), 0);
 }
 
 /// A tensor owns its buffer, so every binding releases one and every move hands one on.
@@ -170,5 +163,5 @@ func main() -> i32 {
     return total
 }
 "#;
-    assert_eq!(run_program("tensor_moves.nr", source), 8);
+    assert_eq!(run("tensor_moves.nr", source), 8);
 }

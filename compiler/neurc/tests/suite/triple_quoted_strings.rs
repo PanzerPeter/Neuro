@@ -4,7 +4,7 @@
 // text it should dedent to and returns 0 only on an exact match, so a failure
 // means the value reaching codegen differed: not merely that the source lexed.
 
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, compile_rejected};
 
 /// Compile a `main` that returns 0 when `block` evaluates to `expected`.
 fn assert_block_equals(name: &str, block: &str, expected: &str) {
@@ -18,16 +18,6 @@ fn assert_block_equals(name: &str, block: &str, expected: &str) {
         .compile_and_run(name, &source)
         .expect("compilation or execution failed");
     assert_eq!(exit_code, 0, "block string did not dedent to {expected:?}");
-}
-
-/// Compile a program expected to be rejected, returning the diagnostic text.
-fn compile_error(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    match test.compile(&path) {
-        Ok(_) => panic!("{name} compiled but should have been rejected"),
-        Err(message) => message,
-    }
 }
 
 #[test]
@@ -103,7 +93,7 @@ fn block_string_trailing_newline_is_written_as_a_blank_line() {
 
 #[test]
 fn under_indented_line_is_rejected() {
-    let message = compile_error(
+    let message = compile_rejected(
         "block_under_indented.nr",
         "func main() -> i32 {\n    val s = \"\"\"\n        deep\n    shallow\n        \"\"\"\n    return s.len() as i32\n}\n",
     );
@@ -115,7 +105,7 @@ fn under_indented_line_is_rejected() {
 
 #[test]
 fn closing_delimiter_sharing_a_line_is_rejected() {
-    let message = compile_error(
+    let message = compile_rejected(
         "block_trailing_close.nr",
         "func main() -> i32 {\n    val s = \"\"\"\n        text \"\"\"\n    return s.len() as i32\n}\n",
     );
@@ -127,7 +117,7 @@ fn closing_delimiter_sharing_a_line_is_rejected() {
 
 #[test]
 fn unterminated_block_string_is_rejected() {
-    let message = compile_error(
+    let message = compile_rejected(
         "block_unterminated.nr",
         "func main() -> i32 {\n    val s = \"\"\"\n        never closed\n    return 0\n}\n",
     );

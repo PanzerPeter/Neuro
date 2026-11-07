@@ -7,13 +7,7 @@
 // value happened to be callable (a closure binding), the misparse type-checked and
 // silently ran a different program.
 
-use crate::compile_harness::CompileTest;
-
-fn run(filename: &str, source: &str) -> i32 {
-    let test = CompileTest::new();
-    test.compile_and_run(filename, source)
-        .expect("compile/run failed")
-}
+use crate::compile_harness::run;
 
 #[test]
 fn regression_parenthesized_expression_starts_a_new_statement() {

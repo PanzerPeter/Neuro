@@ -2,19 +2,7 @@
 //! body uses it; the strongest use makes the closure `Fn`, `FnMut` or `FnOnce`, and a
 //! function type's `mut` / `once` mode says which of them a parameter takes.
 
-use crate::compile_harness::CompileTest;
-
-fn run(filename: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(filename, source)
-        .expect("compile/run failed")
-}
-
-fn refused(filename: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(filename, source)
-        .expect_err("the program should be refused")
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn a_closure_reading_a_string_borrows_it_and_leaves_it_usable() {
@@ -94,7 +82,7 @@ func main() -> i32 {
 
 #[test]
 fn a_mut_closure_is_refused_where_a_plain_function_is_asked() {
-    let err = refused(
+    let err = rejected(
         "fnmut_to_fn.nr",
         r#"
 func apply(f: () -> void) { f() }
@@ -110,7 +98,7 @@ func main() -> i32 {
 
 #[test]
 fn a_once_closure_is_refused_where_a_mut_function_is_asked() {
-    let err = refused(
+    let err = rejected(
         "once_to_mut.nr",
         r#"
 func consume(s: string) -> u64 { s.len() }
@@ -126,7 +114,7 @@ func main() -> i32 {
 
 #[test]
 fn a_once_value_cannot_be_called_twice() {
-    let err = refused(
+    let err = rejected(
         "once_twice.nr",
         r#"
 func run(f: once () -> u64) -> u64 { f() + f() }
@@ -138,7 +126,7 @@ func main() -> i32 { return 0 }
 
 #[test]
 fn a_closure_without_move_cannot_give_a_capture_away() {
-    let err = refused(
+    let err = rejected(
         "borrowed_consumed.nr",
         r#"
 func consume(s: string) -> u64 { s.len() }
@@ -154,7 +142,7 @@ func main() -> i32 {
 
 #[test]
 fn a_moved_capture_is_gone_from_its_source() {
-    let err = refused(
+    let err = rejected(
         "move_then_use.nr",
         r#"
 func main() -> i32 {
@@ -170,7 +158,7 @@ func main() -> i32 {
 
 #[test]
 fn a_borrowed_capture_freezes_its_binding_while_the_closure_lives() {
-    let moved = refused(
+    let moved = rejected(
         "move_while_borrowed.nr",
         r#"
 func consume(s: string) -> u64 { s.len() }
@@ -187,7 +175,7 @@ func main() -> i32 {
         "{moved}"
     );
 
-    let read = refused(
+    let read = rejected(
         "read_while_mutably_borrowed.nr",
         r#"
 func main() -> i32 {
@@ -206,7 +194,7 @@ func main() -> i32 {
 
 #[test]
 fn a_closure_holding_a_borrow_cannot_be_stored_past_its_scope() {
-    let err = refused(
+    let err = rejected(
         "scope_bound_assignment.nr",
         r#"
 func main() -> i32 {
@@ -248,7 +236,7 @@ func main() -> i32 {
 
 #[test]
 fn a_for_head_literal_holds_its_borrows_until_the_loop_ends() {
-    let err = refused(
+    let err = rejected(
         "adapter_borrow_held.nr",
         r#"
 func main() -> i32 {
@@ -273,7 +261,7 @@ func main() -> i32 {
 
 #[test]
 fn a_mutating_closure_literal_is_not_handed_to_a_built_in_method() {
-    let err = refused(
+    let err = rejected(
         "builtin_mutating_literal.nr",
         r#"
 func main() -> i32 {

@@ -2,9 +2,7 @@
 // introduces over arrays, ranges, and `Vec`, how that binding interacts with the
 // loop's other machinery (labels, `continue`, shadowing, closures), and the
 // diagnostics for a head whose arity disagrees with its iterable.
-use crate::compile_harness::CompileTest;
-
-use std::process::Command;
+use crate::compile_harness::{CompileTest, assert_check_error};
 
 #[test]
 fn array_enumerate_binds_position_and_element() {
@@ -260,36 +258,4 @@ func main() -> i32 {
 "#,
         "takes no arguments",
     );
-}
-
-/// Assert `neurc check` rejects `source` with a diagnostic containing `expected`.
-fn assert_check_error(filename: &str, source: &str, expected: &str) {
-    let test = CompileTest::new();
-    let path = test.write_source(filename, source);
-    let output = Command::new(neurc_path())
-        .arg("check")
-        .arg(&path)
-        .output()
-        .expect("run neurc");
-    assert!(
-        !output.status.success(),
-        "expected `{filename}` to be rejected"
-    );
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        text.contains(expected),
-        "expected a diagnostic containing {expected:?}, got: {text}"
-    );
-}
-
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable suffix.
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }

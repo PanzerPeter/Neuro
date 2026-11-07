@@ -7,22 +7,12 @@
 // spellings are the reason the check tests the binding's TYPE rather than whether its
 // initializer happens to be a call: only two of these have a callee at all.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile `source` and return the compiler's combined output, asserting it failed.
-fn expect_compile_error(filename: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let source_path = test.write_source(filename, source);
-    match test.compile(&source_path) {
-        Ok(_) => panic!("binding a void initializer should not compile: {filename}"),
-        Err(output) => output,
-    }
-}
+use crate::compile_harness::{CompileTest, compile_rejected};
 
 /// Every void-initializer spelling must be rejected by the type checker with the same
 /// diagnostic, and must never reach the backend.
 fn assert_void_binding_diagnostic(filename: &str, source: &str) {
-    let output = expect_compile_error(filename, source);
+    let output = compile_rejected(filename, source);
     assert!(
         output.contains("the initializer has type void"),
         "expected the void-binding type error for {filename}, got:\n{output}"

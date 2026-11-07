@@ -1,19 +1,6 @@
 // Supertraits: `trait C: A + B`, the impls it requires, a bound reaching their methods, and
 // a trait object's vtable carrying them.
-use crate::compile_harness::CompileTest;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-fn rejected(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    test.compile(&path)
-        .expect_err("the program must be rejected")
-}
+use crate::compile_harness::{CompileTest, compile_rejected, run};
 
 const CHAIN: &str = r#"
 trait Named {
@@ -90,7 +77,7 @@ impl C for S {}
 impl B for S {}
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("missing.nr", source);
+    let err = compile_rejected("missing.nr", source);
     assert!(
         err.contains("`impl B for S` requires `impl A for S`"),
         "{err}"
@@ -134,13 +121,13 @@ func main() -> i32 {
 
 #[test]
 fn an_unknown_supertrait_is_refused() {
-    let err = rejected("unknown.nr", "trait C: Nope {}\nfunc main() -> i32 { 0 }\n");
+    let err = compile_rejected("unknown.nr", "trait C: Nope {}\nfunc main() -> i32 { 0 }\n");
     assert!(err.contains("Nope"), "{err}");
 }
 
 #[test]
 fn a_supertrait_cycle_is_refused() {
-    let err = rejected(
+    let err = compile_rejected(
         "cycle.nr",
         r#"
 trait A: B { func a(&self) -> i32 }
@@ -181,7 +168,7 @@ impl C for S {}
 func main() -> i32 { S { v: 0 }.c() }
 "#;
     assert_eq!(run("lines.nr", source), 3);
-    rejected(
+    compile_rejected(
         "plus.nr",
         "trait A {}\ntrait C: A + {}\nfunc main() -> i32 { 0 }\n",
     );
@@ -260,7 +247,7 @@ impl Source for Text {
 impl Numbers for Text {}
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("binding_differs.nr", source);
+    let err = compile_rejected("binding_differs.nr", source);
     assert!(err.contains("Item"), "{err}");
 }
 
@@ -277,7 +264,7 @@ trait Holder {
 trait SelfHolder: Holder<Item2 = Self> {}
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("unknown_assoc.nr", source);
+    let err = compile_rejected("unknown_assoc.nr", source);
     assert!(err.contains("Item2"), "{err}");
 
     let source = r#"
@@ -364,7 +351,7 @@ impl Mapped for One {
 }
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("binding_own_differs.nr", differs);
+    let err = compile_rejected("binding_own_differs.nr", differs);
     assert!(err.contains("Item"), "{err}");
 }
 
@@ -376,14 +363,14 @@ trait Source {
     func next(&mut self) -> Self::Item
 }
 "#;
-    let err = rejected(
+    let err = compile_rejected(
         "inherit_sig.nr",
         &format!(
             "{prefix}trait Sub: Source {{ func f(&self) -> Self::Item }}\nfunc main() -> i32 {{ 0 }}\n"
         ),
     );
     assert!(err.contains("Item"), "{err}");
-    let err = rejected(
+    let err = compile_rejected(
         "inherit_bound.nr",
         &format!(
             "{prefix}trait Sub: Source {{}}\nfunc f<T: Sub<Item = i32>>(t: &T) -> i32 {{ 0 }}\nfunc main() -> i32 {{ 0 }}\n"
@@ -419,7 +406,7 @@ struct S { n: i32 }
 impl Held for S {}
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("drop_missing.nr", missing);
+    let err = compile_rejected("drop_missing.nr", missing);
     assert!(err.contains("requires `impl Drop for S`"), "{err}");
 }
 
@@ -433,7 +420,7 @@ impl A for S { func name(&self) -> i32 { 1 } }
 impl B for S { func name(&self) -> i32 { 2 } }
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("redeclared.nr", source);
+    let err = compile_rejected("redeclared.nr", source);
     assert!(err.contains("already defined"), "{err}");
 }
 
@@ -474,7 +461,7 @@ trait Named: Source {}
 func bad<T: Named>(t: &mut T) -> i32 { t.next() }
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("unconstrained.nr", unconstrained);
+    let err = compile_rejected("unconstrained.nr", unconstrained);
     assert!(err.contains("Item"), "{err}");
 }
 
@@ -534,7 +521,7 @@ struct P { n: i32 }
 impl Dup for P {}
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("clone_missing.nr", missing);
+    let err = compile_rejected("clone_missing.nr", missing);
     assert!(err.contains("requires `impl Clone for P`"), "{err}");
 }
 
@@ -586,7 +573,7 @@ struct P { n: i32 }
 impl Sum for P {}
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("operator_super.nr", source);
+    let err = compile_rejected("operator_super.nr", source);
     assert!(err.contains("requires `impl Add for P`"), "{err}");
 }
 
@@ -597,7 +584,7 @@ struct P { n: i32 }
 impl Copy for P {}
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("copy_clone.nr", source);
+    let err = compile_rejected("copy_clone.nr", source);
     assert!(err.contains("requires `impl Clone for P`"), "{err}");
 
     let source = r#"
@@ -625,7 +612,7 @@ impl Hungry for S {}
 func twice<T: Hungry>(t: T) -> i32 { t.eat() + t.eat() }
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("moved.nr", source);
+    let err = compile_rejected("moved.nr", source);
     assert!(err.contains("moved"), "{err}");
 }
 
@@ -764,7 +751,7 @@ func read(s: &dyn Sub) -> i32 {{ 0 }}
 func main() -> i32 {{ 0 }}
 "#
         );
-        let err = rejected(name, &source);
+        let err = compile_rejected(name, &source);
         assert!(
             err.contains("object-safe") || err.contains("object safe"),
             "{err}"
@@ -784,7 +771,7 @@ trait Second: Third {}
 trait Third { func eat(self) -> i32 }
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("order.nr", source);
+    let err = compile_rejected("order.nr", source);
     assert!(err.contains("by value"), "{err}");
 }
 
@@ -797,7 +784,7 @@ func up(a: &dyn A) -> i32 { a.a() }
 func down(b: &dyn B) -> i32 { up(b) }
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("upcast.nr", source);
+    let err = compile_rejected("upcast.nr", source);
     assert!(err.contains("dyn A") && err.contains("dyn B"), "{err}");
 }
 
@@ -849,7 +836,7 @@ func main() -> i32 {{
 }}
 "#
     );
-    let err = rejected("short_instance.nr", &source);
+    let err = compile_rejected("short_instance.nr", &source);
     assert!(err.contains("Top"), "{err}");
 
     let source = format!(
@@ -861,7 +848,7 @@ func main() -> i32 {{
 }}
 "#
     );
-    let err = rejected("short_object.nr", &source);
+    let err = compile_rejected("short_object.nr", &source);
     assert!(err.contains("dyn Top"), "{err}");
 }
 
@@ -885,7 +872,7 @@ func main() -> i32 {
     pair.0.v
 }
 "#;
-    let err = rejected("copy_instance.nr", source);
+    let err = compile_rejected("copy_instance.nr", source);
     assert!(err.contains("Mark"), "{err}");
 }
 

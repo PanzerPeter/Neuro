@@ -4,43 +4,13 @@
 // to stderr and abort the process via `abort()` (SIGABRT): no stack unwinding. These tests
 // compile each program and assert both the runtime termination behavior and the emitted
 // diagnostic text.
+use crate::compile_harness::compile_tagged;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
-
 /// Compile `source` at `-O0`, returning the executable path.
 fn compile_source(source: &str, tag: &str) -> PathBuf {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_panic_{tag}.nr"));
-    let exe = dir.join(format!("neuro_panic_{tag}"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("compile")
-        .arg(&src)
-        .arg("-O")
-        .arg("0")
-        .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-
-    assert!(
-        output.status.success(),
-        "compile failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    exe
+    compile_tagged(source, &format!("panic_{tag}"), "0")
 }
 
 fn run(exe: &PathBuf) -> Output {

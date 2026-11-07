@@ -1,31 +1,7 @@
 // Generic methods: a method's own type parameters after its name, inferred from the
 // arguments or supplied by a turbofish, on plain and generic types, enums and newtypes,
 // and associated functions whose turbofish lists the type's parameters then their own.
-use crate::compile_harness::CompileTest;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-fn stdout_of(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let exe = test
-        .compile(&test.write_source(name, source))
-        .unwrap_or_else(|e| panic!("{name} should compile: {e}"));
-    let out = std::process::Command::new(&exe)
-        .output()
-        .expect("run executable");
-    String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n")
-}
-
-fn rejected(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    test.compile(&path)
-        .expect_err("the program must be rejected")
-}
+use crate::compile_harness::{compile_rejected, run, stdout_of};
 
 #[test]
 fn a_method_infers_its_own_parameter_or_takes_a_turbofish() {
@@ -275,7 +251,7 @@ func main() -> i32 {
 
 #[test]
 fn a_method_parameter_left_uninferred_is_refused() {
-    let err = rejected(
+    let err = compile_rejected(
         "uninferred.nr",
         r#"
 struct S { v: i32 }
@@ -297,7 +273,7 @@ func main() -> i32 {
 
 #[test]
 fn a_turbofish_on_a_plain_method_is_refused_by_name() {
-    let err = rejected(
+    let err = compile_rejected(
         "plain_turbofish.nr",
         r#"
 struct S { v: i32 }
@@ -315,7 +291,7 @@ func main() -> i32 {
 
 #[test]
 fn an_abstract_method_parameter_moves() {
-    let err = rejected(
+    let err = compile_rejected(
         "dup.nr",
         r#"
 struct S { v: i32 }
@@ -334,7 +310,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn a_method_parameter_named_like_the_impls_is_refused() {
-    let err = rejected(
+    let err = compile_rejected(
         "shadow.nr",
         r#"
 struct W<T> { v: T }
@@ -352,7 +328,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn a_method_calling_itself_with_a_growing_type_hits_the_depth_limit() {
-    let err = rejected(
+    let err = compile_rejected(
         "grow.nr",
         r#"
 struct S { v: i32 }

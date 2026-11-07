@@ -1,7 +1,7 @@
 // `impl` blocks and trait impls on enums: inherent methods over every receiver form,
 // associated functions, user traits through a bound and a trait object, operator traits,
 // generic enums, the iterator protocol, and the two rejections the enum target adds.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, run};
 
 const LIGHT: &str = r#"
 enum Light {
@@ -36,12 +36,6 @@ impl Light {
     }
 }
 "#;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
 
 #[test]
 fn inherent_methods_cover_every_receiver_and_an_associated_function() {

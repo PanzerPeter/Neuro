@@ -10,6 +10,15 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.31.3] - 2026-11-07
+
+### Changed
+
+- The end-to-end suite shares its helpers through `compile_harness` instead of a copy per test
+  file. The two differential tests share theirs through `tests/differential_harness`.
+- `neurc compile --help` now lists `--emit` before `-O`, because `compile` and `run` take their
+  build flags from one shared definition. The flags themselves are unchanged.
+
 ## [5.31.2] - 2026-11-07
 
 ### Fixed

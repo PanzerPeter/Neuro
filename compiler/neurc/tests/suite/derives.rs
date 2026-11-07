@@ -4,63 +4,18 @@
 // `@derive(Debug)` gives a struct the `{x:?}` rendering; `@derive(PartialEq)` gives it
 // field-wise `==` / `!=`. Neither routes through a method, so these drive the whole
 // pipeline and assert on the bytes the program wrote and the exit code it returned.
-use std::path::PathBuf;
+use crate::compile_harness::{compile_tagged, rejected};
 use std::process::{Command, Output};
-
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
 
 /// Compile and run `source`, returning the process output.
 fn run_program(source: &str, tag: &str) -> Output {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_derive_{tag}.nr"));
-    let exe = dir.join(format!("neuro_derive_{tag}"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("compile")
-        .arg(&src)
-        .arg("-O")
-        .arg("0")
-        .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-    assert!(
-        output.status.success(),
-        "compile failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
+    let exe = compile_tagged(source, &format!("derive_{tag}"), "0");
     Command::new(&exe).output().expect("run executable")
 }
 
 /// Type-check `source`, returning the compiler's combined diagnostics on rejection.
 fn check_error(source: &str, tag: &str) -> String {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_derive_{tag}.nr"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("check")
-        .arg(&src)
-        .output()
-        .expect("run neurc");
-
-    assert!(!output.status.success(), "expected `check` to reject {tag}");
-    format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )
+    rejected(&format!("neuro_derive_{tag}.nr"), source)
 }
 
 /// See `print_builtins.rs`: fd 1 is a text-mode descriptor on Windows, and these tests

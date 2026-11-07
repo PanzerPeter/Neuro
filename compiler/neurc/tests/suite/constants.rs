@@ -1,7 +1,7 @@
 // Constant declaration tests
 // Covers AC1–AC5: module-level consts, function-body consts, forward references,
 // arithmetic folding, and rejection of non-const expressions.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, compile_rejected};
 
 // ── AC1: Module-level const is visible in function body ──────────────────────
 
@@ -248,19 +248,9 @@ func main() -> i32 {
 // disagreement out, so the folder rejects the initializer instead. Every arithmetic
 // operator moves together: fixing one alone would recreate the asymmetry BUG-021 closed.
 
-/// Compile `source` and return the error text, asserting that compilation failed.
-fn expect_compile_error(filename: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let source_path = test.write_source(filename, source);
-    match test.compile(&source_path) {
-        Ok(_) => panic!("{filename} should have been rejected but compiled"),
-        Err(message) => message,
-    }
-}
-
 #[test]
 fn const_addition_overflow_is_rejected() {
-    let error = expect_compile_error(
+    let error = compile_rejected(
         "const_add_overflow.nr",
         r#"
 const C: u8 = 200u8 + 100u8
@@ -278,7 +268,7 @@ func main() -> i32 {
 
 #[test]
 fn const_subtraction_overflow_is_rejected() {
-    let error = expect_compile_error(
+    let error = compile_rejected(
         "const_sub_overflow.nr",
         r#"
 const C: u8 = 10u8 - 20u8
@@ -296,7 +286,7 @@ func main() -> i32 {
 
 #[test]
 fn const_multiplication_overflow_is_rejected() {
-    let error = expect_compile_error(
+    let error = compile_rejected(
         "const_mul_overflow.nr",
         r#"
 const C: i16 = 300i16 * 300i16
@@ -314,7 +304,7 @@ func main() -> i32 {
 
 #[test]
 fn const_negation_overflow_is_rejected() {
-    let error = expect_compile_error(
+    let error = compile_rejected(
         "const_neg_overflow.nr",
         r#"
 const C: i8 = -(-128i8)
@@ -332,7 +322,7 @@ func main() -> i32 {
 
 #[test]
 fn const_division_min_over_minus_one_is_rejected() {
-    let error = expect_compile_error(
+    let error = compile_rejected(
         "const_div_overflow.nr",
         r#"
 const C: i8 = -128i8 / -1i8
@@ -352,7 +342,7 @@ func main() -> i32 {
 fn const_remainder_min_over_minus_one_is_rejected() {
     // `MIN % -1` is mathematically 0, so the range check alone never sees it. The debug
     // tier still panics on it, so the folder rejects it against the operand type's minimum.
-    let error = expect_compile_error(
+    let error = compile_rejected(
         "const_rem_overflow.nr",
         r#"
 const C: i8 = -128i8 % -1i8

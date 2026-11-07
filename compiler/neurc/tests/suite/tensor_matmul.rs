@@ -6,18 +6,12 @@
 // nor accepts a scalar. It shares `*`'s precedence row (Appendix B row 4), so a mix of
 // the two groups left to right: `a @ b * c` scales the product, `a * b @ c` the operand.
 
-use crate::compile_harness::CompileTest;
-
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
+use crate::compile_harness::{CompileTest, run};
 
 #[test]
 fn a_matrix_product_computes_every_element() {
     // [[1, 2, 3], [4, 5, 6]] @ [[7, 8], [9, 10], [11, 12]] = [[58, 64], [139, 154]]
-    let exit = run_program(
+    let exit = run(
         "matmul_elements.nr",
         r#"
 func main() -> i32 {
@@ -51,7 +45,7 @@ func main() -> i32 {
 /// matrix to assert on: one wrong accumulator anywhere changes a value.
 #[test]
 fn multiplying_by_the_identity_is_the_original() {
-    let exit = run_program(
+    let exit = run(
         "matmul_identity.nr",
         r#"
 func main() -> i32 {
@@ -81,7 +75,7 @@ func main() -> i32 {
 /// the reason every tensor operator is defined on `&T` as well.
 #[test]
 fn a_borrowed_operand_survives_the_product() {
-    let exit = run_program(
+    let exit = run(
         "matmul_borrowed.nr",
         r#"
 func project(w: &Tensor<i32, [2, 2]>, x: &Tensor<i32, [2, 2]>) -> Tensor<i32, [2, 2]> {
@@ -104,7 +98,7 @@ func main() -> i32 {
 /// `(a @ b) * two`.
 #[test]
 fn a_product_followed_by_multiplication_scales_the_product() {
-    let exit = run_program(
+    let exit = run(
         "matmul_precedence.nr",
         r#"
 func main() -> i32 {
@@ -123,7 +117,7 @@ func main() -> i32 {
 /// `a * (mask @ b)` it would be `a * b` here and give 9.
 #[test]
 fn multiplication_followed_by_a_product_scales_the_operand() {
-    let exit = run_program(
+    let exit = run(
         "matmul_after_multiply.nr",
         r#"
 func main() -> i32 {
@@ -164,7 +158,7 @@ func main() -> i32 {
 /// One body, specialized per instantiation, with the repeated `K` checked once.
 #[test]
 fn a_shape_generic_product_specializes_per_instantiation() {
-    let exit = run_program(
+    let exit = run(
         "matmul_generic.nr",
         r#"
 func product<M, N, K>(a: &Tensor<i32, [M, K]>, b: &Tensor<i32, [K, N]>) -> Tensor<i32, [M, N]> {
@@ -187,7 +181,7 @@ func main() -> i32 {
 /// A chain releases the inner product's buffer: it is an owned operand of the outer one.
 #[test]
 fn a_chained_product_consumes_its_intermediate() {
-    let exit = run_program(
+    let exit = run(
         "matmul_chain.nr",
         r#"
 func main() -> i32 {
@@ -263,7 +257,7 @@ func main() -> i32 {
 
 #[test]
 fn a_blocked_product_adds_each_element_in_contracted_order() {
-    assert_eq!(run_program("matmul_ordered.nr", ORDERED_PRODUCT), 0);
+    assert_eq!(run("matmul_ordered.nr", ORDERED_PRODUCT), 0);
 }
 
 /// An integer product is blocked only where it wraps: on the debug tier its overflow check

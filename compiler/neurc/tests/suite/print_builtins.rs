@@ -4,43 +4,13 @@
 // `println` appends a newline. These tests compile each program and assert on the bytes
 // the process actually wrote, its exit code, and (since the panic runtime owns stderr)
 // that nothing leaked onto the error stream.
+use crate::compile_harness::{compile_tagged, rejected};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
-
 /// Compile `source` at `-O0`, returning the executable path.
 fn compile_source(source: &str, tag: &str) -> PathBuf {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_print_{tag}.nr"));
-    let exe = dir.join(format!("neuro_print_{tag}"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("compile")
-        .arg(&src)
-        .arg("-O")
-        .arg("0")
-        .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-
-    assert!(
-        output.status.success(),
-        "compile failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    exe
+    compile_tagged(source, &format!("print_{tag}"), "0")
 }
 
 /// Compile and run `source`, returning the process output. `Command::output` gives the
@@ -52,22 +22,7 @@ fn run_program(source: &str, tag: &str) -> Output {
 
 /// Type-check `source`, returning the compiler's combined diagnostics on rejection.
 fn check_error(source: &str, tag: &str) -> String {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_print_{tag}.nr"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("check")
-        .arg(&src)
-        .output()
-        .expect("run neurc");
-
-    assert!(!output.status.success(), "expected `check` to reject {tag}");
-    format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )
+    rejected(&format!("neuro_print_{tag}.nr"), source)
 }
 
 /// The bytes the program wrote to stdout, with line endings normalized to `\n`.

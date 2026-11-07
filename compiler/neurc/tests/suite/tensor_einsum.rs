@@ -9,21 +9,7 @@
 //
 // An exit code is one byte, so each expected value is kept below 256.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-/// The diagnostics from a program that must not check.
-fn rejection(name: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(name, source)
-        .expect_err(&format!("{name} should be rejected"))
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn a_contraction_over_one_letter_is_a_matrix_product() {
@@ -43,7 +29,7 @@ func main() -> i32 {
     return m[0, 0] + m[0, 1] * 2 + m[1, 0] * 3 + m[1, 1] * 4
 }
 "#;
-    assert_eq!(run_program("einsum_matmul.nr", source), 4 + 10 + 30 + 44);
+    assert_eq!(run("einsum_matmul.nr", source), 4 + 10 + 30 + 44);
 }
 
 /// A repeated letter within ONE operand walks its diagonal, which is the whole of the
@@ -60,7 +46,7 @@ func main() -> i32 {
     return einsum("ii->", m)
 }
 "#;
-    assert_eq!(run_program("einsum_trace.nr", source), 15);
+    assert_eq!(run("einsum_trace.nr", source), 15);
 }
 
 /// No letter is contracted here, so the inner loop runs exactly once per output slot.
@@ -75,7 +61,7 @@ func main() -> i32 {
     return o[0, 0] + o[0, 2] + o[1, 1] + o[1, 2]
 }
 "#;
-    assert_eq!(run_program("einsum_outer.nr", source), 3 + 15 + 8 + 20);
+    assert_eq!(run("einsum_outer.nr", source), 3 + 15 + 8 + 20);
 }
 
 /// Reordering the output letters permutes the result without touching any operand,
@@ -92,7 +78,7 @@ func main() -> i32 {
     return t[2, 1] * 10 + t[0, 1]
 }
 "#;
-    assert_eq!(run_program("einsum_transpose.nr", source), 64);
+    assert_eq!(run("einsum_transpose.nr", source), 64);
 }
 
 /// An input letter missing from the output is summed over, so a one-operand
@@ -111,7 +97,7 @@ func main() -> i32 {
     return rows[0] + rows[1] * 2 + cols[0] + cols[2]
 }
 "#;
-    assert_eq!(run_program("einsum_sum_axis.nr", source), 6 + 30 + 5 + 9);
+    assert_eq!(run("einsum_sum_axis.nr", source), 6 + 30 + 5 + 9);
 }
 
 /// A batch letter appearing in both operands and in the output is neither contracted
@@ -133,7 +119,7 @@ func main() -> i32 {
     return m[0, 0, 0] + m[0, 1, 1] + m[1, 0, 0] + m[1, 1, 0]
 }
 "#;
-    assert_eq!(run_program("einsum_batch.nr", source), 4 + 11 + 23 + 3);
+    assert_eq!(run("einsum_batch.nr", source), 4 + 11 + 23 + 3);
 }
 
 /// Both operands read one letter and the output keeps none, so the result is a scalar
@@ -148,7 +134,7 @@ func main() -> i32 {
     return dot
 }
 "#;
-    assert_eq!(run_program("einsum_dot.nr", source), 4 + 10 + 18);
+    assert_eq!(run("einsum_dot.nr", source), 4 + 10 + 18);
 }
 
 /// A contraction READS its operands, so a borrowed one is accepted and the caller's
@@ -168,7 +154,7 @@ func main() -> i32 {
     return (y[0] as i32) + (y[1] as i32) + (w[1, 1] as i32)
 }
 "#;
-    assert_eq!(run_program("einsum_borrowed.nr", source), 17 + 39 + 4);
+    assert_eq!(run("einsum_borrowed.nr", source), 17 + 39 + 4);
 }
 
 /// An operand built for the call owns a buffer no binding releases, so the contraction
@@ -189,7 +175,7 @@ func main() -> i32 {
     return total
 }
 "#;
-    assert_eq!(run_program("einsum_temporary.nr", source), 14);
+    assert_eq!(run("einsum_temporary.nr", source), 14);
 }
 
 #[test]
@@ -203,7 +189,7 @@ func main() -> i32 {
     return (m[0, 0] as i32) + (m[0, 1] as i32) * 2 + (m[1, 1] as i32) * 3
 }
 "#;
-    assert_eq!(run_program("einsum_float.nr", source), 1 + 6 + 21);
+    assert_eq!(run("einsum_float.nr", source), 1 + 6 + 21);
 }
 
 /// A user function of the same name shadows the builtin, exactly as it shadows
@@ -219,7 +205,7 @@ func main() -> i32 {
     einsum(21)
 }
 "#;
-    assert_eq!(run_program("einsum_shadowed.nr", source), 42);
+    assert_eq!(run("einsum_shadowed.nr", source), 42);
 }
 
 #[test]
@@ -232,7 +218,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_computed_spec.nr", source);
+    let diagnostics = rejected("einsum_computed_spec.nr", source);
     assert!(
         diagnostics.contains("string literal"),
         "expected a literal-subscript diagnostic, got: {diagnostics}"
@@ -248,7 +234,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_no_arrow.nr", source);
+    let diagnostics = rejected("einsum_no_arrow.nr", source);
     assert!(
         diagnostics.contains("no `->`"),
         "expected a missing-arrow diagnostic, got: {diagnostics}"
@@ -264,7 +250,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_digit.nr", source);
+    let diagnostics = rejected("einsum_digit.nr", source);
     assert!(
         diagnostics.contains("not a subscript letter"),
         "expected a subscript-letter diagnostic, got: {diagnostics}"
@@ -280,7 +266,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_operand_count.nr", source);
+    let diagnostics = rejected("einsum_operand_count.nr", source);
     assert!(
         diagnostics.contains("comma-separated subscripts"),
         "expected an operand-count diagnostic, got: {diagnostics}"
@@ -296,7 +282,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_rank.nr", source);
+    let diagnostics = rejected("einsum_rank.nr", source);
     assert!(
         diagnostics.contains("one letter per axis"),
         "expected a rank diagnostic, got: {diagnostics}"
@@ -315,7 +301,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_extent_conflict.nr", source);
+    let diagnostics = rejected("einsum_extent_conflict.nr", source);
     assert!(
         diagnostics.contains("binds 'j' to extent 3 and then to 2"),
         "expected an extent-conflict diagnostic naming 'j', got: {diagnostics}"
@@ -331,7 +317,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_unbound_output.nr", source);
+    let diagnostics = rejected("einsum_unbound_output.nr", source);
     assert!(
         diagnostics.contains("writes 'z' on the right of `->`"),
         "expected an unbound-letter diagnostic naming 'z', got: {diagnostics}"
@@ -347,7 +333,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_repeated_output.nr", source);
+    let diagnostics = rejected("einsum_repeated_output.nr", source);
     assert!(
         diagnostics.contains("writes 'i' twice"),
         "expected a repeated-letter diagnostic naming 'i', got: {diagnostics}"
@@ -363,7 +349,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_not_a_tensor.nr", source);
+    let diagnostics = rejected("einsum_not_a_tensor.nr", source);
     assert!(
         diagnostics.contains("not a tensor"),
         "expected a non-tensor diagnostic, got: {diagnostics}"
@@ -380,7 +366,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_element_mismatch.nr", source);
+    let diagnostics = rejected("einsum_element_mismatch.nr", source);
     assert!(
         diagnostics.contains("shares an element type"),
         "expected an element-type diagnostic, got: {diagnostics}"
@@ -396,7 +382,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let diagnostics = rejection("einsum_bool.nr", source);
+    let diagnostics = rejected("einsum_bool.nr", source);
     assert!(
         diagnostics.contains("integer or float element type"),
         "expected an element-type diagnostic, got: {diagnostics}"
@@ -443,5 +429,5 @@ func main() -> i32 {
     0
 }
 "#;
-    assert_eq!(run_program("half_contraction.nr", source), 0);
+    assert_eq!(run("half_contraction.nr", source), 0);
 }

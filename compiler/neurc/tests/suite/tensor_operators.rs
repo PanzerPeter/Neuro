@@ -7,17 +7,11 @@
 // 2B's slicing item made available, so the assertions are on values rather than on a
 // panicking guard.
 
-use crate::compile_harness::CompileTest;
-
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
+use crate::compile_harness::{CompileTest, run};
 
 #[test]
 fn equal_shaped_operands_add_element_by_element() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_add.nr",
         r#"
 func main() -> i32 {
@@ -33,7 +27,7 @@ func main() -> i32 {
 
 #[test]
 fn every_arithmetic_operator_runs_element_wise() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_family.nr",
         r#"
 func main() -> i32 {
@@ -55,7 +49,7 @@ func main() -> i32 {
 /// bindings feed a second operator and are still readable afterwards.
 #[test]
 fn borrowed_operands_survive_the_operator() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_borrowed.nr",
         r#"
 func main() -> i32 {
@@ -72,7 +66,7 @@ func main() -> i32 {
 
 #[test]
 fn a_lower_rank_operand_is_repeated_across_the_leading_axes() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_row_broadcast.nr",
         r#"
 func main() -> i32 {
@@ -88,7 +82,7 @@ func main() -> i32 {
 
 #[test]
 fn a_size_one_axis_is_stretched_across_the_result() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_column_broadcast.nr",
         r#"
 func main() -> i32 {
@@ -106,7 +100,7 @@ func main() -> i32 {
 /// full `[2, 3]` outer combination, which is the case a single-sided rule would miss.
 #[test]
 fn two_operands_stretch_into_one_result() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_outer.nr",
         r#"
 func main() -> i32 {
@@ -122,7 +116,7 @@ func main() -> i32 {
 
 #[test]
 fn a_scalar_broadcasts_from_either_side() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_scalar.nr",
         r#"
 func main() -> i32 {
@@ -138,7 +132,7 @@ func main() -> i32 {
 
 #[test]
 fn a_float_scalar_broadcast_keeps_the_element_type() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_float_scalar.nr",
         r#"
 func main() -> i32 {
@@ -158,7 +152,7 @@ func main() -> i32 {
 /// literal) is the same scalar broadcast, and takes the element type as `m * 0.5` does.
 #[test]
 fn a_bare_literal_left_of_any_tensor_expression_is_the_element() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_literal_left_of_call.nr",
         r#"
 func make() -> Tensor<f32, [2]> {
@@ -207,7 +201,7 @@ func main() -> i32 {
 /// coordinate arithmetic has nothing to decompose.
 #[test]
 fn rank_zero_operands_combine() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_rank_zero.nr",
         r#"
 func main() -> i32 {
@@ -225,7 +219,7 @@ func main() -> i32 {
 /// result written back into the target's own buffer.
 #[test]
 fn compound_assignment_broadcasts_a_scalar_and_a_row() {
-    let exit = run_program(
+    let exit = run(
         "tensor_compound_broadcast.nr",
         r#"
 func main() -> i32 {
@@ -244,7 +238,7 @@ func main() -> i32 {
 /// buffer is released by the operator that reads it rather than outliving the statement.
 #[test]
 fn a_chained_operator_consumes_its_own_temporary() {
-    let exit = run_program(
+    let exit = run(
         "tensor_binary_chain.nr",
         r#"
 func main() -> i32 {

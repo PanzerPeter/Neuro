@@ -7,21 +7,7 @@
 // DLPack handle addressing the same buffer, so it moves, is stored, and is released with
 // no extent involved.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-/// The diagnostics from a program that must not check.
-fn rejection(name: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(name, source)
-        .expect_err(&format!("{name} should be rejected"))
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn one_dynamic_parameter_accepts_every_extent_at_that_axis() {
@@ -39,7 +25,7 @@ func main() -> i32 {
     return columns(&two) * columns(&seven) + 26
 }
 "#;
-    assert_eq!(run_program("dynamic_parameter.nr", source), 42);
+    assert_eq!(run("dynamic_parameter.nr", source), 42);
 }
 
 /// The point of the axis being per-position: `?` waives the check on its own axis and
@@ -56,7 +42,7 @@ func main() -> i32 {
     return columns(&wrong)
 }
 "#;
-    let errors = rejection("dynamic_static_axis.nr", source);
+    let errors = rejected("dynamic_static_axis.nr", source);
     assert!(
         errors.contains("[?, 4]") && errors.contains("[2, 8]"),
         "the mismatch names both shapes: {errors}"
@@ -83,7 +69,7 @@ func main() -> i32 {
     return 21
 }
 "#;
-    assert_eq!(run_program("dynamic_move.nr", source), 21);
+    assert_eq!(run("dynamic_move.nr", source), 21);
 }
 
 /// Widening is sound and narrowing is not: the run-time shape may be anything, so a
@@ -101,7 +87,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let errors = rejection("dynamic_narrowing.nr", source);
+    let errors = rejected("dynamic_narrowing.nr", source);
     assert!(
         errors.contains("expected Tensor<f32, [3, 2]>"),
         "the annotation is the expectation that fails: {errors}"
@@ -122,7 +108,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let errors = rejection("dynamic_clone.nr", source);
+    let errors = rejected("dynamic_clone.nr", source);
     assert!(
         errors.contains("an axis is `?`"),
         "the diagnostic names the dynamic axis: {errors}"
@@ -146,7 +132,7 @@ func main() -> i32 {
     return rows(&t) * 14
 }
 "#;
-    assert_eq!(run_program("dynamic_named_axis.nr", source), 42);
+    assert_eq!(run("dynamic_named_axis.nr", source), 42);
 }
 
 /// A transposed name is still caught under a `?`: the extents were never what
@@ -166,7 +152,7 @@ func main() -> i32 {
     return rows(&t)
 }
 "#;
-    let errors = rejection("dynamic_transposed_name.nr", source);
+    let errors = rejected("dynamic_transposed_name.nr", source);
     assert!(
         errors.contains("batch") && errors.contains("embed"),
         "the names are what disagree: {errors}"

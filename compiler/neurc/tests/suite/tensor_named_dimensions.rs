@@ -5,21 +5,7 @@
 // erasure: a named shape reaches the backend as the shape it always was, and the program
 // computes the same answer it would have without the names.
 
-use crate::compile_harness::CompileTest;
-
-/// Compile and run `source`, returning its exit code.
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-/// The diagnostics from a program that must not check.
-fn rejection(name: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(name, source)
-        .expect_err(&format!("{name} should be rejected"))
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn a_named_shape_compiles_and_runs_like_the_unnamed_one() {
@@ -33,7 +19,7 @@ func main() -> i32 {
     return width(&image) + 41
 }
 "#;
-    assert_eq!(run_program("named_shape.nr", source), 42);
+    assert_eq!(run("named_shape.nr", source), 42);
 }
 
 /// The names are not part of type identity beyond the both-named rule, so a function
@@ -53,7 +39,7 @@ func main() -> i32 {
     return sum(&t)
 }
 "#;
-    assert_eq!(run_program("named_to_unnamed.nr", source), 10);
+    assert_eq!(run("named_to_unnamed.nr", source), 10);
 }
 
 /// The reason the feature exists: identical extents, transposed names.
@@ -68,7 +54,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let out = rejection("transposed_axes.nr", source);
+    let out = rejected("transposed_axes.nr", source);
     assert!(
         out.contains("axis 0") && out.contains("height") && out.contains("width"),
         "the diagnostic should name the disagreeing axis; got: {out}"
@@ -84,7 +70,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let out = rejection("repeated_axis_name.nr", source);
+    let out = rejected("repeated_axis_name.nr", source);
     assert!(
         out.contains("side"),
         "the diagnostic should name the repeated dimension; got: {out}"
@@ -108,7 +94,7 @@ func main() -> i32 {
     return widest(&row)
 }
 "#;
-    assert_eq!(run_program("slice_keeps_name.nr", source), 15);
+    assert_eq!(run("slice_keeps_name.nr", source), 15);
 }
 
 /// A dimension name and a shape parameter occupy different namespaces: the name is the
@@ -125,5 +111,5 @@ func main() -> i32 {
     return length(&row)
 }
 "#;
-    assert_eq!(run_program("named_shape_param.nr", source), 5);
+    assert_eq!(run("named_shape_param.nr", source), 5);
 }

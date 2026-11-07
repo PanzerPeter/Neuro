@@ -11,36 +11,14 @@
 // The zero divisor panics in every build; `MIN / -1` is an integer overflow and so
 // follows the same rule the arithmetic operators do: a panic in debug builds, the
 // two's-complement wrap in release.
-use std::path::PathBuf;
+use crate::compile_harness::compile_tagged;
 use std::process::{Command, Output};
-
-fn neurc_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
 
 /// Compile `source` at optimization level `opt` and run it, returning the process
 /// result. Every divisor below is read out of a `mut` binding so that constant folding
 /// cannot answer the question before the guard is reached.
 fn compile_and_run(source: &str, tag: &str, opt: &str) -> Output {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_division_{tag}_{opt}.nr"));
-    let exe = dir.join(format!("neuro_division_{tag}_{opt}"));
-    std::fs::write(&src, source).expect("write source");
-
-    let compiled = Command::new(neurc_path())
-        .args(["compile"])
-        .arg(&src)
-        .args(["-O", opt, "-o"])
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-    assert!(
-        compiled.status.success(),
-        "compile failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&compiled.stdout),
-        String::from_utf8_lossy(&compiled.stderr)
-    );
-
+    let exe = compile_tagged(source, &format!("division_{tag}_{opt}"), opt);
     Command::new(&exe).output().expect("run executable")
 }
 

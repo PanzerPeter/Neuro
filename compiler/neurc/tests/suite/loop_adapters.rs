@@ -2,9 +2,7 @@
 // every head shape they apply to, how a chain composes, how they interact with
 // `.enumerate()` and with the loop's other machinery (labels, `continue`, nesting),
 // and the diagnostics for a malformed adapter.
-use crate::compile_harness::CompileTest;
-
-use std::process::Command;
+use crate::compile_harness::{CompileTest, assert_check_error};
 
 #[test]
 fn map_transforms_every_array_element() {
@@ -339,33 +337,4 @@ func main() -> i32 {
 "#,
         "takes exactly one argument",
     );
-}
-
-/// Assert `neurc check` rejects `source` with a diagnostic containing `expected`.
-fn assert_check_error(filename: &str, source: &str, expected: &str) {
-    let test = CompileTest::new();
-    let path = test.write_source(filename, source);
-    let output = Command::new(neurc_path())
-        .arg("check")
-        .arg(&path)
-        .output()
-        .expect("run neurc");
-    assert!(
-        !output.status.success(),
-        "expected `{filename}` to be rejected"
-    );
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        text.contains(expected),
-        "expected a diagnostic containing {expected:?}, got: {text}"
-    );
-}
-
-/// Path to the `neurc` binary Cargo built for this test run.
-fn neurc_path() -> &'static str {
-    env!("CARGO_BIN_EXE_neurc")
 }

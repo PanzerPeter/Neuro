@@ -2,19 +2,7 @@
 //! value moves, and a value passed to a function-typed parameter is lent for the call,
 //! shared for a plain parameter and exclusive for a `mut` one, so the caller keeps it.
 
-use crate::compile_harness::CompileTest;
-
-fn run(filename: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(filename, source)
-        .expect("compile/run failed")
-}
-
-fn refused(filename: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(filename, source)
-        .expect_err("the program should be refused")
-}
+use crate::compile_harness::{rejected, run};
 
 #[test]
 fn a_mut_value_lent_to_each_call_keeps_every_write() {
@@ -101,7 +89,7 @@ func main() -> i32 {
 
 #[test]
 fn a_moved_mut_value_cannot_be_called() {
-    let err = refused(
+    let err = rejected(
         "moved_mut.nr",
         r#"
 func main() -> i32 {
@@ -126,7 +114,7 @@ fn a_mut_value_cannot_reach_its_own_running_call() {
         "two(f, |g: mut () -> void| -> void { f(g) })",
         "f(|| -> void { f(|| -> void {}) })",
     ] {
-        let err = refused(
+        let err = rejected(
             "reentrant.nr",
             &format!(
                 r#"
@@ -158,7 +146,7 @@ func main() -> i32 {{
 
 #[test]
 fn a_closure_calling_a_mut_value_holds_it_exclusively() {
-    let err = refused(
+    let err = rejected(
         "held.nr",
         r#"
 func main() -> i32 {
@@ -179,7 +167,7 @@ func main() -> i32 {
 
 #[test]
 fn a_mut_value_behind_a_shared_borrow_is_not_called() {
-    let err = refused(
+    let err = rejected(
         "shared_field.nr",
         r#"
 struct Holder { step: mut (i32) -> void }

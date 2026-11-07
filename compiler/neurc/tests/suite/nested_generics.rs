@@ -1,20 +1,7 @@
 // A generic instantiated with an enclosing type parameter: `Option<T>` in a generic
 // function's signature, a `Wrapper<U>` field in a generic struct, `Cell<T>` and `Self` in a
 // generic impl, and the calls that infer through them.
-use crate::compile_harness::CompileTest;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-fn rejected(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    test.compile(&path)
-        .expect_err("the program must be rejected")
-}
+use crate::compile_harness::{CompileTest, compile_rejected, run};
 
 #[test]
 fn a_generic_function_returns_and_takes_an_option_of_its_parameter() {
@@ -271,7 +258,7 @@ func dup<T>(o: Option<T>) -> (Option<T>, Option<T>) {
 
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("dup_option.nr", source);
+    let err = compile_rejected("dup_option.nr", source);
     assert!(err.contains("use of moved value 'o'"), "{err}");
 }
 
@@ -284,7 +271,7 @@ func bad<T>(x: T) -> Option<T> {
 
 func main() -> i32 { 0 }
 "#;
-    let err = rejected("mismatch.nr", source);
+    let err = compile_rejected("mismatch.nr", source);
     assert!(
         err.contains("return type mismatch") && err.contains("Option<i32>"),
         "{err}"
@@ -309,7 +296,7 @@ func main() -> i32 {
     0
 }
 "#;
-    let err = rejected("no_infer.nr", source);
+    let err = compile_rejected("no_infer.nr", source);
     assert!(
         err.contains("generic parameter 'T' cannot be inferred"),
         "{err}"
@@ -327,6 +314,6 @@ func main() -> i32 {
     grow(1, 3)
 }
 "#;
-    let err = rejected("grow.nr", source);
+    let err = compile_rejected("grow.nr", source);
     assert!(err.contains("nests generic instances more than"), "{err}");
 }

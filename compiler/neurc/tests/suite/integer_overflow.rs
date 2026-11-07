@@ -4,43 +4,13 @@
 // (`-O1..-O3`) wrap (two's complement). These tests compile the same overflowing
 // program at both optimization levels and assert the runtime behavior differs
 // accordingly.
+use crate::compile_harness::compile_tagged;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus};
 
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
-
 /// Compile `source` at optimization level `opt`, returning the executable path.
 fn compile_source(source: &str, tag: &str, opt: &str) -> PathBuf {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let src = dir.join(format!("neuro_overflow_{tag}.nr"));
-    let exe = dir.join(format!("neuro_overflow_{tag}"));
-    std::fs::write(&src, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("compile")
-        .arg(&src)
-        .arg("-O")
-        .arg(opt)
-        .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run neurc");
-
-    assert!(
-        output.status.success(),
-        "compile failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    exe
+    compile_tagged(source, &format!("overflow_{tag}"), opt)
 }
 
 fn run(exe: &PathBuf) -> ExitStatus {

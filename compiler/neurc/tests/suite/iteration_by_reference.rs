@@ -2,29 +2,7 @@
 // `&T` to each element, `for x in &mut xs` a `&mut T` that writes the element in
 // place, and `for x in xs` consumes the head. Arrays, `Vec`s and slices follow the same
 // rule for every element type, and `&mut it` drives a protocol `Iterator` in place.
-use crate::compile_harness::CompileTest;
-
-fn run(filename: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(filename, source)
-        .expect("compile/run failed")
-}
-
-fn stdout_of(filename: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(filename, source);
-    let exe = test.compile(&path).expect("compile failed");
-    let output = std::process::Command::new(&exe)
-        .output()
-        .expect("run the compiled program");
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
-}
-
-fn rejected(filename: &str, source: &str) -> String {
-    CompileTest::new()
-        .check(filename, source)
-        .expect_err("the program must be rejected")
-}
+use crate::compile_harness::{CompileTest, rejected, run, stdout_of};
 
 #[test]
 fn a_mutable_borrow_writes_every_element_in_place() {

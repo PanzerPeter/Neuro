@@ -8,13 +8,7 @@
 // difference between the two proves every element of it is zero. A wrong element aborts
 // the program instead of returning its exit code.
 
-use crate::compile_harness::CompileTest;
-
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
+use crate::compile_harness::{CompileTest, run};
 
 fn compile_and_run(name: &str, source: &str) -> Result<i32, String> {
     CompileTest::new().compile_and_run(name, source)
@@ -61,7 +55,7 @@ func main() -> i32 {
     return 6
 }
 "#;
-    assert_eq!(run_program("tensor_ops.nr", source), 6);
+    assert_eq!(run("tensor_ops.nr", source), 6);
 }
 
 /// The same bracket, deliberately failed: a program whose expectation is one off aborts,
@@ -83,7 +77,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let exit_code = run_program("tensor_ops_wrong.nr", source);
+    let exit_code = run("tensor_ops_wrong.nr", source);
     assert!(
         aborted(exit_code),
         "expected a panicking guard to abort, but the program exited with {exit_code}"
@@ -106,7 +100,7 @@ func main() -> i32 {
     return 8
 }
 "#;
-    assert_eq!(run_program("tensor_ops_float.nr", source), 8);
+    assert_eq!(run("tensor_ops_float.nr", source), 8);
 }
 
 /// A weight matrix at real scale, updated in place inside a loop: the shape a training
@@ -123,7 +117,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    assert_eq!(run_program("tensor_ops_large.nr", source), 0);
+    assert_eq!(run("tensor_ops_large.nr", source), 0);
 }
 
 /// The element's own guards survive into the tensor form: an overflowing element panics
@@ -138,7 +132,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let exit_code = run_program("tensor_ops_overflow.nr", source);
+    let exit_code = run("tensor_ops_overflow.nr", source);
     assert!(
         aborted(exit_code),
         "expected a panicking guard to abort, but the program exited with {exit_code}"
@@ -157,7 +151,7 @@ func main() -> i32 {
     return 0
 }
 "#;
-    let exit_code = run_program("tensor_ops_divzero.nr", source);
+    let exit_code = run("tensor_ops_divzero.nr", source);
     assert!(
         aborted(exit_code),
         "expected a panicking guard to abort, but the program exited with {exit_code}"
@@ -186,7 +180,7 @@ func main() -> i32 {
     return 3
 }
 "#;
-    assert_eq!(run_program("tensor_ops_ownership.nr", source), 3);
+    assert_eq!(run("tensor_ops_ownership.nr", source), 3);
 }
 
 /// Scalar compound assignment is unaffected by the tensor path: it still desugars to
@@ -205,7 +199,7 @@ func main() -> i32 {
     return n
 }
 "#;
-    assert_eq!(run_program("tensor_ops_scalars.nr", source), 6);
+    assert_eq!(run("tensor_ops_scalars.nr", source), 6);
 }
 
 /// A shape is part of the type, so a differently shaped operand is a compile error rather

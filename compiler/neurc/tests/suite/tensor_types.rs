@@ -1,19 +1,10 @@
 // Static tensor type syntax (Phase 2B): `Tensor<T, [d0, ...]>` in every type position.
 // These cover the annotation itself; construction of tensor *values* is covered by
 // `tensor_values.rs`.
+use crate::compile_harness::neurc_path;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
-
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
 
 fn run(command: &str, source: &str) -> (bool, String) {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");

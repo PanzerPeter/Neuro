@@ -2,38 +2,7 @@
 // moves on assignment and on being passed; `.clone()` is the explicit deep copy and
 // `.to(device)` the consuming device transfer. End to end through `neurc`.
 
-use crate::compile_harness::CompileTest;
-
-use std::fs;
-use std::process::Command;
-use tempfile::TempDir;
-
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
-}
-
-/// Type-check `source`, returning whether it passed and everything the compiler printed.
-fn check_source(source: &str) -> (bool, String) {
-    let temp_dir = TempDir::new().expect("temp directory");
-    let source_path = temp_dir.path().join("tensor_ownership.nr");
-    fs::write(&source_path, source).expect("write source");
-
-    let output = Command::new(neurc_path())
-        .arg("check")
-        .arg(&source_path)
-        .output()
-        .expect("run neurc check");
-
-    let mut printed = String::from_utf8_lossy(&output.stdout).into_owned();
-    printed.push_str(&String::from_utf8_lossy(&output.stderr));
-    (output.status.success(), printed)
-}
-
-fn run_program(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
+use crate::compile_harness::{check_source, run};
 
 /// `.clone()` is the opt-out of move-by-default: both the original and the copy stay
 /// usable, and each can be consumed independently.
@@ -50,7 +19,7 @@ func main() -> i32 {
     return take(a) + take(b)
 }
 "#;
-    assert_eq!(run_program("tensor_clone.nr", source), 6);
+    assert_eq!(run("tensor_clone.nr", source), 6);
 }
 
 /// Cloning through a borrow is how a tensor someone else owns gets copied: the borrow is
@@ -71,7 +40,7 @@ func main() -> i32 {
     return copy_of(&a) + copy_of(&a)
 }
 "#;
-    assert_eq!(run_program("tensor_borrow_clone.nr", source), 8);
+    assert_eq!(run("tensor_borrow_clone.nr", source), 8);
 }
 
 /// A host transfer is the move itself: the tensor arrives on the other side of `.to`
@@ -89,7 +58,7 @@ func main() -> i32 {
     return take(here)
 }
 "#;
-    assert_eq!(run_program("tensor_to_cpu.nr", source), 9);
+    assert_eq!(run("tensor_to_cpu.nr", source), 9);
 }
 
 #[test]
@@ -130,7 +99,7 @@ func main() -> i32 {
     return rows(&a) + rows(&a) + rows(&a)
 }
 "#;
-    assert_eq!(run_program("tensor_borrow.nr", source), 6);
+    assert_eq!(run("tensor_borrow.nr", source), 6);
 }
 
 /// A borrow cannot be consumed, so `.to` is not offered on one.

@@ -1,7 +1,7 @@
 // End-to-end tests for fixed-size arrays `[T; N]`: literals, indexing,
 // element assignment, `.len()`, `for x in arr` / `for x in &arr` iteration, and
 // the debug-build out-of-bounds panic.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, neurc_path};
 
 use std::process::Command;
 
@@ -229,14 +229,4 @@ fn test_bug_068_out_of_range_index_panics_in_release_build() {
             run.status.code()
         );
     }
-}
-
-/// Path to the `neurc` binary Cargo built for this test run.
-///
-/// Cargo sets `CARGO_BIN_EXE_neurc` for integration tests in the `neurc`
-/// package; it is absolute and already carries the platform executable
-/// suffix. Do not derive it from `current_exe()`. That assumes the legacy
-/// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }

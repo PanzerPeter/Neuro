@@ -1,31 +1,7 @@
 // The derivable traits `Copy`, `Clone`, `Debug`, `PartialEq` and `Hashable` as ordinary
 // traits: written by hand, named as bounds, and met alike by a derive, a hand-written
 // impl and a builtin type, so one generic body instantiates over all three.
-use crate::compile_harness::CompileTest;
-
-fn run(name: &str, source: &str) -> i32 {
-    CompileTest::new()
-        .compile_and_run(name, source)
-        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
-}
-
-fn stdout_of(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let exe = test
-        .compile(&test.write_source(name, source))
-        .unwrap_or_else(|e| panic!("{name} should compile: {e}"));
-    let out = std::process::Command::new(&exe)
-        .output()
-        .expect("run executable");
-    String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n")
-}
-
-fn rejected(name: &str, source: &str) -> String {
-    let test = CompileTest::new();
-    let path = test.write_source(name, source);
-    test.compile(&path)
-        .expect_err("the program must be rejected")
-}
+use crate::compile_harness::{CompileTest, compile_rejected, run, stdout_of};
 
 #[test]
 fn a_copy_bound_lets_the_body_use_a_value_twice() {
@@ -312,7 +288,7 @@ func main() -> i32 {
 
 #[test]
 fn a_bound_the_argument_does_not_meet_is_refused() {
-    let err = rejected(
+    let err = compile_rejected(
         "unmet.nr",
         r#"
 struct Plain {
@@ -347,7 +323,7 @@ func main() -> i32 {
 
 #[test]
 fn a_hand_written_copy_is_held_to_what_the_derive_accepts() {
-    let err = rejected(
+    let err = compile_rejected(
         "bad_copy.nr",
         r#"
 struct Owns {
@@ -391,7 +367,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn deriving_a_trait_and_writing_its_impl_conflict() {
-    let err = rejected(
+    let err = compile_rejected(
         "conflict.nr",
         r#"
 @derive(Hashable)
@@ -416,7 +392,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn a_derived_hashable_field_must_hash() {
-    let err = rejected(
+    let err = compile_rejected(
         "float_field.nr",
         r#"
 @derive(Hashable)
@@ -435,7 +411,7 @@ func main() -> i32 { 0 }
 
 #[test]
 fn an_unbounded_parameter_does_not_render_but_fills_a_vec() {
-    let err = rejected(
+    let err = compile_rejected(
         "unbounded.nr",
         r#"
 func show<T>(v: &T) -> string {
@@ -498,7 +474,7 @@ func main() -> i32 {
 
 #[test]
 fn eq_needs_a_partial_eq_bound_or_implementor() {
-    let err = rejected(
+    let err = compile_rejected(
         "eq_unbounded.nr",
         r#"
 struct Plain { a: i32 }
@@ -552,7 +528,7 @@ func main() -> i32 {
 
 #[test]
 fn a_type_parameter_key_needs_every_key_trait_as_a_bound() {
-    let err = rejected(
+    let err = compile_rejected(
         "generic_key_bounds.nr",
         r#"
 func a<K: PartialEq + Copy>(k: K) -> i32 {
@@ -1369,7 +1345,7 @@ func main() -> i32 {
 }
 "#;
     assert_eq!(run("dyn_string.nr", source), 4 + 7 + 4 + 6 + 7);
-    let parameter = rejected(
+    let parameter = compile_rejected(
         "dyn_string_parameter.nr",
         r#"
 func render(d: &dyn Debug) {}
@@ -1385,7 +1361,7 @@ func main() -> i32 {
         parameter.contains("cannot become a `&dyn Debug`"),
         "got: {parameter}"
     );
-    let generic = rejected(
+    let generic = compile_rejected(
         "dyn_string_generic.nr",
         r#"
 func render(d: &dyn Debug) {}

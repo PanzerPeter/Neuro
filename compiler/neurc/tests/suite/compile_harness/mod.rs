@@ -3,7 +3,7 @@
 // the compiler output or the linked binary's exit status for assertion.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -13,7 +13,7 @@ use tempfile::TempDir;
 /// package; it is absolute and already carries the platform executable
 /// suffix. Do not derive it from `current_exe()`. That assumes the legacy
 /// `target/<profile>/deps/` layout and breaks under Cargo's build-dir layout.
-fn neurc_path() -> PathBuf {
+pub fn neurc_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }
 
@@ -121,6 +121,13 @@ impl CompileTest {
     /// what the type checker accepts or rejects: it skips LLVM entirely, so it neither
     /// needs a linker nor reports a backend error as if it were a type error.
     pub fn check(&self, filename: &str, source: &str) -> Result<(), String> {
+        let (accepted, printed) = self.check_output(filename, source);
+        if accepted { Ok(()) } else { Err(printed) }
+    }
+
+    /// `neurc check`: whether the program was accepted, and everything it printed, which
+    /// on an accepted program is where a warning would be.
+    fn check_output(&self, filename: &str, source: &str) -> (bool, String) {
         let source_path = self.write_source(filename, source);
         let output = Command::new(neurc_path())
             .arg("check")
@@ -128,14 +135,12 @@ impl CompileTest {
             .output()
             .expect("Failed to execute neurc");
 
-        if output.status.success() {
-            return Ok(());
-        }
-        Err(format!(
+        let printed = format!(
             "{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        ))
+        );
+        (output.status.success(), printed)
     }
 
     /// Compile and run a program, returning its exit code
@@ -144,4 +149,108 @@ impl CompileTest {
         let exe_path = self.compile(&source_path)?;
         self.run_executable(&exe_path)
     }
+}
+
+/// Compile and run `source`, failing the test unless it does both.
+pub fn run(name: &str, source: &str) -> i32 {
+    CompileTest::new()
+        .compile_and_run(name, source)
+        .unwrap_or_else(|e| panic!("{name} should compile and run: {e}"))
+}
+
+/// Lay out a multi-file program, compile it from `root`, and run it.
+pub fn run_program(files: &[(&str, &str)], root: &str) -> Result<i32, String> {
+    let test = CompileTest::new();
+    let mut root_path = None;
+    for (path, source) in files {
+        let written = test.write_source(path, source);
+        if *path == root {
+            root_path = Some(written);
+        }
+    }
+    let root_path = root_path.ok_or_else(|| format!("{} is not among the written files", root))?;
+    let exe = test.compile(&root_path)?;
+    test.run_executable(&exe)
+}
+
+/// Compile and run `source`, asserting its exit code.
+pub fn assert_exit(name: &str, source: &str, expected: i32) {
+    assert_eq!(
+        run(name, source),
+        expected,
+        "{name} returned the wrong value"
+    );
+}
+
+/// [`assert_exit`] for a test whose program is its only input: the failure shows the source.
+pub fn run_expecting(source: &str, expected: i32) {
+    assert_eq!(
+        run("test.nr", source),
+        expected,
+        "unexpected exit code for program:\n{source}"
+    );
+}
+
+/// Compile and run `source`, returning what it printed with line endings normalized.
+pub fn stdout_of(name: &str, source: &str) -> String {
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source(name, source))
+        .unwrap_or_else(|e| panic!("{name} should compile: {e}"));
+    let output = Command::new(&exe).output().expect("run executable");
+    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+}
+
+/// Type-check `source`, reporting whether it was accepted and what `neurc` printed.
+pub fn check_source(source: &str) -> (bool, String) {
+    CompileTest::new().check_output("test.nr", source)
+}
+
+/// The diagnostics of a program `neurc check` must refuse.
+pub fn rejected(name: &str, source: &str) -> String {
+    CompileTest::new()
+        .check(name, source)
+        .expect_err(&format!("{name} should be rejected"))
+}
+
+/// The diagnostics of a program `neurc compile` must refuse, for a rejection that only the
+/// full pipeline reaches.
+pub fn compile_rejected(name: &str, source: &str) -> String {
+    let test = CompileTest::new();
+    test.compile(&test.write_source(name, source))
+        .expect_err(&format!("{name} should be rejected"))
+}
+
+/// Assert `neurc check` refuses `source` with a diagnostic containing `expected`.
+pub fn assert_check_error(name: &str, source: &str, expected: &str) {
+    let text = rejected(name, source);
+    assert!(
+        text.contains(expected),
+        "expected a diagnostic containing {expected:?}, got: {text}"
+    );
+}
+
+/// Compile `source` at `-O{optimization}` into Cargo's test scratch directory, which outlives
+/// the call, so a test can run the binary as often as it needs. `tag` names the source and
+/// the binary, so it must be unique across the suite: the directory is shared.
+pub fn compile_tagged(source: &str, tag: &str, optimization: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let src = dir.join(format!("neuro_{tag}.nr"));
+    let exe = dir.join(format!("neuro_{tag}"));
+    fs::write(&src, source).expect("write source");
+
+    let output = Command::new(neurc_path())
+        .arg("compile")
+        .arg(&src)
+        .args(["-O", optimization, "-o"])
+        .arg(&exe)
+        .output()
+        .expect("run neurc");
+    assert!(
+        output.status.success(),
+        "compile at -O{optimization} failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    exe
 }
