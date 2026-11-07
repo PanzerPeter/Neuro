@@ -30,7 +30,8 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::values::*;
 use neuro_hir::{HirExpr, HirExprKind};
 
-use crate::codegen::context::{BuiltinMethod, CodegenContext, resolve_builtin_method};
+use crate::codegen::context::{BuiltinMethod, CodegenContext, DropTarget, resolve_builtin_method};
+use crate::codegen::drops::builds_its_own_buffer;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -517,7 +518,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 mutable: false,
             } if matches!(**inner, Type::String)
         ) {
-            return self.codegen_expr(operand);
+            let value = self.codegen_expr(operand)?;
+            // A `string` built for the borrow has no owner but its statement.
+            if self.produces_owned_string(operand) {
+                let slot = self.entry_alloca(value.get_type(), "borrow.str")?;
+                self.builder.build_store(slot, value)?;
+                self.hold_to_statement_end(slot, DropTarget::HeapString)?;
+            }
+            return Ok(value);
         }
         match &operand.kind {
             HirExprKind::Variable(name) => {
@@ -535,18 +543,22 @@ impl<'ctx> CodegenContext<'ctx> {
                 let handle = self.codegen_expr(operand)?;
                 let cell = self.entry_alloca(handle.get_type(), "borrow.cell")?;
                 self.builder.build_store(cell, handle)?;
+                if builds_its_own_buffer(operand) && self.pool_depth == 0 {
+                    self.hold_to_statement_end(cell, DropTarget::TensorBuffer)?;
+                }
                 Ok(cell.into())
             }
             // A field or an element: the address of its storage inside the holder. Anything
-            // else is a `Copy` temporary passed to a call, which the checker allows only
-            // where the borrow ends with the statement, so a stack slot holding the value
-            // outlives it.
+            // else is a temporary passed to a call, which the checker allows only where the
+            // borrow ends with the statement, so a stack slot holding the value outlives
+            // it, and the statement releases what it owns.
             _ => match self.held_place_ptr(operand)? {
                 Some(ptr) => Ok(ptr.into()),
                 None => {
                     let value = self.codegen_expr(operand)?;
                     let slot = self.entry_alloca(value.get_type(), "borrow.temp")?;
                     self.builder.build_store(slot, value)?;
+                    self.hold_unbound_temporary(operand, slot)?;
                     Ok(slot.into())
                 }
             },

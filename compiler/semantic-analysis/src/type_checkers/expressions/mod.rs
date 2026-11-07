@@ -44,7 +44,12 @@ impl TypeChecker {
         match expr {
             // A name or a grouping is the same read as whatever encloses it, so it
             // inherits the chain state rather than opening or closing one.
-            Expr::Identifier(_) | Expr::Paren(_, _) => self.check_expr_kind(expr, expected),
+            Expr::Identifier(_) => self.check_expr_kind(expr, expected),
+            Expr::Paren(_, _) => {
+                let ty = self.check_expr_kind(expr, expected);
+                self.propagate_temporary_view(expr, ty.as_ref());
+                ty
+            }
             Expr::FieldAccess { .. } | Expr::Index { .. } | Expr::TupleIndex { .. } => {
                 let outermost = !self.in_sub_place;
                 self.in_sub_place = true;
@@ -60,6 +65,7 @@ impl TypeChecker {
                 let outer = std::mem::replace(&mut self.in_sub_place, false);
                 let ty = self.check_expr_kind(expr, expected);
                 self.in_sub_place = outer;
+                self.propagate_temporary_view(expr, ty.as_ref());
                 ty
             }
         }
@@ -99,6 +105,31 @@ impl TypeChecker {
             span: expr.span(),
             moved_at,
         });
+    }
+
+    /// Carry a borrow of a temporary out of `expr`'s parts: a value built around one holds
+    /// it, and a call's result may. A value that provably holds no reference ends it.
+    fn propagate_temporary_view(&mut self, expr: &Expr, ty: Option<&Type>) {
+        if self.temporary_views.is_empty() || !ty.is_some_and(|t| self.type_holds_reference(t)) {
+            return;
+        }
+        let parts: Vec<&Expr> = match expr {
+            Expr::Paren(inner, _) => vec![inner.as_ref()],
+            Expr::Call { args, .. } => args.iter().collect(),
+            Expr::StructLiteral { fields, .. } | Expr::EnumStructLiteral { fields, .. } => {
+                fields.iter().map(|field| field.value.as_ref()).collect()
+            }
+            Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+                elements.iter().collect()
+            }
+            _ => Vec::new(),
+        };
+        let carried = parts
+            .iter()
+            .any(|part| self.temporary_views.contains(&part.span()));
+        if carried {
+            let _ = self.temporary_views.insert(expr.span());
+        }
     }
 
     fn check_expr_kind(&mut self, expr: &Expr, expected: Option<&Type>) -> Option<Type> {

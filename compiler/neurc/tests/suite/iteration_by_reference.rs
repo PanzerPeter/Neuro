@@ -309,3 +309,77 @@ func main() -> i32 {
         "got: {err}"
     );
 }
+
+/// A by-value `for` over an array hands each element's ownership to the binding on its
+/// pass, and the array keeps what the loop never reached.
+#[test]
+fn regression_bug_124_a_by_value_array_loop_releases_every_element() {
+    let source = r#"
+struct N { a: string, k: i32 }
+struct V { v: Vec<i32> }
+
+func q() -> string { "a" + "b" }
+func held(k: i32) -> V {
+    mut w: Vec<i32> = Vec::new()
+    w.push(k)
+    V { v: w }
+}
+
+func all() -> i32 {
+    val parts = [q(), "x" + "y", "lit"]
+    mut total = 0
+    for part in parts { total += part.len() as i32 }
+    total
+}
+
+func broken() -> i32 {
+    val parts = [q(), "x" + "y", "lit"]
+    mut total = 0
+    for part in parts {
+        total += part.len() as i32
+        break
+    }
+    total
+}
+
+func returned() -> i32 {
+    val parts = [q(), "x" + "y"]
+    for part in parts {
+        return part.len() as i32 + 1
+    }
+    0
+}
+
+func moved() -> i32 {
+    val parts = [q(), "x" + "yz"]
+    mut v: Vec<string> = Vec::new()
+    for part in parts { v.push(part) }
+    v[1].len() as i32 + v.len() as i32
+}
+
+func structs() -> i32 {
+    val xs = [N { a: "p" + "q", k: 1 }, N { a: "r" + "st", k: 2 }]
+    mut t = 0
+    for x in xs { t += x.a.len() as i32 + x.k }
+    t
+}
+
+func owners() -> i32 {
+    val xs = [held(1), held(2), held(3)]
+    mut t = 0
+    for x in xs {
+        t += x.v[0]
+        if t == 3 { break }
+    }
+    t
+}
+
+func main() -> i32 {
+    mut t = 0
+    for i in 0..4 { t += all() + broken() + returned() + moved() + structs() + owners() }
+    t
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("array_loop.nr", source), 112);
+}

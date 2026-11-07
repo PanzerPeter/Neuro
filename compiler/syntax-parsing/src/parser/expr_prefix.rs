@@ -218,10 +218,18 @@ impl Parser {
                 })
             }
 
-            // `( ... )` is either grouping or a tuple literal. A comma after
-            // the first expression makes it a tuple; otherwise it is plain grouping.
+            // `( ... )` is unit, grouping or a tuple literal. A comma after the first
+            // expression makes it a tuple; otherwise it is plain grouping.
             TokenKind::LeftParen => self.inside_delimiters(|p| {
                 p.skip_newlines();
+                // `()` is the unit value, the tuple of no elements.
+                if p.check(&TokenKind::RightParen) {
+                    let close = p.consume(TokenKind::RightParen, "')'")?;
+                    return Ok(Expr::TupleLiteral {
+                        elements: Vec::new(),
+                        span: token.span.merge(close.span),
+                    });
+                }
                 let first = p.parse_expr(Precedence::Lowest)?;
                 p.skip_newlines();
                 if p.check(&TokenKind::Comma) {

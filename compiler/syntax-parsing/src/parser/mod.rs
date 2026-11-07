@@ -53,6 +53,8 @@ pub(crate) struct Parser {
     /// in a type application (`Ref<'a>`) is checked against it and then dropped, since
     /// nothing past the parser reads one.
     pub(super) lifetime_scope: Vec<String>,
+    /// How many lifetimes have been named in type position so far, `'_` left out.
+    pub(super) named_lifetimes: usize,
 }
 
 impl Parser {
@@ -66,6 +68,7 @@ impl Parser {
             delimiter_depth: 0,
             destructure_counter: 0,
             lifetime_scope: Vec::new(),
+            named_lifetimes: 0,
         }
     }
 

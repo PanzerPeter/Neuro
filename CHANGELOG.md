@@ -10,6 +10,36 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.31.1] - 2026-11-07
+
+### Added
+
+- `()` is the unit type and value, so `Result<(), E>` and `Ok(())` work, and `-> ()` means no return value (BUG-139).
+- `@derive(Clone)` clones field by field: a `string`, a tensor, and a tuple, array or newtype holding them or a struct with a `clone` of its own (BUG-098).
+- A borrow of an owning temporary can be passed to a call: `size(&(a + b))`, `first(&make())`. The statement releases it (BUG-132).
+- A `string` binding or field coerces to `&dyn Debug` and `&dyn Hashable` through `&s` (BUG-126).
+- `val [first, ..] = s else { ... }` over a slice.
+
+### Changed
+
+- `CPU` and `GPU` are no longer bare names: write `Device::CPU` and `Device::GPU(n)`. Only `Option`'s and `Result`'s variants are bare (BUG-140).
+- `&self` on a struct or an enum passes the receiver's address.
+
+### Fixed
+
+- A reference into `self` returned from a `&self` method pointed at the callee's dead frame (BUG-130).
+- A method's reference into an owned local receiver could be returned (BUG-128). A result that borrows a temporary receiver can no longer be bound, stored or returned, and such a receiver now lives to the end of its statement.
+- `val ... else` over a call result leaked an owning payload, on a hit and on a miss (BUG-142).
+- A discarded fresh value that owns something was never released (BUG-144).
+- A by-value `for` over an array leaked every `string` element, and on `break` or `return` every element it had not reached (BUG-124).
+- A gradient could land on the host for a device parameter. `.backward()` now puts it on the parameter's device (BUG-143).
+- A `val ... else` binding could not shadow a name of its block (BUG-145).
+- A `@kernel` call in a `@grad` body gets a message naming it, not `an expression statement`.
+
+### Documentation
+
+- The autodiff and ownership references drop their notes on these bugs, and `docs/BUGS.md` loses their entries.
+
 ## [5.31.0] - 2026-11-07
 
 ### Added

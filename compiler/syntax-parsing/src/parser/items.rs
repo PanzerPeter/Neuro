@@ -445,6 +445,7 @@ fn apply_trait_defaults(
                 self_param: method.self_param.clone(),
                 params: method.params.clone(),
                 return_type: method.return_type.clone(),
+                return_lifetimes: 0,
                 body: body.clone(),
                 attributes: Vec::new(),
                 span: method.span,

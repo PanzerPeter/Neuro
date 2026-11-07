@@ -1022,12 +1022,12 @@ func main() -> i32 {
     assert_eq!(run("indexed_receiver_exit.nr", indexed), 61);
 }
 
-/// A tuple, an array and a newtype are cloned by their bytes, so a struct inside one
-/// whose derived clone calls a field's `clone` is refused there, as a hand-written one is.
+/// A derived clone reaches a struct inside a tuple or an array part by part, so each
+/// hand-written `clone` runs.
 #[test]
-fn a_struct_cloned_by_its_fields_cannot_sit_in_a_tuple_or_array() {
-    let err = rejected(
-        "held_by_bytes.nr",
+fn a_struct_cloned_by_its_fields_sits_in_a_tuple_or_array() {
+    let out = stdout_of(
+        "held_in_parts.nr",
         r#"
 struct Hand {
     n: i32,
@@ -1061,14 +1061,7 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(
-        err.contains("field 't' has type (Mid, i32), which is copied by its bytes"),
-        "got: {err}"
-    );
-    assert!(
-        err.contains("field 'arr' has type [Mid; 2], which is copied by its bytes"),
-        "got: {err}"
-    );
+    assert_eq!(out, "ccc\nab\n");
 }
 
 /// The derived `==` calls a field's `eq` only through its `PartialEq` impl: an inherent
@@ -1216,7 +1209,7 @@ func main() -> i32 {
 /// cannot sit in a tuple, which is copied by its bytes; the refusal says so rather than
 /// blaming a buffer.
 #[test]
-fn a_newtype_field_clone_is_called_and_a_byte_copy_of_it_refused() {
+fn a_newtype_field_clone_is_called_at_any_depth() {
     let called = r#"
 newtype N = i32
 
@@ -1242,9 +1235,7 @@ func main() -> i32 {
 "#;
     assert_eq!(stdout_of("newtype_clone.nr", called), "n\n");
     assert_eq!(run("newtype_clone_exit.nr", called), 4);
-    let err = rejected(
-        "newtype_in_tuple.nr",
-        r#"
+    let in_tuple = r#"
 newtype N = i32
 impl Clone for N {
     func clone(&self) -> Self {
@@ -1262,15 +1253,9 @@ func main() -> i32 {
     println("")
     c.t.0.n.0 + c.t.1
 }
-"#,
-    );
-    assert!(
-        err.contains(
-            "is copied by its bytes, so the `clone` a struct inside it calls would be skipped"
-        ),
-        "got: {err}"
-    );
-    assert!(!err.contains("owns a buffer"), "got: {err}");
+"#;
+    assert_eq!(stdout_of("newtype_in_tuple.nr", in_tuple), "n\n");
+    assert_eq!(run("newtype_in_tuple_exit.nr", in_tuple), 4);
 }
 
 /// A derived or builtin implementor coerces to `&dyn Debug` / `&dyn Hashable` like a
@@ -1360,24 +1345,45 @@ func main() -> i32 {
     assert_eq!(run("dyn_fmt_debug.nr", source), 7);
 }
 
-/// A `&string` is a fat pointer, so it is no trait object's data pointer: refused
-/// written directly, and reported (not an internal error) through a generic instance.
+/// A `&string` is a fat pointer and a trait object's data pointer is thin, so a trait object
+/// borrows the place that holds the `string`. A `&string` with no place behind it is refused.
 #[test]
-fn a_string_is_not_a_trait_object() {
-    let direct = rejected(
-        "dyn_string.nr",
-        r#"
-func render(d: &dyn Debug) {}
+fn regression_bug_126_a_string_place_is_a_trait_object() {
+    let source = r#"
+struct P { name: string }
+func hashed(d: &dyn Hashable) -> u64 { d.hash() }
+func shown(d: &dyn Debug) -> i32 {
+    mut b = StringBuilder::new()
+    d.fmt_debug(&mut b)
+    val s = b.to_string()
+    s.len() as i32
+}
 func main() -> i32 {
     val s = "hi"
-    render(&s)
+    val t = "ab" + "cde"
+    val p = P { name: "x" + "y" }
+    val pair = ("abc" + "d", 1)
+    val r: &dyn Debug = &t
+    if hashed(&s) != hashed(&s) { return 1 }
+    shown(&s) + shown(&t) + shown(&p.name) + shown(&pair.0) + shown(r)
+}
+"#;
+    assert_eq!(run("dyn_string.nr", source), 4 + 7 + 4 + 6 + 7);
+    let parameter = rejected(
+        "dyn_string_parameter.nr",
+        r#"
+func render(d: &dyn Debug) {}
+func via(s: &string) { render(s) }
+func main() -> i32 {
+    val s = "hi"
+    via(&s)
     0
 }
 "#,
     );
     assert!(
-        direct.contains("expected &dyn Debug, found &string"),
-        "got: {direct}"
+        parameter.contains("cannot become a `&dyn Debug`"),
+        "got: {parameter}"
     );
     let generic = rejected(
         "dyn_string_generic.nr",

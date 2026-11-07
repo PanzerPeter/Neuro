@@ -188,15 +188,6 @@ fn test_error_incomplete_unary_expression() {
 }
 
 #[test]
-fn test_error_empty_parens_are_not_an_expression() {
-    let err = expr_error("()");
-    assert!(
-        err.contains("unexpected token RightParen, expected expression"),
-        "{err}"
-    );
-}
-
-#[test]
 fn test_error_trailing_comma_in_call() {
     let err = expr_error("foo(1, 2,)");
     assert!(

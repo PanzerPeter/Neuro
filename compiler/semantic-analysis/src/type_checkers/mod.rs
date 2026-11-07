@@ -174,6 +174,14 @@ pub(crate) struct TypeChecker {
     /// A reference annotation `&'a T` is well-formed only if `a` is present here. Empty
     /// outside a definition that declares lifetimes.
     pub(crate) lifetime_scope: HashSet<String>,
+    /// How many lifetimes each struct and enum declares.
+    pub(crate) declared_lifetimes: HashMap<String, usize>,
+    /// The methods, by `functions` key, whose result borrows the receiver: an elided
+    /// lifetime in a `self` method's return type.
+    pub(crate) self_borrowing_methods: HashSet<String>,
+    /// The spans of the calls whose result borrows a temporary, which dies with its
+    /// statement: `make().view()`.
+    pub(crate) temporary_views: HashSet<shared_types::Span>,
     /// Compile-time constant names and their declared types (module and function scope).
     pub(crate) constants: HashMap<String, Type>,
     /// The same constants' value expressions, for the one place a constant is folded
@@ -525,6 +533,9 @@ impl TypeChecker {
             generic_scope: HashSet::new(),
             const_scope: HashMap::new(),
             lifetime_scope: HashSet::new(),
+            declared_lifetimes: HashMap::new(),
+            self_borrowing_methods: HashSet::new(),
+            temporary_views: HashSet::new(),
             constants: HashMap::new(),
             constant_values: HashMap::new(),
             local_constants: Vec::new(),
@@ -905,69 +916,26 @@ impl TypeChecker {
     }
 
     /// Whether a derived `.clone()` copies a field of type `ty` faithfully by its bytes,
-    /// which duplicates a `Copy` value and a struct that is itself cloned that way, but
-    /// would leave a buffer-owning field shared by the original and the copy, freed twice
-    /// or read after its owner released it. A field whose `Clone` is written by hand is
-    /// admitted by the field rule instead: the derived clone calls it.
+    /// which covers a `Copy` value, a `string`, a tensor, a value with a `Clone` of its own
+    /// and any part-by-part holder of those. A `Vec` and a `StringBuilder` have no `.clone()`.
     pub(crate) fn is_derived_cloneable(&self, ty: &Type) -> bool {
         match ty {
-            Type::Struct(name) => self.clone_structs.contains(name),
+            Type::Struct(name) if self.clone_structs.contains(name) => true,
             // A template defers to its instances, which are validated where they are made.
             Type::Generic(_) | Type::Unknown => true,
-            // A newtype, an array and a tuple are copied by their bytes, so a struct inside
-            // one must be too: one whose derived clone calls a field's `clone` is not.
+            // The derive calls these fields' own `.clone()`.
+            Type::String | Type::Tensor { .. } => true,
+            // The derive clones each part.
             Type::Newtype(name) => self
                 .lookup_newtype_inner(name)
                 .cloned()
-                .is_some_and(|inner| self.clones_by_bytes(&inner)),
-            Type::Array { element, .. } => self.clones_by_bytes(element),
-            Type::Tuple(elements) => elements.iter().all(|e| self.clones_by_bytes(e)),
-            other => self.is_type_copy(other),
+                .is_some_and(|inner| self.is_derived_cloneable(&inner)),
+            Type::Array { element, .. } => self.is_derived_cloneable(element),
+            Type::Tuple(elements) => elements.iter().all(|e| self.is_derived_cloneable(e)),
+            other => {
+                self.is_type_copy(other) || self.implements_by_hand(other, derivable::CLONE_TRAIT)
+            }
         }
-    }
-
-    /// [`Self::is_derived_cloneable`] for a value copied by its bytes inside a newtype,
-    /// an array or a tuple.
-    fn clones_by_bytes(&self, ty: &Type) -> bool {
-        self.is_derived_cloneable(ty) && !self.derived_clone_calls(ty)
-    }
-
-    /// Whether a value of `ty`, copied by its bytes as a newtype, an array or a tuple is,
-    /// holds a struct whose derived clone calls a field's `clone`, which that copy cannot.
-    pub(crate) fn byte_copy_skips_a_clone(&self, ty: &Type) -> bool {
-        let inner: Vec<Type> = match ty {
-            Type::Newtype(name) => self
-                .lookup_newtype_inner(name)
-                .cloned()
-                .into_iter()
-                .collect(),
-            Type::Array { element, .. } => vec![(**element).clone()],
-            Type::Tuple(elements) => elements.clone(),
-            _ => return false,
-        };
-        inner
-            .iter()
-            .any(|e| self.derived_clone_calls(e) || self.byte_copy_skips_a_clone(e))
-    }
-
-    /// Whether the derived clone of `ty` calls a hand-written `clone`: a non-`Copy`
-    /// struct deriving `Clone` with a field that has an `impl Clone` (not an inherent
-    /// method of that name), or with a field that is such a struct itself. A `Copy`
-    /// struct's clone is a copy of its bytes. Lowering's `clone_calls_fields` is the same
-    /// rule.
-    fn derived_clone_calls(&self, ty: &Type) -> bool {
-        let Type::Struct(name) = ty else {
-            return false;
-        };
-        if !self.clone_structs.contains(name) || self.is_type_copy(ty) {
-            return false;
-        }
-        self.struct_defs.get(name).is_some_and(|fields| {
-            fields.iter().any(|(_, field)| {
-                self.type_implements_trait(field, derivable::CLONE_TRAIT)
-                    || self.derived_clone_calls(field)
-            })
-        })
     }
 
     /// Whether a derived `==` can compare `ty`, and so whether a `@derive(PartialEq)`

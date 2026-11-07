@@ -239,15 +239,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let registrar = self.pool_aware_method(struct_name, "register_with_pool")?;
         let handle = self.emit_pool_handle()?;
-        // `register_with_pool` takes `&self`, which this backend passes by value; only
-        // the `&mut self` of `bulk_release` arrives as a pointer.
-        let receiver = self.builder.build_load(
-            self.get_struct_llvm_type(struct_name)?,
-            storage_ptr,
-            "pool.receiver",
-        )?;
         self.builder
-            .build_call(registrar, &[receiver.into(), handle.into()], "")?;
+            .build_call(registrar, &[storage_ptr.into(), handle.into()], "")?;
         self.transfer_pool_registration(name, struct_name, storage_ptr)
     }
 

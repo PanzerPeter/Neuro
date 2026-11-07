@@ -90,7 +90,7 @@ val b: string = a.clone()  // a is NOT moved
 val ok: bool = a == b      // reading a here is fine
 ```
 
-`@derive(Clone)` refuses a struct with a field that owns a buffer: a `string`, a tensor, a `Vec` or a `StringBuilder`. For a `string` or tensor field, write `impl Clone` by hand and call `.clone()` on the field. A `Vec` and a `StringBuilder` have no `.clone()` to call, so a struct holding one cannot implement `Clone` yet.
+`@derive(Clone)` clones each field, so the copy owns its own `string` and tensor buffers. A `Vec` and a `StringBuilder` have no `.clone()` to call, so a struct holding one cannot implement `Clone` yet.
 
 ## Ownership of elements
 
@@ -174,9 +174,8 @@ func main() -> i32 {
 - Method calls and field reads auto-deref through any number of `&` and `&mut`. `r.len()` works on a `&string`, `r.method()` on a `&Struct` or a `&&Struct`, `r.abs()` on a `&f64`, and `r.field` on a `&Struct`. A field write goes through one `&mut`.
 - A borrow of a borrow is written `&&T` in a type. In an expression, borrow a binding that holds the reference (`val rr = &r`), because `&&x` does not borrow a place.
 - Only a **place** can be borrowed: a `val`, `mut` or parameter binding, or a field, a tuple element, or an array, slice or `Vec` element reached from one (`&p.name`, `&arr[i]`, `&v[i]`). A borrow of a part borrows the whole binding, so `p` may not be moved while `&p.name` is live. A `const` and a tensor element are not places, and `&` on them is refused with ``cannot borrow this expression: `&` requires a place``.
-- A **temporary** (a literal, an operator or call result, a struct literal) lives until the end of its statement. A shared borrow of a `Copy` temporary can therefore be passed straight to a call: `id(&1)`, or `norm(&Point { x: 3, y: 4 })` when `Point` is `@derive(Copy)`. A borrow of a temporary cannot be bound (`val r = &5` is refused). A call that could keep the borrow, in its result or through a `&mut` argument, refuses it too.
-
-Not yet supported: borrowing an owning temporary, such as `&make_string()`. Bind the value to a `val` first.
+- A **temporary** (a literal, an operator or call result, a struct literal) lives until the end of its statement. A shared borrow of one can therefore be passed straight to a call: `id(&1)`, `size(&(a + b))`, `first(&make())`. The statement releases what the temporary owns. A borrow of a temporary cannot be bound (`val r = &5` is refused). A call that could keep the borrow, in its result or through a `&mut` argument, refuses it too.
+- A method's result can borrow a temporary receiver the same way. `make().view().len()` reads it in place, and `val r = make().view()` is refused, as is storing or returning it. A result borrows the receiver when its return type elides a lifetime; one that names the `impl`'s lifetime (`-> &'a string`) returns what the receiver borrows instead.
 
 ### String slices (`&string`)
 

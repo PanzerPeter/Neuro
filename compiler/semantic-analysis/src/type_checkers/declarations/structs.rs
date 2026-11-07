@@ -50,6 +50,8 @@ impl TypeChecker {
         self.exit_generic_scope();
 
         self.struct_defs.insert(def.name.name.clone(), fields);
+        self.declared_lifetimes
+            .insert(def.name.name.clone(), def.lifetimes.len());
         self.record_visibility(def);
         self.record_derive_intent(def);
         Some(())
@@ -200,8 +202,6 @@ impl TypeChecker {
                     // buffer, its own derive is the one refused.
                     let reason = if derivable {
                         "has no `.clone()`; give it `@derive(Clone)` too"
-                    } else if self.byte_copy_skips_a_clone(field_ty) {
-                        "is copied by its bytes, so the `clone` a struct inside it calls would be skipped; write `impl Clone` by hand"
                     } else {
                         "owns a buffer that a derived `.clone()` cannot copy yet; write `impl Clone` by hand"
                     };
@@ -264,7 +264,7 @@ impl TypeChecker {
     /// Whether `ty` implements `trait_name` through an `impl` block, whose method a
     /// derive calls on a field of that type. A `PartialEq` impl counts only when it
     /// compares the type with itself, the call the derived `==` makes.
-    fn implements_by_hand(&self, ty: &Type, trait_name: &str) -> bool {
+    pub(crate) fn implements_by_hand(&self, ty: &Type, trait_name: &str) -> bool {
         if !matches!(ty, Type::Struct(_) | Type::Enum(_)) {
             return false;
         }
@@ -339,6 +339,8 @@ impl TypeChecker {
         self.exit_generic_scope();
 
         self.struct_defs.insert(def.name.name.clone(), fields);
+        self.declared_lifetimes
+            .insert(def.name.name.clone(), def.lifetimes.len());
         self.record_visibility(def);
         self.record_derive_intent(def);
         self.generic_structs
@@ -592,6 +594,9 @@ impl TypeChecker {
                 };
                 let inst_sig = self.substitute_generic(&sig, &impl_subst, span);
                 self.functions.insert(inst_key.clone(), inst_sig);
+                if self.self_borrowing_methods.contains(&base_key) {
+                    let _ = self.self_borrowing_methods.insert(inst_key.clone());
+                }
                 if let Some(mut own) = self.generic_methods.get(&base_key).cloned() {
                     // A method bound may constrain an associated type to the impl's `T`,
                     // which this instance has fixed.

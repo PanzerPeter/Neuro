@@ -121,6 +121,15 @@ impl TypeChecker {
             }
 
             self.functions.insert(mangled.clone(), func_ty);
+            if method.self_param.is_some()
+                && !matches!(method.self_param, Some(SelfParam::Owned))
+                && method
+                    .return_type
+                    .as_ref()
+                    .is_some_and(|ret| self.lifetime_positions(ret) > method.return_lifetimes)
+            {
+                let _ = self.self_borrowing_methods.insert(mangled.clone());
+            }
             if let Some(own) = own_generics {
                 self.generic_methods.insert(mangled.clone(), own);
             }

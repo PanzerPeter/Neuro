@@ -8,7 +8,7 @@
 use inkwell::AddressSpace;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::*;
-use neuro_hir::{HirExpr, HirImpl, HirItem, HirMethod, HirSelfParam};
+use neuro_hir::{HirExpr, HirExprKind, HirImpl, HirItem, HirMethod, HirSelfParam, HirType};
 use std::collections::HashMap;
 
 use crate::codegen::context::CodegenContext;
@@ -171,9 +171,12 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| CodegenError::InternalError("thunk lost its self parameter".into()))?
             .into_pointer_value();
 
-        // `&mut self` is already pointer-passed; every other receiver is by value.
+        // A `&mut self` receiver, and a `&self` one on a struct or enum, is already
+        // pointer-passed; every other receiver is by value.
         let self_arg: BasicMetadataValueEnum<'ctx> =
-            if matches!(method.self_param, Some(HirSelfParam::RefMut)) {
+            if matches!(method.self_param, Some(HirSelfParam::RefMut))
+                || self.shared_pointer_self.contains(&target_name)
+            {
                 self_ptr.into()
             } else {
                 // The target's own receiver type, which a newtype has although its name
@@ -219,6 +222,20 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(thunk)
     }
 
+    /// The address of the `string` place `operand`.
+    fn string_place_address(&mut self, operand: &HirExpr) -> CodegenResult<PointerValue<'ctx>> {
+        if let HirExprKind::Variable(name) = &operand.kind {
+            return self
+                .variables
+                .get(name)
+                .copied()
+                .ok_or_else(|| CodegenError::UndefinedVariable(name.clone()));
+        }
+        self.held_place_ptr(operand)?.ok_or_else(|| {
+            CodegenError::InternalError("a `&string` trait object has no place".to_string())
+        })
+    }
+
     /// Lower the unsizing coercion `&T` → `&dyn Trait`: pair the concrete
     /// reference with the `(trait, T)` vtable to form the `{ data, vtable }` fat pointer.
     pub(crate) fn codegen_dyn_coerce(
@@ -257,7 +274,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 ))
             })?;
 
-        let data_ptr = self.codegen_expr(value)?;
+        // A `&string` is the fat pointer itself, so lowering admitted only a borrow of a
+        // place, whose address is the data pointer the thunk reads the `string` through.
+        let data_ptr = match &value.kind {
+            HirExprKind::Reference { operand, .. } if matches!(operand.ty, HirType::String) => {
+                self.string_place_address(operand)?.into()
+            }
+            _ => self.codegen_expr(value)?,
+        };
         let BasicValueEnum::PointerValue(data_ptr) = data_ptr else {
             return Err(CodegenError::InternalError(
                 "trait-object data operand did not lower to a pointer".into(),

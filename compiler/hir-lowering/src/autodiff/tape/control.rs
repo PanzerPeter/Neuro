@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use ast_types::{BinaryOp, UnaryOp};
-use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirStmt, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirPlace, HirStmt, HirTarget, HirType};
 use shared_types::{Literal, Span};
 
 use crate::LoweringError;
@@ -12,8 +12,8 @@ use crate::LoweringError;
 use super::leaf::is_arithmetic;
 use super::positions::{constant_stride, describe_stmt, integer_min, is_float_valued, stmt_span};
 use super::{
-    Arm, ArmBody, Branch, Carried, ForRange, Leaf, Linearizer, Loop, Node, Op, RUN_TIME_STRIDE,
-    Slot,
+    Arm, ArmBody, Branch, Carried, ForRange, KERNEL_CALL, Leaf, Linearizer, Loop, Node, Op,
+    RUN_TIME_STRIDE, Slot,
 };
 
 /// `loop { C; if !t { break }; B }` as the `while { C; t } { B }` it is: the condition, a
@@ -203,8 +203,24 @@ impl<'f> Linearizer<'f> {
                 };
                 self.while_loop(&condition, body, *span)
             }
+            HirStmt::Expr(call) if self.calls_a_kernel(call) => {
+                Err(self.refuse(KERNEL_CALL, call.span))
+            }
             other => Err(self.refuse(describe_stmt(other), stmt_span(other))),
         }
+    }
+
+    /// Whether `expr` calls a `@kernel` function by name.
+    fn calls_a_kernel(&self, expr: &HirExpr) -> bool {
+        let HirExprKind::Call { callee, .. } = &expr.kind else {
+            return false;
+        };
+        let HirExprKind::Variable(name) = &callee.kind else {
+            return false;
+        };
+        self.functions
+            .function(name)
+            .is_some_and(|function| matches!(function.target, HirTarget::Kernel { .. }))
     }
 
     /// `if condition { then } else if ... else { otherwise }`, of type `value_ty` when it

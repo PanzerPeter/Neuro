@@ -17,6 +17,19 @@ fn neurc_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_neurc"))
 }
 
+/// The `libasan` to preload for a leak check, on a machine with one.
+fn libasan_path() -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let output = Command::new("gcc")
+        .arg("-print-file-name=libasan.so")
+        .output()
+        .ok()?;
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    path.is_absolute().then_some(path)
+}
+
 /// Helper struct for running end-to-end compilation tests
 pub struct CompileTest {
     temp_dir: TempDir,
@@ -40,6 +53,28 @@ impl CompileTest {
         }
         fs::write(&source_path, source).expect("Failed to write source file");
         source_path
+    }
+
+    /// Compile and run `source`, and return its exit code after failing the test on any
+    /// memory error or leak the program shows under AddressSanitizer. Where no `libasan`
+    /// can be preloaded, or the leak check cannot attach, the run counts as clean.
+    pub fn run_leak_checked(&self, filename: &str, source: &str) -> i32 {
+        let path = self.write_source(filename, source);
+        let exe = self.compile(&path).expect("compile failed");
+        let exit = self.run_executable(&exe).expect("run failed");
+        let Some(asan) = libasan_path() else {
+            return exit;
+        };
+        let output = Command::new(&exe)
+            .env("LD_PRELOAD", asan)
+            .env("ASAN_OPTIONS", "detect_leaks=1")
+            .output()
+            .expect("run under the leak check");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.contains("LeakSanitizer has encountered a fatal error") {
+            assert!(!stderr.contains("ERROR: "), "{filename}: {stderr}");
+        }
+        exit
     }
 
     /// Compile a source file and return the path to the executable

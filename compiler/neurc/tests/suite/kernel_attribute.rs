@@ -750,3 +750,30 @@ func main() -> i32 {
         );
     }
 }
+
+/// A `@kernel` call in a `@grad` body has no value to differentiate, and the refusal says
+/// that rather than naming an expression statement.
+#[cfg(target_os = "linux")]
+#[test]
+fn regression_lim_257_a_kernel_call_in_a_grad_body_is_named() {
+    let source = r#"
+@kernel(threads: [4])
+func fill(out: KernelOut<Tensor<f32, [4]>>) {
+    val i = thread_id.x
+    unsafe { out[i] = 1.0f32 }
+}
+
+@grad(wrt: [w])
+func loss(w: &mut Tensor<f32, [4]>) -> Tensor<f32, []> {
+    mut o: Tensor<f32, [4]> = Tensor::zeros()
+    fill(&mut o)
+    return Tensor::scalar(w.sum())
+}
+
+func main() -> i32 { 0 }
+"#;
+    let test = CompileTest::new();
+    let path = test.write_source("kernel_in_grad.nr", source);
+    let err = test.compile(&path).expect_err("the program compiled");
+    assert!(err.contains("a call to a `@kernel` function"), "{err}");
+}

@@ -336,11 +336,10 @@ Each derive recurses into the struct's fields, and every field must support the 
 - `Hashable` hashes the fields in declaration order, so a struct that derives both
   `PartialEq` and `Hashable` is a `HashMap` key with no hand-written impls. A float field is
   refused (`DeriveFieldUnsupported`).
-- `Clone` gives `.clone()`, which returns a fresh value without moving the receiver. Each
-  field must be `Copy`, or a struct that derives or implements `Clone`, or a type with a
-  hand-written `Clone`. A `string`, `Vec`, tensor or `StringBuilder` field is refused
-  (`DeriveFieldUnsupported`), so such a struct writes `impl Clone` by hand
-  ([BUG-098](../BUGS.md)).
+- `Clone` gives `.clone()`, which returns a fresh value without moving the receiver. The
+  derive clones field by field: a `string` or tensor field through its own `.clone()`, a struct
+  that derives or implements `Clone` through that, and a tuple, array or newtype part by part.
+  A `Vec` or `StringBuilder` field has no `.clone()` and is refused (`DeriveFieldUnsupported`).
 - `Copy` makes the struct copy, rather than move, on bind, assign, return and by-value
   pass. Each field must be `Copy`: scalars, arrays and tuples of them, and structs that derive
   `Copy`. A `string` or collection field is refused, and the error names the field

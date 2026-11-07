@@ -538,6 +538,8 @@ fn build_module<'ctx>(
         }
     }
 
+    codegen_ctx.define_derivative_homes()?;
+
     // Drain buffered standard output on every path out of the process. Runs here because
     // only a finished module knows whether it prints at all, and because the exit paths
     // it edits (`main`'s returns, `abort`, `llvm.trap`) are all emitted by now.

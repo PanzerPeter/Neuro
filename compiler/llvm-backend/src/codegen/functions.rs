@@ -1,16 +1,26 @@
 use inkwell::types::*;
 use inkwell::values::*;
-use neuro_hir::{HirExpr, HirFunction, HirImpl, HirMethod, HirSelfParam, HirStmt, HirType};
+use neuro_hir::{
+    HirExpr, HirExprKind, HirFunction, HirImpl, HirMethod, HirSelfParam, HirStmt, HirType,
+};
 use std::collections::HashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 use super::context::CodegenContext;
+use super::drops::is_pure_place;
 
 /// The implicit method receiver's binding name. `self` is a keyword, so nothing else
 /// in a body can be bound under it.
 const SELF_BINDING: &str = "self";
+
+/// Whether `method` takes a `&self` receiver of `self_ty` by address. A newtype over a
+/// scalar stays by value, since `Type::from_hir` erased it to a type with no place to lend.
+fn self_shared_by_pointer(method: &HirMethod, self_ty: Option<&Type>) -> bool {
+    matches!(method.self_param, Some(HirSelfParam::Ref))
+        && matches!(self_ty, Some(Type::Struct(_) | Type::Enum(_)))
+}
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Generate code for a function call
@@ -62,10 +72,22 @@ impl<'ctx> CodegenContext<'ctx> {
             // callee retains nothing past the call, `release_owned_arguments` below
             // reaches only an argument that allocated in place, and a place that
             // loses its flag here is then released by nobody.
-            if !self.string_ownership.param_is_read_only(func_name, index) {
+            // `M::get` named as a function takes its receiver as a plain argument, and
+            // only borrows it, so the value stays with whoever had it.
+            let lent_self = index == 0
+                && self.shared_pointer_self.contains(func_name)
+                && !val.is_pointer_value();
+            if !lent_self && !self.string_ownership.param_is_read_only(func_name, index) {
                 self.mark_moved_for_drop(arg)?;
             }
             passed.push(val);
+            if lent_self {
+                let slot = self.entry_alloca(val.get_type(), "self.arg")?;
+                self.builder.build_store(slot, val)?;
+                self.hold_unbound_temporary(arg, slot)?;
+                arg_values.push(BasicMetadataValueEnum::from(slot));
+                continue;
+            }
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
@@ -97,11 +119,11 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Lower a method call, prepending the receiver to the argument list. Returns
     /// `None` when the method returns unit `()`.
     ///
-    /// A `&self` or consuming `self` method takes the struct by value; for `&self` the
-    /// callee's mutations do not escape, and for `self` the callee owns what it was
-    /// handed. A `&mut self` method takes the struct by pointer (detected by its
-    /// first LLVM parameter being a pointer), so the receiver's storage address is
-    /// passed and field writes in the body propagate back to the caller.
+    /// A consuming `self` method takes the value, and owns what it was handed. A `&mut
+    /// self` method takes the receiver's storage address (detected by its first LLVM
+    /// parameter being a pointer), so field writes in the body propagate back to the
+    /// caller. A `&self` method on a struct or enum takes an address too, so a reference
+    /// into `self` points at the caller's value and not at a dead frame.
     pub(crate) fn codegen_method_call(
         &mut self,
         mangled_name: &str,
@@ -120,7 +142,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .is_some_and(|t| t.is_pointer_type());
 
         let struct_name = mangled_name.split("__").next().unwrap_or(mangled_name);
-        let self_arg: BasicValueEnum<'ctx> = if self_by_pointer {
+        let self_arg: BasicValueEnum<'ctx> = if self.shared_pointer_self.contains(mangled_name) {
+            self.shared_self_address(receiver, struct_name)?.into()
+        } else if self_by_pointer {
             // `&mut self`: pass the receiver place's address (auto-loading through a
             // `&mut Struct` receiver), so the callee writes through to it.
             // A newtype has no LLVM type of its own to name, so its storage is reached as
@@ -217,14 +241,48 @@ impl<'ctx> CodegenContext<'ctx> {
         if !held_owners.is_empty() {
             self.forwarded_holder_owners = Some((mangled_name.to_string(), held_owners));
         }
-        // A `&self` receiver built for the call (`make().get()`) is owned by nothing once
-        // the call returns. A consuming receiver belongs to the callee, and a `&mut self`
-        // one was addressed in place.
+        // A by-value `&self` receiver built for the call is owned by nothing once the call
+        // returns. A consuming receiver belongs to the callee, and a receiver passed by
+        // address was addressed in place, or held to the statement's end when it was built.
         if !self_by_pointer && !self.consuming_self_methods.contains(mangled_name) {
             self.drop_unbound_temporary(receiver, self_arg)?;
         }
 
         Ok(call_result.try_as_basic_value().basic())
+    }
+
+    /// The address a `&self` receiver is passed at. A place is lent where it stands, a
+    /// borrow is its own address, and a value built for the call gets a stack slot that
+    /// lives to the end of the statement, as a reference into it may.
+    fn shared_self_address(
+        &mut self,
+        receiver: &HirExpr,
+        type_name: &str,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let borrowed = matches!(receiver.ty, HirType::Reference { .. });
+        if matches!(receiver.kind, HirExprKind::Variable(_)) && !self.is_newtype_value(receiver) {
+            return Ok(self.get_struct_ptr_and_type(receiver, type_name)?.0);
+        }
+        if is_pure_place(receiver)
+            && !borrowed
+            && let Some(ptr) = self.held_place_ptr(receiver)?
+        {
+            return Ok(ptr);
+        }
+        match self.codegen_expr(receiver)? {
+            BasicValueEnum::PointerValue(ptr) => Ok(ptr),
+            value => {
+                let slot = self.entry_alloca(value.get_type(), "self.tmp")?;
+                self.builder.build_store(slot, value)?;
+                self.hold_unbound_temporary(receiver, slot)?;
+                Ok(slot)
+            }
+        }
+    }
+
+    /// Whether `receiver` is a newtype, which has no nominal LLVM type to look up.
+    fn is_newtype_value(&self, receiver: &HirExpr) -> bool {
+        matches!(receiver.ty.referent(), HirType::Newtype { .. })
     }
 
     /// Declare the LLVM signatures of every supported method in an `impl` block.
@@ -282,9 +340,15 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
-        // A `&mut self` receiver is passed by pointer so the body's field writes
-        // reach the caller's value; every other parameter is by value.
-        let self_by_pointer = matches!(method.self_param, Some(HirSelfParam::RefMut));
+        // A borrowed receiver is passed by pointer, so the body's field writes reach the
+        // caller's value and a reference into it outlives the call; every other parameter
+        // is by value.
+        let shared_by_pointer = self_shared_by_pointer(method, param_types.first());
+        if shared_by_pointer {
+            let _ = self.shared_pointer_self.insert(mangled.clone());
+        }
+        let self_by_pointer =
+            shared_by_pointer || matches!(method.self_param, Some(HirSelfParam::RefMut));
 
         let mut llvm_param_types = Vec::new();
         for (i, param_ty) in param_types.iter().enumerate() {
@@ -338,7 +402,8 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
-        let self_by_pointer = matches!(method.self_param, Some(HirSelfParam::RefMut));
+        let self_by_pointer = matches!(method.self_param, Some(HirSelfParam::RefMut))
+            || self_shared_by_pointer(method, param_types.first());
 
         let function = *self
             .functions
@@ -372,7 +437,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .get_nth_param(0)
                 .ok_or_else(|| CodegenError::InternalError("missing self parameter".to_string()))?;
             if self_by_pointer {
-                // `&mut self`: the parameter is already a pointer to the caller's
+                // A borrowed receiver: the parameter is already a pointer to the caller's
                 // struct. Bind `self` directly to it (no copy) so reads and field
                 // writes go through to the caller. The recorded type is the struct
                 // (not the pointer), matching how an owned struct binding reads.
@@ -381,7 +446,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     .insert("self".to_string(), self_val.into_pointer_value());
                 self.variable_types.insert("self".to_string(), struct_ty);
             } else {
-                // `&self`: allocate and store a private copy of the struct value.
+                // A by-value receiver: allocate and store a private copy of the value.
                 let self_type = self_val.get_type();
                 let alloca = self.builder.build_alloca(self_type, "self")?;
                 self.builder.build_store(alloca, self_val)?;

@@ -83,7 +83,10 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         self.builder.position_at_end(cond_bb);
+        // The condition is a statement of its own on every pass: what it holds dies here.
+        let mark = self.statement_temporaries.len();
         let cond_val = self.codegen_expr(condition)?;
+        self.release_statement_temporaries(mark)?;
         self.builder
             .build_conditional_branch(cond_val.into_int_value(), body_bb, exit_bb)
             .map_err(|e| {

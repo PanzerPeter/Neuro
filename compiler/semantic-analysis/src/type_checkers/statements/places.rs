@@ -42,7 +42,12 @@ impl TypeChecker {
         if let (Some((root, _)), Some(prior)) = (&refill, prior) {
             self.symbols.restore_moved(root, prior);
         }
-        let stored = self.check_store(place, place_ty?, op, value, span);
+        let place_ty = place_ty?;
+        let holds_reference = self.type_holds_reference(&place_ty);
+        let stored = self.check_store(place, place_ty, op, value, span);
+        if holds_reference && self.temporary_views.contains(&value.span()) {
+            self.record_error(TypeError::TemporaryBorrowEscapes { span: value.span() });
+        }
         if let Some((root, path)) = &refill {
             self.symbols.clear_moved_within(root, path);
         }

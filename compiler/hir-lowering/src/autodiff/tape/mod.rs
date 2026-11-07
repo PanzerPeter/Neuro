@@ -61,6 +61,10 @@ const RUN_TIME_TARGET: &str =
 /// the callee onto the tape, so its body would run on the host, which `@gpu` forbids.
 const GPU_CALL: &str = "a call to a `@gpu` function, whose body would run on the host inside the derivative; mark it `@no_grad` to call it as a constant";
 
+/// What a call to a `@kernel` function is refused as. It writes through `&mut` tensors on
+/// the device and returns nothing, so the tape has no value to differentiate.
+const KERNEL_CALL: &str = "a call to a `@kernel` function, which writes its result through `&mut` tensors on the GPU and has no derivative; call it outside the `@grad` body";
+
 /// What a `.step(n)` whose stride is not a literal is refused as.
 const RUN_TIME_STRIDE: &str =
     "a `.step(n)` whose stride is not an integer literal; write the stride as a literal";

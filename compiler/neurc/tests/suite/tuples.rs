@@ -192,3 +192,45 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 7);
 }
+
+/// `()` is the tuple of no elements: a type, a value, and the success payload of a
+/// `Result` that has nothing to hand back.
+#[test]
+fn regression_bug_139_unit_is_a_type_and_a_value() {
+    let test = CompileTest::new();
+    let source = r#"
+func code(o: Result<(), i32>) -> i32 {
+    match o {
+        Result::Ok(_) => 1,
+        Result::Err(e) => e
+    }
+}
+
+func check(n: i32) -> Result<(), i32> {
+    if n > 0 { return Err(n) }
+    Ok(())
+}
+
+func both(n: i32) -> Result<(), i32> {
+    check(n)?
+    check(n - 1)?
+    Ok(())
+}
+
+func nothing() -> () { }
+func same(u: ()) -> () { u }
+func maybe(c: bool) -> Option<()> { if c { Some(()) } else { None } }
+
+func main() -> i32 {
+    nothing()
+    val u: () = ()
+    same(u)
+    mut acc = code(check(0)) + code(check(5)) + code(both(0)) + code(both(3))
+    val Ok(v) = check(0) else { return 99 }
+    if val Some(w) = maybe(true) { acc += 1 }
+    val pair = ((), 2)
+    acc + pair.1
+}
+"#;
+    assert_eq!(test.compile_and_run("unit.nr", source), Ok(13));
+}

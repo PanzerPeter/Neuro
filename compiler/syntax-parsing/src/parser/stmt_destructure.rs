@@ -59,12 +59,23 @@ impl Parser {
         start_span: Span,
         out: &mut Vec<Stmt>,
     ) -> ParseResult<()> {
+        let opening = self.current;
         let pattern = self.parse_top_pattern()?;
         self.skip_newlines();
         self.consume(TokenKind::Equal, "'=' in destructuring binding")?;
         self.skip_newlines();
         let init = self.parse_expr(Precedence::Lowest)?;
         let init_span = init.span();
+
+        // `val [first, ..] = s else { ... }`: the same head, read as a refutable pattern.
+        let after_init = self.current;
+        self.skip_newlines();
+        if self.check(&TokenKind::Else) {
+            self.current = opening;
+            out.push(self.parse_val_else(start_span)?);
+            return Ok(());
+        }
+        self.current = after_init;
 
         let tmp = Identifier {
             name: format!("__destructure_{}", self.next_destructure_id()),

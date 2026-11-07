@@ -419,6 +419,21 @@ impl<'ctx> CodegenContext<'ctx> {
         }
 
         let tensor_ty = Type::from_hir(&receiver.ty);
+        let index = self.device_index(device_val)?;
+        self.transfer_tensor(handle, &tensor_ty, to_host, index)?;
+        Ok(handle.into())
+    }
+
+    /// Re-point `handle` at a buffer on the host when `to_host` is set, and on GPU `index`
+    /// otherwise, copying its elements and releasing the old buffer unless it is already
+    /// there.
+    pub(crate) fn transfer_tensor(
+        &mut self,
+        handle: inkwell::values::PointerValue<'ctx>,
+        tensor_ty: &Type,
+        to_host: IntValue<'ctx>,
+        index: IntValue<'ctx>,
+    ) -> CodegenResult<()> {
         let function = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("a device transfer outside a function".to_string())
         })?;
@@ -433,13 +448,12 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_conditional_branch(to_host, to_cpu, to_gpu)?;
 
         self.builder.position_at_end(to_gpu);
-        let index = self.device_index(device_val)?;
         self.builder
             .build_conditional_branch(on_host, upload, resident)?;
 
         self.builder.position_at_end(upload);
         let host_data = self.load_dlpack_data(handle)?;
-        let device_data = self.device_upload(host_data, &tensor_ty, index)?;
+        let device_data = self.device_upload(host_data, tensor_ty, index)?;
         let release_host = self.aligned_release_fn()?;
         self.builder
             .build_call(release_host, &[host_data.into()], "")?;
@@ -449,7 +463,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(resident);
         let device_data = self.load_dlpack_data(handle)?;
         let from = self.dlpack_device_index(handle)?;
-        let moved = self.device_move(device_data, &tensor_ty, from, index)?;
+        let moved = self.device_move(device_data, tensor_ty, from, index)?;
         self.set_dlpack_home(handle, moved, TensorHome::Gpu(index))?;
         self.builder.build_unconditional_branch(done)?;
 
@@ -460,8 +474,8 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(download);
         let device_data = self.load_dlpack_data(handle)?;
         let from = self.dlpack_device_index(handle)?;
-        let host_data = self.alloc_host_buffer(&tensor_ty)?;
-        self.device_download(host_data, device_data, from, &tensor_ty)?;
+        let host_data = self.alloc_host_buffer(tensor_ty)?;
+        self.device_download(host_data, device_data, from, tensor_ty)?;
         let release_device = self.device_tensor_free_fn()?;
         self.builder
             .build_call(release_device, &[device_data.into(), from.into()], "")?;
@@ -469,7 +483,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(done)?;
 
         self.builder.position_at_end(done);
-        Ok(handle.into())
+        Ok(())
     }
 
     /// The `i32` index a `Device::GPU(n)` value carries, read back out of its payload's

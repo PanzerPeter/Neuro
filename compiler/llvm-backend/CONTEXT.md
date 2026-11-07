@@ -24,6 +24,12 @@ populated as bindings are lowered, exists only so the place statements `obj.fiel
 
 `external` names function bodies computed outside this backend; see External Bodies.
 
+A derivative moved into its slot by `__set_grad` / `__set_hessian` goes through a private
+`__neuro_derivative_home_N`, one per tensor type (`derivative_home_fn`), which puts it on its
+parameter's device. Only a finished module knows whether it can reach a GPU, so
+`define_derivative_homes` fills the bodies after every function: a program with no GPU runtime gets
+an empty one and links nothing.
+
 `gpu` (`Nvidia` or `Amd`) is the GPU `external`'s device bodies were built for. It picks the
 GPU runtime linked (see below) and the DLPack device type a device tensor reports, and changes
 nothing in a program that never reaches a GPU.
@@ -513,15 +519,19 @@ name containing `__` (`TypeError::ReservedNameSeparator`), and every monomorphiz
 uses a `$g` marker (`identity$g_i32`, `Pair$g_i32_f64`). `$` is no identifier character, so no
 declared name equals an instance's, and LLVM prints such a symbol quoted (`@"identity$g_i32"`).
 
-- `&self` and owned `self` take the struct **by value** as `param[0]`, named `self` in the
-  alloca map. Callers load their stack var and pass the value. The two differ only in ownership:
-  a mangled name in `consuming_self_methods` has its receiver `mark_moved_for_drop`-ed at the
-  call site and registered in the callee's own drop scope, so a consumed `Drop` receiver is
-  destroyed once, by the callee.
-- `&mut self` takes the struct **by pointer**: `codegen_method` emits `param[0]` as `ptr` and
-  binds `self` directly to it (no copy) with the recorded type still the struct, so `self.field`
-  reads and writes go through to the caller's storage. It also seeds `type_env["self"]` so a
-  `self.field = …` write resolves the struct.
+- Owned `self` takes the value **by value** as `param[0]`, named `self` in the alloca map. A
+  mangled name in `consuming_self_methods` has its receiver `mark_moved_for_drop`-ed at the call
+  site and registered in the callee's own drop scope, so a consumed `Drop` receiver is destroyed
+  once, by the callee.
+- `&mut self`, and `&self` on a struct or enum, take the receiver **by pointer**: `codegen_method`
+  emits `param[0]` as `ptr` and binds `self` directly to it (no copy) with the recorded type still
+  the struct, so `self.field` reads and writes go through to the caller's storage and a reference
+  into `self` outlives the call. It also seeds `type_env["self"]` so a `self.field = …` write
+  resolves the struct. `shared_pointer_self` names the `&self` methods; `shared_self_address`
+  lends a place where it stands, passes a borrow as it is, and spills anything else to a slot the
+  statement owns (`hold_unbound_temporary`). A `&self` on a newtype over a scalar has no place to
+  lend and stays by value. `M::get` used as a function takes its receiver as an argument, which
+  `codegen_call` spills and does not move.
 - Associated functions (no `self_param`) lower identically without the implicit first param;
   `TypeName::func(args)` becomes `codegen_call("StructName__funcName", args)`.
 
@@ -882,9 +892,10 @@ direct free, so the release a scope exit performs is provably the one a foreign 
 of a block it had already freed would be a use-after-free.
 
 `codegen_reference` returns the borrowed place's storage pointer: mutability is compile-time
-only. An operand `held_place_ptr` finds no storage for is a `Copy` temporary the checker let
+only. An operand `held_place_ptr` finds no storage for is a temporary the checker let
 through as a call argument; it is stored into an entry-block slot (`borrow.temp`) and the slot's
-address is lent, which outlives the borrow because the borrow ends with the statement. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
+address is lent, which outlives the borrow because the borrow ends with the statement. What it
+owns is released there (see Drop ABI). `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
 is what `HirPlace::Deref` lowers to.
 **Auto-deref is value-driven**: a borrowed receiver lowers to a `PointerValue`, so
 `string_receiver_struct`, `StructClone`, `codegen_method_call`, and `get_struct_ptr_and_type` load
@@ -991,10 +1002,12 @@ the enclosing block, which registers it, rather than to the pattern.
 the branch, and the else block runs in its own drop scope with its binding saved and restored. The
 success block's bindings are materialized by `bind_arm` and deliberately **not** restored: they
 belong to the enclosing block, which is the whole difference from a match arm. For the same reason
-their ownership is `ArmOwnership::EnclosingString`: a `string` payload a collection's fallible
-reader copied out (`produces_owned_option_payload`) is registered in the ENCLOSING drop scope,
-where the binding lives, and every other payload is left unregistered, as the else binding's is.
-The else block is
+their ownership is `ArmOwnership::EnclosingString` over a place: a `string` payload a collection's
+fallible reader copied out (`produces_owned_option_payload`) is registered in the ENCLOSING drop
+scope, where the binding lives, and every other payload stays with the place. A temporary scrutinee
+has no owner left, so its payload is registered as a `match` arm's is (`ArmOwnership::Arm`), in the
+enclosing scope on a hit and in the else scope on a miss; a miss with no else binding destroys the
+whole value there. The else block is
 terminated with `unreachable` if it still falls through; the frontend has already rejected that
 case, so this only keeps the emitted function verifier-clean.
 
@@ -1032,6 +1045,11 @@ truncate to the node's type, and an `as` cast still narrows explicitly.
 `loop.body` and back to its top, so the only exit is a `break` (`LoopTargets { continue_bb: body,
 break_bb: exit }`, so `continue` re-enters the top). A `break`-less `loop` leaves `loop.exit`
 without predecessors, and the function epilogue supplies its terminator.
+
+A by-value `for` over an array a binding tracks leaves the array its flags. Each pass moves the
+current element's flags onto the loop binding (`element_owner_flags`, `take_element_flags`, a
+`select` per position since the index is a run-time value), so a `break` or `return` leaves the
+array to release what the loop never reached. An array with no drop entry is disowned at the head.
 
 `LoopTargets` carries `break_slot: Option<PointerValue>` for the value form: `codegen_loop`
 allocates a result slot when the loop's HIR type is non-`Void` and returns the loaded value, and a
@@ -1416,10 +1434,19 @@ other gets a `malloc`'d copy, which at worst leaks. A displaced `string` or tens
 (`rearm_held_drop_flags`), which is unconditional because a held position exists only where its
 own type proves ownership.
 
-A fresh value that holds a user `Drop` type and that no binding ever owns is destroyed where it
-is last read (`drop_unbound_temporary`, BUG-047): a call, struct literal or enum construction whose
-statement value is discarded, one a field is read from, and one passed as a `&self` receiver. It
-is stored to a slot, registered in a throwaway scope, and that scope's drops are emitted at once.
+A fresh value that owns something and that no binding ever owns is destroyed where it is last
+read (`drop_unbound_temporary`, BUG-047): a call, struct literal or enum construction whose
+statement value is discarded, and one a field is read from. It is stored to a slot, registered in
+a throwaway scope, and that scope's drops are emitted at once. A bare tensor is left to its
+statement and receiver consumers, which release it through its handle.
+
+A temporary something may still read through a borrow lives to the end of its statement:
+a receiver built for a `&self` call and the operand of a `&` passed to a call. `hold_to_statement_end`
+registers it in the current scope under a flag cleared in the entry block and armed where the value
+is built, so a jump past that point finds nothing to destroy and any exit from the statement
+releases it. `codegen_stmt` opens a mark on `statement_temporaries` and
+`release_statement_temporaries` emits and unregisters what is left at the statement's end. A `while`
+condition is a statement of its own on each pass.
 When the field read owns something it is moved out instead (`drop_temporary_except`): the held
 flags under that field are cleared first, so the reader keeps it and the rest is released. A
 struct with its own `Drop` impl is left whole there, since its destructor reads every field.

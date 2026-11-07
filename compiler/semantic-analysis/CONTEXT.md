@@ -593,17 +593,11 @@ every field of a Copy struct is itself Copy (`CopyDeriveNonCopyField`, also for 
 `bool` or `char` for a hash), `string`, or another struct carrying the same derive), or is a
 struct or enum implementing the trait by hand (`implements_by_hand`; for `PartialEq`, an impl
 comparing the type with itself), whose own method the generated code calls. A `Clone` struct that
-is not `Copy` gets the same check through `is_derived_cloneable`: the derived clone copies the
-struct's bytes except where a field has a `clone` of its own, which it calls, so a field must be
-`Copy`, a `Clone` struct, a type with a hand-written `Clone`, or an array, tuple or newtype of the
-first two. An array, tuple or newtype is copied by its bytes, so a struct inside one must be too:
-one whose derived clone calls a field's `clone` (`derived_clone_calls`, which counts an
-`impl Clone`, not an inherent method named `clone`, the rule lowering's `clone_calls_fields`
-applies) is refused there (`clones_by_bytes`), with its own reason
-(`byte_copy_skips_a_clone`). A `Copy` struct's clone stays a copy of the whole value, as every `Copy`
-type's `.clone()` is, hand-written field clones included. A field that owns a buffer (`string`, a
-tensor, a collection, `StringBuilder`) would end up shared by the original and the copy, so it is
-refused. A struct field with neither the derive nor an impl is refused with the "derive it too"
+is not `Copy` gets the same check through `is_derived_cloneable`: the derived clone goes part by
+part, so a field must be `Copy`, a `string`, a tensor, a `Clone` struct, a type with a hand-written
+`Clone`, or an array, tuple or newtype of those. A `Copy` struct's clone stays a copy of the whole
+value, as every `Copy` type's `.clone()` is, hand-written field clones included. A `Vec` or a
+`StringBuilder` has no `.clone()`, so it is refused. A struct field with neither the derive nor an impl is refused with the "derive it too"
 remedy instead, as for `Debug` and `PartialEq`. A generic template's fields
 are type parameters, which no derive rule can judge, so the check runs again per monomorphized
 instance in `instantiate_generic_struct`; an instance made before pass 2d waits for it in
@@ -742,8 +736,15 @@ The walk follows `if`/`else` arms, bare and `unsafe` blocks, `match` scrutinees 
 parts of a value, `?`, `??`, struct and enum literals, tuples, arrays, and a call's arguments
 and what its receiver holds. It runs when the return type only *holds* a reference too
 (`type_holds_reference`). A trailing `if` used as the tail is reached through `tail_expr`, so
-each of its arms is checked. A method call's receiver is not itself reported: whether a result
-borrows `self` or the impl's lifetimes is not recorded (BUG-128). `is_local_to_function` treats
+each of its arms is checked. A method whose return type leaves a lifetime position unnamed
+(`lifetime_positions` above `MethodDef::return_lifetimes`) is in `self_borrowing_methods`: under
+elision its result borrows `self`, so such a call on an owned local is reported. One naming the
+impl's lifetimes returns what the receiver borrows, which the receiver walk covers.
+
+The same set types a temporary receiver. `temporary_views` holds the spans of calls whose result
+borrows a value that dies with its statement (`make().view()`), a chain on one, and a value built
+around one (`propagate_temporary_view`). Reading one in place is fine; binding, storing or returning
+it is `TemporaryBorrowEscapes`. `is_local_to_function` treats
 an absent name (a constant, an out-of-scope place) as non-local, so a valid program is never
 rejected.
 

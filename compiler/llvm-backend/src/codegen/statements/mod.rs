@@ -484,6 +484,12 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok(());
         }
 
+        let mark = self.statement_temporaries.len();
+        self.codegen_stmt_body(stmt)?;
+        self.release_statement_temporaries(mark)
+    }
+
+    fn codegen_stmt_body(&mut self, stmt: &HirStmt) -> CodegenResult<()> {
         match stmt {
             HirStmt::VarDecl {
                 name,

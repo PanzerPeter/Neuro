@@ -11,6 +11,7 @@ use shared_types::{Identifier, Span};
 use super::TypeChecker;
 use super::collections::OPTION_ENUM;
 use crate::errors::TypeError;
+use crate::symbol_table::pending_key;
 use crate::types::Type;
 
 /// The fallible enum whose `else |name|` binds a payload rather than the scrutinee.
@@ -62,18 +63,23 @@ impl TypeChecker {
         // Binding the scrutinee moves it, exactly as an ordinary `val` does.
         self.record_move(value);
         // A binding is a part of the scrutinee, so it holds what the scrutinee borrows.
+        let mut declared = std::collections::HashSet::new();
         for (name, ty, binding_span) in bindings {
             if matches!(ty, Type::Unknown) {
                 continue;
             }
-            if let Err(duplicate) = self.symbols.define(name.clone(), ty.clone(), false) {
+            if !declared.insert(name.clone()) {
                 self.record_error(TypeError::VariableAlreadyDefined {
-                    name: duplicate,
+                    name,
                     span: binding_span,
                 });
                 continue;
             }
-            self.hold_carried_borrows(&name, value, &ty);
+            // A `val` like any other: it may shadow a name of this block, the scrutinee's
+            // included, so its borrows are taken while the name still means the old binding.
+            self.symbols.define_pending(&name, ty.clone(), false);
+            self.hold_carried_borrows(&pending_key(&name), value, &ty);
+            self.symbols.commit_pending(&name);
         }
         Some(())
     }

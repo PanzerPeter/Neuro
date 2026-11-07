@@ -972,3 +972,80 @@ func main() -> i32 {
         );
     }
 }
+
+/// A fresh value a statement discards owns what it was built with, whatever that is, and
+/// a call handing a parameter straight back is one such value.
+#[test]
+fn regression_bug_144_a_discarded_owner_is_released() {
+    let source = r#"
+struct M { v: Vec<i32> }
+
+impl M {
+    func neg(self) -> M { self }
+}
+
+func make() -> M {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    M { v: v }
+}
+
+func same(m: M) -> M { m }
+
+func list() -> Vec<i32> {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    v
+}
+
+func main() -> i32 {
+    for i in 0..5 {
+        same(make())
+        make()
+        make().neg()
+        list()
+    }
+    0
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("discarded_owner.nr", source), 0);
+}
+
+/// A receiver built for the call lives to the end of its statement, so a reference into it
+/// can still be read, and it is released once, on each pass of a `while` condition too.
+#[test]
+fn regression_a_temporary_receiver_lives_to_the_end_of_its_statement() {
+    let source = r#"
+struct M { v: Vec<i32>, id: i32 }
+
+impl M {
+    func view(&self) -> &Vec<i32> { &self.v }
+    func get(&self) -> i32 { self.id }
+}
+
+func make(id: i32) -> M {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    v.push(2)
+    M { v: v, id: id }
+}
+
+func noise() -> Vec<i32> {
+    mut w: Vec<i32> = Vec::new()
+    w.push(9)
+    w
+}
+
+func main() -> i32 {
+    val n = make(0).view().len() as i32
+    val k = noise()
+    mut i = 0
+    while make(i).get() < 3 { i += 1 }
+    if make(1).get() == 1 && make(2).view().len() == 2 { i += 10 }
+    n + i
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("receiver_temporary.nr", source), 15);
+}

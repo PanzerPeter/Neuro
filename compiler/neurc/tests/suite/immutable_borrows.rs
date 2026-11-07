@@ -353,3 +353,51 @@ func main() -> i32 {
         .expect("compilation failed");
     assert_eq!(exit, 233);
 }
+
+/// A temporary's borrow may be passed to a call: the statement owns the value, whatever it
+/// is, and releases it once the statement ends. Binding the result stays refused.
+#[test]
+fn regression_bug_132_a_borrow_of_an_owning_temporary_reaches_a_call() {
+    let source = r#"
+struct D { n: i32 }
+impl Drop for D {
+    func drop(&mut self) { println("drop {self.n}") }
+}
+struct M { v: Vec<i32> }
+
+func make(n: i32) -> M {
+    mut v: Vec<i32> = Vec::new()
+    v.push(n)
+    M { v: v }
+}
+func list() -> Vec<i32> {
+    mut v: Vec<i32> = Vec::new()
+    v.push(3)
+    v
+}
+func text() -> string { "a" + "b" }
+func tensor() -> Tensor<f32, [2]> {
+    val t: Tensor<f32, [2]> = [1.0, 2.0]
+    t
+}
+func size(s: &string) -> i32 { s.len() as i32 }
+func first(m: &M) -> i32 { m.v[0] }
+func count(v: &Vec<i32>) -> i32 { v.len() as i32 }
+func id_of(d: &D) -> i32 { d.n }
+func total(t: &Tensor<f32, [2]>) -> i32 { t.sum() as i32 }
+
+func main() -> i32 {
+    val k: string = "x"
+    mut acc = 0
+    for i in 0..3 {
+        acc += size(&(k + "yz")) + size(&text()) + first(&make(5)) + count(&list())
+        acc += total(&tensor())
+    }
+    acc += id_of(&D { n: 4 })
+    if acc > 0 && first(&make(1)) == 1 { acc += 1 }
+    acc
+}
+"#;
+    let test = crate::compile_harness::CompileTest::new();
+    assert_eq!(test.run_leak_checked("owning_temporary.nr", source), 47);
+}

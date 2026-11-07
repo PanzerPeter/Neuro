@@ -367,7 +367,8 @@ val ((p, q), r) = ((1, 2), 3)       // nested destructuring
 ```
 
 - **Element type**: any sized type. A tuple is `Copy` exactly when every element is, and otherwise moves, on the same terms as an array element. See [Ownership of an element](ownership.md#ownership-of-elements).
-- **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping. There is no one-element tuple, so `(x,)` is an error, and a tuple literal needs at least two elements.
+- **Grouping vs. tuple**: a single parenthesized expression `(x)` is grouping. There is no one-element tuple, so `(x,)` is an error, and a tuple literal holds no elements or at least two.
+- **Unit**: `()` is the tuple of no elements, as a type and as a value. It carries nothing, which is what a success payload with nothing to hand back wants: `func check(n: i32) -> Result<(), i32>` ends with `Ok(())`. `-> ()` means the same as leaving the return type out.
 - **Index access**: `t.0`, `t.1`, and so on read by a constant index. An out-of-range index is a compile error, and indices chain (`t.0.1`). An element of a `mut` tuple is a place: `pair.0 = 7`, `pair.1 += 1`.
 - **Destructuring**: `val (a, b) = t` binds each position. `_` is a wildcard, and patterns nest. Struct and array patterns work too. See [Variables](variables.md#destructuring).
 - **Function boundaries**: tuples may be passed as parameters and returned, as in `func min_max(a: i32, b: i32) -> (i32, i32)`.

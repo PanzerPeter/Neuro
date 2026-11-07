@@ -56,7 +56,8 @@ impl Parser {
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance(); // consume '->'
             self.skip_newlines();
-            Some(self.parse_type()?)
+            // `-> ()` says what leaving the annotation out says.
+            Some(self.parse_type()?).filter(|ty| !ty.is_unit())
         } else {
             None
         };
@@ -477,15 +478,18 @@ impl Parser {
         self.consume(TokenKind::RightParen, "')'")?;
         self.skip_newlines();
 
+        let lifetimes_before = self.named_lifetimes;
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance(); // consume '->'
             self.skip_newlines();
-            Some(self.parse_type()?)
+            // `-> ()` says what leaving the annotation out says.
+            Some(self.parse_type()?).filter(|ty| !ty.is_unit())
         } else {
             None
         };
 
         self.skip_newlines();
+        let return_lifetimes = self.named_lifetimes - lifetimes_before;
         let where_predicates = self.parse_where_clause(&mut generics)?;
         self.skip_newlines();
         // The same desugar a free function's parameters get: an argument-position
@@ -508,6 +512,7 @@ impl Parser {
             self_param,
             params,
             return_type,
+            return_lifetimes,
             body,
             attributes,
             span: start.span.merge(end_span),

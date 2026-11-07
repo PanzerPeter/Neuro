@@ -122,9 +122,8 @@ pub enum Type {
 
     /// Anonymous tuple type `(T1, T2, ...)`: a fixed-size, heterogeneous,
     /// positionally-indexed aggregate. `span` covers the leading `(` through the
-    /// closing `)`. Always has at least two element types: a single
-    /// parenthesized type is grouping, and the empty tuple (unit) is a separate
-    /// concern not yet produced here.
+    /// closing `)`. Has no element types (the unit type `()`) or at least two: a
+    /// single parenthesized type is grouping.
     Tuple { elements: Vec<Type>, span: Span },
 
     /// Generic type application `Name<T1, T2, ...>`: a nominal type
@@ -182,6 +181,11 @@ pub enum Type {
 }
 
 impl Type {
+    /// Whether this is the unit type `()`.
+    pub fn is_unit(&self) -> bool {
+        matches!(self, Type::Tuple { elements, .. } if elements.is_empty())
+    }
+
     /// Get the span of this type annotation
     pub fn span(&self) -> Span {
         match self {

@@ -133,7 +133,7 @@ fn derived_clone_names_the_missing_derive_on_a_nested_struct() {
         r#"
         struct Q { x: i32 }
         @derive(Clone)
-        struct P { q: Q, s: string }
+        struct P { q: Q, s: Vec<i32> }
         func main() -> i32 { return 0 }
         "#,
     );

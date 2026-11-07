@@ -502,6 +502,14 @@ impl TypeChecker {
                 } else {
                     None
                 };
+                if let (Some(init_expr), Some(init_ty)) = (init, &init_ty)
+                    && self.temporary_views.contains(&init_expr.span())
+                    && self.type_holds_reference(init_ty)
+                {
+                    self.record_error(TypeError::TemporaryBorrowEscapes {
+                        span: init_expr.span(),
+                    });
+                }
                 let init_errored = self.errors.len() > errors_before;
                 // An annotation that failed to resolve was reported already. The
                 // `::new()` it was written to type then has nothing to infer from and

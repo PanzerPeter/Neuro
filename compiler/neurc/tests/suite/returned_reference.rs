@@ -122,3 +122,86 @@ func main() -> i32 {
         17,
     );
 }
+
+/// An elided lifetime in a method's result borrows the receiver, so a method call on an
+/// owned local cannot be returned. A result naming the impl's lifetime returns what the
+/// receiver borrows, which outlives it.
+#[test]
+fn regression_bug_128_a_method_reference_into_a_local_receiver_is_refused() {
+    expect_compile_error(
+        r#"
+struct B { s: string }
+impl B {
+    func head(&self) -> &string { self.s.slice(0..1) }
+}
+func first() -> &string {
+    val b = B { s: "x" + "y" }
+    b.head()
+}
+func main() -> i32 { first().len() as i32 }
+"#,
+        "cannot return a reference to 'b'",
+    );
+    let test = CompileTest::new();
+    let source = r#"
+struct Src<'a> { s: &'a string }
+struct View<'a> { s: &'a string }
+struct B { s: string }
+
+impl<'a> Src<'a> {
+    func source(&self) -> &'a string { self.s }
+    func view(&self) -> View<'a> { View { s: self.s } }
+}
+
+impl B {
+    func head(&self) -> &string { self.s.slice(0..1) }
+}
+
+func pick<'a>(s: &'a string) -> &'a string {
+    val w = Src { s: s }
+    w.source()
+}
+
+func view_of<'a>(s: &'a string) -> View<'a> {
+    val w = Src { s: s }
+    w.view()
+}
+
+func through(b: &B) -> &string { b.head() }
+
+func main() -> i32 {
+    val t = "abc" + "d"
+    val b = B { s: "xy" + "z" }
+    pick(&t).len() as i32 + view_of(&t).s.len() as i32 + through(&b).len() as i32
+}
+"#;
+    assert_eq!(test.compile_and_run("lifetime_results.nr", source), Ok(9));
+}
+
+/// A receiver built for the call dies with its statement, so a result borrowing it cannot
+/// be bound or returned, though it can be read in place.
+#[test]
+fn a_result_borrowing_a_temporary_receiver_is_not_bound() {
+    let source = |body: &str| {
+        format!(
+            r#"
+struct M {{ v: Vec<i32> }}
+impl M {{ func view(&self) -> &Vec<i32> {{ &self.v }} }}
+func make() -> M {{ M {{ v: Vec::new() }} }}
+{body}
+"#
+        )
+    };
+    expect_compile_error(
+        &source("func main() -> i32 {\n    val r = make().view()\n    r.len() as i32\n}"),
+        "may outlive its statement",
+    );
+    for escape in [
+        "func leak() -> &Vec<i32> { make().view() }\nfunc main() -> i32 { 0 }",
+        "struct H<'a> { r: &'a Vec<i32> }\nfunc main() -> i32 {\n    val h = H { r: make().view() }\n    h.r.len() as i32\n}",
+        "func main() -> i32 {\n    val keep = make()\n    mut r = keep.view()\n    r = make().view()\n    r.len() as i32\n}",
+        "func same(v: &Vec<i32>) -> &Vec<i32> { v }\nfunc main() -> i32 {\n    val r = same(make().view())\n    r.len() as i32\n}",
+    ] {
+        expect_compile_error(&source(escape), "may outlive its statement");
+    }
+}

@@ -23,15 +23,28 @@ mod moves;
 
 pub(crate) use functions::{ENV_HEADER_FIELDS, is_pure_place};
 mod owned_strings;
+pub(crate) use owned_strings::builds_its_own_buffer;
 mod string_positions;
 
 /// The name an unbound temporary's drop entry is registered under. `__` is rejected in
 /// every declared name, so no move site can reach the entry.
-const UNBOUND_TEMPORARY: &str = "__unbound_temporary";
+pub(crate) const UNBOUND_TEMPORARY: &str = "__unbound_temporary";
 
 /// The drop flag of a `string` position inside a holder. It is the one flag that
 /// starts `false`, so its name is what tells an armed position from a planned one.
 pub(crate) const STRING_POSITION_FLAG: &str = "str.owned.flag";
+
+/// Whether `expr` builds a value no binding owns. Anything else may be a read of a value
+/// some binding still owns.
+fn is_fresh_value(expr: &HirExpr) -> bool {
+    matches!(
+        expr.kind,
+        HirExprKind::Call { .. }
+            | HirExprKind::StructLiteral { .. }
+            | HirExprKind::EnumConstruct { .. }
+            | HirExprKind::Closure { .. }
+    )
+}
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Open a new lexical scope. Paired with [`pop_drop_scope`].
@@ -151,30 +164,10 @@ impl<'ctx> CodegenContext<'ctx> {
             })
     }
 
-    /// Whether a value of `ty` runs a user destructor somewhere inside it.
-    fn holds_user_drop(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Struct(name) => {
-                self.drop_types.contains(name)
-                    || self
-                        .struct_defs
-                        .get(name)
-                        .is_some_and(|fields| fields.iter().any(|(_, t)| self.holds_user_drop(t)))
-            }
-            Type::Enum(name) => self
-                .type_mapper
-                .enum_payload_types(name)
-                .is_some_and(|variants| variants.iter().flatten().any(|t| self.holds_user_drop(t))),
-            Type::Tuple(elements) => elements.iter().any(|t| self.holds_user_drop(t)),
-            Type::Array { element, .. } => self.holds_user_drop(element),
-            _ => false,
-        }
-    }
-
     /// Destroy `value`, the result of `expr`, when it is a fresh value no binding owns
-    /// and it runs a user destructor or holds a function value: a statement nothing
-    /// reads, or a temporary only read from (`make().id`). No scope exit reaches such a
-    /// value, so without this its destructor never ran (BUG-047).
+    /// and it owns something: a statement nothing reads, or a temporary only read from
+    /// (`make().id`). No scope exit reaches such a value, so without this its destructor
+    /// never ran (BUG-047).
     ///
     /// Only a call, a struct literal, an enum construction or a closure literal is fresh;
     /// anything else may be a read of a value some binding still owns. Inside a `pool` it
@@ -197,15 +190,8 @@ impl<'ctx> CodegenContext<'ctx> {
         value: BasicValueEnum<'ctx>,
         moved: Option<&str>,
     ) -> CodegenResult<()> {
-        let fresh = matches!(
-            expr.kind,
-            HirExprKind::Call { .. }
-                | HirExprKind::StructLiteral { .. }
-                | HirExprKind::EnumConstruct { .. }
-                | HirExprKind::Closure { .. }
-        );
         let ty = Type::from_hir(&expr.ty);
-        if !fresh || self.pool_depth > 0 || !self.temporary_drops_its_owners(&ty) {
+        if !is_fresh_value(expr) || self.pool_depth > 0 || !self.temporary_drops_its_owners(&ty) {
             return Ok(());
         }
         if self.current_block_terminated() {
@@ -245,11 +231,78 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// Keep the fresh value of `expr` in `slot` until its statement ends, for a borrow of
+    /// it the statement may still read. Its flag starts clear in the entry block, so a
+    /// jump past the point that built it finds nothing to destroy. Inside a `pool` the
+    /// arena owns it.
+    pub(crate) fn hold_unbound_temporary(
+        &mut self,
+        expr: &HirExpr,
+        slot: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let ty = Type::from_hir(&expr.ty);
+        if !is_fresh_value(expr) || self.pool_depth > 0 || !self.temporary_drops_its_owners(&ty) {
+            return Ok(());
+        }
+        self.hold_to_statement_end(slot, DropTarget::Captured(ty))
+    }
+
+    /// Register `target` at `slot` for release when the current statement ends, or at any
+    /// exit that leaves it first.
+    pub(crate) fn hold_to_statement_end(
+        &mut self,
+        slot: PointerValue<'ctx>,
+        target: DropTarget,
+    ) -> CodegenResult<()> {
+        let bool_ty = self.context.bool_type();
+        let flag_ptr = self.entry_alloca(bool_ty, "stmt.tmp.flag")?;
+        let restore = self.builder.get_insert_block();
+        if let Some(next) = flag_ptr
+            .as_instruction()
+            .and_then(|alloca| alloca.get_next_instruction())
+        {
+            self.builder.position_before(&next);
+        }
+        self.builder.build_store(flag_ptr, bool_ty.const_zero())?;
+        if let Some(block) = restore {
+            self.builder.position_at_end(block);
+        }
+        self.builder
+            .build_store(flag_ptr, bool_ty.const_int(1, false))?;
+        if let Some(scope) = self.drop_scopes.last_mut() {
+            scope.push(DropEntry {
+                name: UNBOUND_TEMPORARY.to_string(),
+                storage_ptr: slot,
+                flag_ptr,
+                target,
+                held: Vec::new(),
+            });
+        }
+        self.statement_temporaries.push(flag_ptr);
+        Ok(())
+    }
+
+    /// Release what the statement opened at `mark` still holds. An entry an inner scope
+    /// took with it was released at that scope's end.
+    pub(crate) fn release_statement_temporaries(&mut self, mark: usize) -> CodegenResult<()> {
+        for flag_ptr in self.statement_temporaries.split_off(mark).into_iter().rev() {
+            let Some(scope) = self.drop_scopes.last_mut() else {
+                continue;
+            };
+            let Some(index) = scope.iter().position(|e| e.flag_ptr == flag_ptr) else {
+                continue;
+            };
+            let entry = scope.remove(index);
+            self.emit_one_drop(entry.storage_ptr, entry.flag_ptr, &entry.target)?;
+        }
+        Ok(())
+    }
+
     /// Whether an unbound fresh temporary of `ty` has its typed owners destroyed by
-    /// [`Self::drop_unbound_temporary`]: a value that runs a user destructor or holds a
-    /// function value.
+    /// [`Self::drop_unbound_temporary`]: every owner but a bare tensor, whose statement
+    /// and receiver consumers release it through its handle.
     pub(crate) fn temporary_drops_its_owners(&self, ty: &Type) -> bool {
-        self.holds_user_drop(ty) || self.holds_function(ty)
+        !matches!(ty, Type::Tensor { .. }) && self.holds_owner(ty)
     }
 
     /// Destroy the value of type `ty` at `place_ptr` that a store through a borrow is

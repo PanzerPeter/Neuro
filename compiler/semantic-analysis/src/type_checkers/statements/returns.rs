@@ -121,6 +121,41 @@ impl TypeChecker {
         }
     }
 
+    /// How many lifetime positions `ty` has: one per reference, plus what each named type
+    /// it mentions declares.
+    pub(crate) fn lifetime_positions(&self, ty: &ast_types::Type) -> usize {
+        let declared = |name: &str| self.declared_lifetimes.get(name).copied().unwrap_or(0);
+        match ty {
+            ast_types::Type::Reference { inner, .. } => 1 + self.lifetime_positions(inner),
+            ast_types::Type::Named(name) => declared(&name.name),
+            ast_types::Type::Generic { name, args, .. } => {
+                let inner: usize = args
+                    .iter()
+                    .map(|arg| match arg {
+                        ast_types::GenericArg::Type(ty) => self.lifetime_positions(ty),
+                        ast_types::GenericArg::Const { .. } => 0,
+                    })
+                    .sum();
+                declared(&name.name) + inner
+            }
+            ast_types::Type::Tuple { elements, .. } => {
+                elements.iter().map(|e| self.lifetime_positions(e)).sum()
+            }
+            ast_types::Type::Array { element, .. } => self.lifetime_positions(element),
+            _ => 0,
+        }
+    }
+
+    /// Whether calling `method` on an owned receiver of type `receiver` yields a value
+    /// that points into that receiver.
+    pub(crate) fn result_borrows_owned_receiver(&self, receiver: &Type, method: &str) -> bool {
+        let (Type::Struct(name) | Type::Enum(name) | Type::Newtype(name)) = receiver else {
+            return false;
+        };
+        self.self_borrowing_methods
+            .contains(&format!("{name}__{method}"))
+    }
+
     /// Verify a returned reference does not borrow a function-local place.
     ///
     /// Called when the current function's declared return type holds a reference.
@@ -248,14 +283,28 @@ impl TypeChecker {
             }
             // A call's result may hold any borrow its arguments hand it (lifetime
             // elision), and a method's whatever its receiver holds.
-            Expr::Call { func, args, .. } => {
+            Expr::Call {
+                func, args, span, ..
+            } => {
+                if self.temporary_views.contains(span) {
+                    self.record_error(TypeError::TemporaryBorrowEscapes { span: *span });
+                }
                 for arg in args {
                     self.check_escaping_borrows(arg, escape);
                 }
                 if !self.is_variant_constructor(func)
-                    && let Expr::FieldAccess { object, .. } = func.as_ref()
+                    && let Expr::FieldAccess { object, field, .. } = func.as_ref()
                 {
                     self.check_escaping_borrows(object, escape);
+                    // A result that borrows the receiver points into an owned local.
+                    if let Some(root) = TypeChecker::place_root_name(object)
+                        && self.is_local_to_function(&root)
+                        && self
+                            .projection_type(object)
+                            .is_some_and(|ty| self.result_borrows_owned_receiver(&ty, &field.name))
+                    {
+                        self.report_escape(root, *span, escape);
+                    }
                 }
             }
             _ => {}

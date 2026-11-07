@@ -155,9 +155,6 @@ impl TypeChecker {
     /// A shared borrow of a temporary passed as a whole call argument. The temporary lives
     /// until the end of its statement, so the borrow may go in as long as the call keeps
     /// none of it, which the call checks once its result is known.
-    ///
-    /// Only a `Copy` value qualifies: an owning temporary needs a release once the call
-    /// returns, which nothing emits yet.
     fn check_temporary_borrow(
         &mut self,
         operand: &Expr,
@@ -170,10 +167,6 @@ impl TypeChecker {
         };
         let inner = self.check_expr(operand, expected)?;
         if matches!(inner, Type::Unknown) {
-            return Some(Type::Unknown);
-        }
-        if !self.is_type_copy(&inner) {
-            self.record_error(TypeError::CannotBorrowValue { span });
             return Some(Type::Unknown);
         }
         self.call_temporary_borrows.push(span);

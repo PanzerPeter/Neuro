@@ -9,7 +9,7 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirStmt};
 use shared_types::Literal;
 
-use crate::codegen::context::{CodegenContext, LoopTargets};
+use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -245,7 +245,13 @@ impl<'ctx> CodegenContext<'ctx> {
         // destroying the same elements again at its own scope exit. `for x in &arr`
         // borrows instead and leaves ownership where it is.
         let consumes_elements = !matches!(obj_ty, Type::Reference { .. });
-        if consumes_elements {
+        // A tracked array keeps what the loop has not reached yet, so a `break` or `return`
+        // leaves the array to release the rest: each pass takes one element's flags.
+        let element_flags = match consumes_elements {
+            true => self.element_owner_flags(iterable),
+            false => Vec::new(),
+        };
+        if consumes_elements && element_flags.is_empty() {
             self.mark_moved_for_drop(iterable)?;
         }
         let (base_ptr, element_ty, size) = self.array_place_ptr(iterable, &obj_ty)?;
@@ -306,7 +312,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let body_scope_index = self.drop_scopes.len();
         self.push_drop_scope();
         if consumes_elements {
-            self.register_owned_binding(&iter_name, elem_alloca, &element_ty)?;
+            if matches!(element_ty, Type::String) && !element_flags.is_empty() {
+                let _ =
+                    self.register_local_drop(&iter_name, elem_alloca, DropTarget::HeapString)?;
+            } else {
+                self.register_owned_binding(&iter_name, elem_alloca, &element_ty)?;
+            }
+            self.take_element_flags(&element_flags, i_val, &iter_name)?;
         }
         self.loop_targets.push(LoopTargets {
             label: label.map(str::to_string),

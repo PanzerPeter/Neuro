@@ -34,6 +34,8 @@ impl TypeChecker {
         // enum) both resolve regardless of source order. Variants land in
         // `resolve_enum_variants`, once every nominal name is known.
         self.enum_defs.insert(def.name.name.clone(), Vec::new());
+        self.declared_lifetimes
+            .insert(def.name.name.clone(), def.lifetimes.len());
         if !def.generics.is_empty() {
             self.generic_enums
                 .insert(def.name.name.clone(), def.clone());

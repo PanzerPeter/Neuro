@@ -105,6 +105,7 @@ fn method(name: &str, self_param: Option<SelfParam>, params: Vec<Parameter>) -> 
         self_param,
         params,
         return_type: None,
+        return_lifetimes: 0,
         body: Vec::new(),
         attributes: Vec::new(),
         span: span(),

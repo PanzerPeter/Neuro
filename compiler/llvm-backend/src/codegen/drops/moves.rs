@@ -142,6 +142,84 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// The flag of every owner inside the array `iterable` names, as the element it sits
+    /// in and its path below that element. Empty when no binding here tracks the array.
+    pub(crate) fn element_owner_flags(
+        &self,
+        iterable: &HirExpr,
+    ) -> Vec<(usize, Vec<String>, PointerValue<'ctx>)> {
+        let expr = peel_newtype(iterable);
+        if self.shares_on_copy(&Type::from_hir(&expr.ty)) {
+            return Vec::new();
+        }
+        let Some((name, Some(prefix))) = Self::moved_place(expr) else {
+            return Vec::new();
+        };
+        let Some(entry) = self.live_drop_entry(name) else {
+            return Vec::new();
+        };
+        entry
+            .held
+            .iter()
+            .filter_map(|held| {
+                let (element, below) = held.path.strip_prefix(prefix.as_slice())?.split_first()?;
+                Some((element.parse().ok()?, below.to_vec(), held.flag_ptr))
+            })
+            .collect()
+    }
+
+    /// Hand the flags of element `index`, known only at run time, to the matching positions
+    /// of `binding`, clearing them on the array.
+    pub(crate) fn take_element_flags(
+        &mut self,
+        flags: &[(usize, Vec<String>, PointerValue<'ctx>)],
+        index: IntValue<'ctx>,
+        binding: &str,
+    ) -> CodegenResult<()> {
+        let bool_ty = self.context.bool_type();
+        let zero = bool_ty.const_zero();
+        let i64_ty = self.context.i64_type();
+        let targets: Vec<(Vec<String>, PointerValue<'ctx>)> = self
+            .live_drop_entry(binding)
+            .map(|entry| {
+                std::iter::once((Vec::new(), entry.flag_ptr))
+                    .chain(entry.held.iter().map(|h| (h.path.clone(), h.flag_ptr)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (path, target) in targets {
+            let mut taken = zero;
+            let positions = flags.iter().filter(|(_, below, _)| *below == path);
+            let mut any = false;
+            for (element, _, flag_ptr) in positions {
+                any = true;
+                let here = self.builder.build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    index,
+                    i64_ty.const_int(*element as u64, false),
+                    "foreach.here",
+                )?;
+                let owns = self
+                    .builder
+                    .build_load(bool_ty, *flag_ptr, "foreach.owns")?
+                    .into_int_value();
+                taken = self
+                    .builder
+                    .build_select(here, owns, taken, "foreach.taken")?
+                    .into_int_value();
+                let left = self
+                    .builder
+                    .build_select(here, zero, owns, "foreach.left")?
+                    .into_int_value();
+                self.builder.build_store(*flag_ptr, left)?;
+            }
+            if any {
+                self.builder.build_store(target, taken)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Whether reading `expr` leaves its holder owning everything it owned: a `Copy`
     /// value is copied out, and a collection slot, or a part of one, is never moved out
     /// of (the checker refuses it), so a read of one is a read in place.

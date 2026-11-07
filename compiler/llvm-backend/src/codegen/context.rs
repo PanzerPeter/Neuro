@@ -421,6 +421,13 @@ pub(crate) struct CodegenContext<'ctx> {
     /// caller's storage rather than a value this frame owns. A store into it displaces a
     /// value no drop entry here tracks.
     pub(crate) borrowed_self: bool,
+    /// The methods, by mangled name, whose `&self` receiver is passed by address.
+    pub(crate) shared_pointer_self: HashSet<String>,
+    /// The drop flags of the temporaries the current statements hold to their end,
+    /// innermost statement last.
+    pub(crate) statement_temporaries: Vec<PointerValue<'ctx>>,
+    /// The derivative-placing functions a `.backward()` called, each with its tensor type.
+    pub(crate) derivative_homes: Vec<(FunctionValue<'ctx>, Type)>,
 
     /// Stack of lexical name scopes, innermost last and pushed in lockstep with
     /// `drop_scopes`. Each frame lists what the bindings declared in that scope
@@ -530,6 +537,9 @@ impl<'ctx> CodegenContext<'ctx> {
             forwarded_string_owner: None,
             forwarded_holder_owners: None,
             borrowed_self: false,
+            shared_pointer_self: HashSet::new(),
+            statement_temporaries: Vec::new(),
+            derivative_homes: Vec::new(),
             name_scopes: Vec::new(),
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),

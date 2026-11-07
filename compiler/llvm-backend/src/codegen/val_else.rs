@@ -10,6 +10,7 @@
 use neuro_hir::{HirExpr, HirMatchBinding, HirMatchTest, HirStmt};
 
 use crate::codegen::context::CodegenContext;
+use crate::codegen::drops::{UNBOUND_TEMPORARY, is_pure_place};
 use crate::codegen::expressions::matches::ArmOwnership;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -42,27 +43,40 @@ impl<'ctx> CodegenContext<'ctx> {
         })?;
 
         self.builder.position_at_end(else_bb);
-        self.codegen_else_branch(else_binding, else_block, scrut_alloca, &scrut_sem)?;
-
-        self.builder.position_at_end(ok_bb);
-        // Deliberately not restored: these bindings belong to the enclosing block and
-        // must stay visible to every statement after this one.
-        let _ = self.bind_arm(
-            bindings,
+        self.codegen_else_branch(
+            else_binding,
+            else_block,
+            scrutinee,
             scrut_alloca,
             &scrut_sem,
-            ArmOwnership::EnclosingString { scrutinee },
         )?;
+
+        self.builder.position_at_end(ok_bb);
+        // A temporary has no binding left to own what the pattern takes out of it, so the
+        // bindings do, exactly as a `match` arm's would. A place keeps its payload.
+        let ownership = if is_pure_place(scrutinee) {
+            ArmOwnership::EnclosingString { scrutinee }
+        } else {
+            ArmOwnership::Arm {
+                scrutinee,
+                shares: false,
+            }
+        };
+        // Deliberately not restored: these bindings belong to the enclosing block and
+        // must stay visible to every statement after this one.
+        let _ = self.bind_arm(bindings, scrut_alloca, &scrut_sem, ownership)?;
         Ok(())
     }
 
     /// Emit the else branch in its own drop scope, with `else_binding` visible only
     /// inside it. The branch is known to diverge, so anything that still falls out of
-    /// it is unreachable.
+    /// it is unreachable. A temporary scrutinee reaches this branch with no owner: its
+    /// else binding takes the payload, and with none the scope destroys the whole value.
     fn codegen_else_branch(
         &mut self,
         else_binding: Option<&HirMatchBinding>,
         else_block: &[HirStmt],
+        scrutinee: &HirExpr,
         scrut_alloca: inkwell::values::PointerValue<'ctx>,
         scrut_sem: &Type,
     ) -> CodegenResult<()> {
@@ -70,9 +84,21 @@ impl<'ctx> CodegenContext<'ctx> {
             Some(binding) => std::slice::from_ref(binding),
             None => &[],
         };
-        let saved = self.bind_arm(bound, scrut_alloca, scrut_sem, ArmOwnership::Enclosing)?;
+        let temporary = !is_pure_place(scrutinee);
+        let ownership = if temporary {
+            ArmOwnership::Arm {
+                scrutinee,
+                shares: false,
+            }
+        } else {
+            ArmOwnership::Enclosing
+        };
 
         self.push_drop_scope();
+        let saved = self.bind_arm(bound, scrut_alloca, scrut_sem, ownership)?;
+        if temporary && else_binding.is_none() {
+            self.register_owned_binding(UNBOUND_TEMPORARY, scrut_alloca, scrut_sem)?;
+        }
         for stmt in else_block {
             if self.current_block_terminated() {
                 break;

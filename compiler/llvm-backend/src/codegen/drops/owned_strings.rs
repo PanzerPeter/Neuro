@@ -20,7 +20,7 @@ use crate::codegen::string_ownership::tail_exits;
 /// releasing that would free it twice. A slice qualifies because it is a copy, while an
 /// index that reads one element yields no buffer at all. A shape cast and a detach
 /// consume their receiver, so the buffer they hand on has no other owner left.
-pub(super) fn builds_its_own_buffer(expr: &HirExpr) -> bool {
+pub(crate) fn builds_its_own_buffer(expr: &HirExpr) -> bool {
     if let HirExprKind::TensorIndex { .. } = expr.kind {
         return matches!(expr.ty, HirType::Tensor { .. });
     }

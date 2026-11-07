@@ -335,13 +335,18 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   depth through derived structs, whose `Debug` is written by hand (`emit_field_debug_helpers`):
   the backend's field-by-field rendering calls it. A newtype field is read through to its inner
   type only when the newtype has no `Debug` of its own. `.clone()` on a non-`Copy` struct deriving
-  `Clone` with a field that has an `impl Clone` (not an inherent `clone`), directly or through a
-  nested such struct (`clone_calls_fields`, the checker's `derived_clone_calls` rule), calls `S__clone$derived`, the impl a programmer would have written,
+  `Clone` with a part whose clone runs code (`clone_is_a_call`: a `string`, a tensor, an
+  `impl Clone` and not an inherent `clone`, a nested such struct, or a tuple, array or newtype of
+  one) calls `S__clone$derived`, the impl a programmer would have written,
   `S { h: self.h.clone(), n: self.n }`, emitted once per type by `emit_derived_clone` as an
-  inherent `&self` method (`derive_helpers`). The call lends it the receiver exactly as it lends
+  inherent `&self` method (`derive_helpers`). `clone_part` builds each field's value, rebuilding a
+  tuple, array or newtype part by part. The call lends it the receiver exactly as it lends
   one to a hand-written `clone`, so a borrowed, indexed or temporary receiver is never taken
   over. Every other derived clone, a `Copy` struct's included, stays the backend's copy of the
   whole value.
+- **A `string` as a trait object.** A `&string` is a fat pointer and a trait object's data pointer
+  is thin, so `lower_expr` admits the coercion only for `&place` with the place holding a `string`
+  (`borrows_string_place`). The backend lends the place's address.
 - **`val-else`** (`val_else.rs`). `lower_val_else` reuses `lower_pattern` from
   `expressions/matches.rs` for the success test and bindings, lowers the `else` branch in a pushed
   scope with its own binding, and only then defines the pattern's bindings in the **enclosing**

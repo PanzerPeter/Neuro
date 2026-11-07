@@ -397,8 +397,8 @@ refused. A call to a `@no_grad` function is not differentiated through at all. I
 | `@grad` and `@gpu` on one function | Refused at compile time |
 
 A loss built from `.sum()` or `.mean()` is a host tensor, since those reductions return a host scalar.
-See [BUG-143](../BUGS.md#bug-143-the-gradient-of-a-device-parameter-can-land-on-the-host) for where a
-gradient can land today.
+A gradient lands on its parameter's device whatever the last operation was, so `w.grad()` on a device
+tensor is a device tensor. A parameter on another GPU has its gradient copied there by `.backward()`.
 
 ### Function values
 

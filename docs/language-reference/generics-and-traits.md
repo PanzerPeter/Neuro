@@ -457,7 +457,7 @@ A trait object is unsized, so it appears only behind a reference, `&dyn Trait` o
 
 A trait object reaches its supertraits' methods as well: the table behind a `&dyn Priced` carries `Named`'s methods after `Priced`'s own, so `item.name()` works. A `&dyn Priced` does not coerce to a `&dyn Named`.
 
-A derived or builtin implementor coerces too: a struct with `@derive(Debug)` becomes a `&dyn Debug`, and so does `&n` for an `i32`. A `&string` does not yet, see [BUG-126](../BUGS.md).
+A derived or builtin implementor coerces too: a struct with `@derive(Debug)` becomes a `&dyn Debug`, and so does `&n` for an `i32`. A `string` coerces when the borrow names the place holding it (`&s`, `&p.name`). A `&string` parameter or a view has no such place, so it is refused.
 
 A default method reached through `dyn` runs the trait's body, and an override runs the implementor's.
 

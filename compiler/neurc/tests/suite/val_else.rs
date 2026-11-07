@@ -246,3 +246,103 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 18);
 }
+
+/// A temporary scrutinee has no binding left to own its payload, so the success bindings
+/// do, and a miss destroys the value in the `else` block. A named scrutinee keeps its own.
+#[test]
+fn regression_bug_142_a_temporary_scrutinee_gives_up_its_payload() {
+    let source = r#"
+func make(i: i32) -> Option<Tensor<f32, [2]>> {
+    val t: Tensor<f32, [2]> = [1.0, 2.0]
+    if i < 100 { return Some(t) }
+    return None
+}
+
+func load(i: i32) -> Result<Vec<i32>, Vec<i32>> {
+    mut v: Vec<i32> = Vec::new()
+    v.push(i)
+    if i % 2 == 0 { return Ok(v) }
+    return Err(v)
+}
+
+func bound(i: i32) -> i32 {
+    val Ok(c) = load(i) else |e| { return e.len() as i32 + 10 }
+    c.len() as i32
+}
+
+func unbound(i: i32) -> i32 {
+    val Ok(c) = load(i) else { return 20 }
+    c.len() as i32
+}
+
+func named(i: i32) -> i32 {
+    val r = load(i)
+    val Ok(c) = r else { return 30 }
+    c.len() as i32
+}
+
+func main() -> i32 {
+    mut total = 0.0f32
+    mut n = 0
+    for i in 0..10 {
+        val Some(c) = make(i) else { return 2 }
+        total += c.sum()
+        n += bound(i) + unbound(i) + named(i)
+    }
+    if total != 30.0 { return 1 }
+    n - 300
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("val_else_temporary.nr", source), 20);
+}
+
+/// A `val ... else` binding is a `val`, so it may shadow a name of its block, the
+/// scrutinee's included. It used to be refused as already defined.
+#[test]
+fn regression_bug_145_a_val_else_binding_shadows_like_any_val() {
+    let source = r#"
+func wrap(n: i32) -> Option<i32> { Some(n + 1) }
+
+func main() -> i32 {
+    val x = 5
+    val Some(x) = wrap(x) else { return 1 }
+    val Some(x) = wrap(x) else { return 2 }
+    val o = wrap(x)
+    val Some(o) = o else { return 3 }
+    x + o
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.compile_and_run("val_else_shadow.nr", source), Ok(15));
+    let duplicate = "enum E { P(i32, i32), Q }\nfunc main() -> i32 {\n    val E::P(a, a) = E::P(1, 2) else { return 1 }\n    a\n}\n";
+    let err = test
+        .check("val_dup.nr", duplicate)
+        .expect_err("a pattern bound a name twice");
+    assert!(err.contains("already defined"), "{err}");
+}
+
+/// An array pattern is refutable over a slice, so `val [..] = s else` reads as a `val-else`.
+#[test]
+fn regression_lim_249_an_array_pattern_takes_an_else() {
+    let source = r#"
+func first(s: &[i32]) -> i32 {
+    val [a, ..] = s else { return 7 }
+    a
+}
+
+func two(s: &[i32]) -> i32 {
+    val [a, b, ..] = s else { return 8 }
+    a + b
+}
+
+func main() -> i32 {
+    val none: [i32; 0] = []
+    val pair = [4, 5]
+    val [p, q, r] = [1, 2, 3]
+    first(&pair) + first(&none) + two(&pair) + two(&none) + p + q + r
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.compile_and_run("val_else_array.nr", source), Ok(34));
+}

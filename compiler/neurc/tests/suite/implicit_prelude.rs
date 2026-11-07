@@ -245,3 +245,13 @@ func main() -> i32 { 0 }
         error
     );
 }
+
+/// `Device` names its variants with the enum: only `Option`'s and `Result`'s are bare.
+#[test]
+fn regression_bug_140_device_variants_are_qualified() {
+    let bare = "func main() -> i32 {\n    val t: Tensor<f32, [2]> = [1.0, 2.0]\n    val moved = t.to(CPU)\n    0\n}\n";
+    let err = run_program(&[("main.nr", bare)], "main.nr").expect_err("a bare CPU compiled");
+    assert!(err.contains("undefined variable 'CPU'"), "{err}");
+    let qualified = "func main() -> i32 {\n    val t: Tensor<f32, [2]> = [1.0, 2.0]\n    val moved = t.to(Device::CPU)\n    0\n}\n";
+    assert_eq!(run_program(&[("main.nr", qualified)], "main.nr"), Ok(0));
+}

@@ -859,6 +859,14 @@ impl TypeChecker {
                 if matches!(obj_ty, Type::Unknown) {
                     return Some(Type::Unknown);
                 }
+                // A result borrowing an owned temporary, or read from a value that does,
+                // lives no longer than its statement.
+                if self.temporary_views.contains(&object.span())
+                    || (Self::place_root_name(object).is_none()
+                        && self.result_borrows_owned_receiver(&obj_ty, &field.name))
+                {
+                    let _ = self.temporary_views.insert(*span);
+                }
                 // A turbofish names a generic method's own parameters, so on any other
                 // method it names nothing, exactly as on a non-generic free function.
                 // `.to_checked::<T>()` and `.parse::<T>()` are the builtins that read their

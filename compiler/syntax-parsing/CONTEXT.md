@@ -267,7 +267,8 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `val Shape::Circle { r } = s else { ... }` parses as a `val-else`. A `val Name {` stays a struct
   destructure and a payload-less `val None = ...` stays a binding, both because a bare `None`
   pattern is ambiguous until module resolution. The `|name|` after `else` is a dedicated
-  production, not a closure literal.
+  production, not a closure literal. `val [first, ..] = s else { ... }` opens as a destructure;
+  `parse_destructure_bind` reparses it from the pattern as a `val-else` when an `else` follows.
 - **`.enumerate()` in a `for` head is grammar, not a method call.** `parse_for_stmt` reads the
   head as one loop variable or the pair `(index, value)`, then strips a trailing `.enumerate()`
   off the iterable into `Stmt::ForRange`/`ForEach`'s `index` field. It cannot be left as an
@@ -384,8 +385,9 @@ written and resolves nothing: matching a label to a parameter needs the callee, 
   Parameters take an optional `: T`; an optional `-> R` follows; the body is a brace block or a
   single expression at `Precedence::Lowest`, so it stops at a `,`, `)`, or newline. `parse_type`
   reads a parenthesized type list followed by `->` as `Type::Function` (zero or more params),
-  keeping the ≥2-element tuple form for a list with no arrow. A one-element tuple literal `(x,)`
-  is `OneElementTuple`: there is no one-element tuple, so the value is written as itself.
+  keeping the tuple form for a list with no arrow: none or two and more. `()` is the unit type and
+  the unit value, and `-> ()` reads as no return type. A one-element tuple literal `(x,)` is
+  `OneElementTuple`: there is no one-element tuple, so the value is written as itself.
 - **Match.** `parse_match_expr` parses the scrutinee with struct literals suppressed, then arms of
   the form `pattern ('|' pattern)* ('if' guard)? '=>' body`. `parse_pattern` reads
   wildcard / binding / `name @ pattern` / literal / range / array / `E::V` variant patterns with

@@ -111,11 +111,10 @@ pub enum LoweringError {
     )]
     InstantiationTooDeep { name: String, limit: u32 },
 
-    /// A generic body coerces `&T` to `&dyn Trait` and an instance has `T = string`. The
-    /// checker refuses `&string` → `&dyn Trait` written directly, but sees the template
-    /// once, so an instantiation is the path that reaches here.
+    /// A `&string` value with no place behind it is coerced to `&dyn Trait`: a parameter, a
+    /// view, or a generic body's `&T` with `T = string`.
     #[error(
-        "a `&string` cannot become a `&dyn {trait_name}`: a `&string` is a fat pointer and a trait object holds a thin one (a type parameter instantiated with `string` reaches this)"
+        "a `&string` cannot become a `&dyn {trait_name}` here: a trait object holds a thin pointer, so it must borrow a `string` binding or field directly (`&s`)"
     )]
     StringTraitObject { trait_name: String },
 }

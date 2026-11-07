@@ -21,7 +21,7 @@ const PRELUDE_SOURCE: &str = include_str!("prelude.nr");
 
 /// Prelude enums whose variants are written with the enum's name, so a module's bare names
 /// stay its own.
-const QUALIFIED_ENUMS: &[&str] = &["ParseError"];
+const QUALIFIED_ENUMS: &[&str] = &["ParseError", "Device"];
 
 /// The parsed prelude: the declarations to prepend, and the variant names every module
 /// may write bare.

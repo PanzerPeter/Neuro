@@ -236,6 +236,9 @@ pub struct MethodDef {
     pub self_param: Option<SelfParam>,
     pub params: Vec<Parameter>,
     pub return_type: Option<Type>,
+    /// How many lifetimes `return_type` names. A position that names none is elided, and
+    /// an elided lifetime in a `self` method's result borrows the receiver.
+    pub return_lifetimes: usize,
     pub body: Vec<Stmt>,
     pub attributes: Vec<Attribute>,
     pub span: Span,

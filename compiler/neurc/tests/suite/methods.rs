@@ -512,3 +512,115 @@ func main() -> i32 {
     // arr = [3, 7], p.c = 11, v[0] = 21, t.0 = 31: 3000 + 700 + 11 + 21 + 31.
     assert_eq!(exit, (3000 + 700 + 11 + 21 + 31) % 256);
 }
+
+/// A `&self` receiver is passed by address, so a reference into `self` survives the call.
+/// It used to point at the callee's copy, which the next call overwrote.
+#[test]
+fn regression_bug_130_a_reference_into_self_outlives_the_call() {
+    let source = r#"
+struct Bag { xs: [i32; 3] }
+struct View<'a> { xs: &'a [i32; 3] }
+struct BagIter<'a> { xs: &'a [i32; 3], at: u64 }
+
+impl Bag {
+    func view(&self) -> View { View { xs: &self.xs } }
+    func iter(&self) -> BagIter { BagIter { xs: &self.xs, at: 0 } }
+}
+
+impl<'a> Iterator for BagIter<'a> {
+    type Item = i32
+    func next(&mut self) -> Option<i32> {
+        if self.at == 3 { return None }
+        val v = self.xs[self.at]
+        self.at += 1
+        Some(v)
+    }
+}
+
+func noise(a: i32, b: i32) -> i32 {
+    val arr = [a, b, a, b]
+    arr[0] + arr[3]
+}
+
+func main() -> i32 {
+    val b = Bag { xs: [1, 2, 3] }
+    val v = b.view()
+    val n = noise(70, 80)
+    mut total = 0
+    for x in b.iter() { total += x }
+    v.xs[1] * 10 + v.xs[2] + total
+}
+"#;
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run("self_reference.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 29);
+}
+
+/// Every way of reaching a `&self` method: a place, a borrow, an element, a temporary, a
+/// trait object, a bound, a function value and a closure.
+#[test]
+fn a_shared_receiver_is_lent_from_every_call_form() {
+    let source = r#"
+struct M { v: Vec<i32>, id: i32 }
+enum E { A(i32), B(i32, i32) }
+newtype I = i32
+
+trait T {
+    func val_of(&self) -> i32
+    func twice(&self) -> i32 { self.val_of() * 2 }
+}
+
+impl T for M { func val_of(&self) -> i32 { self.id } }
+impl T for E {
+    func val_of(&self) -> i32 {
+        match self {
+            E::A(x) => x,
+            E::B(a, b) => b
+        }
+    }
+}
+
+impl M {
+    func get(&self) -> i32 { self.id }
+    func add(&self, k: i32) -> i32 { self.get() + k }
+}
+
+impl I { func inc(&self) -> i32 { self.0 + 1 } }
+
+func make(n: i32) -> M {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    M { v: v, id: n }
+}
+
+func through_dyn(d: &dyn T) -> i32 { d.twice() }
+func through_bound<X: T>(x: &X) -> i32 { x.val_of() + x.twice() }
+
+func main() -> i32 {
+    val m = make(5)
+    val r = &m
+    val e = E::B(4, 1)
+    mut acc = m.get() + r.add(1)
+    acc += e.val_of() + e.twice()
+    acc += through_dyn(&m) + through_dyn(&e)
+    acc += through_bound(&m) + through_bound(&e)
+    val f = M::get
+    acc += f(make(5))
+    val g = |x: &M| x.get()
+    acc += g(&m)
+    val arr = [make(1), make(2)]
+    acc += arr[1].get()
+    val pair = (make(3), 1)
+    acc += pair.0.get()
+    mut list: Vec<M> = Vec::new()
+    list.push(make(9))
+    acc += list[0].get()
+    acc + I(4).inc()
+}
+"#;
+    let test = CompileTest::new();
+    // 11 + 3 + 12 + 18 + 10 + 2 + 3 + 9 + 5.
+    assert_eq!(test.run_leak_checked("shared_receiver.nr", source), 73);
+}

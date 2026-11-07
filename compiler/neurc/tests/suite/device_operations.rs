@@ -918,3 +918,23 @@ func main() -> i32 {
     }
     assert_ran(&output, 0, "inf inf\n");
 }
+
+/// A gradient lives on its parameter's device. The reverse of `.sum()` and `.mean()` builds
+/// a host tensor, which used to land in the slot as it was, while a traversal through a
+/// local closure, which has no device form, proves where the result sits.
+#[cfg(target_os = "linux")]
+#[test]
+fn regression_bug_143_a_gradient_lands_on_its_parameters_device() {
+    for reduction in ["sum", "mean"] {
+        let source = format!(
+            "@grad(wrt: [v])\nfunc loss(v: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {{\n    return Tensor::scalar(v.{reduction}())\n}}\nfunc main() -> i32 {{\n    val f = |x: f32| x * 2.0f32\n    val h: Tensor<f32, [2, 1]> = [[1.0], [2.0]]\n    mut w = h.to(Device::GPU(0))\n    val e = loss(&mut w)\n    e.backward()\n    val g = w.grad().clone()\n    val r = g.map(f)\n    return 0\n}}\n"
+        );
+        let test = CompileTest::new();
+        let output = run(&test, "gradient_home.nr", &source, false);
+        if without_gpu(&output) {
+            continue;
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with(ON_DEVICE), "{reduction}: {stderr}");
+    }
+}

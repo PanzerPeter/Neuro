@@ -7,7 +7,8 @@
 // the returned bundle, followed under `order: 2` by a `__set_hessian`. So the backend's share
 // of the materialization layer is the slots and nothing else.
 
-use inkwell::values::BasicValueEnum;
+use inkwell::module::Linkage;
+use inkwell::values::{BasicValueEnum, FunctionValue};
 use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
@@ -106,6 +107,9 @@ impl<'ctx> CodegenContext<'ctx> {
                     ));
                 };
                 self.mark_moved_for_drop(derivative)?;
+                let home = self.derivative_home_fn(&Type::from_hir(&derivative.ty));
+                self.builder
+                    .build_call(home, &[handle.into(), value.into()], "")?;
                 // A second `.backward()` replaces the derivative, so the old one is released
                 // rather than leaked.
                 match slot {
@@ -117,6 +121,60 @@ impl<'ctx> CodegenContext<'ctx> {
                 Ok(None)
             }
         }
+    }
+
+    /// The private `void (param, derivative)` that moves a derivative of `derivative_ty` to
+    /// its parameter's device. The reverse of a reduction builds a host tensor whatever the
+    /// parameter's device, so the rule's last operation cannot decide where it lands.
+    fn derivative_home_fn(&mut self, derivative_ty: &Type) -> FunctionValue<'ctx> {
+        if let Some((function, _)) = self
+            .derivative_homes
+            .iter()
+            .find(|(_, ty)| ty == derivative_ty)
+        {
+            return *function;
+        }
+        let ptr = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = self
+            .context
+            .void_type()
+            .fn_type(&[ptr.into(), ptr.into()], false);
+        let name = format!("__neuro_derivative_home_{}", self.derivative_homes.len());
+        let function = self
+            .module
+            .add_function(&name, fn_type, Some(Linkage::Private));
+        self.derivative_homes
+            .push((function, derivative_ty.clone()));
+        function
+    }
+
+    /// Give each [`Self::derivative_home_fn`] its body. Run after every function body,
+    /// since only then is it known whether a tensor can leave the host: a program with no
+    /// GPU runtime moves nothing, and an empty body is all it pays.
+    pub(crate) fn define_derivative_homes(&mut self) -> CodegenResult<()> {
+        let moves_tensors = self.requires_gpu_runtime() && !cfg!(target_os = "windows");
+        for (function, derivative_ty) in self.derivative_homes.clone() {
+            let entry = self.context.append_basic_block(function, "entry");
+            self.builder.position_at_end(entry);
+            self.current_function = Some(function);
+            if moves_tensors {
+                let handle_of = |index| {
+                    function
+                        .get_nth_param(index)
+                        .map(BasicValueEnum::into_pointer_value)
+                        .ok_or_else(|| {
+                            CodegenError::InternalError("derivative home lost a handle".to_string())
+                        })
+                };
+                let (param, derivative) = (handle_of(0)?, handle_of(1)?);
+                let to_host = self.dlpack_on_host(param)?;
+                let index = self.dlpack_device_index(param)?;
+                self.transfer_tensor(derivative, &derivative_ty, to_host, index)?;
+            }
+            self.builder.build_return(None)?;
+        }
+        self.current_function = None;
+        Ok(())
     }
 
     /// `.detach()`: the receiver's handle, consumed and handed on with empty derivative

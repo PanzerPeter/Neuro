@@ -599,6 +599,8 @@ func doubled_or_error(raw: i32) -> i32 {
 }
 ```
 
+An array pattern over a slice is refutable, so it takes an `else` too: `val [first, ..] = s else { return 0 }`. The bindings are `val`s, so they may shadow a name of the block, the scrutinee's included.
+
 The `else` branch **must exit the scope**: `return`, `break`, `continue`, `panic(...)`, or `unreachable()`. A branch that can fall through is rejected, so the binding is guaranteed initialized on the path that continues:
 
 ```text

@@ -216,6 +216,8 @@ walkers.
   Both are validated and then erased: a reference type's identity does not depend on its
   lifetime. A lifetime argument in a type application (`View<'a>`) has no node: the parser
   checks it and drops it, so `Type::Generic` carries type and const arguments only.
+  `MethodDef::return_lifetimes` counts the names its return type wrote, which is what tells an
+  elided lifetime, and so a result borrowing `self`, from one the `impl` declares.
 - **Attributes.** `Attribute { name, args, named, span }` on `FunctionDef` / `MethodDef` /
   `StructDef`: `args` are the bare identifiers (`@derive(Copy, Clone)`), `named` the
   `AttributeNamedArg { label, value: Expr, span }` pairs (`@grad(wrt: [w, self.head.w])`). A

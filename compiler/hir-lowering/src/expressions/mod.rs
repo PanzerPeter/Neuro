@@ -55,6 +55,20 @@ const CHAR_AT_METHOD: &str = "__char_at";
 /// `Some` name marks a struct-variant field; `None` a tuple-variant element.
 type PayloadFields = Vec<(Option<String>, HirType)>;
 
+/// Whether `value` is `&place` with `place` holding a `string` of its own.
+fn borrows_string_place(value: &HirExpr) -> bool {
+    let HirExprKind::Reference { operand, .. } = &value.kind else {
+        return false;
+    };
+    let mut place = operand.as_ref();
+    while let HirExprKind::FieldAccess { object, .. } | HirExprKind::TupleIndex { object, .. } =
+        &place.kind
+    {
+        place = object;
+    }
+    matches!(operand.ty, HirType::String) && matches!(place.kind, HirExprKind::Variable(_))
+}
+
 impl Lowerer {
     /// Lower an expression to a typed [`HirExpr`], deriving its resolved type from
     /// the surrounding `expected` type where the language's contextual inference
@@ -70,7 +84,9 @@ impl Lowerer {
             && let HirType::Reference { inner, .. } = &coerced.ty
             && let HirType::DynObject(trait_name) = inner.as_ref()
         {
-            if matches!(value.ty.referent(), HirType::String) {
+            // A `&string` is a fat pointer held by value, and a trait object's data pointer
+            // is thin, so only the address of the place holding the `string` can serve.
+            if matches!(value.ty.referent(), HirType::String) && !borrows_string_place(value) {
                 return Err(LoweringError::StringTraitObject {
                     trait_name: trait_name.clone(),
                 });

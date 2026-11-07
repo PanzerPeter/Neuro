@@ -11,7 +11,7 @@ use neuro_hir::{
     HirCollectionKind, HirExpr, HirExprKind, HirFieldInit, HirFunction, HirImpl, HirInterpPart,
     HirItem, HirMethod, HirParam, HirSelfParam, HirStmt, HirTarget, HirType,
 };
-use shared_types::{FormatKind, FormatSpec, Span};
+use shared_types::{FormatKind, FormatSpec, Literal, Span};
 
 use crate::{Lowerer, LoweringError};
 
@@ -132,11 +132,85 @@ impl Lowerer {
         if !self.clone_structs.contains(name) || self.is_copy(ty) {
             return false;
         }
-        self.structs.get(name).is_some_and(|fields| {
-            fields
-                .iter()
-                .any(|(_, field)| self.clone_impl(field) || self.clone_calls_fields(field))
-        })
+        self.structs
+            .get(name)
+            .is_some_and(|fields| fields.iter().any(|(_, field)| self.clone_is_a_call(field)))
+    }
+
+    /// Whether a derived clone runs code for a part of `ty` rather than copying its bytes.
+    fn clone_is_a_call(&self, ty: &HirType) -> bool {
+        match ty {
+            _ if self.clone_impl(ty) => true,
+            HirType::String | HirType::Tensor { .. } => true,
+            HirType::Tuple(elements) => elements.iter().any(|e| self.clone_is_a_call(e)),
+            HirType::Array { element, .. } => self.clone_is_a_call(element),
+            HirType::Newtype { inner, .. } => self.clone_is_a_call(inner),
+            other => self.clone_calls_fields(other),
+        }
+    }
+
+    /// The clone of `read`, a pure place of type `ty`, part by part.
+    fn clone_part(&mut self, read: HirExpr, ty: &HirType, span: Span) -> HirExpr {
+        if !self.clone_is_a_call(ty) {
+            return read;
+        }
+        if self.clone_impl(ty) || matches!(ty, HirType::String | HirType::Tensor { .. }) {
+            return method_call(read, CLONE_METHOD, Vec::new(), ty.clone(), span);
+        }
+        let kind = match ty {
+            HirType::Tuple(elements) => HirExprKind::TupleLiteral {
+                elements: elements
+                    .iter()
+                    .enumerate()
+                    .map(|(index, element)| {
+                        let part = HirExpr::new(
+                            HirExprKind::TupleIndex {
+                                object: Box::new(read.clone()),
+                                index,
+                            },
+                            element.clone(),
+                            span,
+                        );
+                        self.clone_part(part, element, span)
+                    })
+                    .collect(),
+            },
+            HirType::Array { element, size } => HirExprKind::ArrayLiteral {
+                elements: (0..*size)
+                    .map(|index| {
+                        let position = HirExpr::new(
+                            HirExprKind::Literal(Literal::Integer(index as i128, None)),
+                            HirType::U64,
+                            span,
+                        );
+                        let part = HirExpr::new(
+                            HirExprKind::Index {
+                                object: Box::new(read.clone()),
+                                index: Box::new(position),
+                            },
+                            (**element).clone(),
+                            span,
+                        );
+                        self.clone_part(part, element, span)
+                    })
+                    .collect(),
+            },
+            HirType::Newtype { name, inner } => {
+                let part = HirExpr::new(
+                    HirExprKind::NewtypeAccess {
+                        object: Box::new(read),
+                    },
+                    (**inner).clone(),
+                    span,
+                );
+                HirExprKind::NewtypeConstruct {
+                    name: name.clone(),
+                    value: Box::new(self.clone_part(part, inner, span)),
+                }
+            }
+            _ => return self.derived_clone_call(read, span),
+        };
+        HirExpr::new(kind, ty.clone(), span)
     }
 
     /// Whether `ty` has an `impl Clone`, whose `clone` a derive calls. An inherent method
@@ -161,9 +235,9 @@ impl Lowerer {
     }
 
     /// `impl Type { func clone$derived(&self) -> Type { Type { h: self.h.clone(), n: self.n } } }`.
-    /// A field with an `impl Clone` takes its `.clone()`; a non-`Copy` struct deriving
-    /// `Clone` calls its own helper; every other field, `Copy` by the derive's field rule,
-    /// is read.
+    /// A field with a `.clone()` takes it; a non-`Copy` struct deriving `Clone` calls its
+    /// own helper; a tuple, array or newtype clones its parts; every other field, `Copy`
+    /// by the derive's field rule, is read.
     fn emit_derived_clone(&mut self, name: &str, span: Span) {
         let helper = format!("{}__{}", name, DERIVED_CLONE_METHOD);
         // A struct lowering never registered emits no helper, and the call to it then
@@ -189,15 +263,7 @@ impl Lowerer {
                 field_ty.clone(),
                 span,
             );
-            let derived = matches!(&field_ty, HirType::Struct(n) if self.clone_structs.contains(n))
-                && !self.is_copy(&field_ty);
-            let value = if self.clone_impl(&field_ty) {
-                method_call(read, CLONE_METHOD, Vec::new(), field_ty, span)
-            } else if derived {
-                self.derived_clone_call(read, span)
-            } else {
-                read
-            };
+            let value = self.clone_part(read, &field_ty, span);
             inits.push(HirFieldInit {
                 name: field,
                 value: Box::new(value),

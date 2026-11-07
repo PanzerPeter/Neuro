@@ -363,18 +363,15 @@ func main() -> i32 {
     assert_eq!(output.status.code(), Some(6));
 }
 
-/// A derived `.clone()` copies the struct's bytes, so a field that owns a buffer came out
-/// shared between the original and the copy: a tensor, `Vec` or `StringBuilder` field was
-/// freed twice, and a `string` field was read after the original released it. Every such
-/// field is now refused, and the copyable fields keep the derive.
+/// A derived `.clone()` copied the struct's bytes, so a field that owns a buffer came out
+/// shared between the original and the copy. A field with no `.clone()` of its own is
+/// refused; every other one is cloned part by part (see the next test).
 #[test]
-fn regression_derived_clone_refuses_a_field_that_owns_a_buffer() {
+fn regression_derived_clone_refuses_a_field_with_no_clone() {
     for (field, tag) in [
-        ("string", "clone_string"),
-        ("Tensor<i32, [4]>", "clone_tensor"),
         ("Vec<i32>", "clone_vec"),
         ("StringBuilder", "clone_builder"),
-        ("[string; 2]", "clone_string_array"),
+        ("[Vec<i32>; 2]", "clone_vec_array"),
     ] {
         let source = format!(
             "@derive(Clone)\nstruct S {{ f: {field}, n: i32 }}\nfunc main() -> i32 {{ 0 }}\n"
@@ -387,8 +384,8 @@ fn regression_derived_clone_refuses_a_field_that_owns_a_buffer() {
     }
 
     let generic = check_error(
-        "@derive(Clone)\nstruct W<T> { v: T }\nfunc main() -> i32 {\n    val w = W { v: \"a\" + \"b\" }\n    val c = w.clone()\n    0\n}\n",
-        "clone_generic_string",
+        "@derive(Clone)\nstruct W<T> { v: T }\nfunc mk() -> Vec<i32> { Vec::new() }\nfunc main() -> i32 {\n    val w = W { v: mk() }\n    val c = w.clone()\n    0\n}\n",
+        "clone_generic_vec",
     );
     assert!(
         generic.contains("struct 'W' cannot derive `Clone`: field 'v'"),
@@ -417,4 +414,60 @@ func main() -> i32 {
         "clone_copyable_fields",
     );
     assert_eq!(output.status.code(), Some(22));
+}
+
+/// `string` and tensor fields, a tuple, array or newtype holding them, a nested derive and
+/// a generic field instantiated with one are each cloned part by part: the copy owns its
+/// own buffers, so it outlives the original and nothing is released twice.
+#[test]
+fn regression_bug_098_derived_clone_copies_owning_fields_part_by_part() {
+    let output = run_program(
+        r#"
+newtype Label = string
+
+@derive(Clone)
+struct Named { name: string, id: i32 }
+
+@derive(Clone)
+struct Deep {
+    n: Named,
+    t: Tensor<f32, [2]>,
+    pair: (string, i32),
+    arr: [string; 2],
+    label: Label
+}
+
+@derive(Clone)
+struct W<T> { v: T }
+
+func copy_of(d: &Deep) -> Deep {
+    val c = d.clone()
+    c
+}
+
+func main() -> i32 {
+    mut total = 0
+    for i in 0..3 {
+        val d = Deep {
+            n: Named { name: "a" + "b", id: 1 },
+            t: [1.0, 2.0],
+            pair: ("x" + "y", 1),
+            arr: ["p" + "q", "lit"],
+            label: Label("hey" + "!")
+        }
+        val c = copy_of(&d)
+        total += c.n.name.len() as i32 + c.n.id + c.pair.0.len() as i32
+        total += c.arr[0].len() as i32 + c.arr[1].len() as i32 + c.label.0.len() as i32
+        total += c.t[1] as i32
+        val w = W { v: "ab" + "c" }
+        val u = w.clone()
+        total += u.v.len() as i32
+    }
+    total
+}
+"#,
+        "clone_owning_fields",
+    );
+    // Per pass: 2 + 1 + 2 + 2 + 3 + 4 + 2 + 3.
+    assert_eq!(output.status.code(), Some(57));
 }

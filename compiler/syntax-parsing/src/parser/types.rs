@@ -121,7 +121,7 @@ impl Parser {
         }
         // A parenthesized type list opens either a tuple type `(T1, T2, ...)` or a
         // closure/function type `(T1, ...) -> R`: disambiguated by a trailing `->`.
-        // A tuple needs two or more elements; a function type accepts zero or more.
+        // A tuple has no element or two or more; a function type accepts zero or more.
         if self.check(&TokenKind::LeftParen) {
             let open = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "'('".to_string(),
@@ -152,6 +152,14 @@ impl Parser {
                 self.advance(); // consume '->'
                 let ret = self.parse_type()?;
                 let span = open.span.merge(ret.span());
+                let ret = if ret.is_unit() {
+                    Type::Named(Identifier {
+                        name: "void".to_string(),
+                        span: ret.span(),
+                    })
+                } else {
+                    ret
+                };
                 return Ok(Type::Function {
                     params: elements,
                     ret: Box::new(ret),
@@ -159,7 +167,8 @@ impl Parser {
                     span,
                 });
             }
-            if elements.len() < 2 {
+            // `()` is the unit type, the tuple of no elements.
+            if elements.len() == 1 {
                 return Err(ParseError::UnexpectedToken {
                     found: TokenKind::RightParen,
                     expected: "a tuple type `(T1, T2, ...)` or a function type `(T1, ...) -> R`"
@@ -436,8 +445,11 @@ impl Parser {
             .ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "lifetime".to_string(),
             })?;
-        if name != ANONYMOUS_LIFETIME && !self.lifetime_scope.contains(&name) {
-            return Err(ParseError::UndeclaredLifetime { name, span });
+        if name != ANONYMOUS_LIFETIME {
+            if !self.lifetime_scope.contains(&name) {
+                return Err(ParseError::UndeclaredLifetime { name, span });
+            }
+            self.named_lifetimes += 1;
         }
         Ok(true)
     }
@@ -594,6 +606,9 @@ impl Parser {
             let lt_token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "lifetime".to_string(),
             })?;
+            if name != ANONYMOUS_LIFETIME {
+                self.named_lifetimes += 1;
+            }
             Some(Identifier {
                 name,
                 span: lt_token.span,
