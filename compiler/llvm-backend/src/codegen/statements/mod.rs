@@ -126,7 +126,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // A binding the block declares dies with the arena, so a later store into it
             // may keep the bump path. Everything else a store can reach outlives the
             // block.
-            self.note_pool_local(name);
+            self.note_pool_local(alloca);
             // A `PoolAware` binding inside a `pool` is released by the arena's sweep at
             // the block's brace instead of by its own scope, so it takes one path or the
             // other and never both.

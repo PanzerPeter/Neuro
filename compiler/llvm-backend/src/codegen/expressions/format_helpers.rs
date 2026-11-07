@@ -98,7 +98,7 @@ impl<'ctx> CodegenContext<'ctx> {
         index: u32,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         func.get_nth_param(index).ok_or_else(|| {
-            CodegenError::InternalError(format!("format helper is missing parameter {}", index))
+            CodegenError::InternalError(format!("helper is missing parameter {}", index))
         })
     }
 

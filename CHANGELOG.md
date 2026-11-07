@@ -10,6 +10,24 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.31.2] - 2026-11-07
+
+### Fixed
+
+- A store to an outer binding kept the arena when an inner scope of the `pool` had declared the
+  same name, so the value dangled after the block. Pool locals are now tracked by storage.
+- A zero-size allocation with the arena exactly full returned the chunk's limit, which the
+  release wrapper passed to libc `free`, aborting the program.
+- The bump allocator now refuses a request whose `used + size` wraps, and hands it to libc.
+- A format or collection helper first built inside a `pool` body no longer allocates from the
+  arena for every caller in the program.
+
+### Known issues
+
+- BUG-146: only the last iteration's `PoolAware` value is released when a loop inside a `pool`
+  registers one per iteration.
+- BUG-147: `neurc` exhausts memory compiling a tensor with an enormous static shape.
+
 ## [5.31.1] - 2026-11-07
 
 ### Added

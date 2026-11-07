@@ -1,7 +1,8 @@
 // The linear arena behind a `pool { }` block.
 //
 // A pool block allocates by moving a bump pointer and frees by moving it back, so
-// its exit costs one store no matter how many objects the body built. Two module
+// its exit costs one store no matter how many objects the body built, plus one sweep
+// step per `PoolAware` value it registered. Two module
 // globals hold the whole allocator: the chunk's base address, reserved on the first
 // `pool` a run reaches, and the offset of the first free byte in it. Entering a block
 // reads the offset (its *mark*); leaving writes it back, which is the bulk free.
@@ -11,7 +12,10 @@
 // libc when the pointer lies inside the chunk: arena memory is reclaimed by the mark
 // restore, and handing it to `free` would corrupt the heap. The wrapper is what lets
 // the ordinary drop path stay exactly as it is inside a pool. In a program with no
-// `pool` the base global is never written, so the check folds away.
+// `pool` the base global is never written, so the optimizer folds the check away.
+//
+// The globals are per process, which holds only while a program has one thread: the
+// language gives each thread its own arena, so `spawn` has to make them thread-local.
 //
 // What the arena does NOT capture is as important as what it does. An allocation made by
 // a callee belongs to whoever the callee gives it to, which this phase cannot prove, so
@@ -21,7 +25,7 @@
 // is where the block's own bindings are told apart from the ones it inherited.
 
 use inkwell::module::Linkage;
-use inkwell::values::{FunctionValue, GlobalValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, GlobalValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
 use neuro_hir::HirPlace;
 
@@ -69,11 +73,11 @@ const CELL_FIELDS: u64 = 4;
 const POOL_HANDLE_STRUCT: &str = "PoolHandle";
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Record `name` as a binding of the innermost open `pool`, so a later store into it
-    /// keeps the bump path. Inert outside a pool.
-    pub(crate) fn note_pool_local(&mut self, name: &str) {
+    /// Record `storage` as a binding of the innermost open `pool`, so a later store into
+    /// it keeps the bump path. Inert outside a pool.
+    pub(crate) fn note_pool_local(&mut self, storage: PointerValue<'ctx>) {
         if let Some(locals) = self.pool_locals.last_mut() {
-            locals.insert(name.to_string());
+            locals.insert(storage);
         }
     }
 
@@ -104,19 +108,36 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Whether a store into `place` must bypass the arena. True for every place not
     /// rooted in a binding the innermost open `pool` declared itself, which is the
     /// conservative half of the routing rule: an owner the analysis cannot place inside the
-    /// block is treated as outliving it.
+    /// block is treated as outliving it. The root is compared by storage, not by name: a
+    /// block may declare a name in an inner scope that an outer binding also carries, and
+    /// once that scope ends the name means the outer binding again.
     fn route_store_off_arena(&self, place: &HirPlace) -> bool {
         let Some(locals) = self.pool_locals.last() else {
             return false;
         };
-        !Self::place_root(place).is_some_and(|root| locals.contains(root))
+        !Self::place_root(place)
+            .and_then(|root| self.variables.get(root))
+            .is_some_and(|storage| locals.contains(storage))
+    }
+
+    /// The function the builder is emitting into right now.
+    pub(crate) fn emitting_function(&self) -> Option<FunctionValue<'ctx>> {
+        self.builder.get_insert_block()?.get_parent()
+    }
+
+    /// Whether an allocation emitted right now is one the innermost open `pool` body
+    /// writes. A helper built lazily in the middle of a body shares its `pool_depth`, but
+    /// every caller in the program runs that helper, so its allocations are a callee's.
+    fn allocating_in_pool_body(&self) -> bool {
+        self.pool_depth > 0
+            && self.pool_exits.last().and_then(|exit| exit.function) == self.emitting_function()
     }
 
     /// The allocator the code being emitted right now must call for a plain buffer:
     /// the arena inside a `pool` body, libc `malloc` outside one. Same signature
     /// either way, so a call site needs no branch of its own.
     pub(crate) fn alloc_fn(&self) -> CodegenResult<FunctionValue<'ctx>> {
-        if self.pool_depth == 0 {
+        if !self.allocating_in_pool_body() {
             return Ok(self.get_or_declare_malloc());
         }
         self.get_or_build_arena_alloc()
@@ -125,7 +146,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The over-aligned counterpart of [`alloc_fn`](CodegenContext::alloc_fn). Both
     /// take the host libc's argument order, which `codegen/dlpack.rs` builds.
     pub(crate) fn aligned_alloc_fn(&self) -> CodegenResult<FunctionValue<'ctx>> {
-        if self.pool_depth == 0 {
+        if !self.allocating_in_pool_body() {
             return Ok(self.get_or_declare_aligned_alloc());
         }
         self.get_or_build_arena_aligned_alloc()
@@ -274,8 +295,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or(CodegenError::UndefinedFunction(mangled))
     }
 
-    /// A `PoolHandle` holding the innermost open pool's arena mark, which is what
-    /// distinguishes one live arena region from another. Stack-allocated per
+    /// A `PoolHandle` holding the innermost open pool's arena mark. The mark is not a
+    /// unique id, since two regions opened with nothing allocated between them share it,
+    /// and the field is private, so no program can read it. Stack-allocated per
     /// registration: `register_with_pool` takes it by reference and may not keep it.
     fn emit_pool_handle(&self) -> CodegenResult<PointerValue<'ctx>> {
         let mark = *self.pool_marks.last().ok_or_else(|| {
@@ -297,15 +319,20 @@ impl<'ctx> CodegenContext<'ctx> {
             .struct_type(&[ptr_type.into(); CELL_FIELDS as usize], false)
     }
 
-    fn pool_head(&self) -> GlobalValue<'ctx> {
-        if let Some(existing) = self.module.get_global(POOL_HEAD_GLOBAL) {
+    /// The internal global `name`, created holding `initial` on first use.
+    fn internal_global(&self, name: &str, initial: BasicValueEnum<'ctx>) -> GlobalValue<'ctx> {
+        if let Some(existing) = self.module.get_global(name) {
             return existing;
         }
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let global = self.module.add_global(ptr_type, None, POOL_HEAD_GLOBAL);
+        let global = self.module.add_global(initial.get_type(), None, name);
         global.set_linkage(Linkage::Internal);
-        global.set_initializer(&ptr_type.const_null());
+        global.set_initializer(&initial);
         global
+    }
+
+    fn pool_head(&self) -> GlobalValue<'ctx> {
+        let null = self.context.ptr_type(AddressSpace::default()).const_null();
+        self.internal_global(POOL_HEAD_GLOBAL, null.into())
     }
 
     fn get_or_build_pool_register(&self) -> CodegenResult<FunctionValue<'ctx>> {
@@ -341,7 +368,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .ok_or_else(|| CodegenError::InternalError("arena alloc returned void".into()))?
                 .into_pointer_value();
             // An allocator that failed leaves the instance unregistered rather than
-            // storing through null; its own `Drop` is all that is owed then.
+            // storing through null, and so unreleased: out of memory, nothing better is left.
             let missing = self.builder.build_is_null(cell, "pool.cell.missing")?;
             self.builder.build_conditional_branch(missing, done, link)?;
 
@@ -352,24 +379,9 @@ impl<'ctx> CodegenContext<'ctx> {
                     .build_load(ptr_type, head_global.as_pointer_value(), "pool.head")?;
             let fields = [
                 (CELL_NEXT, head),
-                (
-                    CELL_INSTANCE,
-                    function.get_nth_param(0).ok_or_else(|| {
-                        CodegenError::InternalError("register lost its instance".into())
-                    })?,
-                ),
-                (
-                    CELL_RELEASE,
-                    function.get_nth_param(1).ok_or_else(|| {
-                        CodegenError::InternalError("register lost its thunk".into())
-                    })?,
-                ),
-                (
-                    CELL_FLAG,
-                    function.get_nth_param(2).ok_or_else(|| {
-                        CodegenError::InternalError("register lost its flag".into())
-                    })?,
-                ),
+                (CELL_INSTANCE, self.param(function, 0)?),
+                (CELL_RELEASE, self.param(function, 1)?),
+                (CELL_FLAG, self.param(function, 2)?),
             ];
             for (index, value) in fields {
                 let slot =
@@ -409,10 +421,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let done = self.context.append_basic_block(function, "done");
             let cell_type = self.pool_cell_type();
             let head_global = self.pool_head();
-            let stop = function
-                .get_first_param()
-                .ok_or_else(|| CodegenError::InternalError("sweep lost its stop cell".into()))?
-                .into_pointer_value();
+            let stop = self.param(function, 0)?.into_pointer_value();
 
             self.builder.position_at_end(entry);
             self.builder.build_unconditional_branch(walk)?;
@@ -429,18 +438,19 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_conditional_branch(reached_stop, done, body)?;
 
             self.builder.position_at_end(body);
-            let mut loaded = Vec::with_capacity(CELL_FIELDS as usize);
-            for index in [CELL_NEXT, CELL_INSTANCE, CELL_RELEASE, CELL_FLAG] {
+            let load_field = |index: u32| -> CodegenResult<PointerValue<'ctx>> {
                 let slot =
                     self.builder
                         .build_struct_gep(cell_type, cell, index, "pool.cell.field")?;
-                loaded.push(
-                    self.builder
-                        .build_load(ptr_type, slot, "pool.cell.value")?
-                        .into_pointer_value(),
-                );
-            }
-            let (next, instance, thunk, flag) = (loaded[0], loaded[1], loaded[2], loaded[3]);
+                Ok(self
+                    .builder
+                    .build_load(ptr_type, slot, "pool.cell.value")?
+                    .into_pointer_value())
+            };
+            let next = load_field(CELL_NEXT)?;
+            let instance = load_field(CELL_INSTANCE)?;
+            let thunk = load_field(CELL_RELEASE)?;
+            let flag = load_field(CELL_FLAG)?;
             // Unlinked before the call so a `bulk_release` that itself enters a pool
             // cannot walk a cell this sweep has already claimed.
             self.builder
@@ -474,27 +484,17 @@ impl<'ctx> CodegenContext<'ctx> {
     /// The internal `ptr` global holding the chunk's base, null until a reservation stores
     /// one in it.
     fn arena_base_global(&self) -> GlobalValue<'ctx> {
-        if let Some(existing) = self.module.get_global(ARENA_BASE_GLOBAL) {
-            return existing;
-        }
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let global = self.module.add_global(ptr_type, None, ARENA_BASE_GLOBAL);
-        global.set_linkage(Linkage::Internal);
-        global.set_initializer(&ptr_type.const_null());
-        global
+        let null = self.context.ptr_type(AddressSpace::default()).const_null();
+        self.internal_global(ARENA_BASE_GLOBAL, null.into())
     }
 
     /// The internal `i64` global holding the offset of the chunk's first free byte,
     /// starting at zero.
     fn arena_offset_global(&self) -> GlobalValue<'ctx> {
-        if let Some(existing) = self.module.get_global(ARENA_OFFSET_GLOBAL) {
-            return existing;
-        }
-        let i64_type = self.context.i64_type();
-        let global = self.module.add_global(i64_type, None, ARENA_OFFSET_GLOBAL);
-        global.set_linkage(Linkage::Internal);
-        global.set_initializer(&i64_type.const_zero());
-        global
+        self.internal_global(
+            ARENA_OFFSET_GLOBAL,
+            self.context.i64_type().const_zero().into(),
+        )
     }
 
     /// Emit a helper's body without disturbing the function the caller is in the
@@ -577,9 +577,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.detached(|| {
             let entry = self.context.append_basic_block(function, "entry");
             self.builder.position_at_end(entry);
-            let mark = function
-                .get_first_param()
-                .ok_or_else(|| CodegenError::InternalError("arena release lost its mark".into()))?;
+            let mark = self.param(function, 0)?;
             let offset = self.arena_offset_global();
             self.builder.build_store(offset.as_pointer_value(), mark)?;
             self.builder.build_return(None)?;
@@ -600,10 +598,7 @@ impl<'ctx> CodegenContext<'ctx> {
             Some(Linkage::Internal),
         );
         self.detached(|| {
-            let size = function
-                .get_first_param()
-                .ok_or_else(|| CodegenError::InternalError("arena alloc lost its size".into()))?
-                .into_int_value();
+            let size = self.param(function, 0)?.into_int_value();
             let align = i64_type.const_int(ARENA_MIN_ALIGN, false);
             let fallback = self.get_or_declare_malloc();
             self.build_bump_body(function, size, align, fallback, &[size.into()])
@@ -623,18 +618,8 @@ impl<'ctx> CodegenContext<'ctx> {
             Some(Linkage::Internal),
         );
         self.detached(|| {
-            let first = function
-                .get_nth_param(0)
-                .ok_or_else(|| {
-                    CodegenError::InternalError("aligned alloc lost an argument".into())
-                })?
-                .into_int_value();
-            let second = function
-                .get_nth_param(1)
-                .ok_or_else(|| {
-                    CodegenError::InternalError("aligned alloc lost an argument".into())
-                })?
-                .into_int_value();
+            let first = self.param(function, 0)?.into_int_value();
+            let second = self.param(function, 1)?.into_int_value();
             // The parameters arrive in the host libc's order, because the call site
             // builds one argument list for both paths. See `ALIGNED_ALLOC_FN`.
             let (align, size) = if cfg!(target_os = "windows") {
@@ -711,12 +696,19 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_int_sub(aligned, base_int, "arena.used")?;
         let end = self.builder.build_int_add(used, size, "arena.end")?;
-        let fits = self.builder.build_int_compare(
-            IntPredicate::ULE,
+        // Strictly below the capacity: a zero-size request at the very end would otherwise
+        // get the limit itself, which `build_arena_owns` disowns and `free` then rejects.
+        let in_chunk = self.builder.build_int_compare(
+            IntPredicate::ULT,
             end,
             i64_type.const_int(ARENA_CAPACITY, false),
-            "arena.fits",
+            "arena.in.chunk",
         )?;
+        // An `end` below `used` is a `size` that wrapped; libc refuses that request.
+        let unwrapped =
+            self.builder
+                .build_int_compare(IntPredicate::UGE, end, used, "arena.unwrapped")?;
+        let fits = self.builder.build_and(in_chunk, unwrapped, "arena.fits")?;
         self.builder.build_conditional_branch(fits, take, heap)?;
 
         self.builder.position_at_end(take);
@@ -760,10 +752,7 @@ impl<'ctx> CodegenContext<'ctx> {
             let done = self.context.append_basic_block(function, "done");
 
             self.builder.position_at_end(entry);
-            let target = function
-                .get_first_param()
-                .ok_or_else(|| CodegenError::InternalError("release lost its pointer".into()))?
-                .into_pointer_value();
+            let target = self.param(function, 0)?.into_pointer_value();
             let owned = self.build_arena_owns(target)?;
             self.builder.build_conditional_branch(owned, done, heap)?;
 

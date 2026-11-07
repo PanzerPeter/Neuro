@@ -1546,7 +1546,10 @@ leaving anyway.
 
 **Which allocations the arena captures is decided at compile time, by `pool_depth`.** Every
 allocation site asks `alloc_fn` / `aligned_alloc_fn` for its allocator, and those hand back the
-arena's bump functions only while codegen is emitting the inside of a pool body. An allocation a
+arena's bump functions only while codegen is emitting the inside of a pool body, which means
+`pool_depth` above zero and the builder inside the function that opened the region. The second
+half matters to a helper built lazily in the middle of a body (a format helper, a collection
+helper): every caller shares it, so its allocations are a callee's. An allocation a
 CALLEE makes is emitted while that callee's own body is being generated, with `pool_depth` back
 at zero, so it stays on the heap: the arena holds what the block writes, which is what makes the
 rule sound without an ownership analysis. It costs the arena's speed on such a path, never its
@@ -1560,10 +1563,12 @@ whole statement rather than just the right-hand side: an address computation tha
 reachable from the same place, and a `PoolAware` value stored this way must take its own `Drop`
 rather than the block's sweep, which `pool_registered_type` decides from the same counter.
 
-Which places outlive is read off `pool_locals`, one `HashSet<String>` per open `pool` region,
+Which places outlive is read off `pool_locals`, one set of binding storage per open `pool` region,
 pushed beside `pool_marks` in `codegen_pool_expr` and filled by `note_pool_local` at each
 `codegen_var_decl`. A store is kept on the bump path only when `Self::place_root` (in `drops/moves.rs`,
-over `moved_place`) names a binding in the INNERMOST frame. Everything else routes: a `*p = v`
+over `moved_place`) names a binding whose current storage is in the INNERMOST frame. Storage, not
+the name: an inner scope of the block may reuse the name of a binding the block inherited, and once
+that scope ends the name means the inherited binding again. Everything else routes: a `*p = v`
 write, whose referent belongs to whoever handed the reference over; a binding of an enclosing
 pool, whose own arena outlives this block's release; and any binding the set happens to miss,
 which costs the arena's speed on that store and never its safety. `semantic-analysis` rejects
@@ -1576,7 +1581,7 @@ inside the chunk. Arena memory is reclaimed by the mark restore, and handing it 
 corrupt the heap. The wrapper is unconditional rather than pool-dependent because a buffer
 allocated inside a pool can be released anywhere, including in a function emitted earlier; only
 the pointer says which allocator owns it. In a program with no `pool` nothing ever stores a
-non-null base, so the check folds away.
+non-null base, so the optimizer folds the check away (not at `-O0`).
 
 The two libc pairs stay distinct through the wrappers, since `free` cannot release an
 over-aligned block on Windows. `realloc` is NOT wrapped and needs no arena path: the only
@@ -1596,7 +1601,7 @@ Inside a pool body, `codegen_var_decl` sends a binding of a `PoolAware` struct t
 `register_pool_aware` INSTEAD of `register_local_drop`, so the type's `Drop` does not also run:
 the sweep replaces it. That emits the type's own `{T}__register_with_pool(self, handle)`
 (a `&self` receiver, so by value) and then `__neuro_pool_register`. `PoolHandle` is a stack slot
-holding the innermost `pool_marks` entry, the active arena region's identity. An initializer that
+holding the innermost `pool_marks` entry, which no program can read. An initializer that
 merely MOVES an already-registered binding takes `transfer_pool_registration` instead, which pushes
 the list entry without re-running the constructor hook.
 

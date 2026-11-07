@@ -5,6 +5,71 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-147: a tensor with an enormous static shape exhausts the compiler's memory
+
+- **Status**: open, confirmed. Root cause not yet located
+- **Area**: compiler, somewhere after type checking
+- **Severity**: major. One line of source can take down the machine compiling it
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val t = Tensor::<f32, [4611686018427387888]>::zeros()
+    0
+}
+```
+
+Expected: a compile error naming the shape. Observed: `neurc` allocates without bound. Under
+`ulimit -v 3000000` it aborts in under five seconds on a single 4 GiB request; with no limit it
+filled RAM and swap until `systemd-oomd` killed the editor running it.
+
+**Workaround**: none in the compiler. Run untrusted sources under a memory limit.
+
+**Fix sketch**: reject a static shape whose byte size exceeds the address space during type
+checking, with checked arithmetic in `tensor_buffer_bytes`, whose product is unchecked today.
+Regression test: the repro under a memory limit, expecting a diagnostic.
+
+## BUG-146: a loop inside a `pool` releases only its last `PoolAware` value
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend` (`codegen/arena.rs`, `codegen_var_decl`)
+- **Severity**: major. External resources leak silently; the program still runs
+
+**Minimal repro**
+
+```neuro
+struct Handle { id: i32 }
+impl PoolAware for Handle {
+    func register_with_pool(&self, arena: &PoolHandle) { println("register {self.id}") }
+    func bulk_release(&mut self) { println("release {self.id}") }
+}
+func main() -> i32 {
+    pool {
+        mut i = 0
+        while i < 3 {
+            val h = Handle { id: i }
+            i = i + 1
+        }
+    }
+    0
+}
+```
+
+Expected: `release 2`, `release 1`, `release 0`. Observed: three registrations and only
+`release 2`.
+
+**Root cause**: confirmed in the code. A registration cell points at the binding's stack slot
+and its drop flag, and a loop reuses both on every iteration. The sweep sees the last value
+through every cell, releases it once, clears the shared flag and skips the rest.
+
+**Workaround**: open the `pool` inside the loop, so each iteration sweeps its own value.
+
+**Fix sketch**: give each registration its own storage and flag, by placing a registered
+binding in the arena or by copying the value there when its scope ends. Either must keep a
+mutation made after registration visible to `bulk_release`. Regression test: the repro, plus
+a `break` and a moved value.
+
 ## BUG-138: a private function is reachable by its bare name after `import`
 
 - **Status**: open, confirmed

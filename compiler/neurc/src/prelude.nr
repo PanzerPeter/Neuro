@@ -277,7 +277,7 @@ export enum Device {
 }
 
 // The arena a `pool` block allocates from, as a type a pool-aware constructor can
-// name. It carries the arena's identity and nothing else: a program never builds one,
+// name. It carries the arena's mark and nothing else: a program never builds one,
 // and the only thing it is useful for is being handed to `register_with_pool`.
 export struct PoolHandle {
     id: u64

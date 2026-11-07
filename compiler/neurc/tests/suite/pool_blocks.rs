@@ -1301,6 +1301,66 @@ func main() -> i32 {
     assert!(err.contains("outlives the pool"), "got: {err}");
 }
 
+/// A name the block declared only in an inner scope means the outer binding again once
+/// that scope ends, so a store to it still outlives the block and must leave the arena.
+#[test]
+fn a_store_to_an_outer_binding_past_a_shadow_in_the_pool_survives() {
+    let test = CompileTest::new();
+    let source = r#"
+func text(s: string) -> string { s }
+func main() -> i32 {
+    val tail = text("b")
+    val fill = text("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+    mut out = "start"
+    pool {
+        if out.len() > 0 {
+            val out = 7
+            println("{out}")
+        }
+        out = "a" + tail
+    }
+    pool {
+        val clobber = fill + fill
+        println(clobber)
+    }
+    println(out)
+    0
+}
+"#;
+    let stdout = stdout_of(&test, "pool_shadow_store.nr", source);
+    assert_eq!(stdout.lines().last(), Some("ab"), "{stdout}");
+}
+
+/// A zero-size request with the chunk exactly full must not be handed the chunk's limit:
+/// the release wrapper does not own that address, so it reached libc `free` and aborted.
+#[test]
+fn a_zero_size_allocation_at_the_end_of_the_chunk_is_released_cleanly() {
+    let test = CompileTest::new();
+    let source = r#"
+func grow(n: i32) -> string {
+    mut s = "x"
+    mut i = 0
+    while i < n {
+        s = s + s
+        i = i + 1
+    }
+    s
+}
+func empty() -> string { "" }
+func main() -> i32 {
+    val big = grow(26)
+    val none = empty()
+    pool {
+        val full = big + none
+        val nothing = none + none
+        println("{full.len()} {nothing.len()}")
+    }
+    0
+}
+"#;
+    assert_eq!(test.compile_and_run("pool_zero_size_end.nr", source), Ok(0));
+}
+
 /// LIM-212: a `&mut` to one of the block's own bindings writes storage that dies with
 /// the block, so a store and a call through it take the arena like the binding itself.
 /// It was refused as if the referent outlived the block.

@@ -463,20 +463,19 @@ pub(crate) struct CodegenContext<'ctx> {
     pub(crate) pool_depth: usize,
 
     /// The arena mark of each open `pool` region, innermost last. A registration hands
-    /// the innermost mark to `register_with_pool` as the active arena's identity, which
-    /// is the only thing `PoolHandle` carries.
+    /// the innermost mark to `register_with_pool`, the only thing `PoolHandle` carries.
     pub(crate) pool_marks: Vec<IntValue<'ctx>>,
 
     /// What leaving each open `pool` region runs, innermost last: a `return`, `break` or
     /// `continue` that jumps past a region's closing brace runs it on the way out.
     pub(crate) pool_exits: Vec<PoolExit<'ctx>>,
 
-    /// The bindings each open `pool` region declares, innermost last. A store whose
-    /// place is not rooted in one of the innermost region's own bindings lands somewhere
+    /// The storage of the bindings each open `pool` region declares, innermost last. A
+    /// store whose place is not rooted in one of the innermost region's own bindings lands somewhere
     /// that outlives the block, so the language routes its allocation off the arena. A binding
     /// this misses is simply treated as outliving, which costs the arena's speed on that
     /// store and never its safety.
-    pub(crate) pool_locals: Vec<HashSet<String>>,
+    pub(crate) pool_locals: Vec<HashSet<PointerValue<'ctx>>>,
 
     /// `Device` when any linked body runs on a device, which has each `pool` block
     /// release the device arena at its exit too.
@@ -1037,6 +1036,8 @@ mod tests {
 pub(crate) struct PoolExit<'ctx> {
     /// The index in `drop_scopes` of the region's body scope.
     pub(crate) scope: usize,
+    /// The function the region's body is emitted into.
+    pub(crate) function: Option<FunctionValue<'ctx>>,
     pub(crate) mark: IntValue<'ctx>,
     pub(crate) device_mark: Option<IntValue<'ctx>>,
     pub(crate) registered: Option<PointerValue<'ctx>>,

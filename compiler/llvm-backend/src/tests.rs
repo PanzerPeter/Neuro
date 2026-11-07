@@ -559,6 +559,48 @@ fn a_pool_block_marks_and_restores_the_arena() {
     assert!(mark < alloc && alloc < release);
 }
 
+/// A format helper is shared by the whole program, so being built in the middle of a
+/// `pool` body must not bake the arena into it: its allocations are a callee's.
+#[test]
+fn a_helper_first_reached_inside_a_pool_stays_on_the_heap() {
+    let source = r#"
+        func main() -> i32 {
+            val v = 3.25
+            pool {
+                println("{v:.2}")
+            }
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let helper = function_body(&ir, "__neuro_fmt_flt");
+    assert!(!helper.contains("@__neuro_arena_alloc("), "{helper}");
+    assert!(helper.contains("@malloc("), "{helper}");
+    let body = function_body(&ir, "main");
+    assert!(body.contains("@__neuro_arena_alloc("), "{body}");
+}
+
+/// The bump path takes a request only strictly below the capacity, so no pointer it
+/// returns is the chunk's limit, and only when `used + size` did not wrap.
+#[test]
+fn the_bump_path_refuses_the_limit_and_a_wrapped_size() {
+    let source = r#"
+        func main() -> i32 {
+            pool {
+                val label = "batch " + "one"
+            }
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "__neuro_arena_alloc");
+    assert!(body.contains("icmp ult i64 %arena.end, 67108864"), "{body}");
+    assert!(
+        body.contains("icmp uge i64 %arena.end, %arena.used"),
+        "{body}"
+    );
+}
+
 /// The same allocation outside a pool stays on libc: the bump path is entered by
 /// where the code is written, never by what it allocates.
 #[test]

@@ -183,6 +183,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let exit = crate::codegen::context::PoolExit {
             scope: self.drop_scopes.len(),
+            function: self.emitting_function(),
             mark,
             device_mark,
             registered,
