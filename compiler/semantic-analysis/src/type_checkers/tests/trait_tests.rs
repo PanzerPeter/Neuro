@@ -154,20 +154,23 @@ fn operator_traits_dispatch_on_user_type() {
 }
 
 #[test]
-fn operator_trait_impl_on_non_copy_is_rejected() {
+fn operator_trait_impl_on_non_copy_moves_its_operands() {
     let errors = semantic_errors(
         r#"
 struct NC { v: i32 }
 impl Add for NC { type Output = NC
     func add(self, rhs: NC) -> NC { NC { v: self.v + rhs.v } } }
-func main() -> i32 { 0 }
+func main() -> i32 {
+    val a = NC { v: 1 }
+    val b = NC { v: 2 }
+    val c = a + b
+    a.v + c.v
+}
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::OperatorTraitRequiresCopy { .. })),
-        "an operator impl on a non-Copy struct must be rejected; got {errors:?}"
+        matches!(errors.as_slice(), [TypeError::UseOfMovedValue { name, .. }] if name == "a"),
+        "a consumed operand must be the only complaint; got {errors:?}"
     );
 }
 

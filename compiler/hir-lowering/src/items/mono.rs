@@ -168,6 +168,12 @@ impl Lowerer {
                     .or_default()
                     .insert(method.name.name.clone(), inst_key);
             }
+            let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+            let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
+            let registered = self.register_operator_impl(imp, mangled);
+            self.type_subst = saved_ty;
+            self.const_subst = saved_c;
+            registered?;
             // The instance implements whatever the template's impl did. Mirrors the
             // checker; without it a `for` head over a generic iterator adapter would
             // find no protocol on the instance the head actually has.
@@ -329,7 +335,8 @@ impl Lowerer {
     /// reference implements none of them.
     fn implements_derivable(&self, ty: &HirType, trait_name: &str) -> bool {
         use super::register::{
-            CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT,
+            CLONE_TRAIT, COMPARABLE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT,
+            PARTIAL_EQ_TRAIT,
         };
         let integer = matches!(
             ty,
@@ -362,6 +369,7 @@ impl Lowerer {
                 HirType::Newtype { inner, .. } => self.implements_derivable(inner, trait_name),
                 _ => integer || float || text || derives(&self.partial_eq_structs),
             },
+            COMPARABLE_TRAIT => integer || matches!(ty, HirType::Char),
             _ => false,
         }
     }

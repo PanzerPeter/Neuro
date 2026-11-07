@@ -249,7 +249,8 @@ func main() -> i32 {
 - The receiver is destroyed when the method returns, so a consuming method may not return a
   reference into it.
 - On a **`Copy`** struct a `self` receiver duplicates rather than moves, so the caller keeps
-  its value. This is what lets an operator-trait method `func add(self, ...)` work.
+  its value. That is why `a + b` on a `Copy` struct leaves `a` usable, where a move type
+  [hands it over](operators.md#operators-on-non-copy-types).
 - A `Drop` type's destructor runs at the method's exit, once ([Destructors](ownership.md#destructors-impl-drop)).
 
 See [`examples/ownership/consuming_self.nr`](../../examples/ownership/consuming_self.nr).

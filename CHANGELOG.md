@@ -10,6 +10,30 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.31.0] - 2026-11-07
+
+### Added
+
+- Operator traits work on every type. A non-`Copy` struct, enum, newtype or generic instance may `impl Add` and the rest, and `a + b` moves both operands as `a.add(b)` would. `impl Mul<&M> for M` takes `a * &b`, which leaves the right operand with its owner.
+- `impl PartialEq` needs only `eq`, and `impl Comparable` only `lt`: `ne`, `le`, `gt` and `ge` are inherited, and an impl may still write its own. A derived `PartialEq` and the built-in types answer `.ne()`, and the built-in orders answer `.lt()`, `.le()`, `.gt()` and `.ge()`.
+- `x OP= y` updates in place through a user `*Assign` impl, on any place: `AddAssign`, `SubAssign`, `MulAssign`, `DivAssign`, `RemAssign`, `BitAndAssign`, `BitOrAssign`, `BitXorAssign` and `ShlAssign`. The impl wins over the by-value trait, and the value is evaluated before the place is borrowed.
+
+### Changed
+
+- The right operand of a by-value operator follows the method's signature. `a * b` is refused when the impl takes `rhs: &M`, and a literal takes the parameter's type, so `v * 2.0` reaches an `impl Mul<f32>`.
+- An operator impl must have its trait's shape and write each required method. A `func add(&self, ...)`, a by-value `rhs` on `eq` and an `impl PartialEq` without `eq` were accepted before and are now rejected.
+- A `T: Comparable` bound is checked at the call, so `smaller(1.5, 2.5)` is rejected: an integer or `char` meets it, and a float does not.
+
+### Fixed
+
+- `<`, `<=`, `>` and `>=` are accepted on a `T: Comparable` parameter, along with its `.lt()` family (BUG-141).
+- `a + r` with `r: &V` on an `impl Add<V>` stopped the compiler with an LLVM verification error. It is now a type mismatch, as `a.add(r)` is.
+- `a * &b` on an `impl Mul<&V>` passed a reference to the reference, so the method read the wrong memory. `a == &b` took the same path.
+
+### Documentation
+
+- `docs/BUGS.md` gains BUG-144 (a discarded call result that passes a parameter through is never released).
+
 ## [5.30.2] - 2026-11-07
 
 ### Changed

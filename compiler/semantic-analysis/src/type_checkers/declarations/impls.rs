@@ -6,12 +6,14 @@
 
 use super::{CLONE_TRAIT, COPY_TRAIT, DERIVABLE_TRAITS, DERIVE_ATTRIBUTE, DROP_METHOD, DROP_TRAIT};
 use crate::errors::TypeError;
-use crate::type_checkers::operator_traits::{is_operator_trait, operator_trait_spec};
+use crate::type_checkers::operator_traits::{
+    OperatorForm, is_operator_trait, is_provided_method, operator_trait_spec,
+};
 use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::val_else::stmts_diverge;
 use crate::type_checkers::{MethodGenerics, TypeChecker};
 use crate::types::{FunctionMode, Type};
-use ast_types::{ImplDef, Item, SelfParam, StructDef};
+use ast_types::{ImplDef, Item, MethodDef, SelfParam, StructDef};
 use std::collections::HashMap;
 
 impl TypeChecker {
@@ -144,7 +146,7 @@ impl TypeChecker {
                 self.trait_impls
                     .insert((DROP_TRAIT.to_string(), struct_name.clone()));
             } else if is_operator_trait(&t.name) {
-                self.register_operator_impl(def, &struct_name, &t.name.clone(), struct_is_copy);
+                self.register_operator_impl(def, &struct_name, &t.name.clone());
             } else {
                 self.check_trait_conformance(def, &def.type_name.name.clone(), &t.name.clone());
             }
@@ -245,36 +247,20 @@ impl TypeChecker {
 
     /// Validate an operator-trait impl and record its operator dispatch.
     ///
-    /// Operator traits (`Add`, `Sub`, …, `PartialEq`, `Comparable`) are compiler-known
-    /// lang-items: the user writes only the `impl`, never a `trait` declaration. Each
-    /// impl method whose name matches one the trait provides wires its operator to that
-    /// method's return type. The scalar path requires the receiver to be `Copy`; an
-    /// `Output` associated type, when present, must equal the method's return type; and a
-    /// trait with a supertrait (`Comparable: PartialEq`) requires that impl to exist too.
+    /// Operator traits (`Add`, `Sub`, …, `PartialEq`, `Comparable`, the `*Assign` family)
+    /// are compiler-known lang-items: the user writes only the `impl`, never a `trait`
+    /// declaration, so what a declaration would state is checked here. Each method must
+    /// have the shape of its trait's form and each required one must be written; an
+    /// `Output` associated type, when present, must equal the method's return type.
     pub(super) fn register_operator_impl(
         &mut self,
         def: &ImplDef,
         struct_name: &str,
         trait_name: &str,
-        struct_is_copy: bool,
     ) {
         let Some(spec) = operator_trait_spec(trait_name) else {
             return;
         };
-
-        // The scalar operator path is defined for `Copy` receivers only.
-        if !struct_is_copy {
-            self.record_error(TypeError::OperatorTraitRequiresCopy {
-                trait_name: trait_name.to_string(),
-                type_name: struct_name.to_string(),
-                span: def.type_name.span,
-            });
-            // The impl is written, only refused: recording it keeps a rule that asks for
-            // it, a derive's field rule among them, from reporting it missing as well.
-            self.trait_impls
-                .insert((trait_name.to_string(), struct_name.to_string()));
-            return;
-        }
 
         // The `Output` binding, if the impl declares one, must match the method return.
         let declared_output = def
@@ -284,9 +270,11 @@ impl TypeChecker {
             .and_then(|(_, ty)| self.resolve_type(ty));
 
         for method in &def.methods {
-            let bin = spec.binary.iter().find(|(m, _)| *m == method.name.name);
-            let un = spec.unary.iter().find(|(m, _)| *m == method.name.name);
-            if bin.is_none() && un.is_none() {
+            let provides = |name: &str| {
+                spec.binary.iter().any(|(m, _)| *m == name)
+                    || spec.unary.iter().any(|(m, _)| *m == name)
+            };
+            if !provides(&method.name.name) {
                 self.record_error(TypeError::NotATraitMethod {
                     trait_name: trait_name.to_string(),
                     method: method.name.name.clone(),
@@ -300,44 +288,70 @@ impl TypeChecker {
                 .as_ref()
                 .and_then(|t| self.resolve_type(t))
                 .unwrap_or(Type::Void);
+            let unary = spec.unary.iter().any(|(m, _)| *m == method.name.name);
+            if let Some(detail) = operator_signature_mismatch(method, spec.form, unary, &ret) {
+                self.record_error(TypeError::TraitMethodSignatureMismatch {
+                    trait_name: trait_name.to_string(),
+                    type_name: struct_name.to_string(),
+                    method: method.name.name.clone(),
+                    detail,
+                    span: method.name.span,
+                });
+                continue;
+            }
 
-            let result = if spec.has_output {
-                if let Some(out) = &declared_output
-                    && !out.is_compatible_with(&ret)
-                {
-                    self.record_error(TypeError::AssociatedTypeMismatch {
-                        trait_name: trait_name.to_string(),
-                        expected: out.clone(),
-                        found: ret.clone(),
-                        span: method.name.span,
-                    });
-                }
-                ret
-            } else {
-                Type::Bool
-            };
+            if spec.form == OperatorForm::Value
+                && let Some(out) = &declared_output
+                && !out.is_compatible_with(&ret)
+            {
+                self.record_error(TypeError::AssociatedTypeMismatch {
+                    trait_name: trait_name.to_string(),
+                    expected: out.clone(),
+                    found: ret.clone(),
+                    span: method.name.span,
+                });
+            }
+            self.record_operator_method(trait_name, struct_name, &method.name.name);
+        }
 
-            if let Some((_, op)) = bin {
-                // A comparison method takes `rhs: &Rhs`; the operand is borrowed at the
-                // call, so record the referent as the operand's expected value type.
-                let rhs = method
-                    .params
-                    .first()
-                    .and_then(|p| self.resolve_type(&p.ty))
-                    .map(|t| t.referent().clone())
-                    .unwrap_or(Type::Unknown);
-                self.operator_binary_impls.insert(
-                    (struct_name.to_string(), *op),
-                    crate::type_checkers::OperatorDispatch { rhs, result },
-                );
-            } else if let Some((_, op)) = un {
-                self.operator_unary_impls
-                    .insert((struct_name.to_string(), *op), result);
+        let required = spec.binary.iter().map(|(m, _)| *m);
+        for name in required.chain(spec.unary.iter().map(|(m, _)| *m)) {
+            if !is_provided_method(name) && !def.methods.iter().any(|m| m.name.name == name) {
+                self.record_error(TypeError::MissingTraitMethod {
+                    trait_name: trait_name.to_string(),
+                    type_name: struct_name.to_string(),
+                    method: name.to_string(),
+                    span: def.type_name.span,
+                });
             }
         }
 
         self.trait_impls
             .insert((trait_name.to_string(), struct_name.to_string()));
+    }
+
+    /// Record that `method` of an impl of `trait_name` backs an operator on `type_name`.
+    /// Anything but one of the trait's operator methods is left for the impl's own check.
+    pub(crate) fn record_operator_method(
+        &mut self,
+        trait_name: &str,
+        type_name: &str,
+        method: &str,
+    ) {
+        let Some(spec) = operator_trait_spec(trait_name) else {
+            return;
+        };
+        let name = method.to_string();
+        if let Some((_, op)) = spec.binary.iter().find(|(m, _)| *m == method) {
+            let table = match spec.form {
+                OperatorForm::InPlace => &mut self.operator_assign_impls,
+                OperatorForm::Value | OperatorForm::Compare => &mut self.operator_binary_impls,
+            };
+            table.insert((type_name.to_string(), *op), name);
+        } else if let Some((_, op)) = spec.unary.iter().find(|(m, _)| *m == method) {
+            self.operator_unary_impls
+                .insert((type_name.to_string(), *op), name);
+        }
     }
 
     /// Verify each trait impl also has its required supertraits, and that a supertrait's
@@ -684,4 +698,43 @@ fn derived_traits(def: &StructDef) -> Vec<&str> {
         derived.push(CLONE_TRAIT);
     }
     derived
+}
+
+/// How an operator-trait method departs from the form its trait fixes, which no
+/// declaration states for conformance to compare against.
+fn operator_signature_mismatch(
+    method: &MethodDef,
+    form: OperatorForm,
+    unary: bool,
+    ret: &Type,
+) -> Option<String> {
+    let receiver = match form {
+        OperatorForm::Value => SelfParam::Owned,
+        OperatorForm::Compare => SelfParam::Ref,
+        OperatorForm::InPlace => SelfParam::RefMut,
+    };
+    if method.self_param.as_ref() != Some(&receiver) {
+        return Some("receiver (`self`) form differs from the trait".to_string());
+    }
+    let expected = usize::from(!unary);
+    if method.params.len() != expected {
+        return Some(format!(
+            "expected {expected} parameter(s), found {}",
+            method.params.len()
+        ));
+    }
+    match form {
+        OperatorForm::Compare if !matches!(ret, Type::Bool) => {
+            Some(format!("a comparison returns bool, found {ret}"))
+        }
+        OperatorForm::Compare
+            if !matches!(method.params[0].ty, ast_types::Type::Reference { .. }) =>
+        {
+            Some("a comparison borrows its right operand: `rhs: &Rhs`".to_string())
+        }
+        OperatorForm::InPlace if !matches!(ret, Type::Void) => {
+            Some(format!("an in-place update returns nothing, found {ret}"))
+        }
+        _ => None,
+    }
 }

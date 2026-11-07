@@ -786,15 +786,6 @@ pub enum TypeError {
     },
 
     #[error(
-        "operator trait '{trait_name}' can only be implemented for a `Copy` type; '{type_name}' is not `Copy`"
-    )]
-    OperatorTraitRequiresCopy {
-        trait_name: String,
-        type_name: String,
-        span: Span,
-    },
-
-    #[error(
         "in `impl {trait_name}`, `type Output = {expected}` does not match method return type {found}"
     )]
     AssociatedTypeMismatch {
@@ -1685,7 +1676,6 @@ impl TypeError {
             | Self::TraitBoundNotSatisfied { span, .. }
             | Self::InvalidBinaryOperator { span, .. }
             | Self::MissingPartialEqImpl { span, .. }
-            | Self::OperatorTraitRequiresCopy { span, .. }
             | Self::AssociatedTypeMismatch { span, .. }
             | Self::UnboundAssociatedType { span, .. }
             | Self::SelfOutsideImpl { span }

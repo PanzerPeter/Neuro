@@ -227,6 +227,9 @@ struct Lowerer {
     /// Operator-trait dispatch for unary operators: `(struct name, operator)` →
     /// `(method name, result type)`.
     operator_unary_impls: HashMap<(String, ast_types::UnaryOp), (String, HirType)>,
+    /// Operator-trait dispatch for `OP=`, the `*Assign` traits, keyed by the operator
+    /// updated with: `(type name, operator)` → the in-place method.
+    operator_assign_impls: HashMap<(String, ast_types::BinaryOp), OpDispatch>,
     /// Module- and function-scope constant names → resolved type.
     constants: HashMap<String, HirType>,
     /// The same constants' value expressions, for a `.reshape` extent that names one
@@ -345,8 +348,8 @@ struct TraitMethodInfo {
 struct OpDispatch {
     /// The backing method name (`add`, `eq`, `lt`, …).
     method: String,
-    /// The method's declared right-hand parameter type. A `Reference` means the operand
-    /// is borrowed at the call (the comparison traits take `rhs: &Rhs`).
+    /// The method's declared right-hand parameter type. A `Reference` on a bare operand
+    /// means the call borrows it (the comparison traits take `rhs: &Rhs`).
     rhs_param: HirType,
     /// The operator's result type: the impl's `Output`, or `bool` for comparisons.
     result: HirType,
@@ -460,6 +463,7 @@ impl Lowerer {
             supertraits: HashMap::new(),
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
+            operator_assign_impls: HashMap::new(),
             constants: HashMap::new(),
             constant_values: HashMap::new(),
             scopes: Vec::new(),

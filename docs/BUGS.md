@@ -5,6 +5,37 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-144: a discarded call result that passes a parameter through is never released
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend` (drops of expression statements)
+- **Severity**: minor. A leak, one value per discarded call; nothing is read out of bounds
+
+**Minimal repro**
+
+```neuro
+struct M { v: Vec<i32> }
+
+func make() -> M {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    M { v: v }
+}
+
+func same(m: M) -> M { m }
+
+func main() -> i32 {
+    same(make())
+    0
+}
+```
+
+Expected: the `Vec`'s buffer is released at the end of the statement.
+Observed: LeakSanitizer reports it. `-make()` leaks the same way with `func neg(self) -> M { self }`,
+and a call that builds a new value (`make() + make()`) does not leak.
+
+**Root cause**: not confirmed. Found while testing operators on non-`Copy` types.
+
 ## BUG-143: the gradient of a device parameter can land on the host
 
 - **Status**: open, confirmed
@@ -84,26 +115,6 @@ result has no binding that does, so nothing releases it.
 enclosing scope, where the binding lives. Check the `else` branch too, whose scrutinee is equally
 unowned. Regression tests: the repro with a tensor and a `Vec`, a miss that runs the `else` branch,
 and a named scrutinee (must not double free).
-
-## BUG-141: a comparison operator is refused on a `T: Comparable` parameter
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (binary operators on a type parameter)
-- **Severity**: minor. A correct program is refused; nothing miscompiles
-
-**Minimal repro**
-
-```neuro
-func smaller<T: Comparable>(a: T, b: T) -> bool { a < b }
-
-func main() -> i32 { 0 }
-```
-
-Expected: the program compiles, as the bounded comparison in the language specification does.
-Observed: `cannot apply binary operator < to types T and T`. `==` on a `T: PartialEq` is accepted.
-
-**Root cause**: not confirmed. Found while testing supertraits. It predates them: the same program
-is refused with `Comparable` written directly.
 
 ## BUG-140: `Device`'s variants are bare names in every module
 

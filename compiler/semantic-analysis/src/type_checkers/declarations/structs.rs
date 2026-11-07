@@ -265,15 +265,15 @@ impl TypeChecker {
     /// derive calls on a field of that type. A `PartialEq` impl counts only when it
     /// compares the type with itself, the call the derived `==` makes.
     fn implements_by_hand(&self, ty: &Type, trait_name: &str) -> bool {
-        let (Type::Struct(name) | Type::Enum(name)) = ty else {
+        if !matches!(ty, Type::Struct(_) | Type::Enum(_)) {
             return false;
-        };
+        }
         self.type_implements_trait(ty, trait_name)
             && (trait_name != PARTIAL_EQ_TRAIT
                 || self
-                    .operator_binary_impls
-                    .get(&(name.clone(), ast_types::BinaryOp::Equal))
-                    .is_none_or(|dispatch| dispatch.rhs == *ty))
+                    .binary_operator_method(ty, ast_types::BinaryOp::Equal)
+                    .and_then(|method| method.rhs)
+                    .is_none_or(|rhs| rhs.referent() == ty))
     }
 
     /// Validate that a struct deriving `Copy` has only `Copy` fields.
@@ -612,6 +612,9 @@ impl TypeChecker {
                     .entry(mangled.to_string())
                     .or_default()
                     .insert(method.name.name.clone(), inst_key);
+                if let Some(trait_name) = &imp.trait_name {
+                    self.record_operator_method(&trait_name.name, mangled, &method.name.name);
+                }
             }
 
             // The instance implements whatever the template's impl did, with the

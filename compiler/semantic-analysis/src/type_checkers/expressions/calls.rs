@@ -11,7 +11,8 @@ use crate::type_checkers::closures::closure_context;
 use crate::type_checkers::declarations::traits::{
     collect_self_assoc, declares_generics, signature_types,
 };
-use crate::type_checkers::derivable::{EQ_METHOD, PARTIAL_EQ_TRAIT};
+use crate::type_checkers::derivable::{COMPARABLE_TRAIT, PARTIAL_EQ_TRAIT};
+use crate::type_checkers::operator_traits::comparison_method;
 use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::statements::{
     borrow_target_of, function_value_position, temporary_borrow_position,
@@ -483,9 +484,12 @@ impl TypeChecker {
     }
 
     /// Whether a bound naming `trait_name` is checked against a call's type arguments: a
-    /// declared trait is, and so is `PartialEq`, which the compiler knows by name instead.
+    /// declared trait is, and so are `PartialEq` and `Comparable`, which the compiler knows
+    /// by name instead.
     pub(crate) fn is_checkable_bound(&self, trait_name: &str) -> bool {
-        trait_name == PARTIAL_EQ_TRAIT || self.traits.contains_key(trait_name)
+        trait_name == PARTIAL_EQ_TRAIT
+            || trait_name == COMPARABLE_TRAIT
+            || self.traits.contains_key(trait_name)
     }
 
     /// Verify a `Trait<Assoc = T>` bound against what the concrete type argument's impl
@@ -926,10 +930,11 @@ impl TypeChecker {
                             }
                             None => {}
                         }
-                        // `PartialEq` is the operator lang-item, not a declared trait, so
-                        // its `eq` is typed here.
+                        // `PartialEq` and `Comparable` are operator lang-items, not declared
+                        // traits, so their methods are typed here.
                         let this = Type::Generic(param.clone());
-                        if field.name == EQ_METHOD && self.satisfies_bound(&this, PARTIAL_EQ_TRAIT)
+                        if let Some((trait_name, _)) = comparison_method(&field.name)
+                            && self.satisfies_bound(&this, trait_name)
                         {
                             let rhs = Type::Reference {
                                 inner: Box::new(this),

@@ -604,9 +604,7 @@ applies) is refused there (`clones_by_bytes`), with its own reason
 type's `.clone()` is, hand-written field clones included. A field that owns a buffer (`string`, a
 tensor, a collection, `StringBuilder`) would end up shared by the original and the copy, so it is
 refused. A struct field with neither the derive nor an impl is refused with the "derive it too"
-remedy instead, as for `Debug` and `PartialEq`. A refused operator impl
-(`OperatorTraitRequiresCopy`) is still recorded in `trait_impls`, so the field rule does not
-report it missing a second time. A generic template's fields
+remedy instead, as for `Debug` and `PartialEq`. A generic template's fields
 are type parameters, which no derive rule can judge, so the check runs again per monomorphized
 instance in `instantiate_generic_struct`; an instance made before pass 2d waits for it in
 `deferred_instance_derives`. Copy implies Clone.
@@ -907,7 +905,7 @@ is what needs no extent: binding, passing, returning, moving and dropping.
 `Hashable` as ordinary traits, so a hand-written impl goes through conformance and a bound
 dispatches through `resolve_generic_trait_method`.
 `PartialEq` stays the operator lang-item, since `PartialEq<Rhs = Self>` needs trait type
-parameters; `is_checkable_bound` still checks a bound naming it at the call. A bound is met
+parameters; `is_checkable_bound` still checks a bound naming it, or `Comparable`, at the call. A bound is met
 through `satisfies_bound`: a type parameter by its own bounds, anything else by
 `implements_without_impl` (a scalar, `string` or a deriving struct, per trait) or by
 `trait_impls`. A reference meets none of the five, because a method call reads through it to the
@@ -994,14 +992,20 @@ same check for return-position `impl Trait<Assoc = U>`.
   return, else `InvalidDropImpl`) and `T` must not be `Copy` (`DropTypeCannotBeCopy`). No Drop
   state is kept on the checker; the backend recomputes the Drop-type set from the AST.
 - The **operator traits** (`Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `BitNot`, `BitAnd`, `BitOr`,
-  `BitXor`, `Shl`, `PartialEq`, `Comparable`), defined in `type_checkers/operator_traits.rs`.
-  `register_operator_impl` requires a `Copy` receiver (`OperatorTraitRequiresCopy`) and a declared
-  `type Output` equal to the method return (`AssociatedTypeMismatch`), and wires each operator's
-  result type into `operator_binary_impls` (`(struct, BinaryOp)` → `OperatorDispatch { rhs,
-  result }`) or `operator_unary_impls`. In `check_expr` a binary or unary operator whose peeled
-  left/operand type is a struct with a matching entry takes the impl's result type **before** the
-  built-in numeric and comparison paths. Not yet: user-declarable `*Assign` traits and
-  auto-derived trait default methods: each operator needs its own impl method.
+  `BitXor`, `Shl`, `MatMul`, `PartialEq`, `Comparable`, the nine `*Assign`), defined in
+  `type_checkers/operator_traits.rs`, each with an `OperatorForm`. These lang-items have no
+  declaration, so `register_operator_impl` checks what one would state: the method's shape per
+  form (`TraitMethodSignatureMismatch`), every required method (`MissingTraitMethod`; the
+  parser has already injected `ne` / `le` / `gt` / `ge`), and a declared `type Output` equal to the
+  method return (`AssociatedTypeMismatch`). `record_operator_method` maps `(type, operator)` to the
+  method name in `operator_binary_impls`, `operator_unary_impls` or `operator_assign_impls`
+  (`Add` and `AddAssign` key the same `BinaryOp`, so the last is its own table), per generic
+  instance too; the signature is read from `functions`. `check_binary_expr` resolves the method from
+  the left operand alone, **before** the tensor and built-in paths, and `check_operator_call`
+  treats the operator as the call: the receiver moves first through `record_consumed_receiver`,
+  so `a + a` is a use after move, and the right operand goes through `check_call_args`. A
+  comparison instead reads its right operand, bare or borrowed, and moves nothing. A type
+  parameter takes the orderings from a `Comparable` bound; the arithmetic traits give it none.
 - **By-value tensor operators** (`type_checkers/tensor_broadcast.rs`) run **before** the
   operator-trait and built-in numeric paths, on either operand being a tensor or a borrow of
   one. `broadcast_shapes` joins the two shapes: aligned at the trailing axis, an extent of 1
@@ -1034,10 +1038,12 @@ same check for return-position `impl Trait<Assoc = U>`.
   after the join (the element-arithmetic check, the move recording) is shared with the
   element-wise operators. A user type reaches `@` through the `MatMul` operator trait instead.
 - **Compound assignment** (`Stmt::Assign` with `op: Some(_)`) implements the operator-trait
-  dispatch rule in `type_checkers/statements/places.rs`. A tensor place routes to
+  dispatch rule in `type_checkers/statements/places.rs`. A place whose type has a `*Assign` impl
+  goes to `check_operator_assign`: the value as a call argument first, then the place read and
+  borrowed as a `&mut self` receiver. A tensor place routes to
   `check_tensor_compound_assign` (`type_checkers/tensors.rs`), the compiler-known `*Assign`
   implementation; every other place re-forms the `Expr::Binary` desugar over `Place::to_expr()`
-  and checks it as an ordinary store, which is what keeps a user operator-trait impl reachable
+  and checks it as an ordinary store, which is what keeps a by-value operator impl reachable
   through `+=`. The
   tensor path checks the operand **before** the target's mutability, which is the evaluation
   order the language specifies; requires the element to have arithmetic

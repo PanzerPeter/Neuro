@@ -1,11 +1,11 @@
 use lexical_analysis::TokenKind;
-use shared_types::Identifier;
+use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 use ast_types::{
-    Attribute, AttributeNamedArg, ConstDef, GenericParam, GenericParamKind, Item, MethodDef,
-    ModuleDef, NewtypeDef, TraitBound, TraitMethod, Type,
+    Attribute, AttributeNamedArg, BinaryOp, ConstDef, Expr, GenericParam, GenericParamKind,
+    ImplDef, Item, MethodDef, ModuleDef, NewtypeDef, Stmt, TraitBound, TraitMethod, Type, UnaryOp,
 };
 
 use super::Parser;
@@ -387,9 +387,6 @@ fn inject_trait_defaults(items: &mut [Item]) {
     // Map trait name -> its default (bodied) methods.
     let mut defaults: HashMap<String, Vec<TraitMethod>> = HashMap::new();
     collect_trait_defaults(items, &mut defaults);
-    if defaults.is_empty() {
-        return;
-    }
     apply_trait_defaults(items, &defaults);
 }
 
@@ -426,9 +423,10 @@ fn apply_trait_defaults(
             continue;
         }
         let Item::Impl(imp) = item else { continue };
-        let Some(trait_name) = &imp.trait_name else {
+        let Some(trait_name) = imp.trait_name.clone() else {
             continue;
         };
+        inject_comparison_defaults(imp, &trait_name.name);
         let Some(trait_defaults) = defaults.get(&trait_name.name) else {
             continue;
         };
@@ -452,6 +450,81 @@ fn apply_trait_defaults(
                 span: method.span,
             });
         }
+    }
+}
+
+/// Inject the provided methods of the comparison traits, `ne` from `eq` and `le`, `gt`,
+/// `ge` from `lt`. These traits are lang-items with no declaration to copy from, and
+/// `PartialEq<Rhs>` lets the signature vary by impl, so each is cloned from the required
+/// method the impl wrote. An impl missing that method gets nothing here: semantic
+/// analysis reports it.
+fn inject_comparison_defaults(imp: &mut ImplDef, trait_name: &str) {
+    let (required, provided): (&str, &[&str]) = match trait_name {
+        "PartialEq" => ("eq", &["ne"]),
+        "Comparable" => ("lt", &["le", "gt", "ge"]),
+        _ => return,
+    };
+    let Some(template) = imp
+        .methods
+        .iter()
+        .find(|m| m.name.name == required)
+        .cloned()
+    else {
+        return;
+    };
+    let Some(rhs) = template.params.first().map(|p| p.name.clone()) else {
+        return;
+    };
+    for &name in provided {
+        if imp.methods.iter().any(|m| m.name.name == name) {
+            continue;
+        }
+        let body = provided_comparison(name, &rhs, template.span);
+        imp.methods.push(MethodDef {
+            name: Identifier {
+                name: name.to_string(),
+                span: template.name.span,
+            },
+            body: vec![Stmt::Expr(body)],
+            ..template.clone()
+        });
+    }
+}
+
+/// The body of a provided comparison method, with `rhs` naming its parameter.
+fn provided_comparison(name: &str, rhs: &Identifier, span: Span) -> Expr {
+    let call = |method: &str| Expr::Call {
+        func: Box::new(Expr::FieldAccess {
+            object: Box::new(Expr::Identifier(Identifier {
+                name: "self".to_string(),
+                span,
+            })),
+            field: Identifier {
+                name: method.to_string(),
+                span,
+            },
+            span,
+        }),
+        type_args: Vec::new(),
+        args: vec![Expr::Identifier(rhs.clone())],
+        arg_labels: Vec::new(),
+        span,
+    };
+    let not = |operand: Expr| Expr::Unary {
+        op: UnaryOp::Not,
+        operand: Box::new(operand),
+        span,
+    };
+    match name {
+        "ne" => not(call("eq")),
+        "le" => Expr::Binary {
+            left: Box::new(call("lt")),
+            op: BinaryOp::Or,
+            right: Box::new(call("eq")),
+            span,
+        },
+        "gt" => not(call("le")),
+        _ => not(call("lt")),
     }
 }
 

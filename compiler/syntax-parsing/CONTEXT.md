@@ -73,7 +73,11 @@ no types.
 - **Trait default methods**: `inject_trait_defaults` copies each trait's defaults into the
   `impl Trait for Type` blocks that omit them, never replacing a method the implementor wrote.
   It runs *before* `expand_type_aliases`, so injected bodies are alias-expanded too. Downstream
-  passes therefore see trait methods as ordinary inherent methods.
+  passes therefore see trait methods as ordinary inherent methods. `PartialEq` and `Comparable`
+  are lang-items with no declaration to copy from, so `inject_comparison_defaults` writes their
+  provided methods itself: `ne` from `eq`, and `le`, `gt`, `ge` from `lt`, each cloning the
+  signature of the required method the impl wrote, since `Rhs` varies by impl. Without that
+  method nothing is written, and semantic analysis reports it missing.
 - **`Self` inside an `impl`**: `expand_self` (`parser/type_aliases.rs`) runs between default
   injection and alias expansion and treats `Self` as an alias scoped to one block. It reuses the
   alias walker: type positions take the whole target (`Cell<T>` for `impl<T> Cell<T>`), and the

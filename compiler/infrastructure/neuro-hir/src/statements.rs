@@ -128,10 +128,10 @@ pub enum HirStmt {
     /// `place OP= value` on a tensor: an in-place element-wise update of the buffer
     /// the place's DLPack handle already addresses.
     ///
-    /// Only the types that update in place reach this node; every other compound
-    /// assignment is desugared to [`HirStmt::Assign`] over a binary expression
-    /// during lowering, so a backend that ignores this variant loses tensors and
-    /// nothing else. `ty` is the target's tensor type, carrying the element type and
+    /// Only tensors reach this node: a `*Assign` impl on a user type lowers to its method
+    /// call, and every other compound assignment is desugared to [`HirStmt::Assign`]
+    /// over a binary expression during lowering, so a backend that ignores this variant
+    /// loses tensors and nothing else. `ty` is the target's tensor type, carrying the element type and
     /// the extents the update loops over. `value` is either that same tensor type or a
     /// reference to it: an owned operand is consumed by the update, a borrowed one is
     /// only read.

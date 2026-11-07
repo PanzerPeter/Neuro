@@ -181,7 +181,14 @@ impl Lowerer {
                         rhs_param: dispatch.rhs_param.clone(),
                         result: dispatch.result.clone(),
                     };
-                    let right = self.lower_expr(right, None)?;
+                    // Mirrors the checker: a comparison reads its right operand, bare or
+                    // borrowed; every other operator takes it as the method's argument.
+                    let right = if op.is_comparison() {
+                        let expected = dispatch.rhs_param.referent().clone();
+                        coercion::auto_deref(self.lower_expr(right, Some(&expected))?)
+                    } else {
+                        self.lower_expr(right, Some(&dispatch.rhs_param))?
+                    };
                     return self.build_operator_call(left, right, dispatch, *span);
                 }
                 let right_expected = coercion::tensor_element(&left.ty)

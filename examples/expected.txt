@@ -110,6 +110,7 @@ operators/bitwise_ops.nr           1
 operators/compose.nr               150
 operators/compound_assignment.nr   21
 operators/error_propagation.nr     129
+operators/in_place_operators.nr    15
 operators/integer_methods.nr       0
 operators/null_coalesce.nr         75
 operators/operator_overloading.nr  24
@@ -209,6 +210,7 @@ showcase/robust_fit.nr               23
 showcase/running_stats.nr            5
 showcase/sample_audit.nr             177
 showcase/scan_guard.nr               160
+showcase/season_table.nr             116
 showcase/sensor_pipeline.nr          57
 showcase/sensor_windows.nr           85
 showcase/settings_loader.nr          77

@@ -10,20 +10,20 @@ use ast_types::Expr;
 use shared_types::Span;
 
 use super::TypeChecker;
+use super::operator_traits::comparison_method;
 use crate::types::{CollectionKind, Type};
 
 pub(crate) const COPY_TRAIT: &str = "Copy";
 pub(crate) const CLONE_TRAIT: &str = "Clone";
 pub(crate) const DEBUG_TRAIT: &str = "Debug";
 pub(crate) const PARTIAL_EQ_TRAIT: &str = "PartialEq";
+pub(crate) const COMPARABLE_TRAIT: &str = "Comparable";
 pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
 
 /// The method `Debug` declares: it appends the value's debug form to a builder.
 pub(crate) const FMT_DEBUG_METHOD: &str = "fmt_debug";
 /// The method `Hashable` declares.
 pub(crate) const HASH_METHOD: &str = "hash";
-/// The method `PartialEq` declares: `eq(&self, rhs: &Self) -> bool`.
-pub(crate) const EQ_METHOD: &str = "eq";
 
 impl TypeChecker {
     /// Whether type parameter `param` carries a `Copy` bound in the scope being checked.
@@ -72,6 +72,8 @@ impl TypeChecker {
                 other => other.is_integer(),
             },
             PARTIAL_EQ_TRAIT => self.is_derived_comparable(ty),
+            // The built-in total orders. No float has one, because of `NaN`.
+            COMPARABLE_TRAIT => ty.is_integer() || ty.is_char(),
             _ => false,
         }
     }
@@ -93,7 +95,8 @@ impl TypeChecker {
 
     /// Type a call of a derivable trait's method on a receiver that implements the trait
     /// without an `impl`: `x.clone()` on a `Copy` value, `s.hash()`, `s.eq(&t)` and
-    /// `s.fmt_debug(out)` on a derived struct or a builtin. `None` when `method` is not one of those here,
+    /// `s.fmt_debug(out)` on a derived struct or a builtin, and the comparison methods
+    /// wherever the operator is built in. `None` when `method` is not one of those here,
     /// so the caller reports the method as missing.
     pub(crate) fn check_supplied_trait_method(
         &mut self,
@@ -106,14 +109,6 @@ impl TypeChecker {
         let (trait_name, params, ret) = match method {
             super::expressions::CLONE_METHOD => (CLONE_TRAIT, Vec::new(), receiver.clone()),
             HASH_METHOD => (HASHABLE_TRAIT, Vec::new(), Type::U64),
-            EQ_METHOD => (
-                PARTIAL_EQ_TRAIT,
-                vec![Type::Reference {
-                    inner: Box::new(receiver.clone()),
-                    mutable: false,
-                }],
-                Type::Bool,
-            ),
             FMT_DEBUG_METHOD => (
                 DEBUG_TRAIT,
                 vec![Type::Reference {
@@ -125,7 +120,14 @@ impl TypeChecker {
                 }],
                 Type::Void,
             ),
-            _ => return None,
+            _ => {
+                let (trait_name, _) = comparison_method(method)?;
+                let rhs = Type::Reference {
+                    inner: Box::new(receiver.clone()),
+                    mutable: false,
+                };
+                (trait_name, vec![rhs], Type::Bool)
+            }
         };
         if !self.implements_without_impl(receiver, trait_name) {
             return None;

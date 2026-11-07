@@ -18,7 +18,6 @@ use crate::{Lowerer, LoweringError};
 const CLONE_METHOD: &str = "clone";
 const FMT_DEBUG_METHOD: &str = "fmt_debug";
 const HASH_METHOD: &str = "hash";
-const EQ_METHOD: &str = "eq";
 const DEBUG_TRAIT: &str = "Debug";
 const CLONE_TRAIT: &str = "Clone";
 const PUSH_STR_METHOD: &str = "push_str";
@@ -36,9 +35,9 @@ const DYN_SUFFIX: &str = "$dyn";
 impl Lowerer {
     /// Lower `object.method(args)` when the receiver implements the method's derivable
     /// trait without an `impl`: `.clone()` on a `Copy` value is that value, `.hash()` is
-    /// the builtin hash the backend also keys maps with, `.eq(&rhs)` is the built-in `==`,
-    /// and `.fmt_debug(out)` appends
-    /// the receiver's `{x:?}` rendering to `out`. `None` for every other call.
+    /// the builtin hash the backend also keys maps with, `.eq(&rhs)` and the other comparison
+    /// methods are the built-in operator, and `.fmt_debug(out)` appends the receiver's
+    /// `{x:?}` rendering to `out`. `None` for every other call.
     pub(crate) fn lower_supplied_trait_method(
         &mut self,
         object: &HirExpr,
@@ -52,6 +51,17 @@ impl Lowerer {
         {
             return Ok(None);
         }
+        // The built-in comparison the receiver's type already has, with both operands read
+        // through their borrows as the operator reads them.
+        if let ([arg], Some(op)) = (args, crate::operator_traits::comparison_op(method)) {
+            let rhs = crate::expressions::coercion::auto_deref(self.lower_expr(arg, None)?);
+            let kind = HirExprKind::Binary {
+                op,
+                left: Box::new(crate::expressions::coercion::auto_deref(object.clone())),
+                right: Box::new(rhs),
+            };
+            return Ok(Some(HirExpr::new(kind, HirType::Bool, span)));
+        }
         let lowered = match method {
             CLONE_METHOD if args.is_empty() && clone_copies(object.ty.referent()) => {
                 read_through(object.clone())
@@ -61,21 +71,6 @@ impl Lowerer {
             }
             HASH_METHOD if args.is_empty() => {
                 method_call(object.clone(), HASH_METHOD, Vec::new(), HirType::U64, span)
-            }
-            // The built-in `==` the receiver's type already has, with both operands read
-            // through their borrows as the operator reads them.
-            EQ_METHOD if args.len() == 1 => {
-                let rhs =
-                    crate::expressions::coercion::auto_deref(self.lower_expr(&args[0], None)?);
-                HirExpr::new(
-                    HirExprKind::Binary {
-                        op: ast_types::BinaryOp::Equal,
-                        left: Box::new(crate::expressions::coercion::auto_deref(object.clone())),
-                        right: Box::new(rhs),
-                    },
-                    HirType::Bool,
-                    span,
-                )
             }
             FMT_DEBUG_METHOD if args.len() == 1 => {
                 self.emit_field_debug_helpers(object.ty.referent(), span);

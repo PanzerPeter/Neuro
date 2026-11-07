@@ -763,7 +763,7 @@ impl Lowerer {
 
     /// Build the method call an overloaded binary operator desugars to:
     /// `a OP b` → `a.op(b)`. When the method's right parameter is a reference
-    /// (`rhs: &Rhs`, the comparison traits), the argument is borrowed.
+    /// (`rhs: &Rhs`, the comparison traits) and the operand is not, it is borrowed.
     pub(super) fn build_operator_call(
         &mut self,
         object: HirExpr,
@@ -774,17 +774,20 @@ impl Lowerer {
         // A comparison method takes `rhs: &Rhs`, and a borrow needs storage to point at,
         // so `p == P { x: 1 }` binds each operand first. Both are bound, left then right,
         // so the operands still evaluate in source order.
-        let borrows_rhs = matches!(dispatch.rhs_param, HirType::Reference { .. });
+        let borrows_rhs = matches!(dispatch.rhs_param, HirType::Reference { .. })
+            && !matches!(rhs.ty, HirType::Reference { .. });
         if borrows_rhs && !matches!(rhs.kind, HirExprKind::Variable(_)) {
             let mut stmts = Vec::with_capacity(3);
-            let object = self.bind_operand(object, &mut stmts);
-            let rhs = self.bind_operand(rhs, &mut stmts);
+            let object = self.bind_read_operand(object, &mut stmts);
+            let rhs = self.bind_read_operand(rhs, &mut stmts);
             let result = dispatch.result.clone();
             let call = self.build_operator_call(object, rhs, dispatch, span)?;
             stmts.push(HirStmt::Expr(call));
             return Ok(HirExpr::new(HirExprKind::Block { stmts }, result, span));
         }
-        let arg = if let HirType::Reference { mutable, .. } = &dispatch.rhs_param {
+        let arg = if let (true, HirType::Reference { mutable, .. }) =
+            (borrows_rhs, &dispatch.rhs_param)
+        {
             let mutable = *mutable;
             let ty = HirType::Reference {
                 inner: Box::new(rhs.ty.clone()),
@@ -817,6 +820,56 @@ impl Lowerer {
             dispatch.result,
             span,
         ))
+    }
+
+    /// Lower `target OP= rhs` through a `*Assign` impl: `target.op_assign(rhs)`. The value
+    /// is bound first, since it is evaluated before the place is addressed.
+    pub(crate) fn build_operator_assign(
+        &mut self,
+        target: HirExpr,
+        rhs: HirExpr,
+        method: String,
+        span: shared_types::Span,
+    ) -> HirStmt {
+        let mut stmts = Vec::with_capacity(2);
+        let rhs = self.bind_operand(rhs, &mut stmts);
+        let callee = HirExpr::new(
+            HirExprKind::FieldAccess {
+                object: Box::new(target),
+                field: method,
+            },
+            HirType::Void,
+            span,
+        );
+        let call = HirExprKind::Call {
+            callee: Box::new(callee),
+            args: vec![rhs],
+        };
+        stmts.push(HirStmt::Expr(HirExpr::new(call, HirType::Void, span)));
+        HirStmt::Expr(HirExpr::new(
+            HirExprKind::Block { stmts },
+            HirType::Void,
+            span,
+        ))
+    }
+
+    /// [`Self::bind_operand`] for an operand the operator only reads. A place stays with
+    /// its owner, so the local holds a borrow of it: holding the value would make the local
+    /// a second owner of whatever the place owns.
+    fn bind_read_operand(&mut self, operand: HirExpr, stmts: &mut Vec<HirStmt>) -> HirExpr {
+        if matches!(operand.kind, HirExprKind::Variable(_)) || !names_storage(&operand) {
+            return self.bind_operand(operand, stmts);
+        }
+        let (inner, span) = (operand.ty.clone(), operand.span);
+        let ty = HirType::Reference {
+            inner: Box::new(inner),
+            mutable: false,
+        };
+        let kind = HirExprKind::Reference {
+            operand: Box::new(operand),
+            mutable: false,
+        };
+        self.bind_operand(HirExpr::new(kind, ty, span), stmts)
     }
 
     /// Bind `operand` to a fresh local unless it already names one, and yield the read.
@@ -1427,5 +1480,17 @@ fn sliceable_element(ty: &HirType) -> Option<HirType> {
             args,
         } => args.first().cloned(),
         _ => None,
+    }
+}
+
+/// Whether `expr` reads storage rooted at a binding or behind a borrow, rather than a
+/// temporary the expression itself produces.
+fn names_storage(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::Variable(_) | HirExprKind::Deref { .. } => true,
+        HirExprKind::FieldAccess { object, .. }
+        | HirExprKind::TupleIndex { object, .. }
+        | HirExprKind::Index { object, .. } => names_storage(object),
+        _ => false,
     }
 }

@@ -1141,20 +1141,23 @@ func main() -> i32 {
     assert_eq!(run("inherent_eq_shape.nr", other_shape), 11);
 }
 
-/// A refused operator impl is reported once: the derive holding the type is not told to
-/// give it a derive as well.
+/// An operator impl needs no `Copy`, so a derive may hold a non-`Copy` field whose
+/// equality is written by hand, and the derived `==` calls it.
 #[test]
-fn a_refused_field_impl_is_not_reported_missing_again() {
-    let err = rejected(
-        "refused_field_impl.nr",
-        r#"
+fn a_derive_calls_a_hand_written_eq_on_a_non_copy_field() {
+    let test = CompileTest::new();
+    let exit = test
+        .compile_and_run(
+            "non_copy_field_impl.nr",
+            r#"
 struct Hand {
-    tag: string
+    tag: string,
+    id: i32
 }
 
 impl PartialEq for Hand {
     func eq(&self, rhs: &Hand) -> bool {
-        true
+        self.id == rhs.id
     }
 }
 
@@ -1164,15 +1167,18 @@ struct Outer {
 }
 
 func main() -> i32 {
-    0
+    val a = Outer { h: Hand { tag: "a", id: 1 } }
+    val b = Outer { h: Hand { tag: "b", id: 1 } }
+    val c = Outer { h: Hand { tag: "c", id: 2 } }
+    mut score = 0
+    if a == b { score = score + 1 }
+    if a != c { score = score + 2 }
+    score
 }
 "#,
-    );
-    assert!(
-        err.contains("operator trait 'PartialEq' can only be implemented for a `Copy` type"),
-        "got: {err}"
-    );
-    assert!(!err.contains("cannot derive"), "got: {err}");
+        )
+        .expect("compile/run failed");
+    assert_eq!(exit, 3);
 }
 
 /// A derive calls a field's `clone` only through its `impl Clone`, the rule the checker

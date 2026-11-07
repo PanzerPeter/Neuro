@@ -97,8 +97,8 @@ Comparisons return `bool`.
 
 | Operator | Meaning | Operands |
 |----------|---------|----------|
-| `==`, `!=` | Equal, not equal | Numbers, `bool`, `char`, `string` (and `&string`), a newtype over these, or a `Copy` type with `impl PartialEq` |
-| `<`, `<=`, `>`, `>=` | Ordering | Numbers and `char` (by code point), or a `Copy` type with `impl Comparable` |
+| `==`, `!=` | Equal, not equal | Numbers, `bool`, `char`, `string` (and `&string`), a newtype over these, or a type with `impl PartialEq` |
+| `<`, `<=`, `>`, `>=` | Ordering | Numbers and `char` (by code point), or a type with `impl Comparable` |
 
 - Both operands must have the same type. `a == b` with `i32` and `i64` fails with `type mismatch: expected i32, found i64`.
 - Comparisons do not chain. `a < b < c` fails with ``comparison operators cannot be chained: use `&&` to combine separate comparisons``. Write `a < b && b < c`.
@@ -159,7 +159,7 @@ Assigning to an immutable binding fails with `cannot assign to immutable variabl
 
 ### Compound Assignment Operators
 
-`x op= n` is `x = x op n` for every type except a tensor. The forms are `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=` and `<<=`. There is no `>>=`, because `>>` is composition. A tensor target updates in place (see below) and takes only the arithmetic forms.
+`x op= n` is `x = x op n` unless the target updates in place: a tensor does (see below), and so does a user type with the matching [`*Assign` impl](#operator-overloading). The forms are `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=` and `<<=`. There is no `>>=`, because `>>` is composition. A tensor target takes only the arithmetic forms.
 
 ```neuro
 mut score: i32 = 100
@@ -240,7 +240,7 @@ func main() -> i32 {
 }
 ```
 
-`==` and `!=` use `PartialEq`, and the orderings use `Comparable`. `Comparable` requires `PartialEq` on the same type. A `Copy` type that implements `Comparable` without `PartialEq` fails with:
+`==` and `!=` use `PartialEq`, and the orderings use `Comparable`. `Comparable` requires `PartialEq` on the same type. A type that implements `Comparable` without `PartialEq` fails with:
 
 ```text
 error: `impl Comparable for Meters` requires `impl PartialEq for Meters`
@@ -259,17 +259,56 @@ error: `impl Comparable for Meters` requires `impl PartialEq for Meters`
 | `@` | `MatMul` | `matmul` |
 | `==` `!=` | `PartialEq` | `eq` `ne` |
 | `<` `<=` `>` `>=` | `Comparable` | `lt` `le` `gt` `ge` |
+| `+=` `-=` `*=` `/=` `%=` | `AddAssign` `SubAssign` `MulAssign` `DivAssign` `RemAssign` | `add_assign` `sub_assign` `mul_assign` `div_assign` `rem_assign` |
+| `&=` `\|=` `^=` `<<=` | `BitAndAssign` `BitOrAssign` `BitXorAssign` `ShlAssign` | `bitand_assign` `bitor_assign` `bitxor_assign` `shl_assign` |
 
 The rules:
 
-- The receiver type must be `Copy`. `impl Add for Meters` on a non-`Copy` struct fails with ``operator trait 'Add' can only be implemented for a `Copy` type``.
-- Each operator dispatches to its own method, so implement the method for every operator the type uses. For example, `!=` calls `ne`, so an `impl PartialEq` with only `eq` supports `==` and rejects `!=`.
+- Each method has the shape its trait fixes. A by-value trait takes `func add(self, rhs: Rhs) -> Output`, a comparison `func eq(&self, rhs: &Rhs) -> bool`, and a `*Assign` trait `func add_assign(&mut self, rhs: Rhs)`. Any other shape is rejected with `does not match the trait signature`.
+- `eq` and `lt` are required. `ne` comes from `eq`, and `le`, `gt` and `ge` from `lt`, so an impl writes those only to replace them. Leaving out a required method fails with `missing required method`.
 - The declared `type Output` must match the method's return type.
+- `Rhs` defaults to the type itself and is written on the trait: `impl Mul<f32> for Vec2` takes `v * 2.0`. A type has one impl of each trait.
 - `!a` (logical not), `&&`, `||`, `??`, `?`, `|>` and `>>` are not overloadable.
-- `v += w` works when the type implements the by-value operator: it desugars to `v = v + w`. A user type cannot yet declare an in-place `*Assign` operator.
 - Calls are monomorphized. Each operator becomes the method call it stands for, with no vtable.
 
 The complete program is [`examples/operators/operator_overloading.nr`](../../examples/operators/operator_overloading.nr).
+
+### Operators on Non-`Copy` Types
+
+An operator impl works on any type, and it follows the signature of its method. The by-value traits take both operands by value, so `a + b` on a non-`Copy` type moves `a` and `b`, as the call `a.add(b)` would. Reading either one afterwards is a use of a moved value.
+
+To leave the right operand with its owner, implement the trait with a reference `Rhs`. The operand is then written as a borrow:
+
+```neuro
+impl Mul<&Samples> for Samples {
+    type Output = Samples
+    func mul(self, rhs: &Samples) -> Samples { ... }
+}
+
+val scaled = joined * &scale    // moves `joined`, reads `scale`
+```
+
+The left operand cannot be borrowed this way, because there is no impl on a reference type. Reaching a non-`Copy` left operand through a borrow fails with `cannot move out of`.
+
+A comparison only reads its operands, so neither moves. The right one may be written bare or borrowed: `a == b` and `a == &b` mean the same.
+
+### In-Place Updates
+
+A type with a `*Assign` impl updates in place, and `x += y` calls `x.add_assign(y)`. That impl wins over `Add` when a type has both. Without one, `x += y` is `x = x + y`, which on a non-`Copy` type moves `x` out and stores the result back.
+
+```neuro
+impl AddAssign<i32> for Samples {
+    func add_assign(&mut self, rhs: i32) {
+        self.values.push(rhs)
+    }
+}
+
+scaled += 10
+```
+
+The target may be any [place](#places-what-may-sit-on-the-left). It is borrowed like a method's `&mut self` receiver, so it must be writable and free of other borrows. The value is evaluated first, so `x += x.doubled()` reads `x` before updating it.
+
+The complete program is [`examples/operators/in_place_operators.nr`](../../examples/operators/in_place_operators.nr).
 
 ## Null/Error Coalescing Operator (`??`)
 

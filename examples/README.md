@@ -171,6 +171,7 @@ in each program has the full description. The three module files under
 - [`quantized_readings.nr`](showcase/quantized_readings.nr): Sensor readings quantized with `.to_checked::<u8>()`, which rejects out-of-range and NaN values where `as u8` would clamp them.
 - [`render_settings.nr`](showcase/render_settings.nr): A render pipeline called with named arguments in a different order from the declaration, plus a positional `_` parameter.
 - [`running_stats.nr`](showcase/running_stats.nr): An online mean accumulator with mixed `i32` and `f64` fields, direct field mutation and an `.is_nan()` guard.
+- [`season_table.nr`](showcase/season_table.nr): A league table of non-`Copy` records: `+` moves two half-seasons into one, `+=` and `-=` update a `Vec` element, a field and a `&mut` parameter in place, and one `lt` supplies `<=`, `>` and a generic `T: Comparable`, beside closures and `Option`.
 - [`simulation.nr`](showcase/simulation.nr): A bit-flag state machine on a struct field, using `|=`, `&=`, `^=` and `<<=`, and `~` through a `BitNot` impl.
 - [`unit_types.nr`](showcase/unit_types.nr): Newtype units of measure (`Meters` and `Seconds` both wrap `i32`) that the compiler keeps apart.
 - [`vector_physics.nr`](showcase/vector_physics.nr): Operator traits (`+`, `-`, unary `-`, `==`, and `+=` through `Add`) on a `Copy` struct, driving a physics step.

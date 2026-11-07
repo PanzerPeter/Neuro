@@ -279,7 +279,7 @@ impl Resizable for Square {
 
 Enums and newtypes take trait impls the same way structs do. A trait that names `Self` outside its receiver cannot be used as `dyn Trait` (see [Object Safety](#object-safety)).
 
-The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
+The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). A `T: PartialEq` bound gives a generic body `==` and `!=`, and `T: Comparable` gives it the orderings, each with its method form (`a.le(b)`). An integer or `char` meets `Comparable`; a float does not, because `NaN` has no place in a total order. The arithmetic and `*Assign` traits give a type parameter no operator yet. The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
 
 ## Supertraits
 

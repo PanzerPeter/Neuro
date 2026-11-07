@@ -381,3 +381,32 @@ trait Plain {}
     };
     assert!(plain.supertraits.is_empty());
 }
+
+fn impl_methods(item: &Item) -> Vec<String> {
+    let Item::Impl(imp) = item else {
+        panic!("expected an impl item");
+    };
+    imp.methods.iter().map(|m| m.name.name.clone()).collect()
+}
+
+#[test]
+fn injects_provided_comparison_methods() {
+    let source = r#"
+impl PartialEq for M {
+    func eq(&self, rhs: &M) -> bool { true }
+}
+impl Comparable for M {
+    func lt(&self, rhs: &M) -> bool { true }
+    func gt(&self, rhs: &M) -> bool { false }
+}
+impl PartialEq for N {
+    func ne(&self, rhs: &N) -> bool { true }
+}
+"#;
+    let items = parse(source).expect("impls should parse");
+    assert_eq!(impl_methods(&items[0]), ["eq", "ne"]);
+    // A method the impl wrote stays, and only the missing ones join it.
+    assert_eq!(impl_methods(&items[1]), ["lt", "gt", "le", "ge"]);
+    // Nothing is cloned without the required method: semantic analysis reports it.
+    assert_eq!(impl_methods(&items[2]), ["ne"]);
+}

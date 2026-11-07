@@ -66,12 +66,24 @@ impl Lowerer {
             } => {
                 let lowered = self.lower_place(place)?;
                 let place_ty = lowered.ty().clone();
+                if let (
+                    Some(op),
+                    HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. },
+                ) = (op, &place_ty)
+                    && let Some(dispatch) = self.operator_assign_impls.get(&(name.clone(), *op))
+                {
+                    let (method, rhs_param) = (dispatch.method.clone(), dispatch.rhs_param.clone());
+                    let value = self.lower_expr(value, Some(&rhs_param))?;
+                    let target = self.lower_expr(&place.to_expr(), None)?;
+                    return Ok(self.build_operator_assign(target, value, method, *span));
+                }
                 match op {
-                    // The type-directed half of the operator-trait dispatch rule. A
-                    // tensor updates the buffer it already owns; every other place takes
-                    // the desugaring, which is re-formed as an AST node here rather than
-                    // as HIR so that a user type's operator-trait impl is still found by
-                    // the ordinary binary-expression lowering.
+                    // The type-directed half of the operator-trait dispatch rule. A type
+                    // with a `*Assign` impl was taken above and a tensor updates the buffer
+                    // it already owns; every other place takes the desugaring, which is
+                    // re-formed as an AST node here rather than as HIR so that a user type's
+                    // operator-trait impl is still found by the ordinary binary-expression
+                    // lowering.
                     Some(op) if matches!(place_ty, HirType::Tensor { .. }) => {
                         // The right-hand side is typed by the ELEMENT, not by the target:
                         // `w *= 2.0` is the scalar broadcast, and a tensor operand ignores

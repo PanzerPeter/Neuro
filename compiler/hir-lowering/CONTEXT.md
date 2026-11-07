@@ -299,14 +299,19 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   `binary_result_type`'s `NullCoalesce` arm is unreachable by construction and says so.
   `success_variant`, `not_fallible`, and `fallible_base` are shared with the `?` desugar.
 - **Operator traits** (`operator_traits.rs` holds the table: `Add`, `Sub`, …, `MatMul`,
-  `PartialEq`, `Comparable`). An operator-trait impl populates `operator_binary_impls` / `operator_unary_impls`
-  during `register_impl`; a `Binary` / `Unary` whose peeled left/operand type is a struct, enum or newtype with a
+  `PartialEq`, `Comparable`, the `*Assign` family). An operator-trait impl populates `operator_binary_impls` / `operator_unary_impls`
+  / `operator_assign_impls` during `register_impl`, and again per instance in
+  `register_instance_methods`; a `Binary` / `Unary` whose peeled left/operand type is a struct, enum or newtype with a
   matching entry becomes the method call `a.op(b)`, a `Call` with a `FieldAccess` callee,
   identical to an ordinary method call, so the backend needs no operator awareness. A comparison
-  method's `rhs: &Rhs` parameter means the argument is wrapped in a `Reference`, and a borrow
+  method's `rhs: &Rhs` parameter means a bare argument is wrapped in a `Reference`, and a borrow
   needs storage, so when the right operand is not a variable `build_operator_call` binds both
   operands to fresh `__operand_N` locals in a `Block` first (left then right, keeping source
-  order): `p == P { x: 1 }` otherwise reached the backend as a borrow of a temporary. Owned `self`
+  order): `p == P { x: 1 }` otherwise reached the backend as a borrow of a temporary. A place
+  operand binds a borrow, never its value: a local holding `v[i]` would be a second owner of what
+  the element owns. An operand already of reference type passes through untouched. A `place OP=
+  rhs` with a `*Assign` impl becomes `build_operator_assign`'s `Block`: the value bound first,
+  then the method call on the place. Owned `self`
   methods are lowered like any other receiver, on a generic impl as well as a concrete one; the
   ownership difference is the backend's, not this stage's.
 - **Derived equality** (`@derive(PartialEq)`). A struct in `partial_eq_structs` has no `eq` to
@@ -650,10 +655,10 @@ compiler bug, not a diagnostic.
   `.to(device)` lowers its one argument at `HirType::Enum("Device")` and yields the receiver's
   own type. `.to` is matched on `recv` rather than the referent, so a borrow does not resolve:
   the same verdict the type checker reaches. A compound `Stmt::Assign` is the one statement
-  whose lowering is type-directed: a tensor place becomes `HirStmt::TensorCompoundAssign`
-  carrying the place's tensor type, and every other place has its `place = place OP rhs` desugar
+  whose lowering is type-directed: a place with a `*Assign` impl calls it, a tensor place becomes
+  `HirStmt::TensorCompoundAssign` carrying the place's tensor type, and every other place has its `place = place OP rhs` desugar
   re-formed as an `Expr::Binary` over `Place::to_expr()` and lowered through `lower_expr`, which
-  is what keeps a user operator-trait impl reachable through `+=`. A by-value tensor operator stays an ordinary
+  is what keeps a by-value operator impl reachable through `+=`. A by-value tensor operator stays an ordinary
   `HirExprKind::Binary`; `binary_result_type` (`expressions/coercion.rs`) re-derives the
   broadcast join over `Vec<Option<usize>>` and `AxisNames` so the node carries the fresh
   result's shape, which is what tells the backend how big a buffer to allocate. A pair that

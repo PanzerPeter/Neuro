@@ -5,7 +5,9 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
+use crate::type_checkers::OperatorMethod;
 use crate::type_checkers::collections::OPTION_ENUM;
+use crate::type_checkers::derivable::COMPARABLE_TRAIT;
 use crate::type_checkers::literals::{float_suffix_to_type, suffix_to_type};
 use crate::type_checkers::val_else::expr_diverges;
 use crate::types::Type;
@@ -79,6 +81,12 @@ impl TypeChecker {
             .unwrap_or(Type::Unknown)
             .auto_deref();
         let left_was_clean = self.errors.len() == errors_before_left;
+        // Operator-trait dispatch on a user type: the operator is the impl's method call,
+        // decided by the left operand alone, so the right one is typed by the method's
+        // parameter. Checked before the tensor and built-in paths, which take neither.
+        if let Some(method) = self.binary_operator_method(&left_ty, *op) {
+            return Some(self.check_operator_call(left, &left_ty, *op, right, method, *span));
+        }
         let right_expectation =
             Self::tensor_element_expectation(&left_ty).unwrap_or_else(|| left_ty.clone());
         let right_ty = self
@@ -115,28 +123,6 @@ impl TypeChecker {
             || matches!(right_ty.referent(), Type::Tensor { .. })
         {
             return Some(self.check_tensor_binary(left, &left_ty, *op, right, &right_ty, *span));
-        }
-
-        // Operator-trait dispatch on a user type: when the left operand is
-        // a struct or enum that implements the operator's trait, the operator lowers to
-        // that impl's method and takes its result type. Checked before the
-        // built-in numeric/bitwise/comparison paths, which reject struct operands.
-        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = left_ty.referent()
-            && let Some(dispatch) = self
-                .operator_binary_impls
-                .get(&(name.clone(), *op))
-                .cloned()
-        {
-            if !right_ty.referent().is_compatible_with(&dispatch.rhs) {
-                self.record_error(TypeError::InvalidBinaryOperator {
-                    op: op.to_string(),
-                    left: left_ty.clone(),
-                    right: right_ty,
-                    span: *span,
-                });
-                return Some(Type::Unknown);
-            }
-            return Some(dispatch.result);
         }
 
         match op {
@@ -241,7 +227,15 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                if !left_ty.is_numeric() && !left_ty.is_half_float() && !left_ty.is_char() {
+                // A type parameter is ordered by its bound; a generic body is checked once
+                // as a template, and each instance's real operator is found at lowering.
+                let ordered_param = matches!(left_ty.referent(), Type::Generic(_))
+                    && self.satisfies_bound(left_ty.referent(), COMPARABLE_TRAIT);
+                if !left_ty.is_numeric()
+                    && !left_ty.is_half_float()
+                    && !left_ty.is_char()
+                    && !ordered_param
+                {
                     self.record_error(TypeError::InvalidBinaryOperator {
                         op: op.to_string(),
                         left: left_ty.clone(),
@@ -325,6 +319,48 @@ impl TypeChecker {
                 }
             }
         }
+    }
+
+    /// Check `left OP right` as the call `left.op(right)`.
+    ///
+    /// The left operand is the receiver, handed over before the right one is read, so
+    /// `a + a` on a non-`Copy` type is a use after move. The right operand is the call's
+    /// argument, except under a comparison: the operator reads it, so it may be written
+    /// bare or borrowed and the call borrows it either way.
+    fn check_operator_call(
+        &mut self,
+        left: &Expr,
+        left_ty: &Type,
+        op: BinaryOp,
+        right: &Expr,
+        method: OperatorMethod,
+        span: Span,
+    ) -> Type {
+        if self.consuming_self_methods.contains(&method.mangled) {
+            self.record_consumed_receiver(left, left_ty, span);
+        }
+        let Some(rhs) = method.rhs else {
+            return method.result;
+        };
+        if !op.is_comparison() {
+            self.check_call_args(std::slice::from_ref(right), &[rhs], span);
+            return method.result;
+        }
+        let expected = rhs.referent();
+        let right_ty = self
+            .check_expr(right, Some(expected))
+            .unwrap_or(Type::Unknown)
+            .auto_deref();
+        if !matches!(right_ty, Type::Unknown) && !right_ty.referent().is_compatible_with(expected) {
+            self.record_error(TypeError::InvalidBinaryOperator {
+                op: op.to_string(),
+                left: left_ty.clone(),
+                right: right_ty,
+                span,
+            });
+            return Type::Unknown;
+        }
+        method.result
     }
 
     /// Whether `==` / `!=` on `ty` are the field-wise comparison `@derive(PartialEq)`
@@ -529,10 +565,11 @@ impl TypeChecker {
 
         // Operator-trait dispatch on a user type: `-a` via `Neg`, `~a` via
         // `BitNot`. The boolean `!a` (`UnaryOp::Not`) is never overloadable.
-        if let Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) = operand_ty.referent()
-            && let Some(result) = self.operator_unary_impls.get(&(name.clone(), *op)).cloned()
-        {
-            return Some(result);
+        if let Some(method) = self.unary_operator_method(&operand_ty, *op) {
+            if self.consuming_self_methods.contains(&method.mangled) {
+                self.record_consumed_receiver(operand, &operand_ty, *span);
+            }
+            return Some(method.result);
         }
 
         match op {

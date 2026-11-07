@@ -5,8 +5,8 @@ use ast_types::{BinaryOp, Expr, Place, TensorIndexArg};
 use shared_types::{Identifier, Span};
 
 use crate::errors::TypeError;
-use crate::type_checkers::TypeChecker;
 use crate::type_checkers::backward::gradient_view_root;
+use crate::type_checkers::{OperatorMethod, TypeChecker};
 use crate::types::Type;
 
 use super::borrow_target_of;
@@ -58,12 +58,17 @@ impl TypeChecker {
         value: &Expr,
         span: Span,
     ) -> Option<()> {
+        if let Some(op) = op
+            && let Some(method) = self.assign_operator_method(&place_ty, op)
+        {
+            return self.check_operator_assign(place, &place_ty, method, value, span);
+        }
         match op {
             // The operator-trait dispatch rule: a type implementing the matching
-            // `*Assign` trait updates in place; everything else desugars and allocates
-            // a fresh value. Tensors are the one type on the first path today, and the
-            // one where the difference is observable: the desugaring would move the
-            // tensor out of its own place and reallocate its buffer.
+            // `*Assign` trait updates in place, which a tensor does by being built in and
+            // a user type through its impl above; everything else desugars and allocates
+            // a fresh value. The desugaring would move a tensor out of its own place and
+            // reallocate its buffer.
             Some(op) if matches!(place_ty, Type::Tensor { .. }) => {
                 self.check_tensor_compound_assign(place, &place_ty, op, value, span)
             }
@@ -78,6 +83,33 @@ impl TypeChecker {
             }
             None => self.check_place_store(place, &place_ty, value, span),
         }
+    }
+
+    /// Check `place OP= value` as the call `place.op_assign(value)`.
+    ///
+    /// The value goes first, as an argument: the language evaluates it before the place
+    /// is borrowed, so `x += x.scale()` reads `x` and only then updates it. The place is
+    /// then read like any receiver, which is what reports one the value moved out.
+    fn check_operator_assign(
+        &mut self,
+        place: &Place,
+        place_ty: &Type,
+        method: OperatorMethod,
+        value: &Expr,
+        span: Span,
+    ) -> Option<()> {
+        if let Some(rhs) = method.rhs {
+            self.check_call_args(std::slice::from_ref(value), &[rhs], span);
+        }
+        let target = place.to_expr();
+        self.check_expr(&target, None)?;
+        // A receiver's exclusive borrow is tracked per binding, so only a bare one sees a
+        // borrow of its binding; a sub-place is held to the rule of any store into it.
+        if !Self::is_bare_binding(&target) {
+            self.refuse_store_while_borrowed(place);
+        }
+        self.check_mut_self_receiver(&target, place_ty, span);
+        Some(())
     }
 
     /// The type of the storage an assignment writes to, reporting the place's own

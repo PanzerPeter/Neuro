@@ -1,6 +1,7 @@
 //! The registration pre-pass: every struct, enum, trait, impl, function and constant
 //! recorded before any body is lowered, so bodies resolve names regardless of order.
 
+use crate::operator_traits::OperatorForm;
 use ast_types::{
     ConstDef, EnumDef, FunctionDef, ImplDef, Item, MethodDef, SelfParam, StructDef, VariantPayload,
 };
@@ -15,6 +16,7 @@ const DERIVE_ATTRIBUTE: &str = "derive";
 pub(crate) const COPY_TRAIT: &str = "Copy";
 pub(crate) const CLONE_TRAIT: &str = "Clone";
 pub(crate) const PARTIAL_EQ_TRAIT: &str = "PartialEq";
+pub(crate) const COMPARABLE_TRAIT: &str = "Comparable";
 pub(crate) const DEBUG_TRAIT: &str = "Debug";
 pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
 
@@ -367,13 +369,21 @@ impl Lowerer {
                 Some(t) => self.resolve_type(t)?,
                 None => HirType::Void,
             };
-            let result = if spec.has_output { ret } else { HirType::Bool };
+            let result = match spec.form {
+                OperatorForm::Value => ret,
+                OperatorForm::Compare => HirType::Bool,
+                OperatorForm::InPlace => HirType::Void,
+            };
             if let Some((_, op)) = spec.binary.iter().find(|(m, _)| *m == method.name.name) {
                 let rhs_param = match method.params.first() {
                     Some(p) => self.resolve_type(&p.ty)?,
                     None => HirType::Void,
                 };
-                self.operator_binary_impls.insert(
+                let table = match spec.form {
+                    OperatorForm::InPlace => &mut self.operator_assign_impls,
+                    OperatorForm::Value | OperatorForm::Compare => &mut self.operator_binary_impls,
+                };
+                table.insert(
                     (struct_name.to_string(), *op),
                     crate::OpDispatch {
                         method: method.name.name.clone(),

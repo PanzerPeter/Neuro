@@ -143,12 +143,15 @@ pub(crate) struct TypeChecker {
     /// `T: Trait<Assoc = U>` bound is satisfied only when the concrete argument's entry
     /// here answers `Assoc` with the same type the bound demanded.
     pub(crate) impl_assoc: HashMap<(String, String), HashMap<String, Type>>,
-    /// Operator-trait dispatch: `(struct name, binary operator)` → the value
-    /// type of the right operand and the operator's result type. Present exactly when
-    /// the struct has an operator-trait impl providing that operator.
-    operator_binary_impls: HashMap<(String, ast_types::BinaryOp), OperatorDispatch>,
+    /// Operator-trait dispatch: `(type name, binary operator)` → the backing method's
+    /// name. Present exactly when the type has an impl providing that operator. The
+    /// signature is read from `functions`, which already holds it per generic instance.
+    operator_binary_impls: HashMap<(String, ast_types::BinaryOp), String>,
     /// Operator-trait dispatch for unary operators (`-a` via `Neg`, `~a` via `BitNot`).
-    operator_unary_impls: HashMap<(String, ast_types::UnaryOp), Type>,
+    operator_unary_impls: HashMap<(String, ast_types::UnaryOp), String>,
+    /// Operator-trait dispatch for `OP=`, keyed by the operator it updates with: the
+    /// `*Assign` traits, kept apart because `Add` and `AddAssign` key the same `+`.
+    operator_assign_impls: HashMap<(String, ast_types::BinaryOp), String>,
     /// Trait bounds of the type parameters in scope while a generic definition is checked
     /// Parameter name → its declared bounds. Lets a generic body dispatch
     /// a trait method on a bounded type parameter. Empty outside a generic definition.
@@ -362,14 +365,13 @@ pub(crate) struct TraitInfo {
     pub(crate) supertraits: Vec<BoundInfo>,
 }
 
-/// How a binary operator dispatches to an operator-trait method.
-#[derive(Clone)]
-pub(crate) struct OperatorDispatch {
-    /// The value type the right operand must have. For a by-reference method parameter
-    /// (`rhs: &Rhs`) this is the referent, since the operand is borrowed at the call.
-    pub(crate) rhs: Type,
-    /// The operator's result type: the method's `Output` for arithmetic/bitwise traits,
-    /// or `bool` for the comparison traits.
+/// The operator-trait method an operator resolved to on one receiver type.
+pub(crate) struct OperatorMethod {
+    /// The key of the method in `functions`.
+    pub(crate) mangled: String,
+    /// The declared type of the right operand; `None` for a unary operator.
+    pub(crate) rhs: Option<Type>,
+    /// The operator's result type.
     pub(crate) result: Type,
 }
 
@@ -517,6 +519,7 @@ impl TypeChecker {
             impl_assoc: HashMap::new(),
             operator_binary_impls: HashMap::new(),
             operator_unary_impls: HashMap::new(),
+            operator_assign_impls: HashMap::new(),
             generic_bounds: HashMap::new(),
             struct_instances: HashMap::new(),
             generic_scope: HashSet::new(),

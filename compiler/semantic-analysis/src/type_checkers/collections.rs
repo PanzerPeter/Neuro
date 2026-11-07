@@ -15,7 +15,7 @@ use ast_types::Expr;
 use shared_types::Span;
 
 use super::TypeChecker;
-use super::derivable::{COPY_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
+use super::derivable::{COMPARABLE_TRAIT, COPY_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
 use crate::types::{CollectionKind, Type};
 
@@ -126,7 +126,7 @@ impl TypeChecker {
         }
         match kind {
             CollectionKind::HashMap => required.push(HASHABLE_TRAIT),
-            CollectionKind::BTreeMap => required.push("Comparable"),
+            CollectionKind::BTreeMap => required.push(COMPARABLE_TRAIT),
             CollectionKind::Vec | CollectionKind::StringBuilder => {}
         }
         for trait_name in required {
