@@ -186,6 +186,7 @@ impl TypeChecker {
         stmts: &[ast_types::Stmt],
         expected: Option<&Type>,
     ) -> Type {
+        let block = self.symbols.depth();
         self.symbols.push_scope();
         let mut result = Type::Void;
         for (i, stmt) in stmts.iter().enumerate() {
@@ -193,6 +194,7 @@ impl TypeChecker {
                 match stmt {
                     ast_types::Stmt::Expr(expr) => {
                         result = self.check_expr(expr, expected).unwrap_or(Type::Unknown);
+                        self.refuse_dying_tail(stmt, &result, block);
                         self.pop_scope();
                         return result;
                     }
@@ -213,6 +215,7 @@ impl TypeChecker {
                                 expected,
                             )
                             .unwrap_or(Type::Unknown);
+                        self.refuse_dying_tail(stmt, &result, block);
                         self.pop_scope();
                         return result;
                     }

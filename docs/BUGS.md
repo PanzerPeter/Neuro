@@ -5,6 +5,35 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-151: a `break` value loses the borrow it carries
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis`, held borrows
+- **Severity**: major. The borrowee can be moved or freed while the loop's value still reads it
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val s = "ab" + "c"
+    val r = loop {
+        break &s
+    }
+    val t = s
+    println(r)
+    0
+}
+```
+
+Expected: moving `s` is refused while `r` holds it. Observed: the program compiles, because the walk
+that finds what a value holds stops at a `loop`, so `r` holds nothing.
+
+**Workaround**: assign to a binding declared before the loop and `break` without a value.
+
+**Fix sketch**: collect each `break` value's borrows while the loop is checked, keyed by the loop's
+span, and let `hold_carried_borrows` read them. `refuse_borrowing_break` can then go, which refuses
+the same shape for function values.
+
 ## BUG-150: a field read off a temporary struct leaks the struct's `string`
 
 - **Status**: open, confirmed

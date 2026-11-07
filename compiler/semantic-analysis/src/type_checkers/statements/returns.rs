@@ -5,7 +5,9 @@ use ast_types::{BinaryOp, Expr, Stmt};
 use shared_types::Span;
 
 use crate::errors::TypeError;
+use crate::symbol_table::{frame_slot_binding, is_frame_slot};
 use crate::type_checkers::TypeChecker;
+use crate::type_checkers::closures::closure_reads;
 use crate::types::Type;
 
 use super::borrow_target_of;
@@ -40,8 +42,9 @@ impl TypeChecker {
     /// `self` outlive. A name absent from the table (a constant, an out-of-scope
     /// place) is conservatively treated as non-local so a valid program is never
     /// rejected.
-    pub(super) fn is_local_to_function(&self, name: &str) -> bool {
-        self.symbols.lookup(name).is_some() && !self.current_fn_outliving.contains(name)
+    pub(crate) fn is_local_to_function(&self, name: &str) -> bool {
+        is_frame_slot(name)
+            || (self.symbols.lookup(name).is_some() && !self.current_fn_outliving.contains(name))
     }
 
     /// Whether `func` names a tuple variant of an enum, so a call of it builds a value
@@ -65,6 +68,12 @@ impl TypeChecker {
     /// returned-reference check walks.
     pub(crate) fn type_holds_reference(&self, ty: &Type) -> bool {
         self.holds_reference_within(ty, &mut Vec::new())
+    }
+
+    /// Whether a value of `ty` can carry a borrow: it can hold a reference, or a function
+    /// value, whose captures may be one.
+    pub(crate) fn may_hold_borrow(&self, ty: &Type) -> bool {
+        self.type_holds_reference(ty) || self.holds_function_value(ty)
     }
 
     /// Whether a value of `ty` provably holds no borrow, so a call returning one ends the
@@ -177,10 +186,22 @@ impl TypeChecker {
     }
 
     fn report_escape(&mut self, name: String, span: Span, escape: Escape) {
+        let name = frame_slot_binding(&name).map_or(name.clone(), str::to_string);
         self.record_error(match escape {
             Escape::Return => TypeError::ReturnsReferenceToLocal { name, span },
             Escape::Store => TypeError::StoresReferenceToLocal { name, span },
         });
+    }
+
+    fn check_escaping_binding(&mut self, name: &str, span: Span, escape: Escape) {
+        if let Some(place) = self
+            .symbols
+            .borrowed_places(name)
+            .into_iter()
+            .find(|place| self.is_local_to_function(place))
+        {
+            self.report_escape(place, span, escape);
+        }
     }
 
     fn check_escaping_borrows(&mut self, expr: &Expr, escape: Escape) {
@@ -202,16 +223,26 @@ impl TypeChecker {
                     self.report_escape(name, *span, escape);
                 }
             }
-            Expr::Identifier(ident) => {
-                if let Some(place) = self
-                    .symbols
-                    .borrowed_places(&ident.name)
-                    .into_iter()
-                    .find(|place| self.is_local_to_function(place))
+            Expr::Identifier(ident) => self.check_escaping_binding(&ident.name, ident.span, escape),
+            // A capture borrowed lives in this frame, whatever the binding holds: the
+            // environment points at its slot, and a `&mut` parameter's slot dies here too.
+            // What it copied in leaves with it, holding what that binding held.
+            Expr::Closure {
+                params, body, span, ..
+            } => {
+                if let Some((place, _)) = self
+                    .borrowing_closures
+                    .get(span)
+                    .and_then(|borrows| borrows.first())
                 {
-                    self.report_escape(place, ident.span, escape);
+                    self.report_escape(place.clone(), *span, escape);
+                    return;
+                }
+                for name in closure_reads(params, body) {
+                    self.check_escaping_binding(&name, *span, escape);
                 }
             }
+            Expr::Deref { operand, .. } => self.check_escaping_borrows(operand, escape),
             // A part of a value holds that value's borrows: `h.r` dangles when `h` was
             // built around a borrow of a local.
             Expr::FieldAccess { object, .. }

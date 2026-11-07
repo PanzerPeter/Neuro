@@ -10,6 +10,31 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.34.0] - 2026-11-07
+
+### Added
+
+- A closure that borrows is now a value like a struct holding a reference. It can be stored in a
+  field, tuple, array or enum payload, assigned to a binding its borrowee outlives, and returned,
+  and whatever holds it holds its borrows.
+- A function can return a closure over its function-typed parameters, so `compose(f, g)` works
+  without `move`, and its result holds what its arguments borrow. A plain or `once` function-typed
+  parameter can be returned and stored too. A `mut` one stays in the call, and so does a closure
+  holding a reference that came in through a parameter.
+
+### Changed
+
+- A closure that reads an `Fn` value now copies it rather than borrowing it, so a `mut` binding of
+  function type can be reassigned while such a closure lives. The closure keeps the old value.
+
+### Fixed
+
+- A block, a `match` arm or a closure body could yield a borrow of its own binding:
+  `{ val s = make(); &s }` compiled and read freed memory, as did a struct around the borrow and a
+  method's reference into a local. It is now `'s' does not live long enough`.
+- A generic call did not store into its `&mut` argument: `put(&mut slot, &s)` with `slot: Slot<T>`
+  left `slot` holding nothing, so `s` could die first. It now takes the borrows.
+
 ## [5.33.0] - 2026-11-07
 
 ### Added

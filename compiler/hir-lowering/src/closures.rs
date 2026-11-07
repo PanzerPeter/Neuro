@@ -5,7 +5,7 @@
 //! binding (module constants and functions are referenced directly, so they are not
 //! captured). Each is settled the way the checker settles it: a `Copy` value
 //! the body only reads is copied, a `move` closure copies or moves every capture, a
-//! capture the checker recorded as moved out is moved in, and any other capture is
+//! capture the checker recorded by value is moved in, and any other capture is
 //! borrowed. A borrowed capture's environment field holds
 //! `&mut name`, and every use of `name` in the body reads or writes through it, so the
 //! backend sees a closure over a reference and nothing new.

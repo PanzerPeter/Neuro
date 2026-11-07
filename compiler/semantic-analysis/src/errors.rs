@@ -1138,6 +1138,16 @@ pub enum TypeError {
     },
 
     #[error(
+        "'{place}' does not live long enough: this value holds a borrow of it and leaves the scope that declares it; move '{place}' out of the block, or take it by value with `move`"
+    )]
+    BorrowLeavesScope { place: String, span: Span },
+
+    #[error(
+        "a `break` cannot carry a function value that borrows, because the loop's value would not hold the borrow: assign the value to a binding declared before the loop and `break` without one"
+    )]
+    BorrowingClosureInBreak { span: Span },
+
+    #[error(
         "cannot store a borrow of '{name}' through a reference: '{name}' is local to this function and does not outlive the call, while the reference's target does; store a borrow derived from a parameter instead"
     )]
     StoresReferenceToLocal { name: String, span: Span },
@@ -1422,7 +1432,7 @@ pub enum TypeError {
     OnceFunctionPerElement { method: String, span: Span },
 
     #[error(
-        "this value may borrow from the scope that built it (a closure that borrows a capture, a function-typed parameter, or a closure holding either), so it lives only as long as that scope: bind it with `val` or `mut`, pass it to a function-typed parameter, or call it; it cannot be assigned, returned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map` as a closure literal that holds a `&mut`"
+        "this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, a closure holding a reference that came in through a parameter, or a closure literal that writes through a borrow given to a built-in such as `.map`): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored; bind a closure that writes with `mut` before handing it to a built-in"
     )]
     ScopeBoundClosureStored { span: Span },
 
@@ -1742,6 +1752,8 @@ impl TypeError {
             | Self::CannotAssignWhileBorrowed { span, .. }
             | Self::ReturnsReferenceToLocal { span, .. }
             | Self::BorrowOutlivesPlace { span, .. }
+            | Self::BorrowLeavesScope { span, .. }
+            | Self::BorrowingClosureInBreak { span }
             | Self::StoresReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::SliceExpectsRange { span, .. }

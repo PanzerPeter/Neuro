@@ -498,7 +498,7 @@ impl TypeChecker {
     /// in what that reference borrows instead, and through a parameter or `self`, in the
     /// caller's frame, which none of this function's locals outlive.
     fn hold_stored_borrows(&mut self, place: &Place, value: &Expr, value_ty: &Type, span: Span) {
-        if !self.type_holds_reference(value_ty) {
+        if !self.may_hold_borrow(value_ty) {
             return;
         }
         let Some(root) = place.root().map(|root| root.name.clone()) else {

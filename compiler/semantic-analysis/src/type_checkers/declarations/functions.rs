@@ -320,7 +320,7 @@ impl TypeChecker {
                 self.record_move(expr);
                 // A trailing reference expression is an implicit return; verify it
                 // does not borrow a function-local place.
-                if self.type_holds_reference(return_type) {
+                if self.may_hold_borrow(return_type) {
                     self.check_returned_reference(expr);
                 }
             }
@@ -353,7 +353,7 @@ impl TypeChecker {
                     self.record_tail_move(std::slice::from_ref(tail), &[]);
                 }
                 // Each arm's tail is a returned value, checked as a trailing expression is.
-                if self.type_holds_reference(return_type) {
+                if self.may_hold_borrow(return_type) {
                     let arms = std::iter::once(then_block)
                         .chain(else_if_blocks.iter().map(|(_, block)| block))
                         .chain(else_block.iter());

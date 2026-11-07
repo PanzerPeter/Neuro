@@ -26,6 +26,7 @@ mod checked_float_conversion;
 mod cli_contract;
 mod closure_capture_modes;
 mod closure_inference;
+mod closure_values;
 mod closures;
 mod codepoint_iterators;
 mod cold_outlining;

@@ -174,6 +174,7 @@ impl TypeChecker {
         let body_ty = self
             .check_expr(&arm.body, expected)
             .unwrap_or(Type::Unknown);
+        self.refuse_dying_borrows(&arm.body, &body_ty, self.symbols.depth() - 1);
         self.pop_scope();
         // An arm that leaves the enclosing scope never reaches the point where the
         // `match` has a value, so it says nothing about that value and must not

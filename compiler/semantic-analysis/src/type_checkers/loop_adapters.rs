@@ -47,7 +47,7 @@ impl TypeChecker {
         let borrows: Vec<(String, bool)> = adapters
             .iter()
             .filter_map(|adapter| function_value_position(&adapter.callee))
-            .filter_map(|span| self.scope_bound_closures.get(&span))
+            .filter_map(|span| self.borrowing_closures.get(&span))
             .flatten()
             .cloned()
             .collect();

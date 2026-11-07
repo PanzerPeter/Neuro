@@ -1357,7 +1357,8 @@ reached any other way (a parameter, a field, a `mut` binding) stays unresolved, 
 move and its result owns nothing. That leaks rather than frees a buffer something still holds.
 
 The environment outlives the scope that built it, and its owned captures with it. A borrowed
-capture's address does not, so the checker keeps every closure that may borrow inside that scope.
+capture's address does not, so the checker holds a closure that borrows to its borrowee's scope,
+as it does a reference. A function value captured by copy takes a count like any other copy.
 
 ## Dynamic Dispatch ABI
 `codegen/dispatch.rs`. `emit_vtables` walks every `impl Trait for Type` whose trait is

@@ -146,6 +146,7 @@ impl TypeChecker {
                 let body_ty = self
                     .check_expr(single, ret_ty.as_ref())
                     .unwrap_or(Type::Unknown);
+                self.refuse_dying_borrows(single, &body_ty, self.symbols.depth() - 1);
                 match ret_ty {
                     Some(declared) => {
                         if !self.assignable(&body_ty, &declared) {
@@ -182,8 +183,7 @@ impl TypeChecker {
             },
             span,
         );
-        let carried = self.block_tail_slot == Some(span) && self.reference_closures.contains(&span);
-        if self.scope_bound_closures.contains_key(&span) && !in_slot && !carried {
+        if self.scope_bound_closures.contains(&span) && !in_slot {
             self.record_error(TypeError::ScopeBoundClosureStored { span });
         }
 
@@ -203,7 +203,7 @@ impl TypeChecker {
     pub(crate) fn refuse_mutating_closure_literal(&mut self, slot: Option<Span>) {
         if let Some(span) = slot
             && self
-                .scope_bound_closures
+                .borrowing_closures
                 .get(&span)
                 .is_some_and(|borrows| borrows.iter().any(|(_, exclusive)| *exclusive))
         {
@@ -228,10 +228,17 @@ impl TypeChecker {
         }
     }
 
-    /// A function-typed parameter may be handed a closure that borrows from the
-    /// caller's frame, so the body keeps it in the bounds such a closure lives in.
+    /// A `mut` function-typed parameter is lent exclusively for the call, so its value
+    /// may not leave it. A plain one is a copy and a `once` one is moved in, and any
+    /// borrow either carries came in through the parameter and may leave the same way.
     pub(crate) fn bind_function_param(&mut self, name: &str, ty: &Type) {
-        if matches!(ty, Type::Function { .. }) {
+        if matches!(
+            ty,
+            Type::Function {
+                mode: FunctionMode::Mut,
+                ..
+            }
+        ) {
             self.symbols.mark_scope_bound(name);
         }
     }
@@ -249,6 +256,7 @@ impl TypeChecker {
     /// `return`/`if` statement needs no value check; its `return`s are validated
     /// against the redirected return-type context.
     fn check_closure_block(&mut self, stmts: &[Stmt], declared: &Type) {
+        let params = self.symbols.depth() - 1;
         self.symbols.push_scope();
         if let Some((last, init)) = stmts.split_last() {
             for stmt in init {
@@ -270,6 +278,7 @@ impl TypeChecker {
                     let _ = self.check_stmt(other);
                 }
             }
+            self.refuse_dying_tail(last, declared, params);
         }
         self.pop_scope();
     }
@@ -278,6 +287,7 @@ impl TypeChecker {
     /// what it ends with: its last expression, or a trailing `if` with an `else`. A body
     /// ending in any other statement returns nothing. `hir-lowering` infers the same.
     fn infer_closure_block(&mut self, stmts: &[Stmt]) -> Type {
+        let params = self.symbols.depth() - 1;
         self.symbols.push_scope();
         let mut result = Type::Void;
         if let Some((last, init)) = stmts.split_last() {
@@ -307,6 +317,7 @@ impl TypeChecker {
                     Type::Void
                 }
             };
+            self.refuse_dying_tail(last, &result, params);
         }
         self.pop_scope();
         result
@@ -351,7 +362,6 @@ impl TypeChecker {
         let mut mode = FunctionMode::Shared;
         let mut borrows = Vec::new();
         let mut scope_bound = false;
-        let mut copies_reference = false;
         let mut seen: HashSet<&String> = HashSet::new();
         for (name, use_span) in fv.reads.iter().chain(&fv.assigns) {
             if !seen.insert(name) {
@@ -365,7 +375,16 @@ impl TypeChecker {
             let Some(ty) = self.symbols.lookup(name).map(|info| info.ty.clone()) else {
                 continue;
             };
-            let copy = self.is_type_copy(&ty);
+            // An `Fn` value is copied freely, and a copy keeps the environment alive where
+            // a borrow would only point at this frame's slot.
+            let shared_function = matches!(
+                ty,
+                Type::Function {
+                    mode: FunctionMode::Shared,
+                    ..
+                }
+            );
+            let copy = shared_function || self.is_type_copy(&ty);
             // A `mut` function value is only ever called or lent, both exclusively, or moved.
             let writes = mutated(name)
                 || matches!(
@@ -381,6 +400,9 @@ impl TypeChecker {
             }
             if writes {
                 mode = mode.max(FunctionMode::Mut);
+            } else if shared_function {
+                // Lowering cannot tell an `Fn` value from an `FnMut` one: HIR has no mode.
+                capture.record_moved(name);
             }
             if consumed.contains(name) {
                 mode = FunctionMode::Once;
@@ -388,14 +410,20 @@ impl TypeChecker {
                     capture.record_moved(name);
                 }
             }
-            // A reference taken by copy is still a borrow the closure holds, and a value
-            // that may itself borrow keeps whatever holds it in its scope too.
-            copies_reference |= self.type_holds_reference(&ty);
-            scope_bound |= self.type_holds_reference(&ty)
-                || self
-                    .symbols
-                    .lookup(name)
-                    .is_some_and(|info| info.scope_bound);
+            // A value lent for the call stays lent inside whatever closure holds it, and so
+            // does a reference no local backs: it came in through a parameter, and a caller
+            // lending `&x` beside a `&mut` to a holder of function values only does not
+            // expect the holder to keep `x` (`hold_argument_stores`).
+            scope_bound |= self
+                .symbols
+                .lookup(name)
+                .is_some_and(|info| info.scope_bound)
+                || (self.type_holds_reference(&ty)
+                    && !self
+                        .symbols
+                        .borrowed_places(name)
+                        .iter()
+                        .any(|place| self.is_local_to_function(place)));
             if capture.by_value(name) {
                 // A body that moved it whole has met the binding's borrows already.
                 let moved_whole = self
@@ -415,22 +443,14 @@ impl TypeChecker {
             if copy && !writes {
                 continue;
             }
-            scope_bound = true;
             self.borrow_capture(name, writes, *use_span);
             borrows.push((name.clone(), writes));
         }
         if scope_bound {
-            // Only a closure whose sole reason is a copied reference: one that borrows a
-            // capture of its own, or holds a bound value, carries what nothing follows.
-            let held_bound = fv.reads.iter().any(|(name, _)| {
-                self.symbols
-                    .lookup(name)
-                    .is_some_and(|info| info.scope_bound && !self.type_holds_reference(&info.ty))
-            });
-            if copies_reference && borrows.is_empty() && !held_bound {
-                self.reference_closures.insert(span);
-            }
-            self.scope_bound_closures.insert(span, borrows);
+            self.scope_bound_closures.insert(span);
+        }
+        if !borrows.is_empty() {
+            self.borrowing_closures.insert(span, borrows);
         }
         mode
     }
@@ -1169,8 +1189,28 @@ func main() -> i32 {{
         }
     }
 
+    /// A `mut` function-typed parameter is lent exclusively, so neither it nor a closure
+    /// over it may leave the call.
     #[test]
-    fn a_scope_bound_closure_cannot_be_stored() {
+    fn a_mut_function_parameter_cannot_leave_the_call() {
+        for body in ["f", "|| f()", "move || f()"] {
+            let errors = semantic_errors(&format!(
+                "func keep(f: mut () -> i32) -> mut () -> i32 {{ {body} }}
+func main() -> i32 {{ 0 }}"
+            ));
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. })),
+                "{body}: {errors:?}"
+            );
+        }
+    }
+
+    /// A borrowing closure is a holder: it may be stored while its borrowee outlives the
+    /// place, and each store is checked against the scope that declares the borrowee.
+    #[test]
+    fn a_borrowing_closure_may_be_stored_where_its_borrowee_lives() {
         for stored in [
             "mut g = |x: i32| -> u64 { 0 }\n    g = |x: i32| -> u64 { s.len() }",
             "val f = |x: i32| -> u64 { s.len() }\n    val pair = (f, 1)",
@@ -1183,12 +1223,7 @@ func main() -> i32 {{
     0
 }}"
             ));
-            assert!(
-                errors
-                    .iter()
-                    .any(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. })),
-                "{stored}: {errors:?}"
-            );
+            assert!(errors.is_empty(), "{stored}: {errors:?}");
         }
     }
 
@@ -1211,10 +1246,12 @@ func main() -> i32 {
         assert!(errors.is_empty(), "{errors:?}");
     }
 
-    /// A closure holding a reference holds a borrow, whether it copied the reference or
-    /// took it by `move`, so it may not leave the scope the borrow belongs to.
+    /// A closure holding a reference from a parameter stays in the call, whether it copied
+    /// the reference or took it by `move`: a caller may lend the reference beside a holder
+    /// of function values, which does not take its borrow. One over a local's slot is
+    /// refused as a borrow of that local.
     #[test]
-    fn a_closure_holding_a_reference_cannot_be_returned() {
+    fn a_closure_holding_a_parameter_reference_cannot_be_returned() {
         for body in ["|| s.len()", "move || s.len()"] {
             let errors = semantic_errors(&format!(
                 "func len_of(s: &string) -> () -> u64 {{ {body} }}
@@ -1227,5 +1264,15 @@ func main() -> i32 {{ 0 }}"
                 "{body}: {errors:?}"
             );
         }
+        let errors = semantic_errors(
+            "func len_of(s: string) -> () -> u64 { || s.len() }
+func main() -> i32 { 0 }",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, TypeError::ReturnsReferenceToLocal { .. })),
+            "{errors:?}"
+        );
     }
 }

@@ -249,21 +249,19 @@ pub(crate) struct TypeChecker {
     /// the whole-binding rule is checked once, at the outermost link, against that
     /// link's own path.
     in_sub_place: bool,
-    /// Every closure literal that borrows a capture or holds a scope-bound value, keyed by
-    /// its span, with the bindings it borrows and whether each borrow is exclusive. The
-    /// binding the literal initializes takes the borrows over (`hold_carried_borrows`).
-    scope_bound_closures: HashMap<shared_types::Span, Vec<(String, bool)>>,
+    /// Every closure literal that borrows a capture, keyed by its span, with the bindings
+    /// it borrows and whether each borrow is exclusive. The binding that ends up holding
+    /// the literal takes the borrows over (`hold_carried_borrows`).
+    borrowing_closures: HashMap<shared_types::Span, Vec<(String, bool)>>,
+    /// Every closure literal over a `mut` function parameter or a closure holding one,
+    /// which may only be checked in `function_value_slot`.
+    scope_bound_closures: std::collections::HashSet<shared_types::Span>,
     /// Whether the closure body being checked takes its return type from its last
     /// expression, which leaves a `return` in it nothing to be checked against.
     inferring_closure_return: bool,
-    /// Scope-bound closures that only copy references, which a block may yield into the
-    /// binding it initializes: the borrows they carry are followed out of the block.
-    reference_closures: std::collections::HashSet<shared_types::Span>,
-    /// The closure literal the block initializing a binding ends in (`block_tail_closure`).
-    block_tail_slot: Option<shared_types::Span>,
     /// The one position a scope-bound function value may be checked in next: the whole
-    /// initializer of a binding, or a whole argument to a function-typed parameter.
-    /// Anywhere else it could be stored past the bindings it reads.
+    /// initializer of a binding, a whole argument to a function-typed parameter, or a
+    /// callee. Anywhere else it would outlive the call that lent it.
     function_value_slot: Option<shared_types::Span>,
     /// The one position a borrow of a temporary may be checked in next: a whole argument
     /// of a call, where the temporary outlives the borrow.
@@ -557,10 +555,9 @@ impl TypeChecker {
             in_borrow_operand: false,
             slot_reads: HashMap::new(),
             in_sub_place: false,
-            scope_bound_closures: HashMap::new(),
+            borrowing_closures: HashMap::new(),
+            scope_bound_closures: std::collections::HashSet::new(),
             inferring_closure_return: false,
-            reference_closures: std::collections::HashSet::new(),
-            block_tail_slot: None,
             function_value_slot: None,
             temporary_borrow_slot: None,
             call_temporary_borrows: Vec::new(),

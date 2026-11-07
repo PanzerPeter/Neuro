@@ -112,7 +112,7 @@ walkers.
   variants are ordered weakest first, so `a <= b` reads "a value of mode `a` fits a slot of mode
   `b`", which is the whole assignability rule the checker applies.
 - `Expr::Closure { capture, .. }` is the one place the checker writes onto the AST.
-  `ClosureCapture` holds the `move` keyword and, in a `RefCell`, the names the body moves out:
+  `ClosureCapture` holds the `move` keyword and, in a `RefCell`, the names taken by value (what the body moves out, and each `Fn` value it only reads):
   the checker calls `record_moved` while settling captures and lowering asks `by_value`, so
   lowering must run on the tree `type_check` saw (a clone taken after it carries the names).
   Only the body check can tell a move, and a `Span`-keyed side table would collide across

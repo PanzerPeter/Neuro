@@ -157,7 +157,7 @@ in each program has the full description. The three module files under
 ### Traits, generics and closures
 
 - [`bin_tally.nr`](showcase/bin_tally.nr): Derivable traits as bounds (`Copy`, `Clone`, `Debug`, `PartialEq`, `Hashable`), with a `HashMap` keyed by a derived struct.
-- [`closures.nr`](showcase/closures.nr): Closures and higher-order functions: capture by copy, by reference, by `move` or by a move the body makes, `(i32) -> i32` parameters, and closures returned or stored in fields.
+- [`closures.nr`](showcase/closures.nr): Closures and higher-order functions: capture by copy, by reference, by `move` or by a move the body makes, `(i32) -> i32` parameters, closures returned or stored in fields, and borrowing closures kept in an array and a struct and chained by a `compose` that returns one.
 - [`derived_records.nr`](showcase/derived_records.nr): `@derive(Debug, PartialEq)` and `@derive(Copy, Clone)` on nested structs, with the `:?` spec and structural `==`.
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): Generic structs and functions with const parameters, `where` clauses, turbofish, a non-`Copy` type argument, and `?` at a generic parameter.
 - [`shared_views.nr`](showcase/shared_views.nr): References as generic arguments: one `Slot<T>` and one `pick` over owned records and borrows of them, where `.clone()` copies the record or only the reference, with a closure parameter and an enum payload.

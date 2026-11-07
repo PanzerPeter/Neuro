@@ -422,18 +422,12 @@ func main() -> i32 {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
-fn scope_bound(errors: &[TypeError]) -> usize {
-    errors
-        .iter()
-        .filter(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. }))
-        .count()
-}
-
-/// A function-typed parameter may hold a closure that borrows from the caller's frame,
-/// so it may not leave the callee: stored through a reference or returned. BUG-072 read
-/// a dead frame through exactly these stores.
+/// A plain function-typed parameter is a copy whose borrows are its caller's, so it may
+/// leave the callee: stored through a reference or returned. BUG-072 read a dead frame
+/// through these stores when a call's result held nothing; the caller's holder now takes
+/// the arguments' borrows.
 #[test]
-fn test_bug_072_a_function_typed_parameter_may_not_leave_its_callee() {
+fn test_bug_072_a_function_typed_parameter_leaves_with_its_borrows() {
     let prelude = r#"
 struct Holder { f: (f32) -> f32 }
 type F = (f32) -> f32
@@ -447,11 +441,7 @@ type F = (f32) -> f32
     ];
     for item in escaping {
         let errors = semantic_errors(&format!("{prelude}{item}\nfunc main() -> i32 {{ 0 }}\n"));
-        assert_eq!(
-            scope_bound(&errors),
-            1,
-            "`{item}` must be refused once; got {errors:?}"
-        );
+        assert!(errors.is_empty(), "`{item}`: {errors:?}");
     }
 }
 

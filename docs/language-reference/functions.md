@@ -585,22 +585,41 @@ func main() -> i32 {
 
 Calling a `mut` value borrows it exclusively too, so nothing else may reach it during the call: `f(|| f())` and `twice(f, f)` with two `mut` parameters are refused. The borrow starts once the arguments are evaluated, so `f(f(1))` is fine, because the inner call returns before the outer one starts. A closure that calls or lends a `mut` value it captured writes that capture, so the closure is `mut` itself and holds the value exclusively while it lives. A `mut` value reached through a shared `&` borrow, such as a field read through `&self`, can be neither called nor lent.
 
-A value that may borrow lives only in the scope that made it:
+### Closures that borrow are values
 
-- a closure that borrows a capture, or copies a reference into its environment;
-- a function-typed parameter, since its caller may have passed such a closure;
-- a closure that captures either.
+A closure that borrows is a value like a struct holding a reference. It can sit in a struct field, a tuple, an array or an enum payload, be assigned, and be returned, and whatever holds it holds its borrows:
 
-Such a value may initialize a binding, be passed to a function-typed parameter, be read by a built-in that only calls it, or be called. It may not be returned, assigned, stored inside another value, or yielded from a block. Returning a closure over the function values a function was handed is refused with this diagnostic:
+```neuro
+struct Stage { label: string, run: (i32) -> i32 }
+
+func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 {
+    |x| g(f(x))
+}
+
+func main() -> i32 {
+    val prefix = "neu" + "ral"
+    val steps = [|x: i32| x + prefix.len() as i32, |x: i32| x * 2]
+    val stage = Stage { label: "chain", run: compose(steps[0], steps[1]) }
+    (stage.run)(1)                      // (1 + 6) * 2 = 14
+}
+```
+
+`compose` returns a closure over its parameters, so its result holds what `steps` borrows, and `prefix` cannot be moved or written while `stage` lives. What such a value borrows sets its limits:
+
+- It cannot be stored in a binding that outlives its borrowee, and a value holding it cannot leave a block, an arm or a closure body that declares the borrowee. Both report `'s' does not live long enough`.
+- It cannot be returned while it borrows a local or a by-value parameter. A closure that borrows a reference parameter or `self` points at that binding's slot, so it stays in the function too.
+- A `break` value cannot hold a function value that borrows.
+
+A `mut` function parameter is lent exclusively, and a closure holding a reference that came in through a parameter stays in the call as well. Either may be bound, passed to a function-typed parameter or called, and nothing else:
 
 ```text
-error: this value may borrow from the scope that built it (a closure that borrows a capture, a function-typed parameter, or a closure holding either), so it lives only as long as that scope: bind it with `val` or `mut`, pass it to a function-typed parameter, or call it; it cannot be assigned, returned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map` as a closure literal that holds a `&mut`
+error: this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, a closure holding a reference that came in through a parameter, or a closure literal that writes through a borrow given to a built-in such as `.map`): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored; bind a closure that writes with `mut` before handing it to a built-in
 ```
 
 ### Not yet supported
 
-- Returning a closure over the function values a function was handed (`func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 { move |x| g(f(x)) }`).
-- Storing a borrowing closure in a holder that dies before what it borrows.
+- Storing a closure over a reference parameter, or returning one (`func len_of(s: &string) -> () -> u64 { || s.len() }`).
+- A function value in a collection (`Vec<(i32) -> i32>`).
 - A closure literal that writes through a borrow, written as the argument of a built-in method (`.map`, `.filter`, `.zip`, `.reduce`). Bind it with `mut` first, so the borrow rules see it beside what the method walks. A literal that only reads what it borrows goes there directly, and a `for` head's literal keeps its borrows until the loop ends.
 - An instantiated associated function or generic method as a value on its own (`val f = Cell::new::<i32>`). It works as a `|>` target and as a later `>>` stage.
 

@@ -203,7 +203,7 @@ func main() -> i32 {
 }
 
 #[test]
-fn a_value_that_may_borrow_cannot_leave_its_scope() {
+fn a_value_that_borrows_a_parameter_may_leave_with_it() {
     for (name, item) in [
         (
             "returned_parameter.nr",
@@ -217,6 +217,17 @@ fn a_value_that_may_borrow_cannot_leave_its_scope() {
             "stored_parameter.nr",
             "struct H { f: (i32) -> i32 }\nfunc keep(h: &mut H, g: (i32) -> i32) { h.f = g }",
         ),
+    ] {
+        let exit = run(name, &format!("{item}\nfunc main() -> i32 {{ 0 }}\n"));
+        assert_eq!(exit, 0, "{name}");
+    }
+}
+
+/// A reference that came in through a parameter does not leave inside a closure, because a
+/// caller lending it beside a holder of function values gives that holder none of its borrow.
+#[test]
+fn a_closure_over_a_parameter_reference_stays_in_its_call() {
+    for (name, item) in [
         (
             "returned_borrow.nr",
             "func len_of(s: &string) -> () -> u64 { || s.len() }",
@@ -225,11 +236,16 @@ fn a_value_that_may_borrow_cannot_leave_its_scope() {
             "returned_block_borrow.nr",
             "func len_of(s: &string) -> () -> u64 {\n    val g = {\n        val r = s\n        move || r.len()\n    }\n    g\n}",
         ),
+        (
+            "stored_reference.nr",
+            "struct H { f: () -> u64 }\nfunc keep(h: &mut H, s: &string) { h.f = move || s.len() }",
+        ),
+        (
+            "stored_reborrow.nr",
+            "struct P { n: string }\nstruct H { f: () -> u64 }\nfunc keep(h: &mut H, p: &P) {\n    val r = &p.n\n    h.f = move || r.len()\n}",
+        ),
     ] {
         let err = rejected(name, &format!("{item}\nfunc main() -> i32 {{ 0 }}\n"));
-        assert!(
-            err.contains("lives only as long as that scope"),
-            "{name}: {err}"
-        );
+        assert!(err.contains("stays in the call"), "{name}: {err}");
     }
 }

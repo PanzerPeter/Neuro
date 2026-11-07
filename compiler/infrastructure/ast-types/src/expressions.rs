@@ -304,11 +304,11 @@ pub enum InterpPart {
 }
 
 /// Which captures a closure literal takes by value: all of them under `move`, otherwise
-/// the ones its body moves out.
+/// the ones its body moves out and every `Fn` value it only reads.
 ///
 /// Only the body check can tell a move (it takes the callee's receiver mode, the operand's
-/// type and every consuming position), and lowering must capture exactly what the checker
-/// moved or a value is released twice. So the checker records the names here, on the
+/// type and every consuming position) or a function value's call mode, and lowering must
+/// capture exactly what the checker moved or a value is released twice. So the checker records the names here, on the
 /// literal, and lowering reads them: a field needs no key, where a side table's `Span` key
 /// would collide across modules.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -327,7 +327,7 @@ impl ClosureCapture {
         }
     }
 
-    /// Record that the body moves `name` out of its capture.
+    /// Record that the literal takes `name` by value.
     pub fn record_moved(&self, name: &str) {
         self.moved.borrow_mut().push(name.to_string());
     }

@@ -683,8 +683,10 @@ holder's (`borrows_outliving`), and a deeper one is `BorrowOutlivesPlace`. Befor
 inside a block with `b` declared outside compiled (BUG-109), and so did `out = r` from a `match`
 arm. A call is a store too (`hold_argument_stores` in `expressions/calls.rs`, run by every call
 path beside the reborrow check): an erased signature does not say what a callee keeps, so the
-binding behind each `&mut` argument whose referent can hold a reference, or a `&mut self`
+binding behind each `&mut` argument whose referent can hold a borrow, or a `&mut self`
 receiver of such a type, holds every borrow the call's other arguments and receiver carry. A
+referent holding function values and no reference takes only the function-valued ones. A generic
+call judges its instance's parameters, not `Slot<T>`. A
 store through a reference writes into what the reference borrows (`borrowed_places` of the
 root); through a parameter or `self` it writes into the caller's frame, so the value may hold no
 borrow of a local (`check_stored_through_reference`, `StoresReferenceToLocal`).
@@ -1102,24 +1104,45 @@ borrows the enclosing statement had in flight are restored after the body (its o
 them as they go), then each borrowed capture takes its borrow (`borrow_capture`), transient until
 `hold_carried_borrows` makes the initialized binding hold it, as `val r = &x` does.
 
-A value that may borrow is scope-bound (`scope_bound_closures`, keyed by the literal's span, and
-`SymbolInfo::scope_bound` on a binding holding one): a closure that borrows a capture or holds a
-reference by copy (`type_holds_reference` on the capture), a function-typed parameter of a function, method or closure
-(`bind_function_param`: its caller may have passed a borrowing closure), and a closure capturing
-either, `move` or not. It may be checked only in `function_value_slot`: the whole initializer of a
-binding, or a whole argument to a function-typed parameter (`check_receiver_call_args`,
+A closure that borrows is a holder like any other: `borrowing_closures`, keyed by the literal's
+span, lists what each borrows, and `tail_borrow_targets` collects every literal in a value, however
+nested, so `hold_carried_borrows` attaches those borrows wherever the value lands. A call's result
+takes what its callee holds as well as its arguments' (`|| || s.len()`). An `Fn` capture the body
+only reads is a copy (`shared_function` in `settle_captures`, recorded through
+`ClosureCapture::record_moved` because HIR has no mode): a borrow would point at this frame's slot,
+and the closure `compose(f, g)` returns outlives that frame. `may_hold_borrow` is the holder predicate
+(`type_holds_reference` or `holds_function_value`).
+
+A closure's borrow points at the binding's slot, so a borrow of a reference parameter or `self`
+outlives the call by `current_fn_outliving` when the slot does not. `hold_frame_slot` records a
+second place beside it, one `is_local_to_function` always counts as local (`is_frame_slot`), and
+`inherit_borrows` carries it to every copy. A literal in an escape walk needs none of this: any
+entry in `borrowing_closures` is refused, and its reads are checked as bindings.
+
+`refuse_dying_borrows` is the rule for a value leaving a scope (`BorrowLeavesScope`), run with the
+scope still open, since afterwards a name means nothing or an outer shadowed binding. It runs on a
+block's tail (`check_block_expr_type`), an arm's body and a closure's result. A place reached through
+a reference is a reborrow, judged by what the reference holds. Under elision a method's reference
+comes from its receiver, so `m.get(&key)` may end a block declaring `key`; a free function's comes
+from any argument. `refuse_borrowing_break` refuses a `break` carrying a function value that borrows,
+because the loop's value is not walked (BUG-151 is the same gap for references).
+
+A value that stays in its call is scope-bound (`scope_bound_closures`, a set of literal spans, and
+`SymbolInfo::scope_bound` on a binding holding one): a `mut` function parameter of a function, method
+or closure (`bind_function_param`), a closure holding a reference no local backs
+(`type_holds_reference` on the capture with no local in its `borrowed_places`), and a closure
+capturing either, `move` or not. It may be checked only in `function_value_slot`: the whole
+initializer of a binding, a whole argument to a function-typed parameter (`check_receiver_call_args`,
 `check_generic_call_with`), or a callee. A tensor traversal and a `for`-head adapter open it for a
 bare binding or a closure literal (`function_value_position`), but `refuse_mutating_closure_literal`
 refuses a literal holding a `&mut`, whose borrow would begin after the built-in read what it walks.
 A `for` head's literals keep their borrows for the loop under the hidden `$adapters` holder
-(`hold_adapter_borrows`), so the body cannot write what they read.
-Anywhere else it could be stored past what it borrows: `ScopeBoundClosureStored`. One exception:
-a closure bound only by a reference it copied (`reference_closures`) may be the last expression of
-a block that initializes a binding (`block_tail_slot`, `block_tail_closure`), since
-`hold_carried_borrows` follows the borrows it carries out of the block; the binding is then bound
-itself (`yields_scope_bound_closure` looks through the block). A `move`
-closure over owned values is not scope-bound: its environment owns them and may outlive the
-scope. `Type::Function`'s `mode` makes `is_compatible_with` directional (a
+(`hold_adapter_borrows`), so the body cannot write what they read. Anywhere else:
+`ScopeBoundClosureStored`. The reference rule is what lets `hold_argument_stores` keep a plain `&`
+argument out of a `&mut` holder of function values only: nothing can put the reference inside one,
+so `opt.step(&batch)` with a function-valued field leaves `batch` free.
+
+`Type::Function`'s `mode` makes `is_compatible_with` directional (a
 value fits a slot of its own mode or a stronger one), a `once` value is move-tracked, and a call
 through a `once` binding moves it (`consume_once_callee`).
 
@@ -1140,8 +1163,7 @@ is `FunctionUsedAsValue`, having no single type until its type arguments are nam
 
 A closure's environment is a counted heap block the backend shares between copies, so a function
 value that is not scope-bound may be returned, stored in a holder, or stored through a reference.
-That is what BUG-072's frame-bound rule guarded, and the scope-bound rule above now covers the
-part of it that still holds. `holds_function_value` walks a type through struct fields, enum
+BUG-072's frame-bound rule guarded that, and the holder rules above cover it. `holds_function_value` walks a type through struct fields, enum
 payloads, newtypes, arrays and tuples for `hold_carried_borrows`. A callee may keep a function
 value, so `check_pool_retention` judges a closure argument by its captures like any other.
 

@@ -188,7 +188,6 @@ coverage.xml
 
 # JetBrains (IntelliJ, CLion, GoLand, Rider, etc.)
 .idea/
-.idea.bak/
 *.iml
 workspace.xml
 tasks.xml

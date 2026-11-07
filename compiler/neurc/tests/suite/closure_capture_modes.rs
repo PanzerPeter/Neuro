@@ -514,7 +514,7 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(err.contains("lives only as long as that scope"), "{err}");
+    assert!(err.contains("does not live long enough"), "{err}");
 }
 
 #[test]
@@ -592,7 +592,7 @@ func main() -> i32 {
 "#,
     );
     assert_eq!(
-        err.matches("as a closure literal that holds a `&mut`")
+        err.matches("a closure literal that writes through a borrow")
             .count(),
         2,
         "{err}"

@@ -226,7 +226,10 @@ func shifter() -> (i32) -> i32 {
 func main() -> i32 { shifter()(1) }
 "#,
     );
-    assert!(error.contains("may borrow from the scope"), "{error}");
+    assert!(
+        error.contains("cannot return a reference to 'p'"),
+        "{error}"
+    );
 }
 
 #[test]

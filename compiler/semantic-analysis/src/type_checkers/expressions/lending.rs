@@ -1,9 +1,9 @@
 // Lending function values: the borrow a call takes of the function value it calls, and of
 // each one it hands to a function-typed parameter.
 //
-// A callee can only call a function-typed parameter (it is scope-bound), so the caller
-// keeps the value: a plain parameter borrows it shared, a `mut` one exclusively, for as
-// long as the call runs. Calling a value borrows it the same way. The borrows begin once
+// The caller keeps a function value it hands to a function-typed parameter: a plain
+// parameter borrows it shared, a `mut` one exclusively, for as long as the call runs, and
+// what a plain one's callee keeps is a copy. Calling a value borrows it the same way. The borrows begin once
 // the arguments are evaluated, so `f(f(x))` is two calls one after the other, while a
 // closure argument that captures `f` holds its borrow into the call and conflicts. They
 // end with the call, not the statement, so `f(1) + f(2)` holds one at a time.

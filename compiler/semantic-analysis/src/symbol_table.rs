@@ -127,8 +127,8 @@ pub(crate) struct SymbolInfo {
     borrows: Vec<BorrowProvenance>,
     /// Set on a `val` bound directly to a `@grad` call's result.
     pub(crate) grad_loss: Option<GradLoss>,
-    /// Holds a closure that borrows or owns a non-Copy capture, which must not be
-    /// stored anywhere that outlives this binding's scope.
+    /// Holds a value lent for the call: a `mut` function parameter or a closure over one,
+    /// which may only be called, lent or bound.
     pub(crate) scope_bound: bool,
     /// Index of the scope defining the binding a `val r = &mut x` borrows whole, set only
     /// inside a `pool` and only when `x` reaches no storage but its own, so every write
@@ -159,6 +159,19 @@ impl SymbolInfo {
 /// name can reach it.
 pub(crate) fn pending_key(name: &str) -> String {
     format!("__pending_{name}")
+}
+
+/// Where a [`SymbolTable::hold_frame_slot`] place starts. `$` is in no source name.
+const FRAME_SLOT_PREFIX: &str = "$slot ";
+
+/// The binding behind a place [`SymbolTable::hold_frame_slot`] recorded, if `place` is one.
+pub(crate) fn frame_slot_binding(place: &str) -> Option<&str> {
+    place.strip_prefix(FRAME_SLOT_PREFIX)
+}
+
+/// Whether `place` is one [`SymbolTable::hold_frame_slot`] recorded.
+pub(crate) fn is_frame_slot(place: &str) -> bool {
+    frame_slot_binding(place).is_some()
 }
 
 /// One binding's transient borrow counts, captured so alternative paths (the arms of a
@@ -378,6 +391,21 @@ impl SymbolTable {
         }
     }
 
+    /// Record that `holder` points at the slot of `binding`, a reference parameter or
+    /// `self`, which a closure borrowed. What such a binding refers to outlives the call,
+    /// but its slot does not, so this travels as a place of its own, one the escape rules
+    /// always count as local. Nothing can be frozen through it: the real borrow of
+    /// `binding` sits beside it.
+    pub(crate) fn hold_frame_slot(&mut self, holder: &str, binding: &str) {
+        if let Some(info) = self.lookup_mut(holder) {
+            info.borrows.push(BorrowProvenance {
+                place: format!("{FRAME_SLOT_PREFIX}{binding}"),
+                scope: 0,
+                exclusive: false,
+            });
+        }
+    }
+
     /// The places `holder` borrows exclusively, each with the index of the scope that
     /// defines it: what a closure captured by `&mut`, where a call through it can store.
     pub(crate) fn exclusive_borrows(&self, holder: &str) -> Vec<(String, usize)> {
@@ -475,6 +503,20 @@ impl SymbolTable {
     pub(crate) fn borrowed_places(&self, holder: &str) -> Vec<String> {
         self.lookup(holder)
             .map(|info| info.borrows.iter().map(|prov| prov.place.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The places `holder` borrows that are declared in the scope at index `floor` or one
+    /// nested inside it.
+    pub(crate) fn borrows_from_scope(&self, holder: &str, floor: usize) -> Vec<String> {
+        self.lookup(holder)
+            .map(|info| {
+                info.borrows
+                    .iter()
+                    .filter(|prov| prov.scope >= floor)
+                    .map(|prov| prov.place.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

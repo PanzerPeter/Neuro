@@ -5,7 +5,8 @@
 // that reads a `string` or pushes to a `Vec` borrows it; a `move` closure that gives its
 // `string` away is `once`. Closures are also returned, stored in struct fields and lent to
 // `mut` parameters. Without `move`, a closure still takes by value whatever its body gives
-// away, one capture at a time.
+// away, one capture at a time. A closure that borrows is a value too: it sits in an array or
+// a struct, is assigned, and comes back out of `compose`, while what it borrows stays frozen.
 
 // Apply `f` to each element of a 4-element array and sum the results.
 
@@ -93,6 +94,18 @@ func feed(xs: [i32; 4], f: mut (i32) -> u64) -> u64 {
 struct Meter {
     label: string,
     read: mut (i32) -> u64
+}
+
+// A labelled step of a pipeline. Its function may borrow, and a `Stage` then holds that borrow.
+struct Stage {
+    label: string,
+    run: (i32) -> i32
+}
+
+// Chain two functions. The closure copies both, so the caller's result holds whatever they
+// borrow, and it stays valid after this function returns.
+func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 {
+    |x| g(f(x))
 }
 
 struct Scaler {
@@ -196,8 +209,21 @@ func main() -> i32 {
     println("lent closure      feed(data, tally)  = {fed}")
     println("moved closure     {meter.label} read(10)     = {grown}")
 
+    // Borrowing closures as values. `prefix` is borrowed by the array's first closure, by
+    // `chain` and by `stage`, so it cannot be moved or written while they live.
+    val prefix = "neu" + "ral"
+    val steps = [|x: i32| x + prefix.len() as i32, |x: i32| x * 2]
+    val chain = compose(steps[0], steps[1])
+    val stage = Stage { label: "chain", run: chain }
+    mut current: (i32) -> i32 = |x| x
+    val before = current(1)                                                    // 1
+    current = stage.run
+    val piped = current(1)                                                     // (1 + 6) * 2 = 14
+
+    println("borrowing values  {stage.label}(1) from {before}      = {piped}")
+
     val inferred = summed + (widest as i32) + escaped + owned + (inferred_move as i32) + delivered
     val lent = (grown - fed) as i32
-    println("total                                = {total + inferred + lent}")
-    total + inferred + lent                          // 143 + 10 + 4 + 12 + 4 + 10 + 9 + 30 = 222
+    println("total                                = {total + inferred + lent + piped}")
+    total + inferred + lent + piped                  // 143 + 10 + 4 + 12 + 4 + 10 + 9 + 30 + 14 = 236
 }

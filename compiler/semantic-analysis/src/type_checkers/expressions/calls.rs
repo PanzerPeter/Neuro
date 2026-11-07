@@ -309,8 +309,7 @@ impl TypeChecker {
         result: Option<&Type>,
     ) {
         let lent = self.call_temporary_borrows.split_off(before);
-        let keeps =
-            result.is_some_and(|ty| self.type_holds_reference(ty) || self.holds_function_value(ty));
+        let keeps = result.is_some_and(|ty| self.may_hold_borrow(ty));
         if !keeps {
             return;
         }
@@ -323,7 +322,9 @@ impl TypeChecker {
     /// can hold one (`func set(h: &mut H, s: &string) { h.r = s }`), and nothing in an
     /// erased signature says which, so the binding behind each such argument holds every
     /// borrow the call's other inputs carry: a borrowed argument, what an argument value
-    /// holds, and a borrow of the receiver with whatever it holds.
+    /// holds, and a borrow of the receiver with whatever it holds. A referent that holds
+    /// function values and no reference takes only what is function-valued: no closure over
+    /// a reference parameter leaves its call, so `opt.step(&batch)` keeps nothing of `batch`.
     fn hold_argument_stores(
         &mut self,
         receiver: Option<(&ast_types::Expr, bool)>,
@@ -331,38 +332,46 @@ impl TypeChecker {
         params: &[Type],
         span: Span,
     ) {
-        // Each holder with the argument it came in as; `None` is the receiver.
-        let mut holders: Vec<(Option<usize>, Vec<String>)> = Vec::new();
+        // Each holder with the argument it came in as (`None` is the receiver), and
+        // whether it can hold a reference.
+        let mut holders: Vec<(Option<usize>, bool, Vec<String>)> = Vec::new();
         for (index, (arg, param)) in args.iter().zip(params).enumerate() {
             if let Type::Reference {
                 inner,
                 mutable: true,
             } = param
-                && self.type_holds_reference(inner)
+                && self.may_hold_borrow(inner)
             {
-                holders.push((Some(index), self.store_target_bindings(arg)));
+                let references = self.type_holds_reference(inner);
+                holders.push((Some(index), references, self.store_target_bindings(arg)));
             }
         }
         let receiver_root = receiver.and_then(|(expr, _)| Self::place_root_name(expr));
+        let receiver_ty = receiver.and_then(|(expr, _)| self.projection_type(expr));
         if let Some((expr, true)) = receiver
-            && self
-                .projection_type(expr)
-                .is_some_and(|ty| self.type_holds_reference(ty.referent()))
+            && let Some(ty) = &receiver_ty
+            && self.may_hold_borrow(ty.referent())
         {
-            holders.push((None, self.store_target_bindings(expr)));
+            let references = self.type_holds_reference(ty.referent());
+            holders.push((None, references, self.store_target_bindings(expr)));
         }
-        if !holders.is_empty() {
+        if holders.iter().any(|(_, references, _)| *references) {
             self.refuse_stored_temporary_borrows(args);
         }
-        for (own, targets) in holders {
+        for (own, references, targets) in holders {
             for holder in targets {
                 let before = self.symbols.borrow_count(&holder);
                 for (index, (arg, param)) in args.iter().zip(params).enumerate() {
-                    if Some(index) != own {
+                    if Some(index) != own && (references || self.holds_function_value(param)) {
                         self.hold_carried_borrows(&holder, arg, param);
                     }
                 }
+                let receiver_carries = references
+                    || receiver_ty
+                        .as_ref()
+                        .is_some_and(|ty| self.holds_function_value(ty.referent()));
                 if own.is_some()
+                    && receiver_carries
                     && let Some(root) = &receiver_root
                     && *root != holder
                 {
@@ -653,7 +662,13 @@ impl TypeChecker {
         let lends = self.lend_arguments(lent);
         self.end_lends(lends);
         self.check_reborrow_exclusivity(receiver, args, &sig.params);
-        self.hold_argument_stores(receiver, args, &sig.params, span);
+        // What a `&mut Slot<T>` argument can hold depends on `T`, so only the instance says.
+        let instance_params: Vec<Type> = sig
+            .params
+            .iter()
+            .map(|param| self.substitute_generic(param, &subst, span))
+            .collect();
+        self.hold_argument_stores(receiver, args, &instance_params, span);
 
         // Every parameter must be bound, by inference or turbofish. A type argument is
         // unconstrained: the body was move-checked against an abstract `T` that is
