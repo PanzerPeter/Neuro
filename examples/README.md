@@ -160,6 +160,7 @@ in each program has the full description. The three module files under
 - [`closures.nr`](showcase/closures.nr): Closures and higher-order functions: capture by copy, by reference or by `move`, `(i32) -> i32` parameters, and closures returned or stored in fields.
 - [`derived_records.nr`](showcase/derived_records.nr): `@derive(Debug, PartialEq)` and `@derive(Copy, Clone)` on nested structs, with the `:?` spec and structural `==`.
 - [`generic_toolkit.nr`](showcase/generic_toolkit.nr): Generic structs and functions with const parameters, `where` clauses, turbofish, a non-`Copy` type argument, and `?` at a generic parameter.
+- [`shared_views.nr`](showcase/shared_views.nr): References as generic arguments: one `Slot<T>` and one `pick` over owned records and borrows of them, where `.clone()` copies the record or only the reference, with a closure parameter and an enum payload.
 - [`shape_traits.nr`](showcase/shape_traits.nr): Trait declarations with default methods, `impl Trait` and `dyn Trait` dispatch, a generic bounded by two traits, and a supertrait reached through a default body, a bound and a trait object.
 - [`typed_channels.nr`](showcase/typed_channels.nr): Associated types (`type Sample`) with one trait and three implementors, `Channel<Sample = i32>` bounds, and a generic trait method called through one.
 

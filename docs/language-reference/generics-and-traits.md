@@ -333,7 +333,9 @@ A bound is enforced at the call site, and the body may call only the methods its
 
 ### Copy and Clone bounds
 
-`T: Copy` makes `T` copy instead of move inside the body, so a `T` may be read twice and a `Vec<T>` may be built there. `T: Clone` gives the body `v.clone()`, which returns a `T`, and a `Copy` bound gives it too. The scalars, `string` (which is `Clone` but not `Copy`), and a struct that derives or implements the trait all meet these bounds. A reference does not: passing `&i32` for a `T: Copy` parameter is rejected with ``type argument `&i32` for 'T' does not implement required trait 'Copy'``.
+`T: Copy` makes `T` copy instead of move inside the body, so a `T` may be read twice and a `Vec<T>` may be built there. `T: Clone` gives the body `v.clone()`, which returns a `T`, and a `Copy` bound gives it too. The scalars, `string` (which is `Clone` but not `Copy`), and a struct that derives or implements the trait all meet these bounds.
+
+A shared reference meets both, whatever it refers to, and `.clone()` on a value declared `T` copies the reference. A receiver reads through its borrows only as far as the type parameter, so where `T` is `&Record`, `v.clone()` on a `v: T` never calls `Record`'s `clone`, while `s.clone()` on an `s: &Record` does. A `&mut T` meets neither bound: passing `&mut i32` for a `T: Copy` parameter is rejected with ``type argument `&mut i32` for 'T' does not implement required trait 'Copy'``. A value a generic call builds from a reference holds that borrow, a `Vec<T>` included.
 
 ```neuro
 func dup<T: Copy>(v: T) -> (T, T) {

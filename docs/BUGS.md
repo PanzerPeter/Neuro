@@ -5,6 +5,99 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-150: a field read off a temporary struct leaks the struct's `string`
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`, statement temporaries
+- **Severity**: minor. One buffer per evaluation of the expression; the program still runs
+
+**Minimal repro**
+
+```neuro
+struct Run { name: string }
+
+func mk(s: &Run) -> Run {
+    Run { name: "{s.name}'" }
+}
+
+func main() -> i32 {
+    val a = Run { name: "ab" }
+    println("{mk(&a).name}")
+    0
+}
+```
+
+Expected: the temporary `Run` releases `name` when the statement ends. Observed: LeakSanitizer
+reports the 3 bytes, allocated in `mk`.
+
+**Workaround**: bind the value first, `val r = mk(&a)`, and read `r.name`.
+
+**Fix sketch**: hold the receiver of a field read that is not a place to the statement's end, as a
+temporary `&self` receiver already is.
+
+## BUG-149: a plain binding copies a `&mut`, so two exclusive borrows of one value live at once
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`copy_within` in `type_checkers/mod.rs`)
+- **Severity**: major. Two live `&mut` borrows alias one value, which the borrow checker must refuse
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    mut n = 3
+    val a = &mut n
+    val b = a
+    val c = a
+    *b = 1
+    *c = 2
+    0
+}
+```
+
+Expected: `a` moves into `b`, and `val c = a` is a use after move. Observed: it compiles and both
+writes run. A `@derive(Copy)` generic struct holding a `&mut` copies the same way. A `T: Copy` bound
+does refuse a `&mut`.
+
+**Workaround**: none in the compiler. Do not bind a `&mut` twice.
+
+**Fix sketch**: `&mut` moves, with an implicit reborrow where a `&mut` parameter takes one, so that
+`copy_within` can answer `false` for it without breaking every call that passes a `&mut` on.
+
+## BUG-148: a generic impl cannot name its own associated type
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering` (`register_instance_methods`, `emit_instance_impls`)
+- **Severity**: major. A well-typed program fails to compile
+
+**Minimal repro**
+
+```neuro
+trait Source {
+    type Item
+    func get(&self) -> Self::Item
+}
+
+struct W<T> { v: T }
+
+impl<T: Copy> Source for W<T> {
+    type Item = T
+    func get(&self) -> Self::Item { self.v }
+}
+
+func main() -> i32 {
+    val w = W { v: 5 }
+    w.get()
+}
+```
+
+Expected: exit code 5. Observed: ``cannot resolve type annotation 'Self::Item' during lowering``.
+
+**Workaround**: write the bound type (`-> T`) in the impl.
+
+**Fix sketch**: bind `Self::Item` per instance as `enter_impl_assoc` does for a plain impl, under
+the impl's substitution, so the template pass in `declared_receivers` rebinds it too.
+
 ## BUG-147: a tensor with an enormous static shape exhausts the compiler's memory
 
 - **Status**: open, confirmed. Root cause not yet located

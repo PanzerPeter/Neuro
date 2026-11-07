@@ -290,6 +290,38 @@ fn a_generic_feeding_itself_a_growing_type_stops_at_the_depth_limit() {
 }
 
 /// Every method an impl of `type_name` carries, by name, across all its blocks.
+/// `.clone()` at `T = &S` is the reference when the receiver is declared in `T`, while a
+/// receiver declared `&S` in the same body still reads through to `S`'s `clone`.
+#[test]
+fn a_clone_copies_a_reference_only_where_the_receiver_is_declared_in_the_parameter() {
+    let program = lower(
+        "struct S { n: i32 }\n\
+         impl S { func clone(&self) -> S { S { n: 0 } } }\n\
+         func both<T: Clone>(v: T, s: &S) -> T { val c = s.clone()\n return v.clone() }\n\
+         func main() -> i32 { val s = S { n: 1 }\n val r = both(&s, &s)\n 0 }",
+    );
+    let name = function_names(&program)
+        .into_iter()
+        .find(|name| name.starts_with("both"))
+        .expect("the instance is emitted");
+    let body = function_body(&program, &name);
+    assert!(
+        matches!(binding_init(body, "c").kind, HirExprKind::Call { .. }),
+        "a concrete borrow reaches `S::clone`"
+    );
+    let Some(HirStmt::Return {
+        value: Some(value), ..
+    }) = body.last()
+    else {
+        panic!("expected a return: {body:?}");
+    };
+    assert!(
+        matches!(value.kind, HirExprKind::Variable(_)),
+        "the declared receiver is copied, got {:?}",
+        value.kind
+    );
+}
+
 fn impl_method_names(program: &neuro_hir::HirProgram, type_name: &str) -> Vec<String> {
     program
         .items

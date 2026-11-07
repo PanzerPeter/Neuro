@@ -36,6 +36,17 @@ signatures under mangled `Struct__method` keys, free-function signatures,
 trait method order, and module constants. Bodies then lower under a lexical scope stack and a
 loop-context stack.
 
+### Declared receivers
+A method call reads through every borrow, but an instance holds concrete types only, so at
+`T = &S` a `v: T` and an `s: &S` look alike. `items/declared_receivers.rs` tells them apart: an
+instance with a parameter bound to a `&T` that has `.clone()` through a `Copy` or `Clone` bound
+first lowers its template on a clone of the `Lowerer`, with that parameter as an opaque struct
+(`$param$T`). A `.clone()` receiver reaching one records its call span and the borrows above it in
+`param_receivers`, and the real pass peels those borrows and returns the place: the copy. The table
+holds for one body, because a `Span` has no file id; every instance path sets and clears it
+(`lower_mono_instance`, `emit_instance_impls`, `emit_mono_method`). Only `.clone()` is recorded,
+since a reference meets no other bound.
+
 ### `@grad` and the derivative transform
 `autodiff/` lowers `@grad func f` to `f` plus a `GradsOf_f` struct (one owned field per
 differentiated parameter, typed as that parameter's tensor; `Wrt` is what the attribute selects:

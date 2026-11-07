@@ -10,6 +10,28 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.32.0] - 2026-11-07
+
+### Added
+
+- A shared reference meets `T: Copy` and `T: Clone` bounds: `dup(&n)`, `dup::<&i32>(&n)` and a
+  `Slot<&Record>` with `impl<T: Clone> Slot<T>` all compile. `.clone()` on a value declared `T`
+  copies the reference, and only a receiver declared as a concrete borrow reaches the referent's
+  `clone`. A `&mut T` meets neither bound.
+
+### Fixed
+
+- A `Vec` or map that a generic call built from a reference type did not hold the borrow, so it
+  could outlive the value it pointed at. It is now tracked like any other value holding a borrow.
+- A generic function with a `Vec<T>` or map parameter, `&Vec<T>` included, failed in lowering with
+  `cannot resolve type annotation 'T'`.
+
+### Known issues
+
+- BUG-148: a generic impl cannot name its own associated type as `Self::Item`.
+- BUG-149: a plain binding copies a `&mut`, so two exclusive borrows of one value can be live.
+- BUG-150: a field read off a temporary struct leaks the struct's `string`.
+
 ## [5.31.3] - 2026-11-07
 
 ### Changed

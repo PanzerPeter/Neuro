@@ -909,8 +909,9 @@ dispatches through `resolve_generic_trait_method`.
 parameters; `is_checkable_bound` still checks a bound naming it, or `Comparable`, at the call. A bound is met
 through `satisfies_bound`: a type parameter by its own bounds, anything else by
 `implements_without_impl` (a scalar, `string` or a deriving struct, per trait) or by
-`trait_impls`. A reference meets none of the five, because a method call reads through it to the
-referent. `type_implements_trait` stays nominal: it answers return-position `impl Trait`, where a
+`trait_impls`. A `&T` meets `Copy` and `Clone` and a `&mut T` nothing: lowering keeps a receiver
+declared in a type parameter from reading through to the referent (`hir-lowering`'s CONTEXT, the
+declared receivers). `type_implements_trait` stays nominal: it answers return-position `impl Trait`, where a
 derive has no method to stand behind it. `&T` to `&dyn Trait` coercion reads `satisfies_bound`,
 since lowering supplies a derived or builtin implementor's vtable; a `&string` is refused there,
 its reference being a fat pointer no trait object can hold. The map

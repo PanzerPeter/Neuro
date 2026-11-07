@@ -927,8 +927,14 @@ impl Lowerer {
         args: &[Expr],
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
+        let object = self.lower_expr(object, None)?;
+        if method == CLONE_METHOD
+            && let Some(copy) = self.clone_of_declared_param(&object, span)
+        {
+            return Ok(copy);
+        }
         // Mirrors the checker: the receiver is read through every borrow.
-        let object = super::coercion::auto_deref(self.lower_expr(object, None)?);
+        let object = super::coercion::auto_deref(object);
         let recv = object.ty.clone();
 
         // `.chars()` is the one intrinsic that produces a value the HIR can already

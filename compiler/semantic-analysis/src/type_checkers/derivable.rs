@@ -44,14 +44,13 @@ impl TypeChecker {
     /// Whether `ty` implements a derivable trait with no `impl` block: a builtin type the
     /// compiler covers, or a struct that derives it.
     ///
-    /// A reference implements none of them here although it is `Copy`. A method call
-    /// reads through a borrow to its referent, so in an instance where `T` is `&S` the
-    /// body's `v.clone()` would reach `S`'s `clone`, not the reference's copy.
+    /// A `&T` is `Copy` and `Clone` whatever `T` is, since copying it copies no referent. A
+    /// `&mut T` is neither: a bound would let a generic body hold two exclusive borrows.
     pub(crate) fn implements_without_impl(&self, ty: &Type, trait_name: &str) -> bool {
-        if matches!(
-            ty,
-            Type::Reference { .. } | Type::Generic(_) | Type::Unknown
-        ) {
+        if let Type::Reference { mutable, .. } = ty {
+            return !mutable && matches!(trait_name, COPY_TRAIT | CLONE_TRAIT);
+        }
+        if matches!(ty, Type::Generic(_) | Type::Unknown) {
             return false;
         }
         match trait_name {

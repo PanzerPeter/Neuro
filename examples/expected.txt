@@ -181,6 +181,7 @@ showcase/generic_toolkit.nr          92
 showcase/gpu_fallback.nr             3
 showcase/gpu_layer.nr                3  gpu
 showcase/heat_diffusion.nr           100  gpu
+showcase/shared_views.nr             43
 showcase/train_predict.nr            3  gpu
 showcase/gradient_loss.nr            45
 showcase/grid_update.nr              50

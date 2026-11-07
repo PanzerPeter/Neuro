@@ -60,7 +60,7 @@ impl TypeChecker {
     }
 
     /// Whether a value of `ty` can hold a reference: a reference itself, or a tuple,
-    /// array, struct, enum or newtype with one somewhere inside. A value of such a type
+    /// array, collection, struct, enum or newtype with one somewhere inside. A value of such a type
     /// holds the borrows it was built around, and a returned one is what the
     /// returned-reference check walks.
     pub(crate) fn type_holds_reference(&self, ty: &Type) -> bool {
@@ -84,7 +84,8 @@ impl TypeChecker {
     fn holds_reference_within(&self, ty: &Type, seen: &mut Vec<String>) -> bool {
         match ty {
             Type::Reference { .. } => true,
-            Type::Tuple(elements) => elements
+            // A written `Vec<&T>` is refused, but a generic call builds one from `Vec<T>`.
+            Type::Collection { args: elements, .. } | Type::Tuple(elements) => elements
                 .iter()
                 .any(|e| self.holds_reference_within(e, seen)),
             Type::Array { element, .. } => self.holds_reference_within(element, seen),

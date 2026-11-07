@@ -386,7 +386,8 @@ impl Copy for Money {}
 
 Any of the five names may bound a type parameter. A derive, a hand-written impl and a builtin
 type meet the bound alike: the scalars implement all five (a float is not `Hashable`), `string`
-all but `Copy`, and every `Copy` type is `Clone`. So one generic body serves all of them:
+all but `Copy`, every `Copy` type is `Clone`, and a `&T` is `Copy` and `Clone` only. So one
+generic body serves all of them:
 
 ```neuro
 func label<T: Debug>(name: string, v: &T) -> string {

@@ -16,6 +16,7 @@ use shared_types::Literal;
 
 use crate::{Lowerer, LoweringError};
 
+mod declared_receivers;
 mod mono;
 pub(crate) use mono::{generic_name_sets, mentions_any};
 mod register;

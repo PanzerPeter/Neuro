@@ -276,19 +276,35 @@ impl Lowerer {
             if !self.instance_meets_impl_bounds(imp, &impl_subst) {
                 continue;
             }
-            let mut methods = Vec::new();
+            let const_types = self.const_param_types(generics)?;
             // A generic method's instances are emitted per call, from its own worklist.
-            for method in imp.methods.iter().filter(|m| m.generics.is_empty()) {
-                let const_types = self.const_param_types(generics)?;
-                let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
-                let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
-                let saved_ct = std::mem::replace(&mut self.const_types, const_types);
-                let lowered = self.lower_method(&self_type, method);
-                self.type_subst = saved_ty;
-                self.const_subst = saved_c;
-                self.const_types = saved_ct;
-                methods.push(lowered?);
-            }
+            let bodies: Vec<_> = imp
+                .methods
+                .iter()
+                .filter(|m| m.generics.is_empty())
+                .collect();
+            let params: Vec<_> = imp.generics.iter().collect();
+            self.param_receivers =
+                self.declared_receivers(&params, &impl_subst, |pass, subst| {
+                    let self_type = pass.opaque_self_type(imp, mangled, &subst)?;
+                    pass.lower_instance_methods(
+                        &self_type,
+                        &bodies,
+                        subst,
+                        const_subst,
+                        &const_types,
+                    )
+                    .map(drop)
+                })?;
+            let lowered = self.lower_instance_methods(
+                &self_type,
+                &bodies,
+                impl_subst,
+                const_subst,
+                &const_types,
+            );
+            self.param_receivers.clear();
+            let methods = lowered?;
             self.mono_items.push(HirItem::Impl(HirImpl {
                 type_name: mangled.to_string(),
                 self_type: self_type.clone(),
@@ -298,6 +314,28 @@ impl Lowerer {
             }));
         }
         Ok(())
+    }
+
+    /// Lower `bodies` for one instance under its substitutions.
+    fn lower_instance_methods(
+        &mut self,
+        self_type: &HirType,
+        bodies: &[&ast_types::MethodDef],
+        subst: std::collections::HashMap<String, HirType>,
+        const_subst: &std::collections::HashMap<String, u64>,
+        const_types: &std::collections::HashMap<String, HirType>,
+    ) -> Result<Vec<neuro_hir::HirMethod>, LoweringError> {
+        let saved_ty = std::mem::replace(&mut self.type_subst, subst);
+        let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
+        let saved_ct = std::mem::replace(&mut self.const_types, const_types.clone());
+        let lowered = bodies
+            .iter()
+            .map(|method| self.lower_method(self_type, method))
+            .collect();
+        self.type_subst = saved_ty;
+        self.const_subst = saved_c;
+        self.const_types = saved_ct;
+        lowered
     }
 
     /// Whether every argument of an instance implements the traits its impl bounds the
@@ -331,8 +369,8 @@ impl Lowerer {
     }
 
     /// Whether `ty` implements a derivable trait with no `impl` block, by the checker's
-    /// rule (`implements_without_impl`): a builtin type, or a struct deriving it. A
-    /// reference implements none of them.
+    /// rule (`implements_without_impl`): a builtin type, a struct deriving it, or a `&T`
+    /// for `Copy` and `Clone`.
     fn implements_derivable(&self, ty: &HirType, trait_name: &str) -> bool {
         use super::register::{
             CLONE_TRAIT, COMPARABLE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT,
@@ -355,8 +393,8 @@ impl Lowerer {
         );
         let text = matches!(ty, HirType::Bool | HirType::Char | HirType::String);
         let derives = |set: &std::collections::HashSet<String>| matches!(ty, HirType::Struct(name) if set.contains(name));
-        if matches!(ty, HirType::Reference { .. }) {
-            return false;
+        if let HirType::Reference { mutable, .. } = ty {
+            return !mutable && matches!(trait_name, COPY_TRAIT | CLONE_TRAIT);
         }
         match trait_name {
             COPY_TRAIT => self.is_copy(ty),
@@ -587,14 +625,31 @@ impl Lowerer {
         })?;
         let mut const_types = template.const_types.clone();
         const_types.extend(self.const_param_types(&template.def.generics)?);
-        let saved_ty = std::mem::replace(&mut self.type_subst, mm.subst.clone());
-        let saved_c = std::mem::replace(&mut self.const_subst, mm.const_subst.clone());
-        let saved_ct = std::mem::replace(&mut self.const_types, const_types);
-        let lowered = self.lower_method(&template.self_type, &template.def);
-        self.type_subst = saved_ty;
-        self.const_subst = saved_c;
-        self.const_types = saved_ct;
-        let mut method = lowered?;
+        let bodies = [&template.def];
+        let owner = self.impl_declaring(&template.type_name, &template.def.name.name);
+        let mut params: Vec<_> = template.def.generics.iter().collect();
+        params.extend(owner.iter().flat_map(|imp| &imp.generics));
+        self.param_receivers = self.declared_receivers(&params, &mm.subst, |pass, subst| {
+            let self_type = match &owner {
+                Some(imp) => pass.opaque_self_type(imp, &template.type_name, &subst)?,
+                None => template.self_type.clone(),
+            };
+            pass.lower_instance_methods(&self_type, &bodies, subst, &mm.const_subst, &const_types)
+                .map(drop)
+        })?;
+        let lowered = self.lower_instance_methods(
+            &template.self_type,
+            &bodies,
+            mm.subst.clone(),
+            &mm.const_subst,
+            &const_types,
+        );
+        self.param_receivers.clear();
+        let mut method = lowered?
+            .pop()
+            .ok_or_else(|| LoweringError::UnresolvedCall {
+                target: mm.key.clone(),
+            })?;
         method.name = mm.name.clone();
         self.mono_items.push(HirItem::Impl(HirImpl {
             type_name: template.type_name,
@@ -622,8 +677,25 @@ impl Lowerer {
             }
         };
 
+        let generics: Vec<_> = template.generics.iter().collect();
+        self.param_receivers =
+            self.declared_receivers(&generics, &instance.subst, |pass, subst| {
+                pass.lower_template(&template, instance, subst).map(drop)
+            })?;
+        let lowered = self.lower_template(&template, instance, instance.subst.clone());
+        self.param_receivers.clear();
+        lowered
+    }
+
+    /// Lower `template`'s signature and body under `subst`, named for `instance`.
+    fn lower_template(
+        &mut self,
+        template: &ast_types::FunctionDef,
+        instance: &MonoInstance,
+        subst: std::collections::HashMap<String, HirType>,
+    ) -> Result<HirFunction, LoweringError> {
         let const_types = self.const_param_types(&template.generics)?;
-        let saved_ty = std::mem::replace(&mut self.type_subst, instance.subst.clone());
+        let saved_ty = std::mem::replace(&mut self.type_subst, subst);
         let saved_c = std::mem::replace(&mut self.const_subst, instance.const_subst.clone());
         let saved_ct = std::mem::replace(&mut self.const_types, const_types);
 

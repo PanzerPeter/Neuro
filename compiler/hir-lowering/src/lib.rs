@@ -128,6 +128,7 @@ const MAX_INSTANCE_DEPTH: u32 = 128;
 /// optional name distinguishes a struct variant's field from a tuple variant's
 /// positional element; reordering struct-literal fields into this declared order is
 /// how the single [`neuro_hir::HirExprKind::EnumConstruct`] payload is built.
+#[derive(Clone)]
 struct EnumVariantData {
     name: String,
     fields: Vec<(Option<String>, HirType)>,
@@ -135,6 +136,7 @@ struct EnumVariantData {
 
 /// Per-active-loop state used to resolve `break`/`continue` targets and to type a
 /// `loop` used as a value expression, mirroring the checker's loop stack.
+#[derive(Clone)]
 struct LoopCtx {
     /// The loop's label (`outer:`), or `None` when unlabeled.
     label: Option<String>,
@@ -156,6 +158,7 @@ struct LoopCtx {
 /// Lowering state: the global symbol tables built in a pre-pass plus the
 /// per-body scope and loop stacks. Mirrors the subset of the type checker's state
 /// needed to re-derive expression types.
+#[derive(Clone)]
 struct Lowerer {
     /// Free functions and mangled methods → (parameter types, return type).
     functions: HashMap<String, (Vec<HirType>, HirType)>,
@@ -287,6 +290,11 @@ struct Lowerer {
     /// reference to one lowers to a correctly-typed integer literal. Parallel to
     /// [`Self::const_subst`].
     const_types: HashMap<String, HirType>,
+    /// The `.clone()` calls in the instance body being lowered whose receiver is declared
+    /// in a type parameter bound to a reference, by call span, each with the borrows the
+    /// declaration wraps the parameter in. See `items::declared_receivers`. A span names
+    /// one call only within a body, so this is emptied after each.
+    param_receivers: HashMap<shared_types::Span, u32>,
     /// Monomorphization worklist: instances discovered but not yet lowered.
     mono_pending: Vec<MonoInstance>,
     /// How many instances deep the body being lowered sits: 0 for an ordinary item, and
@@ -336,6 +344,7 @@ struct Lowerer {
 }
 
 /// One trait method's lowering-visible signature, in declaration order.
+#[derive(Clone)]
 struct TraitMethodInfo {
     name: String,
     /// Parameter types excluding the implicit `self`.
@@ -344,6 +353,7 @@ struct TraitMethodInfo {
 }
 
 /// How a binary operator desugars to an operator-trait method call.
+#[derive(Clone)]
 struct OpDispatch {
     /// The backing method name (`add`, `eq`, `lt`, …).
     method: String,
@@ -357,6 +367,7 @@ struct OpDispatch {
 /// One pending monomorphization: the generic template `fn_name`, the concrete type
 /// arguments (in the template's type-parameter order), and the mangled instance name
 /// the call site refers to.
+#[derive(Clone)]
 struct MonoInstance {
     depth: u32,
     mangled: String,
@@ -378,6 +389,7 @@ enum MonoArg {
 /// mangled instance name, the concrete type arguments (in declaration order), and the
 /// type-parameter substitution. Emission produces one `HirItem::Struct` plus one
 /// `HirItem::Impl` per matching generic impl.
+#[derive(Clone)]
 struct MonoStruct {
     depth: u32,
     base: String,
@@ -401,6 +413,7 @@ struct GenericMethod {
 
 /// One pending generic-method instance: the template's key, the instance's method name
 /// within the type, and the full substitution its body lowers under.
+#[derive(Clone)]
 struct MonoMethod {
     depth: u32,
     key: String,
@@ -412,6 +425,7 @@ struct MonoMethod {
 /// One pending generic-enum instantiation: the base template name, the mangled
 /// instance name, and the substitutions its payload types resolve under. Emission
 /// produces one `HirItem::Enum` carrying fully concrete payloads.
+#[derive(Clone)]
 struct MonoEnum {
     depth: u32,
     base: String,
@@ -482,6 +496,7 @@ impl Lowerer {
             type_subst: HashMap::new(),
             const_subst: HashMap::new(),
             const_types: HashMap::new(),
+            param_receivers: HashMap::new(),
             mono_pending: Vec::new(),
             mono_depth: 0,
             mono_seen: HashSet::new(),
@@ -710,6 +725,13 @@ impl Lowerer {
                     self.unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
                 }
                 self.unify_ast_hir(pr, ar, gnames, cnames, subst, const_subst);
+            }
+            (ast_types::Type::Generic { args, .. }, HirType::Collection { args: built, .. }) => {
+                for (arg, ty) in args.iter().zip(built) {
+                    if let ast_types::GenericArg::Type(arg) = arg {
+                        self.unify_ast_hir(arg, ty, gnames, cnames, subst, const_subst);
+                    }
+                }
             }
             // `Inner<U>` against the instance `Inner<i32>`: an instance carries its arguments,
             // so the parameters its annotation names bind through them.

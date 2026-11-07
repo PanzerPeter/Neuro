@@ -558,7 +558,7 @@ fn clone_copies(ty: &HirType) -> bool {
 }
 
 /// The value a receiver denotes: a borrowed receiver is read through its borrow.
-fn read_through(object: HirExpr) -> HirExpr {
+pub(crate) fn read_through(object: HirExpr) -> HirExpr {
     let HirType::Reference { inner, .. } = &object.ty else {
         return object;
     };

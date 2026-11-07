@@ -120,6 +120,7 @@ mod print_builtins;
 mod range_rev;
 mod range_step;
 mod reading_through_borrows;
+mod reference_bounds;
 mod return_paths;
 mod returned_reference;
 mod self_type;

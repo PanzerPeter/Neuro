@@ -82,21 +82,57 @@ fn copy_bound_refuses_an_owning_argument() {
     assert!(bound_failure(&errors, "Copy"), "got {errors:?}");
 }
 
-/// A method call reads through a borrow, so in an instance where `T` is `&S` the body's
-/// `v.clone()` would reach `S`'s own `clone`: a reference does not meet the bound.
 #[test]
-fn copy_bound_refuses_a_reference_argument() {
+fn a_shared_reference_meets_copy_and_clone_whatever_it_refers_to() {
+    assert_clean(
+        r#"
+        struct Plain { x: i32 }
+        func dup<T: Copy>(v: T) -> (T, T) { (v, v) }
+        func twice<T: Clone>(v: T) -> (T, T) { (v.clone(), v.clone()) }
+        func main() -> i32 {
+            val n = 3
+            val p = Plain { x: 1 }
+            val a = dup(&n)
+            val b = twice(&p)
+            val c = dup::<&Plain>(&p)
+            0
+        }
+        "#,
+    );
+}
+
+#[test]
+fn a_mutable_reference_meets_neither_copy_nor_clone() {
     let errors = errors_with_traits(
         r#"
         func dup<T: Copy>(v: T) -> (T, T) { (v, v) }
+        func twice<T: Clone>(v: T) -> (T, T) { (v.clone(), v.clone()) }
         func main() -> i32 {
-            val n = 3
-            val pair = dup(&n)
+            mut n = 3
+            val a = dup(&mut n)
+            val b = twice(&mut n)
             0
         }
         "#,
     );
     assert!(bound_failure(&errors, "Copy"), "got {errors:?}");
+    assert!(bound_failure(&errors, "Clone"), "got {errors:?}");
+}
+
+/// Only `Copy` and `Clone` hold for a reference: it reads through to nothing else.
+#[test]
+fn a_reference_meets_no_other_derivable_bound() {
+    let errors = errors_with_traits(
+        r#"
+        func show<T: Debug>(v: T) {}
+        func main() -> i32 {
+            val n = 3
+            show(&n)
+            0
+        }
+        "#,
+    );
+    assert!(bound_failure(&errors, "Debug"), "got {errors:?}");
 }
 
 #[test]
