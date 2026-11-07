@@ -34,6 +34,10 @@ from the loss, adding each value's contribution wherever that value was used. Sh
 
 ## Running the derivative: `.backward()`, `.grad()`, `.zero_grad()`
 
+> **Planned change.** `.backward()`, `.grad()`, `.zero_grad()` and the gradient slot are planned to go
+> before the neural network library lands. The planned form is `val (loss, g) = grad(f(args))`, where
+> a gradient is an ordinary value you own. Code written against this section will need that change.
+
 The derivative runs when the loss returned by a `@grad` call is asked for it. `.backward()` runs it
 and moves each gradient into a slot beside the tensor it belongs to. `.grad()` reads that gradient,
 and `.zero_grad()` empties the slot. A training step from
@@ -379,6 +383,22 @@ A callee may read a `&mut` parameter but not write through it, and it must retur
 site gets its own copy of the callee in the derivative, so a function called in many places grows the
 derivative accordingly. A recursive call, a method call and a call to a builtin such as `println` are
 refused. A call to a `@no_grad` function is not differentiated through at all. It is a constant.
+
+### Where the derivative runs
+
+"GPU gradients" means different things, so each case is listed by what the `@grad` body does.
+
+| In a `@grad` body | Result |
+| --- | --- |
+| Tensor operations on host tensors | Differentiated, on the host |
+| Tensor operations on device tensors | Differentiated, with each operation on the tensor's GPU |
+| A call to a `@gpu` function | Refused at compile time, unless the callee is `@no_grad`, which makes it a constant |
+| A call to a `@kernel` function | Refused at compile time |
+| `@grad` and `@gpu` on one function | Refused at compile time |
+
+A loss built from `.sum()` or `.mean()` is a host tensor, since those reductions return a host scalar.
+See [BUG-143](../BUGS.md#bug-143-the-gradient-of-a-device-parameter-can-land-on-the-host) for where a
+gradient can land today.
 
 ### Function values
 

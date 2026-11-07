@@ -267,12 +267,12 @@ Each numbered phase is a MAJOR-version milestone: completing **Phase N** ships *
 | **2** | **Tensors and MLIR**: first-class tensor types lowered through MLIR Linalg, the pool allocator, and the value model they need | Complete |
 | **3** | **Automatic differentiation**: a reverse-mode source-to-source transform over Neuro's own typed HIR, `@grad(wrt: ...)`, `.backward()` / `.zero_grad()`, higher-order derivatives, elementwise math, `.detach()` / `@no_grad` | Complete |
 | **4** | **GPU acceleration**: MLIR GPU dialects for NVIDIA and AMD, `@gpu` with an opt-in CPU fallback, `@kernel` and the `KernelOut<T>` aliasing model, device tensors on any GPU | Complete |
-| **5** | **Language and backend completion**: MLIR as the only tensor backend, generic methods, closure capture modes, references in structs, tensors generic over their element type, named dynamic extents, a standard library written in Neuro, `@test` | In progress |
+| **5** | **Language and backend completion**: MLIR as the only tensor backend, generic methods, closure capture modes, references in structs, tensors generic over their element type, named dynamic extents, a standard library written in Neuro with file and `.safetensors` I/O, a prebuilt Linux compiler, `@test` | In progress |
 | **6** | **Neural network library**: typed gradients from `grad(...)`, `@model`, optimizers, layers and attention, `.safetensors` weights, a `DataLoader`, training benchmarks against PyTorch | Planned |
 | **7** | **Parallelism and scale**: scoped `parallel { }` tasks, channels, multithreaded host kernels, multi-GPU data parallel | Planned |
 | **8** | **Interop and deployment**: Python extension modules over DLPack, `extern func` foreign functions, `defer` | Planned |
 | **9** | **Developer experience**: debug info, incremental compilation, Language Server Protocol, error recovery, formatter | Planned |
-| **10** | **Distribution and optimization**: the `neurpm` package manager, prebuilt binaries and installers, a self-updater, optimization passes | Planned |
+| **10** | **Distribution and optimization**: the `neurpm` package manager, prebuilt macOS and Windows binaries, installers, a self-updater, optimization passes | Planned |
 
 ---
 

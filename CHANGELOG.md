@@ -10,6 +10,19 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.30.2] - 2026-11-07
+
+### Changed
+
+- The roadmap moves the standard library ahead of the remaining tensor type work, so file input, `.safetensors` reads and a first training run from a file come first. A prebuilt Linux compiler moves up with them.
+- `.safetensors` reads are specified to copy into an ordinary tensor rather than map the file, and a gradient to live on its parameter's device.
+
+### Documentation
+
+- The autodiff reference states what `@grad` does on each device, and says the gradient slot API is planned to be replaced.
+- The installation guide no longer claims CI ships release binaries. It does not yet.
+- `docs/BUGS.md` gains BUG-142 (`val ... else` over a call result leaks an owning payload) and BUG-143 (a device parameter's gradient can land on the host), and BUG-082 records that `Result<string, E>` hits it.
+
 ## [5.30.1] - 2026-11-06
 
 ### Fixed

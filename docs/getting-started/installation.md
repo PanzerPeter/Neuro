@@ -1,8 +1,8 @@
 # Installation Guide
 
-This guide installs the Neuro compiler, `neurc`, on Linux, macOS and Windows: the three
-platforms CI builds, tests and ships release binaries for. Every build needs LLVM 23 and
-MLIR 23 installed into one prefix before Cargo runs.
+This guide builds the Neuro compiler, `neurc`, from source on Linux, macOS and Windows: the
+three platforms CI builds and tests. There are no prebuilt binaries yet. Every build needs
+LLVM 23 and MLIR 23 installed into one prefix before Cargo runs.
 
 ## Prerequisites
 

@@ -5,6 +5,86 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-143: the gradient of a device parameter can land on the host
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering` (`autodiff`, the reverse of `.sum()` and `.mean()`)
+- **Severity**: minor. The values are right; an update pays a host-to-device copy it should not need
+
+**Minimal repro**
+
+```neuro
+@grad(wrt: [v])
+func loss(v: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {
+    return Tensor::scalar(v.sum())
+}
+
+export func gradient() -> Tensor<f32, [2, 1]> {
+    val h: Tensor<f32, [2, 1]> = [[1.0], [2.0]]
+    mut w = h.to(Device::GPU(0))
+    val e = loss(&mut w)
+    e.backward()
+    return w.grad().clone()
+}
+```
+
+Link it into a shared library and read `dl_tensor.device` from the returned handle.
+
+Expected: `kDLCUDA`, the parameter's device. Observed: `kDLCPU`. `.mean()` directly on the parameter
+does the same. Squaring the parameter first, `.tanh()` and `x @ w - y` all leave the gradient on the
+GPU, so where a gradient lives depends on the last operation applied to the parameter. A training
+step still computes the right update, because a host operand next to a device operand is copied over.
+
+**Root cause**: confirmed for `.sum()`. Its reverse builds the broadcast adjoint as a host tensor
+literal, visible in the IR of `__loss__rev`, and that value becomes the gradient unchanged.
+
+**Fix sketch**: move a gradient to its parameter's device where `.backward()` stores it, which covers
+every rule at once. Regression tests: the repro through the DLPack device field, and `.mean()`.
+
+## BUG-142: `val ... else` over a call result never releases an owning payload
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend` (`codegen_val_else`, `ArmOwnership::EnclosingString` in
+  `codegen/expressions/matches.rs`)
+- **Severity**: major. An unbounded leak, one payload per evaluation
+
+**Minimal repro**
+
+```neuro
+func make() -> Option<Tensor<f32, [2]>> {
+    val t: Tensor<f32, [2]> = [1.0, 2.0]
+    return Some(t)
+}
+
+func main() -> i32 {
+    mut total = 0.0f32
+    for i in 0..10 {
+        val Some(c) = make() else { return 2 }
+        total += c.sum()
+    }
+    return 0
+}
+```
+
+Expected: `c` is released at the end of each iteration. Observed: AddressSanitizer's leak check
+reports the tensor's allocations for the earlier iterations. A `Vec` payload leaks the same way, and
+so does `val Ok(c) = load() else |e| { ... }`.
+
+`if val`, `match`, `?` and `??` on the same call are clean, and so is binding the call first
+(`val r = make()`, then `val Some(c) = r else { ... }`).
+
+**Root cause**: confirmed in the code. `codegen_val_else` binds its success bindings with
+`ArmOwnership::EnclosingString`, which registers a `string` payload from a collection's fallible
+reader and leaves every other payload unregistered. A named scrutinee still owns its payload. A call
+result has no binding that does, so nothing releases it.
+
+**Workaround**: bind the call to a `val` first.
+
+**Fix sketch**: when the scrutinee is a temporary, register a payload that `holds_owner` in the
+enclosing scope, where the binding lives. Check the `else` branch too, whose scrutinee is equally
+unowned. Regression tests: the repro with a tensor and a `Vec`, a miss that runs the `else` branch,
+and a named scrutinee (must not double free).
+
 ## BUG-141: a comparison operator is refused on a `T: Comparable` parameter
 
 - **Status**: open, confirmed
@@ -465,6 +545,10 @@ func main() -> i32 {
 
 Expected: each buffer `"ab" + "cd"` built is released when `m` leaves scope. Observed: the
 arithmetic is right, and AddressSanitizer's leak check reports the 4-byte buffers as leaked.
+
+The prelude's enums hit it too. A `Result<string, E>` holding a computed string leaks through `?`,
+`??`, `match` and a plain drop, and an enum payload that is a struct whose only owner is a `string`
+leaks the same way, because `holds_owner` answers `false` for that struct.
 
 **Root cause**: confirmed in the code. `enum_holds_owner` asks `holds_owner` of each payload
 type, which answers `false` for `string` by design: a `string` position owns its buffer only
