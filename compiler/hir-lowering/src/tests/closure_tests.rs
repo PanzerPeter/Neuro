@@ -308,3 +308,38 @@ fn a_closure_called_in_place_is_typed_by_its_argument() {
     let init = binding_init(body, "r");
     assert_eq!(init.ty, HirType::I64);
 }
+
+/// The checker records a capture the body moves out on the literal, and that alone turns
+/// the capture from a borrow into a value. Its neighbour stays a borrow.
+#[test]
+fn a_capture_recorded_as_moved_is_taken_by_value() {
+    let source = "func main() -> i32 {
+        val s = \"a\" + \"b\"
+        val kept = \"c\" + \"d\"
+        val f = || s.len() + kept.len()
+        0
+    }";
+    let ast = syntax_parsing::parse(source).expect("source should parse");
+    let ast_types::Item::Function(main) = &ast[0] else {
+        panic!("expected a function");
+    };
+    let ast_types::Stmt::VarDecl {
+        init: Some(ast_types::Expr::Closure { capture, .. }),
+        ..
+    } = &main.body[2]
+    else {
+        panic!("expected a closure binding");
+    };
+    capture.record_moved("s");
+
+    let program = crate::lower_program(&ast).expect("program should lower");
+    let init = binding_init(function_body(&program, "main"), "f");
+    let HirExprKind::Closure { captures, .. } = &init.kind else {
+        panic!("expected a closure value, got {:?}", init.kind);
+    };
+    let borrowed: Vec<(&str, bool)> = captures
+        .iter()
+        .map(|c| (c.name.as_str(), c.borrowed))
+        .collect();
+    assert_eq!(borrowed, [("s", false), ("kept", true)]);
+}

@@ -7,7 +7,7 @@ Provide the canonical Abstract Syntax Tree node definitions shared by every stag
 - Type: Library (no entry function: pure data)
 - Public surface, re-exported from the crate root in four groups:
   - `expressions`: `Expr`, `BinaryOp`, `UnaryOp`, `Pattern`, `MatchArm`, `EnumPatternPayload`,
-    `ArrayPatternRest`, `FieldPattern`, `FieldInit`, `ClosureParam`, `InterpPart`, `TensorIndexArg`
+    `ArrayPatternRest`, `FieldPattern`, `FieldInit`, `ClosureCapture`, `ClosureParam`, `InterpPart`, `TensorIndexArg`
   - `items`: `Item`, `FunctionDef`, `StructDef`, `EnumDef`, `EnumVariant`, `VariantPayload`,
     `FieldDef`, `ImplDef`, `MethodDef`, `SelfParam`, `TraitDef`, `TraitMethod`, `ConstDef`,
     `NewtypeDef`, `ModuleDef`, `ModuleId`, `PRELUDE_MODULE`, `ImportDef`, `ImportName`,
@@ -111,6 +111,12 @@ walkers.
   `FunctionMode::{Shared, Mut, Once}` for `(T) -> U`, `mut (T) -> U` and `once (T) -> U`. The
   variants are ordered weakest first, so `a <= b` reads "a value of mode `a` fits a slot of mode
   `b`", which is the whole assignability rule the checker applies.
+- `Expr::Closure { capture, .. }` is the one place the checker writes onto the AST.
+  `ClosureCapture` holds the `move` keyword and, in a `RefCell`, the names the body moves out:
+  the checker calls `record_moved` while settling captures and lowering asks `by_value`, so
+  lowering must run on the tree `type_check` saw (a clone taken after it carries the names).
+  Only the body check can tell a move, and a `Span`-keyed side table would collide across
+  modules.
 - A composition `f >> g >> h` has no node of its own: the parser builds the `Expr::Closure`
   it stands for, one parameter named `COMPOSE_PARAM` (`$compose`, which no identifier token
   can spell) and the body `h(g(f($compose)))`. Checker and lowering give that parameter the

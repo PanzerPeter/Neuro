@@ -142,11 +142,9 @@ fn check_compose_operand(operand: &Expr) -> ParseResult<()> {
                 span: object.span(),
             })
         }
-        Expr::Closure {
-            is_move: true,
-            span,
-            ..
-        } => Err(ParseError::ComposeMoveClosure { span: *span }),
+        Expr::Closure { capture, span, .. } if capture.is_move => {
+            Err(ParseError::ComposeMoveClosure { span: *span })
+        }
         _ => Ok(()),
     }
 }
@@ -341,7 +339,7 @@ impl Parser {
                     }],
                     ret: None,
                     body: Box::new(body),
-                    is_move: false,
+                    capture: Box::default(),
                     span,
                 })
             }

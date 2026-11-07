@@ -5,10 +5,12 @@ mut capture       count += x         = 10
 vec push capture  seen.push(x * x)   = 4 items, last 16
 borrowed string   neuro.len() + x     = 30
 once closure      shout(banner)      = 9
+inferred move     shout(title)       = 10, bytes kept
+returned once     deferred!.len()     = 9
 generic fold      |acc, x| acc + x   = 10
 generic fold      widest as i64      = 4
 returned closure  shift(2) + square(3) = 12
 owned capture     word.len()         = 4
 lent closure      feed(data, tally)  = 30
 moved closure     tally read(10)     = 60
-total                                = 203
+total                                = 222

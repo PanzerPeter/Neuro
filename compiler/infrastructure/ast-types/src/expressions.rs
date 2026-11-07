@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt;
 
 use shared_types::{FormatSpec, Identifier, Literal, Span};
@@ -245,7 +246,7 @@ pub enum Expr {
     /// `move |p| body`). An anonymous callable capturing free variables from the
     /// enclosing scope. `ret` is `None` when the return type is inferred from the
     /// body; `body` is a single expression (a bare block for the multi-statement
-    /// form). `is_move` records the `move` keyword, which forces by-value capture.
+    /// form). `capture` records how it holds what it captures.
     ///
     /// A composition `f >> g` is parsed to this node too: one parameter named
     /// [`COMPOSE_PARAM`] and the body `g(f(param))`. A parameter of that name that
@@ -254,7 +255,7 @@ pub enum Expr {
         params: Vec<ClosureParam>,
         ret: Option<crate::Type>,
         body: Box<Expr>,
-        is_move: bool,
+        capture: Box<ClosureCapture>,
         span: Span,
     },
     /// An instantiated generic named as a value, `convert::<u8>`: a turbofish with no
@@ -300,6 +301,41 @@ pub enum InterpPart {
         spec: Option<FormatSpec>,
         span: Span,
     },
+}
+
+/// Which captures a closure literal takes by value: all of them under `move`, otherwise
+/// the ones its body moves out.
+///
+/// Only the body check can tell a move (it takes the callee's receiver mode, the operand's
+/// type and every consuming position), and lowering must capture exactly what the checker
+/// moved or a value is released twice. So the checker records the names here, on the
+/// literal, and lowering reads them: a field needs no key, where a side table's `Span` key
+/// would collide across modules.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ClosureCapture {
+    /// The `move` keyword.
+    pub is_move: bool,
+    moved: RefCell<Vec<String>>,
+}
+
+impl ClosureCapture {
+    /// The capture of a literal written with or without `move`.
+    pub fn new(is_move: bool) -> Self {
+        Self {
+            is_move,
+            moved: RefCell::default(),
+        }
+    }
+
+    /// Record that the body moves `name` out of its capture.
+    pub fn record_moved(&self, name: &str) {
+        self.moved.borrow_mut().push(name.to_string());
+    }
+
+    /// Whether the literal takes `name` by value.
+    pub fn by_value(&self, name: &str) -> bool {
+        self.is_move || self.moved.borrow().iter().any(|moved| moved == name)
+    }
 }
 
 /// One parameter of a closure literal: a binding name and an optional type

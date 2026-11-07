@@ -1090,9 +1090,13 @@ only the check sees: a move out of it (`moves_since` against a snapshot taken be
 and a `&mut self` call on it (`mut_receivers`, the log `check_mut_self_receiver` appends to). A
 capture the body writes (an assignment rooted at it, a `&mut` of it, such a call) is borrowed
 `&mut` and makes the closure `FunctionMode::Mut`; a `Copy` one it only reads is copied and holds
-nothing; any other is borrowed `&`. A `move` closure moves every non-`Copy` capture out of its
-source (`record_move`), and one whose body moves a capture is `FunctionMode::Once`. A closure
-without `move` that moves a capture is `ClosureMovesCapture`. Inside a `@kernel` body only the old
+nothing; any other is borrowed `&`. A capture taken by value is moved out of its source
+(`record_move`): every non-`Copy` capture of a `move` closure, and any the body moves out, part
+or whole, which `ClosureCapture::record_moved` writes onto the literal for lowering. The place a
+body ends with is moved like a function's result (`move_closure_result`), so `|| s` is such a
+move. A closure
+whose body moves a capture is `FunctionMode::Once`, and `refuse_once_per_element` keeps a `once`
+value out of a built-in that calls per element. Inside a `@kernel` body only the old
 rule holds (`ClosureCapturesNonCopy`, `ClosureAssignsCapture`): MLIR copies captures. The transient
 borrows the enclosing statement had in flight are restored after the body (its own statements end
 them as they go), then each borrowed capture takes its borrow (`borrow_capture`), transient until

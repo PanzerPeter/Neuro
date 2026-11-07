@@ -316,8 +316,8 @@ impl TypeChecker {
                 params,
                 ret,
                 body,
+                capture,
                 span: closure_span,
-                ..
             },
         ] = args
         else {
@@ -351,7 +351,7 @@ impl TypeChecker {
             params,
             ret.as_ref(),
             body,
-            false,
+            capture,
             Some(&fixed),
             *closure_span,
         );

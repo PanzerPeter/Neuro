@@ -10,6 +10,32 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.33.0] - 2026-11-07
+
+### Added
+
+- A closure without `move` takes a capture by value when its body moves it out: `|| consume(s)`
+  moves `s` in and can be called once, while the closure's other captures keep their weakest mode.
+  A closure that only moves its captures owns them and can be returned. This replaces the
+  diagnostic that asked for `move`.
+
+### Fixed
+
+- A `once` closure could be handed to a built-in that calls per element (`.map`, `.filter`, `.zip`,
+  `.reduce`), which ran its body again on every element and released a moved capture each time.
+  It is now refused.
+- A closure's result did not move what it named, so `|| n` borrowed `n`, and each call yielded the
+  same value: a `Drop` value was released once per call and once more by its owner. A capture the
+  closure ends with is now moved out, with or without `move`, and the closure can be called once.
+- A function that captured a `string` parameter by value into a closure it returned left its
+  caller free to release the argument on return, so the closure read freed memory. The argument
+  now stays with the closure.
+
+### Known issues
+
+- A `string` argument captured by value, or a capture a function value hands back, leaks its
+  buffer rather than being released.
+
 ## [5.32.0] - 2026-11-07
 
 ### Added

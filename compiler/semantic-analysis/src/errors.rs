@@ -1417,9 +1417,9 @@ pub enum TypeError {
     ClosureAssignsCapture { name: String, span: Span },
 
     #[error(
-        "closure moves captured '{name}' out, but a closure without `move` captures it by reference: write `move |...|` so the closure owns '{name}' and may give it away"
+        "`.{method}` calls its function once per element, but this one gives a capture away, so it can run only once: pass a `.clone()` of the capture to the call, or borrow it"
     )]
-    ClosureMovesCapture { name: String, span: Span },
+    OnceFunctionPerElement { method: String, span: Span },
 
     #[error(
         "this value may borrow from the scope that built it (a closure that borrows a capture, a function-typed parameter, or a closure holding either), so it lives only as long as that scope: bind it with `val` or `mut`, pass it to a function-typed parameter, or call it; it cannot be assigned, returned, stored inside another value, yielded from a block, or handed to a built-in method such as `.map` as a closure literal that holds a `&mut`"
@@ -1795,7 +1795,7 @@ impl TypeError {
             | Self::ClosureParamNeedsType { span, .. }
             | Self::ClosureCapturesNonCopy { span, .. }
             | Self::ClosureAssignsCapture { span, .. }
-            | Self::ClosureMovesCapture { span, .. }
+            | Self::OnceFunctionPerElement { span, .. }
             | Self::ScopeBoundClosureStored { span }
             | Self::ClosureBlockNeedsReturnType { span, .. }
             | Self::UnformattableType { span, .. }

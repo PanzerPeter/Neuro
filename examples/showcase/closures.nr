@@ -4,7 +4,8 @@
 // closure that writes a local borrows it `&mut` and goes to a `mut (..)` parameter; one
 // that reads a `string` or pushes to a `Vec` borrows it; a `move` closure that gives its
 // `string` away is `once`. Closures are also returned, stored in struct fields and lent to
-// `mut` parameters.
+// `mut` parameters. Without `move`, a closure still takes by value whatever its body gives
+// away, one capture at a time.
 
 // Apply `f` to each element of a 4-element array and sum the results.
 
@@ -62,6 +63,12 @@ func pick_transform(offset: i32, squared: bool) -> Transform {
 // A `move` closure owns the `string` it captured, so it may be returned as well.
 func length_of(word: string) -> () -> u64 {
     move || word.len()
+}
+
+// The body gives its only capture away, so the closure owns it and may be returned with no
+// `move`.
+func deliver_later(item: string) -> once () -> string {
+    || item
 }
 
 // A running tally that owns its `string` and writes its own total: a `mut` closure.
@@ -143,6 +150,18 @@ func main() -> i32 {
     println("borrowed string   {name}.len() + x     = {measured}")
     println("once closure      shout(banner)      = {announced}")
 
+    // No `move`: `title` is given away, so it is taken by value and the closure is `once`,
+    // while `unit`, only read, stays borrowed and stays readable.
+    val title = "neu" + "ro"
+    val unit = "by" + "tes"
+    val inferred_move = finish(|| -> u64 { shout(title) + unit.len() })        // 5 + 5 = 10
+    val later = deliver_later("deferred" + "!")
+    val parcel = later()
+    val delivered = parcel.len() as i32                                        // 9
+
+    println("inferred move     shout(title)       = {inferred_move}, {unit} kept")
+    println("returned once     {parcel}.len()     = {delivered}")
+
     val captured = count + (seen.len() as i32) + measured + (announced as i32)
     val total = biased + scaled + doubled + captured
     // Inference: none of these closures is annotated.
@@ -177,8 +196,8 @@ func main() -> i32 {
     println("lent closure      feed(data, tally)  = {fed}")
     println("moved closure     {meter.label} read(10)     = {grown}")
 
-    val inferred = summed + (widest as i32) + escaped + owned
+    val inferred = summed + (widest as i32) + escaped + owned + (inferred_move as i32) + delivered
     val lent = (grown - fed) as i32
     println("total                                = {total + inferred + lent}")
-    total + inferred + lent                          // 143 + 10 + 4 + 12 + 4 + 30 = 203
+    total + inferred + lent                          // 143 + 10 + 4 + 12 + 4 + 10 + 9 + 30 = 222
 }

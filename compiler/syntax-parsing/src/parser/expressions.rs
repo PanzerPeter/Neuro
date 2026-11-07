@@ -4,7 +4,7 @@ use shared_types::{Identifier, Span};
 
 use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
-use ast_types::{ClosureParam, Expr};
+use ast_types::{ClosureCapture, ClosureParam, Expr};
 
 use super::Parser;
 
@@ -149,7 +149,7 @@ impl Parser {
             params,
             ret,
             body: Box::new(body),
-            is_move,
+            capture: Box::new(ClosureCapture::new(is_move)),
             span,
         })
     }

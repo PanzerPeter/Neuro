@@ -10,14 +10,14 @@ fn parses_single_expression_closure() {
         Expr::Closure {
             params,
             ret,
-            is_move,
+            capture,
             ..
         } => {
             assert_eq!(params.len(), 1);
             assert_eq!(params[0].name.name, "x");
             assert!(params[0].ty.is_some());
             assert!(ret.is_none());
-            assert!(!is_move);
+            assert!(!capture.is_move);
         }
         other => panic!("expected closure, got {:?}", other),
     }
@@ -30,13 +30,13 @@ fn parses_move_closure_with_return_type() {
         Expr::Closure {
             params,
             ret,
-            is_move,
+            capture,
             body,
             ..
         } => {
             assert_eq!(params.len(), 2);
             assert!(ret.is_some());
-            assert!(is_move);
+            assert!(capture.is_move);
             assert!(matches!(*body, Expr::Block { .. }));
         }
         other => panic!("expected closure, got {:?}", other),

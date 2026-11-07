@@ -5,7 +5,7 @@
 // is fully erased before codegen. These tests drive the whole pipeline
 // (parse → type-check → HIR lowering → LLVM → native binary) and assert on the
 // program's exit code.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, run};
 
 #[test]
 fn identity_at_multiple_types() {
@@ -194,10 +194,9 @@ func main() -> i32 {
 }
 
 #[test]
-fn moving_an_abstract_capture_out_of_a_closure_is_rejected() {
-    let test = CompileTest::new();
-    // The capture is borrowed, since `T` is not known to be `Copy`, so moving it out
-    // would hand every call the same buffer to free at `T = string`.
+fn moving_an_abstract_capture_out_of_a_closure_serves_every_instance() {
+    // `v` is taken by value in the template, so at `T = string` the closure owns the one
+    // buffer, and at `T = i32` it holds a copy.
     let source = r#"
 func hold<T>(v: T) -> i32 {
     val f = |x: i32| -> i32 {
@@ -208,14 +207,10 @@ func hold<T>(v: T) -> i32 {
 }
 
 func main() -> i32 {
-    return 0
+    return hold(7) + hold("a" + "b") + 10
 }
 "#;
-    let path = test.write_source("generic_capture.nr", source);
-    let err = test
-        .compile(&path)
-        .expect_err("a closure capturing an abstract-typed binding must be rejected");
-    assert!(err.contains("closure moves captured 'v' out"), "{err}");
+    assert_eq!(run("generic_capture.nr", source), 12);
 }
 
 #[test]

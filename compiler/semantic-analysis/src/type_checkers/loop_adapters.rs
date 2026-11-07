@@ -86,6 +86,7 @@ impl TypeChecker {
             .unwrap_or(Type::Unknown);
         self.function_value_slot = None;
         self.refuse_mutating_closure_literal(slot);
+        self.refuse_once_per_element(&callee_ty, &name, adapter.span);
 
         let (param, ret) = match &callee_ty {
             Type::Function { params, ret, .. } if params.len() == 1 => {

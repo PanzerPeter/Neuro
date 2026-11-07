@@ -431,11 +431,25 @@ func main() -> i32 {
 }
 ```
 
-A closure without `move` may not move a capture out (passing a captured `string` to a function that takes one by value, say), because it only borrowed it. The diagnostic asks for `move`.
+A closure without `move` takes a capture by value when its body moves it out, by passing a captured `string` to a function that takes one by value or by ending with it, say. Only that capture is moved in, and the others keep their weakest mode. Moving out one field takes the whole variable:
+
+```neuro
+func consume(s: string) -> u64 { s.len() }
+
+func main() -> i32 {
+    val title = "neu" + "ro"
+    val unit = "by" + "tes"
+    val send = || -> u64 { consume(title) + unit.len() }
+    val n = send()                     // 10, and `title` is gone
+    (n + unit.len()) as i32            // 15: `unit` was only borrowed
+}
+```
+
+A closure whose every capture is taken by value owns them, so it may be returned without `move`: `func later(s: string) -> once () -> u64 { || consume(s) }`.
 
 ### Call modes
 
-How a closure uses its captures decides how it may be called. One that only reads them can be called any number of times. One that writes a capture is a `mut` function. A `move` closure that moves a capture out can be called once. A parameter's function type says which it accepts:
+How a closure uses its captures decides how it may be called. One that only reads them can be called any number of times. One that writes a capture is a `mut` function. One that moves a capture out can be called once, and so cannot go to a built-in that calls per element (`.map`, `.filter`, `.zip`, `.reduce`). A parameter's function type says which it accepts:
 
 | Parameter type | Accepts | The callee may |
 | --- | --- | --- |
@@ -588,7 +602,6 @@ error: this value may borrow from the scope that built it (a closure that borrow
 - Returning a closure over the function values a function was handed (`func compose(f: (i32) -> i32, g: (i32) -> i32) -> (i32) -> i32 { move |x| g(f(x)) }`).
 - Storing a borrowing closure in a holder that dies before what it borrows.
 - A closure literal that writes through a borrow, written as the argument of a built-in method (`.map`, `.filter`, `.zip`, `.reduce`). Bind it with `mut` first, so the borrow rules see it beside what the method walks. A literal that only reads what it borrows goes there directly, and a `for` head's literal keeps its borrows until the loop ends.
-- A closure without `move` taking a capture by value because its body moves it out.
 - An instantiated associated function or generic method as a value on its own (`val f = Cell::new::<i32>`). It works as a `|>` target and as a later `>>` stage.
 
 ## See also

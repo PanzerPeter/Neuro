@@ -61,7 +61,7 @@ Instance names carry the `$g` marker, which no declared identifier can contain. 
 
 ### Closures and dynamic dispatch
 
-Each closure lifts to a `HirItem::Closure` named `__closure_N`. Its captures are the free variables that resolve to an enclosing local. A `Copy` value the body does not write is copied, a `move` closure copies or moves each capture, and any other capture is borrowed.
+Each closure lifts to a `HirItem::Closure` named `__closure_N`. Its captures are the free variables that resolve to an enclosing local. A `Copy` value the body does not write is copied, a `move` closure copies or moves each capture, a capture the type checker found the body moving out is moved in, and any other capture is borrowed. That one fact comes from the checker, which records it on the closure literal: a move depends on every consuming position and receiver mode, and the two stages must agree exactly.
 
 Each trait lowers with its methods in declaration order, which is the canonical vtable slot layout. The unsizing coercions `&T` to `&dyn Trait` and `&[T; N]` (or `&Vec<T>`) to `&[T]` are inserted in one place, so every context with an expected type receives them.
 

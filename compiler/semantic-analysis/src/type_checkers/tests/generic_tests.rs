@@ -139,22 +139,22 @@ func main() -> i32 { return 0 }
 }
 
 #[test]
-fn closure_moving_an_abstract_capture_out_is_rejected() {
-    // `T` is not known to be `Copy`, so the closure borrows `v`, and every call would
-    // move the one value out again once `T` was instantiated with a `Drop` type.
+fn closure_moving_an_abstract_capture_out_runs_once() {
+    // `T` is not known to be `Copy`, so moving `v` out takes it by value and leaves the
+    // closure callable once, whichever type the instance gives it.
     let errors = semantic_errors(
         r#"
 func hold<T>(v: T) -> i32 { val f = |x: i32| -> i32 { val held = v
         x }
-    f(1) }
+    f(1) + f(2) }
 func main() -> i32 { return 0 }
 "#,
     );
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, TypeError::ClosureMovesCapture { .. })),
-        "capturing an abstract-typed binding must be reported; got {errors:?}"
+            .any(|e| matches!(e, TypeError::UseOfMovedValue { name, .. } if name == "f")),
+        "a second call of the closure must be reported; got {errors:?}"
     );
 }
 

@@ -147,7 +147,7 @@ impl Lowerer {
             params,
             ret,
             body,
-            is_move,
+            capture,
             span: literal,
         } = crate::closures::peel_parens(func)
             && params.iter().any(|p| p.ty.is_none())
@@ -166,7 +166,7 @@ impl Lowerer {
                 lowered.push(arg);
             }
             let callee =
-                self.lower_closure(params, ret.as_ref(), body, *is_move, &hint, *literal)?;
+                self.lower_closure(params, ret.as_ref(), body, capture, &hint, *literal)?;
             let HirType::Function { ret, .. } = callee.ty.clone() else {
                 return Err(LoweringError::Malformed {
                     detail: "a closure literal lowered to a non-function".to_string(),

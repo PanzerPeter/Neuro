@@ -4,14 +4,16 @@
 //! Captures are the free variables of the body that resolve to an enclosing *local*
 //! binding (module constants and functions are referenced directly, so they are not
 //! captured). Each is settled the way the checker settles it: a `Copy` value
-//! the body only reads is copied, a `move` closure copies or moves every capture, and
-//! any other capture is borrowed. A borrowed capture's environment field holds
+//! the body only reads is copied, a `move` closure copies or moves every capture, a
+//! capture the checker recorded as moved out is moved in, and any other capture is
+//! borrowed. A borrowed capture's environment field holds
 //! `&mut name`, and every use of `name` in the body reads or writes through it, so the
 //! backend sees a closure over a reference and nothing new.
 use std::collections::HashSet;
 
 use ast_types::{
-    COMPOSE_PARAM, ClosureParam, Expr, GenericArg, InterpPart, Place, Stmt, TensorIndexArg,
+    COMPOSE_PARAM, ClosureCapture, ClosureParam, Expr, GenericArg, InterpPart, Place, Stmt,
+    TensorIndexArg,
 };
 use neuro_hir::{
     HirCapture, HirClosure, HirExpr, HirExprKind, HirItem, HirParam, HirStmt, HirType,
@@ -36,7 +38,7 @@ impl Lowerer {
         params: &[ClosureParam],
         ret: Option<&ast_types::Type>,
         body: &Expr,
-        is_move: bool,
+        capture: &ClosureCapture,
         hint: &ClosureHint,
         span: Span,
     ) -> Result<HirExpr, LoweringError> {
@@ -61,7 +63,7 @@ impl Lowerer {
             });
         }
 
-        let settled = self.collect_captures(params, body, is_move);
+        let settled = self.collect_captures(params, body, capture);
         let ret_hint = match ret {
             Some(t) => Some(self.resolve_type(t)?),
             None => hint.ret.clone(),
@@ -202,9 +204,9 @@ impl Lowerer {
                 params,
                 ret,
                 body,
-                is_move,
+                capture,
                 span,
-            } => self.lower_closure(params, ret.as_ref(), body, *is_move, hint, *span),
+            } => self.lower_closure(params, ret.as_ref(), body, capture, hint, *span),
             // A generic enum's tuple variant takes the parameters the call has fixed.
             Expr::Path {
                 type_name, member, ..
@@ -478,7 +480,7 @@ impl Lowerer {
         &self,
         params: &[ClosureParam],
         body: &Expr,
-        is_move: bool,
+        by_value: &ClosureCapture,
     ) -> Vec<(HirCapture, HirType)> {
         let mut walk = FreeVars::default();
         walk.scoped(|fv| {
@@ -507,7 +509,7 @@ impl Lowerer {
                 continue;
             }
             let writes = walk.writes(&name, &self.mut_self_method_names);
-            if is_move || (self.is_copy(&ty) && !writes) {
+            if by_value.by_value(&name) || (self.is_copy(&ty) && !writes) {
                 let capture = HirCapture {
                     name,
                     ty: ty.clone(),

@@ -519,8 +519,11 @@ prefix is a reserved generated-symbol marker the checker forbids in user names),
 variables that resolve to an enclosing **local** binding (`lookup_local` excludes module
 constants), in first-seen order. `collect_captures` settles each as the checker does: a `Copy`
 value the body does not write (`FreeVars::writes`: an assignment root, a `&mut` operand, a call of
-a method whose name some `&mut self` method has) is copied, a `move` closure copies or moves every
-capture, and any other is borrowed (`HirCapture::borrowed`, typed `&mut T`). The captures sit in a
+a method whose name some `&mut self` method has) is copied, a capture `ClosureCapture::by_value`
+answers for (every one under `move`, plus each the checker recorded as moved out) is copied or
+moved in, and any other is borrowed (`HirCapture::borrowed`, typed `&mut T`). A move is the one
+capture fact not re-derived here: it takes every consuming position and receiver mode, and the
+two slices must agree exactly, so it rides on the literal. The captures sit in a
 scope of their own outside the parameters', so a body binding hides a capture instead of
 overwriting it, and `borrowed_captures` marks the borrowed ones by scope index. Inside the body
 `binding_value` reads one as `*name`, `lower_place` writes it through `HirPlace::Deref`, and

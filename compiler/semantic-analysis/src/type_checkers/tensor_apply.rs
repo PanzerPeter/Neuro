@@ -112,6 +112,7 @@ impl TypeChecker {
             .unwrap_or(Type::Unknown);
         self.function_value_slot = None;
         self.refuse_mutating_closure_literal(slot);
+        self.refuse_once_per_element(&callee_ty, method, callee.span());
         let Type::Function { params, ret, .. } = &callee_ty else {
             if !matches!(callee_ty, Type::Unknown) {
                 self.record_error(TypeError::TensorApplyNotCallable {

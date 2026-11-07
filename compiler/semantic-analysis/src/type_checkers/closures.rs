@@ -3,12 +3,15 @@
 //! A closure is type-checked as an anonymous callable of type
 //! [`Type::Function`]. Free variables referenced in the body that resolve to an
 //! enclosing local binding are *captures*, each settled per variable by how the body
-//! uses it: a `Copy` value it only reads is copied, a value it writes is
-//! borrowed `&mut`, any other value is borrowed `&`, and a `move` closure takes every
-//! capture by value. The strongest use decides the closure's call mode.
-use std::collections::{HashMap, HashSet};
+//! uses it: a value it moves out is taken by value, a `Copy` value it only reads is
+//! copied, a value it writes is borrowed `&mut`, any other value is borrowed `&`, and a
+//! `move` closure takes every capture by value. The strongest use decides the closure's
+//! call mode.
+use std::collections::HashSet;
 
-use ast_types::{COMPOSE_PARAM, ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg};
+use ast_types::{
+    COMPOSE_PARAM, ClosureCapture, ClosureParam, Expr, InterpPart, Place, Stmt, TensorIndexArg,
+};
 use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
@@ -33,7 +36,7 @@ impl TypeChecker {
         params: &[ClosureParam],
         ret: Option<&ast_types::Type>,
         body: &Expr,
-        is_move: bool,
+        capture: &ClosureCapture,
         expected: Option<&Type>,
         span: Span,
     ) -> Type {
@@ -158,6 +161,7 @@ impl TypeChecker {
                 }
             }
         };
+        self.move_closure_result(body);
 
         self.pop_scope();
         self.current_function_return_type = saved_return;
@@ -171,7 +175,7 @@ impl TypeChecker {
         let mode = self.settle_captures(
             params,
             body,
-            is_move,
+            capture,
             CaptureEvidence {
                 moves_before: &moves_before,
                 receivers_before,
@@ -207,12 +211,37 @@ impl TypeChecker {
         }
     }
 
+    /// Refuse a `once` function value given to a built-in that calls it per element: a
+    /// second call would give the same capture away again.
+    pub(crate) fn refuse_once_per_element(&mut self, callee: &Type, method: &str, span: Span) {
+        if matches!(
+            callee,
+            Type::Function {
+                mode: FunctionMode::Once,
+                ..
+            }
+        ) {
+            self.record_error(TypeError::OnceFunctionPerElement {
+                method: method.to_string(),
+                span,
+            });
+        }
+    }
+
     /// A function-typed parameter may be handed a closure that borrows from the
     /// caller's frame, so the body keeps it in the bounds such a closure lives in.
     pub(crate) fn bind_function_param(&mut self, name: &str, ty: &Type) {
         if matches!(ty, Type::Function { .. }) {
             self.symbols.mark_scope_bound(name);
         }
+    }
+
+    /// A closure's result leaves it the way a function's does, so a place it ends with is
+    /// moved out, a capture included: `|| s` gives `s` away. Runs with the parameters
+    /// still bound, so a tail naming one moves that and not an outer binding.
+    fn move_closure_result(&mut self, body: &Expr) {
+        self.symbols.clear_transient_borrows();
+        self.record_move(body);
     }
 
     /// Check a block-bodied closure like a function body: every statement is checked,
@@ -288,21 +317,24 @@ impl TypeChecker {
     /// Runs after the body is checked, because two uses only the body check sees decide a
     /// mode: a move out of a capture (its move state changed) and a `&mut self` call on
     /// one. A borrowed capture takes its borrow here, transient until the binding the
-    /// literal initializes takes it over; a `move` closure moves each non-`Copy`
-    /// capture out of its source. `lowering`'s capture walk settles the same way.
+    /// literal initializes takes it over. A capture taken by value is moved out of its
+    /// source: every non-`Copy` one of a `move` closure, and any the body moves out, which
+    /// are recorded on `capture` because lowering cannot see them. Its capture walk
+    /// settles the rest the same way.
     fn settle_captures(
         &mut self,
         params: &[ClosureParam],
         body: &Expr,
-        is_move: bool,
+        capture: &ClosureCapture,
         evidence: CaptureEvidence<'_>,
         span: Span,
     ) -> FunctionMode {
         let fv = free_vars(params, body);
-        let consumed: HashMap<String, Span> = self
+        let consumed: HashSet<String> = self
             .symbols
             .moves_since(evidence.moves_before)
             .into_iter()
+            .map(|(name, _)| name)
             .collect();
         let receivers: HashSet<String> = self.mut_receivers[evidence.receivers_before..]
             .iter()
@@ -350,14 +382,10 @@ impl TypeChecker {
             if writes {
                 mode = mode.max(FunctionMode::Mut);
             }
-            if let Some(moved_at) = consumed.get(name) {
+            if consumed.contains(name) {
                 mode = FunctionMode::Once;
-                if !is_move && !copy {
-                    self.record_error(TypeError::ClosureMovesCapture {
-                        name: name.clone(),
-                        span: *moved_at,
-                    });
-                    continue;
+                if !copy {
+                    capture.record_moved(name);
                 }
             }
             // A reference taken by copy is still a borrow the closure holds, and a value
@@ -368,8 +396,13 @@ impl TypeChecker {
                     .symbols
                     .lookup(name)
                     .is_some_and(|info| info.scope_bound);
-            if is_move {
-                if !copy {
+            if capture.by_value(name) {
+                // A body that moved it whole has met the binding's borrows already.
+                let moved_whole = self
+                    .symbols
+                    .lookup(name)
+                    .is_some_and(|info| info.moves.whole.is_some());
+                if !copy && !moved_whole {
                     self.record_move(&Expr::Identifier(Identifier {
                         name: name.clone(),
                         span: *use_span,
@@ -1061,6 +1094,79 @@ func main() -> i32 {
             })
             .collect();
         assert_eq!(moved, ["s", "f"], "{errors:?}");
+    }
+
+    /// A capture the body moves out is taken by value without `move`, and only that one:
+    /// the source is gone from the closure on, its neighbour is still borrowed, and the
+    /// closure can run once.
+    #[test]
+    fn a_moved_capture_is_taken_by_value_and_its_neighbours_stay_borrowed() {
+        let errors = semantic_errors(
+            "func consume(s: string) -> u64 { s.len() }
+func main() -> i32 {
+    val s = \"a\" + \"b\"
+    val kept = \"c\" + \"d\"
+    val f = || -> u64 { consume(s) + kept.len() }
+    val n = s.len() + kept.len()
+    val a = f()
+    (a + f() + n) as i32
+}",
+        );
+        let moved: Vec<&str> = errors
+            .iter()
+            .filter_map(|e| match e {
+                TypeError::UseOfMovedValue { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(moved, ["s", "f"], "{errors:?}");
+    }
+
+    /// The body's move meets a live borrow of the capture, and taking the capture must not
+    /// report the same conflict a second time.
+    #[test]
+    fn moving_a_borrowed_capture_is_reported_once() {
+        let errors = semantic_errors(
+            "func consume(s: string) -> u64 { s.len() }
+func main() -> i32 {
+    val s = \"a\" + \"b\"
+    val r = &s
+    val f = || -> u64 { consume(s) }
+    println(r)
+    0
+}",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(matches!(
+            errors[0],
+            TypeError::CannotMoveWhileBorrowed { .. }
+        ));
+    }
+
+    /// A built-in calls its function per element, so one that gives a capture away would
+    /// give it away again on the second element.
+    #[test]
+    fn a_once_function_is_refused_where_a_built_in_calls_per_element() {
+        for head in ["move |x: f32| -> f32 {", "|x: f32| -> f32 {"] {
+            let errors = semantic_errors(&format!(
+                "func consume(s: string) -> u64 {{ s.len() }}
+func main() -> i32 {{
+    val s = \"a\" + \"b\"
+    val t: Tensor<f32, [2]> = Tensor::zeros()
+    val u = t.map({head}
+        val n = consume(s)
+        x
+    }})
+    0
+}}"
+            ));
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| matches!(e, TypeError::OnceFunctionPerElement { .. })),
+                "{head}: {errors:?}"
+            );
+        }
     }
 
     #[test]

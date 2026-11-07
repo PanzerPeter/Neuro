@@ -1505,10 +1505,13 @@ fn read_retains(expr: &HirExpr, name: &Param) -> bool {
 /// the whitelist does not recognise.
 fn mentions(expr: &HirExpr, name: &str) -> bool {
     let mut found = false;
-    walk(expr, &mut |e| {
-        if matches!(&e.kind, HirExprKind::Variable(other) if other == name) {
-            found = true;
+    walk(expr, &mut |e| match &e.kind {
+        HirExprKind::Variable(other) => found |= other == name,
+        // A by-value capture keeps the buffer for as long as the closure lives.
+        HirExprKind::Closure { captures, .. } => {
+            found |= captures.iter().any(|c| c.name == name && !c.borrowed)
         }
+        _ => {}
     });
     found
 }
@@ -1843,6 +1846,17 @@ mod tests {
         // A view bound to a local, or handed back, may outlive the read.
         assert!(!owned.param_is_read_only("keep", 0));
         assert!(!owned.param_is_read_only("give", 0));
+    }
+
+    /// A closure that took the parameter by value may outlive the call, so the caller must
+    /// hand the buffer over rather than release it on return. A borrow cannot escape.
+    #[test]
+    fn a_parameter_captured_by_value_is_retained() {
+        let owned = summary(
+            "func owned(s: string) -> () -> u64 { move || s.len() }\nfunc lent(s: string) -> u64 {\n    val f = || s.len()\n    f()\n}\nfunc main() -> i32 { 0 }\n",
+        );
+        assert!(!owned.param_is_read_only("owned", 0));
+        assert!(owned.param_is_read_only("lent", 0));
     }
 
     #[test]
