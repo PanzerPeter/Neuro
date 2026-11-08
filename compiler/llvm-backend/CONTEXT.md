@@ -1472,7 +1472,7 @@ scrutinee's entire plan (`mark_held_moved_for_drop`), because which payload left
 runtime tag, so a part a binding arm left unbound leaks instead of being released twice (an arm
 that binds nothing restores the plan). And
 `collection_place_ptr` still copies a collection read out of something that is NOT a place (a
-`m.keys()` result, say) into a temporary; that copy aliases the holder's buffer, so
+call's result, say) into a temporary; that copy aliases the holder's buffer, so
 `reads_a_held_place` keeps it from being registered as an owner in its own right.
 
 `codegen_function` / `codegen_method` open the body scope and register by-value `Drop`,
@@ -1587,11 +1587,9 @@ non-null base, so the optimizer folds the check away (not at `-O0`).
 The two libc pairs stay distinct through the wrappers, since `free` cannot release an
 over-aligned block on Windows. `realloc` is NOT wrapped and needs no arena path: the only
 buffers it grows (a `Vec`'s and a `StringBuilder`'s) are produced by `realloc` from a null
-pointer, so they never come from the arena at all. A map's table and the `Vec` that `keys()`
-returns take libc `malloc` directly for the same pair of reasons: the table belongs to the map,
-which may outlive the block that grows it (BUG-045), and the key `Vec` will be grown by `realloc`,
-which must never see an arena pointer (BUG-046). The growth path frees the old table through the
-wrapper.
+pointer, so they never come from the arena at all. A map's table takes libc `malloc` directly:
+it belongs to the map, which may outlive the block that grows it (BUG-045). The growth path frees
+the old table through the wrapper.
 
 ### `PoolAware` registration and the LIFO sweep
 `pool_aware_types: HashSet<String>` (filled by `compile` from `impl PoolAware for T` blocks) gates
@@ -1660,11 +1658,11 @@ Buffer layouts, per kind:
   dangle after the next `push_str`, which the borrow checker does not yet track.
 
 Loop-shaped operations are emitted once per instantiation as private helpers named
-`__neuro_{hmap,bmap}_{find,insert,keys}_<key>_<value>` (plus `__neuro_vec_reserve`,
+`__neuro_{hmap,bmap}_{find,insert,drop_elems,drop_elems_rest}_<key>_<value>` (plus `__neuro_vec_reserve`,
 `__neuro_string_reserve`, and `__neuro_hash_string`), created through `get_or_build_helper`, which
 saves and restores the caller's insertion point and `current_function`. A lookup returns the slot
 index, or `-1`. `codegen/collections/` is split `mod` / `vectors` / `keys` / `maps`, with `maps/`
-further split into `lookup`, `insertion`, `iteration`, `probing`, and `growth`.
+further split into `lookup`, `insertion`, `iteration`, `probing`, `growth` and `release`.
 
 Key equality, order, and hash are compiler-supplied for int-like, `bool` and `string` keys
 (FNV-1a for strings, a SplitMix64 finalizer for integers and `bool`, `memcmp` for string order)
@@ -1693,11 +1691,21 @@ borrowed head binds each slot's address and registers nothing. A by-value head o
 that own nothing binds their bits and leaves the buffer to its owner's scope-exit release; the
 checker refuses any use of the owner after the loop.
 
+**A `for` over a map** (`codegen_map_for_each`, `maps/iteration.rs`) walks slots `0..cap` of a
+`HashMap`, skipping any not `FULL`, or `0..len` of a `BTreeMap`, whose dense sorted prefix makes
+the walk ascending. It binds what lowering typed: `(K, V)` loaded from the slot, `(&K, &V)` /
+`(&K, &mut V)` built with `slot_borrow`, or for a `HirStmt::ForEach::view` one shared borrow. The
+position of `.enumerate()` counts entries yielded, not slots. A consuming head over entries that
+own something takes the table like a `Vec` (`take_map_for_loop`) under
+`DropTarget::MapRemainder`; the header's `used` field, read by nothing once the loop owns the
+table, holds the first slot not taken, and the `drop_elems_rest` helper releases the live slots
+from there before freeing the buffer.
+
 A collection binding is registered in the drop scope with `DropTarget::Collection`, so scope exit
 `free`s field 0 under the same runtime drop flag that user `Drop` types use: a moved-out
-collection is not freed twice. An unnamed collection *temporary* (`for k in m.keys()`) is
+collection is not freed twice. An unnamed collection *temporary* (`for e in build_map()`) is
 registered the same way under a synthetic `__`-containing name that no source binding can collide
-with; without that, the only route to map iteration would leak. A collection read out of a place
+with; without that, a loop over a returned collection would leak it. A collection read out of a place
 another binding holds (`b.items.len()`) is not such a temporary: the copy aliases the holder's
 buffer, which the holder's own drop releases, so `reads_a_held_place` suppresses the registration. This is also what frees a `StringBuilder`'s
 buffer, since it is registered as an ordinary collection. A slot's value is released by the

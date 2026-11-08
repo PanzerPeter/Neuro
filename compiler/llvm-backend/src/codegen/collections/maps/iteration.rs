@@ -1,138 +1,311 @@
-// Generated `keys(header) -> Vec<K>` helper: a snapshot of the live keys in order.
+// `for` over a `HashMap` / `BTreeMap`: a walk of the live slots in slot order, which for
+// the ordered map is ascending key order.
 //
 // One of the map-codegen modules under `maps`; each adds methods to the same
 // `impl CodegenContext` block.
 
 use inkwell::IntPredicate;
-use inkwell::values::FunctionValue;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
+use neuro_hir::{HirExpr, HirStmt, MapView};
 
-use super::STATE_FULL;
-use crate::codegen::collections::{FIELD_CAP, FIELD_LEN};
-use crate::codegen::context::CodegenContext;
+use super::{STATE_FULL, SlotField};
+use crate::codegen::collections::{FIELD_CAP, FIELD_LEN, FIELD_USED, collection_arg};
+use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
 
+/// The drop-scope name of the table a consuming loop took over. It contains `__`, which
+/// no declared name may, so no move can clear its flag.
+const CONSUMED_MAP: &str = "__consumed_map";
+
 impl<'ctx> CodegenContext<'ctx> {
-    /// Emit `keys(header, out_buffer)`: copy every live key into `out_buffer`, in slot
-    /// order.
-    pub(super) fn build_map_keys_helper(
+    /// `for e in m` / `&m` / `&mut m`, and the `m.keys()` / `m.values()` views.
+    ///
+    /// A borrowed head binds `(&K, &V)` or `(&K, &mut V)` at each slot's address, a view
+    /// one half of that, and a by-value head the entry `(K, V)`; lowering types the
+    /// binding by the same rule. A by-value head over entries that own something consumes
+    /// them: the loop takes the table from its owner, each pass's binding owns the entry
+    /// it holds, and whatever no pass reached is released with the buffer when the loop
+    /// is left, by `break` and `return` as much as by running out.
+    ///
+    /// `index` counts the entries yielded, not the slots walked, which a hashed table
+    /// leaves gaps between.
+    pub(crate) fn codegen_map_for_each(
         &mut self,
-        kind: CollectionKind,
-        key_ty: &Type,
-        value_ty: &Type,
-    ) -> CodegenResult<FunctionValue<'ctx>> {
-        let name = self.map_helper_name(kind, "keys", key_ty, value_ty);
-        let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
-        let fn_type = self
-            .context
-            .void_type()
-            .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
-        let key_ty = key_ty.clone();
-        let value_ty = value_ty.clone();
-
-        self.get_or_build_helper(&name, fn_type, move |ctx, func| {
-            ctx.emit_map_keys_body(func, kind, &key_ty, &value_ty)
-        })
-    }
-
-    /// Body of the `keys` helper.
-    pub(super) fn emit_map_keys_body(
-        &mut self,
-        func: FunctionValue<'ctx>,
-        kind: CollectionKind,
-        key_ty: &Type,
-        value_ty: &Type,
+        label: Option<&str>,
+        index: Option<&str>,
+        iterator: &str,
+        iterable: &HirExpr,
+        view: Option<MapView>,
+        body: &[HirStmt],
     ) -> CodegenResult<()> {
-        let i64_ty = self.context.i64_type();
-        let entry = self.context.append_basic_block(func, "entry");
-        let cond_bb = self.context.append_basic_block(func, "cond");
-        let body_bb = self.context.append_basic_block(func, "body");
-        let take_bb = self.context.append_basic_block(func, "take");
-        let step_bb = self.context.append_basic_block(func, "step");
-        let exit_bb = self.context.append_basic_block(func, "exit");
-        self.builder.position_at_end(entry);
-
-        let header = func
-            .get_nth_param(0)
-            .ok_or_else(|| CodegenError::InternalError("map keys arity".into()))?
-            .into_pointer_value();
-        let out = func
-            .get_nth_param(1)
-            .ok_or_else(|| CodegenError::InternalError("map keys arity".into()))?
-            .into_pointer_value();
-
-        // A hashed table must scan every slot (live ones are scattered); the ordered
-        // one only has to walk its dense prefix.
-        let limit = match kind {
-            CollectionKind::HashMap => self.load_header_field(header, FIELD_CAP, "cap")?,
-            _ => self.load_header_field(header, FIELD_LEN, "len")?,
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("no current function".to_string()))?;
+        let obj_ty = Type::from_hir(&iterable.ty);
+        let Type::Collection { kind, args } = obj_ty.referent().clone() else {
+            return Err(CodegenError::InternalError(format!(
+                "map loop over a non-map type {:?}",
+                obj_ty
+            )));
         };
-        let slot_slot = self.entry_alloca(i64_ty, "slot")?;
-        let out_slot = self.entry_alloca(i64_ty, "out.i")?;
-        for target in [slot_slot, out_slot] {
-            self.builder.build_store(target, i64_ty.const_zero())?;
-        }
-        self.builder.build_unconditional_branch(cond_bb)?;
+        let key_ty = collection_arg(&args, 0)?;
+        let value_ty = collection_arg(&args, 1)?;
+        let lent = match obj_ty {
+            Type::Reference { mutable, .. } => Some(mutable),
+            _ => None,
+        };
+        let owner_header = self.collection_place_ptr(iterable, &obj_ty)?;
+        let consumes = view.is_none()
+            && lent.is_none()
+            && (self.slot_needs_release(&key_ty) || self.slot_needs_release(&value_ty));
+        let header = match consumes {
+            true => self.take_map_for_loop(owner_header, obj_ty.referent())?,
+            false => owner_header,
+        };
+        let binding_ty = map_binding_type(&key_ty, &value_ty, view, lent);
+        let binding_llvm = self.get_any_llvm_type(&binding_ty)?;
+        let i64_ty = self.context.i64_type();
 
+        let slot_alloca = self.entry_alloca(i64_ty, "meach.slot")?;
+        self.builder.build_store(slot_alloca, i64_ty.const_zero())?;
+        let count_alloca = self.entry_alloca(i64_ty, "meach.count")?;
+        self.builder
+            .build_store(count_alloca, i64_ty.const_zero())?;
+        let elem_alloca = self.entry_alloca(binding_llvm, iterator)?;
+
+        self.type_env
+            .insert(iterator.to_string(), binding_ty.clone());
+        let iter_name = iterator.to_string();
+        let previous_var = self.variables.insert(iter_name.clone(), elem_alloca);
+        let previous_ty = self.variable_types.insert(iter_name.clone(), binding_llvm);
+        let index_binding = self.bind_loop_index(index)?;
+
+        let cond_bb = self.context.append_basic_block(parent_fn, "meach.cond");
+        let live_bb = self.context.append_basic_block(parent_fn, "meach.live");
+        let body_bb = self.context.append_basic_block(parent_fn, "meach.body");
+        let step_bb = self.context.append_basic_block(parent_fn, "meach.step");
+        let exit_bb = self.context.append_basic_block(parent_fn, "meach.exit");
+
+        if !self.current_block_terminated() {
+            self.builder.build_unconditional_branch(cond_bb)?;
+        }
+
+        // A hashed table scatters its live slots across the whole buffer; the ordered one
+        // keeps them in a dense prefix.
         self.builder.position_at_end(cond_bb);
         let slot = self
             .builder
-            .build_load(i64_ty, slot_slot, "slot.val")?
+            .build_load(i64_ty, slot_alloca, "meach.sv")?
             .into_int_value();
+        let limit = match kind {
+            CollectionKind::HashMap => self.load_header_field(header, FIELD_CAP, "meach.cap")?,
+            _ => self.load_header_field(header, FIELD_LEN, "meach.len")?,
+        };
         let more = self
             .builder
-            .build_int_compare(IntPredicate::ULT, slot, limit, "more")?;
+            .build_int_compare(IntPredicate::ULT, slot, limit, "meach.more")?;
         self.builder
-            .build_conditional_branch(more, body_bb, exit_bb)?;
+            .build_conditional_branch(more, live_bb, exit_bb)?;
 
-        self.builder.position_at_end(body_bb);
+        self.builder.position_at_end(live_bb);
         let live = match kind {
             CollectionKind::HashMap => {
-                let state = self.load_slot_state(header, key_ty, value_ty, slot)?;
+                let state = self.load_slot_state(header, &key_ty, &value_ty, slot)?;
                 self.builder.build_int_compare(
                     IntPredicate::EQ,
                     state,
                     self.context.i8_type().const_int(STATE_FULL, false),
-                    "live",
+                    "meach.full",
                 )?
             }
             _ => self.context.bool_type().const_int(1, false),
         };
         self.builder
-            .build_conditional_branch(live, take_bb, step_bb)?;
+            .build_conditional_branch(live, body_bb, step_bb)?;
 
-        self.builder.position_at_end(take_bb);
-        let key = self.load_slot_key(kind, header, key_ty, value_ty, slot)?;
-        let out_index = self
+        self.builder.position_at_end(body_bb);
+        let entry = self.map_loop_entry(
+            (kind, header, slot),
+            (&key_ty, &value_ty),
+            view,
+            lent,
+            binding_llvm,
+        )?;
+        self.builder.build_store(elem_alloca, entry)?;
+        if consumes {
+            // The entry now belongs to this pass's binding, so the remainder the loop
+            // still owns starts past its slot.
+            let taken =
+                self.builder
+                    .build_int_add(slot, i64_ty.const_int(1, false), "meach.taken")?;
+            self.store_header_field(header, FIELD_USED, taken)?;
+        }
+        let count = self
             .builder
-            .build_load(i64_ty, out_slot, "out.val")?
+            .build_load(i64_ty, count_alloca, "meach.cv")?
             .into_int_value();
-        let key_llvm = self.collection_value_type(key_ty)?;
-        // SAFETY: `out` was allocated with the map's `used` count and `out_index` is
-        // incremented once per live slot taken, so it never reaches that count.
-        let dst = unsafe {
+        self.store_loop_index(&index_binding, count)?;
+        let counted =
             self.builder
-                .build_in_bounds_gep(key_llvm, out, &[out_index], "out.slot")?
-        };
-        self.builder.build_store(dst, key)?;
-        // The snapshot is a `Vec<K>` of its own, released by whoever binds it, so every
-        // `string` of a key is copied rather than aliased out of the map's slot.
-        self.own_strings_stored_through_borrow(dst, key_ty, &[])?;
-        let out_next =
-            self.builder
-                .build_int_add(out_index, i64_ty.const_int(1, false), "out.next")?;
-        self.builder.build_store(out_slot, out_next)?;
-        self.builder.build_unconditional_branch(step_bb)?;
+                .build_int_add(count, i64_ty.const_int(1, false), "meach.counted")?;
+        self.builder.build_store(count_alloca, counted)?;
+
+        let body_scope_index = self.drop_scopes.len();
+        self.push_drop_scope();
+        if consumes {
+            self.register_slot_owner(iterator, elem_alloca, &binding_ty)?;
+        }
+        self.loop_targets.push(LoopTargets {
+            label: label.map(str::to_string),
+            continue_bb: step_bb,
+            break_bb: exit_bb,
+            break_slot: None,
+            drop_scope_depth: body_scope_index,
+        });
+        for stmt in body {
+            if self.current_block_terminated() {
+                break;
+            }
+            self.codegen_stmt(stmt)?;
+        }
+        let _ = self.loop_targets.pop();
+        if !self.current_block_terminated() {
+            self.emit_top_scope_drops()?;
+        }
+        self.pop_drop_scope();
+
+        if let Some(tail_bb) = self.builder.get_insert_block()
+            && tail_bb.get_terminator().is_none()
+        {
+            self.builder.build_unconditional_branch(step_bb)?;
+        }
 
         self.builder.position_at_end(step_bb);
+        let current = self
+            .builder
+            .build_load(i64_ty, slot_alloca, "meach.sv")?
+            .into_int_value();
         let next = self
             .builder
-            .build_int_add(slot, i64_ty.const_int(1, false), "slot.next")?;
-        self.builder.build_store(slot_slot, next)?;
+            .build_int_add(current, i64_ty.const_int(1, false), "meach.next")?;
+        self.builder.build_store(slot_alloca, next)?;
         self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(exit_bb);
-        self.builder.build_return(None)?;
+        self.unbind_loop_index(index_binding);
+        if consumes {
+            self.emit_top_scope_drops()?;
+            self.pop_drop_scope();
+        }
+
+        match previous_var {
+            Some(p) => {
+                self.variables.insert(iter_name.clone(), p);
+            }
+            None => {
+                self.variables.remove(&iter_name);
+            }
+        }
+        match previous_ty {
+            Some(p) => {
+                self.variable_types.insert(iter_name, p);
+            }
+            None => {
+                self.variable_types.remove(&iter_name);
+            }
+        }
         Ok(())
+    }
+
+    /// The value one pass binds for the live slot `slot`: a borrow of the key or value
+    /// for a view, the pair of borrows for a borrowed head, and the entry's bits for a
+    /// by-value one.
+    fn map_loop_entry(
+        &mut self,
+        (kind, header, slot): (CollectionKind, PointerValue<'ctx>, IntValue<'ctx>),
+        (key_ty, value_ty): (&Type, &Type),
+        view: Option<MapView>,
+        lent: Option<bool>,
+        binding_llvm: inkwell::types::BasicTypeEnum<'ctx>,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let key_ptr =
+            self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, SlotField::Key)?;
+        let value_ptr =
+            self.map_slot_field_ptr(kind, header, key_ty, value_ty, slot, SlotField::Value)?;
+        let (key, value) = match (view, lent) {
+            (Some(MapView::Keys), _) => return self.slot_borrow(key_ptr, key_ty, false),
+            (Some(MapView::Values), _) => return self.slot_borrow(value_ptr, value_ty, false),
+            (None, Some(mutable)) => (
+                self.slot_borrow(key_ptr, key_ty, false)?,
+                self.slot_borrow(value_ptr, value_ty, mutable)?,
+            ),
+            (None, None) => {
+                let key_llvm = self.collection_value_type(key_ty)?;
+                let value_llvm = self.collection_value_type(value_ty)?;
+                (
+                    self.builder.build_load(key_llvm, key_ptr, "meach.key")?,
+                    self.builder
+                        .build_load(value_llvm, value_ptr, "meach.val")?,
+                )
+            }
+        };
+        let pair = binding_llvm.into_struct_type().get_undef();
+        let pair = self
+            .builder
+            .build_insert_value(pair, key, 0, "meach.pair.k")?;
+        let pair = self
+            .builder
+            .build_insert_value(pair, value, 1, "meach.pair.v")?;
+        Ok(pair.into_struct_value().into())
+    }
+
+    /// Move the map at `owner_header` into a header the consuming loop about to run
+    /// owns, leaving its owner an empty one to release, and open the scope that releases
+    /// whatever the loop does not take. The `used` field, which only insertion reads,
+    /// marks the first slot not yet taken.
+    fn take_map_for_loop(
+        &mut self,
+        owner_header: PointerValue<'ctx>,
+        map_ty: &Type,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let header_ty = self.collection_header_type();
+        let taken = self.entry_alloca(header_ty, "meach.src")?;
+        let value = self
+            .builder
+            .build_load(header_ty, owner_header, "meach.src.val")?;
+        self.builder.build_store(taken, value)?;
+        self.builder
+            .build_store(owner_header, header_ty.const_zero())?;
+        self.store_header_field(taken, FIELD_USED, self.context.i64_type().const_zero())?;
+        self.push_drop_scope();
+        self.register_local_drop(
+            CONSUMED_MAP,
+            taken,
+            DropTarget::MapRemainder(map_ty.clone()),
+        )?;
+        Ok(taken)
+    }
+}
+
+/// What a map loop binds per entry, by the rule lowering applies: a shared borrow of the
+/// key or value for a view, `(&K, &V)` / `(&K, &mut V)` through a borrow, and `(K, V)`.
+fn map_binding_type(
+    key_ty: &Type,
+    value_ty: &Type,
+    view: Option<MapView>,
+    lent: Option<bool>,
+) -> Type {
+    let borrow = |inner: &Type, mutable: bool| Type::Reference {
+        inner: Box::new(inner.clone()),
+        mutable,
+    };
+    match (view, lent) {
+        (Some(MapView::Keys), _) => borrow(key_ty, false),
+        (Some(MapView::Values), _) => borrow(value_ty, false),
+        (None, Some(mutable)) => {
+            Type::Tuple(vec![borrow(key_ty, false), borrow(value_ty, mutable)])
+        }
+        (None, None) => Type::Tuple(vec![key_ty.clone(), value_ty.clone()]),
     }
 }

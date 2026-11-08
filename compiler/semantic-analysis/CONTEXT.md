@@ -1531,6 +1531,15 @@ compiler-known nominal type, never `Copy` and always move-tracked.
 - Raw float keys are rejected toward `OrderedF32` / `OrderedF64` (IEEE-754 `<` is a partial
   order); a struct key requires `PartialEq` plus `Hashable` (hashed), derived or by hand, or
   `PartialEq` plus `impl Comparable` (ordered).
+- **Map heads.** A `HashMap` / `BTreeMap` `for` head binds its entry by receiver mode
+  (`map_loop_item`): `(K, V)` by value, recording the move; `(&K, &V)` through `&m`; `(&K, &mut V)`
+  through `&mut m`, a key never lent mutably. `m.keys()` / `m.values()` over a map place
+  (`map_view_receiver`, the place typed by `projection_type`) is a head form binding `&K` / `&V`,
+  and the loop binding holds a shared borrow of the map. Anywhere else the two names on a map are
+  `MapViewOutsideHead`. A `Stmt::ForEach` marked `pair` needs a two-element tuple item, else
+  `PairHeadOverNonPair`, reported once with the item bound as `Unknown` so the parser's
+  destructuring declarations stay silent.
+- A type-parameter key needs only the map's key traits; it moves into its slot like a value.
 - Indexing, index assignment, and `for`-in accept a `Vec` alongside an array. A by-value head
   consumes the `Vec` whatever its element type (`counted_loop_item`); a borrowed one binds `&T` /
   `&mut T`, so a move out of the element is the ordinary `CannotMoveOutOfBorrow` of a `*x`.

@@ -1,5 +1,5 @@
 // Generated `drop_elems(header)` helper for both map shapes: release what the live slots
-// own.
+// own. Its `drop_rest` twin starts at the slot a consuming `for` loop has reached.
 //
 // One of the map-codegen modules under `maps`; each adds methods to the same
 // `impl CodegenContext` block.
@@ -9,7 +9,7 @@ use inkwell::values::PointerValue;
 
 use super::{STATE_FULL, SlotField};
 use crate::codegen::collections::elements::element_release_helper_name;
-use crate::codegen::collections::{FIELD_CAP, FIELD_LEN, collection_arg};
+use crate::codegen::collections::{FIELD_CAP, FIELD_LEN, FIELD_USED, collection_arg};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
@@ -29,20 +29,53 @@ impl<'ctx> CodegenContext<'ctx> {
         let fn_type = self.context.void_type().fn_type(&[ptr_ty.into()], false);
 
         let helper = self.get_or_build_helper(&name, fn_type, move |ctx, func| {
-            ctx.emit_map_release_body(func, kind, &key_ty, &value_ty)
+            ctx.emit_map_release_body(func, kind, &key_ty, &value_ty, false)
         })?;
         self.builder.build_call(helper, &[header.into()], "")?;
         Ok(())
     }
 
-    /// Body of the slot-release helper: walk the slots this shape can hold live entries
-    /// in and release what each one's key and value own.
+    /// Release what a consuming loop over the map `map_ty` has not reached, then its
+    /// buffer: the [`DropTarget::MapRemainder`] release. The loop keeps the first slot it
+    /// has not taken in the header's `used` field, which nothing else reads once the loop
+    /// owns the table.
+    ///
+    /// [`DropTarget::MapRemainder`]: crate::codegen::context::DropTarget::MapRemainder
+    pub(crate) fn emit_map_remainder_free(
+        &mut self,
+        header: PointerValue<'ctx>,
+        map_ty: &Type,
+    ) -> CodegenResult<()> {
+        let Type::Collection { kind, args } = map_ty else {
+            return Err(CodegenError::InternalError(format!(
+                "map remainder of a non-map type {:?}",
+                map_ty
+            )));
+        };
+        let (kind, key_ty, value_ty) = (*kind, collection_arg(args, 0)?, collection_arg(args, 1)?);
+        let name = format!("{}_rest", element_release_helper_name(kind, args));
+        let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
+        let fn_type = self.context.void_type().fn_type(&[ptr_ty.into()], false);
+        let helper = self.get_or_build_helper(&name, fn_type, move |ctx, func| {
+            ctx.emit_map_release_body(func, kind, &key_ty, &value_ty, true)
+        })?;
+        self.builder.build_call(helper, &[header.into()], "")?;
+        let buffer = self.load_header_buffer(header)?;
+        let free_fn = self.release_fn()?;
+        self.builder.build_call(free_fn, &[buffer.into()], "")?;
+        Ok(())
+    }
+
+    /// Body of the slot-release helpers: walk the slots this shape can hold live entries
+    /// in, from the first or, with `from_used`, from the slot the header's `used` field
+    /// names, and release what each one's key and value own.
     fn emit_map_release_body(
         &mut self,
         func: inkwell::values::FunctionValue<'ctx>,
         kind: CollectionKind,
         key_ty: &Type,
         value_ty: &Type,
+        from_used: bool,
     ) -> CodegenResult<()> {
         let i64_ty = self.context.i64_type();
         let entry = self.context.append_basic_block(func, "entry");
@@ -64,8 +97,12 @@ impl<'ctx> CodegenContext<'ctx> {
             CollectionKind::HashMap => self.load_header_field(header, FIELD_CAP, "cap")?,
             _ => self.load_header_field(header, FIELD_LEN, "len")?,
         };
+        let start = match from_used {
+            true => self.load_header_field(header, FIELD_USED, "rel.start")?,
+            false => i64_ty.const_zero(),
+        };
         let cursor = self.entry_alloca(i64_ty, "rel.slot")?;
-        self.builder.build_store(cursor, i64_ty.const_zero())?;
+        self.builder.build_store(cursor, start)?;
         self.builder.build_unconditional_branch(cond_bb)?;
 
         self.builder.position_at_end(cond_bb);

@@ -91,7 +91,7 @@ func main() -> i32 {
         Option::None => { return 94 }
     }
 
-    // `keys()` is a `Vec` of its own, with copies of the map's keys in it.
+    // `keys()` lends each key in turn; nothing is copied out of the map.
     mut key_bytes: u64 = 0
     for key in notes.keys() {
         key_bytes = key_bytes + key.len()

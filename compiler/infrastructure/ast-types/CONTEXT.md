@@ -161,6 +161,10 @@ walkers.
   *arity* on the loop node rather than an adapter expression, so it folds into the loop over any
   head, an array included, and builds no adapter value. Both walkers that bind loop
   variables must bind this one too, or a closure in the body captures it as a free variable.
+  `Stmt::ForEach` also carries `pair: bool`: a `(a, b)` head over an item that is no position.
+  The parser has bound the item to its own `__destructure_N` name and opened `body` with the two
+  declarations that take it apart, so a pass sees ordinary statements and only the checker reads
+  the flag, to require a two-element tuple item.
   `Stmt::ForRange` additionally carries `reversed: bool`, the `.rev()` head form: the same
   bounds walked from the last value down to `start`. It is a flag on the range rather than a
   `LoopAdapter` because it reorders the bounds themselves, not the element stream an adapter

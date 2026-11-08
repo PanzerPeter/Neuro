@@ -370,3 +370,80 @@ fn other_borrows_of_a_protocol_type_are_rejected() {
         .count();
     assert_eq!(rejected, 2, "got {errors:?}");
 }
+
+/// A map head binds the entry by its receiver mode, and a view one half of it, shared;
+/// the annotations below fail to check if any binding has another type.
+#[test]
+fn a_map_head_binds_its_entry_by_the_receiver_mode() {
+    let errors = semantic_errors(&program(
+        r#"
+    mut m: HashMap<i32, string> = HashMap::new()
+    for e in &m {
+        val k: &i32 = e.0
+        val v: &string = e.1
+    }
+    for (k, v) in &mut m {
+        val key: &i32 = k
+        val value: &mut string = v
+    }
+    for k in m.keys() { val key: &i32 = k }
+    for v in m.values() { val value: &string = v }
+    for (k, v) in m {
+        val key: i32 = k
+        val value: string = v
+    }
+    0
+"#,
+    ));
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}
+
+#[test]
+fn a_pair_head_needs_a_two_element_item() {
+    let errors = semantic_errors(&program(
+        r#"
+    val m: BTreeMap<i32, i32> = BTreeMap::new()
+    for (a, b) in m.keys() { }
+    for (a, b) in [(1, 2, 3)] { }
+    0
+"#,
+    ));
+    let rejected = errors
+        .iter()
+        .filter(|e| matches!(e, TypeError::PairHeadOverNonPair { .. }))
+        .count();
+    assert_eq!(
+        rejected, 2,
+        "one report per head and nothing else, got {errors:?}"
+    );
+    assert_eq!(errors.len(), 2, "got {errors:?}");
+}
+
+/// Outside a head the views are refused rather than resolved, and a type's own `keys`
+/// method is an ordinary call in a head.
+#[test]
+fn a_map_view_is_a_head_form_only() {
+    let errors = semantic_errors(&program(
+        r#"
+    val m: HashMap<i32, i32> = HashMap::new()
+    val ks = m.keys()
+    0
+"#,
+    ));
+    assert!(
+        matches!(errors.as_slice(), [TypeError::MapViewOutsideHead { method, .. }] if method == "keys"),
+        "got {errors:?}"
+    );
+    let errors = semantic_errors(&format!(
+        "{PROTOCOL_TRAITS}
+         struct Bag {{ n: i32 }}
+         impl Bag {{ func keys(&self) -> CountIter {{ CountIter {{ at: 0, end: self.n }} }} }}
+         func main() -> i32 {{
+            val b = Bag {{ n: 3 }}
+            mut total = 0
+            for k in b.keys() {{ total = total + k }}
+            total
+         }}"
+    ));
+    assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+}

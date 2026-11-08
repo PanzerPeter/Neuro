@@ -531,7 +531,7 @@ fn a_type_parameter_key_needs_every_key_trait_as_a_bound() {
     let err = compile_rejected(
         "generic_key_bounds.nr",
         r#"
-func a<K: PartialEq + Copy>(k: K) -> i32 {
+func a<K: PartialEq>(k: K) -> i32 {
     val m: HashMap<K, i32> = HashMap::new()
     m.len() as i32
 }
@@ -541,7 +541,7 @@ func b<K: Hashable + PartialEq>(k: K) -> i32 {
     m.len() as i32
 }
 
-func c<K: Hashable + PartialEq + Copy>(k: K) -> i32 {
+func c<K: Hashable + PartialEq>(k: K) -> i32 {
     val m: BTreeMap<K, i32> = BTreeMap::new()
     m.len() as i32
 }
@@ -553,7 +553,8 @@ func main() -> i32 { 0 }
         err.contains("map keys require `Hashable` on K"),
         "got: {err}"
     );
-    assert!(err.contains("map keys require `Copy` on K"), "got: {err}");
+    // A key moves into its slot like a value, so `b` needs no `Copy` bound.
+    assert!(!err.contains("`Copy`"), "got: {err}");
     assert!(
         err.contains("map keys require `Comparable` on K"),
         "got: {err}"

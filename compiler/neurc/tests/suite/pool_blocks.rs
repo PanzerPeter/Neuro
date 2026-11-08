@@ -1076,7 +1076,8 @@ func main() -> i32 {{
 }
 
 /// `Vec` growth reallocates its buffer with libc, so a `Vec` whose buffer came from the
-/// arena would hand `realloc` a pointer libc never gave out. `keys()` is such a `Vec`.
+/// arena would hand `realloc` a pointer libc never gave out. `keys()` once built such a
+/// `Vec`; the keys now fill one inside the pool.
 /// The second pool writes past the arena's first page, which is where the damage that
 /// `realloc` did to the chunk becomes a fault.
 #[test]
@@ -1089,7 +1090,8 @@ func main() -> i32 {
     m.insert(2, 20)
     mut total: i32 = 0
     pool first {
-        mut k = m.keys()
+        mut k: Vec<i32> = Vec::new()
+        for key in m.keys() { k.push(*key) }
         mut i: i32 = 0
         while i < 40 {
             k.push(i)

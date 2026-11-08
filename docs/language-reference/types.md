@@ -563,14 +563,30 @@ Both share one surface:
 | `m.remove(k)` | `Option<V>` | Takes the value out, dropping the key |
 | `m.len()` | `u64` | Live entry count |
 | `m.clear()` | nothing | |
-| `m.keys()` | `Vec<K>` | A fresh `Vec`, so a map is iterated with `for k in m.keys()` |
+| `for (k, v) in m` | nothing | Moves each entry out as a `(K, V)` pair, consuming `m` |
+| `for (k, v) in &m` / `&mut m` | nothing | Binds `(&K, &V)` / `(&K, &mut V)`, leaving `m` usable |
+| `for k in m.keys()` / `for v in m.values()` | nothing | Binds `&K` / `&V`, leaving `m` usable |
 
-`HashMap` has average-O(1) lookup. `BTreeMap` keeps its entries ordered by key, so `keys()` returns them **ascending**. Pick it when iteration order matters.
+A map head yields one entry per pass, and a pair head `(k, v)` takes it apart; a single binding holds the tuple. A key is never lent mutably, since it decides where its entry lives. `m.keys()` and `m.values()` exist only as `for` heads. They copy nothing out of the map, and they cannot be bound to a name. As with a `Vec`, a borrowed head holds `m` for the whole loop, so the body cannot insert into it.
+
+`HashMap` has average-O(1) lookup and walks its entries in no promised order. `BTreeMap` keeps its entries ordered by key, so every head walks them **ascending**. Pick it when iteration order matters.
+
+```neuro
+mut stock: BTreeMap<string, i32> = BTreeMap::new()
+stock.insert("pears", 4)
+stock.insert("apples", 7)
+for (_, count) in &mut stock {
+    *count += 10
+}
+for (fruit, count) in &stock {
+    println("{fruit}: {count}")      // apples: 17, then pears: 14
+}
+```
 
 ### Element and key types
 
 - **Elements and values** may be any sized value except one that holds a reference or a function value.
-- **Keys** also need equality, plus a hash (`HashMap`) or a total order (`BTreeMap`). The compiler supplies both for integer, `bool`, `char`, and `string` keys. A struct key needs `PartialEq` and `Hashable` (`HashMap`), or `PartialEq` and `Comparable` (`BTreeMap`), derived or written by hand. A type parameter is a key when its bounds name those traits and `Copy`, as in `func count<K: Hashable + PartialEq + Copy>`. See [Generics and Traits](generics-and-traits.md).
+- **Keys** also need equality, plus a hash (`HashMap`) or a total order (`BTreeMap`). The compiler supplies both for integer, `bool`, `char`, and `string` keys. A struct key needs `PartialEq` and `Hashable` (`HashMap`), or `PartialEq` and `Comparable` (`BTreeMap`), derived or written by hand. A type parameter is a key when its bounds name those traits, as in `func count<K: Hashable + PartialEq>`; the key moves into its slot like any value, so no `Copy` bound is needed. See [Generics and Traits](generics-and-traits.md).
 - **Float keys are rejected.** IEEE-754 comparison is a partial order, and NaN compares false against everything, itself included. A map keyed on a raw float could hold a key it can never find again. Use the prelude's validating wrappers, which reject NaN when they are built:
 
 ```neuro
@@ -599,7 +615,8 @@ The one requirement is that equal keys hash equally. The integers, `bool`, `char
 ### Current limits
 
 - An element may not hold a reference or a function value.
-- `keys()` builds a `Vec` holding a copy of every key rather than an iterator over borrows, and there is no `values()`.
+- `m.keys()` and `m.values()` are `for` heads, not values: they cannot be bound, passed or returned.
+- A `string` does not meet a `Comparable` bound, so a generic `BTreeMap<K, V>` with `K: Comparable` cannot be instantiated at `string`, though `BTreeMap<string, V>` written directly works.
 - `Vec<T>` does not go through the [`Iterator` protocol](control-flow.md#the-iteration-protocol). `for x in v` lowers to a counted loop, as `for x in arr` does, and so does `for (i, x) in v.enumerate()`. The protocol is what a user-defined type implements to stand in a `for` head.
 
 ## Type Annotations and Inference

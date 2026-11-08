@@ -273,8 +273,13 @@ the tuple-index parse, so it needs no expression grammar of its own.
   head as one loop variable or the pair `(index, value)`, then strips a trailing `.enumerate()`
   off the iterable into `Stmt::ForRange`/`ForEach`'s `index` field. It cannot be left as an
   expression for semantic analysis to resolve: a range has no value form to be the receiver of a
-  method, and there is no iterator type for one to return. A pair head and `.enumerate()` imply
-  each other, so either alone is a parse error (`PairWithoutEnumerate` / `PairHeadWithoutPair`).
+  method, and there is no iterator type for one to return. `.enumerate()` without a pair head is
+  `PairHeadWithoutPair`; a pair over a range is `PairWithoutEnumerate`, a range yielding integers.
+- **A pair head over any other iterable destructures the item.** `bind_pair_item` binds the item
+  whole under a `__destructure_N` name and opens the body with `val a = item.0` / `val b = item.1`
+  (a `_` binds nothing), the same expansion `val (a, b) = e` gets. `Stmt::ForEach::pair` marks
+  the loop so the checker can name a non-pair item once (`PairHeadOverNonPair`): only the type
+  says whether the item is a two-element tuple, as a map entry is.
   `(0..n).enumerate()` must be parenthesised: `..` binds looser than a call, so the parenthesised
   range is unwrapped here into the range loop's bounds, and `for i in (0..n)` follows from the
   same unwrap.

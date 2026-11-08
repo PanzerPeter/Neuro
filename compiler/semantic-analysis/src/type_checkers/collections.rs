@@ -15,7 +15,7 @@ use ast_types::Expr;
 use shared_types::Span;
 
 use super::TypeChecker;
-use super::derivable::{COMPARABLE_TRAIT, COPY_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
+use super::derivable::{COMPARABLE_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::errors::TypeError;
 use crate::types::{CollectionKind, Type};
 
@@ -120,10 +120,6 @@ impl TypeChecker {
         };
         let name = name.clone();
         let mut required = vec![PARTIAL_EQ_TRAIT];
-        // A slot bit-copies its key, so an abstract key must be `Copy` in every instance.
-        if matches!(ty, Type::Generic(_)) {
-            required.push(COPY_TRAIT);
-        }
         match kind {
             CollectionKind::HashMap => required.push(HASHABLE_TRAIT),
             CollectionKind::BTreeMap => required.push(COMPARABLE_TRAIT),
@@ -212,6 +208,15 @@ impl TypeChecker {
         let Type::Collection { kind, args: params } = recv.referent().clone() else {
             return None;
         };
+        if matches!(kind, CollectionKind::HashMap | CollectionKind::BTreeMap)
+            && super::iteration::MAP_VIEWS.contains(&method)
+        {
+            self.record_error(TypeError::MapViewOutsideHead {
+                method: method.to_string(),
+                span,
+            });
+            return Some(Type::Unknown);
+        }
         let spec = collection_method(kind, method)?;
 
         if spec.mutating {
@@ -360,8 +365,6 @@ enum ResultShape {
     },
     /// The element type itself, moved out of its slot (`Vec::remove`).
     Value,
-    /// A freshly built `Vec<K>` of the map's keys.
-    KeyVec,
     /// A freshly allocated owned immutable `string` (`StringBuilder::to_string`).
     OwnedString,
 }
@@ -384,10 +387,6 @@ impl ResultShape {
                 checker.option_of(inner, span)
             }
             ResultShape::Value => ParamSlot::Value.resolve(params),
-            ResultShape::KeyVec => Type::Collection {
-                kind: CollectionKind::Vec,
-                args: vec![ParamSlot::Key.resolve(params)],
-            },
             ResultShape::OwnedString => Type::String,
         }
     }
@@ -467,11 +466,6 @@ fn collection_method(kind: CollectionKind, method: &str) -> Option<MethodSpec> {
         (CollectionKind::StringBuilder, "to_string") => MethodSpec {
             params: &[],
             result: ResultShape::OwnedString,
-            mutating: false,
-        },
-        (CollectionKind::HashMap | CollectionKind::BTreeMap, "keys") => MethodSpec {
-            params: &[],
-            result: ResultShape::KeyVec,
             mutating: false,
         },
         _ => return None,

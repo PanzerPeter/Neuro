@@ -1,8 +1,9 @@
 // Showcase: a ledger on the standard collections, alongside earlier features. Integration
 // example: a `Vec` of `Copy` structs, a `Vec<string>`, a `HashMap<string, i32>` index, a
 // key-ordered `BTreeMap` report, an enum with `match`, `Option` and `??` reads, and `for`
-// in all three receiver modes. `for x in v` consumes the names, `for x in &v` reads the
-// items in place, and `for x in &mut v` restocks them.
+// in all three receiver modes over the `Vec` and the maps. `for x in v` consumes the names,
+// `for x in &v` reads the items in place, and `for x in &mut v` restocks them; a map head
+// binds each entry as a `(key, value)` pair, and `.keys()` / `.values()` lend one half.
 
 @derive(Copy, Clone)
 struct Item {
@@ -112,7 +113,7 @@ func main() -> i32 {
     // The ordered map reports ascending weights, so the last key is the heaviest.
     mut heaviest: i32 = 0
     for w in by_weight.keys() {
-        heaviest = w
+        heaviest = *w
     }
     // heaviest == 45
 
@@ -132,6 +133,30 @@ func main() -> i32 {
     val lines = items.len() as i32                    // 3
     val indexed = index.len() as i32                  // 3
 
+    // Map heads. `&index` lends each entry, `&mut by_weight` doubles the quantities in
+    // place, `.values()` reads them back through a head filter, and a by-value walk
+    // consumes the index, moving each name out.
+    mut name_bytes: i32 = 0
+    for (name, at) in &index {
+        name_bytes += name.len() as i32 * (*at + 1)
+    }
+    // bolt 4 x 1 + girder 6 x 2 + washer 6 x 3 = 34
+    for (_, quantity) in &mut by_weight {
+        *quantity *= 2
+    }
+    mut doubled: i32 = 0
+    for quantity in by_weight.values().filter(|q| q > 2) {
+        doubled += *quantity
+    }
+    // 12, 1, 4 doubled to 24, 2, 8; the filter keeps 24 + 8 = 32
+    mut long_names: i32 = 0
+    for (name, _) in index {
+        if name.len() > 4 {
+            long_names += 1
+        }
+    }
+    // girder and washer: 2
+
     println("Vec<Item> lines            = {lines}")
     println("HashMap index entries      = {indexed}")
     println("total weight               = {total_weight}")
@@ -142,10 +167,13 @@ func main() -> i32 {
     println("surcharges                 = {fees}")
     println("BTreeMap heaviest key      = {heaviest}")
     println("restocked weight           = {restocked}")
+    println("index name bytes x slot    = {name_bytes}")
+    println("doubled quantities over 2  = {doubled}")
+    println("names longer than 4        = {long_names}")
 
-    // 73 + 45 + 1 + 9 + 45 + 3 + 3 + 0 + 2 = 181
+    // 73 + 45 + 1 + 9 + 45 + 3 + 3 + 0 + 2 + 34 + 32 + 2 = 249
     val total = total_weight + girder_weight + missing + fees + heaviest + lines +
-        indexed + bolt_at + rivet_at
+        indexed + bolt_at + rivet_at + name_bytes + doubled + long_names
     println("total                      = {total}")
     total
 }

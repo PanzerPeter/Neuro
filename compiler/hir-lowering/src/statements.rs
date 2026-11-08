@@ -3,7 +3,9 @@
 use ast_types::{Expr, Place, Stmt};
 use neuro_hir::{HirExprKind, HirPlace, HirStmt, HirType};
 
-use crate::iteration::{LoopPosition, char_indices_receiver};
+use crate::iteration::{
+    LoopPosition, char_indices_receiver, map_entry_types, map_loop_item, map_view_receiver,
+};
 use crate::{LoopCtx, Lowerer, LoweringError};
 
 /// The type of an enumerated loop's position binding. `u64` matches `.len()` and
@@ -231,6 +233,7 @@ impl Lowerer {
                 iterator,
                 iterable,
                 adapters,
+                pair: _,
                 body,
                 span,
             } => {
@@ -251,10 +254,24 @@ impl Lowerer {
                         LoopPosition::ByteOffset,
                     );
                 }
-                let iterable = self.lower_expr(iterable, None)?;
-                let element_ty = match Self::collection_element(&iterable.ty) {
-                    Some(element) => borrowed_element(&iterable.ty, element),
-                    None => match iterable.ty.referent() {
+                // `m.keys()` / `m.values()` over a map walks the map itself; the checker
+                // refused the call anywhere else, so a map receiver here is that head.
+                let viewed = match map_view_receiver(iterable) {
+                    Some((receiver, view)) => {
+                        let receiver = self.lower_expr(receiver, None)?;
+                        map_entry_types(&receiver.ty).map(|_| (receiver, view))
+                    }
+                    None => None,
+                };
+                let (iterable, view) = match viewed {
+                    Some((receiver, view)) => (receiver, Some(view)),
+                    None => (self.lower_expr(iterable, None)?, None),
+                };
+                let entry = map_entry_types(&iterable.ty);
+                let element_ty = match (entry, Self::collection_element(&iterable.ty)) {
+                    (Some(entry), _) => map_loop_item(&iterable.ty, entry, view),
+                    (None, Some(element)) => borrowed_element(&iterable.ty, element),
+                    (None, None) => match iterable.ty.referent() {
                         HirType::Array { element, .. } | HirType::Slice(element) => {
                             borrowed_element(&iterable.ty, (**element).clone())
                         }
@@ -281,7 +298,7 @@ impl Lowerer {
                 };
                 if !adapters.is_empty() {
                     return self.lower_adapted_for_each(
-                        label, index, iterator, iterable, element_ty, adapters, body, *span,
+                        label, index, iterator, iterable, view, element_ty, adapters, body, *span,
                     );
                 }
                 let index_name = index.as_ref().map(|i| i.name.clone());
@@ -297,6 +314,7 @@ impl Lowerer {
                     index: index_name,
                     iterator: iterator.name.clone(),
                     iterable,
+                    view,
                     body,
                     span: *span,
                 })

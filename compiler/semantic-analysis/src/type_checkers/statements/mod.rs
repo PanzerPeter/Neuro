@@ -518,6 +518,30 @@ impl TypeChecker {
         }
     }
 
+    /// What one step of a `for` over a map binds: the entry `(K, V)` from a by-value
+    /// head, which consumes the map, and `(&K, &V)` or `(&K, &mut V)` through a borrow.
+    /// A key is never lent mutably: rewritten in place, it would sit in the wrong slot.
+    fn map_loop_item(
+        &mut self,
+        iterable: &Expr,
+        iterable_ty: &Type,
+        (key, value): (Type, Type),
+    ) -> Type {
+        match iterable_ty {
+            Type::Reference { mutable, .. } => Type::Tuple(vec![
+                Type::Reference {
+                    inner: Box::new(key),
+                    mutable: false,
+                },
+                Type::Reference {
+                    inner: Box::new(value),
+                    mutable: *mutable,
+                },
+            ]),
+            _ => self.counted_loop_item(iterable, iterable_ty, Type::Tuple(vec![key, value])),
+        }
+    }
+
     /// What one step of a `for` over the nominal type `head` binds, through the
     /// `IntoIterator` / `Iterator` protocol.
     ///
@@ -965,31 +989,66 @@ impl TypeChecker {
                 iterator,
                 iterable,
                 adapters,
+                pair,
                 body,
                 span: _,
             } => {
+                // `m.keys()` / `m.values()` over a map place is a head form: it borrows the
+                // map for the loop and binds a shared borrow of each key or value.
+                let view = super::iteration::map_view_receiver(iterable).filter(|(receiver, _)| {
+                    self.projection_type(receiver)
+                        .is_some_and(|ty| super::iteration::map_entry_types(&ty).is_some())
+                });
                 // `text.char_indices()` is a head form rather than a method: it types as
                 // the `Chars` iterator it drives, and its position binding is the byte
                 // offset the lowering reads off that iterator between steps.
-                let iterable_ty = match super::iteration::char_indices_receiver(iterable) {
-                    Some(receiver) => self.check_char_indices_head(receiver, iterable.span()),
-                    None => self.check_expr(iterable, None).unwrap_or(Type::Unknown),
+                let iterable_ty = match (view, super::iteration::char_indices_receiver(iterable)) {
+                    (Some((receiver, _)), _) => {
+                        self.check_expr(receiver, None).unwrap_or(Type::Unknown)
+                    }
+                    (None, Some(receiver)) => {
+                        self.check_char_indices_head(receiver, iterable.span())
+                    }
+                    (None, None) => self.check_expr(iterable, None).unwrap_or(Type::Unknown),
                 };
-                let element_ty = match self.collection_element(&iterable_ty) {
-                    Some(element) => Some(self.counted_loop_item(iterable, &iterable_ty, element)),
-                    None => match iterable_ty.referent() {
-                        Type::Array { element, .. } | Type::Slice(element) => Some(
-                            self.counted_loop_item(iterable, &iterable_ty, (**element).clone()),
-                        ),
-                        Type::Unknown => None,
-                        other => {
-                            let other = other.clone();
-                            self.protocol_loop_item(iterable, &iterable_ty, &other)
+                let entry = super::iteration::map_entry_types(&iterable_ty);
+                let element_ty = match (view, entry) {
+                    (Some((_, half)), Some((key, value))) => Some(Type::Reference {
+                        inner: Box::new(if half == 0 { key } else { value }),
+                        mutable: false,
+                    }),
+                    (_, Some(entry)) => Some(self.map_loop_item(iterable, &iterable_ty, entry)),
+                    (_, None) => match self.collection_element(&iterable_ty) {
+                        Some(element) => {
+                            Some(self.counted_loop_item(iterable, &iterable_ty, element))
                         }
+                        None => match iterable_ty.referent() {
+                            Type::Array { element, .. } | Type::Slice(element) => Some(
+                                self.counted_loop_item(iterable, &iterable_ty, (**element).clone()),
+                            ),
+                            Type::Unknown => None,
+                            other => {
+                                let other = other.clone();
+                                self.protocol_loop_item(iterable, &iterable_ty, &other)
+                            }
+                        },
                     },
                 };
 
                 let element_ty = self.check_loop_adapters(element_ty, adapters);
+                // The body opens by destructuring the item, so it is bound even when its
+                // type is unknown, and a wrong shape is reported once, here.
+                let element_ty = match element_ty {
+                    Some(ty) if *pair && !matches!(&ty, Type::Unknown) && !is_pair(&ty) => {
+                        self.record_error(TypeError::PairHeadOverNonPair {
+                            found: ty,
+                            span: iterator.span,
+                        });
+                        Some(Type::Unknown)
+                    }
+                    None if *pair => Some(Type::Unknown),
+                    other => other,
+                };
 
                 // Body moves are not guaranteed straight-line; restore move state after
                 // the loop. A `for` yields unit, so it is not a value loop.
@@ -1017,13 +1076,34 @@ impl TypeChecker {
                         // A borrowed head is held for the whole loop even when what a step
                         // yields holds nothing (`&mut it` over an iterator of `i32`): the
                         // loop goes on reading the head between steps.
-                        Ok(()) => {
-                            let held = match iterable_ty {
-                                Type::Reference { .. } => &iterable_ty,
-                                _ => &element_ty,
-                            };
-                            self.hold_carried_borrows(&iterator.name, iterable, held);
-                        }
+                        Ok(()) => match view {
+                            // A view lends from the map it walks, as `&m` would.
+                            Some((receiver, _)) => {
+                                let lent = Expr::Reference {
+                                    operand: Box::new(receiver.clone()),
+                                    mutable: false,
+                                    span: receiver.span(),
+                                };
+                                let (head, held) = match iterable_ty {
+                                    Type::Reference { .. } => (receiver, iterable_ty.clone()),
+                                    _ => (
+                                        &lent,
+                                        Type::Reference {
+                                            inner: Box::new(iterable_ty.clone()),
+                                            mutable: false,
+                                        },
+                                    ),
+                                };
+                                self.hold_carried_borrows(&iterator.name, head, &held);
+                            }
+                            None => {
+                                let held = match iterable_ty {
+                                    Type::Reference { .. } => &iterable_ty,
+                                    _ => &element_ty,
+                                };
+                                self.hold_carried_borrows(&iterator.name, iterable, held);
+                            }
+                        },
                         Err(duplicate_name) => {
                             self.record_error(TypeError::VariableAlreadyDefined {
                                 name: duplicate_name,
@@ -1130,4 +1210,9 @@ impl TypeChecker {
             }
         }
     }
+}
+
+/// Whether `ty` is a two-element tuple, the item a pair head destructures.
+fn is_pair(ty: &Type) -> bool {
+    matches!(ty, Type::Tuple(elements) if elements.len() == 2)
 }

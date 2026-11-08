@@ -9,7 +9,7 @@ use ast_types::{Expr, UnaryOp};
 use shared_types::Span;
 
 use crate::errors::TypeError;
-use crate::types::Type;
+use crate::types::{CollectionKind, Type};
 
 use super::TypeChecker;
 use super::expressions::const_predicates::eval_literal_int;
@@ -26,6 +26,9 @@ const INTO_ITER_METHOD: &str = "into_iter";
 pub(crate) const NEXT_METHOD: &str = "next";
 /// The `for`-head form that drives a `Chars` iterator by byte offset.
 const CHAR_INDICES_METHOD: &str = "char_indices";
+/// The map head forms binding one half of each entry, indexed by that half's position
+/// in the entry pair.
+pub(crate) const MAP_VIEWS: [&str; 2] = ["keys", "values"];
 
 /// An integer literal with no suffix, whose type comes from its context.
 fn unsuffixed_integer(expr: &Expr) -> bool {
@@ -248,6 +251,31 @@ pub(crate) fn char_indices_receiver(iterable: &Expr) -> Option<&Expr> {
         return None;
     }
     Some(object.as_ref())
+}
+
+/// The receiver of a `m.keys()` / `m.values()` `for` head and the half of each entry it
+/// binds (0 the key, 1 the value), or `None` for any other iterable. Whether the receiver
+/// is a map is the caller's question: another type's own `keys` is a method call.
+pub(crate) fn map_view_receiver(iterable: &Expr) -> Option<(&Expr, usize)> {
+    let Expr::Call { func, args, .. } = iterable else {
+        return None;
+    };
+    let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return None;
+    };
+    let half = MAP_VIEWS.iter().position(|view| *view == field.name)?;
+    args.is_empty().then_some((object.as_ref(), half))
+}
+
+/// The key and value types of a `HashMap` / `BTreeMap`, through any borrow of one.
+pub(crate) fn map_entry_types(ty: &Type) -> Option<(Type, Type)> {
+    match ty.referent() {
+        Type::Collection {
+            kind: CollectionKind::HashMap | CollectionKind::BTreeMap,
+            args,
+        } => Some((args.first()?.clone(), args.get(1)?.clone())),
+        _ => None,
+    }
 }
 
 /// The declaration name behind a nominal type, which is the key both trait tables use.

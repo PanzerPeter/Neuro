@@ -1174,9 +1174,19 @@ pub enum TypeError {
     NotIndexable { found: Type, span: Span },
 
     #[error(
-        "cannot iterate over a value of type {found}: a `for` head must be a range, an array, a `Vec<T>`, a `&[T]`, or a type implementing `IntoIterator` or `Iterator`"
+        "cannot iterate over a value of type {found}: a `for` head must be a range, an array, a `Vec<T>`, a `&[T]`, a map, or a type implementing `IntoIterator` or `Iterator`"
     )]
     NotIterable { found: Type, span: Span },
+
+    #[error(
+        "a `for` head binding a pair `(a, b)` needs a two-element tuple item, and this head yields {found}; add `.enumerate()` to the iterable to bind positions, or iterate `.char_indices()` for byte offsets"
+    )]
+    PairHeadOverNonPair { found: Type, span: Span },
+
+    #[error(
+        "`.{method}()` walks a map's entries by reference in a `for` head (`for x in m.{method}()`) and is not a value; to keep them, copy each one out in the loop (`out.push(x.clone())`)"
+    )]
+    MapViewOutsideHead { method: String, span: Span },
 
     #[error(
         "cannot iterate over a value of type {found}: the `IntoIterator` / `Iterator` protocol is implemented on the owned type; iterate the value itself, or write `&mut` to drive an `Iterator` in place"
@@ -1770,6 +1780,8 @@ impl TypeError {
             | Self::NotIndexable { span, .. }
             | Self::NotIterable { span, .. }
             | Self::BorrowedIterableHead { span, .. }
+            | Self::PairHeadOverNonPair { span, .. }
+            | Self::MapViewOutsideHead { span, .. }
             | Self::LoopAdapterNotCallable { span, .. }
             | Self::LoopAdapterInput { span, .. }
             | Self::LoopAdapterOutput { span, .. }

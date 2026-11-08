@@ -10,6 +10,32 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.37.0] - 2026-11-08
+
+### Added
+
+- `HashMap` and `BTreeMap` are now `for` heads, in the three receiver modes a `Vec` has.
+  `for (k, v) in &m` binds `(&K, &V)`, `for (k, v) in &mut m` binds `(&K, &mut V)` so `*v += 1`
+  writes the map, and `for (k, v) in m` moves each entry out and consumes the map; leaving such a
+  loop early drops the entries it did not reach. A `BTreeMap` walks in ascending key order, a
+  `HashMap` in no promised order. The key is never lent mutably.
+- `for k in m.keys()` and `for v in m.values()` lend each key or value as `&K` / `&V` without
+  copying, and take `.map`, `.filter` and `.enumerate()` like any `for` head.
+- A pair head `for (a, b) in xs` now takes apart any two-element tuple item, so it works over a
+  map, an array of pairs or a stored `Enumerate` value, not only over a head ending in
+  `.enumerate()`. `_` skips a half.
+- A type parameter can be a map key without a `Copy` bound:
+  `func tally<K: Hashable + PartialEq>(keys: Vec<K>) -> HashMap<K, i32>` accepts `string` and
+  struct keys, which move into the map.
+
+### Changed
+
+- `m.keys()` no longer builds a `Vec<K>` copy of the keys. It is a `for` head form only, as is
+  `m.values()`; written anywhere else either is an error that suggests copying the keys out
+  inside the loop. Code that wrote `for k in m.keys()` keeps working, with `k` now a `&K`.
+- A pair head over an item that is not a two-element tuple is now reported by the type checker,
+  which names the item's type, instead of by the parser.
+
 ## [5.36.0] - 2026-11-08
 
 ### Added

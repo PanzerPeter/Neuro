@@ -252,12 +252,17 @@ pub enum Stmt {
     ///
     /// `adapters` are the `.map(f)` / `.filter(p)` calls the head wore, in source
     /// order; empty for a bare `for x in xs`.
+    ///
+    /// `pair` marks `for (a, b) in xs` over a head that yields no position: `iterator`
+    /// is then a parser-made binding of the whole item, and `body` opens with the two
+    /// declarations that destructure it, so only the item's shape is left to check.
     ForEach {
         label: Option<Identifier>,
         index: Option<Identifier>,
         iterator: Identifier,
         iterable: Expr,
         adapters: Vec<LoopAdapter>,
+        pair: bool,
         body: Vec<Stmt>,
         span: Span,
     },

@@ -270,6 +270,29 @@ for s in scores {           // s: i32, scores is consumed
 
 A slice is already a borrow, so `for x in xs` over a `&[T]` binds `&T`, and over a `&mut [T]` binds `&mut T`. A borrowed head stays borrowed for the whole loop, so the body cannot push to the `Vec` it walks, or read it while a `&mut` loop is running.
 
+A `HashMap` or `BTreeMap` iterates entry by entry in the same three modes. Each pass yields a `(key, value)` pair, which a pair head takes apart:
+
+```neuro
+for (name, age) in &ages { }       // name: &string, age: &i32
+for (name, age) in &mut ages { }   // age: &mut i32; the key is never lent mutably
+for (name, age) in ages { }        // string, i32; ages is consumed
+for name in ages.keys() { }        // name: &string
+for age in ages.values() { }       // age: &i32
+```
+
+A `BTreeMap` walks in ascending key order; a `HashMap` promises no order. `.keys()` and `.values()` are head forms that lend one half of each entry, and they take the adapters and `.enumerate()` like any other head. See [Types](types.md#hashmapk-v-and-btreemapk-v) for the map surface.
+
+### Pair Heads
+
+A `for` head may bind a pair `(a, b)` instead of a single variable. Over `.enumerate()` and `.char_indices()` the first binding is a position; over any other head, the item itself must be a two-element tuple, and the pair takes it apart, as `val (a, b) = item` would. A map's entries, an array of pairs and a stored `Enumerate` value all qualify, and `_` skips a half:
+
+```neuro
+val pairs = [(1, 2), (3, 4)]
+for (a, _) in pairs { }
+```
+
+A pair head over anything else is refused with ``a `for` head binding a pair `(a, b)` needs a two-element tuple item``, which names `.enumerate()` for the case where a position was meant.
+
 ### Iterating with a Position: `.enumerate()`
 
 A `for` head may bind a pair instead of a single variable when the iterable ends in `.enumerate()`. The first binding is the **position** (a `u64` counting from zero), and the second is the element:
@@ -300,7 +323,7 @@ for (step, value) in (10..13).enumerate() {
 
 The position is a count of iterations, not a value the sequence holds, which is why the two columns above differ.
 
-The pair head and `.enumerate()` imply each other: a pair head over a plain iterable, or `.enumerate()` under a single-variable head, is a parse error. Both bindings live in the loop's own scope, so they shadow any outer name of the same spelling for the loop's duration and disappear at its exit. Naming them alike (`for (i, i) in ...`) is a redefinition error, ``variable 'i' already defined in this scope``, rather than a shadow.
+`.enumerate()` needs a pair head: under a single variable it is a parse error. Both bindings live in the loop's own scope, so they shadow any outer name of the same spelling for the loop's duration and disappear at its exit. Naming them alike (`for (i, i) in ...`) is a redefinition error, ``variable 'i' already defined in this scope``, rather than a shadow.
 
 ### Adapter Methods: `.map(f)` and `.filter(p)`
 
@@ -454,7 +477,7 @@ func show_evens() {
 
 - The call consumes the iterator and moves the function in. A closure that writes what it captured can drive an adapter; one that can run only once is refused, since the adapter calls it per element.
 - `.filter`'s predicate takes `&A`, a borrow of the element it may keep. Operators read through it, so `|n| n % 2 == 0` needs no `*`.
-- `.enumerate()` yields `(u64, A)` pairs, counting from zero what it yielded. Bind the adapter and read `pair.0` and `pair.1`: a `(i, x)` pattern takes only the head form.
+- `.enumerate()` yields `(u64, A)` pairs, counting from zero what it yielded. A [pair head](#pair-heads) takes them apart: `val e = it.enumerate(); for (i, x) in e`.
 - A type parameter bounded by `Iterator<Item = T>` takes the adapters too, and is a `for` head by that bound.
 - A type's own method of the same name wins. An array, a `Vec` or a range is not an iterator value, so outside a `for` head the adapters do not apply to it.
 

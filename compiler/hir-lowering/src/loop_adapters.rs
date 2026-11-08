@@ -25,7 +25,7 @@
 //! loop's index, which counts source steps and would leave gaps.
 
 use ast_types::{LoopAdapter, LoopAdapterKind, Stmt, UnaryOp};
-use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType};
+use neuro_hir::{HirExpr, HirExprKind, HirStmt, HirType, MapView};
 use shared_types::{Identifier, Literal, Span};
 
 use crate::closures::ClosureHint;
@@ -291,6 +291,7 @@ impl Lowerer {
         index: &Option<Identifier>,
         iterator: &Identifier,
         iterable: HirExpr,
+        view: Option<MapView>,
         element_ty: HirType,
         adapters: &[LoopAdapter],
         body: &[Stmt],
@@ -308,6 +309,7 @@ impl Lowerer {
                 index: None,
                 iterator: plan.element.clone(),
                 iterable,
+                view,
                 body: loop_body,
                 span,
             };

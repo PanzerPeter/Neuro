@@ -386,6 +386,10 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   their generated code unchanged. A borrowed counted head defines its element binding as
   `&T` / `&mut T` of the head's own mutability (`borrowed_element`), adapters included; the
   backend reads the same rule off the head's type.
+  A map head stays a counted `ForEach` as well, binding the entry by the checker's rule
+  (`map_loop_item`). For `m.keys()` / `m.values()` over a map (`map_view_receiver`) the
+  iterable is the map itself and `HirStmt::ForEach::view` names the half bound, which an
+  adapter chain carries through (`lower_adapted_for_each` takes the view).
   A `LoopPosition` picks where the position binding's value comes from. `Step` is the counter
   above; `ByteOffset` is what a `text.char_indices()` head takes (`char_indices_receiver`
   recognises it on the AST iterable, ahead of lowering it): the loop samples the iterator's own

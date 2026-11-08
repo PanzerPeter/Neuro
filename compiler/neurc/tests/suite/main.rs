@@ -98,6 +98,7 @@ mod literal_type_propagation;
 mod loop_adapters;
 mod loop_stack_slots;
 mod loop_value;
+mod map_iteration;
 mod methods;
 mod mlir_routing;
 mod modules;

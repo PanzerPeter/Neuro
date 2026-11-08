@@ -121,8 +121,14 @@ impl Parser {
                 (_, true) => Some(CHAR_INDICES_METHOD),
                 _ => None,
             };
-            Self::check_head_agrees(&index, pair_head, iterable.span())?;
-            let body = self.parse_block()?;
+            // A pair over a head that yields no position destructures the item, which the
+            // checker requires to be a two-element tuple. Only a range is known here to
+            // yield something else.
+            let pair = index.is_some() && pair_head.is_none();
+            if !pair {
+                Self::check_head_agrees(&index, pair_head, iterable.span())?;
+            }
+            let mut body = self.parse_block()?;
             let end_span = self.previous_span(iterable.span());
             let span = start_span.merge(end_span);
 
@@ -130,6 +136,9 @@ impl Parser {
             // so unwrap it here rather than leaving a range value no other pass
             // knows how to consume.
             return Ok(match unwrap_paren(iterable) {
+                Expr::Range { span, .. } if pair => {
+                    return Err(ParseError::PairWithoutEnumerate { span });
+                }
                 Expr::Range {
                     start,
                     end,
@@ -148,15 +157,24 @@ impl Parser {
                     body,
                     span,
                 },
-                iterable => Stmt::ForEach {
-                    label,
-                    index,
-                    iterator,
-                    iterable,
-                    adapters,
-                    body,
-                    span,
-                },
+                iterable => {
+                    let (index, iterator) = match (pair, index) {
+                        (true, Some(first)) => {
+                            (None, self.bind_pair_item(first, iterator, &mut body))
+                        }
+                        (_, index) => (index, iterator),
+                    };
+                    Stmt::ForEach {
+                        label,
+                        index,
+                        iterator,
+                        iterable,
+                        adapters,
+                        pair,
+                        body,
+                        span,
+                    }
+                }
             });
         };
 
@@ -207,6 +225,37 @@ impl Parser {
         self.skip_newlines();
         self.consume(TokenKind::RightParen, "')' to close the loop bindings")?;
         Ok((Some(index), value))
+    }
+
+    /// Bind a pair head's item whole under a parser-made name and open `body` by
+    /// destructuring it, as `val (first, second) = item` would. A `_` binds nothing.
+    fn bind_pair_item(
+        &mut self,
+        first: Identifier,
+        second: Identifier,
+        body: &mut Vec<Stmt>,
+    ) -> Identifier {
+        let item = Identifier {
+            name: format!("__destructure_{}", self.next_destructure_id()),
+            span: first.span.merge(second.span),
+        };
+        let fields = [first, second]
+            .into_iter()
+            .enumerate()
+            .filter(|(_, name)| name.name != "_")
+            .map(|(index, name)| Stmt::VarDecl {
+                init: Some(Expr::TupleIndex {
+                    object: Box::new(Expr::Identifier(item.clone())),
+                    index,
+                    span: name.span,
+                }),
+                span: name.span,
+                name,
+                ty: None,
+                mutable: false,
+            });
+        body.splice(0..0, fields);
+        item
     }
 
     /// Consume one identifier as a loop binding.
@@ -681,10 +730,36 @@ mod tests {
         assert!(index.is_some());
     }
 
+    /// A pair over any other head destructures the item, whose shape the checker owns.
     #[test]
-    fn pair_head_without_enumerate_is_rejected() {
+    fn pair_head_without_a_position_destructures_the_item() {
+        let Stmt::ForEach {
+            index,
+            iterator,
+            pair,
+            body,
+            ..
+        } = first_stmt("func main() -> i32 { for (k, _) in m { }\n 0 }")
+        else {
+            panic!("expected a for-each");
+        };
+        assert!(pair);
+        assert!(index.is_none());
+        assert!(iterator.name.starts_with("__destructure_"));
+        let [Stmt::VarDecl { name, init, .. }] = body.as_slice() else {
+            panic!("expected one destructuring declaration, got {body:?}");
+        };
+        assert_eq!(name.name, "k");
         assert!(matches!(
-            parse_err("func main() -> i32 { for (i, x) in xs { }\n 0 }"),
+            init,
+            Some(ast_types::Expr::TupleIndex { index: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn pair_head_over_a_parenthesised_range_is_rejected() {
+        assert!(matches!(
+            parse_err("func main() -> i32 { for (i, x) in (0..4) { }\n 0 }"),
             ParseError::PairWithoutEnumerate { .. }
         ));
     }

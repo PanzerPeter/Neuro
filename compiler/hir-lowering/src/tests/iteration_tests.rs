@@ -4,7 +4,7 @@
 
 use super::assert_payload_slot;
 use super::{function_body, lower};
-use neuro_hir::{HirExprKind, HirMatchTest, HirPlace, HirStmt, HirType};
+use neuro_hir::{HirExprKind, HirMatchTest, HirPlace, HirStmt, HirType, MapView};
 
 /// The protocol traits and a source iterator, declared exactly as the prelude declares
 /// them. The lowering slice sees no prelude, so each program brings its own.
@@ -361,5 +361,44 @@ fn char_indices_samples_the_iterator_cursor_before_each_step() {
     assert!(
         !arm.iter().any(|s| matches!(s, HirStmt::Assign { .. })),
         "a byte cursor is advanced by `next`, not by the loop, got {arm:?}"
+    );
+}
+
+/// A map head stays one counted `ForEach`; a view keeps the map itself as the iterable
+/// and records which half it binds, which the backend reads.
+#[test]
+fn a_map_head_lowers_to_one_for_each_and_a_view_names_its_half() {
+    let program = lower(
+        "func main() -> i32 {
+            mut m: HashMap<i32, i32> = HashMap::new()
+            for (k, v) in &mut m { *v += *k }
+            for v in m.values() { }
+            0
+         }",
+    );
+    let loops: Vec<_> = function_body(&program, "main")
+        .iter()
+        .filter_map(|stmt| match stmt {
+            HirStmt::ForEach {
+                iterable,
+                view,
+                body,
+                ..
+            } => Some((iterable, *view, body)),
+            _ => None,
+        })
+        .collect();
+    let [(pairs, None, pair_body), (values, Some(MapView::Values), _)] = loops.as_slice() else {
+        panic!("expected a pair loop and a values view, got {loops:?}");
+    };
+    assert!(matches!(pairs.ty, HirType::Reference { mutable: true, .. }));
+    assert!(matches!(values.ty, HirType::Collection { .. }));
+    let Some(HirStmt::VarDecl { name, ty, .. }) = pair_body.get(1) else {
+        panic!("the body opens with the destructuring declarations, got {pair_body:?}");
+    };
+    assert_eq!(name, "v");
+    assert!(
+        matches!(ty, HirType::Reference { mutable: true, .. }),
+        "got {ty:?}"
     );
 }

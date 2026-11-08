@@ -51,7 +51,7 @@ func main() -> i32 {
     println("Map  get/contains/rm  -> {sum}")
 
     // --- BTreeMap<K, V>: key-ordered -------------------------------------
-    // `keys()` returns a Vec, so an ordered map's iteration order is observable.
+    // `keys()` walks the keys in place, so an ordered map's iteration order is observable.
     mut ranks: BTreeMap<i32, i32> = BTreeMap::new()
     ranks.insert(30, 3)
     ranks.insert(10, 1)
@@ -60,7 +60,7 @@ func main() -> i32 {
     mut highest: i32 = 0
     for key in ranks.keys() {
         println("BTreeMap key          -> {key}")     // ascending: 10, 20, 30
-        highest = key                                 // ascending, so 30 last
+        highest = *key                                // ascending, so 30 last
     }
 
     val total = sum + highest + ranks.len() as i32

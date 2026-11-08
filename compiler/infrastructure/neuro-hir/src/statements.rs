@@ -179,11 +179,15 @@ pub enum HirStmt {
     },
     /// `index` is the `u64` position binding of an enumerated loop; `None` for a
     /// plain `for x in xs`.
+    ///
+    /// `view` is set for a `m.keys()` / `m.values()` head: `iterable` is then the map
+    /// itself, never consumed, and `iterator` a shared borrow of each key or value.
     ForEach {
         label: Option<String>,
         index: Option<String>,
         iterator: String,
         iterable: HirExpr,
+        view: Option<MapView>,
         body: Vec<HirStmt>,
         span: Span,
     },
@@ -220,4 +224,11 @@ pub enum HirStmt {
         span: Span,
     },
     Expr(HirExpr),
+}
+
+/// The half of each map entry a `m.keys()` / `m.values()` `for` head binds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapView {
+    Keys,
+    Values,
 }

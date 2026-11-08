@@ -289,6 +289,10 @@ pub(crate) enum DropTarget {
     /// count have been handed to the loop's bindings: release the rest, then the buffer.
     /// Carries the element type.
     VecRemainder(Type),
+    /// The map table a consuming `for` loop took over, whose slots below its `used`
+    /// field have been handed to the loop's bindings: release the live rest, then the
+    /// buffer. Carries the map's type.
+    MapRemainder(Type),
 }
 
 /// Central state container for LLVM IR code generation.

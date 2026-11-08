@@ -36,7 +36,7 @@ pub use items::{
     HirImpl, HirItem, HirMethod, HirParam, HirProgram, HirSelfParam, HirStruct, HirTarget,
     HirTrait,
 };
-pub use statements::{HirPlace, HirStmt};
+pub use statements::{HirPlace, HirStmt, MapView};
 pub use types::{AxisNames, HirCollectionKind, HirType, extent_display, static_shape};
 
 #[cfg(test)]

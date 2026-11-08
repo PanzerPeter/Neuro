@@ -4,7 +4,7 @@ use neuro_hir::{HirConst, HirExpr, HirExprKind, HirPlace, HirStmt, HirType};
 use shared_types::Span;
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::Type;
+use crate::types::{CollectionKind, Type};
 
 use super::context::CodegenContext;
 
@@ -547,10 +547,27 @@ impl<'ctx> CodegenContext<'ctx> {
                 index,
                 iterator,
                 iterable,
+                view,
                 body,
                 ..
             } => {
                 let obj_ty = Type::from_hir(&iterable.ty);
+                if matches!(
+                    obj_ty.referent(),
+                    Type::Collection {
+                        kind: CollectionKind::HashMap | CollectionKind::BTreeMap,
+                        ..
+                    }
+                ) {
+                    return self.codegen_map_for_each(
+                        label.as_deref(),
+                        index.as_deref(),
+                        iterator,
+                        iterable,
+                        *view,
+                        body,
+                    );
+                }
                 if matches!(obj_ty.referent(), Type::Collection { .. }) {
                     return self.codegen_vec_for_each(
                         label.as_deref(),

@@ -207,6 +207,8 @@ a counted loop already computes the position it would yield. `HirStmt::ForRange`
 `reversed: bool` for the same reason: `.rev()` reorders the bounds a counted loop already holds.
 An enumerated reversed loop counts its position up while its binding counts down. `step:
 Option<Box<HirExpr>>` is `.step(n)`, a positive stride of the range's own type evaluated once.
+`HirStmt::ForEach::view: Option<MapView>` is the `m.keys()` / `m.values()` head form over a map:
+`iterable` is the map, never consumed, and the binding a shared borrow of the named half.
 
 **Enums normalize three construction forms to one.** `HirType::Enum(String)` is nominal;
 `HirExprKind::EnumConstruct { enum_name, variant, tag, payload }` is what unit, tuple, and
@@ -227,7 +229,7 @@ lower straight through, so backends erase the wrapper entirely.
 `HirExprKind::CollectionNew { capacity }`: the typed mirror of `Vec::new()` and its siblings,
 whose `ty` is the collection being built, with `capacity` set for `Vec::with_capacity(n)`. Collection *methods* need no node: they reach backends as an
 ordinary `Call` with a `FieldAccess` callee whose `ty` carries the call's resolved result (the
-`Option<T>` or `Option<&T>` a reader returns, the `Vec<K>` `keys()` builds).
+`Option<T>` or `Option<&T>` a reader returns).
 
 `StringBuilder` is the one **nullary** kind: its buffer is a byte run, so it carries no type
 arguments and needs no new `HirType` variant: `Collection { kind: StringBuilder, args: [] }` is the

@@ -20,7 +20,8 @@
 use ast_types::{LoopAdapter, Stmt};
 use neuro_hir::HirPlace;
 use neuro_hir::{
-    HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt, HirType,
+    HirCollectionKind, HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirStmt,
+    HirType, MapView,
 };
 use shared_types::{Identifier, Literal, Span};
 
@@ -383,6 +384,56 @@ pub(crate) fn char_indices_receiver(iterable: &ast_types::Expr) -> Option<&ast_t
         return None;
     }
     Some(object.as_ref())
+}
+
+/// The receiver of a `m.keys()` / `m.values()` `for` head and the half it binds, or
+/// `None` for any other iterable. The receiver's type decides whether it is a map.
+pub(crate) fn map_view_receiver(iterable: &ast_types::Expr) -> Option<(&ast_types::Expr, MapView)> {
+    let ast_types::Expr::Call { func, args, .. } = iterable else {
+        return None;
+    };
+    let ast_types::Expr::FieldAccess { object, field, .. } = func.as_ref() else {
+        return None;
+    };
+    let view = match field.name.as_str() {
+        "keys" => MapView::Keys,
+        "values" => MapView::Values,
+        _ => return None,
+    };
+    args.is_empty().then_some((object.as_ref(), view))
+}
+
+/// The key and value types of a `HashMap` / `BTreeMap`, through any borrow of one.
+pub(crate) fn map_entry_types(ty: &HirType) -> Option<(HirType, HirType)> {
+    match ty.referent() {
+        HirType::Collection {
+            kind: HirCollectionKind::HashMap | HirCollectionKind::BTreeMap,
+            args,
+        } => Some((args.first()?.clone(), args.get(1)?.clone())),
+        _ => None,
+    }
+}
+
+/// What a `for` over a map binds per entry, by the checker's rule: the entry by value,
+/// or `(&K, &V)` / `(&K, &mut V)` through a borrow; a view binds `&K` or `&V`. The
+/// backend reads the same rule off the head's type and the view.
+pub(crate) fn map_loop_item(
+    iterable_ty: &HirType,
+    (key, value): (HirType, HirType),
+    view: Option<MapView>,
+) -> HirType {
+    let lend = |inner: HirType, mutable: bool| HirType::Reference {
+        inner: Box::new(inner),
+        mutable,
+    };
+    match (view, iterable_ty) {
+        (Some(MapView::Keys), _) => lend(key, false),
+        (Some(MapView::Values), _) => lend(value, false),
+        (None, HirType::Reference { mutable, .. }) => {
+            HirType::Tuple(vec![lend(key, false), lend(value, *mutable)])
+        }
+        (None, _) => HirType::Tuple(vec![key, value]),
+    }
 }
 
 /// The declaration name behind a nominal type, which is the key the trait tables use.

@@ -408,33 +408,6 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Build an owned `Vec<T>` header over `count` elements already written into
-    /// `buffer`. Used by the maps' `keys()`, which allocates and fills the buffer itself.
-    pub(super) fn vec_header_value(
-        &mut self,
-        buffer: PointerValue<'ctx>,
-        count: IntValue<'ctx>,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let header_ty = self.collection_header_type();
-        let mut agg = header_ty.get_undef();
-        let fields: [(u32, BasicValueEnum<'ctx>); 4] = [
-            (super::FIELD_BUFFER, buffer.into()),
-            (FIELD_LEN, count.into()),
-            (FIELD_CAP, count.into()),
-            (
-                super::FIELD_USED,
-                self.context.i64_type().const_zero().into(),
-            ),
-        ];
-        for (field, value) in fields {
-            agg = self
-                .builder
-                .build_insert_value(agg, value, field, "vec.hdr")?
-                .into_struct_value();
-        }
-        Ok(agg.into())
-    }
-
     /// Address of element `index` in the buffer, with no bounds check.
     pub(super) fn vec_slot_ptr(
         &mut self,

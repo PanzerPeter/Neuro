@@ -331,6 +331,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 let element_ty = element_ty.clone();
                 self.emit_vec_remainder_free(storage_ptr, &element_ty)?
             }
+            DropTarget::MapRemainder(map_ty) => {
+                let map_ty = map_ty.clone();
+                self.emit_map_remainder_free(storage_ptr, &map_ty)?
+            }
             DropTarget::Captured(ty) => {
                 let ty = ty.clone();
                 self.emit_captured_drop(storage_ptr, &ty)?

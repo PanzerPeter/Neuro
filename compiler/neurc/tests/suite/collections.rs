@@ -271,12 +271,11 @@ func main() -> i32 {
     t.insert(10, 1)
     t.insert(90, 9)
     t.insert(30, 3)
-    val ks: Vec<i32> = t.keys()
     mut ordered: i32 = 1
     mut prev: i32 = -1
-    for k in ks {
-        if k < prev { ordered = 0 }
-        prev = k
+    for k in t.keys() {
+        if *k < prev { ordered = 0 }
+        prev = *k
     }
     ordered * 100 + prev
 }
@@ -332,10 +331,9 @@ func main() -> i32 {
         Option::Some(v) => { acc = acc + v }
         Option::None => { acc = acc - 100 }
     }
-    val ks: Vec<OrderedF32> = scores.keys()
     mut ordered: i32 = 1
     mut prev: f32 = -1.0f32
-    for k in ks {
+    for k in scores.keys() {
         if k.value < prev { ordered = 0 }
         prev = k.value
     }

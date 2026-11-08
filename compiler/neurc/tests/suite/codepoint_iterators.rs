@@ -241,8 +241,8 @@ func main() -> i32 {
     run_expecting(source, 3);
 }
 
-/// A pair binds a position and a value; `.chars()` yields only the value, so the head
-/// arity is rejected rather than silently binding the scalar twice.
+/// A pair head destructures a two-element tuple item; `.chars()` yields a `char`, so the
+/// head is rejected rather than silently binding the scalar twice.
 #[test]
 fn a_pair_head_over_chars_is_rejected() {
     let (success, stderr) = check_source(
@@ -253,12 +253,9 @@ func main() -> i32 {
 }
 "#,
     );
+    assert!(!success, "a pair head needs a pair item; got: {stderr}");
     assert!(
-        !success,
-        "a pair head needs a position-yielding iterable; got: {stderr}"
-    );
-    assert!(
-        stderr.contains("iterates a position-yielding head"),
+        stderr.contains("needs a two-element tuple item"),
         "{stderr}"
     );
 }

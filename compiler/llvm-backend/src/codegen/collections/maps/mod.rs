@@ -142,7 +142,6 @@ impl<'ctx> CodegenContext<'ctx> {
                     result_ty, present, value, &value_ty,
                 )?))
             }
-            "keys" => Ok(Some(self.emit_map_keys(kind, header, &key_ty, &value_ty)?)),
             _ => Err(CodegenError::InternalError(format!(
                 "unknown map method '{}' reached codegen",
                 method
@@ -318,35 +317,6 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(done_bb);
         Ok(())
-    }
-
-    /// `m.keys()`, a fresh `Vec<K>` of the live keys, in slot order. For the ordered
-    /// map that order is ascending, which is what makes its ordering observable.
-    fn emit_map_keys(
-        &mut self,
-        kind: CollectionKind,
-        header: PointerValue<'ctx>,
-        key_ty: &Type,
-        value_ty: &Type,
-    ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let helper = self.build_map_keys_helper(kind, key_ty, value_ty)?;
-        let key_llvm = self.collection_value_type(key_ty)?;
-        let stride = self.size_of_type(key_llvm)?;
-        let len = self.load_header_field(header, FIELD_LEN, "map.len")?;
-        let bytes = self.builder.build_int_mul(len, stride, "keys.bytes")?;
-        // A `Vec` grows its buffer with libc `realloc`, which must never be handed an
-        // arena pointer, so the buffer it starts from is libc's too.
-        let malloc = self.get_or_declare_malloc();
-        let buffer = self
-            .builder
-            .build_call(malloc, &[bytes.into()], "keys.buf")?
-            .try_as_basic_value()
-            .basic()
-            .ok_or_else(|| CodegenError::InternalError("malloc returned void".into()))?
-            .into_pointer_value();
-        self.builder
-            .build_call(helper, &[header.into(), buffer.into()], "")?;
-        self.vec_header_value(buffer, len)
     }
 
     /// Address of a slot's key (`key`) or value field.
