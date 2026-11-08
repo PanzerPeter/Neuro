@@ -477,3 +477,35 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 9);
 }
+
+/// `NaN != NaN` is `false`, like every comparison with `NaN`, so the constructor
+/// asks `.is_nan()`. It used to compare the value with itself and let `NaN` in.
+#[test]
+fn ordered_float_constructors_refuse_nan() {
+    for wrapper in ["OrderedF32", "OrderedF64"] {
+        let test = CompileTest::new();
+        let ty = if wrapper == "OrderedF32" {
+            "f32"
+        } else {
+            "f64"
+        };
+        let source = format!(
+            r#"
+func main() -> i32 {{
+    val zero: {ty} = 0.0
+    val key = {wrapper}::new(zero / zero)
+    0
+}}
+"#
+        );
+        let path = test.write_source("ordered_nan.nr", &source);
+        let exe = test.compile(&path).expect("compile failed");
+        let output = Command::new(&exe).output().expect("run binary");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{wrapper} took a NaN");
+        assert!(
+            stderr.contains(&format!("{wrapper} cannot hold NaN")),
+            "unexpected stderr: {stderr}"
+        );
+    }
+}

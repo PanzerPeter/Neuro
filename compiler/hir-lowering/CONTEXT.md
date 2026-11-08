@@ -262,8 +262,9 @@ Three have no first-class source form: a `loop` value-expression takes its `brea
 `void`); a method-name callee `FieldAccess` carries the *call's* result type, since there is no
 method value. A `Call` with a `FieldAccess` callee therefore always means a method call, so a call
 through a function-valued field (`(k.f)(x)`) binds the field's value to a fresh `__operand_N`
-local first and calls through that; a `Range` carries `void`, being valid only as a `string.slice` /
-`string.char_slice` argument whose lowering reads its bounds directly.
+local first and calls through that; a `Range` carries `void`, being built only for a slice
+intrinsic's argument (`lower_slice_range`), whose lowering reads its bounds directly. A range
+anywhere else is a `Range` value (below).
 
 Divergent panic-family calls (`panic` / `assert` / `unreachable`) adopt their context's expected
 type, or `void` in statement position. The standard-output builtins (`print` / `println`,
@@ -410,6 +411,13 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   receiver, its `protocol_item_type` and the function's result) holding the receiver and the
   function, lowered through `lower_function_arg` with the element as its hint. No backend sees
   an adapter: the instance's own `impl Iterator` drives it through the protocol path above.
+- **Range values** (`range_values.rs`). An `Expr::Range` reaching `lower_expr` becomes a
+  `StructLiteral` of the prelude's `Range` instance at the bounds' type (`lower_range_bounds`,
+  shared with `ForRange`; a `Range<T>` expectation types an unsuffixed literal), with a stride of
+  one and every flag clear. `.rev()` / `.step(n)` are ordinary prelude methods. The walk's two
+  prelude-private intrinsics lower per instance in `lower_method_call`, ahead of the impl lookup:
+  `x.__to_u64()` to a `Cast` to `u64`, `x.__offset(k)` to `(x as u64).wrapping_add(k)` cast back
+  to `x`'s type. No backend learns ranges exist.
 - **Traits.** The parser has already injected each trait's default methods into the matching
   `impl Trait for Type` blocks, so trait impls and their inherited defaults lower through the
   ordinary inherent-impl path, and a trait-bounded generic monomorphizes to concrete dispatch with
@@ -754,9 +762,9 @@ compiler bug, not a diagnostic.
   `index: Option<String>` and define it in the loop scope as `LOOP_INDEX_TYPE` (`u64`), ahead of
   the element binding so the two collide rather than shadow. The free-variable walker binds it
   too, or a closure in the body captures it.
-- **Range bounds**: the start is lowered first and the end against its type, except that an
-  unsuffixed integer literal start beside a non-literal end is lowered against the end's type
-  (`0..v.len()` runs over `u64`), the order `semantic-analysis` checks them in.
+- **Range bounds**: `lower_range_bounds` lowers the start first and the end against its type,
+  except that an unsuffixed integer literal start beside a non-literal end is lowered against the
+  end's type (`0..v.len()` runs over `u64`), the order `semantic-analysis` checks them in.
 - **Reversed and stepped ranges**: `ForRange`'s `reversed` flag and `step` ride through to the
   adapted lowering as well as the plain one, the stride lowered against the range's element type.
   Nothing about the bounds, the element type, or the body changes with them; the walk is a

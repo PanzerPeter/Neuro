@@ -143,13 +143,15 @@ which types implement them with no impl (the scalars, `string`, a struct carryin
 Dropping one item takes with it every prelude declaration written against it. `Chars::next`
 returns `Option<char>`, so a program declaring its own `Option` would leave the prelude's own
 body compiled against a type that is no longer there. `PRELUDE_DEPENDENCIES` records those
-edges (`Chars` and the adapters `Map`, `Filter` and `Enumerate` need `Option` and
-`Iterator`; `PoolAware` needs `PoolHandle`), and `dropped_declarations` closes over them.
+edges (`Chars`, the adapters `Map`, `Filter` and `Enumerate`, and `Range` need `Option` and
+`Iterator`; `Rev` and `Step` need those and `Range`, so they follow it in the table;
+`PoolAware` needs `PoolHandle`), and `dropped_declarations` closes over them.
 `is_dropped` also drops an `impl` block extending a displaced type: those methods belong to the
 prelude's type, not to whatever the program put in its place. A method naming another prelude
 type is withdrawn alone (`PRELUDE_METHOD_DEPENDENCIES`, applied by `withdraw_methods`):
 `Option::ok_or` builds a `Result` and `Result::ok` an `Option`, so a program declaring its own
-`Result` keeps `Option::map` and the `is_*` tests.
+`Result` keeps `Option::map` and the `is_*` tests. `Range::rev` names `Rev`, and `Range::step` /
+`Rev::step` name `Step`, so a program's own `Step` leaves ranges reversible but not stridable.
 
 `prepend` stamps every prelude declaration with `PRELUDE_MODULE` (`ModuleId::MAX`), an id no
 loaded file can hold. The prelude is prepended *after* module resolution has numbered the
@@ -163,7 +165,8 @@ either in the whole program or absent from all of it.
 
 `prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
 validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint
-iterator `string.chars()` hands out, `Device`, the enum `tensor.to(device)` takes, and the
+iterator `string.chars()` hands out, the adapters, `Range` / `Rev` / `Step`, the value a range
+written outside a `for` head builds and its `.rev()` / `.step(n)` forms, `Device`, the enum `tensor.to(device)` takes, and the
 `PoolHandle` / `PoolAware` pair a type implements to be allowed inside a `pool`. The wrappers exist so
 an ordered map can be keyed on a float: IEEE-754 `<` is a partial order, so a raw float key
 could be inserted and never found again. Hence `@derive(Copy, Clone)`, a `new` constructor

@@ -364,13 +364,11 @@ impl TypeChecker {
             // error. Reading through either `&T` or `&mut T` is permitted.
             Expr::Deref { operand, span } => self.check_deref_expr(operand, span),
 
-            // A range `a..b` is not a first-class value: it is consumed directly
-            // by `string.slice` / `string.char_slice` via `check_string_slice`, so
-            // reaching it through the general expression path means it was used somewhere
-            // a range is not allowed. Still check the bounds for cascaded diagnostics.
+            // A slice argument is read by the slice intrinsics and a `for` head carries
+            // its bounds on the loop, so a range reaching here is a `Range` value.
             Expr::Range {
                 start, end, span, ..
-            } => self.check_range_expr(start, end, span),
+            } => self.check_range_value(start, end, *span, expected),
 
             // Array literal `[e0, ...]`: all elements share one type, fixed by
             // the first and required of the rest. An empty literal needs a `[T; N]`

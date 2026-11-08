@@ -268,11 +268,11 @@ fn char_slice_without_range_is_rejected() {
     );
 }
 
+/// A range value is the prelude's `Range`, which a bare checker does not declare.
 #[test]
-fn range_outside_slice_is_rejected() {
+fn range_value_without_the_prelude_range_is_rejected() {
     let mut checker = TypeChecker::new();
 
-    // 0..5 used as a standalone value
     let expr = Expr::Range {
         start: Box::new(Expr::Literal(Literal::Integer(0, None), Span::new(0, 1))),
         end: Box::new(Expr::Literal(Literal::Integer(5, None), Span::new(3, 4))),

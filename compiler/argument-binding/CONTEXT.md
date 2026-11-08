@@ -101,7 +101,13 @@ Reads and rewrites the AST it is handed; touches no files.
   every `impl` and `trait` declaring that method name agrees on the parameter names; when two
   disagree, a named argument on it is rejected with `AmbiguousMethodLabels` rather than
   guessed at. Positional calls are unaffected, so the limitation costs nothing until someone
-  writes a label.
+  writes a label. A prelude method (`PRELUDE_MODULE`) is recorded last. Under a name no
+  program method or seeded builtin uses it is recorded as any method is; under one the
+  program's methods agree on, and with other parameter names, the entry becomes
+  `OverPrelude`: a labelled call binds the program's names (a program declaration displaces a
+  prelude one), and a positional call is left alone, since it may be the prelude method's. The
+  prelude declares `step` on its ranges, and a program's own `step(add:, times:)` keeps its
+  labels.
 - **Nothing else declares parameter names.** A closure, a builtin (`panic`, `.len()`), an enum
   tuple variant, and a newtype constructor all reach the `Unknown` arm: a label on one is
   `LabelsUnsupported`, and a positional call passes through. Attribute arguments

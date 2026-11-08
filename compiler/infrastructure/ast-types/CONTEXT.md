@@ -127,9 +127,9 @@ walkers.
 - `Expr::Try { operand, span }` (postfix `?`) is a node of its own rather than a `BinaryOp`: it
   has one operand, and its type comes from that operand's success payload while its *failure*
   path is typed by the enclosing function's return type.
-- `Expr::Range { start, end, inclusive, span }` is **not** a first-class value: it is valid only
-  as a `.slice` / `.char_slice` argument, and semantic analysis rejects it elsewhere. `for`-range
-  loops keep their bounds on `Stmt::ForRange` and never produce it.
+- `Expr::Range { start, end, inclusive, span }` is a `.slice` / `.char_slice` argument, whose
+  bounds the slice reads off the node, or anywhere else a value of the prelude's `Range`.
+  `for`-range loops keep their bounds on `Stmt::ForRange` and never produce it.
 - `Expr::TensorIndex { object, indices, span }` is the tensor index `t[i, j]` / `t[1..3, ..]`,
   one `TensorIndexArg` per axis: `Position(Expr)`, `Range { start, end, inclusive, reversed, step }`,
   or `FullAxis`. It is a node of its own rather than a widened `Expr::Index` because no other
@@ -157,9 +157,9 @@ walkers.
   node the parser builds from a *name* plus a bracketed shape rather than from a keyword or a
   bracket, and `span` covers the name through the closing `>`.
 - `Stmt::ForRange` / `Stmt::ForEach` carry `index: Option<Identifier>`: the position binding of
-  `for (i, x) in xs.enumerate()`, a `u64` counting from zero. `.enumerate()` is an *arity* on the
-  loop node rather than an adapter expression because there is no iterator protocol to return one
-  from, and because a range has no value form to call a method on. Both walkers that bind loop
+  `for (i, x) in xs.enumerate()`, a `u64` counting from zero. `.enumerate()` in a head is an
+  *arity* on the loop node rather than an adapter expression, so it folds into the loop over any
+  head, an array included, and builds no adapter value. Both walkers that bind loop
   variables must bind this one too, or a closure in the body captures it as a free variable.
   `Stmt::ForRange` additionally carries `reversed: bool`, the `.rev()` head form: the same
   bounds walked from the last value down to `start`. It is a flag on the range rather than a
@@ -168,9 +168,8 @@ walkers.
   the `.step(n)` head form, directly above `reversed` and beneath the same two.
 - The same two nodes carry `adapters: Vec<LoopAdapter>`: the `.map(f)` / `.filter(p)` chain the
   head wore, in source order, each holding a `LoopAdapterKind` and the single `callee` expression.
-  They ride on the loop node for the same reason `index` does: a range has no receiver to resolve
-  a method against, and an adapter that returned a value would need a generic `Option<T>` payload
-  the enum surface cannot express yet. Every walker over `Stmt` must visit `callee`, which is an
+  They ride on the loop node for the same reason `index` does. Every walker over `Stmt` must
+  visit `callee`, which is an
   ordinary expression evaluated once in the scope *enclosing* the loop.
 - `Expr::Unsafe { stmts, span }` is structurally identical to `Expr::Block` and lowers like
   one. The distinct node exists for the one rule it carries, which semantic analysis

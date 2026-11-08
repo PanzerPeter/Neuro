@@ -87,6 +87,10 @@ fn bind_call(expr: &mut Expr, local: bool, table: &SignatureTable) -> Result<Bou
     let span = *span;
     match lookup {
         Lookup::Known(sig) => binding::bind(expr, sig, &callee, span),
+        Lookup::LabelsOnly(sig) => match first_label(arg_labels) {
+            Some(_) => binding::bind(expr, sig, &callee, span),
+            None => Ok(Bound::InPlace),
+        },
         Lookup::Unknown => match first_label(arg_labels) {
             Some(_) => Err(ArgumentError::LabelsUnsupported { callee, span }),
             None => Ok(Bound::InPlace),

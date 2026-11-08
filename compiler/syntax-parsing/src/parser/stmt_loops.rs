@@ -382,12 +382,11 @@ fn strip_adapters(iterable: Expr) -> ParseResult<(Expr, Vec<LoopAdapter>, bool)>
     }
 }
 
-/// Split a trailing `.rev()` off the base iterable, returning the receiver and
-/// whether the adapter was there.
+/// Split a trailing `.rev()` off a range literal, returning the receiver and whether
+/// the adapter was there.
 ///
-/// A receiver that is not a range is rejected here rather than left to fail later as
-/// an unresolved method: `.rev()` is specified on ranges only, and the alternative
-/// diagnostic names a method the language does not define on that type.
+/// Any other receiver keeps its call: a `Range` value has a `.rev()` method of its own,
+/// and on a receiver that has none the type checker names the range spelling.
 fn strip_rev(iterable: Expr) -> ParseResult<(Expr, bool)> {
     let Expr::Call {
         func, args, span, ..
@@ -401,25 +400,22 @@ fn strip_rev(iterable: Expr) -> ParseResult<(Expr, bool)> {
     if field.name != REV_METHOD {
         return Ok((iterable, false));
     }
+    let receiver = unwrap_paren(object.as_ref().clone());
+    if !matches!(receiver, Expr::Range { .. }) {
+        return Ok((iterable, false));
+    }
     if !args.is_empty() {
         return Err(ParseError::AdapterTakesNoArguments {
             adapter: field.name.clone(),
             span: *span,
         });
     }
-    let receiver = unwrap_paren(object.as_ref().clone());
-    if !matches!(receiver, Expr::Range { .. }) {
-        return Err(ParseError::RevOnNonRange { span: *span });
-    }
     Ok((receiver, true))
 }
 
-/// Split a trailing `.step(n)` off the base iterable, returning the receiver (still
-/// wearing any `.rev()`) and the stride.
-///
-/// The language defines `.step(n)` on ranges only and `.rev()` may sit under it, so the
-/// receiver must be a range once a `.rev()` is peeled; anything else is rejected here
-/// for the reason `strip_rev` gives.
+/// Split a trailing `.step(n)` off a range literal, possibly reversed, returning the
+/// receiver (still wearing any `.rev()`) and the stride. Any other receiver keeps its
+/// call, for the reason `strip_rev` gives.
 fn strip_step(iterable: Expr) -> ParseResult<(Expr, Option<Box<Expr>>)> {
     let Expr::Call {
         func, args, span, ..
@@ -433,14 +429,14 @@ fn strip_step(iterable: Expr) -> ParseResult<(Expr, Option<Box<Expr>>)> {
     if field.name != STEP_METHOD {
         return Ok((iterable, None));
     }
-    let [stride] = args.as_slice() else {
-        return Err(ParseError::StepArity { span: *span });
-    };
     let receiver = object.as_ref().clone();
     let (under_rev, _) = strip_rev(receiver.clone())?;
     if !matches!(unwrap_paren(under_rev), Expr::Range { .. }) {
-        return Err(ParseError::StepOnNonRange { span: *span });
+        return Ok((iterable, None));
     }
+    let [stride] = args.as_slice() else {
+        return Err(ParseError::StepArity { span: *span });
+    };
     Ok((receiver, Some(Box::new(stride.clone()))))
 }
 
@@ -768,18 +764,20 @@ mod tests {
         assert_eq!(adapters.len(), 1);
     }
 
-    /// `.rev()` is a range form only. Left to fall through it would be reported as a
-    /// missing method, which names a construct the language does not define.
+    /// Only a range literal's `.rev()` folds into the loop. On any other receiver it is
+    /// a call, which a `Range` value answers and the checker refuses elsewhere.
     #[test]
-    fn rev_on_a_non_range_head_is_rejected() {
-        assert!(matches!(
-            parse_err("func main() -> i32 { for x in xs.rev() { }\n 0 }"),
-            ParseError::RevOnNonRange { .. }
-        ));
-        assert!(matches!(
-            parse_err("func main() -> i32 { for x in (0..4).map(f).rev() { }\n 0 }"),
-            ParseError::RevOnNonRange { .. }
-        ));
+    fn rev_on_a_non_range_head_stays_a_call() {
+        for source in [
+            "func main() -> i32 { for x in xs.rev() { }\n 0 }",
+            "func main() -> i32 { for x in (0..4).map(f).rev() { }\n 0 }",
+            "func main() -> i32 { for x in (0..9).step(3).rev() { }\n 0 }",
+        ] {
+            let Stmt::ForEach { iterable, .. } = first_stmt(source) else {
+                panic!("expected a for-each over a call: {source}");
+            };
+            assert!(matches!(iterable, Expr::Call { .. }), "{source}");
+        }
     }
 
     #[test]
@@ -813,15 +811,17 @@ mod tests {
     }
 
     #[test]
-    fn step_on_a_non_range_head_is_rejected() {
-        assert!(matches!(
-            parse_err("func main() -> i32 { for x in xs.step(2) { }\n 0 }"),
-            ParseError::StepOnNonRange { .. }
-        ));
-        assert!(matches!(
-            parse_err("func main() -> i32 { for x in (0..4).step(2).step(2) { }\n 0 }"),
-            ParseError::StepOnNonRange { .. }
-        ));
+    fn step_on_a_non_range_head_stays_a_call() {
+        for source in [
+            "func main() -> i32 { for x in xs.step(2) { }\n 0 }",
+            "func main() -> i32 { for x in (0..4).step(2).step(2) { }\n 0 }",
+            "func main() -> i32 { for x in r.rev().step(2) { }\n 0 }",
+        ] {
+            let Stmt::ForEach { iterable, .. } = first_stmt(source) else {
+                panic!("expected a for-each over a call: {source}");
+            };
+            assert!(matches!(iterable, Expr::Call { .. }), "{source}");
+        }
     }
 
     #[test]
@@ -829,16 +829,6 @@ mod tests {
         assert!(matches!(
             parse_err("func main() -> i32 { for x in (0..4).step() { }\n 0 }"),
             ParseError::StepArity { .. }
-        ));
-    }
-
-    /// Only `.rev().step(n)` is defined; the other order is reported rather than
-    /// silently read as a different walk.
-    #[test]
-    fn rev_after_step_is_rejected() {
-        assert!(matches!(
-            parse_err("func main() -> i32 { for x in (0..9).step(3).rev() { }\n 0 }"),
-            ParseError::RevOnNonRange { .. }
         ));
     }
 

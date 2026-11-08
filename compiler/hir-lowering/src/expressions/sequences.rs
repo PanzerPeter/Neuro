@@ -1,4 +1,4 @@
-//! Ranges, array literals, and tuple literals.
+//! Slice ranges, array literals, and tuple literals.
 //!
 //! Reached from the `lower_expr_uncoerced` dispatch in this module's `mod.rs`.
 //! Every file here adds methods to the same `impl Lowerer` block.
@@ -9,26 +9,31 @@ use neuro_hir::{HirExpr, HirExprKind, HirType};
 use crate::{Lowerer, LoweringError};
 
 impl Lowerer {
-    /// Lower a `start..end` / `start..=end` range. Ranges are not first-class values
-    /// Only valid as a `string.slice` argument, so the node carries
-    /// `void`; the slice lowering reads the bounds directly. Bounds are `u64`-typed.
-    pub(super) fn lower_range(
-        &mut self,
-        start: &Expr,
-        end: &Expr,
-        inclusive: bool,
-        span: shared_types::Span,
-    ) -> Result<HirExpr, LoweringError> {
+    /// Lower the `start..end` / `start..=end` argument of a slice intrinsic, which reads
+    /// the bounds off the node: it carries `void`, and its bounds are `u64`-typed. A range
+    /// anywhere else is a `Range` value.
+    pub(super) fn lower_slice_range(&mut self, arg: &Expr) -> Result<HirExpr, LoweringError> {
+        let Expr::Range {
+            start,
+            end,
+            inclusive,
+            span,
+        } = arg
+        else {
+            return Err(LoweringError::Malformed {
+                detail: "a slice intrinsic expects a range argument".to_string(),
+            });
+        };
         let start = self.lower_expr(start, Some(&HirType::U64))?;
         let end = self.lower_expr(end, Some(&HirType::U64))?;
         Ok(HirExpr::new(
             HirExprKind::Range {
                 start: Box::new(start),
                 end: Box::new(end),
-                inclusive,
+                inclusive: *inclusive,
             },
             HirType::Void,
-            span,
+            *span,
         ))
     }
 

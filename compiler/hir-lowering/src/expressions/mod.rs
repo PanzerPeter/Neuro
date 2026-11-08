@@ -489,7 +489,7 @@ impl Lowerer {
                 end,
                 inclusive,
                 span,
-            } => self.lower_range(start, end, *inclusive, *span),
+            } => self.lower_range_value(start, end, *inclusive, expected, *span),
 
             // A `Tensor<T, [...]>` expectation turns the literal into a tensor
             // literal; anything else leaves it a plain array.

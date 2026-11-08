@@ -5,6 +5,34 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-155: a panic inside a standard-library body reports a position in the program's file
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`, panic locations
+- **Severity**: minor. The message is right and the program aborts as it should, but the location
+  points at the wrong file
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val z = 0.0
+    val o = OrderedF64::new(z / z)
+    0
+}
+```
+
+Expected: a location naming the `new` call, or the standard library's own source. Observed:
+`panic: OrderedF64 cannot hold NaN at main.nr:6:1`, a line past the end of a five-line file. A
+standard-library body's spans are offsets into its own embedded source, and the panic location
+reads them against the program's file. A zero stride passed to a range value's `.step(n)` at run
+time reports the same kind of position.
+
+**Workaround**: none. The message text still names the cause.
+
+**Fix sketch**: give the panic location the module its span belongs to, or report a
+standard-library panic at the call site that entered it.
+
 ## BUG-154: a `string` binding returned inside an `Option` is freed by the function returning it
 
 - **Status**: open, confirmed

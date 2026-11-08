@@ -905,45 +905,7 @@ impl TypeChecker {
                 body,
                 span: _,
             } => {
-                // An unsuffixed literal start (`0..v.len()`) takes the end's type, so the
-                // end is checked first; otherwise the start leads, as before.
-                let (start_ty, end_ty) = if unsuffixed_integer(start) && !unsuffixed_integer(end) {
-                    let end_ty = self.check_expr(end, None).unwrap_or(Type::Unknown);
-                    let start_ty = self
-                        .check_expr(start, Some(&end_ty))
-                        .unwrap_or(Type::Unknown);
-                    (start_ty, end_ty)
-                } else {
-                    let start_ty = self.check_expr(start, None).unwrap_or(Type::Unknown);
-                    let end_ty = self
-                        .check_expr(end, Some(&start_ty))
-                        .unwrap_or(Type::Unknown);
-                    (start_ty, end_ty)
-                };
-                if !matches!(start_ty, Type::Unknown) && !start_ty.is_integer() {
-                    self.record_error(TypeError::InvalidForRangeType {
-                        found: start_ty.clone(),
-                        span: start.span(),
-                    });
-                }
-
-                if !matches!(end_ty, Type::Unknown) && !end_ty.is_integer() {
-                    self.record_error(TypeError::InvalidForRangeType {
-                        found: end_ty.clone(),
-                        span: end.span(),
-                    });
-                }
-
-                if !matches!(start_ty, Type::Unknown)
-                    && !matches!(end_ty, Type::Unknown)
-                    && !end_ty.is_compatible_with(&start_ty)
-                {
-                    self.record_error(TypeError::Mismatch {
-                        expected: start_ty.clone(),
-                        found: end_ty,
-                        span: end.span(),
-                    });
-                }
+                let start_ty = self.check_range_bounds(start, end, None);
                 if let Some(step) = step {
                     self.check_range_step(step, &start_ty);
                 }
@@ -1168,12 +1130,4 @@ impl TypeChecker {
             }
         }
     }
-}
-
-/// An integer literal with no suffix, whose type comes from its context.
-fn unsuffixed_integer(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::Literal(shared_types::Literal::Integer(_, None), _)
-    )
 }

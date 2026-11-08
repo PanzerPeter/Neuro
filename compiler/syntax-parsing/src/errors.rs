@@ -101,14 +101,6 @@ pub enum ParseError {
     #[error("`.{adapter}()` takes exactly one argument: the function applied to each element")]
     LoopAdapterArity { adapter: String, span: Span },
 
-    #[error("`.rev()` reverses a range, so its receiver must be one: write `(start..end).rev()`")]
-    RevOnNonRange { span: Span },
-
-    #[error(
-        "`.step(n)` strides over a range, so its receiver must be one: write `(start..end).step(n)`, or `(start..end).rev().step(n)` to stride down"
-    )]
-    StepOnNonRange { span: Span },
-
     #[error("`.step()` takes exactly one argument: the positive stride, as in `(0..n).step(2)`")]
     StepArity { span: Span },
 
@@ -178,8 +170,6 @@ impl ParseError {
             | ParseError::CharIndicesHeadDecorated { span }
             | ParseError::AdapterTakesNoArguments { span, .. }
             | ParseError::LoopAdapterArity { span, .. }
-            | ParseError::RevOnNonRange { span }
-            | ParseError::StepOnNonRange { span }
             | ParseError::StepArity { span }
             | ParseError::ShapeArgumentOnNonTensor { span, .. }
             | ParseError::TensorTypeArity { span }

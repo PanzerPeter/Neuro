@@ -97,14 +97,23 @@ const PRELUDE_DEPENDENCIES: &[(&str, &[&str])] = &[
     ("Map", &["Option", "Iterator"]),
     ("Filter", &["Option", "Iterator"]),
     ("Enumerate", &["Option", "Iterator"]),
+    ("Range", &["Option", "Iterator"]),
+    ("Rev", &["Option", "Iterator", "Range"]),
+    ("Step", &["Option", "Iterator", "Range"]),
     ("PoolAware", &["PoolHandle"]),
 ];
 
 /// Prelude methods written against another prelude type, as (owner, method, needed
 /// type). The conversions between `Option` and `Result` name both enums, so a program that
-/// replaces one keeps the other's remaining methods and loses only the conversion.
-const PRELUDE_METHOD_DEPENDENCIES: &[(&str, &str, &str)] =
-    &[("Option", "ok_or", "Result"), ("Result", "ok", "Option")];
+/// replaces one keeps the other's remaining methods and loses only the conversion; a
+/// range's `.rev()` and `.step(n)` go with the adapter type they return.
+const PRELUDE_METHOD_DEPENDENCIES: &[(&str, &str, &str)] = &[
+    ("Option", "ok_or", "Result"),
+    ("Result", "ok", "Option"),
+    ("Range", "rev", "Rev"),
+    ("Range", "step", "Step"),
+    ("Rev", "step", "Step"),
+];
 
 /// Every prelude name a program's own declarations displace: the names it declares
 /// outright, plus the prelude declarations written against those.
@@ -223,6 +232,28 @@ mod tests {
             .collect();
         assert!(option_methods.contains(&"map"), "{option_methods:?}");
         assert!(!option_methods.contains(&"ok_or"), "{option_methods:?}");
+    }
+
+    /// A range's `.step(n)` returns the prelude's `Step`, so a program declaring its own
+    /// `Step` keeps `Range` and `.rev()` and loses only the strides.
+    #[test]
+    fn a_program_step_withdraws_only_the_range_strides() {
+        let program = syntax_parsing::parse("struct Step { n: i32 }").expect("program parses");
+        let combined = load().expect("the prelude parses").prepend(program);
+        let methods = |owner: &str| -> Vec<String> {
+            combined
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Impl(def) if def.type_name.name == owner && def.trait_name.is_none() => {
+                        Some(def)
+                    }
+                    _ => None,
+                })
+                .flat_map(|def| def.methods.iter().map(|m| m.name.name.clone()))
+                .collect()
+        };
+        assert_eq!(methods("Range"), ["rev"]);
+        assert!(methods("Rev").is_empty());
     }
 
     /// `Chars::next` answers `Option<char>`, so a program that brings its own `Option`

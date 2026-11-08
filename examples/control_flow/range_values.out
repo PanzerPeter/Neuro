@@ -1,0 +1,6 @@
+3..7             = 3 4 5 6 
+evens_below(9)   = 0 2 4 6 8 
+0..=10 down by 3 = 10 7 4 1 
+252..=255 as u8  = 252 253 254 255 
+walked first     = 0 1 2 3 
+rest, newest     = 9 8 7 6 5 

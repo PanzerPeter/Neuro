@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use ast_types::{Expr, GenericArg, GenericParam, ImplDef, Item, Parameter, TraitDef, Type};
+use ast_types::{
+    Expr, GenericArg, GenericParam, ImplDef, Item, PRELUDE_MODULE, Parameter, TraitDef, Type,
+};
 use shared_types::{Literal, Span};
 
 /// The label `.sum` / `.mean` / `.max` / `.min` take their reduction axis under, and
@@ -139,6 +141,11 @@ impl Signature {
 enum MethodEntry {
     Agreed(Signature),
     Conflicting,
+    /// The program's methods agree on the name and a prelude method disagrees with them. A
+    /// labelled call binds against the program's names, which displace the prelude's as a
+    /// program declaration does; a positional call is left alone, since it may be the
+    /// prelude method's.
+    OverPrelude(Signature),
 }
 
 /// Every call-site naming rule the program declares, indexed the three ways a call can
@@ -148,6 +155,9 @@ pub(crate) struct SignatureTable {
     functions: HashMap<String, Signature>,
     assoc: HashMap<(String, String), Signature>,
     methods: HashMap<String, MethodEntry>,
+    /// The prelude's instance methods, recorded after the program's own: the prelude
+    /// declares `step` on its ranges, and a program's `step(add:, times:)` keeps its labels.
+    prelude_methods: Vec<(String, Signature)>,
 }
 
 /// What a lookup found for a call site.
@@ -159,6 +169,8 @@ pub(crate) enum Lookup<'a> {
     Unknown,
     /// Several methods answer to the name with different parameter names.
     Ambiguous,
+    /// The program's own parameter names, binding a labelled call only.
+    LabelsOnly(&'a Signature),
 }
 
 impl SignatureTable {
@@ -168,6 +180,17 @@ impl SignatureTable {
         // A program's own declarations are collected second so one that declares its
         // own `Tensor` overwrites the builtin entry rather than fighting it.
         table.collect(items);
+        let taken: Vec<String> = table.methods.keys().cloned().collect();
+        for (name, sig) in std::mem::take(&mut table.prelude_methods) {
+            if !taken.contains(&name) {
+                table.record_method(&name, sig);
+            } else if let Some(MethodEntry::Agreed(own)) = table.methods.get(&name)
+                && *own != sig
+            {
+                let own = own.clone();
+                table.methods.insert(name, MethodEntry::OverPrelude(own));
+            }
+        }
         table
     }
 
@@ -279,6 +302,9 @@ impl SignatureTable {
                     self.assoc
                         .insert((def.type_name.name.clone(), method.name.name.clone()), sig);
                 }
+                Some(_) if def.module == PRELUDE_MODULE => self
+                    .prelude_methods
+                    .push((method.name.name.clone(), sig.without_types())),
                 Some(_) => self.record_method(&method.name.name, sig.without_types()),
             }
         }
@@ -327,6 +353,7 @@ impl SignatureTable {
         match self.methods.get(name) {
             Some(MethodEntry::Agreed(sig)) => Lookup::Known(sig),
             Some(MethodEntry::Conflicting) => Lookup::Ambiguous,
+            Some(MethodEntry::OverPrelude(sig)) => Lookup::LabelsOnly(sig),
             None => Lookup::Unknown,
         }
     }

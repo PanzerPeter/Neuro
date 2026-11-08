@@ -27,6 +27,14 @@ pub(crate) const NEXT_METHOD: &str = "next";
 /// The `for`-head form that drives a `Chars` iterator by byte offset.
 const CHAR_INDICES_METHOD: &str = "char_indices";
 
+/// An integer literal with no suffix, whose type comes from its context.
+fn unsuffixed_integer(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Literal(shared_types::Literal::Integer(_, None), _)
+    )
+}
+
 /// The value of a constant `.step(n)` stride. A negative one is the case worth
 /// catching, and the shared folder does not read a leading `-`, so it is peeled here.
 pub(crate) fn constant_stride(step: &Expr) -> Option<i128> {
@@ -42,6 +50,55 @@ pub(crate) fn constant_stride(step: &Expr) -> Option<i128> {
 }
 
 impl TypeChecker {
+    /// Type-check a range's two bounds, in a `for` head or as a value, and answer the
+    /// element type: the start's, or `Unknown` when it has none. Both must be integers
+    /// of one type. An unsuffixed literal start (`0..v.len()`) takes the end's type, so
+    /// the end is checked first then; otherwise the start leads, typed by `hint` (a
+    /// `Range<u64>` the value is expected to be) when there is one.
+    pub(crate) fn check_range_bounds(
+        &mut self,
+        start: &Expr,
+        end: &Expr,
+        hint: Option<&Type>,
+    ) -> Type {
+        let (start_ty, end_ty) = if unsuffixed_integer(start) && !unsuffixed_integer(end) {
+            let end_ty = self.check_expr(end, None).unwrap_or(Type::Unknown);
+            let start_ty = self
+                .check_expr(start, Some(&end_ty))
+                .unwrap_or(Type::Unknown);
+            (start_ty, end_ty)
+        } else {
+            let start_ty = self.check_expr(start, hint).unwrap_or(Type::Unknown);
+            let end_ty = self
+                .check_expr(end, Some(&start_ty))
+                .unwrap_or(Type::Unknown);
+            (start_ty, end_ty)
+        };
+        if !matches!(start_ty, Type::Unknown) && !start_ty.is_integer() {
+            self.record_error(TypeError::InvalidForRangeType {
+                found: start_ty.clone(),
+                span: start.span(),
+            });
+        }
+        if !matches!(end_ty, Type::Unknown) && !end_ty.is_integer() {
+            self.record_error(TypeError::InvalidForRangeType {
+                found: end_ty.clone(),
+                span: end.span(),
+            });
+        }
+        if !matches!(start_ty, Type::Unknown)
+            && !matches!(end_ty, Type::Unknown)
+            && !end_ty.is_compatible_with(&start_ty)
+        {
+            self.record_error(TypeError::Mismatch {
+                expected: start_ty.clone(),
+                found: end_ty,
+                span: end.span(),
+            });
+        }
+        start_ty
+    }
+
     /// Type-check the stride of a `for` head's `.step(n)`: an integer of the range's own
     /// element type, since the induction variable advances by it. A constant stride is
     /// checked positive here; a run-time one is guarded where the loop starts.

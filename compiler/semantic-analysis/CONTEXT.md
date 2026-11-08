@@ -353,7 +353,7 @@ a wrong count):
 - `string.len() -> u64`, `string.clone() -> string` (nullary);
 - `string.slice(a..b) -> &string` and `string.char_slice(a..b) -> &string`, both via
   `check_string_slice`: one `Expr::Range` argument with integer bounds, else
-  `SliceExpectsRange`. A bare `Expr::Range` anywhere else is `RangeNotAllowed`. The two share a
+  `SliceExpectsRange`. A bare `Expr::Range` anywhere else is a range value (below). The two share a
   check because they share a contract: they differ only in whether the indices count bytes or
   code points, which is a backend concern with no type-level consequence;
 - `string.chars() -> Chars` (nullary), the prelude's codepoint iterator. Like `.slice` it
@@ -435,16 +435,19 @@ loop.
   so `xs[i]` needs no cast) in the same scope as the element binding, which is what makes
   `for (i, i) in ...` a `VariableAlreadyDefined` rather than a shadow.
 
-- **Range bounds.** The start bound leads: it is checked with no expected type and the end is
-  checked against it. The exception is an unsuffixed integer literal start beside an end that is
-  not one (`0..v.len()`, `0..=n`): the end is checked first and the literal takes its type, so
+- **Range bounds.** `check_range_bounds` (`iteration.rs`), shared by a `for` head and a range
+  value. The start bound leads: it is checked against the expected element type, if any, and the
+  end against the start. The exception is an unsuffixed integer literal start beside an end that
+  is not one (`0..v.len()`, `0..=n`): the end is checked first and the literal takes its type, so
   the loop runs over `u64` or `i64` without a suffix. `hir-lowering` orders the two the same way.
 
 - **Reversed heads.** `Stmt::ForRange` and `TensorIndexArg::Range` carry a `reversed` flag
   for `.rev()`, and the checker reads neither. A reversal changes the order values arrive in,
   not the bounds, the element type, or a slice's surviving extent, so there is no rule here to
-  state and no diagnostic to raise: the parser has already rejected the only ill-formed case
-  (a receiver that is not a range).
+  state. The parser folds `.rev()` and `.step(n)` only off a range literal; on any other receiver
+  they stay calls, and one that declares no such method is `RevOnNonRange` / `StepOnNonRange`
+  (`range_values::missing_method`, used by all three `MethodNotFound` sites in
+  `check_call_expr`).
 
 - **Stepped heads.** A `.step(n)` stride is checked by `check_range_step` (`iteration.rs`) in
   the enclosing scope: an integer (`InvalidForRangeType`) of the range's own type (`Mismatch`),
@@ -477,6 +480,16 @@ loop.
   adapter holds what its arguments hold through the ordinary call-result walk
   (`tail_borrow_targets`). When the program has displaced the generic struct (its own `Map`,
   or its own `Option`, which drops the adapters with it), the call is an ordinary lookup again.
+
+- **Range values.** `type_checkers/range_values.rs`. An `Expr::Range` reaching `check_expr` (not
+  a slice argument, not a `for` head) types as the prelude's `Range<T>` over its integer bounds,
+  a `Range<T>` expectation typing an unsuffixed literal. The struct must be the prelude's
+  (`struct_modules` names `PRELUDE_MODULE`); a program that displaces it gets `RangeNotAllowed`.
+  `.rev()` and `.step(n)` are the prelude's own methods, answering `Rev<T>` and `Step<T>`, so
+  they need nothing here beyond `check_range_value_stride`, which refuses a constant stride below
+  one as the head form does. The prelude's walk calls `x.__to_u64()` and `x.__offset(k)` on its
+  type parameter; `check_range_intrinsic` types them inside the prelude only, ahead of
+  `MethodNotFound` on a type-parameter receiver.
 
 ### The iteration protocol
 `type_checkers/iteration.rs`. A `Stmt::ForEach` head that is neither a collection, an array,

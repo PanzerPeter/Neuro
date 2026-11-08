@@ -16,9 +16,9 @@ pub enum LoopAdapterKind {
 
 /// One `.map(f)` / `.filter(p)` call peeled off a `for` head.
 ///
-/// The adapter is recognised by the parser rather than resolved as a method
-/// because a range is not a first-class value, so `(0..n).map(f)` has no receiver
-/// to dispatch against: the same reason `.enumerate()` is a head form.
+/// The adapter is recognised by the parser rather than resolved as a method so it
+/// folds into the loop over every head, an array included, and builds no adapter
+/// value: the same reason `.enumerate()` is a head form.
 /// `callee` is the single argument: a closure literal, a function name, or any
 /// expression of function type.
 #[derive(Debug, Clone, PartialEq)]

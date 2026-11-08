@@ -243,22 +243,6 @@ impl TypeChecker {
         }
     }
 
-    /// A range `a..b` is not a first-class value: it is consumed directly
-    /// by the `.slice` / `.char_slice` intrinsics, so reaching it through the general
-    /// expression path means it was used somewhere a range is not allowed. Still check
-    /// the bounds for cascaded diagnostics.
-    pub(super) fn check_range_expr(
-        &mut self,
-        start: &Expr,
-        end: &Expr,
-        span: &Span,
-    ) -> Option<Type> {
-        let _ = self.check_expr(start, None);
-        let _ = self.check_expr(end, None);
-        self.record_error(TypeError::RangeNotAllowed { span: *span });
-        Some(Type::Unknown)
-    }
-
     /// Array indexing `object[index]`: the object is an array (or a
     /// borrow of one, auto-derefed per); the index is an integer; the
     /// result is the element type.

@@ -211,6 +211,38 @@ The stride is an integer of the range's own type and must be positive. A constan
 
 `.step(n)` sits beneath the adapters and `.enumerate()` exactly as `.rev()` does, and a tensor index takes it too (`t[(0..n).step(2)]`).
 
+### Ranges as Values
+
+A range written anywhere other than a `for` head or a slice argument is a value of the standard library's `Range<T>`, where `T` is the bounds' integer type. It binds, passes and returns like any struct, and it is an iterator, so a `for` loop, the adapter values and a generic `I: Iterator<Item = T>` parameter all take it:
+
+```neuro
+func evens(n: i32) -> Step<i32> {
+    (0..n).step(2)
+}
+
+func main() -> i32 {
+    val window = 3..7                  // Range<i32>
+    mut total = 0
+    for x in window { total += x }     // 3, 4, 5, 6
+    for x in evens(9) { total += x }   // 0, 2, 4, 6, 8
+    total
+}
+```
+
+`.rev()` on a `Range<T>` returns a `Rev<T>`, `.step(n)` on either returns a `Step<T>`, and they walk exactly what the head forms above walk, including the last value of a `u8` and the first of an `i8`. The stride follows the head form's rules: a constant below one is a compile error, and a zero computed at run time panics at the `.step` call. A `Step` has no `.rev()`, so `.step(n).rev()` is refused here too.
+
+A range value moves: `for x in r` consumes `r`, and a second loop over it is a use of a moved value. To walk part of one and keep the rest, borrow it mutably. `for x in &mut r` drives it in place, a `break` leaves it where it stopped, and `.rev()` or `.step(n)` afterwards walk only what is left:
+
+```neuro
+mut r = 0..10
+for x in &mut r {
+    if x == 3 { break }               // 0, 1, 2, then 3 ends the loop
+}
+for x in r.rev() { }                  // 9, 8, 7, 6, 5, 4
+```
+
+Written directly on a range literal in a `for` head, `.rev()` and `.step(n)` are still the head forms and build no value.
+
 ### Iterating a Collection: `xs`, `&xs` and `&mut xs`
 
 A fixed-size array, a `Vec<T>` and a slice iterate element by element. How the head is written decides what the loop variable is, the same three receiver modes a method has:
@@ -311,7 +343,7 @@ for (rank, value) in [10, 3, 20, 4, 30].filter(|x: i32| -> bool { x >= 10 }).enu
 
 A `.filter` predicate must return `bool` and a `.map` function must return a value; a function that does not take the element type is rejected where the head is written.
 
-**Head form.** Written in a `for` head, `.map` / `.filter` fold into the loop, as `.enumerate()` does, and build no value. On an iterator outside a `for` head the same calls return an adapter value that can be stored or returned (see [Adapter values](#the-iteration-protocol)). The head form's predicate is handed the element itself, while an adapter value's takes a borrow of it; an unannotated closure reads the same either way.
+**Head form.** Written in a `for` head, `.map` / `.filter` fold into the loop, as `.enumerate()` does, and build no value. On an iterator outside a `for` head, a [range value](#ranges-as-values) included, the same calls return an adapter value that can be stored or returned (see [Adapter values](#the-iteration-protocol)). The head form's predicate is handed the element itself, while an adapter value's takes a borrow of it; an unannotated closure reads the same either way.
 
 ### The Iteration Protocol
 

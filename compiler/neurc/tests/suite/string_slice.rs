@@ -244,8 +244,9 @@ func main() -> i32 {
     assert!(stderr.contains("expects a range argument"), "{stderr}");
 }
 
+/// Outside a slice argument a range is a `Range` value, so binding one is no error.
 #[test]
-fn range_outside_slice_is_rejected() {
+fn range_outside_slice_is_a_range_value() {
     let source = r#"
 func main() -> i32 {
     val r = 0..5
@@ -253,14 +254,7 @@ func main() -> i32 {
 }
 "#;
     let (success, stderr) = check_source(source);
-    assert!(
-        !success,
-        "a range expression outside .slice() must be a type error; got: {stderr}"
-    );
-    assert!(
-        stderr.contains("is only valid as the argument to `.slice()`"),
-        "{stderr}"
-    );
+    assert!(success, "a range value should type-check; got: {stderr}");
 }
 
 #[test]

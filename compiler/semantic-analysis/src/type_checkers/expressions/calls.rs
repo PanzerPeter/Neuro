@@ -13,6 +13,7 @@ use crate::type_checkers::declarations::traits::{
 };
 use crate::type_checkers::derivable::{COMPARABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use crate::type_checkers::operator_traits::comparison_method;
+use crate::type_checkers::range_values::missing_method;
 use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::statements::{
     borrow_target_of, function_value_position, temporary_borrow_position,
@@ -971,11 +972,12 @@ impl TypeChecker {
                         {
                             return Some(ty);
                         }
-                        self.record_error(TypeError::MethodNotFound {
-                            struct_name: param.clone(),
-                            method_name: field.name.clone(),
-                            span: *fa_span,
-                        });
+                        if let Some(ty) =
+                            self.check_range_intrinsic(param, &field.name, args, *span)
+                        {
+                            return Some(ty);
+                        }
+                        self.record_error(missing_method(param.clone(), &field.name, *fa_span));
                         return Some(Type::Unknown);
                     }
                     // Dynamic dispatch through a trait object: the call
@@ -1039,11 +1041,11 @@ impl TypeChecker {
                         {
                             return Some(ret);
                         }
-                        self.record_error(TypeError::MethodNotFound {
-                            struct_name: obj_ty.to_string(),
-                            method_name: field.name.clone(),
-                            span: *fa_span,
-                        });
+                        self.record_error(missing_method(
+                            obj_ty.to_string(),
+                            &field.name,
+                            *fa_span,
+                        ));
                         return Some(Type::Unknown);
                     }
                 };
@@ -1068,16 +1070,13 @@ impl TypeChecker {
                         {
                             return Some(ty);
                         }
-                        self.record_error(TypeError::MethodNotFound {
-                            struct_name,
-                            method_name: field.name.clone(),
-                            span: *fa_span,
-                        });
+                        self.record_error(missing_method(struct_name, &field.name, *fa_span));
                         return Some(Type::Unknown);
                     }
                 };
 
                 self.check_impl_bounds(&struct_name, &field.name, *span);
+                self.check_range_value_stride(&struct_name, &field.name, args);
 
                 // Calling a `&mut self` method takes an exclusive borrow of the
                 // receiver for the call: the receiver must be a mutable

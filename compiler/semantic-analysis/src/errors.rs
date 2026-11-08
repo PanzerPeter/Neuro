@@ -919,7 +919,7 @@ pub enum TypeError {
     )]
     BreakValueInUnitLoop { span: Span },
 
-    #[error("a for-range bound or `.step(n)` stride must be an integer type, found {found}")]
+    #[error("a range bound or `.step(n)` stride must be an integer type, found {found}")]
     InvalidForRangeType { found: Type, span: Span },
 
     #[error(
@@ -1153,9 +1153,17 @@ pub enum TypeError {
     StoresReferenceToLocal { name: String, span: Span },
 
     #[error(
-        "a range expression `a..b` is only valid as the argument to `.slice()` or `.char_slice()`"
+        "a range value is the prelude's `Range`, which this program replaces or leaves out (its own `Range`, `Option` or `Iterator`, or `@no_prelude`); a range still works in a `for` head and as a `.slice()` argument"
     )]
     RangeNotAllowed { span: Span },
+
+    #[error("`.rev()` reverses a range, so its receiver must be one: write `(start..end).rev()`")]
+    RevOnNonRange { span: Span },
+
+    #[error(
+        "`.step(n)` strides over a range, so its receiver must be one: write `(start..end).step(n)`, or `(start..end).rev().step(n)` to stride down"
+    )]
+    StepOnNonRange { span: Span },
 
     #[error("`.slice()` / `.char_slice()` expects a range argument `a..b` or `a..=b`")]
     SliceExpectsRange { span: Span },
@@ -1756,6 +1764,8 @@ impl TypeError {
             | Self::BorrowingClosureInBreak { span }
             | Self::StoresReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
+            | Self::RevOnNonRange { span }
+            | Self::StepOnNonRange { span }
             | Self::SliceExpectsRange { span, .. }
             | Self::NotIndexable { span, .. }
             | Self::NotIterable { span, .. }

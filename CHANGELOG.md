@@ -10,6 +10,35 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.36.0] - 2026-11-08
+
+### Added
+
+- A range written outside a `for` head or a slice argument is now a value. `val r = 0..n` and
+  `0..=n` build the standard library's `Range<T>` over the bounds' integer type, which binds,
+  passes and returns under its written type and is an iterator: a `for` loop, `for x in &mut r`,
+  the adapter values and any `I: Iterator<Item = T>` parameter take it. `.rev()` returns a
+  `Rev<T>` and `.step(n)` a `Step<T>`, so `func evens(n: i32) -> Step<i32> { (0..n).step(2) }`
+  compiles. They walk exactly what the head forms walk, up to a type's last value and down to its
+  first, and on a partly walked range they take what is left. A constant stride below one is a
+  compile error; a zero stride computed at run time panics. A range value moves rather than
+  copies. Written directly into a `for` head, `(a..b).rev()` and `.step(n)` are still the counted
+  head forms.
+
+### Changed
+
+- `.rev()` and `.step(n)` on something that is not a range are now refused by the type checker
+  instead of the parser, with the same message. On a range value they are its methods, so
+  `for x in r.rev()` works when `r` is a `Range`.
+- A labelled call of a method the standard library also declares now binds against the
+  program's own method's parameter names, so a program's `step(add:, times:)` keeps working
+  beside `Range::step`. An unlabelled call of such a name is left for the type checker.
+
+### Fixed
+
+- `OrderedF32::new` and `OrderedF64::new` now refuse `NaN`. They compared the value with itself,
+  and `NaN != NaN` is `false` like every comparison with `NaN`, so a `NaN` key got in.
+
 ## [5.35.0] - 2026-11-08
 
 ### Added

@@ -121,6 +121,7 @@ mod pool_blocks;
 mod print_builtins;
 mod range_rev;
 mod range_step;
+mod range_values;
 mod reading_through_borrows;
 mod reference_bounds;
 mod return_paths;

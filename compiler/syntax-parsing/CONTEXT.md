@@ -290,18 +290,17 @@ the tuple-index parse, so it needs no expression grammar of its own.
   calls) and reverses it into source order on `Stmt::ForRange`/`ForEach`'s `adapters` field. Each
   takes exactly one argument (`LoopAdapterArity` otherwise). `.enumerate()` is recognised only at
   the outermost position: it yields pairs, so nothing beneath one could be handed a single element.
-- **`.rev()` is a range form, and the innermost one.** `strip_rev` peels it beneath the whole
-  adapter chain into `Stmt::ForRange`'s `reversed` field, and `index_argument_from`
-  (`expr_index.rs`) peels the same call off an index axis into `TensorIndexArg::Range`'s. The
-  language scopes it to ranges, so a receiver that is not one is `RevOnNonRange` rather than a method
-  resolved later: left to fall through it would be reported as a missing method, naming a
-  construct the language does not define on that type. `AdapterTakesNoArguments` covers `.rev(x)`
-  and `.enumerate(x)` alike.
-- **`.step(n)` sits directly above `.rev()`.** `strip_step` peels it off before `strip_rev` runs,
-  into `Stmt::ForRange`'s `step`, and `expr_index.rs` does the same for `TensorIndexArg::Range`.
-  Its receiver, once a `.rev()` is peeled, must be a range (`StepOnNonRange`), and it takes one
-  argument (`StepArity`). `(a..b).step(n).rev()` is therefore `RevOnNonRange`: the language
-  defines only the other order, and the two walk different values.
+- **`.rev()` on a range literal is a head form, and the innermost one.** `strip_rev` peels it
+  beneath the whole adapter chain into `Stmt::ForRange`'s `reversed` field, and
+  `index_argument_from` (`expr_index.rs`) peels the same call off an index axis into
+  `TensorIndexArg::Range`'s. On any other receiver it stays a method call: a `Range` value has a
+  `.rev()` of its own, and the type checker names the range spelling on a receiver that has
+  none. `AdapterTakesNoArguments` covers `.rev(x)` on a literal and `.enumerate(x)` alike.
+- **`.step(n)` sits directly above `.rev()`.** `strip_step` peels it off a range literal, reversed
+  or not, before `strip_rev` runs, into `Stmt::ForRange`'s `step`, and `expr_index.rs` does the
+  same for `TensorIndexArg::Range`. It takes one argument (`StepArity`). Any other receiver keeps
+  the call, so `(a..b).step(n).rev()` is a `.rev()` on a `Step` value, which the checker refuses:
+  the language defines only the other order, and the two walk different values.
   The cost of resolving them here is the same one `.enumerate()` pays (a user type with its own
   one-argument `.map` method cannot be a bare `for` head), and it buys the adapters over ranges and
   arrays, neither of which is an `Iterator` impl with a method to call.

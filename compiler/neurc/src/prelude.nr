@@ -137,8 +137,7 @@ export struct OrderedF32 {
 
 impl OrderedF32 {
     func new(value: f32) -> OrderedF32 {
-        // NaN is the only value that differs from itself.
-        if value != value {
+        if value.is_nan() {
             panic("OrderedF32 cannot hold NaN")
         }
         OrderedF32 { value: value }
@@ -176,7 +175,7 @@ export struct OrderedF64 {
 
 impl OrderedF64 {
     func new(value: f64) -> OrderedF64 {
-        if value != value {
+        if value.is_nan() {
             panic("OrderedF64 cannot hold NaN")
         }
         OrderedF64 { value: value }
@@ -293,6 +292,107 @@ impl<I: Iterator<Item = A>, A> Iterator for Enumerate<I, A> {
             }
             Option::None => Option::None
         }
+    }
+}
+
+// The value `start..end` and `start..=end` build outside a `for` head: the integers
+// from `start` up to `end`, which `inclusive` says whether to reach.
+//
+// The walk is written against two prelude-private intrinsics on the element type,
+// because a generic body has no integer arithmetic yet: `x.__to_u64()` is `x as u64`
+// (sign-extended), and `x.__offset(k)` adds `k` to `x` modulo the type's width. The
+// distance between two values of any integer type fits a `u64` that way, so a walk to
+// the type's last value never steps past it. Only integer bounds build a `Range`.
+//
+// `stride` and `reversed` are what `.step(n)` and `.rev()` set before handing the walk
+// on as a `Step` or `Rev`; `done` marks an inclusive walk that has yielded its last
+// value, which no bound can say once `start` has reached the type's maximum.
+export struct Range<T> {
+    start: T,
+    end: T,
+    inclusive: bool,
+    stride: u64,
+    reversed: bool,
+    done: bool
+}
+
+impl<T: Comparable + Copy> Iterator for Range<T> {
+    type Item = T
+    func next(&mut self) -> Option<T> {
+        if self.done || self.end < self.start || (!self.inclusive && !(self.start < self.end)) {
+            self.done = true
+            return Option::None
+        }
+        // The offset of the walk's last value from `start`.
+        mut last = self.end.__to_u64().wrapping_sub(self.start.__to_u64())
+        if !self.inclusive {
+            last = last - 1
+        }
+        val value = if self.reversed { self.start.__offset(last) } else { self.start }
+        if last < self.stride {
+            self.done = true
+        } else if self.reversed {
+            self.end = self.start.__offset(last - self.stride)
+            self.inclusive = true
+        } else {
+            self.start = self.start.__offset(self.stride)
+        }
+        Option::Some(value)
+    }
+}
+
+impl<T: Comparable + Copy> Range<T> {
+    // The same values from the top down. What has been walked stays walked.
+    func rev(self) -> Rev<T> {
+        mut range = self
+        range.reversed = true
+        Rev { range: range }
+    }
+    // Every `n`th value, counting from the first. `n` has the element type, as the
+    // `for`-head form's has, so its zero is reached through the intrinsics: `n` plus
+    // its own negation. The check is the one a head's `.step(n)` makes where its loop
+    // starts.
+    func step(self, n: T) -> Step<T> {
+        val zero = n.__offset((0 as u64).wrapping_sub(n.__to_u64()))
+        if n <= zero {
+            panic("range step must be positive")
+        }
+        mut range = self
+        range.stride = n.__to_u64()
+        Step { range: range }
+    }
+}
+
+// `range.rev()`: a `Range` walked from its last value down.
+export struct Rev<T> {
+    range: Range<T>
+}
+
+impl<T: Comparable + Copy> Iterator for Rev<T> {
+    type Item = T
+    func next(&mut self) -> Option<T> {
+        self.range.next()
+    }
+}
+
+impl<T: Comparable + Copy> Rev<T> {
+    // Every `n`th value of the downward walk, from the last one.
+    func step(self, n: T) -> Step<T> {
+        self.range.step(n)
+    }
+}
+
+// `range.step(n)` and `range.rev().step(n)`. It has no `.rev()`: striding down from the
+// top visits different values than reversing an upward stride, and only the first is
+// written `.rev().step(n)`.
+export struct Step<T> {
+    range: Range<T>
+}
+
+impl<T: Comparable + Copy> Iterator for Step<T> {
+    type Item = T
+    func next(&mut self) -> Option<T> {
+        self.range.next()
     }
 }
 

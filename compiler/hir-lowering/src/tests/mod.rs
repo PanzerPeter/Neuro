@@ -12,6 +12,7 @@ mod kernel_tests;
 mod loop_adapter_tests;
 mod match_tests;
 mod newtype_tests;
+mod range_value_tests;
 mod slice_tests;
 mod tensor_op_tests;
 mod tensor_reduce_tests;

@@ -1,6 +1,7 @@
 // Showcase: the iteration protocol carrying a small stream pipeline. Integration example:
 // `IntoIterator` and `Iterator` with associated types, `.map` and `.filter` both as head
-// adapters and as adapter values a function returns, a bound `S: Iterator<Item = i32>`,
+// adapters and as adapter values a function returns, a range value strided and reversed
+// into the same adapters, a bound `S: Iterator<Item = i32>`,
 // generic structs, closures in a struct field, `|>` and `>>` over every function-value
 // spelling, `Option`, and `for`-in. A source, a transform and a filter are three types,
 // each an `Iterator`, and one `for` head drives the chain one element at a time. No
@@ -233,6 +234,13 @@ func main() -> i32 {
     for entry in ranked {
         println("boosted {entry.0}: {entry.1}")
     }
+
+    // A range is a value too: the sample positions, newest first and every other one, are
+    // a `Step<u64>` that the same `.map` and the same consumer take. Unbound, the bounds
+    // and the stride would have been a `for`-head form, and nothing could have returned it.
+    val every_other = (0..readings.samples.len()).rev().step(2)
+    val alternate = every_other.map(|i| readings.samples[i])
+    println("every other sample, newest first, totals {stream_total(alternate)}")
 
     // An adapted head over an array, enumerated. The position counts what the
     // chain YIELDED, so it stays dense however much the filter drops.

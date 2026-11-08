@@ -380,6 +380,83 @@ fn two_methods_of_one_name_with_different_parameters_reject_a_label() {
     ));
 }
 
+/// The prelude declares `step` on its ranges, under other parameter names. A program's own
+/// method keeps its labels: a prelude method is consulted only for a name no program method
+/// uses, as a program declaration displaces a prelude one.
+#[test]
+fn a_program_method_keeps_its_labels_over_a_prelude_method() {
+    let mut prelude = impl_block(
+        "Range",
+        vec![method("step", Some(SelfParam::Owned), vec![implicit("n")])],
+    );
+    if let Item::Impl(def) = &mut prelude {
+        def.module = ast_types::PRELUDE_MODULE;
+    }
+    let mut items = vec![
+        prelude,
+        impl_block(
+            "Acc",
+            vec![method(
+                "step",
+                Some(SelfParam::Ref),
+                vec![implicit("by"), implicit("cap")],
+            )],
+        ),
+        func(
+            "main",
+            Vec::new(),
+            vec![Stmt::Expr(call(
+                Expr::FieldAccess {
+                    object: Box::new(Expr::Identifier(ident("c"))),
+                    field: ident("step"),
+                    span: span(),
+                },
+                vec![named("cap", 9), named("by", 1)],
+            ))],
+        ),
+    ];
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_values(&items), vec![1, 9]);
+}
+
+/// A positional call of the shared name may be the prelude method's, so the program's
+/// arity does not judge it.
+#[test]
+fn a_positional_call_of_a_name_the_prelude_shares_is_left_alone() {
+    let mut prelude = impl_block(
+        "Range",
+        vec![method("step", Some(SelfParam::Owned), vec![implicit("n")])],
+    );
+    if let Item::Impl(def) = &mut prelude {
+        def.module = ast_types::PRELUDE_MODULE;
+    }
+    let mut items = vec![
+        prelude,
+        impl_block(
+            "Acc",
+            vec![method(
+                "step",
+                Some(SelfParam::Ref),
+                vec![implicit("by"), implicit("cap")],
+            )],
+        ),
+        func(
+            "main",
+            Vec::new(),
+            vec![Stmt::Expr(call(
+                Expr::FieldAccess {
+                    object: Box::new(Expr::Identifier(ident("r"))),
+                    field: ident("step"),
+                    span: span(),
+                },
+                vec![(None, int(2))],
+            ))],
+        ),
+    ];
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_values(&items), vec![2]);
+}
+
 #[test]
 fn a_call_nested_in_an_argument_is_bound_too() {
     let mut items = vec![

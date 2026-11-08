@@ -1055,6 +1055,9 @@ impl Lowerer {
         if let Some(lowered) = self.lower_supplied_trait_method(&object, method, args, span)? {
             return Ok(lowered);
         }
+        if let Some(lowered) = self.lower_range_intrinsic(&object, method, args, span)? {
+            return Ok(lowered);
+        }
 
         let impl_receiver = match recv.referent() {
             HirType::Struct(name) => Some(name.clone()),
@@ -1296,7 +1299,7 @@ impl Lowerer {
         let arg = args.first().ok_or_else(|| LoweringError::Malformed {
             detail: "`.slice` expects a range argument".to_string(),
         })?;
-        let range = self.lower_expr(arg, None)?;
+        let range = self.lower_slice_range(arg)?;
         let slice_ty = HirType::Reference {
             inner: Box::new(HirType::Slice(Box::new(element))),
             mutable: false,
@@ -1324,7 +1327,7 @@ impl Lowerer {
                 let arg = args.first().ok_or_else(|| LoweringError::Malformed {
                     detail: format!("string.{} expects a range argument", method),
                 })?;
-                let range = self.lower_expr(arg, None)?;
+                let range = self.lower_slice_range(arg)?;
                 let slice_ty = HirType::Reference {
                     inner: Box::new(HirType::String),
                     mutable: false,
