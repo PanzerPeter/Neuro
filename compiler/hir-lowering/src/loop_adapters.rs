@@ -244,7 +244,10 @@ impl Lowerer {
     ///
     /// The chain's function bindings sit in a scope of their own, wrapped around the
     /// loop, so they are evaluated once and are invisible to everything after it.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the loop's names, bounds and adapter chain are separate pieces its one caller already holds; a parameter struct would only rename them"
+    )]
     pub(crate) fn lower_adapted_for_range(
         &mut self,
         label: &Option<Identifier>,
@@ -284,7 +287,10 @@ impl Lowerer {
     }
 
     /// Lower `for x in xs` over a counted sequence wearing an adapter chain.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the loop's names, iterable and adapter chain are separate pieces its one caller already holds; a parameter struct would only rename them"
+    )]
     pub(crate) fn lower_adapted_for_each(
         &mut self,
         label: &Option<Identifier>,

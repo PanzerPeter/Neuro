@@ -331,3 +331,59 @@ func main() -> i32 {
     // 3 + 3 + 3 + 2.
     assert_eq!(test.run_leak_checked("break_outer_borrow.nr", source), 11);
 }
+
+#[test]
+fn regression_an_aggregate_field_reads_through_a_held_borrow() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Bag { n: i32, items: Vec<i32> }
+struct Held<'a> { bag: &'a Bag }
+
+impl Bag {
+    func view(&self) -> Held<'_> { Held { bag: &self } }
+}
+
+func main() -> i32 {
+    mut b = Bag { n: 5, items: Vec::new() }
+    b.items.push(3)
+    b.items.push(4)
+    val held = Held { bag: &b }
+    val again = b.view()
+    val first = held.bag.items[0] + held.bag.items[1]
+    val arr = [&b]
+    val pair = (&b, 3)
+    val held_len = held.bag.items.len() + again.bag.items.len()
+    held_len as i32 + first + held.bag.n + arr[0].items.len() as i32 + pair.0.items.len() as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("held_borrow_aggregate_read.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 2 + 2 + 7 + 5 + 2 + 2);
+}
+
+#[test]
+fn regression_a_store_and_a_call_reach_through_a_held_mutable_borrow() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Bag { n: i32, items: Vec<i32>, pair: (i32, i32) }
+struct Writer<'a> { bag: &'a mut Bag, cell: &'a mut (i32, i32) }
+
+func main() -> i32 {
+    mut b = Bag { n: 5, items: Vec::new(), pair: (1, 2) }
+    mut t = (10, 20)
+    {
+        val w = Writer { bag: &mut b, cell: &mut t }
+        w.bag.n = 9
+        w.bag.items.push(7)
+        w.bag.pair.1 = 6
+        w.cell.0 = 11
+    }
+    b.n + b.items[0] + b.pair.1 + b.items.len() as i32 + t.0
+}
+"#;
+    let exit = test
+        .compile_and_run("held_borrow_aggregate_write.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 9 + 7 + 6 + 1 + 11);
+}

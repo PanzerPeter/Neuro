@@ -546,6 +546,10 @@ site detects a by-pointer callee from its first
 LLVM param being a pointer and passes the receiver place's address (via
 `get_struct_ptr_and_type`, which auto-loads a `&mut Struct` receiver, and falls back to
 `held_place_ptr` for an array, `Vec` or tuple element or a `*r`) rather than the loaded value.
+A holder that is itself a field, tuple element or array element of borrow type names the slot
+holding the borrow, so a chained access, a store or a receiver (`h.bag.items.push(x)`,
+`h.bag.n = 1` with `bag: &mut Bag`) loads that slot once before addressing into the referent
+(`through_held_borrow`). A binding or a `*r` already names the referent.
 A `&dyn Trait` coercion of a newtype keys its vtable by the newtype's HIR name for the same reason.
 `.0` on a `&Newtype` loads the inner value through the borrow (`NewtypeAccess`).
 

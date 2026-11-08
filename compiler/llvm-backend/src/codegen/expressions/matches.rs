@@ -433,7 +433,10 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Bring the arm's stored bindings into scope, evaluate its guard (if any), then its
     /// body into the result slot, branching to `merge_bb` on success or `guard_failed`
     /// when the guard fails. Bindings are removed from the name maps before returning.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arm, its slots and the three target blocks are per-arm state the match lowering already holds; a parameter struct would only rename them"
+    )]
     fn codegen_arm_body(
         &mut self,
         arm: &HirMatchArm,

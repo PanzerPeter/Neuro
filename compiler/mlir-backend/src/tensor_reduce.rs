@@ -665,7 +665,10 @@ fn host_lane_pass<'c, 'b>(
 /// The source element at run position `position` of the run whose result position is
 /// `kept`: along the reduced axis for an axis reduction, and row-major through every axis
 /// for a whole-tensor one.
-#[expect(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the builder's context, location and block travel beside the run's operands, so a parameter struct would only rename them"
+)]
 fn read_run<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,

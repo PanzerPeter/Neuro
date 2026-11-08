@@ -253,12 +253,13 @@ impl<'ctx> CodegenContext<'ctx> {
         // The value first (the language evaluates it before the place): when the holder is an element of a `Vec`, the value
         // may grow that `Vec` and free the buffer an address taken earlier points into.
         let val = self.codegen_expr(value)?;
-        let Some(ptr) = self.held_place_ptr(object)? else {
+        let Some(holder_slot) = self.held_place_ptr(object)? else {
             return Err(CodegenError::UnsupportedType(format!(
                 "the holder of field '{}' is not a place",
                 field_name
             )));
         };
+        let ptr = self.through_held_borrow(object, holder_slot)?;
         let llvm_struct_ty = self.get_struct_llvm_type(&struct_name)?;
         let idx = self.struct_field_index(&struct_name, field_name)?;
 
@@ -295,12 +296,13 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         // The value first, as for a field: the holder may sit in a `Vec` the value grows.
         let val = self.codegen_expr(value)?;
-        let Some(base) = self.held_place_ptr(object)? else {
+        let Some(holder_slot) = self.held_place_ptr(object)? else {
             return Err(CodegenError::UnsupportedType(format!(
                 "the holder of tuple element {} is not a place",
                 index
             )));
         };
+        let base = self.through_held_borrow(object, holder_slot)?;
         let tuple_llvm = self.get_any_llvm_type(&Type::from_hir(object.ty.referent()))?;
         if !tuple_llvm.is_struct_type() {
             return Err(CodegenError::InternalError(format!(
@@ -359,6 +361,38 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// The address of what a holder place borrows, given the holder's own storage address.
+    ///
+    /// A binding or a `*r` already names the borrowed place (see `held_place_ptr`). A
+    /// field, a tuple element or an array element of borrow type names the slot that
+    /// holds the borrow, so one load reaches the place a chained access or a store
+    /// goes on to address. A fat borrow (`&string`, `&[T]`) is held by value and has
+    /// no such place.
+    fn through_held_borrow(
+        &mut self,
+        holder: &HirExpr,
+        slot: PointerValue<'ctx>,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let in_a_slot = matches!(
+            holder.kind,
+            HirExprKind::FieldAccess { .. }
+                | HirExprKind::TupleIndex { .. }
+                | HirExprKind::Index { .. }
+        );
+        let ty = Type::from_hir(&holder.ty);
+        if !in_a_slot
+            || !matches!(ty, Type::Reference { .. })
+            || !self.type_mapper.map_type(&ty)?.is_pointer_type()
+        {
+            return Ok(slot);
+        }
+        let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
+        Ok(self
+            .builder
+            .build_load(ptr_ty, slot, "borrow.target")?
+            .into_pointer_value())
+    }
+
     /// The storage address of a place expression, when it has one.
     ///
     /// A binding uses its alloca; a field of a struct that itself has storage is a GEP
@@ -405,9 +439,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 else {
                     return Ok(None);
                 };
-                let Some(parent_ptr) = self.held_place_ptr(object)? else {
+                let Some(parent_slot) = self.held_place_ptr(object)? else {
                     return Ok(None);
                 };
+                let parent_ptr = self.through_held_borrow(object, parent_slot)?;
                 let parent_llvm = self.get_struct_llvm_type(&parent_name)?;
                 let idx = self.struct_field_index(&parent_name, field)?;
                 let field_ptr = self.builder.build_struct_gep(
@@ -452,9 +487,10 @@ impl<'ctx> CodegenContext<'ctx> {
             // A tuple element, reached the same way a struct field is: a tuple lowers
             // to an anonymous LLVM struct, so the position IS the field index.
             HirExprKind::TupleIndex { object, index } => {
-                let Some(base) = self.held_place_ptr(object)? else {
+                let Some(holder_slot) = self.held_place_ptr(object)? else {
                     return Ok(None);
                 };
+                let base = self.through_held_borrow(object, holder_slot)?;
                 let tuple_llvm = self.get_any_llvm_type(&Type::from_hir(object.ty.referent()))?;
                 if !tuple_llvm.is_struct_type() {
                     return Ok(None);
@@ -542,12 +578,16 @@ impl<'ctx> CodegenContext<'ctx> {
                     idx as u32,
                     &format!("{}.ptr", field),
                 )?;
-                Ok((field_ptr, self.nominal_llvm_type(struct_name)?))
+                let place = self.through_held_borrow(object, field_ptr)?;
+                Ok((place, self.nominal_llvm_type(struct_name)?))
             }
             // An array or `Vec` element, a tuple element or a `*r`: the checker accepted
             // it as a place, so `arr[i].advance()` writes through to the element.
             other => match self.held_place_ptr(object)? {
-                Some(ptr) => Ok((ptr, self.nominal_llvm_type(struct_name)?)),
+                Some(slot) => {
+                    let ptr = self.through_held_borrow(object, slot)?;
+                    Ok((ptr, self.nominal_llvm_type(struct_name)?))
+                }
                 None => Err(CodegenError::UnsupportedType(format!(
                     "a method receiver must be a place, not {:?}",
                     other

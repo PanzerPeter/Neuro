@@ -69,7 +69,10 @@ impl Lowerer {
     /// `head` is the already-lowered iterable. The loop's own scope holds the
     /// generated iterator binding as well as the element and position bindings, so a
     /// `break` / `continue` inside `body` resolves against the emitted `while`.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the loop's names, head and position are separate pieces each caller already holds; a parameter struct would only rename them"
+    )]
     pub(crate) fn lower_protocol_for(
         &mut self,
         label: &Option<Identifier>,

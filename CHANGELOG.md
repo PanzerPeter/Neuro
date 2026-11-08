@@ -10,6 +10,26 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.37.3] - 2026-11-08
+
+### Fixed
+
+- A borrow held in a struct field, a tuple element or an array element now reaches the borrowed
+  value for chained reads, stores and method calls. With `bag: &'a Bag` in a holder,
+  `held.bag.items.len()`, `held.bag.items[0]` and `held.bag.items.push(x)` addressed the slot that
+  holds the borrow instead of the `Bag`, so a read returned a stack address, and `held.bag.n = 9`
+  through a `&'a mut Bag` overwrote the borrow itself and crashed. A read of a scalar field such as
+  `held.bag.n` was unaffected, which hid the fault. A method returning `Held { bag: &self }` went
+  through the same path.
+
+### Changed
+
+- Each `#[expect(clippy::too_many_arguments)]` states its reason.
+
+### Documentation
+
+- The llvm-backend `CONTEXT.md` states how a holder of borrow type is addressed.
+
 ## [5.37.2] - 2026-11-08
 
 ### Fixed
