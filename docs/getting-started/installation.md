@@ -1,10 +1,64 @@
 # Installation Guide
 
-This guide builds the Neuro compiler, `neurc`, from source on Linux, macOS and Windows: the
-three platforms CI builds and tests. There are no prebuilt binaries yet. Every build needs
+This guide installs the Neuro compiler, `neurc`. On x86-64 Linux, download the prebuilt
+binary: it needs only a C compiler. On macOS and Windows, or to work on the compiler itself,
+build it from source.
+
+## Prebuilt Linux binary
+
+The binary runs on x86-64 Linux with glibc 2.28 or newer (RHEL 8, Debian 10, Ubuntu 20.04 and
+later). It has LLVM and MLIR built in, so you install neither. `neurc` calls `cc` (gcc or clang)
+to link each program, so a C compiler must be on `PATH`.
+
+```bash
+base=https://github.com/PanzerPeter/Neuro/releases/latest/download
+curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz"
+curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz.sha256"
+sha256sum -c neurc-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf neurc-x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ~/.local/bin
+cp neurc-x86_64-unknown-linux-gnu/neurc ~/.local/bin/
+neurc --version
+```
+
+If the last command is not found, add `~/.local/bin` to `PATH`. Then compile and run a
+program:
+
+```bash
+cat > hello.nr <<'EOF'
+func main() -> i32 {
+    println("Hello from Neuro")
+    return 0
+}
+EOF
+neurc run hello.nr
+```
+
+```text
+Hello from Neuro
+```
+
+The checksum catches a corrupted download. To also confirm that the archive was built by this
+repository's release workflow, verify its signed provenance with the GitHub CLI:
+
+```bash
+gh attestation verify neurc-x86_64-unknown-linux-gnu.tar.gz --repo PanzerPeter/Neuro
+```
+
+The archive also holds the Neuro `LICENSE` and, under `licenses/`, the notices for the LLVM,
+MLIR and Rust code compiled into the binary. To update, run the same commands again: the
+`latest` URL always serves the newest release. To uninstall, delete `~/.local/bin/neurc`.
+
+Programs with `@gpu` functions need only the NVIDIA driver to run. Math functions inside a
+kernel also need the CUDA toolkit when compiling, as
+[Choosing a GPU](../guides/cli-usage.md#choosing-a-gpu) explains.
+
+## Build from source
+
+Linux, macOS and Windows are the three platforms CI builds and tests. Every build needs
 LLVM 23 and MLIR 23 installed into one prefix before Cargo runs.
 
-## Prerequisites
+### Prerequisites
 
 | Requirement | Version | Notes |
 |---|---|---|
@@ -17,7 +71,7 @@ LLVM 23 and MLIR 23 installed into one prefix before Cargo runs.
 - An NVIDIA GPU and its driver, to run a program with `@gpu` functions (Linux only). Compiling one needs no CUDA toolkit.
 - For an AMD GPU instead: ROCm to compile with `--gpu-arch gfxNNN`, and the HIP runtime to run the result. See [Choosing a GPU](../guides/cli-usage.md#choosing-a-gpu).
 
-## Quick check
+### Quick check
 
 Once the build for your platform finishes, run the `hello` example through the release binary
 (on Windows, `target\release\neurc.exe`):
@@ -39,7 +93,7 @@ and starts the program, so this one command exercises the whole toolchain. If it
 To run the full suite, use `cargo test --workspace`. Add `--no-fail-fast` to see every failing
 test rather than stopping at the first.
 
-## Arch Linux / CachyOS
+### Arch Linux / CachyOS
 
 Arch ships no MLIR package that fits. `aur/mlir` installs next to the stock `llvm` but
 provides no `libMLIR-C.so`, and with no static LLVM libraries in `/usr`, `mlir-sys` links
@@ -80,7 +134,7 @@ cargo test --workspace
 cargo install --path compiler/neurc
 ```
 
-## Ubuntu / Debian
+### Ubuntu / Debian
 
 ```bash
 # 1. Install LLVM 23 from apt.llvm.org
@@ -113,7 +167,7 @@ cargo build --release
 cargo test --workspace
 ```
 
-## macOS (Homebrew)
+### macOS (Homebrew)
 
 ```bash
 # 1. Install LLVM 23 (Homebrew builds MLIR into the same formula)
@@ -142,7 +196,7 @@ cargo test --workspace
 
 > **Note (Apple Silicon):** The LLVM prefix is usually `/opt/homebrew/opt/llvm`. On Intel Macs it is `/usr/local/opt/llvm`. `brew --prefix llvm` returns the correct path automatically.
 
-## Windows (MSVC)
+### Windows (MSVC)
 
 No Windows LLVM release carries MLIR, so Windows builds LLVM and MLIR 23 from source into
 one prefix, as CI does. Expect the build to take hours on a four-core machine.
@@ -217,7 +271,7 @@ the linker's `LIB`. Without step 5 the build stops with
 through your user-level Cargo config, which Cargo combines with the repository's
 `+crt-static` setting instead of replacing it.
 
-## MLIR
+### MLIR
 
 Every build compiles the `mlir-backend` slice, which lowers tensor code through the `melior`
 Rust MLIR bindings. MLIR 23 must sit **in the same prefix as the LLVM 23 that
@@ -230,7 +284,7 @@ say where each one comes from.
 For what the MLIR path does with a program, see the [MLIR backend](../compiler/components/mlir-backend.md)
 and the [tensor GPU section](../language-reference/tensors.md#running-on-a-gpu-gpu).
 
-## Updating Neuro
+### Updating Neuro
 
 ```bash
 cd Neuro
@@ -240,7 +294,7 @@ cargo test --workspace
 cargo install --path compiler/neurc   # Re-install if using the installed binary
 ```
 
-## Uninstalling
+### Uninstalling
 
 ```bash
 # Remove the installed binary

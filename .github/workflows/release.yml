@@ -1,0 +1,196 @@
+name: Release
+
+# Builds the prebuilt Linux `neurc` and attaches it to a GitHub Release, once it has
+# compiled and run every example in containers that hold nothing but a C compiler.
+#
+# A `release` event runs this file as it stands at the tagged commit, so a release
+# whose tag predates the file never triggers it. `workflow_dispatch` covers that: it
+# runs this file and the scripts in tools/release/ from the branch it is started on,
+# builds the sources at `tag`, and attaches to that tag's existing release.
+#
+# The static LLVM + MLIR prefix takes about two hours to build, so it is cached.
+# A cache saved under a tag is visible to that tag alone, and one unused for a week is
+# evicted. The toolchain job therefore also runs on the default branch weekly and
+# whenever the recipe changes, which keeps a copy every release run can restore.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build (vX.Y.Z)"
+        required: true
+      dry_run:
+        description: "Build and gate only; attach nothing"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: [tools/release/build-prefix.sh]
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  # manylinux_2_28 is AlmaLinux 8: glibc 2.28 and GCC 14, so the binary runs on any
+  # x86-64 Linux from that glibc on. Pinned by digest like every action here.
+  BUILD_IMAGE: quay.io/pypa/manylinux_2_28_x86_64@sha256:9555ba6c479fa69a2aa80ad1dc57154a60d562b19df159361d9379a02beb1e36
+  ASSET: neurc-x86_64-unknown-linux-gnu
+
+jobs:
+  toolchain:
+    name: Linux LLVM + MLIR Prefix
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      - name: Restore LLVM + MLIR 23 prefix
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: prefix
+        with:
+          path: llvm-prefix
+          key: llvm-mlir-23.1.2-linux-manylinux_2_28-${{ hashFiles('tools/release/build-prefix.sh') }}
+
+      # The LLVM build tree outgrows the runner's free disk with the preinstalled SDKs
+      # in place, and nothing here uses them.
+      - name: Free disk space
+        if: steps.prefix.outputs.cache-hit != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Build LLVM + MLIR 23 prefix
+        if: steps.prefix.outputs.cache-hit != 'true'
+        run: |
+          docker run --rm -v "$PWD/llvm-prefix:/llvm" -v "$PWD/tools/release:/tools:ro" \
+            "$BUILD_IMAGE" bash /tools/build-prefix.sh /llvm
+
+      - name: Save LLVM + MLIR 23 prefix
+        if: steps.prefix.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: llvm-prefix
+          key: ${{ steps.prefix.outputs.cache-primary-key }}
+
+  build:
+    name: Build & Package
+    needs: [toolchain]
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      # The tag comes from a form field, so it reaches the shell through env and is
+      # checked before anything uses it.
+      - name: Check tag
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$TAG' is not a vX.Y.Z tag"; exit 1; }
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+        with:
+          ref: ${{ env.TAG }}
+          path: src
+
+      - name: Restore LLVM + MLIR 23 prefix
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: llvm-prefix
+          key: llvm-mlir-23.1.2-linux-manylinux_2_28-${{ hashFiles('tools/release/build-prefix.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Build neurc
+        run: |
+          docker run --rm -v "$PWD/llvm-prefix:/llvm:ro" -v "$PWD/src:/src" \
+            -v "$PWD/tools/release:/tools:ro" "$BUILD_IMAGE" bash /tools/build-neurc.sh /llvm /src
+
+      - name: Install cargo-about
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-about@0.9.2
+
+      - name: Check portability and package
+        run: bash tools/release/package.sh src/target/release/neurc llvm-prefix src "${TAG#v}" dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ env.ASSET }}
+          path: |
+            dist/${{ env.ASSET }}.tar.gz
+            dist/${{ env.ASSET }}.tar.gz.sha256
+          if-no-files-found: error
+
+  gate:
+    name: Examples in ${{ matrix.image }}
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The glibc floor, and a current release: the binary has to load on both.
+          - image: almalinux:8
+            install_cc: dnf -q install -y gcc tar gzip
+          - image: debian:13
+            install_cc: apt-get -qq update && apt-get -qq install -y --no-install-recommends gcc libc6-dev
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+        with:
+          ref: ${{ env.TAG }}
+          path: src
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ env.ASSET }}
+          path: dist
+
+      # Exactly what a user downloads: verify, unpack, and use it with no LLVM and no
+      # Rust present. The runner has no GPU, so `gpu` examples must abort cleanly.
+      - name: Compile and run every example
+        env:
+          IMAGE: ${{ matrix.image }}
+          INSTALL_CC: ${{ matrix.install_cc }}
+        run: |
+          (cd dist && sha256sum -c "$ASSET.tar.gz.sha256")
+          docker run --rm -e ASSET -v "$PWD/dist:/dist:ro" -v "$PWD/src/examples:/examples:ro" \
+            -v "$PWD/tools/release/smoke.sh:/smoke.sh:ro" "$IMAGE" bash -ec "
+              $INSTALL_CC
+              tar -xzf /dist/\$ASSET.tar.gz -C /opt
+              /opt/\$ASSET/neurc --version
+              bash /smoke.sh /opt/\$ASSET/neurc /examples"
+
+  publish:
+    name: Attach to Release
+    needs: [gate]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      # Sigstore signs the provenance with a short-lived certificate minted from the
+      # job's OIDC token; `gh attestation verify` checks the archive against it.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ env.ASSET }}
+          path: dist
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/${{ env.ASSET }}.tar.gz
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" "dist/$ASSET.tar.gz" "dist/$ASSET.tar.gz.sha256" \
+            --repo "$GITHUB_REPOSITORY" --clobber

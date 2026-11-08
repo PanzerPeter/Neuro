@@ -10,6 +10,23 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.38.0] - 2026-11-08
+
+### Added
+
+- A prebuilt Linux compiler. Each GitHub Release carries `neurc-x86_64-unknown-linux-gnu.tar.gz`
+  and its SHA-256 checksum: a `neurc` for x86-64 Linux with glibc 2.28 or newer that needs only a
+  C compiler beside it, since LLVM, MLIR and libstdc++ are linked in. The archive also holds the
+  license notices for the LLVM, MLIR and Rust code inside it. The installation guide and the
+  README now start with the download.
+- A release workflow that builds it in a `manylinux_2_28` container against a cached static LLVM
+  and MLIR prefix (zlib, zstd and libxml2 off). It refuses a binary that needs any shared library
+  beyond glibc and `libgcc_s`, a glibc symbol newer than 2.28, or any libstdc++ symbol. It
+  attaches the archive only after every example compiles, runs and matches its pins in clean
+  AlmaLinux 8 and Debian 13 containers that hold nothing but `gcc`, with a signed build
+  provenance attestation that `gh attestation verify` checks. A manual run builds an existing
+  tag and attaches to its release, or with `dry_run` only builds and checks.
+
 ## [5.37.3] - 2026-11-08
 
 ### Fixed

@@ -118,6 +118,20 @@ several features at once.
 
 ## Installation
 
+On x86-64 Linux, the prebuilt compiler needs only a C compiler (`cc`) on the machine:
+
+```bash
+base=https://github.com/PanzerPeter/Neuro/releases/latest/download
+curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz"
+curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz.sha256"
+sha256sum -c neurc-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf neurc-x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ~/.local/bin && cp neurc-x86_64-unknown-linux-gnu/neurc ~/.local/bin/
+```
+
+It runs on glibc 2.28 and newer. The [installation guide](docs/getting-started/installation.md#prebuilt-linux-binary)
+covers updating and GPU use. On macOS and Windows, or to work on the compiler, build from source:
+
 | Requirement | Version | Notes |
 |---|---|---|
 | **Rust** | 1.98.1+ | Install via [rustup](https://rustup.rs/) |

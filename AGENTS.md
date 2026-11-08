@@ -196,6 +196,9 @@ local-only paths.
 CI additionally runs the suite on Linux/macOS/Windows against stable, plus a
 Linux nightly leg, OSV-Scanner over the dependency graph, benchmark regression budgets,
 release smoke tests (compile and run two examples with the release `neurc`), and coverage.
+A separate release workflow builds the prebuilt Linux `neurc` from the scripts in
+`tools/release/` and attaches it to each GitHub Release once every example passes in a
+container with only `cc`.
 
 ## Security Considerations
 

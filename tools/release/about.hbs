@@ -1,0 +1,14 @@
+Third-party Rust crates compiled into neurc, grouped by license.
+LLVM and MLIR, also compiled in, are covered by the LLVM-*.txt files beside this one.
+{{#each licenses}}
+
+================================================================================
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}
