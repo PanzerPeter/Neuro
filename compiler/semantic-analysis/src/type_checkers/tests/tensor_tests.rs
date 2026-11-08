@@ -1910,3 +1910,30 @@ fn an_overflowing_constant_slice_bound_is_refused_without_a_panic() {
         assert!(!errors.is_empty(), "{bound}: expected a refusal");
     }
 }
+
+/// BUG-147: a static shape's element count was an unchecked product, so `[2^32, 2^32]`
+/// wrapped to an empty tensor (and panicked a debug build), and a single enormous extent
+/// reached code generation, which built one constant per element until memory ran out.
+#[test]
+fn regression_bug_147_a_static_shape_past_the_element_cap_is_rejected() {
+    let errors = semantic_errors(
+        r#"
+func ok(t: &Tensor<f32, [65536, 65535]>) -> i32 { 0 }
+func wraps(t: &Tensor<f32, [4294967296, 4294967296]>) -> i32 { 0 }
+func main() -> i32 {
+    val t = Tensor::<f32, [4611686018427387888]>::zeros()
+    0
+}
+"#,
+    );
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [
+                TypeError::TensorTooLarge { .. },
+                TypeError::TensorTooLarge { .. }
+            ]
+        ),
+        "only the two shapes past u32::MAX elements must be rejected; got {errors:?}"
+    );
+}

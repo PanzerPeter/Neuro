@@ -844,3 +844,48 @@ func main() -> i32 {
         Some(0)
     );
 }
+
+/// BUG-154: a `string` binding moved into an enum payload stayed the buffer's owner, so the
+/// scope that declared it released the buffer while the enum carried it on: a returned
+/// `Option::Some(w)` or a payload pushed into an outer `Vec` printed freed memory.
+#[test]
+fn regression_bug_154_a_string_moved_into_an_enum_payload_is_not_freed_by_its_source() {
+    let source = r#"
+enum Msg { Text(string), Num(i32) }
+
+func pick(s: string) -> Option<string> {
+    val w = "x{s}"
+    Option::Some(w)
+}
+
+func early(s: string) -> Msg {
+    val w = "y{s}"
+    return Msg::Text(w)
+}
+
+func main() -> i32 {
+    match pick("ab") {
+        Option::Some(a) => println("{a}"),
+        Option::None => {}
+    }
+    match early("cd") {
+        Msg::Text(t) => println("{t}"),
+        Msg::Num(_) => {}
+    }
+    mut kept: Vec<Option<string>> = Vec::new()
+    {
+        val w = "z" + "ef"
+        kept.push(Option::Some(w))
+    }
+    match kept.pop() {
+        Option::Some(Option::Some(t)) => println("{t}"),
+        _ => {}
+    }
+    0
+}
+"#;
+    assert_eq!(
+        crate::compile_harness::stdout_of("bug_154.nr", source),
+        "xab\nycd\nzef\n"
+    );
+}

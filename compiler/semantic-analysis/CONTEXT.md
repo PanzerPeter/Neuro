@@ -1801,3 +1801,9 @@ Each closed a path where a program type-checked and then aborted codegen with an
   `generic_funcs` before falling through to `UndefinedVariable`, so a function name in value
   position is told apart from a name that does not exist. No coercion was added: a function is
   still not a value.
+- **Size and depth caps.** A static tensor shape holds at most `u32::MAX` elements
+  (`TensorTooLarge`), the cap an array has, computed with a checked product so an overflowing
+  shape is refused rather than wrapped to an empty tensor (BUG-147). `instantiate_impls_for` stops
+  at 128 nested instances (`InstantiationTooDeep`), the depth lowering enforces: registering an
+  instance's method signatures instantiates the types they name, and a signature naming its own
+  type nested in itself never closes the chain (BUG-152).

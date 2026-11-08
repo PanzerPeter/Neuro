@@ -10,6 +10,34 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.37.1] - 2026-11-08
+
+### Fixed
+
+- A `string` binding moved into an enum payload is no longer freed by the scope that declared it.
+  `Option::Some(w)` returned from a function, or pushed into a `Vec` that outlives `w`, carried a
+  buffer that scope had already released, so the reader printed freed memory (BUG-154). The
+  payload now belongs to the enum, which does not release a `string` yet (BUG-082): the buffer
+  leaks instead, including in the case that used to be right, an enum built and taken apart in
+  one function.
+- A generic struct literal whose type parameter no field names (`struct Tag<T> { n: i32 }`) takes
+  its type arguments from the annotation or the return type it meets. It lowered the parameter to
+  `void`, and code generation failed (BUG-153).
+- A generic impl of a trait can name its own associated type: `type Item = T` with
+  `-> Self::Item` failed to lower with `cannot resolve type annotation 'Self::Item'` (BUG-148).
+- A statically shaped tensor holds at most 4294967295 elements, as an array does, and a shape past
+  that is a type error naming it. The element count was an unchecked product, so
+  `[4294967296, 4294967296]` wrapped to an empty tensor in a release build and panicked a debug
+  one, and a shape below the wrap reached code generation (BUG-147).
+- `zeros()`, `ones()` and `identity()` write their buffer with a loop at run time, as
+  `random_normal` does. They built one LLVM constant per element and copied it out of `.rodata`, so
+  the compiler's memory and the binary grew with the shape: a 10M-element `ones()` took 2.5 s and
+  a 40 MB binary, and a large enough shape exhausted the compiler's memory (BUG-147).
+- A method whose signature names its own type nested in itself (`func wrap(self) -> W<W<I>>`) now
+  stops the type checker with a diagnostic at 128 nested instances, the depth lowering already
+  enforced. The checker used to allocate until it was killed. The program is still refused
+  (BUG-152).
+
 ## [5.37.0] - 2026-11-08
 
 ### Added

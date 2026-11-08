@@ -337,3 +337,34 @@ func main() -> i32 {
         .expect("should compile and run");
     assert_eq!(exit, 14);
 }
+
+/// BUG-153: a type parameter no field names was inferred from the field values only, so
+/// it lowered to `void` and code generation failed. The annotation, or the return type a
+/// tail literal meets, names the instance.
+#[test]
+fn regression_bug_153_a_parameter_no_field_names_takes_the_expected_instance() {
+    let source = r#"
+struct Tag<T> { n: i32 }
+
+impl<T> Tag<T> {
+    func get(&self) -> Option<T> { Option::None }
+}
+
+func make() -> Tag<i64> { Tag { n: 4 } }
+
+func main() -> i32 {
+    val t: Tag<i32> = Tag { n: 3 }
+    val a = match t.get() {
+        Option::Some(v) => v,
+        Option::None => t.n
+    }
+    val u = make()
+    val b = match u.get() {
+        Option::Some(v) => v as i32,
+        Option::None => u.n
+    }
+    a * 10 + b
+}
+"#;
+    assert_eq!(crate::compile_harness::run("bug_153.nr", source), 34);
+}

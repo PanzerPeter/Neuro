@@ -1693,27 +1693,30 @@ fn a_tensor_binding_frees_its_buffer_at_scope_exit() {
     );
 }
 
-/// `zeros()` is a constant fill, so nothing per-element survives to run time.
+/// BUG-147: a fill is written by a run-time loop, so neither the compiler's memory nor the
+/// binary grows with the element count. A constant per element made a large `zeros()`
+/// exhaust the compiler's memory and put the whole buffer in `.rodata`.
 #[test]
-fn a_zeros_tensor_lowers_to_a_zero_initializer() {
+fn regression_bug_147_a_fill_is_written_by_a_loop_not_a_constant_per_element() {
     let source = r#"
         func main() -> i32 {
-            val z = Tensor::<f32, [4, 4]>::zeros()
+            val z = Tensor::<f32, [1000, 1000]>::zeros()
+            val o = Tensor::<f32, [1000, 1000]>::ones()
             return 0
         }
     "#;
 
     let ir = module_ir(source, OptimizationLevelSetting::O0);
     assert!(
-        ir.contains("private constant [16 x float] zeroinitializer"),
-        "zeros() is a zero-initialized 16-element buffer:\n{ir}"
+        ir.contains("tensor.fill.head") && !ir.contains("[1000000 x float] "),
+        "a fill is a loop over the buffer, with no per-element constant:\n{ir}"
     );
 }
 
-/// The diagonal is what distinguishes `identity()` from `ones()`, and it is folded
-/// at compile time rather than written by a loop.
+/// The diagonal is what distinguishes `identity()` from `ones()`: each slot compares its
+/// row with its column. The values themselves are checked end to end.
 #[test]
-fn an_identity_tensor_carries_ones_only_on_its_diagonal() {
+fn an_identity_tensor_compares_row_and_column_per_slot() {
     let source = r#"
         func main() -> i32 {
             val e = Tensor::<i32, [3, 3]>::identity()
@@ -1722,9 +1725,10 @@ fn an_identity_tensor_carries_ones_only_on_its_diagonal() {
     "#;
 
     let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
     assert!(
-        ir.contains("[9 x i32] [i32 1, i32 0, i32 0, i32 0, i32 1, i32 0, i32 0, i32 0, i32 1]"),
-        "identity() puts ones on the diagonal of a row-major buffer:\n{ir}"
+        body.contains("tensor.identity.diag") && body.contains("select i1"),
+        "identity() selects one on the diagonal and zero elsewhere:\n{body}"
     );
 }
 
@@ -1752,7 +1756,7 @@ fn a_tensor_clone_duplicates_the_allocation() {
     );
     assert_eq!(
         body.matches("call ptr @memcpy(").count(),
-        2,
+        1,
         "the clone copies the elements rather than aliasing them:\n{body}"
     );
     assert_eq!(

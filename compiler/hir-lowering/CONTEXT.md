@@ -645,7 +645,10 @@ declaration, naming no implementor, and `lower_supplied_trait_method` leaves it 
 An **associated type** reaches lowering as a `Type::Named` spelled `Self::Item`. `enter_impl_assoc`
 adds each `impl` block's bindings to `type_subst` under that spelling for the block's signature
 registration and its bodies: a name standing for a concrete type over one block is what the
-type-parameter substitution already is, so annotations resolve through the one path. A trait's own
+type-parameter substitution already is, so annotations resolve through the one path. A generic
+impl's methods are resolved per instance, so `with_impl_assoc` binds the same names under each
+instance's substitution, in signature registration, the `declared_receivers` template pass and
+body lowering alike. A trait's own
 declaration has no implementor, so `resolve_trait_sig_type` gives such a position `Void` in the
 `traits` table, and a bare `Self` position too; nothing reads either, because a trait naming one
 is not object-safe. Inside an `impl` no `Self` reaches lowering: the parser replaced it.

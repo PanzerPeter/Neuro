@@ -174,3 +174,37 @@ func main() -> i32 { 0 }
         "the diagnostic should name the unbound associated type; got: {err}"
     );
 }
+
+/// BUG-148: a generic impl's methods are resolved per instance, and only a plain impl
+/// bound `Self::Item`, so a generic impl naming its own associated type failed to lower.
+/// The `&T` instance also runs the template pass that tells a cloned reference apart.
+#[test]
+fn regression_bug_148_a_generic_impl_names_its_own_associated_type() {
+    let source = r#"
+trait Source {
+    type Item
+    func get(&self) -> Self::Item
+    func pair(&self, other: Self::Item) -> (Self::Item, Self::Item)
+}
+
+struct W<T> { v: T }
+
+impl<T: Clone> Source for W<T> {
+    type Item = T
+    func get(&self) -> Self::Item { self.v.clone() }
+    func pair(&self, other: Self::Item) -> (Self::Item, Self::Item) {
+        val mine: Self::Item = self.v.clone()
+        (mine, other)
+    }
+}
+
+func main() -> i32 {
+    val w = W { v: 5 }
+    val n = 2
+    val r = W { v: &n }
+    val (a, b) = w.pair(4)
+    w.get() + a + b + *r.get() + *r.pair(&n).1
+}
+"#;
+    assert_eq!(crate::compile_harness::run("bug_148.nr", source), 18);
+}

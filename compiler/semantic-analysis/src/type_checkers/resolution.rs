@@ -352,6 +352,29 @@ impl TypeChecker {
                         extent,
                     });
                 }
+                // The buffer is an LLVM array, whose element count is 32 bits wide, as an
+                // array's is. Checked, because an overflowing product wraps to a tensor
+                // with no elements.
+                let elements = axes.iter().try_fold(1u64, |count, axis| match axis.extent {
+                    ArrayLen::Fixed(extent) => count.checked_mul(extent as u64),
+                    _ => Some(count),
+                });
+                if elements.is_none_or(|count| count > u64::from(u32::MAX)) {
+                    let extents: Vec<String> = shape
+                        .iter()
+                        .map(|dim| match &dim.extent {
+                            ast_types::TensorExtent::Literal(extent) => extent.to_string(),
+                            ast_types::TensorExtent::Dynamic(_) => "?".to_string(),
+                            ast_types::TensorExtent::Param(ident) => ident.name.clone(),
+                        })
+                        .collect();
+                    self.record_error(TypeError::TensorTooLarge {
+                        shape: format!("[{}]", extents.join(", ")),
+                        max: u32::MAX,
+                        span: *span,
+                    });
+                    return None;
+                }
                 Some(Type::Tensor {
                     element: Box::new(element),
                     shape: axes,

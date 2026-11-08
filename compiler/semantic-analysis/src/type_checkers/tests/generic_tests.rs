@@ -813,3 +813,31 @@ func main() -> i32 { 0 }
         "got {errors:?}"
     );
 }
+
+/// BUG-152: an instance registers its impls' method signatures, and a method returning
+/// its own type nested in itself builds a deeper instance whose methods build a deeper one
+/// still, so the checker allocated until it was killed. The chain is now cut at the depth
+/// lowering already enforces, with a diagnostic.
+#[test]
+fn regression_bug_152_a_self_nesting_method_signature_stops_with_a_diagnostic() {
+    let errors = semantic_errors(
+        r#"
+struct W<I> { inner: I }
+
+impl<I> W<I> {
+    func wrap(self) -> W<W<I>> { W { inner: self } }
+}
+
+func main() -> i32 {
+    val w = W { inner: 3 }
+    w.wrap().inner.inner
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::InstantiationTooDeep { .. })),
+        "expected the instance chain to be cut with a diagnostic; got {errors:?}"
+    );
+}

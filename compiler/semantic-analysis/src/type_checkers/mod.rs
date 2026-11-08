@@ -104,6 +104,10 @@ pub(crate) struct TypeChecker {
     /// Generic `impl` templates keyed by base struct name: `impl<T> Wrapper<T>`.
     /// Instantiating a generic struct also instantiates each matching impl's methods.
     generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
+    /// How many instances' impls are being registered inside one another. Registering an
+    /// instance's method signatures can instantiate the types they name, so a signature
+    /// naming its own type nested in itself (`-> W<W<I>>`) would recurse without end.
+    impl_instance_depth: u32,
     /// The bounds a generic `impl` puts on its parameters (`impl<T: Show> Cell<T>`),
     /// keyed by each of its methods' template key (`Cell__get`). An instance's
     /// arguments are checked against them at a call, not at instantiation: an instance
@@ -515,6 +519,7 @@ impl TypeChecker {
             grad_functions: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
+            impl_instance_depth: 0,
             impl_bounds: HashMap::new(),
             traits: HashMap::new(),
             trait_names: HashSet::new(),

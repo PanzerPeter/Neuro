@@ -111,6 +111,21 @@ impl Lowerer {
         result
     }
 
+    /// `subst` with the impl's associated types bound under it as `Self::Name`, as
+    /// [`Self::enter_impl_assoc`] binds them for a plain impl: a generic impl's methods
+    /// are resolved per instance, so its `type Item = T` resolves per instance too.
+    pub(super) fn with_impl_assoc(
+        &mut self,
+        imp: &ImplDef,
+        subst: std::collections::HashMap<String, HirType>,
+    ) -> Result<std::collections::HashMap<String, HirType>, LoweringError> {
+        let saved = std::mem::replace(&mut self.type_subst, subst);
+        let entered = self.enter_impl_assoc(imp);
+        let bound = std::mem::replace(&mut self.type_subst, saved);
+        entered?;
+        Ok(bound)
+    }
+
     /// Register the signature of every method of each generic `impl` of `base` for the
     /// concrete instance `mangled`, so calls on the instance resolve.
     pub(super) fn register_instance_methods(
@@ -125,6 +140,7 @@ impl Lowerer {
         let self_ty = self.impl_target_type(mangled)?;
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
+            let impl_subst = self.with_impl_assoc(imp, impl_subst)?;
             for method in &imp.methods {
                 if method.self_param == Some(ast_types::SelfParam::RefMut) {
                     self.mut_self_method_names.insert(method.name.name.clone());
@@ -286,6 +302,7 @@ impl Lowerer {
             let params: Vec<_> = imp.generics.iter().collect();
             self.param_receivers =
                 self.declared_receivers(&params, &impl_subst, |pass, subst| {
+                    let subst = pass.with_impl_assoc(imp, subst)?;
                     let self_type = pass.opaque_self_type(imp, mangled, &subst)?;
                     pass.lower_instance_methods(
                         &self_type,
@@ -296,6 +313,7 @@ impl Lowerer {
                     )
                     .map(drop)
                 })?;
+            let impl_subst = self.with_impl_assoc(imp, impl_subst)?;
             let lowered = self.lower_instance_methods(
                 &self_type,
                 &bodies,

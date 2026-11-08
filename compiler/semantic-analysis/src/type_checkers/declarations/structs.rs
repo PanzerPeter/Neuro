@@ -15,6 +15,10 @@ use ast_types::{ImplDef, StructDef};
 use shared_types::Span;
 use std::collections::HashMap;
 
+/// How many instances' impls may be registered inside one another: the cap lowering
+/// puts on an instantiation chain, so a chain the checker accepts lowers.
+const MAX_IMPL_INSTANCE_DEPTH: u32 = 128;
+
 impl TypeChecker {
     /// Whether a struct, enum, newtype or trait already holds `name`. Type names share
     /// one namespace, so a second declaration of a name is refused whatever its kind.
@@ -574,7 +578,29 @@ impl TypeChecker {
             Some(v) => v.clone(),
             None => return,
         };
-        for imp in &impls {
+        if self.impl_instance_depth >= MAX_IMPL_INSTANCE_DEPTH {
+            self.record_error(TypeError::InstantiationTooDeep {
+                name: base.to_string(),
+                limit: MAX_IMPL_INSTANCE_DEPTH,
+                span,
+            });
+            return;
+        }
+        self.impl_instance_depth += 1;
+        self.register_instance_impls(&impls, base, mangled, args, span);
+        self.impl_instance_depth -= 1;
+    }
+
+    /// [`Self::instantiate_impls_for`] past its depth check.
+    fn register_instance_impls(
+        &mut self,
+        impls: &[ast_types::ImplDef],
+        base: &str,
+        mangled: &str,
+        args: &[Type],
+        span: Span,
+    ) {
+        for imp in impls {
             let mut impl_subst: HashMap<String, Type> = HashMap::new();
             for (ta, arg) in imp.type_args.iter().zip(args.iter()) {
                 if let ast_types::Type::Named(id) = ta

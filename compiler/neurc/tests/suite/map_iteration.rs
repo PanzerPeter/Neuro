@@ -1,4 +1,4 @@
-//! `HashMap` / `BTreeMap` as `for` heads (§3.7, §3.18): the entry by value, `(&K, &V)`
+//! `HashMap` / `BTreeMap` as `for` heads: the entry by value, `(&K, &V)`
 //! through `&m`, `(&K, &mut V)` through `&mut m`, the `m.keys()` / `m.values()` views, a
 //! pair head over any two-element tuple item, and a key type parameter with no `Copy`
 //! bound.

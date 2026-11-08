@@ -11,10 +11,11 @@
 // `load`/`store` pair that only `-O1`'s SROA can turn into a `memcpy`, and SelectionDAG
 // crashes legalizing one above ~50k elements at `-O0`.
 //
-// Three of the four construction nodes still fold to an LLVM constant: a fill, an
-// identity matrix, and a literal whose elements are themselves constant all land in
-// `.rodata` and reach the buffer as one `memcpy`. Only `random_normal` needs a runtime
-// loop, and it now writes straight into the heap buffer.
+// A literal whose elements are themselves constant folds to an LLVM constant in `.rodata`
+// and reaches the buffer as one `memcpy`; its size is the source's. A fill, an identity
+// matrix and `random_normal` are written by a run-time loop straight into the heap buffer
+// instead, because their element count comes from the type alone: a constant per element
+// made the compiler's memory and the binary grow with the shape.
 //
 // The compound assignment at the end of the file allocates nothing at all: it reuses the
 // buffer the target already owns, which is the guarantee the language makes about a
@@ -165,12 +166,11 @@ impl<'ctx> CodegenContext<'ctx> {
         value: &HirExpr,
         tensor_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let (element_ty, count) = self.tensor_layout(tensor_ty)?;
+        let (element_ty, _) = self.tensor_layout(tensor_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let value = self.codegen_expr(value)?;
         let value = self.coerce_if_needed(value, elem_llvm, &element_ty)?;
-        let constant = Self::const_array_of(elem_llvm, std::iter::repeat_n(value, count))?;
-        self.emit_const_tensor_buffer(tensor_ty, constant, "tensor.fill")
+        self.write_tensor_by_loop(tensor_ty, "tensor.fill", |_, _| Ok(value))
     }
 
     /// Lower `identity()`: ones on the diagonal of a square rank-2 buffer, zeros
@@ -184,13 +184,13 @@ impl<'ctx> CodegenContext<'ctx> {
                 "identity node does not carry a tensor type".to_string(),
             ));
         };
-        let [rows, cols] = crate::types::static_extents(shape)?[..] else {
+        let [_, cols] = crate::types::static_extents(shape)?[..] else {
             return Err(CodegenError::InternalError(
                 "identity is a rank-2 construction".to_string(),
             ));
         };
         let elem_llvm = self.get_any_llvm_type(element)?;
-        let (zero, one) = match elem_llvm {
+        let (zero, one): (BasicValueEnum<'ctx>, BasicValueEnum<'ctx>) = match elem_llvm {
             BasicTypeEnum::IntType(int_ty) => (
                 int_ty.const_zero().into(),
                 int_ty.const_int(1, false).into(),
@@ -205,22 +205,97 @@ impl<'ctx> CodegenContext<'ctx> {
                 ));
             }
         };
-        let values = (0..rows * cols).map(|i| if i / cols == i % cols { one } else { zero });
-        let constant = Self::const_array_of(elem_llvm, values)?;
-        self.emit_const_tensor_buffer(tensor_ty, constant, "tensor.identity")
+        // Squareness was established before lowering, so a zero-sized matrix has no slot
+        // to write and the loop never divides by its column count.
+        let cols = self.context.i64_type().const_int(cols.max(1) as u64, false);
+        self.write_tensor_by_loop(tensor_ty, "tensor.identity", |ctx, i| {
+            let row = ctx
+                .builder
+                .build_int_unsigned_div(i, cols, "tensor.identity.row")?;
+            let col = ctx
+                .builder
+                .build_int_unsigned_rem(i, cols, "tensor.identity.col")?;
+            let diagonal = ctx.builder.build_int_compare(
+                IntPredicate::EQ,
+                row,
+                col,
+                "tensor.identity.diag",
+            )?;
+            Ok(ctx
+                .builder
+                .build_select(diagonal, one, zero, "tensor.identity.value")?)
+        })
+    }
+
+    /// Allocate a tensor of `tensor_ty` and write `value_at(i)` into each buffer slot `i`
+    /// in a counted loop. The buffer is written through its pointer rather than built by
+    /// `insertvalue` or a constant, because the element count comes from the type and an
+    /// instruction or a constant per element does not scale.
+    fn write_tensor_by_loop(
+        &mut self,
+        tensor_ty: &Type,
+        name: &str,
+        mut value_at: impl FnMut(&mut Self, IntValue<'ctx>) -> CodegenResult<BasicValueEnum<'ctx>>,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let (_, count) = self.tensor_layout(tensor_ty)?;
+        let buffer_ty = self.type_mapper.tensor_buffer_type(tensor_ty)?;
+        let (handle, data) = self.alloc_tensor(tensor_ty, name)?;
+        let i64_type = self.context.i64_type();
+        let index = self.entry_alloca(i64_type, &format!("{name}.i"))?;
+        self.builder.build_store(index, i64_type.const_zero())?;
+
+        let function = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("tensor construction outside a function".to_string())
+        })?;
+        let head = self
+            .context
+            .append_basic_block(function, &format!("{name}.head"));
+        let body = self
+            .context
+            .append_basic_block(function, &format!("{name}.body"));
+        let done = self
+            .context
+            .append_basic_block(function, &format!("{name}.done"));
+
+        self.builder.build_unconditional_branch(head)?;
+        self.builder.position_at_end(head);
+        let i = self
+            .builder
+            .build_load(i64_type, index, &format!("{name}.idx"))?
+            .into_int_value();
+        let more = self.builder.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64_type.const_int(count as u64, false),
+            &format!("{name}.more"),
+        )?;
+        self.builder.build_conditional_branch(more, body, done)?;
+
+        self.builder.position_at_end(body);
+        let value = value_at(self, i)?;
+        // `i` is below `count` on this edge, because the loop head's `ULT` test is what
+        // branches here, so the slot address stays inside the buffer.
+        let slot = self.tensor_slot(buffer_ty, data, i)?;
+        self.builder.build_store(slot, value)?;
+        let next =
+            self.builder
+                .build_int_add(i, i64_type.const_int(1, false), &format!("{name}.next"))?;
+        self.builder.build_store(index, next)?;
+        self.builder.build_unconditional_branch(head)?;
+
+        self.builder.position_at_end(done);
+        Ok(handle.into())
     }
 
     /// Lower `random_normal(mean, std)`: a counted loop that writes one draw per buffer
-    /// slot. The buffer is written through a stack slot rather than built by
-    /// `insertvalue`, because a weight tensor has as many elements as it has parameters
-    /// and an instruction per element does not scale.
+    /// slot.
     pub(crate) fn codegen_tensor_random_normal(
         &mut self,
         mean: &HirExpr,
         std: &HirExpr,
         tensor_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let (element_ty, count) = self.tensor_layout(tensor_ty)?;
+        let (element_ty, _) = self.tensor_layout(tensor_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let BasicTypeEnum::FloatType(elem_float) = elem_llvm else {
             return Err(CodegenError::InternalError(
@@ -229,73 +304,29 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let mean = self.codegen_expr(mean)?.into_float_value();
         let std = self.codegen_expr(std)?.into_float_value();
-
         let normal_fn = self.get_or_define_rng_normal()?;
-        let buffer_ty = self.type_mapper.tensor_buffer_type(tensor_ty)?;
-        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.rand")?;
-        let i64_type = self.context.i64_type();
-        let index = self.entry_alloca(i64_type, "tensor.rand.i")?;
-        self.builder.build_store(index, i64_type.const_zero())?;
-
-        let function = self.current_function.ok_or_else(|| {
-            CodegenError::InternalError("tensor construction outside a function".to_string())
-        })?;
-        let head = self
-            .context
-            .append_basic_block(function, "tensor.rand.head");
-        let body = self
-            .context
-            .append_basic_block(function, "tensor.rand.body");
-        let done = self
-            .context
-            .append_basic_block(function, "tensor.rand.done");
-
-        self.builder.build_unconditional_branch(head)?;
-        self.builder.position_at_end(head);
-        let i = self
-            .builder
-            .build_load(i64_type, index, "tensor.rand.idx")?
-            .into_int_value();
-        let more = self.builder.build_int_compare(
-            IntPredicate::ULT,
-            i,
-            i64_type.const_int(count as u64, false),
-            "tensor.rand.more",
-        )?;
-        self.builder.build_conditional_branch(more, body, done)?;
-
-        self.builder.position_at_end(body);
-        let draw = self
-            .builder
-            .build_call(normal_fn, &[], "tensor.rand.draw")?
-            .try_as_basic_value()
-            .basic()
-            .ok_or_else(|| CodegenError::InternalError("rng helper returned void".to_string()))?
-            .into_float_value();
-        // The draw is standard normal in `f64`; narrowing before the affine transform
-        // keeps the arithmetic at the element's own width, so an `f32` tensor rounds
-        // once rather than twice.
-        let draw = self
-            .builder
-            .build_float_cast(draw, elem_float, "tensor.rand.elem")?;
-        let scaled = self
-            .builder
-            .build_float_mul(std, draw, "tensor.rand.scaled")?;
-        let value = self
-            .builder
-            .build_float_add(mean, scaled, "tensor.rand.value")?;
-        // `i` is below `count` on this edge, because the loop head's `ULT` test is what
-        // branches here, so the slot address stays inside the buffer.
-        let slot = self.tensor_slot(buffer_ty, data, i)?;
-        self.builder.build_store(slot, value)?;
-        let next =
-            self.builder
-                .build_int_add(i, i64_type.const_int(1, false), "tensor.rand.next")?;
-        self.builder.build_store(index, next)?;
-        self.builder.build_unconditional_branch(head)?;
-
-        self.builder.position_at_end(done);
-        Ok(handle.into())
+        self.write_tensor_by_loop(tensor_ty, "tensor.rand", |ctx, _| {
+            let draw = ctx
+                .builder
+                .build_call(normal_fn, &[], "tensor.rand.draw")?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| CodegenError::InternalError("rng helper returned void".to_string()))?
+                .into_float_value();
+            // The draw is standard normal in `f64`; narrowing before the affine transform
+            // keeps the arithmetic at the element's own width, so an `f32` tensor rounds
+            // once rather than twice.
+            let draw = ctx
+                .builder
+                .build_float_cast(draw, elem_float, "tensor.rand.elem")?;
+            let scaled = ctx
+                .builder
+                .build_float_mul(std, draw, "tensor.rand.scaled")?;
+            Ok(ctx
+                .builder
+                .build_float_add(mean, scaled, "tensor.rand.value")?
+                .into())
+        })
     }
 
     /// Lower `tensor.clone()`: a second buffer holding the same elements.

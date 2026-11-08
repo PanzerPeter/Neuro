@@ -139,17 +139,31 @@ impl Lowerer {
             });
         }
 
-        let mut args = Vec::with_capacity(template.generics.len());
-        for gp in &template.generics {
-            match &gp.kind {
-                ast_types::GenericParamKind::Const(_) => args.push(crate::MonoArg::Const(
-                    const_subst.get(&gp.name.name).copied().unwrap_or(0),
-                )),
-                ast_types::GenericParamKind::Type => args.push(crate::MonoArg::Type(
-                    subst.get(&gp.name.name).cloned().unwrap_or(HirType::Void),
-                )),
-            }
-        }
+        // The instance the context names wins over field inference: the checker required
+        // the literal to be that instance, and a parameter no field names (`Tag<T> { n:
+        // i32 }`) has no field value to be inferred from.
+        let expected_args = self
+            .expected_struct_instance(&name.name, expected)
+            .and_then(|instance| {
+                self.struct_instances
+                    .get(instance)
+                    .map(|(_, args)| args.clone())
+            });
+        let args = match expected_args {
+            Some(args) => args,
+            None => template
+                .generics
+                .iter()
+                .map(|gp| match &gp.kind {
+                    ast_types::GenericParamKind::Const(_) => {
+                        crate::MonoArg::Const(const_subst.get(&gp.name.name).copied().unwrap_or(0))
+                    }
+                    ast_types::GenericParamKind::Type => crate::MonoArg::Type(
+                        subst.get(&gp.name.name).cloned().unwrap_or(HirType::Void),
+                    ),
+                })
+                .collect(),
+        };
         let mangled = self.instantiate_generic_struct(&name.name, &args)?;
         let struct_ty = HirType::Struct(mangled.clone());
         let base = match base {
@@ -175,16 +189,24 @@ impl Lowerer {
         base: &str,
         expected: Option<&HirType>,
     ) -> Option<Vec<(String, HirType)>> {
+        let instance = self.expected_struct_instance(base, expected)?;
+        self.structs.get(instance).cloned()
+    }
+
+    /// The mangled name of the instance of generic struct `base` that `expected` names,
+    /// if it names one.
+    fn expected_struct_instance<'e>(
+        &self,
+        base: &str,
+        expected: Option<&'e HirType>,
+    ) -> Option<&'e str> {
         let Some(HirType::Struct(instance)) = expected else {
             return None;
         };
         let names_base = instance
             .strip_prefix(base)
             .is_some_and(|rest| rest.starts_with("$g_"));
-        if !names_base || !self.struct_instances.contains_key(instance) {
-            return None;
-        }
-        self.structs.get(instance).cloned()
+        (names_base && self.struct_instances.contains_key(instance)).then_some(instance.as_str())
     }
 
     /// The declared type of `field` on `struct_name`.

@@ -52,12 +52,26 @@ pub enum TypeError {
     GenericParamNotInferable { name: String, span: Span },
 
     #[error(
+        "instantiating '{name}' nests generic instances more than {limit} deep: a method whose signature names its own type nested in itself needs a new instance at every level"
+    )]
+    InstantiationTooDeep {
+        name: String,
+        limit: u32,
+        span: Span,
+    },
+
+    #[error(
         "array length '{name}' is not a known constant; use an integer literal or an in-scope `const` generic parameter"
     )]
     UnknownArrayLength { name: String, span: Span },
 
     #[error("array length {length} is too large; an array holds at most {max} elements")]
     ArrayLengthTooLarge { length: u64, max: u32, span: Span },
+
+    #[error(
+        "tensor shape {shape} holds too many elements; a statically shaped tensor holds at most {max}"
+    )]
+    TensorTooLarge { shape: String, max: u32, span: Span },
 
     #[error(
         "undeclared lifetime `'{name}`; declare it in the generic parameter list, e.g. `func f<'{name}>(...)`"
@@ -1594,8 +1608,10 @@ impl TypeError {
             | Self::MethodGenericShadowsImpl { span, .. }
             | Self::GenericMethodInTraitImpl { span, .. }
             | Self::GenericParamNotInferable { span, .. }
+            | Self::InstantiationTooDeep { span, .. }
             | Self::UnknownArrayLength { span, .. }
             | Self::ArrayLengthTooLarge { span, .. }
+            | Self::TensorTooLarge { span, .. }
             | Self::UndeclaredLifetime { span, .. }
             | Self::ConstParamNotInteger { span, .. }
             | Self::ConstPredicateViolated { span, .. }

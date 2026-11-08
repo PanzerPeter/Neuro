@@ -5,7 +5,7 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-155: a panic inside a standard-library body reports a position in the program's file
+## BUG-155: a panic in a standard-library body or an imported module reports a position in the program's file
 
 - **Status**: open, confirmed
 - **Area**: `llvm-backend`, panic locations
@@ -26,86 +26,22 @@ Expected: a location naming the `new` call, or the standard library's own source
 `panic: OrderedF64 cannot hold NaN at main.nr:6:1`, a line past the end of a five-line file. A
 standard-library body's spans are offsets into its own embedded source, and the panic location
 reads them against the program's file. A zero stride passed to a range value's `.step(n)` at run
-time reports the same kind of position.
+time reports the same kind of position, and so does a `panic` in any imported module of a
+multi-file program: a `Span` is a pair of byte offsets with no file, and the merged program has
+no way to say which file one indexes.
 
 **Workaround**: none. The message text still names the cause.
 
-**Fix sketch**: give the panic location the module its span belongs to, or report a
-standard-library panic at the call site that entered it.
+**Fix sketch**: give a span the module it belongs to, which the hierarchical module namespaces
+on the roadmap need anyway, and resolve the panic location against that module's source. A
+narrower stopgap reports a standard-library panic at the call site that entered it.
 
-## BUG-154: a `string` binding returned inside an `Option` is freed by the function returning it
+## BUG-152: a method returning its own type nested in itself does not compile
 
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`, string ownership at a function's exit
-- **Severity**: critical. The caller reads freed memory
-
-**Minimal repro**
-
-```neuro
-func pick(s: string) -> Option<string> {
-    val w = "x{s}"
-    Option::Some(w)
-}
-
-func main() -> i32 {
-    match pick("ab") {
-        Option::Some(a) => println("{a}"),
-        Option::None => {}
-    }
-    0
-}
-```
-
-Expected: `xab`, and no memory error under AddressSanitizer. Observed: `pick` releases `w` on the way
-out although `Option::Some(w)` moved it into the result, so `main` prints from freed memory: a
-heap-use-after-free under `LD_PRELOAD` libasan. `val w = v[0].clone()` does the same. An `Iterator`
-over owned strings whose `next` binds the element before returning `Option::Some(w)` hits it on
-every step.
-
-**Workaround**: build the payload in place, `Option::Some("x{s}")`, which leaks (BUG-082) instead.
-
-**Fix sketch**: mark a binding moved into an enum constructor's payload, as a struct literal's field
-already is, so the exit release skips it.
-
-## BUG-153: a type parameter no field names lowers to `void` in its impl's methods
-
-- **Status**: open, confirmed
-- **Area**: `hir-lowering` (struct literal instance inference)
+- **Status**: open, confirmed. Narrowed: the checker now stops the chain at 128 nested instances
+  with a diagnostic, the depth lowering already enforced, instead of allocating until killed
+- **Area**: `semantic-analysis` (`instantiate_impls_for`); `hir-lowering` (`register_instance_methods`)
 - **Severity**: major. A well-typed program fails to compile
-
-**Minimal repro**
-
-```neuro
-struct Tag<T> { n: i32 }
-
-impl<T> Tag<T> {
-    func get(&self) -> Option<T> { Option::None }
-}
-
-func main() -> i32 {
-    val t: Tag<i32> = Tag { n: 3 }
-    match t.get() {
-        Option::Some(v) => v,
-        Option::None => t.n
-    }
-}
-```
-
-Expected: exit code 3. Observed: the checker accepts it and code generation fails with ``unsupported
-type: void type cannot be used as a value``. Lowering infers a struct literal's type arguments from its
-field values only, so `T`, which no field names, is never bound, and the annotation does not reach it.
-
-**Workaround**: give the parameter a field, or build the value where the compiler fixes its type
-arguments, as the prelude's `Enumerate` is built by `.enumerate()`.
-
-**Fix sketch**: seed the literal's instance from the expected type when lowering has one, as the
-checker does.
-
-## BUG-152: a method returning its own type nested in itself exhausts the checker's memory
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`instantiate_impls_for`)
-- **Severity**: major. The compiler runs until it is killed
 
 **Minimal repro**
 
@@ -122,11 +58,12 @@ func main() -> i32 {
 }
 ```
 
-Expected: exit code 3. Observed: `neurc check` allocates until the memory cap aborts it. Every instance
+Expected: exit code 3. Observed: `instantiating 'W' nests generic instances more than 128 deep`.
+Before the cap, `neurc check` allocated until the memory cap aborted it. Every instance
 registers the signature of each method of its generic impls, and registering `wrap` for `W<i32>`
 builds `W<W<i32>>`, whose own `wrap` builds `W<W<W<i32>>>`, with no end. A trait's default method
 returning `Wrapper<Self>` does the same, which is why the prelude's iterator adapters are not default
-methods on `Iterator`. Lowering has a depth guard (`InstantiationTooDeep`); the checker has none.
+methods on `Iterator`.
 
 **Workaround**: none that keeps the method; a free function `func wrap<I>(w: W<I>) -> W<W<I>>`
 instantiates per call and terminates.
@@ -221,65 +158,6 @@ does refuse a `&mut`.
 
 **Fix sketch**: `&mut` moves, with an implicit reborrow where a `&mut` parameter takes one, so that
 `copy_within` can answer `false` for it without breaking every call that passes a `&mut` on.
-
-## BUG-148: a generic impl cannot name its own associated type
-
-- **Status**: open, confirmed
-- **Area**: `hir-lowering` (`register_instance_methods`, `emit_instance_impls`)
-- **Severity**: major. A well-typed program fails to compile
-
-**Minimal repro**
-
-```neuro
-trait Source {
-    type Item
-    func get(&self) -> Self::Item
-}
-
-struct W<T> { v: T }
-
-impl<T: Copy> Source for W<T> {
-    type Item = T
-    func get(&self) -> Self::Item { self.v }
-}
-
-func main() -> i32 {
-    val w = W { v: 5 }
-    w.get()
-}
-```
-
-Expected: exit code 5. Observed: ``cannot resolve type annotation 'Self::Item' during lowering``.
-
-**Workaround**: write the bound type (`-> T`) in the impl.
-
-**Fix sketch**: bind `Self::Item` per instance as `enter_impl_assoc` does for a plain impl, under
-the impl's substitution, so the template pass in `declared_receivers` rebinds it too.
-
-## BUG-147: a tensor with an enormous static shape exhausts the compiler's memory
-
-- **Status**: open, confirmed. Root cause not yet located
-- **Area**: compiler, somewhere after type checking
-- **Severity**: major. One line of source can take down the machine compiling it
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val t = Tensor::<f32, [4611686018427387888]>::zeros()
-    0
-}
-```
-
-Expected: a compile error naming the shape. Observed: `neurc` allocates without bound. Under
-`ulimit -v 3000000` it aborts in under five seconds on a single 4 GiB request; with no limit it
-filled RAM and swap until `systemd-oomd` killed the editor running it.
-
-**Workaround**: none in the compiler. Run untrusted sources under a memory limit.
-
-**Fix sketch**: reject a static shape whose byte size exceeds the address space during type
-checking, with checked arithmetic in `tensor_buffer_bytes`, whose product is unchecked today.
-Regression test: the repro under a memory limit, expecting a diagnostic.
 
 ## BUG-146: a loop inside a `pool` releases only its last `PoolAware` value
 
@@ -448,6 +326,11 @@ func main() -> i32 {
 
 Expected: each buffer `"ab" + "cd"` built is released when `m` leaves scope. Observed: the
 arithmetic is right, and AddressSanitizer's leak check reports the 4-byte buffers as leaked.
+
+A `string` binding moved into a payload (`Option::Some(w)`) belongs to the enum from then on, so it
+leaks with the enum, even when a `match` in the same function takes it out again: an arm's `string`
+binding owns nothing. Before, the scope that declared `w` freed it. That was correct only when the
+enum died in the same scope; any enum that left it read a freed buffer.
 
 The prelude's enums hit it too. A `Result<string, E>` holding a computed string leaks through `?`,
 `??`, `match` and a plain drop, and an enum payload that is a struct whose only owner is a `string`

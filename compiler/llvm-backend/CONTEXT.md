@@ -385,7 +385,9 @@ then belongs to the storage, and is tracked one of three ways:
   in step with the held paths, plus the positions a call's callee always allocated (below). A
   holder's move or its field's move clears those flags exactly as it
   clears any other. An enum payload gets no such entry: its slot is destroyed under a tag switch
-  with no flag to guard it.
+  with no flag to guard it. A place moved into a payload is disowned all the same, a `string`
+  included, since the enum can outlive it (BUG-154); with no flag in the payload, that `string`
+  is released by nobody (BUG-082).
 - **A function's return value.** `codegen/string_ownership.rs` reads every body once, before any is
   generated, and collects the functions whose every exit (each `return`, plus an expression tail)
   allocates. `impl` methods and associated functions are collected too, keyed by the
@@ -769,10 +771,11 @@ DLPack Representation section below.
 `expressions/tensors.rs` owns the construction nodes. `alloc_tensor` is the single place the
 allocator is chosen (the hook 2D's arena replaces), and every construction node routes through it,
 taking back both the handle it returns and the `data` pointer it writes elements through.
-`zeros()` / `ones()` / `identity()` and a literal whose elements are all constants emit the buffer
-once as a private `.rodata` global and `memcpy` it in, so a fill of any size costs one call rather
-than an instruction per element; a literal mentioning a runtime value is written slot by slot;
-`random_normal` writes its counted loop straight into the heap buffer.
+A literal whose elements are all constants emits the buffer once as a private `.rodata` global and
+`memcpy`s it in; a literal mentioning a runtime value is written slot by slot. `zeros()`, `ones()`,
+`identity()` and `random_normal` share `write_tensor_by_loop`, a counted loop writing straight into
+the heap buffer: their element count comes from the type alone, and a constant per element made
+the compiler's memory and the binary grow with the shape (BUG-147).
 
 `expressions/tensor_rng.rs` holds the xorshift64 generator `random_normal` draws from, and the
 float intrinsics its Box-Muller transform calls. Nothing else in the backend draws a random
