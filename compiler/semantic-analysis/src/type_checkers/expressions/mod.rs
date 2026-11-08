@@ -333,7 +333,7 @@ impl TypeChecker {
             // runs forever or leaves via `return`. It therefore produces no value
             // and must satisfy whatever type its context demands, the same
             // divergent contract the panic-family builtins carry.
-            Expr::Loop { label, body, .. } => self.check_loop_expr(label, body, expected),
+            Expr::Loop { label, body, span } => self.check_loop_expr(label, body, *span, expected),
 
             // `unsafe` checks like a bare block. Its one meaning so far: inside it, a
             // kernel may index a `KernelOut` element.

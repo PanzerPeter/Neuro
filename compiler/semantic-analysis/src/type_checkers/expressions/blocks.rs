@@ -150,9 +150,13 @@ impl TypeChecker {
         &mut self,
         label: &Option<Identifier>,
         body: &[ast_types::Stmt],
+        span: shared_types::Span,
         expected: Option<&Type>,
     ) -> Option<Type> {
         let exit = self.check_loop_body(label.as_ref(), true, expected, body);
+        if !exit.borrows.is_empty() {
+            self.loop_break_borrows.insert(span, exit.borrows);
+        }
         match exit.value_ty {
             Some(ty) => Some(ty),
             None if exit.has_break => Some(Type::Void),

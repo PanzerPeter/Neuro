@@ -83,6 +83,24 @@ struct Carried {
     live: Vec<String>,
     /// Each closure literal in the value, with whatever borrows the checker gave it.
     closures: Vec<shared_types::Span>,
+    /// Each value `loop` in the value, with whatever borrows its `break`s carry out.
+    loops: Vec<shared_types::Span>,
+}
+
+/// What `value`, of type `ty`, carries into a binding that holds it. A call returning a
+/// reference carries its arguments' borrows only: `hold_returned_borrows` takes the
+/// receiver's, by how the method takes it.
+fn carried_by(value: &Expr, ty: &Type) -> Carried {
+    let mut carried = Carried::default();
+    match peel_parens(value) {
+        Expr::Call { args, .. } if matches!(ty, Type::Reference { .. }) => {
+            for arg in args {
+                tail_borrow_targets(arg, &mut Vec::new(), &mut Vec::new(), &mut carried);
+            }
+        }
+        value => tail_borrow_targets(value, &mut Vec::new(), &mut Vec::new(), &mut carried),
+    }
+    carried
 }
 
 /// The borrows a block, `if` or `match` initializer may yield, found through each tail
@@ -189,6 +207,8 @@ fn tail_borrow_targets<'a>(
             }
         }
         Expr::Identifier(id) => follow_binding(&id.name, blocks, followed, carried),
+        // A loop yields what its `break`s carry, which were resolved as each was checked.
+        Expr::Loop { span, .. } => carried.loops.push(*span),
         // A value read out of a borrow holds what the borrowee holds.
         Expr::Deref { operand, .. } => tail_borrow_targets(operand, blocks, followed, carried),
         // A closure carries the borrows it took and those of what it copied in.
@@ -284,19 +304,9 @@ impl TypeChecker {
         if !self.may_hold_borrow(ty) {
             return;
         }
-        let value = peel_parens(value);
-        let mut carried = Carried::default();
-        match value {
-            // `hold_returned_borrows` takes the receiver of a call returning a
-            // reference, by how the method takes it.
-            Expr::Call { args, .. } if matches!(ty, Type::Reference { .. }) => {
-                for arg in args {
-                    tail_borrow_targets(arg, &mut Vec::new(), &mut Vec::new(), &mut carried);
-                }
-            }
-            _ => tail_borrow_targets(value, &mut Vec::new(), &mut Vec::new(), &mut carried),
-        }
-        for (place, exclusive) in carried.places {
+        let carried = carried_by(value, ty);
+        let from_loops = self.loop_borrows(&carried.loops);
+        for (place, exclusive) in carried.places.into_iter().chain(from_loops) {
             self.symbols.attach_borrow(holder, &place, exclusive);
         }
         for span in carried.closures {
@@ -335,6 +345,8 @@ impl TypeChecker {
         };
         let mut carried = Carried::default();
         tail_borrow_targets(value, &mut Vec::new(), &mut Vec::new(), &mut carried);
+        let from_loops = self.loop_borrows(&carried.loops);
+        carried.places.extend(from_loops);
         // A place reached through a reference is a reborrow of what the reference points
         // at, so it dies with that, and the reference binding itself may go first.
         let (reborrowed, places): (Vec<_>, Vec<_>) = carried.places.into_iter().partition(|p| {
@@ -411,6 +423,60 @@ impl TypeChecker {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The places the value loops at `spans` carry out of their `break`s.
+    fn loop_borrows(&self, spans: &[shared_types::Span]) -> Vec<(String, bool)> {
+        spans
+            .iter()
+            .filter_map(|span| self.loop_break_borrows.get(span))
+            .flatten()
+            .cloned()
+            .collect()
+    }
+
+    /// Record the borrows `value`, of type `ty`, carries out of the loop a `break` with
+    /// `label` leaves, for the binding that holds the loop's value. A borrow of a binding
+    /// the loop declares is refused instead: that binding dies as the `break` leaves.
+    ///
+    /// Resolved to places here rather than when the loop's value is bound, because a
+    /// binding the value copies (`val q = &s; break q`) is out of scope by then.
+    pub(crate) fn carry_break_borrows(
+        &mut self,
+        label: Option<&shared_types::Identifier>,
+        value: &Expr,
+        ty: &Type,
+    ) {
+        if !self.may_hold_borrow(ty) {
+            return;
+        }
+        let Some(floor) = self.loop_target_mut(label).map(|ctx| ctx.scope_floor) else {
+            return;
+        };
+        self.refuse_dying_borrows(value, ty, floor);
+        let carried = carried_by(value, ty);
+        let mut borrows = carried.places;
+        borrows.extend(self.loop_borrows(&carried.loops));
+        for span in &carried.closures {
+            borrows.extend(
+                self.borrowing_closures
+                    .get(span)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
+        }
+        for name in &carried.live {
+            borrows.extend(self.symbols.held_borrows(name));
+        }
+        borrows.retain(|(place, _)| {
+            self.symbols
+                .defining_depth(place)
+                .is_some_and(|depth| depth < floor)
+        });
+        if let Some(ctx) = self.loop_target_mut(label) {
+            ctx.break_borrows.extend(borrows);
         }
     }
 
@@ -954,6 +1020,8 @@ impl TypeChecker {
                     has_break: false,
                     break_moves: Vec::new(),
                     continue_moves: Vec::new(),
+                    scope_floor: self.symbols.depth(),
+                    break_borrows: Vec::new(),
                 });
                 self.symbols.push_scope();
                 self.hold_adapter_borrows(adapters);
@@ -1061,6 +1129,8 @@ impl TypeChecker {
                     has_break: false,
                     break_moves: Vec::new(),
                     continue_moves: Vec::new(),
+                    scope_floor: self.symbols.depth(),
+                    break_borrows: Vec::new(),
                 });
                 self.symbols.push_scope();
                 self.hold_adapter_borrows(adapters);
@@ -1139,6 +1209,7 @@ impl TypeChecker {
                         *span,
                     );
                     self.refuse_borrowing_break(value_expr, &value_ty);
+                    self.carry_break_borrows(label.as_ref(), value_expr, &value_ty);
                     if !matches!(value_ty, Type::Unknown) {
                         self.record_break_value(label.as_ref(), value_ty, *span);
                     }

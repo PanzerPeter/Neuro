@@ -14,6 +14,8 @@ use crate::types::Type;
 pub(crate) struct LoopExit {
     pub(crate) value_ty: Option<Type>,
     pub(crate) has_break: bool,
+    /// The places the `break` values borrow, and whether exclusively.
+    pub(crate) borrows: Vec<(String, bool)>,
 }
 
 impl TypeChecker {
@@ -73,6 +75,8 @@ impl TypeChecker {
             has_break: false,
             break_moves: Vec::new(),
             continue_moves: Vec::new(),
+            scope_floor: self.symbols.depth(),
+            break_borrows: Vec::new(),
         });
         self.symbols.push_scope();
         for stmt in body {
@@ -85,10 +89,12 @@ impl TypeChecker {
             Some(ctx) => LoopExit {
                 value_ty: ctx.break_value_ty,
                 has_break: ctx.has_break,
+                borrows: ctx.break_borrows,
             },
             None => LoopExit {
                 value_ty: None,
                 has_break: false,
+                borrows: Vec::new(),
             },
         }
     }

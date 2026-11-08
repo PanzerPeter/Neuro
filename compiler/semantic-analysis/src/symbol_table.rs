@@ -520,6 +520,18 @@ impl SymbolTable {
             .unwrap_or_default()
     }
 
+    /// The places `holder` borrows, and whether exclusively.
+    pub(crate) fn held_borrows(&self, holder: &str) -> Vec<(String, bool)> {
+        self.lookup(holder)
+            .map(|info| {
+                info.borrows
+                    .iter()
+                    .map(|prov| (prov.place.clone(), prov.exclusive))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// How many borrows `holder` holds. Paired with [`SymbolTable::borrows_outliving`] to
     /// judge only the borrows one store added.
     pub(crate) fn borrow_count(&self, holder: &str) -> usize {

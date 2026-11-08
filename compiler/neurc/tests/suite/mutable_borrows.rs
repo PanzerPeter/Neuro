@@ -3,7 +3,7 @@
 // dereference operator (read and write), and the borrow rules: `&mut` requires a
 // `mut` binding, `*` applies only to references, and writing through `*` requires
 // a `&mut`. Covers end-to-end compile+run and the rejection diagnostics.
-use crate::compile_harness::{check_source, run_expecting};
+use crate::compile_harness::{assert_check_error, check_source, run_expecting};
 
 #[test]
 fn mutate_through_a_mutable_reference() {
@@ -168,4 +168,80 @@ func main() -> i32 {
 }
 "#;
     run_expecting(source, 38);
+}
+
+/// A `&mut` moves: a plain binding takes it, so a second copy, which would be a second
+/// exclusive borrow of the same value, is a use after move.
+#[test]
+fn regression_a_binding_moves_a_mutable_reference() {
+    assert_check_error(
+        "mut_ref_copied.nr",
+        r#"
+func main() -> i32 {
+    mut n = 3
+    val a = &mut n
+    val b = a
+    val c = a
+    *b = 1
+    *c = 2
+    0
+}
+"#,
+        "use of moved value 'a'",
+    );
+    assert_check_error(
+        "mut_ref_copy_struct.nr",
+        r#"
+@derive(Copy)
+struct P<T> { x: T }
+func main() -> i32 {
+    mut n = 3
+    val a = P { x: &mut n }
+    val b = a
+    val c = a
+    0
+}
+"#,
+        "use of moved value 'a'",
+    );
+}
+
+/// A reference parameter reborrows a `&mut` argument for the call, so the binding is
+/// usable again once the call returns.
+#[test]
+fn a_mutable_reference_is_reborrowed_by_each_call() {
+    run_expecting(
+        r#"
+func bump(r: &mut i32) { *r += 1 }
+func peek(r: &i32) -> i32 { *r }
+func id<T>(x: T) -> T { x }
+struct S { v: Vec<i32> }
+impl S { func add(&mut self, x: i32) { self.v.push(x) } }
+func fill(s: &mut S, k: i32) { s.add(k) }
+func main() -> i32 {
+    mut n = 3
+    mut v: Vec<i32> = Vec::new()
+    mut s = S { v: Vec::new() }
+    mut k = 0
+    {
+        val a = &mut n
+        bump(a)
+        bump(a)
+        k = peek(a)
+        *a += 1
+        val w = &mut v
+        w.push(1)
+        w.push(2)
+        val t = &mut s
+        t.add(4)
+        fill(t, 5)
+        t.add(6)
+        val u = id(t)
+        u.add(7)
+    }
+    k + n + v.len() as i32 + s.v.len() as i32
+}
+"#,
+        17,
+    );
 }

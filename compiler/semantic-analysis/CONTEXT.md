@@ -260,8 +260,11 @@ resolve registers as `Unknown` rather than `void`, so its call sites stay quiet.
   `Type::Generic` (a type-parameter placeholder compatible only with itself), and
   `Type::DynObject`.
 - `Type::Reference { inner, mutable }` (Display `&T` / `&mut T`) is compatible only when
-  **mutability and referent both match**: there is no `&mut T` → `&T` coercion. References are
-  always `Copy` and never move-tracked. Field access auto-derefs one layer via `referent()`.
+  **mutability and referent both match**: there is no `&mut T` → `&T` coercion. A `&T` is `Copy`;
+  a `&mut T` moves, since a copy would be a second exclusive borrow of one value, and a holder of
+  one (`@derive(Copy)` struct, tuple, enum) moves with it. A reference parameter reborrows a `&mut`
+  argument for the call instead of taking it (`pass_argument`), so `bump(r); bump(r)` stays valid.
+  Field access auto-derefs one layer via `referent()`.
 - `Type::auto_deref` is how a built-in operator operand and a method receiver read a borrow:
   a borrowed scalar (`is_scalar`: numbers, `bool`, `char`) is read through every `&` / `&mut`,
   and any other borrow collapses to one `&`, mutable only if every layer was. `check_binary_expr`
@@ -1154,8 +1157,12 @@ scope still open, since afterwards a name means nothing or an outer shadowed bin
 block's tail (`check_block_expr_type`), an arm's body and a closure's result. A place reached through
 a reference is a reborrow, judged by what the reference holds. Under elision a method's reference
 comes from its receiver, so `m.get(&key)` may end a block declaring `key`; a free function's comes
-from any argument. `refuse_borrowing_break` refuses a `break` carrying a function value that borrows,
-because the loop's value is not walked (BUG-151 is the same gap for references).
+from any argument. A `break` value is checked against the loop it leaves (`carry_break_borrows`): a
+borrow of a binding the loop declares is `BorrowLeavesScope`, and the rest are resolved to places
+at the `break`, while a binding the value copies is still in scope, and kept on the loop's
+`LoopContext`. A checked value `loop` files them under its span (`loop_break_borrows`), and the
+walk reads a `loop` there, so the holder of its value takes them. `refuse_borrowing_break` still
+refuses a `break` carrying a function value that borrows.
 
 A value that stays in its call is scope-bound (`scope_bound_closures`, a set of literal spans, and
 `SymbolInfo::scope_bound` on a binding holding one): a `mut` function parameter of a function, method

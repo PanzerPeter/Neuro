@@ -3,7 +3,7 @@
 // binding that holds such a value holds its borrows: the borrowee stays frozen while
 // it lives, the holder may not outlive the borrowee, and it may not leave the
 // function carrying a borrow of a local.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, assert_check_error};
 
 #[test]
 fn a_struct_with_a_lifetime_parameter_runs() {
@@ -250,4 +250,84 @@ func main() -> i32 { 0 }
 "#,
         "undeclared lifetime `'b`",
     );
+}
+
+/// A `loop`'s value holds what its `break`s borrow, so the borrowee stays frozen while the
+/// binding lives, through a copied borrow too.
+#[test]
+fn regression_a_break_value_carries_its_borrow_to_the_loop_binding() {
+    for (name, body) in [
+        ("break_direct.nr", "break &s"),
+        ("break_copied.nr", "val q = &s\n        break q"),
+        ("break_nested.nr", "break loop { break &s }"),
+    ] {
+        let source = format!(
+            r#"
+func main() -> i32 {{
+    val s = "ab" + "c"
+    val r = loop {{
+        {body}
+    }}
+    val t = s
+    println(r)
+    0
+}}
+"#
+        );
+        assert_check_error(name, &source, "cannot move out of 's' while it is borrowed");
+    }
+}
+
+/// A `break` may not carry a borrow of a binding its loop declares, which dies as the
+/// `break` leaves.
+#[test]
+fn regression_a_break_value_may_not_borrow_a_loop_local() {
+    assert_check_error(
+        "break_local.nr",
+        r#"
+func main() -> i32 {
+    val v = [1, 2, 3]
+    val n = 'outer: loop {
+        val w = [4, 5, 6]
+        loop {
+            break 'outer &w
+        }
+    }
+    n[0]
+}
+"#,
+        "'w' does not live long enough",
+    );
+}
+
+#[test]
+fn a_break_value_borrowing_an_outer_binding_runs() {
+    let source = r#"
+struct H<'a> { r: &'a string }
+
+func main() -> i32 {
+    val s = "ab" + "c"
+    val v = [1, 2, 3]
+    val r = loop { break &s }
+    val h = loop {
+        val q = &s
+        break H { r: q }
+    }
+    val n = 'outer: loop {
+        mut i = 0
+        loop {
+            i += 1
+            if i == 2 { break 'outer &v }
+        }
+    }
+    val e = loop {
+        val z = &v
+        break z[1]
+    }
+    r.len() as i32 + h.r.len() as i32 + n[2] + e
+}
+"#;
+    let test = CompileTest::new();
+    // 3 + 3 + 3 + 2.
+    assert_eq!(test.run_leak_checked("break_outer_borrow.nr", source), 11);
 }

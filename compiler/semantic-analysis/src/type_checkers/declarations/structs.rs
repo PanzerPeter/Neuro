@@ -206,6 +206,8 @@ impl TypeChecker {
                     // buffer, its own derive is the one refused.
                     let reason = if derivable {
                         "has no `.clone()`; give it `@derive(Clone)` too"
+                    } else if matches!(field_ty, Type::Reference { mutable: true, .. }) {
+                        "is an exclusive borrow, and a `.clone()` would duplicate it"
                     } else {
                         "owns a buffer that a derived `.clone()` cannot copy yet; write `impl Clone` by hand"
                     };

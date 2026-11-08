@@ -257,6 +257,10 @@ pub(crate) struct TypeChecker {
     /// it borrows and whether each borrow is exclusive. The binding that ends up holding
     /// the literal takes the borrows over (`hold_carried_borrows`).
     borrowing_closures: HashMap<shared_types::Span, Vec<(String, bool)>>,
+    /// Every checked value `loop` that carries a borrow out, keyed by its span, with the
+    /// places its `break`s borrow. The binding that ends up holding the loop's value
+    /// takes the borrows over (`hold_carried_borrows`).
+    loop_break_borrows: HashMap<shared_types::Span, Vec<(String, bool)>>,
     /// Every closure literal over a `mut` function parameter or a closure holding one,
     /// which may only be checked in `function_value_slot`.
     scope_bound_closures: std::collections::HashSet<shared_types::Span>,
@@ -440,6 +444,12 @@ struct LoopContext {
     /// The move state at every `continue` that starts this loop's next iteration: what
     /// it had moved, that iteration would move again.
     continue_moves: Vec<Vec<MoveState>>,
+    /// Index of the scope the loop's body opens. A binding defined at or above it dies
+    /// as a `break` leaves.
+    scope_floor: usize,
+    /// The places the value-carrying `break`s borrow, and whether exclusively: the
+    /// borrows the loop's value carries out to whatever holds it.
+    break_borrows: Vec<(String, bool)>,
 }
 
 /// One open `pool` block. The arena it names is released at the block's closing
@@ -563,6 +573,7 @@ impl TypeChecker {
             slot_reads: HashMap::new(),
             in_sub_place: false,
             borrowing_closures: HashMap::new(),
+            loop_break_borrows: HashMap::new(),
             scope_bound_closures: std::collections::HashSet::new(),
             inferring_closure_return: false,
             function_value_slot: None,
@@ -724,10 +735,10 @@ impl TypeChecker {
                 .get(name)
                 .map(|inner| self.copy_within(inner, visiting))
                 .unwrap_or(false),
-            // A borrow `&T` / `&mut T` is `Copy`: copying the reference is sound
-            // because it never moves the borrowed value. Note: aliasing
-            // exclusivity for `&mut T` is enforced by the borrow checker, not here.
-            Type::Reference { .. } => true,
+            // A shared borrow `&T` is `Copy`: copying it never moves the borrowed value.
+            // A `&mut T` moves, since a copy would be a second exclusive borrow of one
+            // value. A reference parameter reborrows it instead (`pass_argument`).
+            Type::Reference { mutable, .. } => !mutable,
             // An array is `Copy` exactly when its element type is `Copy`.
             // The element is currently restricted to Copy scalars at resolution time,
             // so this recursion is always true in practice; it keeps the rule honest
@@ -854,6 +865,8 @@ impl TypeChecker {
             Type::Struct(name) => !self.struct_copies(name, visiting),
             Type::Collection { .. } => true,
             Type::Tensor { .. } => true,
+            // See [`Self::copy_within`]: a `&mut` moves.
+            Type::Reference { mutable: true, .. } => true,
             // Calling a `once` value may consume what it captured, so a second call must
             // be refused, and so must a copy that could make it. Copies of a `mut` value
             // would share an environment its calls write, so one copy's running call could

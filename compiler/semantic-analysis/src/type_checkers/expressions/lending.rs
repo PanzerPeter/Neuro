@@ -22,7 +22,9 @@ pub(super) struct Lend {
 impl TypeChecker {
     /// Pass `arg` to a parameter of type `param`: lent for the call when the parameter is a
     /// plain or `mut` function type, so it joins `lent` to be borrowed once every argument
-    /// is checked; moved into the callee otherwise (a `once` parameter consumes it).
+    /// is checked; reborrowed for the call when it is a `&mut` handed to a reference
+    /// parameter, so the binding is usable again once the call returns; moved into the
+    /// callee otherwise (a `once` parameter consumes it).
     pub(super) fn pass_argument<'a>(
         &mut self,
         arg: &'a Expr,
@@ -33,6 +35,10 @@ impl TypeChecker {
             Type::Function { mode, .. } if *mode != FunctionMode::Once => {
                 lent.push((arg, *mode == FunctionMode::Mut));
             }
+            Type::Reference { .. }
+                if self
+                    .projection_type(arg)
+                    .is_some_and(|ty| matches!(ty, Type::Reference { mutable: true, .. })) => {}
             _ => self.record_move(arg),
         }
     }
