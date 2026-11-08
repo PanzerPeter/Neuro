@@ -268,5 +268,5 @@ If you forgot to sign off, amend with `git commit --amend --signoff`. For a seri
 ## License
 
 By submitting a DCO-signed contribution to Neuro, you agree your contribution is licensed under the
-[Neuro Shared Source License v2.1](LICENSE) and accept the future-relicensing terms in section 12.3.
+[Neuro Shared Source License v2.2](LICENSE) and accept the future-relicensing terms in section 12.3.
 The contributor patent grant of section 12.5 applies to all accepted contributions.

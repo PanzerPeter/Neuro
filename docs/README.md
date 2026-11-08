@@ -97,4 +97,4 @@ Model weights are planned to use the standard `.safetensors` format rather than 
 - [CHANGELOG.md](../CHANGELOG.md): version history
 - [CONTRIBUTING.md](../CONTRIBUTING.md): contribution guidelines and the full architecture rules
 - [VSA.md](../VSA.md): the Vertical Slice Architecture ruleset the compiler is built to
-- [LICENSE](../LICENSE): Neuro Shared Source License v2.1
+- [LICENSE](../LICENSE): Neuro Shared Source License v2.2

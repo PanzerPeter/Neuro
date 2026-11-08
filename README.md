@@ -6,7 +6,7 @@
   <img src="assets/demo.gif" alt="neurc rejects a swapped matrix product at compile time, then the fixed program trains a model with @grad and predicts on the GPU" width="880">
 </p>
 
-[![License: Neuro Shared Source License v2.1](https://img.shields.io/badge/License-NSSL%20v2.1-blue.svg)](LICENSE)
+[![License: Neuro Shared Source License v2.2](https://img.shields.io/badge/License-NSSL%20v2.2-blue.svg)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-neuro--lang.netlify.app-blue.svg)](https://neuro-lang.netlify.app)
 [![LLVM](https://img.shields.io/badge/LLVM-23-blue.svg)](https://llvm.org/)
 [![CI](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PanzerPeter/Neuro/actions/workflows/ci.yml)
@@ -335,12 +335,14 @@ See also [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md
 
 ## License
 
-[Neuro Shared Source License v2.1](LICENSE). The license covers the compiler, not what you build
+[Neuro Shared Source License v2.2](LICENSE). The license covers the compiler, not what you build
 with it.
 
-You may freely use, study and modify the compiler for any personal or internal purpose, write
-Neuro programs and distribute or sell the compiled output under any terms you choose, build tools
-and editor integrations that call into the compiler, and contribute code back. Redistributing the
+Code you write in Neuro is yours, and so are the programs compiled from it: distribute or sell them
+under any terms you choose. The runtime and standard library code the compiler puts in each binary
+come with no attribution or source obligation, and you may copy the examples into your own code.
+You may use, study and modify the compiler for any purpose, commercial work included, build tools
+and editor integrations that call into it, and contribute code back. Redistributing the
 compiler itself, or a fork of it, as part of a commercial product requires a commercial license,
 unless the fork is renamed and fully source-available under section 3.6 of the license.
 

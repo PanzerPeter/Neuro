@@ -10,6 +10,21 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.34.1] - 2026-11-08
+
+### Changed
+
+- The license is now the Neuro Shared Source License v2.2. It says outright that source code you
+  write in Neuro is yours, and it grants the runtime and standard library code the compiler puts
+  in each binary for any use, with no attribution or source obligation. Examples and
+  documentation samples may be copied into your own code. The compiler may be used for any
+  purpose short of redistributing it or offering it as a service, so a sole developer selling
+  programs needs no commercial license. Output from compiling the compiler's own source stays
+  under the license, the program exemptions survive termination, and later versions of the
+  license cannot narrow them. Contract claims no longer cite trade secret or breach of confidence,
+  and the court and arbitration clauses no longer contradict each other.
+- The editor extension is 1.2.1 and carries the new license.
+
 ## [5.34.0] - 2026-11-07
 
 ### Added
