@@ -91,11 +91,12 @@ func main() -> i32 {
     for v in h.values() {
         total += *v
     }
-    total + seen
+    (total + seen) % 256
 }
 "#,
     );
     // keys 0..20 minus 4 and 7 sum to 179, values to 358, and 18 entries were seen.
+    // Reduced in the program: Windows reports the whole exit code, not its low byte.
     assert_eq!(exit, (179 + 358 + 18) % 256);
 }
 

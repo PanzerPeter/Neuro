@@ -76,11 +76,19 @@ impl<'ctx> CodegenContext<'ctx> {
             let alloca_ty = self.get_any_llvm_type(&target_sem)?;
             let final_val = self.coerce_if_needed(val, alloca_ty, &target_sem)?;
 
-            let alloca = self.entry_alloca(alloca_ty, name)?;
+            let pool_registered = self.pool_registered_type(&target_sem);
+            // A binding the arena releases lives in its registration cell, one per
+            // evaluation, so each iteration of a loop registers a value of its own.
+            let (alloca, pool_flag) = match &pool_registered {
+                Some(struct_name) => {
+                    let (storage, flag) = self.pool_registration_slot(struct_name, alloca_ty)?;
+                    (storage, Some(flag))
+                }
+                None => (self.entry_alloca(alloca_ty, name)?, None),
+            };
             self.builder.build_store(alloca, final_val).map_err(|e| {
                 CodegenError::LlvmError(format!("failed to store initial value: {}", e))
             })?;
-            let pool_registered = self.pool_registered_type(&target_sem);
             let moves_a_registration =
                 init.is_some_and(|expr| self.moves_a_pool_registration(expr));
 
@@ -130,12 +138,8 @@ impl<'ctx> CodegenContext<'ctx> {
             // A `PoolAware` binding inside a `pool` is released by the arena's sweep at
             // the block's brace instead of by its own scope, so it takes one path or the
             // other and never both.
-            if let Some(struct_name) = pool_registered {
-                if moves_a_registration {
-                    self.transfer_pool_registration(name, &struct_name, alloca)?;
-                } else {
-                    self.register_pool_aware(name, &struct_name, alloca)?;
-                }
+            if let (Some(struct_name), Some(flag)) = (pool_registered, pool_flag) {
+                self.bind_pool_registered(name, &struct_name, alloca, flag, !moves_a_registration)?;
             } else if matches!(drop_target, Some(DropTarget::HeapString)) {
                 // The one target no type proves: its flag comes from the initializer.
                 let flag_ptr = self.register_local_drop(name, alloca, DropTarget::HeapString)?;

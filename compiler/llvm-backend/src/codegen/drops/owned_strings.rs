@@ -153,6 +153,14 @@ impl<'ctx> CodegenContext<'ctx> {
                 }
                 _ => false,
             },
+            // A field read off a fresh holder, directly or through a field of one, leaves
+            // with its reader, and the rest of the temporary is released around it
+            // (`drop_temporary_except`), so the reader owns the buffer the holder's
+            // construction provably stored there.
+            HirExprKind::FieldAccess { object, field } => self
+                .armed_temporary_positions(object)
+                .iter()
+                .any(|path| matches!(path.as_slice(), [only] if only == field)),
             _ => false,
         }
     }

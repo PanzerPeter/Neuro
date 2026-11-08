@@ -1956,3 +1956,46 @@ func main() -> i32 {
 "#;
     assert_eq!(test.compile_and_run("closure_scalar.nr", accepted), Ok(9));
 }
+
+/// Each iteration of a loop inside a `pool` registers a value of its own, and the sweep
+/// releases every one of them, newest first: a mutation after registration is what
+/// `bulk_release` sees, a moved value is released once, from its new binding, and a
+/// `break` leaves the values already registered for the sweep.
+#[test]
+fn regression_a_loop_in_a_pool_releases_every_iteration() {
+    let source = format!(
+        r#"{TRACED_HANDLE}
+func main() -> i32 {{
+    pool {{
+        mut i = 0
+        while i < 3 {{
+            val h = Handle {{ id: i }}
+            i = i + 1
+        }}
+        loop {{
+            mut m = Handle {{ id: 10 + i }}
+            m.id = m.id + 10
+            val g = m
+            i = i + 1
+            if i == 5 {{ break }}
+        }}
+    }}
+    0
+}}
+"#
+    );
+    let out = stdout_of(&CompileTest::new(), "pool_loop.nr", &source);
+    let released: Vec<&str> = out.lines().filter(|l| l.starts_with("release")).collect();
+    assert_eq!(
+        released,
+        [
+            "release 24",
+            "release 23",
+            "release 2",
+            "release 1",
+            "release 0"
+        ],
+        "{out}"
+    );
+    assert!(!out.contains("drop"), "{out}");
+}

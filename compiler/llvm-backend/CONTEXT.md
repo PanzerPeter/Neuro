@@ -1442,7 +1442,11 @@ A fresh value that owns something and that no binding ever owns is destroyed whe
 read (`drop_unbound_temporary`, BUG-047): a call, struct literal or enum construction whose
 statement value is discarded, and one a field is read from. It is stored to a slot, registered in
 a throwaway scope, and that scope's drops are emitted at once. A bare tensor is left to its
-statement and receiver consumers, which release it through its handle.
+statement and receiver consumers, which release it through its handle. A `string` position counts
+when the expression proves the temporary allocated it (`armed_temporary_positions`, the same
+`collect_armed_positions` a binding arms from): its flag is armed in the throwaway scope, and a
+temporary held to its statement's end holds each such position as a `HeapString` of its own, before
+the whole, so a `drop` still reads them.
 
 A temporary something may still read through a borrow lives to the end of its statement:
 a receiver built for a `&self` call and the operand of a `&` passed to a call. `hold_to_statement_end`
@@ -1453,7 +1457,12 @@ releases it. `codegen_stmt` opens a mark on `statement_temporaries` and
 condition is a statement of its own on each pass.
 When the field read owns something it is moved out instead (`drop_temporary_except`): the held
 flags under that field are cleared first, so the reader keeps it and the rest is released. A
-struct with its own `Drop` impl is left whole there, since its destructor reads every field.
+`string` field always leaves with its reader, and the reader owns it exactly when the temporary
+armed that position: `collect_armed_positions` follows a field chain down from a fresh root
+(`make().inner.name`, `val r = make().inner`), and `produces_owned_string` asks it, so the reader
+releases it once. A struct with its own `Drop` impl is left whole when a holder or typed owner is
+moved out, since its destructor reads every field; a `string` field read off one leaves the
+destructor to run on the rest.
 Inside a `pool` it does nothing.
 
 Every lookup of a binding's drop entry goes through `live_drop_entry`, which matches the entry's
@@ -1599,16 +1608,21 @@ the old table through the wrapper.
 this half exactly as `drop_types` gates the Drop ABI: while it is empty no registry global, no
 helper, and no sweep call is emitted, and a pool's exit stays the single store above.
 
-Inside a pool body, `codegen_var_decl` sends a binding of a `PoolAware` struct to
-`register_pool_aware` INSTEAD of `register_local_drop`, so the type's `Drop` does not also run:
-the sweep replaces it. That emits the type's own `{T}__register_with_pool(self, handle)`
-(a `&self` receiver, so by value) and then `__neuro_pool_register`. `PoolHandle` is a stack slot
-holding the innermost `pool_marks` entry, which no program can read. An initializer that
-merely MOVES an already-registered binding takes `transfer_pool_registration` instead, which pushes
-the list entry without re-running the constructor hook.
+Inside a pool body, `codegen_var_decl` gives a binding of a `PoolAware` struct its storage and
+drop flag inside its own registration cell (`pool_registration_slot`, which calls
+`__neuro_pool_register(bulk_release, size)`) INSTEAD of a stack slot, and `bind_pool_registered`
+registers it in place of `register_local_drop`, so the type's `Drop` does not also run: the sweep
+replaces it. A cell per evaluation is what lets a loop register one value per iteration; a shared
+slot and flag made the sweep see the last value through every cell and release it once. For a
+constructed value it first emits the type's own `{T}__register_with_pool(self, handle)` (a `&self`
+receiver, so by value). `PoolHandle` is a stack slot holding the innermost `pool_marks` entry,
+which no program can read. An initializer that merely MOVES an already-registered binding gets a
+cell of its own without re-running the constructor hook. When the allocator fails the binding
+falls back to a stack slot and is not registered.
 
 The list is a single `__neuro_pool_head` global of `{ next, instance, bulk_release, flag }` cells
-bump-allocated from the arena itself, pushed at the head. `codegen_pool_expr` reads the head on
+bump-allocated from the arena itself, pushed at the head; a binding's cell carries its flag and
+instance after those four fields, and `instance` and `flag` point at them. `codegen_pool_expr` reads the head on
 entry and hands it to `__neuro_pool_sweep` as a stop marker, so a nested block releases its own
 registrations and leaves the enclosing block's alone. The sweep walks the list forward, which IS
 reverse registration order, unlinks each cell before calling its `bulk_release(&mut self)` thunk

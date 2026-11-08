@@ -771,3 +771,48 @@ func main() -> i32 {{
         .expect("compile/run failed");
     assert_eq!(exit, 0);
 }
+
+/// A struct temporary whose only owners are `string` fields releases the buffers its
+/// construction allocated: read for a field, lent as `&self` or `&`, or discarded. A field
+/// read off it, directly or through a field, leaves with the reader, which releases it once.
+#[test]
+fn regression_a_temporary_releases_the_string_fields_it_owns() {
+    let source = r#"
+struct Run { name: string }
+struct D { name: string, n: i32 }
+impl Drop for D { func drop(&mut self) { println("drop {self.name}") } }
+struct Mix { v: Vec<i32>, name: string }
+struct Outer { inner: Run, tag: string }
+
+impl Run {
+    func n(&self) -> i32 { self.name.len() as i32 }
+}
+
+func mk(s: &Run) -> Run { Run { name: "{s.name}'" } }
+func mkd(i: i32) -> D { D { name: "d{i}", n: i } }
+func mkm(i: i32) -> Mix { Mix { v: Vec::new(), name: "m{i}" } }
+func len_of(r: &Run) -> i32 { r.name.len() as i32 }
+func mko(i: i32) -> Outer { Outer { inner: Run { name: "i{i}" }, tag: "t{i}" } }
+
+func main() -> i32 {
+    val a = Run { name: "ab" }
+    mut t = 0
+    for i in 0..3 {
+        mk(&a)
+        println("{mk(&a).name}")
+        t = t + len_of(&mk(&a)) + mk(&a).n() + mk(&a).name.len() as i32
+        val s = mkd(i).name
+        t = t + s.len() as i32 + mkm(i).name.len() as i32
+        val r = mko(i).inner
+        t = t + mko(i).inner.name.len() as i32 + r.name.len() as i32
+    }
+    t
+}
+"#;
+    let test = CompileTest::new();
+    // Each round: 3 + 3 + 3 for "ab'", 2 for "d{i}", 2 for "m{i}", 2 + 2 for "i{i}".
+    assert_eq!(
+        test.run_leak_checked("string_field_temporary.nr", source),
+        51
+    );
+}

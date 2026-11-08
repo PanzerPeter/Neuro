@@ -148,7 +148,7 @@ fn a_pool_sweeps_its_registrations_before_reclaiming_the_arena() {
     let ir = module_ir(&source, OptimizationLevelSetting::O0);
     let body = function_body(&ir, "main");
 
-    let registrations = body.matches("call void @__neuro_pool_register").count();
+    let registrations = body.matches("@__neuro_pool_register(").count();
     assert_eq!(
         registrations, 2,
         "one registration per owned value:\n{body}"

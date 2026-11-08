@@ -10,6 +10,31 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.37.2] - 2026-11-08
+
+### Fixed
+
+- A `break` value now carries its borrows to whatever holds the loop's value.
+  `val r = loop { break &s }` left `r` holding nothing, so `s` could be moved while `r` still read
+  it (BUG-151). A `break` that borrows a binding its own loop declares is refused as
+  `'x' does not live long enough`. Such a program used to compile and read freed memory.
+- A `&mut` moves instead of copying. `val b = a; val c = a` gave two live exclusive borrows of one
+  value, and a `@derive(Copy)` struct holding a `&mut` copied the same way (BUG-149). A reference
+  parameter reborrows a `&mut` argument for the call, so passing one binding to several calls still
+  works. A `@derive(Clone)` on a struct holding a `&mut` now says the field is an exclusive borrow.
+- Each iteration of a loop inside a `pool` releases its own `PoolAware` value. Every registration
+  pointed at the binding's one stack slot and flag, so the sweep released only the last value
+  (BUG-146). A registered binding now lives in its registration cell, one per evaluation.
+- A temporary struct releases the `string` fields its construction allocated: when it is
+  discarded, lent as `&self` or `&`, or read for a field, directly or through another field
+  (`mk().inner.name`, `val r = mk().inner`). Only a struct holding a typed owner was released
+  before, so a struct whose only owners are `string`s leaked them (BUG-150).
+
+### Tests
+
+- `map_iteration`'s hashed-walk test reduces its result in the program. It relied on the exit code
+  being truncated to its low byte, which Windows does not do.
+
 ## [5.37.1] - 2026-11-08
 
 ### Fixed

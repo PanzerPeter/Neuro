@@ -175,12 +175,16 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map_err(|e| CodegenError::LlvmError(format!("failed to read field: {}", e)))?;
             // A temporary only read from is destroyed once the field is copied out. A
             // field that owns something is moved out instead, and the rest of the
-            // temporary is destroyed around it.
+            // temporary is destroyed around it. A `string` field always leaves with the
+            // reader, which owns it exactly when the temporary did
+            // (`produces_owned_string`).
             let field_owns = self
                 .struct_defs
                 .get(struct_name)
                 .and_then(|def| def.get(idx))
-                .is_some_and(|(_, ty)| self.drop_target_of(ty).is_some());
+                .is_some_and(|(_, ty)| {
+                    matches!(ty, Type::String) || self.drop_target_of(ty).is_some()
+                });
             let moved = field_owns.then_some(field_name);
             self.drop_temporary_except(object, aggregate, moved)?;
             return Ok(field);

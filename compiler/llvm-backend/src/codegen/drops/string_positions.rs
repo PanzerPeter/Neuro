@@ -509,6 +509,20 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::NewtypeConstruct { value: inner, .. } => {
                 self.collect_armed_positions(inner, path, out)
             }
+            // A field read off a fresh holder leaves with its reader, positions and all
+            // (`drop_temporary_except` clears them in the temporary), so the reader owns
+            // what the holder's construction armed below that field.
+            HirExprKind::FieldAccess { object, field } => {
+                let mut holder = Vec::new();
+                self.collect_armed_positions(object, &mut Vec::new(), &mut holder);
+                for position in holder {
+                    if let Some((head, below)) = position.split_first()
+                        && head == field
+                    {
+                        out.push(path.iter().chain(below).cloned().collect());
+                    }
+                }
+            }
             // A value taken out of a collection slot owns every `string` position, as
             // the slot did.
             HirExprKind::Call { callee, .. } if takes_vec_element(callee) => {

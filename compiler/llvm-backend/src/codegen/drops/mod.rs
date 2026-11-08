@@ -191,13 +191,19 @@ impl<'ctx> CodegenContext<'ctx> {
         moved: Option<&str>,
     ) -> CodegenResult<()> {
         let ty = Type::from_hir(&expr.ty);
-        if !is_fresh_value(expr) || self.pool_depth > 0 || !self.temporary_drops_its_owners(&ty) {
+        if !is_fresh_value(expr) || self.pool_depth > 0 || self.current_block_terminated() {
             return Ok(());
         }
-        if self.current_block_terminated() {
+        let armed = self.armed_temporary_positions(expr);
+        if !self.temporary_drops_its_owners(&ty) && armed.is_empty() {
             return Ok(());
         }
-        if moved.is_some() && matches!(self.drop_target_of(&ty), Some(DropTarget::UserDrop(_))) {
+        let moves_an_owner = moved.is_some_and(|field| {
+            self.held_positions(&ty)
+                .iter()
+                .any(|(name, field_ty)| name == field && self.drop_target_of(field_ty).is_some())
+        });
+        if moves_an_owner && matches!(self.drop_target_of(&ty), Some(DropTarget::UserDrop(_))) {
             return Ok(());
         }
         let slot = self.entry_alloca(value.get_type(), "unbound.tmp")?;
@@ -205,6 +211,25 @@ impl<'ctx> CodegenContext<'ctx> {
         let depth = self.drop_scopes.len();
         self.push_drop_scope();
         self.register_owned_binding(UNBOUND_TEMPORARY, slot, &ty)?;
+        // The scope pushed above holds the temporary's entry alone.
+        let armed_flags: Vec<PointerValue<'ctx>> = self
+            .drop_scopes
+            .last()
+            .and_then(|scope| scope.last())
+            .map(|entry| {
+                entry
+                    .held
+                    .iter()
+                    .filter(|held| matches!(held.target, DropTarget::HeapString))
+                    .filter(|held| armed.contains(&held.path))
+                    .map(|held| held.flag_ptr)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let one = self.context.bool_type().const_int(1, false);
+        for flag_ptr in armed_flags {
+            self.builder.build_store(flag_ptr, one)?;
+        }
         if let Some(field) = moved {
             // The scope pushed above holds the temporary's entry alone; it has no binding
             // for `live_drop_entry` to resolve.
@@ -241,10 +266,52 @@ impl<'ctx> CodegenContext<'ctx> {
         slot: PointerValue<'ctx>,
     ) -> CodegenResult<()> {
         let ty = Type::from_hir(&expr.ty);
-        if !is_fresh_value(expr) || self.pool_depth > 0 || !self.temporary_drops_its_owners(&ty) {
+        if !is_fresh_value(expr) || self.pool_depth > 0 {
+            return Ok(());
+        }
+        // Held before the whole, so the statement's end, which releases in reverse,
+        // runs a `drop` that may read them while they still hold their bytes.
+        for path in self.armed_temporary_positions(expr) {
+            let position_ptr = self.position_ptr(slot, &ty, &path)?;
+            self.hold_to_statement_end(position_ptr, DropTarget::HeapString)?;
+        }
+        if !self.temporary_drops_its_owners(&ty) {
             return Ok(());
         }
         self.hold_to_statement_end(slot, DropTarget::Captured(ty))
+    }
+
+    /// The `string` positions of the fresh value `expr` that its construction provably
+    /// allocated into, which the temporary owns. A typed owner proves itself through the
+    /// type; these are the positions only the expression can prove.
+    pub(super) fn armed_temporary_positions(&self, expr: &HirExpr) -> Vec<Vec<String>> {
+        let mut armed = Vec::new();
+        self.collect_armed_positions(expr, &mut Vec::new(), &mut armed);
+        armed
+    }
+
+    /// Address of the position `path` names inside the value of `ty` at `storage_ptr`.
+    fn position_ptr(
+        &self,
+        storage_ptr: PointerValue<'ctx>,
+        ty: &Type,
+        path: &[String],
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let mut ptr = storage_ptr;
+        let mut holder = ty.clone();
+        for segment in path {
+            let positions = self.held_positions(&holder);
+            let Some(index) = positions.iter().position(|(name, _)| name == segment) else {
+                return Err(CodegenError::InternalError(format!(
+                    "a held position '{}' that its holder does not have",
+                    segment
+                )));
+            };
+            let holder_llvm = self.get_any_llvm_type(&holder)?;
+            ptr = self.aggregate_position_ptr(holder_llvm, ptr, index as u32, "held.str.ptr")?;
+            holder = positions[index].1.clone();
+        }
+        Ok(ptr)
     }
 
     /// Register `target` at `slot` for release when the current statement ends, or at any
