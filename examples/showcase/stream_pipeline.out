@@ -12,6 +12,10 @@ kept 27
 kept 3 of 6, totalling 87
 sample remainders mod 5 total 13
 inline pipeline totals 87, matching 87
+value pipeline totals 87, matching 87
+boosted 0: 24
+boosted 1: 36
+boosted 2: 27
 rank  0 flagged  11
 rank  1 flagged  15
 rank  2 flagged  19

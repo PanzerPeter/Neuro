@@ -463,6 +463,7 @@ mod expressions;
 mod gpu;
 mod grad;
 mod iteration;
+mod iterator_adapters;
 mod kernel;
 mod literals;
 mod loop_adapters;

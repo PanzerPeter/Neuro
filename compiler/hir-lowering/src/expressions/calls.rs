@@ -1070,6 +1070,20 @@ impl Lowerer {
             }
             _ => None,
         };
+        // An iterator with no method of the name is given the prelude adapter, as the
+        // checker types it.
+        if let Some(name) = &impl_receiver
+            && crate::iterator_adapters::is_iterator_adapter(method)
+            && !self
+                .impl_methods
+                .get(name)
+                .is_some_and(|m| m.contains_key(method))
+            && self
+                .trait_impls
+                .contains(&(crate::iteration::ITERATOR_TRAIT.to_string(), name.clone()))
+        {
+            return self.lower_iterator_adapter(object, method, args, span);
+        }
         let (lowered_args, result_ty) = if let Some(struct_name) = impl_receiver {
             if let Some(mangled) = self
                 .impl_methods

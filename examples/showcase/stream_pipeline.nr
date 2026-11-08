@@ -1,9 +1,10 @@
 // Showcase: the iteration protocol carrying a small stream pipeline. Integration example:
-// `IntoIterator` and `Iterator` with associated types, `.map` and `.filter` head adapters,
-// a bound `S: Iterator<Item = i32>`, generic structs, closures in a struct field, `|>` and
-// `>>` over every function-value spelling, `Option`, and `for`-in. A source, a transform
-// and a filter are three types, each an `Iterator`, and one `for` head drives the chain one
-// element at a time. No intermediate array is built.
+// `IntoIterator` and `Iterator` with associated types, `.map` and `.filter` both as head
+// adapters and as adapter values a function returns, a bound `S: Iterator<Item = i32>`,
+// generic structs, closures in a struct field, `|>` and `>>` over every function-value
+// spelling, `Option`, and `for`-in. A source, a transform and a filter are three types,
+// each an `Iterator`, and one `for` head drives the chain one element at a time. No
+// intermediate array is built.
 
 // A container. It holds no cursor, so it may be walked more than once: each `for`
 // head asks it for a fresh iterator through `into_iter()`.
@@ -136,6 +137,23 @@ func describe(total: i32) -> string {
     "piped total {total}"
 }
 
+// `Scaled` + `Above` again, built by the adapter methods instead of two hand-written types.
+// On an iterator value `.map` and `.filter` return the prelude's `Map` and `Filter`, so the
+// whole chain is a value with a type a signature can name. The closures copy `factor` and
+// `floor` in, so the returned chain owns everything it reads.
+func boosted(readings: Readings, factor: i32, floor: i32) -> Filter<Map<ReadingsIter, i32, i32>, i32> {
+    readings.into_iter().map(|sample| sample * factor).filter(|scaled| *scaled > floor)
+}
+
+// Any stream of `i32`, an adapter chain included, consumed through the bound alone.
+func stream_total<S: Iterator<Item = i32>>(stream: S) -> i32 {
+    mut total = 0
+    for value in stream {
+        total = total + value
+    }
+    total
+}
+
 func keep<T>(value: T) -> T {
     value
 }
@@ -194,8 +212,8 @@ func main() -> i32 {
     }
     println("sample remainders mod 5 total {remainders}")
 
-    // The same pipeline written with the compiler's own adapters. `.map` and
-    // `.filter` are part of the `for` head rather than values, so one head
+    // The same pipeline written with the compiler's own adapters. In a `for` head
+    // `.map` and `.filter` fold into the loop instead of building values, so one head
     // expresses what `Scaled` + `Above` needed two types for, and the head they
     // decorate is the very same `IntoIterator` container.
     mut inline_total = 0
@@ -205,6 +223,16 @@ func main() -> i32 {
         inline_total = inline_total + value
     }
     println("inline pipeline totals {inline_total}, matching {kept_total}")
+
+    // The pipeline as a value: built by one function, driven by another that knows only
+    // that it yields `i32`. Bound, `.enumerate()` is a value too, yielding position-value
+    // pairs; written straight into a `for` head it would be the head form instead.
+    val value_total = stream_total(boosted(readings, 3, 20))
+    println("value pipeline totals {value_total}, matching {kept_total}")
+    val ranked = boosted(readings, 3, 20).enumerate()
+    for entry in ranked {
+        println("boosted {entry.0}: {entry.1}")
+    }
 
     // An adapted head over an array, enumerated. The position counts what the
     // chain YIELDED, so it stays dense however much the filter drops.

@@ -403,6 +403,13 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   counted loop's `index`: that index counts SOURCE steps, so a filtered chain would leave gaps in
   it. The cursor is read and advanced after the filters and before the user's statements, for the
   same reason the protocol path's `__iter_pos_N` is.
+- **Adapter values** (`iterator_adapters.rs`). Outside a `for` head, `lower_method_call` hands
+  `.map(f)` / `.filter(p)` / `.enumerate()` on a struct that implements `Iterator` and declares
+  no method of the name to `lower_iterator_adapter`, which builds a `StructLiteral` of the
+  prelude's `Map` / `Filter` / `Enumerate` instance (`instantiate_generic_struct` at the
+  receiver, its `protocol_item_type` and the function's result) holding the receiver and the
+  function, lowered through `lower_function_arg` with the element as its hint. No backend sees
+  an adapter: the instance's own `impl Iterator` drives it through the protocol path above.
 - **Traits.** The parser has already injected each trait's default methods into the matching
   `impl Trait for Type` blocks, so trait impls and their inherited defaults lower through the
   ordinary inherent-impl path, and a trait-bounded generic monomorphizes to concrete dispatch with

@@ -17,6 +17,7 @@ mod grad_tests;
 mod held_borrow_tests;
 mod intrinsic_tests;
 mod iteration_tests;
+mod iterator_adapter_tests;
 mod kernel_tests;
 mod literal_tests;
 mod loop_adapter_tests;

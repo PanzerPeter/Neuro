@@ -966,6 +966,11 @@ impl TypeChecker {
                             self.check_call_args(args, &[rhs], *span);
                             return Some(Type::Bool);
                         }
+                        if let Some(ty) =
+                            self.check_iterator_adapter(object, &obj_ty, &field.name, args, *span)
+                        {
+                            return Some(ty);
+                        }
                         self.record_error(TypeError::MethodNotFound {
                             struct_name: param.clone(),
                             method_name: field.name.clone(),
@@ -1057,6 +1062,11 @@ impl TypeChecker {
                             self.check_supplied_trait_method(&obj_ty, &field.name, args, *span)
                         {
                             return Some(ret);
+                        }
+                        if let Some(ty) =
+                            self.check_iterator_adapter(object, &obj_ty, &field.name, args, *span)
+                        {
+                            return Some(ty);
                         }
                         self.record_error(TypeError::MethodNotFound {
                             struct_name,

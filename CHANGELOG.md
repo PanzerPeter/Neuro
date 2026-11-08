@@ -10,6 +10,25 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.35.0] - 2026-11-08
+
+### Added
+
+- `.map(f)`, `.filter(p)` and `.enumerate()` on an iterator now return values: the standard
+  library's `Map`, `Filter` and `Enumerate`. A pipeline can be bound, passed to a function and
+  returned under its written type, for example
+  `-> Map<Filter<Count, i32>, i32, i32>`. It is itself an iterator, so adapters chain and a `for`
+  loop drives it. The function moves into the adapter: a closure that writes what it captured can
+  drive one, and a closure that can run only once is refused. `.filter`'s predicate takes a borrow
+  of each element. `.enumerate()` yields `(position, value)` pairs. A type parameter bounded by
+  `Iterator<Item = T>` takes the adapters too. Written straight into a `for` head, the three are
+  still the head forms folded into the loop, over arrays and ranges as before.
+
+### Fixed
+
+- A type parameter bounded by `Iterator<Item = T>` is now a `for` head inside the generic
+  function, by value or through `&mut`. It used to be refused as not iterable.
+
 ## [5.34.1] - 2026-11-08
 
 ### Changed

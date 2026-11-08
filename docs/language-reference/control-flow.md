@@ -311,7 +311,7 @@ for (rank, value) in [10, 3, 20, 4, 30].filter(|x: i32| -> bool { x >= 10 }).enu
 
 A `.filter` predicate must return `bool` and a `.map` function must return a value; a function that does not take the element type is rejected where the head is written.
 
-**Head form, not a value.** `.map` / `.filter` are part of the `for` head, as `.enumerate()` is: `val m = xs.map(f)` is not a method call that resolves. Write the adapter type (see [Adapter types](#the-iteration-protocol)) when the pipeline has to be stored or returned.
+**Head form.** Written in a `for` head, `.map` / `.filter` fold into the loop, as `.enumerate()` does, and build no value. On an iterator outside a `for` head the same calls return an adapter value that can be stored or returned (see [Adapter values](#the-iteration-protocol)). The head form's predicate is handed the element itself, while an adapter value's takes a borrow of it; an unannotated closure reads the same either way.
 
 ### The Iteration Protocol
 
@@ -405,6 +405,26 @@ func double_down() {
 ```
 
 Nothing between the source and the loop is materialized: each step pulls one element through the whole chain.
+
+**Adapter values.** On an iterator, `.map(f)`, `.filter(p)` and `.enumerate()` do that wrapping themselves. They return the prelude adapters `Map<I, A, B>`, `Filter<I, A>` and `Enumerate<I, A>`, where `I` is the iterator, `A` its `Item` and `B` what `f` returns. The result is an ordinary value and an iterator itself: it chains, binds, and is passed and returned under its written type:
+
+```neuro
+func evens_doubled(start: i32) -> Map<Filter<Countdown, i32>, i32, i32> {
+    Countdown { remaining: start }.filter(|n| n % 2 == 0).map(|n| n * 2)
+}
+
+func show_evens() {
+    for n in evens_doubled(6) {
+        println("{n}")      // 8, 4, 0
+    }
+}
+```
+
+- The call consumes the iterator and moves the function in. A closure that writes what it captured can drive an adapter; one that can run only once is refused, since the adapter calls it per element.
+- `.filter`'s predicate takes `&A`, a borrow of the element it may keep. Operators read through it, so `|n| n % 2 == 0` needs no `*`.
+- `.enumerate()` yields `(u64, A)` pairs, counting from zero what it yielded. Bind the adapter and read `pair.0` and `pair.1`: a `(i, x)` pattern takes only the head form.
+- A type parameter bounded by `Iterator<Item = T>` takes the adapters too, and is a `for` head by that bound.
+- A type's own method of the same name wins. An array, a `Vec` or a range is not an iterator value, so outside a `for` head the adapters do not apply to it.
 
 **What is not covered.** The built-in heads (a range, a fixed-size array, a `Vec<T>`, a borrowed slice) do **not** go through the protocol. They compile to counted loops directly, which is a lowering choice, not a difference in meaning.
 

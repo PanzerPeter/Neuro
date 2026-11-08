@@ -29,7 +29,7 @@ use crate::{Lowerer, LoweringError};
 /// The prelude trait a container implements to produce an iterator.
 const INTO_ITERATOR_TRAIT: &str = "IntoIterator";
 /// The prelude trait an iterator itself implements.
-const ITERATOR_TRAIT: &str = "Iterator";
+pub(crate) const ITERATOR_TRAIT: &str = "Iterator";
 /// `IntoIterator`'s producing method.
 const INTO_ITER_METHOD: &str = "into_iter";
 /// `Iterator`'s stepping method.
@@ -339,7 +339,7 @@ impl Lowerer {
     /// Reading the payload rather than the impl's `type Item` binding is deliberate:
     /// the payload is the type the backend will actually decode out of the enum, so the
     /// binding and the storage cannot drift apart.
-    fn protocol_item_type(&self, iter_ty: &HirType) -> Result<HirType, LoweringError> {
+    pub(crate) fn protocol_item_type(&self, iter_ty: &HirType) -> Result<HirType, LoweringError> {
         let next_ret = self.next_return_type(iter_ty)?;
         let (_, payload) = self.success_variant(&next_ret)?;
         Ok(payload)

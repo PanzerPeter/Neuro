@@ -143,8 +143,8 @@ which types implement them with no impl (the scalars, `string`, a struct carryin
 Dropping one item takes with it every prelude declaration written against it. `Chars::next`
 returns `Option<char>`, so a program declaring its own `Option` would leave the prelude's own
 body compiled against a type that is no longer there. `PRELUDE_DEPENDENCIES` records those
-edges (`Chars` needs `Option` and `Iterator`; `PoolAware` needs `PoolHandle`), and
-`dropped_declarations` closes over them.
+edges (`Chars` and the adapters `Map`, `Filter` and `Enumerate` need `Option` and
+`Iterator`; `PoolAware` needs `PoolHandle`), and `dropped_declarations` closes over them.
 `is_dropped` also drops an `impl` block extending a displaced type: those methods belong to the
 prelude's type, not to whatever the program put in its place. A method naming another prelude
 type is withdrawn alone (`PRELUDE_METHOD_DEPENDENCIES`, applied by `withdraw_methods`):

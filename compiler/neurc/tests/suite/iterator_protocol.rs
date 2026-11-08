@@ -367,3 +367,67 @@ func main() -> i32 {
         "the diagnostic must name the protocol; got {error}"
     );
 }
+
+/// A type parameter bounded by `Iterator<Item = T>` is an iterator inside the generic body:
+/// by value it is consumed into the loop, and `&mut it` drives it in place.
+#[test]
+fn a_bounded_type_parameter_is_a_for_head() {
+    let source = r#"
+struct Count { n: i32, limit: i32 }
+
+impl Iterator for Count {
+    type Item = i32
+    func next(&mut self) -> Option<i32> {
+        if self.n >= self.limit {
+            return Option::None
+        }
+        self.n = self.n + 1
+        Option::Some(self.n)
+    }
+}
+
+func sum<I: Iterator<Item = i32>>(it: I) -> i32 {
+    mut total = 0
+    for v in it {
+        total += v
+    }
+    total
+}
+
+func first_two<I: Iterator<Item = i32>>(it: &mut I) -> i32 {
+    mut total = 0
+    for v in it {
+        total += v
+        if total > 2 {
+            break
+        }
+    }
+    total
+}
+
+func main() -> i32 {
+    mut c = Count { n: 0, limit: 5 }
+    val head = first_two(&mut c)
+    head * 10 + sum(c)
+}
+"#;
+    // 1 + 2 taken in place, then 3 + 4 + 5.
+    crate::compile_harness::assert_exit("iter_bounded_param.nr", source, 42);
+}
+
+/// A bound that leaves `Item` open gives the loop nothing to bind, which is named.
+#[test]
+fn a_bound_without_an_item_is_not_enough_for_a_for_head() {
+    let source = r#"
+func drain<I: Iterator>(it: I) {
+    for v in it {}
+}
+
+func main() -> i32 { 0 }
+"#;
+    crate::compile_harness::assert_check_error(
+        "iter_open_item.nr",
+        source,
+        "write `Iterator<Item = T>` to say what it is",
+    );
+}

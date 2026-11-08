@@ -5,6 +5,107 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-154: a `string` binding returned inside an `Option` is freed by the function returning it
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend`, string ownership at a function's exit
+- **Severity**: critical. The caller reads freed memory
+
+**Minimal repro**
+
+```neuro
+func pick(s: string) -> Option<string> {
+    val w = "x{s}"
+    Option::Some(w)
+}
+
+func main() -> i32 {
+    match pick("ab") {
+        Option::Some(a) => println("{a}"),
+        Option::None => {}
+    }
+    0
+}
+```
+
+Expected: `xab`, and no memory error under AddressSanitizer. Observed: `pick` releases `w` on the way
+out although `Option::Some(w)` moved it into the result, so `main` prints from freed memory: a
+heap-use-after-free under `LD_PRELOAD` libasan. `val w = v[0].clone()` does the same. An `Iterator`
+over owned strings whose `next` binds the element before returning `Option::Some(w)` hits it on
+every step.
+
+**Workaround**: build the payload in place, `Option::Some("x{s}")`, which leaks (BUG-082) instead.
+
+**Fix sketch**: mark a binding moved into an enum constructor's payload, as a struct literal's field
+already is, so the exit release skips it.
+
+## BUG-153: a type parameter no field names lowers to `void` in its impl's methods
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering` (struct literal instance inference)
+- **Severity**: major. A well-typed program fails to compile
+
+**Minimal repro**
+
+```neuro
+struct Tag<T> { n: i32 }
+
+impl<T> Tag<T> {
+    func get(&self) -> Option<T> { Option::None }
+}
+
+func main() -> i32 {
+    val t: Tag<i32> = Tag { n: 3 }
+    match t.get() {
+        Option::Some(v) => v,
+        Option::None => t.n
+    }
+}
+```
+
+Expected: exit code 3. Observed: the checker accepts it and code generation fails with ``unsupported
+type: void type cannot be used as a value``. Lowering infers a struct literal's type arguments from its
+field values only, so `T`, which no field names, is never bound, and the annotation does not reach it.
+
+**Workaround**: give the parameter a field, or build the value where the compiler fixes its type
+arguments, as the prelude's `Enumerate` is built by `.enumerate()`.
+
+**Fix sketch**: seed the literal's instance from the expected type when lowering has one, as the
+checker does.
+
+## BUG-152: a method returning its own type nested in itself exhausts the checker's memory
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`instantiate_impls_for`)
+- **Severity**: major. The compiler runs until it is killed
+
+**Minimal repro**
+
+```neuro
+struct W<I> { inner: I }
+
+impl<I> W<I> {
+    func wrap(self) -> W<W<I>> { W { inner: self } }
+}
+
+func main() -> i32 {
+    val w = W { inner: 3 }
+    w.wrap().inner.inner
+}
+```
+
+Expected: exit code 3. Observed: `neurc check` allocates until the memory cap aborts it. Every instance
+registers the signature of each method of its generic impls, and registering `wrap` for `W<i32>`
+builds `W<W<i32>>`, whose own `wrap` builds `W<W<W<i32>>>`, with no end. A trait's default method
+returning `Wrapper<Self>` does the same, which is why the prelude's iterator adapters are not default
+methods on `Iterator`. Lowering has a depth guard (`InstantiationTooDeep`); the checker has none.
+
+**Workaround**: none that keeps the method; a free function `func wrap<I>(w: W<I>) -> W<W<I>>`
+instantiates per call and terminates.
+
+**Fix sketch**: register an instance's method signatures when a call first looks the method up, not
+when the instance is built, in the checker and in lowering's `register_instance_methods` alike.
+
 ## BUG-151: a `break` value loses the borrow it carries
 
 - **Status**: open, confirmed

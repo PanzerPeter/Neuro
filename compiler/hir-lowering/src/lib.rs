@@ -37,6 +37,7 @@ mod elementwise_math;
 mod expressions;
 mod items;
 mod iteration;
+mod iterator_adapters;
 mod loop_adapters;
 mod operator_traits;
 mod statements;

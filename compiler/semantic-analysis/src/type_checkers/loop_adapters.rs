@@ -14,9 +14,9 @@ use crate::errors::TypeError;
 use crate::types::Type;
 
 /// What `.filter()`'s predicate must answer, named for the diagnostic.
-const FILTER_RESULT: &str = "bool";
+pub(crate) const FILTER_RESULT: &str = "bool";
 /// What `.map()`'s function must answer, named for the diagnostic.
-const MAP_RESULT: &str = "a value";
+pub(crate) const MAP_RESULT: &str = "a value";
 /// The loop-scoped name an adapter chain's closure literals hold their borrows under.
 /// `$` cannot appear in a source identifier, so no binding can collide with it.
 const ADAPTER_HOLDER: &str = "$adapters";

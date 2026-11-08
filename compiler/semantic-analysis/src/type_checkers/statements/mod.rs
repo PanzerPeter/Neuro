@@ -531,9 +531,14 @@ impl TypeChecker {
         iterable_ty: &Type,
         head: &Type,
     ) -> Option<Type> {
-        let item = match iterable_ty {
-            Type::Reference { mutable: true, .. } => self.iterator_item(head),
-            Type::Reference { .. } => None,
+        // A type parameter iterates by its `Iterator<Item = T>` bound, which also makes
+        // `&mut it` drive it in place.
+        let item = match (iterable_ty, head) {
+            (Type::Reference { mutable: false, .. }, _) => None,
+            (_, Type::Generic(param)) => {
+                self.bound_iterator_item(param, super::iteration::NEXT_METHOD, iterable.span())
+            }
+            (Type::Reference { .. }, _) => self.iterator_item(head),
             _ => self.iteration_item(head),
         };
         if let Some(item) = item {

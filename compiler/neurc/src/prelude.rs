@@ -94,6 +94,9 @@ impl Prelude {
 /// needs. Shadowing a needed name takes the dependent declaration down with it.
 const PRELUDE_DEPENDENCIES: &[(&str, &[&str])] = &[
     ("Chars", &["Option", "Iterator"]),
+    ("Map", &["Option", "Iterator"]),
+    ("Filter", &["Option", "Iterator"]),
+    ("Enumerate", &["Option", "Iterator"]),
     ("PoolAware", &["PoolHandle"]),
 ];
 

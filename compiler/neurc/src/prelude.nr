@@ -229,6 +229,73 @@ export trait IntoIterator {
     func into_iter(self) -> Self::Iter
 }
 
+// The adapters `.map(f)`, `.filter(p)` and `.enumerate()` build over any `Iterator`.
+//
+// The compiler builds these literals itself when an iterator has no method of that name, so
+// the fields stay private. They are not default methods on `Iterator`: a default method
+// returning `Filter<Self, ...>` would be registered for `Filter<Self, ...>` too, and that
+// registration has no end. Each type carries its element type `A` as a parameter, because a
+// field cannot name the associated type `I::Item`.
+//
+// The function is `mut`, so a closure that writes what it captured can drive the adapter.
+// It is called through `&mut self` and never through a shared borrow.
+export struct Map<I, A, B> {
+    inner: I,
+    f: mut (A) -> B
+}
+
+impl<I: Iterator<Item = A>, A, B> Iterator for Map<I, A, B> {
+    type Item = B
+    func next(&mut self) -> Option<B> {
+        match self.inner.next() {
+            Option::Some(value) => Option::Some((self.f)(value)),
+            Option::None => Option::None
+        }
+    }
+}
+
+// The predicate takes a borrow: the element it accepts is still the one `next` returns.
+export struct Filter<I, A> {
+    inner: I,
+    keep: mut (&A) -> bool
+}
+
+impl<I: Iterator<Item = A>, A> Iterator for Filter<I, A> {
+    type Item = A
+    func next(&mut self) -> Option<A> {
+        loop {
+            match self.inner.next() {
+                Option::Some(value) => {
+                    if (self.keep)(&value) {
+                        break Option::Some(value)
+                    }
+                }
+                Option::None => { break Option::None }
+            }
+        }
+    }
+}
+
+// The position counts what this adapter has yielded, from zero.
+export struct Enumerate<I, A> {
+    inner: I,
+    position: u64
+}
+
+impl<I: Iterator<Item = A>, A> Iterator for Enumerate<I, A> {
+    type Item = (u64, A)
+    func next(&mut self) -> Option<(u64, A)> {
+        match self.inner.next() {
+            Option::Some(value) => {
+                val at = self.position
+                self.position = self.position + 1
+                Option::Some((at, value))
+            }
+            Option::None => Option::None
+        }
+    }
+}
+
 // The iterator `string.chars()` hands out: a cursor over one borrowed string's
 // Unicode scalar values.
 //

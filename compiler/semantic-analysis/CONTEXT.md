@@ -463,6 +463,21 @@ loop.
   `bool`, and a `.map` returning `void` (both `LoopAdapterOutput`): the last because the loop
   binding would otherwise have no type the backend can represent.
 
+- **Adapter values.** `type_checkers/iterator_adapters.rs`. Outside a `for` head, `.map(f)`,
+  `.filter(p)` and `.enumerate()` on a receiver that implements `Iterator` and declares no
+  method of the name type as the prelude's `Map<I, A, B>`, `Filter<I, A>` and
+  `Enumerate<I, A>`, instantiated at the receiver `I`, its element `A` and `f`'s result `B`.
+  `check_call_expr` asks `check_iterator_adapter` just before it would report
+  `MethodNotFound`, for a struct receiver and for a type parameter, whose element comes from its
+  `Iterator<Item = T>` bound (`bound_iterator_item`; an open `Item` is
+  `UnconstrainedAssociatedType`). The receiver is consumed (`record_consumed_receiver`). The
+  function is checked against `(A) -> _`, or `(&A) -> bool` for `.filter`, and moved in: no
+  function-value slot is opened, so a scope-bound value is refused as any store of one is, and
+  `refuse_once_per_element` refuses an `FnOnce`. The loop-adapter diagnostics are reused. The
+  adapter holds what its arguments hold through the ordinary call-result walk
+  (`tail_borrow_targets`). When the program has displaced the generic struct (its own `Map`,
+  or its own `Option`, which drops the adapters with it), the call is an ordinary lookup again.
+
 ### The iteration protocol
 `type_checkers/iteration.rs`. A `Stmt::ForEach` head that is neither a collection, an array,
 nor a slice falls through to `iteration_item`, which answers what one step binds:
@@ -480,6 +495,8 @@ nor a slice falls through to `iteration_item`, which answers what one step binds
 - `&mut it` over a type with its own `impl Iterator` drives `it` in place and moves nothing; the
   Item is that impl's even when the type also implements `IntoIterator`. The loop binding holds
   the `&mut` borrow for the whole body, whatever the Item holds, so the body cannot touch `it`.
+- A type parameter iterates by its `Iterator<Item = T>` bound (`bound_iterator_item`), by value
+  or through `&mut`; monomorphization hands lowering the concrete iterator.
 - A head implementing neither trait is `TypeError::NotIterable`, which replaced the
   `NotIndexable` this arm used to reuse: iterating and indexing are no longer the same question.
 - Any other BORROW of a protocol type (`&it`, or `&c` / `&mut c` over an `IntoIterator`) is

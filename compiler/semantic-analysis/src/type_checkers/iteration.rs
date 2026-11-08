@@ -22,6 +22,8 @@ const ITERATOR_TRAIT: &str = "Iterator";
 const ITEM_ASSOC: &str = "Item";
 /// `IntoIterator`'s producing method.
 const INTO_ITER_METHOD: &str = "into_iter";
+/// The method a `for` head calls per step, named when a bound leaves its `Item` open.
+pub(crate) const NEXT_METHOD: &str = "next";
 /// The `for`-head form that drives a `Chars` iterator by byte offset.
 const CHAR_INDICES_METHOD: &str = "char_indices";
 
@@ -127,6 +129,37 @@ impl TypeChecker {
             .get(&(ITERATOR_TRAIT.to_string(), name))
             .and_then(|bindings| bindings.get(ITEM_ASSOC))
             .cloned()
+    }
+
+    /// What the type parameter `param` yields by its `Iterator<Item = T>` bound, or `None`
+    /// when no bound makes it an iterator.
+    ///
+    /// A bound that leaves `Item` open is reported against `method`, the call that needs
+    /// the element type, and answers `Unknown`.
+    pub(crate) fn bound_iterator_item(
+        &mut self,
+        param: &str,
+        method: &str,
+        span: Span,
+    ) -> Option<Type> {
+        let bound = self
+            .param_bounds(param, span)
+            .into_iter()
+            .find(|bound| bound.trait_name == ITERATOR_TRAIT)?;
+        let item = bound
+            .assoc
+            .iter()
+            .find(|(name, _)| name == ITEM_ASSOC)
+            .map(|(_, ty)| ty.clone());
+        if item.is_none() {
+            self.record_error(TypeError::UnconstrainedAssociatedType {
+                trait_name: ITERATOR_TRAIT.to_string(),
+                method: method.to_string(),
+                assoc: ITEM_ASSOC.to_string(),
+                span,
+            });
+        }
+        Some(item.unwrap_or(Type::Unknown))
     }
 
     /// The declared return type of `type_name`'s `method_name`, resolved through the
