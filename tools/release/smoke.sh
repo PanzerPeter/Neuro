@@ -7,7 +7,7 @@
 #   smoke.sh <neurc> <examples-dir>
 #
 # Release CI runs it in a container that holds a C compiler and nothing else, which is
-# what proves the tarball needs no toolchain beside `cc`. Needs only bash and coreutils.
+# what proves the tarball needs no toolchain beside `cc`. Needs only bash, coreutils and grep.
 set -uo pipefail
 
 neurc=${1:?usage: smoke.sh <neurc> <examples-dir>}
@@ -47,7 +47,9 @@ while read -r rel code marker _; do
   [ -f "$golden" ] || golden=/dev/null
   problems=()
   [ "$got" -eq "$code" ] || problems+=("exit code $got, expected $code")
-  cmp -s "$golden" "$work/stdout" || problems+=("stdout differs from ${rel%.nr}.out")
+  # Checksums, not cmp: cmp is diffutils, which a bare AlmaLinux 8 image lacks.
+  [ "$(sha256sum <"$golden")" = "$(sha256sum <"$work/stdout")" ] \
+    || problems+=("stdout differs from ${rel%.nr}.out")
   if [ ${#problems[@]} -eq 0 ]; then
     passed=$((passed + 1))
   else

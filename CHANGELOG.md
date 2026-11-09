@@ -10,6 +10,15 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.38.2] - 2026-11-09
+
+### Fixed
+
+- The release workflow's AlmaLinux 8 example gate reported every example with a pinned stdout as
+  a mismatch. Its compare step called `cmp`, which comes with diffutils, and the bare image has
+  no diffutils. It now compares SHA-256 checksums from coreutils, so the gate still needs nothing
+  beyond `gcc`.
+
 ## [5.38.1] - 2026-11-09
 
 ### Fixed
