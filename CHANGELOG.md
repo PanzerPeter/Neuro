@@ -10,6 +10,15 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.38.1] - 2026-11-09
+
+### Fixed
+
+- The release build of the prebuilt Linux `neurc` failed to link with `unable to find library
+  -lffi`: inkwell asks for libffi on every non-Windows target, and the `manylinux_2_28` build
+  image has none. The compiler never uses libffi, so inkwell's `no-libffi-linking` feature is now
+  on. Tags up to 5.38.0 carry the old setting and cannot be built by the release workflow.
+
 ## [5.38.0] - 2026-11-08
 
 ### Added
