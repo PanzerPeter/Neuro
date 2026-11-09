@@ -10,6 +10,17 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.38.3] - 2026-11-09
+
+### Fixed
+
+- Building from source against the apt.llvm.org or Homebrew LLVM failed to link with undefined
+  `ffi_*` symbols since 5.38.1. Those LLVMs use libffi but leave it out of
+  `llvm-config --system-libs`, and 5.38.1 had stopped inkwell from linking it. inkwell links
+  libffi again. The release build instead installs libffi in its build image, where the linker
+  drops it again because the release LLVM does not use it, so the prebuilt `neurc` still needs
+  no libffi.
+
 ## [5.38.2] - 2026-11-09
 
 ### Fixed

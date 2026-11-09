@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "5.38.2"
+version = "5.38.3"
 edition = "2024"
 rust-version = "1.98.1"
 authors = ["Neuro Contributors"]
@@ -47,10 +47,9 @@ logos = "0.16"
 # otherwise compile in initializers for every LLVM target (ARM, BPF, Mips, ...).
 # That fails to link against LLVM's official Windows build, which ships only a
 # subset of backends. We only ever initialize the native (x86) target.
-# no-libffi-linking: inkwell otherwise asks for libffi on every non-Windows target, even
-# against an LLVM built without it, and the release build image has none. An LLVM built
-# with libffi still gets it through llvm-sys, which reads `llvm-config --system-libs`.
-inkwell = { version = "0.11", default-features = false, features = ["llvm23-1", "target-x86", "no-libffi-linking"] }
+# inkwell links libffi on every non-Windows target. Keep it: the apt.llvm.org and Homebrew
+# LLVMs use libffi but leave it out of `llvm-config --system-libs`, so nothing else would.
+inkwell = { version = "0.11", default-features = false, features = ["llvm23-1", "target-x86"] }
 
 # MLIR Backend (Phase 1.8+)
 # Rust MLIR bindings for the tensor lowering path. melior 0.28.x is the MLIR 23

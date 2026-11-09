@@ -13,7 +13,11 @@ src=${2:?usage: build-neurc.sh <llvm-prefix> <source-dir>}
 # bindgen needs a libclang, and only for parsing the MLIR-C and TableGen C headers. The
 # image's own (AppStream) generates the same bindings for them as libclang 23, and
 # building clang into the prefix would add about an hour to a cold cache.
-dnf -q install -y clang-devel
+#
+# inkwell asks the linker for libffi whatever LLVM it builds against. The prefix is built
+# without libffi, so --as-needed drops it and the binary does not need it; the library only
+# has to exist for the link to resolve. package.sh fails the build if it ever stays.
+dnf -q install -y clang-devel libffi-devel
 
 curl -fsSL --retry 5 --retry-connrefused https://sh.rustup.rs \
   | sh -s -- -y --profile minimal --default-toolchain stable
