@@ -376,7 +376,7 @@ impl Lowerer {
         }
         Ok(HirStruct {
             name: def.name.name.clone(),
-            written_name: def.name.name.clone(),
+            written_name: written_name(&def.name.name),
             fields,
             span: def.span,
         })
@@ -595,6 +595,16 @@ impl Lowerer {
 
 /// The expression a body evaluates to: its trailing expression, or the operand of a
 /// trailing `return`. Used for return-position `impl Trait` resolution.
+/// The name a struct was declared with: its canonical name less the module path
+/// resolution put in front of it, so `{p:?}` reads `Point` wherever `Point` is declared.
+pub(crate) fn written_name(canonical: &str) -> String {
+    canonical
+        .rsplit("::")
+        .next()
+        .unwrap_or(canonical)
+        .to_string()
+}
+
 fn body_result_expr(body: &[ast_types::Stmt]) -> Option<&ast_types::Expr> {
     match body.last()? {
         ast_types::Stmt::Expr(expr) => Some(expr),

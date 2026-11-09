@@ -147,8 +147,8 @@ export func classify(n: i32) -> Level {
             r#"
 func main() -> i32 {
     match signal::classify(42) {
-        Level::High => 7,
-        Level::Low => 1
+        signal::Level::High => 7,
+        signal::Level::Low => 1
     }
 }
 "#,
@@ -202,21 +202,19 @@ fn an_item_the_module_does_not_declare_is_reported() {
 }
 
 #[test]
-fn a_name_two_modules_declare_is_reported() {
+fn a_name_two_modules_declare_is_two_items() {
     let files = [
-        ("helper.nr", "func shared(n: i32) -> i32 { n }\n"),
+        (
+            "helper.nr",
+            "export func shared(n: i32) -> i32 { n * 10 }\n",
+        ),
         (
             "main.nr",
-            "func shared(n: i32) -> i32 { n }\nfunc main() -> i32 { helper::shared(1) }\n",
+            "func shared(n: i32) -> i32 { n }\nfunc main() -> i32 { helper::shared(1) + shared(2) }\n",
         ),
     ];
 
-    let error = run_program(&files, "main.nr").expect_err("expected a module error");
-    assert!(
-        error.contains("share one namespace"),
-        "unexpected error: {}",
-        error
-    );
+    assert_eq!(run_program(&files, "main.nr"), Ok(12));
 }
 
 #[test]

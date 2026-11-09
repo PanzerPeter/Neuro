@@ -5,16 +5,18 @@
 //! (`math::sqrt`, `utils::io::read`, `geometry::Point`), so a directory full of unrelated
 //! programs never drags its neighbours into a build.
 //!
-//! Resolution flattens: every loaded module's items are merged into one namespace, the
-//! qualifier on each path is verified against the module that owns the name and then
-//! stripped, and every name an import bound is replaced by what it stands for. Downstream
-//! slices therefore see an ordinary single-file program and know nothing about modules.
+//! Every module is a namespace. A name is resolved against the scope it is written in
+//! (the locals around it, the module's own declarations and imports, an enclosing
+//! module's for an inline block, then the prelude) and a path that starts with none of
+//! those starts at the program's root directory. Each reference is then rewritten to the
+//! canonical name of the declaration it reaches: `geometry::Point` for a `Point` declared
+//! in `geometry.nr`, bare `Point` for one in the root file. Downstream slices therefore see
+//! one item list of distinct names and know nothing about modules.
+//!
 //! A declaration is private to its module unless it is written with `export`, and that
 //! rule is enforced here: this pass is the only one that still knows which file a name was
 //! written in and which file it is reached from. Field visibility needs the receiver's
 //! type, so each item carries the module it came from and the type checker settles it.
-//! The namespace underneath stays flat, which is why two modules still cannot each declare
-//! `helper` even when both keep it private.
 //!
 //! An inline `module Name { ... }` block is a module with no file of its own and is loaded
 //! as one, so every rule above reaches it unchanged. `export import` is the one way a name
@@ -28,6 +30,7 @@
 
 use std::path::Path;
 
+mod defaults;
 mod imports;
 mod loader;
 mod rewriter;
@@ -47,9 +50,9 @@ pub struct ResolvedProgram {
     pub items: Vec<Item>,
     /// One entry per loaded module, for diagnostics and driver reporting.
     pub modules: Vec<ResolvedModule>,
-    /// Whether the root file was written with `@no_prelude`. The merged namespace is
-    /// flat, so the prelude's *declarations* are a property of the program rather than of
-    /// any one file: the root is the file that decides for it.
+    /// Whether the root file was written with `@no_prelude`. The prelude's declarations
+    /// join the program's one item list, so they are a property of the program rather
+    /// than of any one file: the root is the file that decides for it.
     pub no_prelude: bool,
 }
 
@@ -60,7 +63,7 @@ pub struct ResolvedProgram {
 /// another slice to find out.
 #[derive(Debug, Clone)]
 pub struct PreludeVariant {
-    /// The enum the variant belongs to, as the flat namespace names it.
+    /// The enum the variant belongs to, by its canonical name.
     pub owner: String,
     /// The variant's own name, which is also the bare name a module may write.
     pub variant: String,
@@ -109,11 +112,11 @@ pub enum ModuleError {
     },
 
     #[error(
-        "`{name}` is declared in both `{first}` and `{second}`; module items share one \
-         namespace, so the two declarations collide; rename one of them"
+        "`{path}` would name both `{first}` and `{second}`; rename the inline module or \
+         the file so the two modules have paths of their own"
     )]
-    DuplicateItem {
-        name: String,
+    DuplicateModulePath {
+        path: String,
         first: String,
         second: String,
     },
@@ -129,6 +132,22 @@ pub enum ModuleError {
          so rename one of them with `as`"
     )]
     DuplicateImport { name: String, from: String },
+
+    #[error(
+        "`{name}` is imported in `{from}`, which declares a `{name}` of its own; one name \
+         can stand for one thing, so rename the import with `as`"
+    )]
+    ImportShadowsDeclaration { name: String, from: String },
+
+    #[error(
+        "`{name}` is declared in `{root}`, not in `{from}`, and nothing in `{from}` imports \
+         it; every module is a namespace, so import it or write its path"
+    )]
+    NotInScope {
+        name: String,
+        from: String,
+        root: String,
+    },
 
     #[error(
         "variant `{variant}` is used without its enum in `{from}` but no import brings it \
@@ -174,9 +193,9 @@ pub enum ModuleError {
     },
 
     #[error(
-        "`{path}` in `{from}` cannot reach the inline module `{head}`: a block sees its own \
-         children and its file's sibling files, not the file's other blocks; move `{head}` \
-         into a `{head}.nr` beside it and import it as `./{head}`"
+        "`{path}` in `{from}` cannot reach the inline module `{head}`: a block is in scope \
+         inside the module that declares it, and from anywhere else is reached through that \
+         module's path, or moved into a `{head}.nr` of its own"
     )]
     UnreachableInlineModule {
         path: String,
@@ -198,16 +217,16 @@ pub enum ModuleError {
 ///
 /// Returns a [`ModuleError`] when a module file cannot be read or parsed, when an import or
 /// a qualified path names a module or an item that does not exist, when a name it reaches
-/// for is private to the module that declares it, when an `export import` names something
-/// other than an item, or when two modules declare the same name.
+/// for is private to the module that declares it or is not in scope where it is written,
+/// when an `export import` names something other than an item, or when an import binds a
+/// name its scope already holds.
 pub fn resolve_program(
     root: &Path,
     parse_module: &ParseModule<'_>,
     prelude: &[PreludeVariant],
 ) -> Result<ResolvedProgram, ModuleError> {
     let mut graph = loader::ModuleGraph::load(root, parse_module)?;
-    graph.check_name_collisions()?;
     let scopes = imports::resolve_imports(&mut graph, prelude)?;
-    rewriter::strip_qualifiers(&mut graph, &scopes)?;
+    rewriter::resolve_names(&mut graph, &scopes, prelude)?;
     Ok(graph.into_program())
 }

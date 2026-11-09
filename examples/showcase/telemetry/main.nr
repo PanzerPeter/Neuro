@@ -1,7 +1,8 @@
 // Showcase: multi-file compilation and `import` alongside earlier features. Integration
 // example: a sibling module, a directory module with a child, `import` in its three shapes
 // (a name list, a rename, and a module alias), the prelude, `export` visibility, an inline
-// `module { }` block, and `export import` re-exports.
+// `module { }` block, `export import` re-exports, and module namespaces: a name declared in
+// two modules, a path in a pattern and an `impl` header, and a local shadowing an import.
 //
 //   showcase/telemetry/
 //     main.nr          <- this file, the root module, plus the inline module `scoring`
@@ -42,6 +43,24 @@ module scoring {
     }
 }
 
+// `report::format` declares a `scale` too, reached below as `fmt::scale`. Every module is
+// a namespace, so the two are different functions and neither has to be renamed.
+func scale(value: i32) -> i32 {
+    value + 1
+}
+
+// A trait from another module, named by its path in the impl header. `doubled` is not
+// written here: it is the trait's default, declared in `report`.
+struct Reading {
+    level: i32
+}
+
+impl report::Weighted for Reading {
+    func weight(&self) -> i32 {
+        self.level
+    }
+}
+
 func main() -> i32 {
     val samples: [i32; 5] = [12, 40, 7, 33, 18]
 
@@ -79,8 +98,24 @@ func main() -> i32 {
     println("fmt::scale (module alias)      = {weighted}")
     println("report::clamp (re-export)      = {capped}")
 
-    // The inline module does the final tally; its private `adjust` supplies the bonus.
-    val total = scoring::combine(capped, louder, summary.count, flagged)
-    println("scoring::combine (inline mod)  = {total}")
-    total                                                       // 28 + 40 + 5 + 2 = 75
+    // The inline module does the tally; its private `adjust` supplies the bonus.
+    val tally = scoring::combine(capped, louder, summary.count, flagged)
+    println("scoring::combine (inline mod)  = {tally}")         // 28 + 40 + 5 + 2 = 75
+
+    // An enum from another module, matched by its path.
+    val level = match report::band_for(mean) {
+        report::Band::Quiet  => 0,
+        report::Band::Normal => 1,
+        report::Band::Loud   => 3
+    }                                                           // mean 22 is Normal: 1
+    val reading = Reading { level: level }
+    val bumped = scale(reading.doubled())                       // root's scale(2) = 3
+
+    // `choose` was imported from `stats`; from here on it is this local instead.
+    val choose = bumped * 2                                     // 6
+    println("report::Band::Normal level     = {level}")
+    println("scale(doubled) (root's scale)  = {bumped}")
+    println("choose (local over the import) = {choose}")
+
+    tally + choose                                              // 75 + 6 = 81
 }

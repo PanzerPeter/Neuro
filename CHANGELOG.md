@@ -10,6 +10,46 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.39.0] - 2026-11-09
+
+### Added
+
+- Every module is a namespace, inline `module` blocks included. Two files may each declare a
+  `helper`, private or exported, and each module's code reaches its own. Names only meet where one
+  scope imports both, and that import is the error. An import may also not bind a name its module
+  declares; rename either with `as`.
+- Module paths in every position a name takes: a `match` pattern (`shapes::Shape::Circle(r)`), a
+  struct literal with a base (`geo::Point { x: 2, ..base }`), an `impl` header
+  (`impl geo::Drawable for Dot`), a trait bound, and `impl` / `dyn` types.
+- A path written without `./` starts at the program's root directory, and `import ../shared::config`
+  climbs above the importing file. The root file is reached from other modules by its name
+  (`main::Config`).
+- A local variable, parameter or pattern binding shadows an imported name or a module's own item,
+  `as`-renamed imports included.
+- `import Shape::Circle` imports a single variant.
+- `export module name { }` makes an inline block reachable from outside the module that declares
+  it; without `export`, only that module can reach it. A block sees the names of the modules around
+  it, sibling blocks and private items included.
+- A new example, `examples/modules/namespaces.nr`. The `telemetry` showcase also matches an enum and
+  implements a trait through their module paths.
+
+### Changed
+
+- A name declared in another module is no longer in scope without an import or a path, and a root
+  file's names are not in scope in the other modules. Code that relied on the old shared namespace,
+  such as a `match` naming `Level::High` from another module bare, now writes the path or imports
+  the name.
+- A path such as `io::read` written in `utils/mod.nr` now means the root's `io.nr`, not `utils/io.nr`;
+  write `./io` in an `import` for the file beside it.
+- Derived `Debug` prints a type by its declared name (`Point`), wherever it is declared.
+
+### Fixed
+
+- A trait declared in one module now supplies its default methods to an `impl` in another module.
+  Before, the impl lacked them and every call failed to type-check.
+- A private function, type or constant is no longer reachable by its bare name from another module
+  that imported the module declaring it (BUG-138).
+
 ## [5.38.3] - 2026-11-09
 
 ### Fixed

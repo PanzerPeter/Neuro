@@ -32,8 +32,8 @@ impl TypeChecker {
     /// Concrete instantiation happens per call site.
     /// The program's entry point is called by the C runtime, which passes `argc` as the
     /// first argument and reads the return register as the exit status. Only the root
-    /// module's `main` is that entry point; the merged namespace is flat, so no other
-    /// module can declare one beside it.
+    /// module's `main` is that entry point; another module's `main` reaches here under its
+    /// module path and is an ordinary function.
     fn check_main_signature(&mut self, func: &FunctionDef, params: &[Type], ret: &Type) {
         if func.name.name != MAIN_FUNCTION || func.module != ROOT_MODULE {
             return;

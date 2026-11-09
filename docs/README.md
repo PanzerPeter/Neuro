@@ -46,7 +46,7 @@ Design goals:
 | [Structs and Enums](language-reference/structs.md) | Struct and enum definitions, `impl` methods and receivers, associated functions, derives and the derivable traits as bounds, `Option<T>` and `Result<T, E>` |
 | [Ownership and Borrowing](language-reference/ownership.md) | Moves, `Copy` and `.clone()`, `&T` and `&mut T` borrows and their exclusivity, lifetimes, owned elements, `Drop` |
 | [Memory Model](language-reference/memory-model.md) | What is reclaimed and when: stack values, collections, reassigned bindings, `pool` blocks, and what still leaks in alpha |
-| [Modules](language-reference/modules.md) | Multi-file programs, `mod.nr` directories, qualified paths, `import`, inline `module` blocks, `export import` re-exports, visibility |
+| [Modules](language-reference/modules.md) | Multi-file programs, `mod.nr` directories, per-module namespaces, qualified paths, `import`, inline `module` blocks, `export import` re-exports, visibility |
 
 ## User Guides
 

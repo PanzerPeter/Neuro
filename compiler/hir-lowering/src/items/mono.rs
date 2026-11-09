@@ -258,7 +258,7 @@ impl Lowerer {
         self.const_subst = saved_c;
         self.mono_items.push(HirItem::Struct(HirStruct {
             name: ms.mangled.clone(),
-            written_name: ms.base.clone(),
+            written_name: super::written_name(&ms.base),
             fields: hir_fields,
             span: template.span,
         }));

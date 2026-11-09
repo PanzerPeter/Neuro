@@ -37,14 +37,44 @@ func main() -> i32 {
 }
 ```
 
-Functions, constants, structs, enums, and newtypes are reachable this way, in value position and in
-type annotations alike. Structs and enums are described in [Structs and Enums](structs.md). Traits
-are not reachable by path: a trait is named through an import, and an `impl` or a bound cannot
-qualify it (see [What has not landed yet](#what-has-not-landed-yet)). A **method** call needs no
-qualifier. It resolves on the value's type, wherever that type was declared.
+Functions, constants, structs, enums, newtypes and traits are reachable this way, in every position a
+name takes: a call, a type annotation, a pattern, a struct literal, an `impl` header, a bound and a
+`dyn` type. Structs and enums are described in [Structs and Enums](structs.md).
+
+```neuro
+match shape {
+    shapes::Shape::Circle(r) => r * 3,                       // a pattern
+    shapes::Shape::Square(w) => w * w
+}
+val moved = geo::Point { x: 2, ..geo::origin() }            // a struct literal with a base
+impl geo::Drawable for Dot { func size(&self) -> i32 { 1 } } // an impl header
+func total(d: &dyn geo::Drawable) -> i32 { d.size() }       // a `dyn` type
+```
+
+A **method** call needs no qualifier. It resolves on the value's type, wherever that type was declared.
 
 Because only referenced modules load, a directory full of unrelated single-file programs still
 compiles one program at a time.
+
+## Every module is a namespace
+
+A name declared in one module is a different item from the same name declared in another. Two files
+may each declare a private `helper`, or an exported `size`, and each module's code reaches its own:
+
+```neuro
+// geo.nr
+func helper() -> i32 { 100 }
+export func area() -> i32 { helper() }     // geo's helper
+
+// main.nr
+func helper() -> i32 { 1 }
+func main() -> i32 { geo::area() + helper() }   // 100 + 1
+```
+
+Inside a module, its own declarations are in scope by their bare names. Anything else is reached by a
+path or brought into scope by an `import`. A name from another module is never in scope just because
+that module was loaded. The two names only meet where one scope imports both, and that import is the
+error.
 
 ## Importing
 
@@ -53,17 +83,23 @@ into it. It also binds names locally, so the rest of the file can drop the quali
 
 ```neuro
 import math                          // the module, still written `math::sqrt` below
-import ./utils                       // the same, written explicitly relative
+import ./utils                       // a module beside this file
+import ../shared::config             // a module one directory above this file
 import math::{sqrt, sin}             // two names, usable bare
 import math::{sin as sine}           // one of them under a different name
 import math::matrix as mat           // a child module under a shorter qualifier
 import math::sqrt as root            // a single item under a different name
 import Option::{Some, None}          // enum variants, usable without `Option::`
+import Shape::Circle                 // one variant
 ```
 
-Every path is resolved relative to the importing file, whether or not it is written `./`-first. A
-brace entry may name a **child module** as well as an item. `import ./utils::{io}` binds the module
-`utils::io`, so `io::read(x)` resolves.
+A path written without `./` or `../` starts at the program's root directory, the one holding the file
+you passed to `neurc`. `./` starts at the importing file's own directory, and each `../` climbs one
+level above it. A brace entry may name a **child module** as well as an item.
+`import ./utils::{io}` binds the module `utils::io`, so `io::read(x)` resolves.
+
+An import may not bind a name the module already declares, or one another import already bound.
+`as` renames one of them. A local variable may shadow an imported name, renamed or not.
 
 Imported variants read as themselves in value and pattern position alike:
 
@@ -84,8 +120,8 @@ func main() -> i32 {
 ```
 
 A variant written without its enum is readable when an import accounts for it, or when the prelude
-does. Otherwise write `Shape::Circle`. Imports bind per file, so two modules may bind the same name to
-different things. One module may not bind one name twice.
+does. Otherwise write `Shape::Circle`. Imports bind per module, so two modules may bind the same name
+to different things.
 
 ## The implicit prelude
 
@@ -127,9 +163,9 @@ func triangular(n: i32) -> i32 {
 }
 ```
 
-On a non-root file, `@no_prelude` takes away that file's bindings. On the **root** file it also drops
-the prelude's declarations from the whole program. `Option` and `Result` are then declared nowhere.
-The merged namespace is flat, so those types are either in the program or absent from all of it.
+On a non-root file, `@no_prelude` takes away that file's variant bindings. On the **root** file it also
+drops the prelude's declarations from the whole program. `Option` and `Result` are then declared
+nowhere: the prelude's declarations are either in the program or absent from all of it.
 
 `print` / `println` (and the panic family) are **not** in the prelude. They are compiler builtins
 resolved by name, so `@no_prelude` does not take them away. Only a local declaration of the same name
@@ -137,15 +173,20 @@ shadows one. See [Standard Output Builtins](functions.md#standard-output-builtin
 
 ## How a path is resolved
 
-Each segment is looked up beside the file that wrote the path:
+The first segment is looked up where the path is written: a type, an imported name, or an inline block
+in scope comes first. `Point::new` is the associated function of the `Point` in scope, and adding a
+`Point.nr` can never silently re-point it. A first segment that nothing in scope names starts at the
+program's root directory, so `io::read` means the root's `io.nr` from every file of the program. Each
+further segment is looked up below the module reached so far:
 
 1. `<dir>/<segment>/mod.nr`, a directory module, whose own children are the files beside its `mod.nr`.
 2. `<dir>/<segment>.nr`, a leaf module. A leaf has **no** children. `math.nr` is a file, so
    `math::io::read` cannot reach an `io.nr` sitting next to it.
+3. An inline `module` block the module declares.
 
 A segment that names no module ends the lookup, and what is left is an ordinary type path. That is how
-`Point::new` and `Option::Some` keep their meaning. A locally declared type also wins over a same-named
-file. Adding `Point.nr` beside your code can never silently re-point an existing `Point::new`.
+`shapes::Shape::Circle` and `Option::Some` keep their meaning. The root file is a module like any
+other, so another file reaches its exported items by its name: `main::Config` for a root `main.nr`.
 
 ## Visibility
 
@@ -184,11 +225,10 @@ A private field has two consequences, and both are enforced:
   reaching it through `..base`, since the update form supplies every field you did not list. See
   [Struct Instantiation](structs.md#struct-instantiation).
 
-There is no `export` on an `impl` block, a `type` alias, or an inline `module` block. An `impl` declares
-no name of its own. An alias is expanded at parse time, so nothing of it survives to be reached. A
-block's name is reached only from the file that declares it, so there is no outside to open it to. Each
-is rejected with a message that says so. An `import` *does* take `export`. That is the re-export form,
-below.
+There is no `export` on an `impl` block or a `type` alias. An `impl` declares no name of its own. An
+alias is expanded at parse time, so nothing of it survives to be reached. Each is rejected with a
+message that says so. An inline `module` block takes `export` like an item (below), and an `import`
+takes it as the re-export form.
 
 Item visibility is settled while modules are resolved, so it is reported before type checking. Field
 visibility needs the receiver's type and is reported by the type checker.
@@ -213,15 +253,18 @@ func main() -> i32 {
 }
 ```
 
-A block is a module in every sense a file is one, and the same rules reach it. Its items are private
-unless written with `export`. An `import` binds from it (`import geometry::{Circle}`), and blocks nest
-(`outer::inner::deep()`). Three consequences follow:
+A block is a module in every sense a file is one, and the same rules reach it. Its items have names of
+their own and are private unless written with `export`. An `import` binds from it
+(`import geometry::{Circle}`), and blocks nest (`outer::inner::deep()`). Four consequences follow:
 
-- The file that declares a block is **outside** it. `export` is the only way in, exactly as for a file
+- The module that declares a block is **outside** it. `export` is the only way in, exactly as for a file
   module.
-- A block has **no file children**. A path through one stops where a leaf `.nr` file's does.
-- A block **wins over a same-named file**, on the rule that a locally declared type follows. Adding a
-  file must never silently re-point a path that already resolved.
+- A block **sees the names around it**: the declarations of the module it is written in, sibling blocks
+  included, and their private ones too, since it is part of that module.
+- A block is itself **private** unless written `export module`. Without it, only code inside the
+  declaring module can reach the block, whatever the block's own items export.
+- A block has **no file children**. A path through one stops where a leaf `.nr` file's does. A block
+  in scope **wins over a same-named file**, on the rule that a locally declared type follows.
 
 Use a block for logical grouping within one file. For an independent, separately compilable unit, prefer
 a file module.
@@ -263,56 +306,31 @@ declaration lives.
 | `math::cbrt` where `math.nr` has no `cbrt` | ``module `math` declares no item named `cbrt` `` |
 | `utils::read` where `utils/` has no `mod.nr` | ``utils` is a directory with no `mod.nr` … add `utils/mod.nr`` |
 | `missing::inner::value()` naming no module at all | ``missing::inner::value` does not name a module … expected `missing.nr` or `missing/mod.nr` beside it`` |
-| The same name declared by two loaded modules | ``shared` is declared in both `main.nr` and `helper.nr` … rename one of them`` |
+| A root-file name used bare in another module | ``secret` is declared in `main.nr`, not in `lib.nr` … import it or write its path`` |
+| An import of a name the module declares | ``size` is imported in `main.nr`, which declares a `size` of its own … rename the import with `as`` |
 | `import math::{cbrt}` where `math.nr` has no `cbrt` | ``module `math` declares no item named `cbrt` `` |
 | Two imports binding one name | ``sqrt` is imported twice … rename one of them with `as`` |
 | `Some(n)` in a pattern with no import behind it | ``variant `Some` is used without its enum … write `Enum::Some` or add `import Enum::{Some}`` |
 | Reaching a declaration with no `export` | ``internal` is private to module `lib` … write `export` before its declaration`` |
 | Reaching a field with no `export` | ``field 'timeout' of struct 'Config' is private to the module that declares it`` |
-| `export` on an `impl`, a `type` alias, or a `module` block | ``export` cannot be applied to …`` |
+| `export` on an `impl` or a `type` alias | ``export` cannot be applied to …`` |
 | `export import` naming a module or a variant | ``export import` … would re-export `x`, which names a module rather than an item`` |
 | Two inline blocks in one module sharing a name | ``m` is declared twice as an inline module … rename one of them`` |
 
 ## What has not landed yet
 
-Modules still share **one flat namespace**. Qualifiers are checked against the module that owns the name
-and then erased, so the rest of the compiler sees a single-file program. Four consequences:
-
-- **Two modules cannot declare the same name**, even when both keep it private. The collision is
-  reported, naming both files, rather than one declaration silently winning. Renaming at the import site
-  does not help, because the clash is between the declarations, not the uses. Visibility says who may
-  *reach* a name. Lifting this needs the merge itself to stop being flat.
-- **Qualification is checked but never required.** An exported name reaches you whether or not you
-  imported it. What an import buys is the module load, the check that the name exists where you took it
-  from, and the rename forms.
-- **Visibility is enforced on qualified paths and import lists, not on bare names.** After
-  `import ./lib`, a bare `internal()` still resolves to a private declaration of `lib`. Write
-  `lib::internal()` and it is refused as above. This is [BUG-138](../BUGS.md#bug-138-a-private-function-is-reachable-by-its-bare-name-after-import).
-- **An inline block does not lift the flat namespace.** A block buys a private *surface*, not a private
-  namespace, so its items still collide with same-named declarations elsewhere in the program.
-
 The prelude is not a module you can name. `std::prelude` describes the effect, but the driver prepends
 the declarations and seeds the variant bindings directly. So `import std::prelude::{Option}` is an error
 (`std::prelude` does not name a module), and there is no way to import a *subset* of the prelude.
-`@no_prelude` on a non-root file drops that file's bindings only. Its declarations stay in the flat
-namespace, which is the same limitation as above.
+`@no_prelude` on a non-root file drops that file's variant bindings only; `Option` and `Result` still
+reach it.
 
-**A local binding does not shadow an import that was renamed with `as`.** After
-`import geometry::{ORIGIN_SHIFT as SHIFT}`, a `val SHIFT = 7` in a function body is accepted, but every
-later use still reads the imported constant. An unrenamed import is shadowed as usual. Name the local
-differently when the import is renamed.
+A root file that declares a name the prelude also declares, such as its own `Result`, replaces the
+prelude's for the whole program.
 
-Also not yet available:
-
-- a qualified name in a `match` pattern. Write the bare enum name, which the flat namespace makes reach,
-  or import the variants;
-- a module-qualified trait in an `impl`, a `dyn` type, or a generic bound. Import the trait and name it
-  bare;
-- the functional-update form on a qualified struct, `mod::Point { x: 1.0, ..base }`. The form works on a
-  struct named without a qualifier, once it is imported.
-
-Panic diagnostics report positions in the root file's coordinate space. Merged modules share one span
-space, the same approximation the prepended prelude already carries.
+Diagnostics do not yet name the file they come from. A compile-time error in a program of more than one
+module prints no location, and a panic in a module other than the root reports a position in the root
+file's coordinates.
 
 ## See also
 
@@ -324,6 +342,8 @@ space, the same approximation the prepended prelude already carries.
   modules, exit code `40`
 - [`examples/modules/inline.nr`](../../examples/modules/inline.nr), inline `module` blocks, nested, with a
   private helper, exit code `26`
+- [`examples/modules/namespaces.nr`](../../examples/modules/namespaces.nr), the root and `geometry.nr`
+  declaring the same names, a single-variant import, and a local shadowing an import, exit code `30`
 - [`examples/modules/reexports.nr`](../../examples/modules/reexports.nr), an `export import` facade over
   `geometry.nr`, exit code `10`
 - [`examples/modules/prelude.nr`](../../examples/modules/prelude.nr), `Option`, `Result`, and their

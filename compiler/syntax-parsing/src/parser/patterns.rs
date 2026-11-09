@@ -242,10 +242,21 @@ impl Parser {
     }
 
     /// Parse the `::Variant payload?` tail of an enum pattern; `enum_name` and the
-    /// following `::` are already positioned (the `::` not yet consumed).
-    fn parse_enum_pattern(&mut self, enum_name: Identifier) -> ParseResult<Pattern> {
+    /// following `::` are already positioned (the `::` not yet consumed). A longer path
+    /// (`shapes::Shape::Circle`) folds every segment before the variant into the enum
+    /// name, which module resolution splits again.
+    fn parse_enum_pattern(&mut self, mut enum_name: Identifier) -> ParseResult<Pattern> {
         self.advance(); // consume '::'
-        let variant = self.consume_identifier("enum variant name after '::'")?;
+        let mut variant = self.consume_identifier("enum variant name after '::'")?;
+        while self.check(&TokenKind::ColonColon) {
+            self.advance(); // consume '::'
+            let next = self.consume_identifier("enum variant name after '::'")?;
+            enum_name = Identifier {
+                name: format!("{}::{}", enum_name.name, variant.name),
+                span: enum_name.span.merge(variant.span),
+            };
+            variant = next;
+        }
         let (payload, end_span) = self.parse_variant_payload_pattern(variant.span)?;
 
         Ok(Pattern::Enum {

@@ -101,6 +101,7 @@ mod loop_value;
 mod map_iteration;
 mod methods;
 mod mlir_routing;
+mod module_namespaces;
 mod modules;
 mod move_semantics;
 mod multi_gpu;

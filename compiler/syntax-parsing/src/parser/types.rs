@@ -307,24 +307,12 @@ impl Parser {
         }
     }
 
-    /// Parse the trait-name identifier following an `impl` / `dyn` keyword.
+    /// Parse the trait name, module-qualified or not, following an `impl` / `dyn` keyword.
     fn parse_trait_ref_name(&mut self, context: &str) -> ParseResult<Identifier> {
-        let token = self
-            .consume(TokenKind::Identifier(String::new()), context)
+        self.consume_path_name(context)
             .map_err(|_| ParseError::UnexpectedEof {
                 expected: context.to_string(),
-            })?;
-        match token.kind {
-            TokenKind::Identifier(name) => Ok(Identifier {
-                name,
-                span: token.span,
-            }),
-            other => Err(ParseError::UnexpectedToken {
-                found: other,
-                expected: context.to_string(),
-                span: token.span,
-            }),
-        }
+            })
     }
 
     /// Parse the optional `<Assoc = T, ...>` constraint list that follows a trait name

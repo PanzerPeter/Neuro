@@ -156,6 +156,30 @@ impl Parser {
         }
     }
 
+    /// Consume a name that may be module-qualified (`geometry::Drawable`), folding every
+    /// segment into one [`Identifier`]: module resolution splits it again, exactly as it does
+    /// for a qualified type or expression path.
+    pub(super) fn consume_path_name(
+        &mut self,
+        role: &str,
+    ) -> ParseResult<shared_types::Identifier> {
+        let mut name = self.consume_identifier(role)?;
+        while self.check(&TokenKind::ColonColon)
+            && matches!(
+                self.tokens.get(self.current + 1).map(|t| &t.kind),
+                Some(TokenKind::Identifier(_))
+            )
+        {
+            self.advance(); // consume '::'
+            let segment = self.consume_identifier(role)?;
+            name = shared_types::Identifier {
+                name: format!("{}::{}", name.name, segment.name),
+                span: name.span.merge(segment.span),
+            };
+        }
+        Ok(name)
+    }
+
     /// Parse `f` in a guarded-header position (an `if`/`while` condition, a `for`
     /// iterable, a `match` scrutinee, a match-arm guard): a bare `Ident {` there opens
     /// the header's body block, so it must not be read as a struct literal. The

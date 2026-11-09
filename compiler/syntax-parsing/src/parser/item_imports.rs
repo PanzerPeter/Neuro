@@ -13,7 +13,8 @@ impl Parser {
     ///
     /// Five surface forms share a single shape (a path, then an optional selection):
     /// `import math`, `import ./utils::io`, `import math::{sqrt, sin}`,
-    /// `import math::matrix as mat`, `import Option::{Some, None}`. What each path
+    /// `import math::matrix as mat`, `import Option::{Some, None}`, and `../` for a
+    /// path that climbs above this file's directory. What each path
     /// segment *names* (a module file, an item inside one, an enum) is a question
     /// about the file system, so the parser records the syntax and module resolution
     /// answers it.
@@ -25,11 +26,21 @@ impl Parser {
         let start = self.consume(TokenKind::Import, "'import'")?;
         self.skip_newlines();
 
-        // `./utils`: a leading `./` marks the path explicitly relative to this file.
-        let relative = self.check(&TokenKind::Dot);
-        if relative {
+        // `./utils` starts at this file's directory and each `../` climbs one above it;
+        // a path with neither starts at the program's root directory.
+        let mut relative = false;
+        let mut parents = 0u32;
+        if self.check(&TokenKind::Dot) {
             self.advance(); // consume '.'
             self.consume(TokenKind::Slash, "'/' after '.' in a relative import path")?;
+            relative = true;
+        } else {
+            while self.check(&TokenKind::DotDot) {
+                self.advance(); // consume '..'
+                self.consume(TokenKind::Slash, "'/' after '..' in a relative import path")?;
+                relative = true;
+                parents += 1;
+            }
         }
 
         let mut path = vec![self.consume_identifier("module name after 'import'")?];
@@ -57,6 +68,7 @@ impl Parser {
 
         Ok(ImportDef {
             relative,
+            parents,
             path,
             selection,
             exported,

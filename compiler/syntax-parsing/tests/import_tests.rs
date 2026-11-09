@@ -20,6 +20,22 @@ fn parses_a_bare_module_import() {
 }
 
 #[test]
+fn parses_a_parent_relative_path() {
+    let def = import("import ../../shared::config\n");
+    assert!(def.relative);
+    assert_eq!(def.parents, 2);
+    let segments: Vec<&str> = def.path.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(segments, vec!["shared", "config"]);
+}
+
+#[test]
+fn a_root_path_climbs_nothing() {
+    let def = import("import ./utils\n");
+    assert_eq!(def.parents, 0);
+    assert!(!import("import utils\n").relative);
+}
+
+#[test]
 fn parses_a_nested_relative_path() {
     let def = import("import ./utils::io\n");
     assert!(def.relative);
@@ -111,5 +127,68 @@ func main() -> i32 {
     match &arms[0].patterns[0] {
         Pattern::UnqualifiedEnum { variant, .. } => assert_eq!(variant.name, "Some"),
         other => panic!("expected an unqualified variant pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_qualified_enum_pattern_folds_its_module_path_into_the_enum() {
+    let items = parse("func f(s: i32) -> i32 {\n    match s {\n        shapes::Shape::Circle(r) => r,\n        _ => 0,\n    }\n}\n")
+        .expect("a qualified pattern parses");
+    let Item::Function(def) = &items[0] else {
+        panic!("expected a function");
+    };
+    let pattern = def.body.iter().find_map(|stmt| match stmt {
+        Stmt::Expr(Expr::Match { arms, .. }) => arms[0].patterns.first().cloned(),
+        _ => None,
+    });
+    match pattern {
+        Some(Pattern::Enum {
+            enum_name, variant, ..
+        }) => {
+            assert_eq!(enum_name.name, "shapes::Shape");
+            assert_eq!(variant.name, "Circle");
+        }
+        other => panic!("expected an enum pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn qualified_trait_names_parse_in_impl_dyn_and_bound_positions() {
+    let source = "impl geo::Drawable for geo::Dot { }\nfunc f(d: &dyn geo::Drawable) { }\nfunc g<T: geo::Drawable>(t: T) -> impl geo::Drawable { t }\n";
+    let items = parse(source).expect("qualified trait names parse");
+    match &items[0] {
+        Item::Impl(def) => {
+            assert_eq!(
+                def.trait_name.as_ref().map(|t| t.name.as_str()),
+                Some("geo::Drawable")
+            );
+            assert_eq!(def.type_name.name, "geo::Dot");
+        }
+        other => panic!("expected an impl, got {:?}", other),
+    }
+    match &items[2] {
+        Item::Function(def) => {
+            assert_eq!(def.generics[0].bounds[0].trait_name.name, "geo::Drawable")
+        }
+        other => panic!("expected a function, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_qualified_struct_literal_takes_a_base() {
+    let items = parse("func f() {\n    val p = geo::Point { x: 1, ..geo::origin() }\n}\n")
+        .expect("a qualified struct literal with a base parses");
+    let Item::Function(def) = &items[0] else {
+        panic!("expected a function");
+    };
+    match &def.body[0] {
+        Stmt::VarDecl {
+            init: Some(Expr::StructLiteral { name, base, .. }),
+            ..
+        } => {
+            assert_eq!(name.name, "geo::Point");
+            assert!(base.is_some());
+        }
+        other => panic!("expected a struct literal, got {:?}", other),
     }
 }

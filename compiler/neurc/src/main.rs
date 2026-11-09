@@ -304,8 +304,8 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
 
     let module_count = program.modules.len();
     let files = program.modules.iter().map(|m| m.file.clone()).collect();
-    // The merged namespace is flat, so the prelude's declarations are either in the program
-    // or absent from all of it; `@no_prelude` on the root file is what decides.
+    // The prelude's declarations join the program as one list, so they are either in the
+    // program or absent from all of it; `@no_prelude` on the root file is what decides.
     let mut items = if program.no_prelude {
         program.items
     } else {

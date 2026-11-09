@@ -90,7 +90,7 @@ The compiler needs LLVM 23 and MLIR, with the `LLVM_SYS_231_PREFIX`, `MLIR_SYS_2
 ## Known Limitations
 
 1. **Debug information**: no DWARF or PDB output, and no `-g` flag. It is on the [Quick Roadmap](../../README.md#quick-roadmap).
-2. **Flat namespace**: the merged program is one namespace, so two modules cannot declare the same top-level name. The collision is reported.
+2. **Diagnostics in multi-module programs**: spans index their own file, and the driver cannot yet tell which one. A compile error in a program of more than one module prints no location, and a panic in a module other than the root reports a position in the root file's coordinates.
 3. **System toolchain required**: linking needs `cc` on Unix, or clang, `lld-link` or MSVC on Windows. No linker is bundled.
 
 ## Source

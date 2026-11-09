@@ -1,29 +1,41 @@
-//! Rewriting: resolve every name against the module that owns it, then erase the route.
+//! Rewriting: resolve every name against the scope it is written in, and replace it with
+//! the canonical name of the declaration it reaches.
 //!
-//! Two routes reach the same flat namespace. A qualifier is verified against the module it
-//! names and stripped; an imported name is looked up in the importing module's table and
-//! replaced by what it stands for. After this pass no name carries a `::` module prefix and
-//! no name depends on an import, which is why semantic analysis, HIR lowering, and both
-//! backends need to know nothing about either.
+//! Every module is a namespace, and the canonical name says which one: `geometry::Point`
+//! for a `Point` declared in `geometry.nr`, bare `Point` for one in the root file. After
+//! this pass no name depends on an import or on the module it was written in, which is
+//! why semantic analysis, HIR lowering, and both backends need to know nothing about
+//! either: two modules' `helper`s reach them as two different names.
 
 use ast_types::{EnumPatternPayload, Expr, Pattern};
 use shared_types::Identifier;
 
-use crate::ModuleError;
 use crate::imports::ImportScope;
-use crate::loader::{ModuleGraph, site_segments};
+use crate::loader::{ModuleGraph, site_segments, split_segments};
 use crate::walk::{Site, walk_items};
+use crate::{ModuleError, PreludeVariant};
 
-pub(crate) fn strip_qualifiers(
+/// The module every program starts from, whose names stay bare.
+const ROOT: usize = 0;
+
+/// The type name a path may open with inside an `impl` or a trait, which names no module.
+const SELF_TYPE: &str = "Self";
+
+pub(crate) fn resolve_names(
     graph: &mut ModuleGraph,
     scopes: &[ImportScope],
+    prelude: &[PreludeVariant],
 ) -> Result<(), ModuleError> {
-    // One scope per module, in module order, so the index is the module id.
-    for (id, scope) in scopes.iter().enumerate() {
+    for id in 0..graph.modules.len() {
         let mut items = std::mem::take(&mut graph.modules[id].items);
         let outcome = {
-            let view = &*graph;
-            let mut rewrite = |site: Site<'_>| resolve_site(view, scope, id, site);
+            let resolver = Resolver {
+                graph,
+                scopes,
+                prelude,
+                from: id,
+            };
+            let mut rewrite = |site: Site<'_>| resolver.site(site);
             walk_items(&mut items, &mut rewrite)
         };
         graph.modules[id].items = items;
@@ -32,220 +44,266 @@ pub(crate) fn strip_qualifiers(
     Ok(())
 }
 
-/// Resolve one name written in module `from`.
-///
-/// A path whose head names neither a module nor an import is left exactly as it was:
-/// `Point::new` and `Option::Some` are associated-function and enum-variant paths, and
-/// belong to the type checker rather than here.
-fn resolve_site(
-    graph: &ModuleGraph,
-    scope: &ImportScope,
-    from: usize,
-    site: Site<'_>,
-) -> Result<(), ModuleError> {
-    if let Site::Pattern(pattern) = site {
-        return resolve_pattern(graph, scope, from, pattern);
-    }
-
-    let segments = site_segments(&site);
-    match segments.len() {
-        0 => Ok(()),
-        1 => {
-            resolve_imported_name(scope, site, &segments[0]);
-            Ok(())
-        }
-        _ => resolve_qualified(graph, scope, from, site, &segments),
-    }
+/// What a bare name stands for in the scope it is written in.
+enum Binding {
+    /// A declaration, by its canonical name.
+    Item(String),
+    /// An enum variant: the enum's canonical name and the variant's own.
+    Variant(String, String),
+    Module(usize),
 }
 
-/// Replace a bare name an import bound. A name no import mentions is left alone, so an
-/// ordinary local or a plain call reaches this and passes straight through.
-fn resolve_imported_name(scope: &ImportScope, site: Site<'_>, name: &str) {
-    if let Some(item) = scope.rename(name) {
-        let item = item.to_string();
-        rewrite_bare(site, &item);
-        return;
-    }
-    let Some((owner, variant)) = scope.variant(name) else {
-        return;
-    };
-    // A variant used as a value: `Some` becomes the `Option::Some` path the checker reads,
-    // whether it is called (`Some(42)`) or standing alone (`None`).
-    let Site::Expr(expr) = site else {
-        return;
-    };
-    let Expr::Identifier(ident) = &*expr else {
-        return;
-    };
-    *expr = Expr::Path {
-        type_name: Identifier {
-            name: owner.to_string(),
-            span: ident.span,
-        },
-        member: Identifier {
-            name: variant.to_string(),
-            span: ident.span,
-        },
-        span: ident.span,
-    };
+struct Resolver<'a> {
+    graph: &'a ModuleGraph,
+    scopes: &'a [ImportScope],
+    prelude: &'a [PreludeVariant],
+    from: usize,
 }
 
-/// Resolve a `a::b(::c)` path against the modules and module aliases in scope.
-fn resolve_qualified(
-    graph: &ModuleGraph,
-    scope: &ImportScope,
-    from: usize,
-    site: Site<'_>,
-    segments: &[String],
-) -> Result<(), ModuleError> {
-    let chain = &segments[..segments.len() - 1];
-
-    // A head this module declares as a type, or imported as an item, starts a type path,
-    // so no same-named file beside the module can re-point it.
-    let head = &chain[0];
-    let local_type = graph.declares_type(from, head);
-    let imported_item = scope.rename(head).filter(|_| !local_type);
-
-    let mut module = None;
-    let mut consumed = 0;
-    if !local_type && imported_item.is_none() {
-        // An `as` alias renames the head only; the rest of the chain descends as usual.
-        if let Some(id) = scope.module(&chain[0]) {
-            module = Some(id);
-            consumed = 1;
+impl Resolver<'_> {
+    /// What `name` stands for in module `from`: an import or a declaration of the module
+    /// itself, then of each module enclosing it, then the prelude's variants. `None` for a
+    /// name nothing in scope declares, which is left to the type checker: a prelude type or
+    /// function, or a builtin.
+    fn lookup(&self, name: &str) -> Option<Binding> {
+        let mut current = Some(self.from);
+        while let Some(id) = current {
+            let scope = &self.scopes[id];
+            if let Some(module) = scope.module(name) {
+                return Some(Binding::Module(module));
+            }
+            if let Some(target) = scope.item(name) {
+                return Some(Binding::Item(
+                    self.graph.canonical(target.module, &target.item),
+                ));
+            }
+            if let Some((owner, variant)) = scope.variant(name) {
+                return Some(Binding::Variant(owner.to_string(), variant.to_string()));
+            }
+            if self.graph.modules[id].declared.contains(name) {
+                return Some(Binding::Item(self.graph.canonical(id, name)));
+            }
+            if let Some(block) = self.graph.inline_child(id, name) {
+                return Some(Binding::Module(block));
+            }
+            current = self.graph.modules[id].parent;
         }
-        for segment in &chain[consumed..] {
-            match graph.resolve_segment(from, module, segment) {
-                Some(id) => {
-                    module = Some(id);
+        if self.graph.no_prelude(self.from) {
+            return None;
+        }
+        self.prelude
+            .iter()
+            .find(|entry| entry.variant == name)
+            .map(|entry| Binding::Variant(entry.owner.clone(), entry.variant.clone()))
+    }
+
+    /// Reject a bare name nothing in scope accounts for when the root module declares it.
+    ///
+    /// The root's declarations keep their bare names, so such a name would otherwise land on
+    /// the root's item from a module that never imported it, private or not.
+    fn reject_root_leak(&self, name: &str) -> Result<(), ModuleError> {
+        if self.graph.encloses(ROOT, self.from) || !self.graph.modules[ROOT].declared.contains(name)
+        {
+            return Ok(());
+        }
+        Err(ModuleError::NotInScope {
+            name: name.to_string(),
+            from: self.graph.display(self.from).to_string(),
+            root: self.graph.display(ROOT).to_string(),
+        })
+    }
+
+    fn site(&self, site: Site<'_>) -> Result<(), ModuleError> {
+        if let Site::Pattern(pattern) = site {
+            return self.pattern(pattern);
+        }
+        let segments = site_segments(&site);
+        match segments.len() {
+            0 => Ok(()),
+            1 => self.bare(site, &segments[0]),
+            _ => self.qualified(site, &segments),
+        }
+    }
+
+    /// Resolve a name written without a qualifier.
+    fn bare(&self, site: Site<'_>, name: &str) -> Result<(), ModuleError> {
+        match self.lookup(name) {
+            Some(Binding::Item(canonical)) => {
+                rewrite_bare(site, &canonical);
+                Ok(())
+            }
+            Some(Binding::Variant(owner, variant)) => {
+                // A variant used as a value: `Some` becomes the `Option::Some` path the
+                // checker reads, whether it is called (`Some(42)`) or standing alone.
+                if let Site::Expr(expr) = site
+                    && let Expr::Identifier(ident) = &*expr
+                {
+                    let span = ident.span;
+                    *expr = Expr::Path {
+                        type_name: Identifier { name: owner, span },
+                        member: Identifier {
+                            name: variant,
+                            span,
+                        },
+                        span,
+                    };
+                }
+                Ok(())
+            }
+            Some(Binding::Module(_)) => Ok(()),
+            None => self.reject_root_leak(name),
+        }
+    }
+
+    /// Resolve an `a::b(::c)` path. Its head is looked up like a bare name; a head nothing
+    /// in scope declares starts at the program's root directory.
+    fn qualified(&self, site: Site<'_>, segments: &[String]) -> Result<(), ModuleError> {
+        let head = &segments[0];
+        if head == SELF_TYPE {
+            return Ok(());
+        }
+        let path = segments.join("::");
+        let from = self.graph.display(self.from).to_string();
+
+        let start = match self.lookup(head) {
+            Some(Binding::Module(module)) => Some(module),
+            // A type in scope opens a type path: `Point::new`, or `Pt::new` after
+            // `import geometry::{Point as Pt}`.
+            Some(Binding::Item(canonical)) => {
+                if segments.len() > 2 {
+                    return Err(ModuleError::UnknownModule {
+                        path,
+                        from,
+                        head: head.clone(),
+                    });
+                }
+                rename_head(site, &canonical);
+                return Ok(());
+            }
+            Some(Binding::Variant(..)) => return Ok(()),
+            None => self.graph.resolve_head(self.from, None, head),
+        };
+
+        let Some(mut module) = start else {
+            self.reject_root_leak(head)?;
+            if self.graph.has_inline_block_named(head) {
+                return Err(ModuleError::UnreachableInlineModule {
+                    path,
+                    from,
+                    head: head.clone(),
+                });
+            }
+            // Two segments with no module prefix is the ordinary `Type::member` shape of a
+            // type nothing here declares (`Option::Some`, `Vec::new`). Three or more can
+            // only have been meant as a module path, so a silent pass-through would
+            // surface as a baffling "unknown type `a::b`" later.
+            if segments.len() > 2 {
+                return Err(ModuleError::UnknownModule {
+                    path,
+                    from,
+                    head: head.clone(),
+                });
+            }
+            return Ok(());
+        };
+        self.graph.check_block_reachable(self.from, module)?;
+
+        let mut consumed = 1;
+        while consumed + 1 < segments.len() {
+            match self.graph.resolve_child(module, &segments[consumed]) {
+                Some(child) => {
+                    self.graph.check_block_reachable(self.from, child)?;
+                    module = child;
                     consumed += 1;
                 }
                 None => break,
             }
         }
+
+        match &segments[consumed..] {
+            [item] => {
+                if !self.graph.declares(module, item) {
+                    return Err(ModuleError::UndeclaredItem {
+                        module: self.graph.path_of(module).to_string(),
+                        item: item.clone(),
+                        from,
+                    });
+                }
+                self.graph.check_visible(self.from, module, item)?;
+                rewrite_bare(site, &self.graph.canonical_through(module, item));
+                Ok(())
+            }
+            [ty, member] => {
+                if !self.graph.declares_type(module, ty) {
+                    return Err(ModuleError::UndeclaredItem {
+                        module: self.graph.path_of(module).to_string(),
+                        item: ty.clone(),
+                        from,
+                    });
+                }
+                // The member is a method or a variant, which carry the type's visibility:
+                // only the type itself is gated.
+                self.graph.check_visible(self.from, module, ty)?;
+                rewrite_member(
+                    site,
+                    &self.graph.canonical_through(module, ty),
+                    member,
+                    &path,
+                    &from,
+                )
+            }
+            _ => Err(ModuleError::PathTooDeep { path, from }),
+        }
     }
 
-    let path = segments.join("::");
-    let Some(module) = module else {
-        // Two segments with no module prefix is the ordinary `Type::member` shape. Three
-        // or more can only have been meant as a module path, so a silent pass-through
-        // would surface as a baffling "unknown type `a::b`" later.
-        if segments.len() > 2 {
-            return Err(ModuleError::UnknownModule {
-                path,
-                from: graph.display(from).to_string(),
-                head: segments[0].clone(),
-            });
-        }
-        // `Pt::new` after `import geometry::{Point as Pt}` names `Point::new`.
-        if let Some(item) = imported_item {
-            rename_head(site, item);
-        }
-        return Ok(());
-    };
-
-    let rest = &segments[consumed..];
-    match rest {
-        [item] => {
-            if !graph.declares(module, item) {
-                return Err(ModuleError::UndeclaredItem {
-                    module: graph.path_of(module).to_string(),
-                    item: item.clone(),
-                    from: graph.display(from).to_string(),
-                });
+    /// Resolve a pattern that names a variant.
+    ///
+    /// A payload-less variant (`None`) is written exactly like a binding, so the scope is
+    /// the only thing that tells them apart; a payload-carrying one (`Some(n)`) is
+    /// unambiguous and is an error when nothing in scope accounts for it. A qualified
+    /// pattern's enum is a type name like any other.
+    fn pattern(&self, pattern: &mut Pattern) -> Result<(), ModuleError> {
+        match pattern {
+            Pattern::Binding(ident) => {
+                if let Some(Binding::Variant(owner, variant)) = self.lookup(&ident.name) {
+                    *pattern = enum_pattern(owner, variant, EnumPatternPayload::Unit, ident.span);
+                }
+                Ok(())
             }
-            graph.check_visible(from, module, item)?;
-            // A re-exported name may have been renamed on the way through, so the flat
-            // namespace is reached by what the declaration is really called.
-            rewrite_bare(site, graph.flat_name(module, item));
-            Ok(())
-        }
-        [ty, member] => {
-            if !graph.declares_type(module, ty) {
-                return Err(ModuleError::UndeclaredItem {
-                    module: graph.path_of(module).to_string(),
-                    item: ty.clone(),
-                    from: graph.display(from).to_string(),
-                });
+            Pattern::UnqualifiedEnum {
+                variant,
+                payload,
+                span,
+            } => {
+                let Some(Binding::Variant(owner, name)) = self.lookup(&variant.name) else {
+                    return Err(ModuleError::UnimportedVariant {
+                        variant: variant.name.clone(),
+                        from: self.graph.display(self.from).to_string(),
+                    });
+                };
+                *pattern = enum_pattern(owner, name, payload.clone(), *span);
+                Ok(())
             }
-            // The member is a method or a variant, which carry the type's visibility:
-            // only the type itself is gated.
-            graph.check_visible(from, module, ty)?;
-            rewrite_member(
-                site,
-                graph.flat_name(module, ty),
-                member,
-                &path,
-                graph.display(from),
-            )
+            Pattern::Enum { enum_name, .. } => self.site(Site::TypeName(enum_name)),
+            Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Range { .. }
+            | Pattern::At { .. }
+            | Pattern::Array { .. } => Ok(()),
         }
-        _ => Err(ModuleError::PathTooDeep {
-            path,
-            from: graph.display(from).to_string(),
-        }),
-    }
-}
-
-/// Resolve a pattern that names a variant.
-///
-/// A payload-less variant (`None`) is written exactly like a binding, so the import table
-/// is the only thing that tells them apart; a payload-carrying one (`Some(n)`) is
-/// unambiguous and is an error when no import accounts for it.
-fn resolve_pattern(
-    graph: &ModuleGraph,
-    scope: &ImportScope,
-    from: usize,
-    pattern: &mut Pattern,
-) -> Result<(), ModuleError> {
-    match pattern {
-        Pattern::Binding(ident) => {
-            let Some((owner, variant)) = scope.variant(&ident.name) else {
-                return Ok(());
-            };
-            *pattern = enum_pattern(owner, variant, EnumPatternPayload::Unit, ident.span);
-            Ok(())
-        }
-        Pattern::UnqualifiedEnum {
-            variant,
-            payload,
-            span,
-        } => {
-            let Some((owner, name)) = scope.variant(&variant.name) else {
-                return Err(ModuleError::UnimportedVariant {
-                    variant: variant.name.clone(),
-                    from: graph.display(from).to_string(),
-                });
-            };
-            *pattern = enum_pattern(owner, name, payload.clone(), *span);
-            Ok(())
-        }
-        Pattern::Enum { enum_name, .. } => {
-            if let Some(item) = scope.rename(&enum_name.name) {
-                enum_name.name = item.to_string();
-            }
-            Ok(())
-        }
-        Pattern::Wildcard(_)
-        | Pattern::Literal(_, _)
-        | Pattern::Range { .. }
-        | Pattern::At { .. }
-        | Pattern::Array { .. } => Ok(()),
     }
 }
 
 fn enum_pattern(
-    owner: &str,
-    variant: &str,
+    owner: String,
+    variant: String,
     payload: EnumPatternPayload,
     span: shared_types::Span,
 ) -> Pattern {
     Pattern::Enum {
-        enum_name: Identifier {
-            name: owner.to_string(),
-            span,
-        },
+        enum_name: Identifier { name: owner, span },
         variant: Identifier {
-            name: variant.to_string(),
+            name: variant,
             span,
         },
         payload,
@@ -253,7 +311,7 @@ fn enum_pattern(
     }
 }
 
-/// Replace a resolved name with the bare item name the flat namespace uses.
+/// Replace a resolved name with the canonical name of what it reaches.
 fn rewrite_bare(site: Site<'_>, item: &str) {
     match site {
         Site::TypeName(name) => name.name = item.to_string(),
@@ -292,18 +350,22 @@ fn rewrite_bare(site: Site<'_>, item: &str) {
     }
 }
 
-/// Replace the type half of a bare `Type::member` path with the item an import bound.
+/// Replace the head of a `Type::member` path with the canonical name of the type in scope.
 fn rename_head(site: Site<'_>, item: &str) {
-    if let Site::Expr(expr) = site {
-        match expr {
-            Expr::Path { type_name, .. } => type_name.name = item.to_string(),
-            Expr::EnumStructLiteral { enum_name, .. } => enum_name.name = item.to_string(),
-            _ => {}
+    match site {
+        Site::Expr(Expr::Path { type_name, .. }) => type_name.name = item.to_string(),
+        Site::Expr(Expr::EnumStructLiteral { enum_name, .. }) => enum_name.name = item.to_string(),
+        // `Pt::Item` in a type position: only the head is a name in scope.
+        Site::TypeName(name) => {
+            let mut segments = split_segments(&name.name);
+            segments[0] = item.to_string();
+            name.name = segments.join("::");
         }
+        Site::Expr(_) | Site::Pattern(_) => {}
     }
 }
 
-/// Replace a qualified `module::Type::member` with the bare `Type::member` path.
+/// Replace a qualified `module::Type::member` with the canonical `Type::member` path.
 fn rewrite_member(
     site: Site<'_>,
     ty: &str,
@@ -325,7 +387,6 @@ fn rewrite_member(
                     type_name,
                     member: last,
                     span,
-                    ..
                 } => Expr::Path {
                     type_name: Identifier {
                         name: ty.to_string(),

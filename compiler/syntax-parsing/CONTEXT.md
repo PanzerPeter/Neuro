@@ -77,7 +77,10 @@ no types.
   are lang-items with no declaration to copy from, so `inject_comparison_defaults` writes their
   provided methods itself: `ne` from `eq`, and `le`, `gt`, `ge` from `lt`, each cloning the
   signature of the required method the impl wrote, since `Rhs` varies by impl. Without that
-  method nothing is written, and semantic analysis reports it missing.
+  method nothing is written, and semantic analysis reports it missing. Injection covers one file's
+  top level only: a trait and an impl in different modules, or inside `module` blocks, are matched
+  by `module-resolution` once their names are canonical, since a bare trait name may mean another
+  declaration there.
 - **`Self` inside an `impl`**: `expand_self` (`parser/type_aliases.rs`) runs between default
   injection and alias expansion and treats `Self` as an alias scoped to one block. It reuses the
   alias walker: type positions take the whole target (`Cell<T>` for `impl<T> Cell<T>`), and the
@@ -329,17 +332,16 @@ the tuple-index parse, so it needs no expression grammar of its own.
 `parse_program` delegates to `parse_item_list`, which runs to end of input at file level and to
 the closing brace inside a `module Name { ... }` block, so a block body is parsed by the same code
 as the file around it and blocks nest for free. Type-alias declarations from every nesting level
-are collected into one list and expanded in a single pass, and trait-default injection walks
-blocks too: both are erased at parse time, which is what makes an alias declared beside a block
-still read inside it.
+are collected into one list and expanded in a single pass, which is what makes an alias declared
+beside a block still read inside it.
 
 `export` is consumed between the attributes and the item keyword (the position `pub` takes in
 Rust, so `@derive(Copy)` still reads as attached to the declaration) and per field inside
 `parse_struct_def`, since an exported struct may keep a field to itself. It is rejected on an
-`impl` block (which declares no name), on a `type` alias (expanded at parse time, so nothing of
-it survives to reach another module), and on a `module` block (an inline module's name is reached
-only from the file declaring it), all through `ParseError::ExportNotAllowed`. Nothing here
-*enforces* visibility: the parser records what was written.
+`impl` block (which declares no name) and on a `type` alias (expanded at parse time, so nothing of
+it survives to reach another module), both through `ParseError::ExportNotAllowed`. On a `module`
+block it sets `ModuleDef.exported`. Nothing here *enforces* visibility: the parser records what
+was written.
 
 `parse_attributes` collects `@name` / `@name(arg, label: value, ...)` ahead of every `func`
 (free and impl methods) and `struct`. An identifier followed by `:` is a label and its value any
@@ -349,8 +351,8 @@ semantics live in semantic-analysis. An attribute preceding neither is rejected
 (`UnexpectedToken`).
 
 `parse_import` (`parser/item_imports.rs`) reads all five surface forms into one `Item::Import`: an
-optional leading `./`, a `::`-separated path, then an optional `{a, b as c}` list or a trailing
-`as` alias.
+optional leading `./` or one or more `../` (`ImportDef.relative`, `ImportDef.parents`), a
+`::`-separated path, then an optional `{a, b as c}` list or a trailing `as` alias.
 
 `parse_impl_def` accepts both inherent `impl TypeName { … }` and trait `impl TraitName for
 TypeName { … }` (a `for` after the first identifier selects the trait form). Its body loop takes
@@ -382,9 +384,13 @@ written and resolves nothing: matching a label to a parameter needs the callee, 
 - **Paths.** When `parse_prefix` sees `Identifier` `::`, it produces `Expr::Path`. A path may
   carry more than two segments now that modules exist (`utils::io::read`): the loop folds
   everything ahead of the final segment into one qualifier identifier whose `name` holds the `::`
-  separators, and `parse_type` does the same for a qualified type annotation. No AST node
-  changed: `module-resolution` splits the qualifier again, verifies it against the module that
-  owns the name, and erases it, so no `::` name ever reaches the type checker.
+  separators, and `parse_type` does the same for a qualified type annotation. `consume_path_name`
+  folds a qualified trait or type name the same way in an `impl` header, a bound, and an `impl` /
+  `dyn` type, and `parse_enum_pattern` folds every segment before the variant into the enum name
+  (`shapes::Shape::Circle`). No AST node changed: `module-resolution` splits the qualifier again
+  and rewrites the whole path to the canonical name of the declaration it reaches. A qualified
+  struct-variant-shaped literal with a `..base` is a struct literal from the start, since a variant
+  takes no base.
 - **Closures.** A leading `|` / `||` / `move` in prefix position parses as a closure literal.
   Parameters take an optional `: T`; an optional `-> R` follows; the body is a brace block or a
   single expression at `Precedence::Lowest`, so it stops at a `,`, `)`, or newline. `parse_type`

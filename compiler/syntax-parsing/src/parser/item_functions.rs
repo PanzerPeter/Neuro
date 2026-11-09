@@ -387,24 +387,15 @@ impl Parser {
     /// Parse one trait bound: `Trait`, or `Trait<Assoc = T>` constraining an associated
     /// type the trait declares, returning it with the span of its last token.
     fn parse_trait_bound(&mut self) -> ParseResult<(TraitBound, Span)> {
-        let token = self.consume(TokenKind::Identifier(String::new()), "trait bound name")?;
-        let TokenKind::Identifier(name) = token.kind else {
-            return Err(ParseError::UnexpectedToken {
-                found: token.kind,
-                expected: "trait bound name".to_string(),
-                span: token.span,
-            });
-        };
+        let trait_name = self.consume_path_name("trait bound name")?;
         let (assoc_bindings, close_span) = self.parse_assoc_bindings()?;
+        let end = close_span.unwrap_or(trait_name.span);
         Ok((
             TraitBound {
-                trait_name: Identifier {
-                    name,
-                    span: token.span,
-                },
+                trait_name,
                 assoc_bindings,
             },
-            close_span.unwrap_or(token.span),
+            end,
         ))
     }
 

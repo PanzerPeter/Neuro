@@ -4,9 +4,9 @@
 //! directory holding a dozen unrelated single-file programs still compiles one at a time.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
-use ast_types::{ImportDef, Item, ModuleDef, ModuleId};
+use ast_types::{ImportDef, ImportSelection, Item, ModuleDef, ModuleId};
 
 use crate::walk::{Site, walk_items};
 use crate::{ModuleError, ParseModule};
@@ -14,28 +14,39 @@ use crate::{ModuleError, ParseModule};
 /// U+FEFF, which some editors write at the start of a UTF-8 file.
 const BYTE_ORDER_MARK: char = '\u{feff}';
 
+/// The type name a path may open with inside an `impl` or a trait, which names no module.
+const SELF_TYPE: &str = "Self";
+
 /// A module that was loaded, as reported back to the driver.
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
-    /// Dotted-free module path as first reached, e.g. `utils::io`. Empty for the root.
+    /// The module's path from the program root, e.g. `utils::io`. Empty for the root.
     pub path: String,
     /// The file the module was read from.
     pub file: PathBuf,
 }
 
 pub(crate) struct Module {
+    /// The module's path from the program root (`utils::io`, `counter::limits`), which
+    /// prefixes every name it declares once resolution is done. Empty for the root, whose
+    /// names stay bare.
     pub(crate) path: String,
     /// Short form used in diagnostics: the file relative to the root module's directory.
     pub(crate) display: String,
     pub(crate) file: PathBuf,
-    /// Directory a path written *inside* this module resolves its first segment against.
+    /// Directory a `./` path written inside this module starts from.
     ref_dir: PathBuf,
     /// Directory this module's own children live in. `Some` only for a `mod.nr`: a leaf
     /// `math.nr` has no children, so `math::helper` must not reach `math`'s siblings.
     child_dir: Option<PathBuf>,
+    /// The module an inline block is written in. A block sees its enclosing module's
+    /// names, so name lookup climbs this chain; a file has no enclosing module.
+    pub(crate) parent: Option<usize>,
     /// Inline `module Name { ... }` blocks declared directly in this module, by name.
     /// Consulted before the file system, so a block always wins over a same-named file.
     inline_children: HashMap<String, usize>,
+    /// The subset of `inline_children` written `export module`.
+    exported_blocks: HashSet<String>,
     pub(crate) items: Vec<Item>,
     /// The file's `import` declarations, lifted out of `items` at load time so nothing
     /// downstream has to know the item kind existed.
@@ -69,14 +80,25 @@ struct ModuleOrigin {
     file: PathBuf,
     ref_dir: PathBuf,
     child_dir: Option<PathBuf>,
+    parent: Option<usize>,
 }
 
-/// Where a re-exported name really comes from, already followed to the end of any chain
-/// of re-exports so the flat namespace can be reached in one step.
+/// Where a declaration really lives: the module that declares it and the name it has
+/// there. A re-export is stored already followed to the end of any chain, so the
+/// declaration is reached in one step.
 #[derive(Clone)]
 pub(crate) struct Reexport {
     pub(crate) module: usize,
     pub(crate) item: String,
+}
+
+/// A module path written somewhere, as discovery follows it.
+#[derive(Clone, PartialEq)]
+struct Chain {
+    /// `None` for a path that starts at the program's root directory; `Some(n)` for one
+    /// that starts at the writing file's own directory, climbed `n` levels (`./` is 0).
+    anchor: Option<u32>,
+    segments: Vec<String>,
 }
 
 pub(crate) struct ModuleGraph {
@@ -95,7 +117,7 @@ impl ModuleGraph {
             by_file: HashMap::new(),
             root_dir,
         };
-        graph.load_file(file, None, String::new(), parse_module)?;
+        graph.load_file(file, None, parse_module)?;
 
         // Each module is visited once: `ensure_chain` walks a whole path in one call, so a
         // module loaded later cannot deepen an already-visited module's chain.
@@ -107,63 +129,104 @@ impl ModuleGraph {
             }
             next += 1;
         }
+        graph.check_module_paths()?;
         Ok(graph)
+    }
+
+    /// The paths an import in module `id` binds a name to, inner modules first, so a block
+    /// reads its enclosing module's imports as its own scope does.
+    fn import_chains(&self, id: usize) -> HashMap<String, Chain> {
+        let mut bound: HashMap<String, Chain> = HashMap::new();
+        let mut current = Some(id);
+        while let Some(module) = current {
+            for import in &self.modules[module].imports {
+                let anchor = import.relative.then_some(import.parents);
+                let path: Vec<String> = import.path.iter().map(|s| s.name.clone()).collect();
+                let mut bind = |name: &str, segments: Vec<String>| {
+                    bound
+                        .entry(name.to_string())
+                        .or_insert(Chain { anchor, segments });
+                };
+                match &import.selection {
+                    ImportSelection::Module => {
+                        if let Some(last) = path.last() {
+                            bind(last, path.clone());
+                        }
+                    }
+                    ImportSelection::Alias(alias) => bind(&alias.name, path.clone()),
+                    ImportSelection::List(names) => {
+                        for entry in names {
+                            let mut deeper = path.clone();
+                            deeper.push(entry.name.name.clone());
+                            bind(&entry.alias.as_ref().unwrap_or(&entry.name).name, deeper);
+                        }
+                    }
+                }
+            }
+            current = self.modules[module].parent;
+        }
+        bound
     }
 
     /// The module-path candidates written in module `id`: every qualified name minus its
     /// final segment, which is the item or type being named rather than a module, plus the
     /// path of every `import`, which is what makes an import pull its module in even when
     /// no qualified name reaches into it.
-    fn module_chains(&mut self, id: usize) -> Vec<Vec<String>> {
-        let mut items = std::mem::take(&mut self.modules[id].items);
-        let declared_types = std::mem::take(&mut self.modules[id].declared_types);
-        let mut chains: Vec<Vec<String>> = Vec::new();
-        // Each name an import binds, mapped to the path it was imported along. A qualified
-        // name headed by one is loaded along that path: the rewriting pass reads such a
-        // head through the import, so a same-named file beside this module is not what it
-        // names and must not be dragged into the build.
-        let mut bound: HashMap<String, Vec<String>> = HashMap::new();
+    fn module_chains(&mut self, id: usize) -> Vec<Chain> {
+        let mut chains: Vec<Chain> = Vec::new();
         for import in &self.modules[id].imports {
+            let anchor = import.relative.then_some(import.parents);
             let path: Vec<String> = import.path.iter().map(|s| s.name.clone()).collect();
-            match &import.selection {
-                ast_types::ImportSelection::Module => {
-                    if let Some(last) = path.last() {
-                        bound.entry(last.clone()).or_insert_with(|| path.clone());
-                    }
-                }
-                ast_types::ImportSelection::Alias(alias) => {
-                    bound
-                        .entry(alias.name.clone())
-                        .or_insert_with(|| path.clone());
-                }
-                // A `{...}` entry may name a child module rather than an item
-                // (`import ./utils::{io}`), so each one extends the path it is loaded along.
-                ast_types::ImportSelection::List(names) => {
-                    for entry in names {
-                        let mut deeper = path.clone();
-                        deeper.push(entry.name.name.clone());
-                        let name = entry.alias.as_ref().unwrap_or(&entry.name);
-                        bound
-                            .entry(name.name.clone())
-                            .or_insert_with(|| deeper.clone());
-                        chains.push(deeper);
-                    }
+            // A `{...}` entry may name a child module rather than an item
+            // (`import ./utils::{io}`), so each one extends the path it is loaded along.
+            if let ImportSelection::List(names) = &import.selection {
+                for entry in names {
+                    let mut deeper = path.clone();
+                    deeper.push(entry.name.name.clone());
+                    chains.push(Chain {
+                        anchor,
+                        segments: deeper,
+                    });
                 }
             }
-            chains.push(path);
+            chains.push(Chain {
+                anchor,
+                segments: path,
+            });
         }
+        // A qualified name headed by an imported name is loaded along the import's path:
+        // the rewriting pass reads such a head through the import, so a same-named file at
+        // the root is not what it names and must not be dragged into the build.
+        let bound = self.import_chains(id);
+        let mut items = std::mem::take(&mut self.modules[id].items);
+        let view = &*self;
         let mut collect = |site: Site<'_>| -> Result<(), ModuleError> {
             let segments = site_segments(&site);
             if segments.len() < 2 {
                 return Ok(());
             }
-            let chain = &segments[..segments.len() - 1];
-            if declared_types.contains(&chain[0]) {
+            let written = &segments[..segments.len() - 1];
+            let head = &written[0];
+            if head == SELF_TYPE
+                || view.lexical_type(id, head)
+                || view.lexical_block(id, head).is_some()
+            {
                 return Ok(());
             }
-            let chain = match bound.get(&chain[0]) {
-                Some(target) => target.iter().chain(&chain[1..]).cloned().collect(),
-                None => chain.to_vec(),
+            let chain = match bound.get(head) {
+                Some(import) => Chain {
+                    anchor: import.anchor,
+                    segments: import
+                        .segments
+                        .iter()
+                        .chain(&written[1..])
+                        .cloned()
+                        .collect(),
+                },
+                None => Chain {
+                    anchor: None,
+                    segments: written.to_vec(),
+                },
             };
             if !chains.contains(&chain) {
                 chains.push(chain);
@@ -172,47 +235,43 @@ impl ModuleGraph {
         };
         // The collector never fails; only the rewriting pass reports on what it finds.
         let _ = walk_items(&mut items, &mut collect);
-        // A locally declared type wins over a same-named file here too: the head of
-        // `import Shape::{Circle}` is this module's enum, never a `Shape.nr` beside it.
-        chains.retain(|chain| {
-            !chain
-                .first()
-                .is_some_and(|head| declared_types.contains(head))
-        });
         self.modules[id].items = items;
-        self.modules[id].declared_types = declared_types;
         chains
     }
 
-    /// Load every module along `chain`, starting from module `from`'s directory. A segment
-    /// that names no file ends the descent: the remainder is a type path such as the
-    /// `Point::new` of `math::Point::new`.
+    /// Load every module along `chain`, written in module `from`. A segment that names no
+    /// file ends the descent: the remainder is a type path such as the `Point::new` of
+    /// `math::Point::new`, or an enum's variant list.
     fn ensure_chain(
         &mut self,
         from: usize,
-        chain: &[String],
+        chain: &Chain,
         parse_module: &ParseModule<'_>,
     ) -> Result<(), ModuleError> {
-        let mut dir = self.modules[from].ref_dir.clone();
-        let mut current: Option<usize> = None;
-        let mut path = String::new();
-        for segment in chain {
-            // An inline block is already loaded and holds no file children, so reaching one
-            // ends the descent before the file system is consulted at all.
-            let holder = current.unwrap_or(from);
-            if self.modules[holder].inline_children.contains_key(segment) {
+        let Some(head) = chain.segments.first() else {
+            return Ok(());
+        };
+        let mut dir = match chain.anchor {
+            // An inline block is already loaded and holds no file children, so reaching
+            // one ends the descent before the file system is consulted at all. A locally
+            // declared type wins over a same-named file for the same reason.
+            None if self.lexical_block(from, head).is_some() || self.lexical_type(from, head) => {
                 return Ok(());
             }
-            let found = self.locate(&dir, segment, from)?;
-            let Some((file, child_dir)) = found else {
+            None => self.root_dir.clone(),
+            Some(levels) => climb(&self.modules[from].ref_dir, levels),
+        };
+        let mut current: Option<usize> = None;
+        for segment in &chain.segments {
+            if let Some(id) = current
+                && self.modules[id].inline_children.contains_key(segment)
+            {
+                return Ok(());
+            }
+            let Some((file, child_dir)) = self.locate(&dir, segment, from)? else {
                 return Ok(());
             };
-            path = if path.is_empty() {
-                segment.clone()
-            } else {
-                format!("{}::{}", path, segment)
-            };
-            let id = self.load_file(file, child_dir, path.clone(), parse_module)?;
+            let id = self.load_file(file, child_dir, parse_module)?;
             current = Some(id);
             match &self.modules[id].child_dir {
                 Some(next) => dir = next.clone(),
@@ -252,7 +311,6 @@ impl ModuleGraph {
         &mut self,
         file: PathBuf,
         child_dir: Option<PathBuf>,
-        path: String,
         parse_module: &ParseModule<'_>,
     ) -> Result<usize, ModuleError> {
         let file = canonical(&file)?;
@@ -272,6 +330,13 @@ impl ModuleGraph {
             message,
         })?;
 
+        // The root's names stay bare; every other file is named by where it sits under
+        // the root directory, which is the same whichever module first reached it.
+        let path = if self.modules.is_empty() {
+            String::new()
+        } else {
+            module_path(&file, &self.root_dir)
+        };
         let ref_dir = parent_dir(&file);
         let child_dir = child_dir.map(|d| canonical(&d)).transpose()?;
         let origin = ModuleOrigin {
@@ -280,6 +345,7 @@ impl ModuleGraph {
             file: file.clone(),
             ref_dir,
             child_dir,
+            parent: None,
         };
         let id = self.push_module(origin, items, false)?;
         self.by_file.insert(file, id);
@@ -290,9 +356,10 @@ impl ModuleGraph {
     /// it declares.
     ///
     /// An inline block is a module in every sense that matters here: its items are private
-    /// unless exported, a qualified path reaches into it, and its declarations join the one
-    /// flat namespace. Making it a graph module rather than a special case is what lets the
-    /// visibility rule, the collision check, and the `ModuleId` stamp apply unchanged.
+    /// unless exported, a qualified path reaches into it, and its declarations live in a
+    /// namespace of their own. Making it a graph module rather than a special case is what
+    /// lets the visibility rule, the canonical names, and the `ModuleId` stamp apply
+    /// unchanged.
     fn push_module(
         &mut self,
         origin: ModuleOrigin,
@@ -300,7 +367,7 @@ impl ModuleGraph {
         inherited_no_prelude: bool,
     ) -> Result<usize, ModuleError> {
         // Imports, inline blocks, and the `@no_prelude` marker are consumed here rather
-        // than carried along: after resolution the program is one flat item list, and none
+        // than carried along: after resolution the program is one item list, and none
         // of the three has anything left to say to a downstream pass.
         let mut imports = Vec::new();
         let mut blocks: Vec<ModuleDef> = Vec::new();
@@ -347,7 +414,9 @@ impl ModuleGraph {
             file: origin.file,
             ref_dir: origin.ref_dir,
             child_dir: origin.child_dir,
+            parent: origin.parent,
             inline_children: HashMap::new(),
+            exported_blocks: HashSet::new(),
             items,
             imports,
             declared,
@@ -377,6 +446,7 @@ impl ModuleGraph {
                 file,
                 ref_dir,
                 child_dir: None,
+                parent: Some(id),
             };
             let child = self.push_module(origin, block.items, no_prelude)?;
             if self.modules[id]
@@ -389,31 +459,65 @@ impl ModuleGraph {
                     from: self.modules[id].display.clone(),
                 });
             }
+            if block.exported {
+                self.modules[id].exported_blocks.insert(name);
+            }
         }
         Ok(id)
     }
 
-    /// The module a path segment names: a child of `current`, or (for the first segment,
-    /// where `current` is `None`) a module beside `from`. Only already-loaded modules are
-    /// consulted; discovery has finished by the time this is asked.
+    /// Reject two loaded modules that would share a path, so share every name. The one way
+    /// it happens is an inline block in the root file and a file at the root of the same
+    /// name: the root reaches its block, every other module the file.
+    fn check_module_paths(&self) -> Result<(), ModuleError> {
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+        for (id, module) in self.modules.iter().enumerate() {
+            if let Some(first) = seen.insert(&module.path, id) {
+                return Err(ModuleError::DuplicateModulePath {
+                    path: module.path.clone(),
+                    first: self.modules[first].display.clone(),
+                    second: module.display.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// The first segment of a path written in module `from` without `./`: an inline block
+    /// in scope (`from`'s own, or an enclosing module's), else a file at the program root.
     ///
-    /// An inline block declared in the module doing the reaching wins over a same-named
-    /// file, on the same principle that makes a locally declared type win: adding a file
-    /// beside a module must never silently re-point a path that already resolved.
-    pub(crate) fn resolve_segment(
+    /// A path starting `./` or `../` is anchored at the writing file's directory instead,
+    /// climbed `levels` times.
+    pub(crate) fn resolve_head(
         &self,
         from: usize,
-        current: Option<usize>,
+        anchor: Option<u32>,
         segment: &str,
     ) -> Option<usize> {
-        let holder = current.unwrap_or(from);
-        if let Some(id) = self.modules[holder].inline_children.get(segment) {
+        let dir = match anchor {
+            None => {
+                if let Some(block) = self.lexical_block(from, segment) {
+                    return Some(block);
+                }
+                self.root_dir.clone()
+            }
+            Some(levels) => climb(&self.modules[from].ref_dir, levels),
+        };
+        self.loaded_file(&dir, segment)
+    }
+
+    /// A segment below module `current`: an inline block it declares, else a file in its
+    /// directory. Only already-loaded modules are consulted; discovery has finished by the
+    /// time this is asked.
+    pub(crate) fn resolve_child(&self, current: usize, segment: &str) -> Option<usize> {
+        if let Some(id) = self.modules[current].inline_children.get(segment) {
             return Some(*id);
         }
-        let dir = match current {
-            None => &self.modules[from].ref_dir,
-            Some(id) => self.modules[id].child_dir.as_ref()?,
-        };
+        let dir = self.modules[current].child_dir.as_ref()?;
+        self.loaded_file(dir, segment)
+    }
+
+    fn loaded_file(&self, dir: &Path, segment: &str) -> Option<usize> {
         let candidates = [
             dir.join(segment).join("mod.nr"),
             dir.join(format!("{}.nr", segment)),
@@ -424,40 +528,100 @@ impl ModuleGraph {
             .copied()
     }
 
+    /// Reject reaching module `target` from `from` when it is an inline block that keeps
+    /// to its enclosing module: a block without `export` is reached only from inside the
+    /// module that declares it.
+    pub(crate) fn check_block_reachable(
+        &self,
+        from: usize,
+        target: usize,
+    ) -> Result<(), ModuleError> {
+        let Some(parent) = self.modules[target].parent else {
+            return Ok(());
+        };
+        let name = self.modules[target]
+            .path
+            .rsplit("::")
+            .next()
+            .unwrap_or_default();
+        if self.modules[parent].exported_blocks.contains(name) || self.encloses(parent, from) {
+            return Ok(());
+        }
+        Err(ModuleError::PrivateItem {
+            module: self.path_of(parent).to_string(),
+            item: name.to_string(),
+            from: self.display(from).to_string(),
+        })
+    }
+
+    /// Is module `inner` the module `outer`, or a block written inside it at any depth?
+    pub(crate) fn encloses(&self, outer: usize, inner: usize) -> bool {
+        let mut current = Some(inner);
+        while let Some(id) = current {
+            if id == outer {
+                return true;
+            }
+            current = self.modules[id].parent;
+        }
+        false
+    }
+
+    /// The inline block module `id` declares as `name`.
+    pub(crate) fn inline_child(&self, id: usize, name: &str) -> Option<usize> {
+        self.modules[id].inline_children.get(name).copied()
+    }
+
+    /// The inline block `name` in scope in module `from`: its own, or an enclosing
+    /// module's, nearest first.
+    pub(crate) fn lexical_block(&self, from: usize, name: &str) -> Option<usize> {
+        let mut current = Some(from);
+        while let Some(id) = current {
+            if let Some(block) = self.modules[id].inline_children.get(name) {
+                return Some(*block);
+            }
+            current = self.modules[id].parent;
+        }
+        None
+    }
+
+    /// Does module `from`, or a module enclosing it, declare a type called `name`?
+    pub(crate) fn lexical_type(&self, from: usize, name: &str) -> bool {
+        let mut current = Some(from);
+        while let Some(id) = current {
+            if self.modules[id].declared_types.contains(name) {
+                return true;
+            }
+            current = self.modules[id].parent;
+        }
+        false
+    }
+
+    /// Does module `id` itself declare `name`, as an item or an inline block? An import
+    /// may not bind such a name: the two would compete for one spelling.
+    pub(crate) fn declares_own(&self, id: usize, name: &str) -> bool {
+        self.modules[id].declared.contains(name)
+            || self.modules[id].inline_children.contains_key(name)
+    }
+
     /// Does module `id` declare `name`, or re-export it?
     pub(crate) fn declares(&self, id: usize, name: &str) -> bool {
         self.modules[id].declared.contains(name) || self.modules[id].reexports.contains_key(name)
     }
 
     pub(crate) fn declares_type(&self, id: usize, name: &str) -> bool {
-        let module = &self.modules[id];
-        if module.declared_types.contains(name) {
-            return true;
-        }
-        match module.reexports.get(name) {
-            Some(target) => self.modules[target.module]
-                .declared_types
-                .contains(&target.item),
-            None => false,
-        }
+        let (origin, item) = self.flat_origin(id, name);
+        self.modules[origin].declared_types.contains(&item)
     }
 
-    /// Does any module in the graph declare an enum called `name`?
-    ///
-    /// Graph-wide rather than per-module because items share one flat namespace once
-    /// resolution finishes, so `import Shape::{Circle}` is legitimate wherever `Shape`
-    /// was declared. The prelude's enums are not here: they are prepended after this
-    /// pass, so the caller adds them from the prelude list it already holds.
-    pub(crate) fn declares_enum_anywhere(&self, name: &str) -> bool {
-        self.modules
-            .iter()
-            .any(|module| module.declared_enums.contains(name))
+    pub(crate) fn declares_enum(&self, id: usize, name: &str) -> bool {
+        let (origin, item) = self.flat_origin(id, name);
+        self.modules[origin].declared_enums.contains(&item)
     }
 
     /// Does any module in the graph hold an inline `module {name} { ... }` block?
     ///
-    /// Used only to explain an import that resolved nothing: a block is invisible to its
-    /// parent's *other* blocks, which is the one way a real module can fail to be found.
+    /// Used only to explain a path that resolved nothing: a block is reached from inside
+    /// the module that declares it, which is the one way a real module can fail to be found.
     pub(crate) fn has_inline_block_named(&self, name: &str) -> bool {
         self.modules
             .iter()
@@ -482,13 +646,17 @@ impl ModuleGraph {
         }
     }
 
-    /// The name `name` carries in the flat namespace once module `id` is stripped off it.
-    /// They differ only when a re-export renamed the declaration with `as`.
-    pub(crate) fn flat_name<'a>(&'a self, id: usize, name: &'a str) -> &'a str {
-        match self.modules[id].reexports.get(name) {
-            Some(target) => &target.item,
-            None => name,
-        }
+    /// The name module `id`'s declaration `name` carries once resolution is done: its
+    /// module path in front of it, or the bare name for the root.
+    pub(crate) fn canonical(&self, id: usize, name: &str) -> String {
+        canonical_name(&self.modules[id].path, name)
+    }
+
+    /// The canonical name a reference to `name` through module `id` lands on, following
+    /// a re-export to the declaration.
+    pub(crate) fn canonical_through(&self, id: usize, name: &str) -> String {
+        let (origin, item) = self.flat_origin(id, name);
+        self.canonical(origin, &item)
     }
 
     /// Record that module `id` re-exports `name`, reporting whether that was new.
@@ -506,15 +674,15 @@ impl ModuleGraph {
     }
 
     /// Reject a reference from `from` into `module` naming a declaration that module
-    /// keeps to itself. A module referring to its own name is always allowed, which is
-    /// what makes a self-qualified path inside a module legal.
+    /// keeps to itself. A module may always name its own declarations, and a block those
+    /// of every module it is written inside: it is part of them.
     pub(crate) fn check_visible(
         &self,
         from: usize,
         module: usize,
         name: &str,
     ) -> Result<(), ModuleError> {
-        if from == module || self.exports(module, name) {
+        if self.encloses(module, from) || self.exports(module, name) {
             return Ok(());
         }
         Err(ModuleError::PrivateItem {
@@ -534,8 +702,7 @@ impl ModuleGraph {
         &self.modules[id].display
     }
 
-    /// The module path a module was first reached by. The root has none, so it answers
-    /// with its file instead.
+    /// The module's path. The root has none, so it answers with its file instead.
     pub(crate) fn path_of(&self, id: usize) -> &str {
         let module = &self.modules[id];
         if module.path.is_empty() {
@@ -545,46 +712,27 @@ impl ModuleGraph {
         }
     }
 
-    /// Reject the same name declared by two modules. Items share one namespace this phase,
-    /// so the alternative is one declaration silently winning.
-    pub(crate) fn check_name_collisions(&self) -> Result<(), ModuleError> {
-        let mut seen: HashMap<&str, usize> = HashMap::new();
-        for (id, module) in self.modules.iter().enumerate() {
-            let mut names: Vec<&str> = module.declared.iter().map(String::as_str).collect();
-            names.sort_unstable();
-            for name in names {
-                if let Some(first) = seen.insert(name, id) {
-                    return Err(ModuleError::DuplicateItem {
-                        name: name.to_string(),
-                        first: self.modules[first].display.clone(),
-                        second: module.display.clone(),
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn into_program(self) -> crate::ResolvedProgram {
-        // The prelude's declarations join one flat namespace, so opting out of them is a
-        // decision for the program rather than for a file, and the root is the file that
-        // makes it.
+        // The prelude's declarations join the program as one list, so opting out of them
+        // is a decision for the program rather than for a file, and the root is the file
+        // that makes it.
         let no_prelude = self.modules.first().is_some_and(|root| root.no_prelude);
         let mut items = Vec::new();
         let mut modules = Vec::new();
         for (id, module) in self.modules.into_iter().enumerate() {
+            // Every reference was already rewritten to the canonical name, so renaming
+            // the declarations is what makes the two meet.
+            for mut item in module.items {
+                rename_declaration(&mut item, &module.path);
+                stamp_module(&mut item, id as ModuleId);
+                items.push(item);
+            }
             modules.push(ResolvedModule {
                 path: module.path,
                 file: module.file,
             });
-            // The merge is flat, so this stamp is the only trace of which file a
-            // declaration came from. Field visibility needs types and is therefore
-            // settled by the type checker, which has nothing else to read it from.
-            for mut item in module.items {
-                stamp_module(&mut item, id as ModuleId);
-                items.push(item);
-            }
         }
+        crate::defaults::inject_trait_defaults(&mut items);
         crate::ResolvedProgram {
             items,
             modules,
@@ -593,13 +741,29 @@ impl ModuleGraph {
     }
 }
 
+/// `path::name`, or `name` alone for the root's empty path.
+pub(crate) fn canonical_name(path: &str, name: &str) -> String {
+    if path.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}::{}", path, name)
+    }
+}
+
 /// The `::`-separated segments a qualified site names, item or type name included.
 ///
-/// A site that names no path (a pattern, a non-path expression) yields nothing, and a
-/// bare name yields the one segment an import table is keyed on.
+/// A site that names no path yields nothing, and a bare name yields the one segment an
+/// import table is keyed on.
 pub(crate) fn site_segments(site: &Site<'_>) -> Vec<String> {
     match site {
         Site::TypeName(name) => split_segments(&name.name),
+        Site::Pattern(ast_types::Pattern::Enum {
+            enum_name, variant, ..
+        }) => {
+            let mut segments = split_segments(&enum_name.name);
+            segments.push(variant.name.clone());
+            segments
+        }
         Site::Pattern(_) => Vec::new(),
         Site::Expr(expr) => match expr {
             ast_types::Expr::Identifier(name) => vec![name.name.clone()],
@@ -622,12 +786,53 @@ pub(crate) fn site_segments(site: &Site<'_>) -> Vec<String> {
     }
 }
 
-fn split_segments(name: &str) -> Vec<String> {
+pub(crate) fn split_segments(name: &str) -> Vec<String> {
     name.split("::").map(str::to_string).collect()
 }
 
 fn parent_dir(file: &Path) -> PathBuf {
     file.parent().map(Path::to_path_buf).unwrap_or_default()
+}
+
+/// `dir` with `levels` trailing components removed: where `../` leads.
+fn climb(dir: &Path, levels: u32) -> PathBuf {
+    let mut dir = dir.to_path_buf();
+    for _ in 0..levels {
+        dir = parent_dir(&dir);
+    }
+    dir
+}
+
+/// The module path of `file`: its location under `root_dir` with `/` read as `::`, a
+/// `mod.nr` named by its directory and a leaf by its stem. A file above the root, reached
+/// through `../`, keeps a `..` segment per level climbed, so its names cannot collide with
+/// a module under the root.
+fn module_path(file: &Path, root_dir: &Path) -> String {
+    let file_parts: Vec<Component<'_>> = file.components().collect();
+    let root_parts: Vec<Component<'_>> = root_dir.components().collect();
+    let common = file_parts
+        .iter()
+        .zip(&root_parts)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut segments: Vec<String> = vec!["..".to_string(); root_parts.len() - common];
+    segments.extend(
+        file_parts[common..]
+            .iter()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned()),
+    );
+    match segments.last().map(String::as_str) {
+        Some("mod.nr") => {
+            segments.pop();
+        }
+        Some(leaf) => {
+            let stem = leaf.strip_suffix(".nr").unwrap_or(leaf).to_string();
+            segments.pop();
+            segments.push(stem);
+        }
+        None => {}
+    }
+    segments.join("::")
 }
 
 /// Canonicalize so the same file reached by two different paths is one module.
@@ -646,6 +851,23 @@ fn display_path(file: &Path, root_dir: &Path) -> String {
         .replace('\\', "/")
 }
 
+/// Give a declaration its canonical name: `path::Name` outside the root module.
+fn rename_declaration(item: &mut Item, path: &str) {
+    if path.is_empty() {
+        return;
+    }
+    let name = match item {
+        Item::Function(def) => &mut def.name,
+        Item::Struct(def) => &mut def.name,
+        Item::Enum(def) => &mut def.name,
+        Item::Trait(def) => &mut def.name,
+        Item::Const(def) => &mut def.name,
+        Item::Newtype(def) => &mut def.name,
+        Item::Impl(_) | Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => return,
+    };
+    name.name = canonical_name(path, &name.name);
+}
+
 /// Record which module a declaration was loaded from, on the item kinds whose bodies
 /// or fields the visibility rules are checked against.
 fn stamp_module(item: &mut Item, module: ModuleId) {
@@ -657,7 +879,7 @@ fn stamp_module(item: &mut Item, module: ModuleId) {
         // An enum, a newtype, and a trait declaration hold no field access to check:
         // an enum payload is reached through a pattern, which names the variant rather
         // than a field, and a trait's default bodies are checked through the impl copies
-        // the parser injects.
+        // they are injected as.
         // An inline block is lifted into a module of its own before this runs, so none
         // reaches the merge.
         Item::Enum(_)

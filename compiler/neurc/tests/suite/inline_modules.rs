@@ -67,7 +67,7 @@ fn blocks_nest_and_an_import_reaches_into_one() {
     let exit = run_single(
         r#"
 module outer {
-    module inner {
+    export module inner {
         export func deep() -> i32 { 7 }
     }
 
@@ -178,45 +178,59 @@ fn two_blocks_may_not_share_a_name() {
 }
 
 #[test]
-fn export_is_rejected_on_a_block() {
-    let error = run_single("export module m { }\nfunc main() -> i32 { 0 }\n")
-        .expect_err("expected a parse error");
-    assert!(error.contains("`export` cannot be applied to"), "{}", error);
+fn a_private_block_is_closed_to_other_modules() {
+    let files = [
+        (
+            "shapes.nr",
+            "module inner {\n    export func deep() -> i32 { 7 }\n}\n",
+        ),
+        ("main.nr", "func main() -> i32 { shapes::inner::deep() }\n"),
+    ];
+    let error = run_program(&files, "main.nr").expect_err("expected a module error");
+    assert!(error.contains("`inner` is private"), "{}", error);
 }
 
 #[test]
-fn a_sibling_block_in_an_import_path_is_reported_as_an_invisible_module() {
-    // A block sees its own children and the file's siblings, not its parent's other
-    // blocks. The path therefore resolves no module, but it must not be silently
-    // re-read as an enum whose variants are being imported.
-    let error = run_single(
-        "module leaf   { export const BASE: i32 = 8 }\n\
-         module facade { export import leaf::{BASE} }\n\
-         func main() -> i32 { facade::BASE }\n",
-    )
-    .expect_err("expected a module error");
-    assert!(
-        !error.contains("enum variant"),
-        "`BASE` is a const, not a variant; got: {}",
-        error
-    );
-    assert!(
-        error.contains("inline module"),
-        "diagnostic should name the invisible block; got: {}",
-        error
-    );
+fn an_exported_block_opens_to_other_modules() {
+    let files = [
+        (
+            "shapes.nr",
+            "export module inner {\n    export func deep() -> i32 { 7 }\n}\n",
+        ),
+        ("main.nr", "func main() -> i32 { shapes::inner::deep() }\n"),
+    ];
+    assert_eq!(run_program(&files, "main.nr"), Ok(7));
 }
 
 #[test]
-fn a_plain_import_of_a_sibling_block_is_reported_the_same_way() {
-    // Dropping the `export` must not make the error go away: the plain form was
-    // silently accepted as a variant binding of an enum that does not exist.
-    let error = run_single(
+fn a_block_reaches_a_sibling_block_through_its_enclosing_module() {
+    // A block sees the names of the module it is written in, and a sibling block is one
+    // of them, whether it is re-exported or imported plainly.
+    let exit = run_single(
         "module leaf   { export const BASE: i32 = 8 }\n\
-         module facade { import leaf::{BASE}\n export func get() -> i32 { BASE } }\n\
-         func main() -> i32 { facade::get() }\n",
+         module facade { export import leaf::{BASE}\n export func get() -> i32 { BASE + 1 } }\n\
+         func main() -> i32 { facade::BASE + facade::get() }\n",
     )
-    .expect_err("expected a module error");
+    .expect("a sibling block is in scope");
+    assert_eq!(exit, 17);
+}
+
+#[test]
+fn a_block_named_bare_from_another_file_is_reported_as_an_invisible_module() {
+    // `leaf` is a block in the root file. Another file does not have it in scope, and the
+    // path must not be silently re-read as an enum whose variants are being imported.
+    let files = [
+        (
+            "other.nr",
+            "import leaf::{BASE}\nexport func get() -> i32 { BASE }\n",
+        ),
+        (
+            "main.nr",
+            "module leaf { export const BASE: i32 = 8 }\nfunc main() -> i32 { other::get() }\n",
+        ),
+    ];
+    let error = run_program(&files, "main.nr").expect_err("expected a module error");
+    assert!(!error.contains("enum variant"), "{}", error);
     assert!(
         error.contains("inline module"),
         "diagnostic should name the invisible block; got: {}",

@@ -33,12 +33,14 @@ cannot state.
 Three `Item` variants never reach `semantic-analysis`. Module resolution reads them off the
 file it opens and drops them. Each therefore records **only what was written**, because what it
 *means* is a file-system question:
-- `Item::Import(ImportDef)`: `relative` (the explicit `./` form), the `::`-separated `path`, an
+- `Item::Import(ImportDef)`: `relative` (a `./` or `../` path, which starts at the importing
+  file's directory rather than the program root), `parents` (how many `../`), the `::`-separated `path`, an
   `ImportSelection` of `Module` / `Alias` / `List(Vec<ImportName>)`, and `exported` for the
   `export import` re-export form. Whether a path segment names a module file, an item inside one,
   or an enum is not decidable at parse time.
-- `Item::Module(ModuleDef { name, items, span })`: an inline `module Name { … }` block, which
-  module resolution lifts into a graph module of its own and erases.
+- `Item::Module(ModuleDef { name, exported, items, span })`: an inline `module Name { … }` block,
+  `exported` for `export module`, which module resolution lifts into a graph module of its own and
+  erases.
 - `Item::NoPrelude(Span)`: the file-scope `@no_prelude` marker, carrying only its span.
 
 `Pattern::UnqualifiedEnum { variant, payload, span }` is the pattern-side counterpart: `Some(n)`

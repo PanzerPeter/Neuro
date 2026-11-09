@@ -21,7 +21,7 @@ one and checks two things:
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, `for` over maps, ranges as values, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match` and its nested, `@` and array patterns, `val-else`, `if val` / `while val`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
 | `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, supertraits, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs and Enums](../docs/language-reference/structs.md) |
-| `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
+| `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, per-module namespaces, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
 | `showcase/`     | Bigger programs proving many features work **together** | see the index below |
 
 ## Compiling and running
@@ -187,7 +187,7 @@ in each program has the full description. The three module files under
 
 ### Multi-file
 
-- [`telemetry/main.nr`](showcase/telemetry/main.nr): The root of a multi-file program: sibling and directory modules, the three `import` forms, `export import`, and an inline `module` block.
+- [`telemetry/main.nr`](showcase/telemetry/main.nr): The root of a multi-file program: sibling and directory modules, the three `import` forms, `export import`, an inline `module` block, and namespaces. Two modules declare the same function name, an enum is matched and a trait implemented through their module paths, a trait default crosses modules, and a local shadows an import.
 
 ## See also
 

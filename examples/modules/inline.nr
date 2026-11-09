@@ -18,8 +18,9 @@ module counter {
         }
     }
 
-    // Nested one level deeper: `counter::limits` from outside, `limits` from in here.
-    module limits {
+    // Nested one level deeper: `counter::limits` from outside, `limits` from in here. A
+    // block is private like any other item, so `export` is what lets `main` reach it.
+    export module limits {
         export const CEILING: i32 = 30
     }
 

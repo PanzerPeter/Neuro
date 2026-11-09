@@ -1,4 +1,4 @@
-//! Unit tests for discovery, collision detection, and qualifier stripping.
+//! Unit tests for discovery, name resolution, and canonical naming.
 //!
 //! The AST fixtures are built by hand rather than parsed: this slice must compile without
 //! `syntax-parsing`, so the parser it is handed here is a stub that maps a marker line to
@@ -108,9 +108,15 @@ fn match_on(pattern: Pattern) -> Stmt {
 
 /// Build one `import` item from the stub's `import <rest>` line.
 fn import_item(rest: &str, exported: bool) -> Result<Item, String> {
+    let mut parents = 0;
+    let mut rest = rest;
+    while let Some(stripped) = rest.strip_prefix("../") {
+        parents += 1;
+        rest = stripped;
+    }
     let (relative, rest) = match rest.strip_prefix("./") {
         Some(stripped) => (true, stripped),
-        None => (false, rest),
+        None => (parents > 0, rest),
     };
 
     let segments = |path: &str| path.split("::").map(ident).collect::<Vec<_>>();
@@ -143,6 +149,7 @@ fn import_item(rest: &str, exported: bool) -> Result<Item, String> {
 
     Ok(Item::Import(ImportDef {
         relative,
+        parents,
         path,
         selection,
         exported,
@@ -151,19 +158,21 @@ fn import_item(rest: &str, exported: bool) -> Result<Item, String> {
 }
 
 /// The stub parser: each line is `func NAME`, `export func NAME`,
-/// `call QUALIFIER::MEMBER`, `bare NAME`, `param NAME: TYPE`, `import ...`,
+/// `call QUALIFIER::MEMBER`, `bare NAME`, `local NAME` (a `val NAME = 0`), `param NAME: TYPE`, `import ...`,
 /// `export import ...`, `no_prelude`, `pat NAME(BIND)`, or `patbare NAME`: enough surface to drive
-/// every resolution rule. A `module NAME` line opens an inline block that runs to a
-/// matching `end`. `func` without `export` is private to its file, exactly as in real
+/// every resolution rule. A `module NAME` or `export module NAME` line opens an inline
+/// block that runs to a matching `end`. `func` without `export` is private to its file, exactly as in real
 /// source.
 fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     let mut calls = Vec::new();
     let mut lines = source.lines().map(str::trim).filter(|l| !l.is_empty());
     while let Some(line) = lines.next() {
-        if let Some(name) = line.strip_prefix("module ") {
+        let exported_block = line.strip_prefix("export module ");
+        if let Some(name) = exported_block.or_else(|| line.strip_prefix("module ")) {
             items.push(Item::Module(ModuleDef {
                 name: ident(name),
+                exported: exported_block.is_some(),
                 items: stub_parse(&stub_block(&mut lines, name)?)?,
                 span: Span::new(0, 0),
             }));
@@ -182,6 +191,14 @@ fn stub_parse(source: &str) -> Result<Vec<Item>, String> {
             calls.push(call_path(qualifier, member));
         } else if let Some(name) = line.strip_prefix("bare ") {
             calls.push(call_bare(name));
+        } else if let Some(name) = line.strip_prefix("local ") {
+            calls.push(Stmt::VarDecl {
+                name: ident(name),
+                ty: None,
+                init: Some(Expr::Literal(Literal::Integer(0, None), Span::new(0, 0))),
+                mutable: false,
+                span: Span::new(0, 0),
+            });
         } else if let Some(rest) = line.strip_prefix("param ") {
             let (name, ty) = rest
                 .split_once(": ")
@@ -230,7 +247,7 @@ fn stub_block<'a>(lines: &mut impl Iterator<Item = &'a str>, name: &str) -> Resu
     let mut depth = 1;
     let mut body = String::new();
     for line in lines {
-        if line.starts_with("module ") {
+        if line.starts_with("module ") || line.starts_with("export module ") {
             depth += 1;
         } else if line == "end" {
             depth -= 1;
@@ -326,7 +343,7 @@ fn first_pattern(program: &ResolvedProgram) -> Option<Pattern> {
 }
 
 #[test]
-fn loads_a_sibling_module_and_strips_the_qualifier() {
+fn loads_a_sibling_module_and_names_its_items_by_path() {
     let dir = TempDir::new().expect("temp dir");
     write(dir.path(), "math.nr", "export func sqrt\n");
     let root = write(dir.path(), "main.nr", "call math::sqrt\n");
@@ -334,8 +351,8 @@ fn loads_a_sibling_module_and_strips_the_qualifier() {
     let program = resolve(&root).expect("resolution succeeds");
 
     assert_eq!(program.modules.len(), 2);
-    assert!(declared_names(&program).contains(&"sqrt".to_string()));
-    assert_eq!(first_callee(&program).as_deref(), Some("sqrt"));
+    assert!(declared_names(&program).contains(&"math::sqrt".to_string()));
+    assert_eq!(first_callee(&program).as_deref(), Some("math::sqrt"));
 }
 
 #[test]
@@ -348,12 +365,12 @@ fn descends_into_a_directory_module_through_its_mod_file() {
     let program = resolve(&root).expect("resolution succeeds");
 
     assert_eq!(program.modules.len(), 3);
-    assert_eq!(first_callee(&program).as_deref(), Some("read"));
+    assert_eq!(first_callee(&program).as_deref(), Some("utils::io::read"));
     assert_eq!(program.modules[2].path, "utils::io");
 }
 
 #[test]
-fn a_qualified_type_annotation_loses_its_module_prefix() {
+fn a_qualified_type_annotation_takes_its_canonical_name() {
     let dir = TempDir::new().expect("temp dir");
     write(dir.path(), "geometry.nr", "export func Point\n");
     let root = write(dir.path(), "main.nr", "param take: geometry::Point\n");
@@ -365,7 +382,7 @@ fn a_qualified_type_annotation_loses_its_module_prefix() {
         _ => None,
     });
     match annotated.map(|param| &param.ty) {
-        Some(Type::Named(name)) => assert_eq!(name.name, "Point"),
+        Some(Type::Named(name)) => assert_eq!(name.name, "geometry::Point"),
         other => panic!("expected a bare named type, got {:?}", other),
     }
 }
@@ -424,7 +441,7 @@ fn an_item_the_module_does_not_declare_is_rejected() {
 }
 
 #[test]
-fn a_name_declared_by_two_modules_collides() {
+fn two_modules_may_each_declare_the_same_name() {
     let dir = TempDir::new().expect("temp dir");
     write(dir.path(), "other.nr", "export func shared\n");
     let root = write(
@@ -433,10 +450,9 @@ fn a_name_declared_by_two_modules_collides() {
         "export func shared\ncall other::shared\n",
     );
 
-    match resolve(&root) {
-        Err(ModuleError::DuplicateItem { name, .. }) => assert_eq!(name, "shared"),
-        other => panic!("expected DuplicateItem, got {:?}", other.map(|_| ())),
-    }
+    let program = resolve(&root).expect("each module has a namespace of its own");
+    assert_eq!(declared_names(&program), ["shared", "other::shared"]);
+    assert_eq!(first_callee(&program).as_deref(), Some("other::shared"));
 }
 
 #[test]
@@ -489,7 +505,7 @@ fn an_import_pulls_in_a_module_nothing_else_references() {
 
     // Discovery is reference-driven, so without the import nothing would reach `math.nr`.
     assert_eq!(program.modules.len(), 2);
-    assert!(declared_names(&program).contains(&"sqrt".to_string()));
+    assert!(declared_names(&program).contains(&"math::sqrt".to_string()));
 }
 
 #[test]
@@ -504,7 +520,7 @@ fn an_imported_item_is_usable_unqualified() {
 
     let program = resolve(&root).expect("resolution succeeds");
 
-    assert_eq!(first_callee(&program).as_deref(), Some("sqrt"));
+    assert_eq!(first_callee(&program).as_deref(), Some("math::sqrt"));
 }
 
 #[test]
@@ -519,7 +535,7 @@ fn an_aliased_item_resolves_to_its_original_name() {
 
     let program = resolve(&root).expect("resolution succeeds");
 
-    assert_eq!(first_callee(&program).as_deref(), Some("sqrt"));
+    assert_eq!(first_callee(&program).as_deref(), Some("math::sqrt"));
 }
 
 #[test]
@@ -535,7 +551,7 @@ fn an_aliased_module_qualifies_a_path() {
 
     let program = resolve(&root).expect("resolution succeeds");
 
-    assert_eq!(first_callee(&program).as_deref(), Some("mul"));
+    assert_eq!(first_callee(&program).as_deref(), Some("math::matrix::mul"));
 }
 
 #[test]
@@ -554,7 +570,7 @@ fn a_relative_import_reaches_a_child_module_in_its_list() {
     // `io` names a child module rather than an item of `utils`, so the list entry binds a
     // module and the qualified call resolves through it.
     assert_eq!(program.modules.len(), 3);
-    assert_eq!(first_callee(&program).as_deref(), Some("read"));
+    assert_eq!(first_callee(&program).as_deref(), Some("utils::io::read"));
 }
 
 #[test]
@@ -659,14 +675,33 @@ fn a_variant_import_whose_head_names_no_enum_is_rejected() {
 }
 
 #[test]
-fn an_import_reaching_a_sibling_inline_block_names_the_block() {
+fn a_block_reaches_its_sibling_through_the_enclosing_module() {
     let dir = TempDir::new().expect("temp dir");
-    // A block sees its own children and its file's siblings, not the file's other
-    // blocks, so this resolves no module, and must say so rather than inventing an enum.
+    // A block sees its enclosing module's names, and a sibling block is one of them.
     let root = write(
         dir.path(),
         "main.nr",
-        "module leaf\n  export func base\nend\nmodule facade\n  export import leaf::{base}\nend\nfunc main\n",
+        "module leaf\n  export func base\nend\nmodule facade\n  export import leaf::{base}\nend\ncall facade::base\n",
+    );
+
+    let program = resolve_with_prelude(&root).expect("a sibling block is in scope");
+    assert_eq!(first_callee(&program).as_deref(), Some("leaf::base"));
+}
+
+#[test]
+fn a_block_named_from_another_file_names_the_block() {
+    let dir = TempDir::new().expect("temp dir");
+    // `leaf` is a block in the root file, so `other.nr` reaches it through the root's
+    // path rather than by its bare name, and must be told so rather than offered an enum.
+    write(
+        dir.path(),
+        "other.nr",
+        "import leaf::{base}\nexport func f\n",
+    );
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module leaf\n  export func base\nend\ncall other::f\n",
     );
 
     match resolve_with_prelude(&root) {
@@ -757,7 +792,7 @@ fn a_private_item_is_still_usable_inside_its_own_module() {
     let root = write(dir.path(), "main.nr", "call math::sqrt\n");
 
     let program = resolve(&root).expect("resolution succeeds");
-    assert!(declared_names(&program).contains(&"helper".to_string()));
+    assert!(declared_names(&program).contains(&"math::helper".to_string()));
 }
 
 #[test]
@@ -777,7 +812,7 @@ fn every_item_carries_the_module_it_was_loaded_from() {
     // The root is module 0 and every other file gets its own id, which is what the type
     // checker measures a private field against.
     assert_eq!(module_of("entry"), Some(0));
-    assert_eq!(module_of("sqrt"), Some(1));
+    assert_eq!(module_of("math::sqrt"), Some(1));
 }
 
 #[test]
@@ -791,9 +826,9 @@ fn an_inline_block_is_reached_like_any_other_module() {
 
     let program = resolve(&root).expect("resolution succeeds");
 
-    // The block's items join the same flat namespace, so the qualifier is gone.
-    assert_eq!(first_callee(&program).as_deref(), Some("area"));
-    assert!(declared_names(&program).contains(&"area".to_string()));
+    // The block is a namespace of its own, so its items carry its path.
+    assert_eq!(first_callee(&program).as_deref(), Some("geometry::area"));
+    assert!(declared_names(&program).contains(&"geometry::area".to_string()));
 }
 
 #[test]
@@ -824,7 +859,10 @@ fn an_inline_block_wins_over_a_same_named_file() {
 
     let program = resolve(&root).expect("resolution succeeds");
 
-    assert_eq!(first_callee(&program).as_deref(), Some("inline_area"));
+    assert_eq!(
+        first_callee(&program).as_deref(),
+        Some("geometry::inline_area")
+    );
     // The sibling file was never a candidate, so it was never loaded.
     assert!(!declared_names(&program).contains(&"area".to_string()));
 }
@@ -835,11 +873,14 @@ fn inline_blocks_nest() {
     let root = write(
         dir.path(),
         "main.nr",
-        "module outer\nmodule inner\nexport func deep\nend\nend\ncall outer::inner::deep\n",
+        "module outer\nexport module inner\nexport func deep\nend\nend\ncall outer::inner::deep\n",
     );
 
     let program = resolve(&root).expect("resolution succeeds");
-    assert_eq!(first_callee(&program).as_deref(), Some("deep"));
+    assert_eq!(
+        first_callee(&program).as_deref(),
+        Some("outer::inner::deep")
+    );
 }
 
 #[test]
@@ -872,7 +913,7 @@ fn export_import_makes_a_name_reachable_through_the_importer() {
     let root = write(dir.path(), "main.nr", "call facade::parse\n");
 
     let program = resolve(&root).expect("resolution succeeds");
-    assert_eq!(first_callee(&program).as_deref(), Some("parse"));
+    assert_eq!(first_callee(&program).as_deref(), Some("internal::parse"));
 }
 
 #[test]
@@ -900,8 +941,11 @@ fn export_import_carries_the_rename_back_to_the_declaration() {
     let root = write(dir.path(), "main.nr", "call facade::build\n");
 
     let program = resolve(&root).expect("resolution succeeds");
-    // The flat namespace holds the declaration's own name; only the route was renamed.
-    assert_eq!(first_callee(&program).as_deref(), Some("parse_config"));
+    // The canonical name is the declaration's own; only the route was renamed.
+    assert_eq!(
+        first_callee(&program).as_deref(),
+        Some("internal::parse_config")
+    );
 }
 
 #[test]
@@ -913,7 +957,7 @@ fn a_chain_of_re_exports_resolves_to_the_declaration() {
     let root = write(dir.path(), "main.nr", "call top::v\n");
 
     let program = resolve(&root).expect("resolution succeeds");
-    assert_eq!(first_callee(&program).as_deref(), Some("value"));
+    assert_eq!(first_callee(&program).as_deref(), Some("deep::value"));
 }
 
 #[test]
@@ -1095,7 +1139,7 @@ fn a_name_an_import_binds_does_not_load_a_same_named_sibling_file() {
     let program = resolve(&root).expect("resolution succeeds");
 
     assert_eq!(program.modules.len(), 3);
-    assert_eq!(first_callee(&program).as_deref(), Some("read"));
+    assert_eq!(first_callee(&program).as_deref(), Some("utils::io::read"));
 }
 
 #[test]
@@ -1111,7 +1155,7 @@ fn an_aliased_module_reaches_its_own_children() {
 
     let program = resolve(&root).expect("resolution succeeds");
 
-    assert_eq!(first_callee(&program).as_deref(), Some("read"));
+    assert_eq!(first_callee(&program).as_deref(), Some("utils::io::read"));
 }
 
 #[test]
@@ -1129,7 +1173,10 @@ fn an_imported_type_heads_a_path_over_a_same_named_file() {
     let program = resolve(&root).expect("resolution succeeds");
 
     assert_eq!(program.modules.len(), 2);
-    assert_eq!(first_callee(&program).as_deref(), Some("Counter::make"));
+    assert_eq!(
+        first_callee(&program).as_deref(),
+        Some("geometry::Counter::make")
+    );
 }
 
 #[test]
@@ -1203,7 +1250,15 @@ fn a_renamed_import_reaches_impl_bound_and_struct_literal_positions() {
             _ => {}
         }
     }
-    assert_eq!(seen, ["Point", "Shape", "Shape", "Point"]);
+    assert_eq!(
+        seen,
+        [
+            "shapes::Point",
+            "shapes::Shape",
+            "shapes::Shape",
+            "shapes::Point"
+        ]
+    );
 }
 
 #[test]
@@ -1227,5 +1282,175 @@ fn a_variant_import_of_a_local_enum_ignores_a_same_named_file() {
             ("Shape", "Circle")
         ),
         other => panic!("expected the local enum's variant, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_bare_path_starts_at_the_program_root() {
+    let dir = TempDir::new().expect("temp dir");
+    // `utils/mod.nr` writes `io::read`: a bare path starts at the root directory, so it is
+    // the root's `io.nr`, not the `utils/io.nr` beside the writer.
+    write(dir.path(), "io.nr", "export func read\n");
+    write(dir.path(), "utils/io.nr", "export func read\n");
+    write(
+        dir.path(),
+        "utils/mod.nr",
+        "export func run\ncall io::read\n",
+    );
+    let root = write(dir.path(), "main.nr", "call utils::run\n");
+
+    let program = resolve(&root).expect("resolution succeeds");
+    let run_body = program.items.iter().find_map(|item| match item {
+        Item::Function(def) if def.name.name == "utils::run" => Some(def.body.clone()),
+        _ => None,
+    });
+    let callee = run_body.and_then(|body| match body.first() {
+        Some(Stmt::Expr(Expr::Call { func, .. })) => match func.as_ref() {
+            Expr::Identifier(name) => Some(name.name.clone()),
+            _ => None,
+        },
+        _ => None,
+    });
+    assert_eq!(callee.as_deref(), Some("io::read"));
+}
+
+#[test]
+fn a_parent_relative_import_climbs_above_the_file() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "shared/mod.nr", "export func base\n");
+    let root = write(
+        dir.path(),
+        "app/main.nr",
+        "import ../shared::{base}\nbare base\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+    // Above the root, the module path keeps a `..` per level so it cannot meet one below.
+    assert_eq!(first_callee(&program).as_deref(), Some("..::shared::base"));
+}
+
+#[test]
+fn a_local_shadows_an_imported_name() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import math::{sqrt}\nlocal sqrt\nbare sqrt\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+    assert_eq!(first_callee(&program).as_deref(), Some("sqrt"));
+}
+
+#[test]
+fn a_root_name_is_not_in_scope_elsewhere() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "lib.nr", "export func run\nbare secret\n");
+    let root = write(dir.path(), "main.nr", "func secret\ncall lib::run\n");
+
+    match resolve(&root) {
+        Err(ModuleError::NotInScope { name, .. }) => assert_eq!(name, "secret"),
+        other => panic!("expected NotInScope, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn an_import_may_not_shadow_a_declaration() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    let root = write(dir.path(), "main.nr", "import math::{sqrt}\nfunc sqrt\n");
+
+    match resolve(&root) {
+        Err(ModuleError::ImportShadowsDeclaration { name, .. }) => assert_eq!(name, "sqrt"),
+        other => panic!(
+            "expected ImportShadowsDeclaration, got {:?}",
+            other.map(|_| ())
+        ),
+    }
+}
+
+#[test]
+fn a_private_block_is_closed_to_other_files() {
+    let dir = TempDir::new().expect("temp dir");
+    write(
+        dir.path(),
+        "lib.nr",
+        "module inner\nexport func deep\nend\n",
+    );
+    let root = write(dir.path(), "main.nr", "call lib::inner::deep\n");
+
+    match resolve(&root) {
+        Err(ModuleError::PrivateItem { item, .. }) => assert_eq!(item, "inner"),
+        other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn a_block_reaches_its_enclosing_modules_private_items() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "func helper\nmodule inner\nexport func deep\nbare helper\nend\ncall inner::deep\n",
+    );
+
+    let program = resolve(&root).expect("a block is part of the module around it");
+    let deep_calls = program.items.iter().any(|item| match item {
+        Item::Function(def) if def.name.name == "inner::deep" => def.body.iter().any(|stmt| {
+            matches!(stmt, Stmt::Expr(Expr::Call { func, .. })
+                if matches!(func.as_ref(), Expr::Identifier(name) if name.name == "helper"))
+        }),
+        _ => false,
+    });
+    assert!(deep_calls);
+}
+
+#[test]
+fn a_single_variant_import_binds_the_variant() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "enum Shape\nimport Shape::Circle\nfunc main\nbare Circle\n",
+    );
+
+    let program = resolve(&root).expect("resolution succeeds");
+    let main_body = program.items.iter().find_map(|item| match item {
+        Item::Function(def) if def.name.name == "main" => def.body.first().cloned(),
+        _ => None,
+    });
+    match main_body {
+        Some(Stmt::Expr(Expr::Call { func, .. })) => match *func {
+            Expr::Path {
+                type_name, member, ..
+            } => assert_eq!(
+                (type_name.name, member.name),
+                ("Shape".into(), "Circle".into())
+            ),
+            other => panic!("expected a variant path, got {:?}", other),
+        },
+        other => panic!("expected a call, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_root_block_and_a_root_file_may_not_share_a_path() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "geometry.nr", "export func area\n");
+    write(
+        dir.path(),
+        "other.nr",
+        "export func f\ncall geometry::area\n",
+    );
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "module geometry\nexport func area\nend\ncall other::f\n",
+    );
+
+    match resolve(&root) {
+        Err(ModuleError::DuplicateModulePath { path, .. }) => assert_eq!(path, "geometry"),
+        other => panic!("expected DuplicateModulePath, got {:?}", other.map(|_| ())),
     }
 }

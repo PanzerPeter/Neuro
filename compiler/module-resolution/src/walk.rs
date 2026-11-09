@@ -3,6 +3,11 @@
 //! Discovery and rewriting are the same walk with different callbacks: writing it twice
 //! is how the two would drift apart and leave a qualifier standing in a corner of the
 //! grammar nobody re-checked.
+//!
+//! The walk also tracks which local names are in scope: parameters, `val` / `var` bindings,
+//! pattern and loop bindings, closure parameters and generic parameters. A name whose head
+//! is a local is never offered to the callback, which is what lets a local shadow an
+//! imported name or one of the module's own items.
 
 use ast_types::{
     ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParam, GenericParamKind, InterpPart,
@@ -32,548 +37,658 @@ pub(crate) enum Site<'a> {
 pub(crate) type SiteFn<'f> = &'f mut dyn FnMut(Site<'_>) -> Result<(), ModuleError>;
 
 pub(crate) fn walk_items(items: &mut [Item], f: SiteFn) -> Result<(), ModuleError> {
+    let mut walker = Walker {
+        f,
+        locals: Vec::new(),
+    };
     for item in items {
-        walk_item(item, f)?;
+        walker.item(item)?;
     }
     Ok(())
 }
 
-fn walk_item(item: &mut Item, f: SiteFn) -> Result<(), ModuleError> {
-    match item {
-        Item::Function(def) => {
-            walk_generics(&mut def.generics, f)?;
-            for predicate in &mut def.where_predicates {
-                walk_expr(predicate, f)?;
-            }
-            for param in &mut def.params {
-                walk_type(&mut param.ty, f)?;
-            }
-            if let Some(ret) = &mut def.return_type {
-                walk_type(ret, f)?;
-            }
-            walk_stmts(&mut def.body, f)
-        }
-        Item::Struct(def) => {
-            walk_generics(&mut def.generics, f)?;
-            for predicate in &mut def.where_predicates {
-                walk_expr(predicate, f)?;
-            }
-            for field in &mut def.fields {
-                walk_type(&mut field.ty, f)?;
-            }
-            Ok(())
-        }
-        Item::Enum(def) => {
-            walk_generics(&mut def.generics, f)?;
-            for variant in &mut def.variants {
-                match &mut variant.payload {
-                    VariantPayload::Unit => {}
-                    VariantPayload::Tuple(types) => {
-                        for ty in types {
-                            walk_type(ty, f)?;
-                        }
-                    }
-                    VariantPayload::Struct(fields) => {
-                        for field in fields {
-                            walk_type(&mut field.ty, f)?;
-                        }
-                    }
-                }
-            }
-            Ok(())
-        }
-        Item::Trait(def) => {
-            walk_bounds(&mut def.supertraits, f)?;
-            for method in &mut def.methods {
-                walk_generics(&mut method.generics, f)?;
-                for predicate in &mut method.where_predicates {
-                    walk_expr(predicate, f)?;
-                }
-                for param in &mut method.params {
-                    walk_type(&mut param.ty, f)?;
-                }
-                if let Some(ret) = &mut method.return_type {
-                    walk_type(ret, f)?;
-                }
-                if let Some(body) = &mut method.default_body {
-                    walk_stmts(body, f)?;
-                }
-            }
-            Ok(())
-        }
-        Item::Impl(def) => {
-            walk_generics(&mut def.generics, f)?;
-            // The block's own type and trait are names an import may have renamed:
-            // `impl Pt` after `import geometry::{Point as Pt}` extends `Point`.
-            f(Site::TypeName(&mut def.type_name))?;
-            if let Some(trait_name) = &mut def.trait_name {
-                f(Site::TypeName(trait_name))?;
-            }
-            for ty in &mut def.type_args {
-                walk_type(ty, f)?;
-            }
-            for predicate in &mut def.where_predicates {
-                walk_expr(predicate, f)?;
-            }
-            for (_, ty) in &mut def.assoc_types {
-                walk_type(ty, f)?;
-            }
-            for method in &mut def.methods {
-                walk_method(method, f)?;
-            }
-            Ok(())
-        }
-        Item::Const(def) => {
-            walk_type(&mut def.ty, f)?;
-            walk_expr(&mut def.value, f)
-        }
-        Item::Newtype(def) => walk_type(&mut def.inner, f),
-        // Imports are lifted out of the item list as each module is loaded, so the walk
-        // never meets one.
-        // An import is consumed at load time, an inline block is lifted into a module of
-        // its own there too, and the `@no_prelude` marker is dropped there: none survives
-        // to be walked.
-        Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => Ok(()),
-    }
+/// The first `::` segment of a name, which is what a local can shadow.
+fn head(name: &str) -> &str {
+    name.split("::").next().unwrap_or(name)
 }
 
-/// Walk a `<...>` list: a const parameter's type, and every trait a bound names.
-fn walk_generics(params: &mut [GenericParam], f: SiteFn) -> Result<(), ModuleError> {
-    for param in params {
-        if let GenericParamKind::Const(ty) = &mut param.kind {
-            walk_type(ty, f)?;
-        }
-        walk_bounds(&mut param.bounds, f)?;
-    }
-    Ok(())
+struct Walker<'f> {
+    f: SiteFn<'f>,
+    /// Every local name in scope, innermost last. A scope records the length on entry and
+    /// truncates back to it on exit. Generic parameters share the list: a type parameter
+    /// `T` shadows an item `T` in a type position as a value binding does in an expression,
+    /// and a const parameter `N` is read as a value.
+    locals: Vec<String>,
 }
 
-/// Walk a bound list: each trait it names, and the types its `Trait<Assoc = T>` bind.
-fn walk_bounds(bounds: &mut [TraitBound], f: SiteFn) -> Result<(), ModuleError> {
-    for bound in bounds {
-        f(Site::TypeName(&mut bound.trait_name))?;
-        for (_, ty) in &mut bound.assoc_bindings {
-            walk_type(ty, f)?;
-        }
-    }
-    Ok(())
-}
-
-fn walk_method(method: &mut MethodDef, f: SiteFn) -> Result<(), ModuleError> {
-    walk_generics(&mut method.generics, f)?;
-    for predicate in &mut method.where_predicates {
-        walk_expr(predicate, f)?;
-    }
-    for param in &mut method.params {
-        walk_type(&mut param.ty, f)?;
-    }
-    if let Some(ret) = &mut method.return_type {
-        walk_type(ret, f)?;
-    }
-    walk_stmts(&mut method.body, f)
-}
-
-fn walk_type(ty: &mut Type, f: SiteFn) -> Result<(), ModuleError> {
-    match ty {
-        Type::Named(name) => f(Site::TypeName(name)),
-        Type::Generic { name, args, .. } => {
-            f(Site::TypeName(name))?;
-            for arg in args {
-                if let GenericArg::Type(inner) = arg {
-                    walk_type(inner, f)?;
-                }
-            }
-            Ok(())
-        }
-        Type::Reference { inner, .. } => walk_type(inner, f),
-        Type::Array { element, .. } | Type::Slice { element, .. } => walk_type(element, f),
-        Type::Tuple { elements, .. } => {
-            for element in elements {
-                walk_type(element, f)?;
-            }
-            Ok(())
-        }
-        Type::Function { params, ret, .. } => {
-            for param in params {
-                walk_type(param, f)?;
-            }
-            walk_type(ret, f)
-        }
-        Type::Tensor { element_type, .. } => walk_type(element_type, f),
-        // `impl mod::Trait` does not parse, but a bare trait name may be an imported one.
-        Type::ImplTrait {
-            trait_name,
-            assoc_bindings,
-            ..
-        } => {
-            f(Site::TypeName(trait_name))?;
-            for (_, ty) in assoc_bindings {
-                walk_type(ty, f)?;
-            }
-            Ok(())
-        }
-        Type::DynTrait { trait_name, .. } => f(Site::TypeName(trait_name)),
-    }
-}
-
-fn walk_stmts(stmts: &mut [Stmt], f: SiteFn) -> Result<(), ModuleError> {
-    for stmt in stmts {
-        walk_stmt(stmt, f)?;
-    }
-    Ok(())
-}
-
-fn walk_stmt(stmt: &mut Stmt, f: SiteFn) -> Result<(), ModuleError> {
-    match stmt {
-        Stmt::VarDecl { ty, init, .. } => {
-            if let Some(ty) = ty {
-                walk_type(ty, f)?;
-            }
-            if let Some(init) = init {
-                walk_expr(init, f)?;
-            }
-            Ok(())
-        }
-        Stmt::Assign { place, value, .. } => {
-            walk_place(place, f)?;
-            walk_expr(value, f)
-        }
-        Stmt::Return { value, .. } => {
-            if let Some(value) = value {
-                walk_expr(value, f)?;
-            }
-            Ok(())
-        }
-        Stmt::If {
-            condition,
-            then_block,
-            else_if_blocks,
-            else_block,
-            ..
-        } => {
-            walk_expr(condition, f)?;
-            walk_stmts(then_block, f)?;
-            for (cond, block) in else_if_blocks {
-                walk_expr(cond, f)?;
-                walk_stmts(block, f)?;
-            }
-            if let Some(block) = else_block {
-                walk_stmts(block, f)?;
-            }
-            Ok(())
-        }
-        Stmt::While {
-            condition, body, ..
-        } => {
-            walk_expr(condition, f)?;
-            walk_stmts(body, f)
-        }
-        Stmt::ForRange {
-            start,
-            end,
-            step,
-            adapters,
-            body,
-            ..
-        } => {
-            walk_expr(start, f)?;
-            walk_expr(end, f)?;
-            if let Some(step) = step {
-                walk_expr(step, f)?;
-            }
-            for adapter in adapters {
-                walk_expr(&mut adapter.callee, f)?;
-            }
-            walk_stmts(body, f)
-        }
-        Stmt::ForEach {
-            iterable,
-            adapters,
-            body,
-            ..
-        } => {
-            walk_expr(iterable, f)?;
-            for adapter in adapters {
-                walk_expr(&mut adapter.callee, f)?;
-            }
-            walk_stmts(body, f)
-        }
-        Stmt::Break { value, .. } => {
-            if let Some(value) = value {
-                walk_expr(value, f)?;
-            }
-            Ok(())
-        }
-        Stmt::Continue { .. } => Ok(()),
-        Stmt::ValElse {
-            pattern,
-            value,
-            else_block,
-            ..
-        } => {
-            walk_pattern(pattern, f)?;
-            walk_expr(value, f)?;
-            walk_stmts(else_block, f)
-        }
-        Stmt::Const { ty, value, .. } => {
-            walk_type(ty, f)?;
-            walk_expr(value, f)
-        }
-        Stmt::Expr(expr) => walk_expr(expr, f),
-    }
-}
-
-/// Walk the expressions a place reaches through. The root binding is not a site:
-/// a module qualifier cannot open an assignment target.
-fn walk_place(place: &mut Place, f: SiteFn) -> Result<(), ModuleError> {
-    match place {
-        Place::Var(_) => Ok(()),
-        Place::Field { object, .. }
-        | Place::TupleIndex { object, .. }
-        | Place::Deref {
-            pointer: object, ..
-        } => walk_expr(object, f),
-        Place::Index { object, index, .. } => {
-            walk_expr(object, f)?;
-            walk_expr(index, f)
-        }
-        Place::TensorIndex {
-            object, indices, ..
-        } => {
-            walk_expr(object, f)?;
-            for index in indices {
-                match index {
-                    TensorIndexArg::Position(expr) => walk_expr(expr, f)?,
-                    TensorIndexArg::Range {
-                        start, end, step, ..
-                    } => {
-                        walk_expr(start, f)?;
-                        walk_expr(end, f)?;
-                        if let Some(step) = step {
-                            walk_expr(step, f)?;
-                        }
-                    }
-                    TensorIndexArg::FullAxis(_) => {}
-                }
-            }
-            Ok(())
-        }
-    }
-}
-
-fn walk_expr(expr: &mut Expr, f: SiteFn) -> Result<(), ModuleError> {
-    // The callback runs before the descent: it may replace this node, and the replacement's
-    // children still need walking.
-    // A struct literal written as one is visited by its name alone; one the callback
-    // produced from a qualified `geometry::Point { .. }` is already resolved, and is not
-    // offered twice.
-    match expr {
-        Expr::Path { .. } | Expr::EnumStructLiteral { .. } | Expr::Identifier(_) => {
-            f(Site::Expr(expr))?
-        }
-        Expr::StructLiteral { name, .. } => f(Site::TypeName(name))?,
-        _ => {}
+impl Walker<'_> {
+    fn is_local(&self, name: &str) -> bool {
+        let head = head(name);
+        self.locals.iter().any(|local| local == head)
     }
 
-    match expr {
-        Expr::Literal(_, _) | Expr::Identifier(_) => Ok(()),
-        Expr::Instance {
-            callee, type_args, ..
-        } => {
-            walk_expr(callee, f)?;
-            for arg in type_args {
-                if let GenericArg::Type(ty) = arg {
-                    walk_type(ty, f)?;
-                }
-            }
-            Ok(())
-        }
-        Expr::Binary { left, right, .. } => {
-            walk_expr(left, f)?;
-            walk_expr(right, f)
-        }
-        Expr::Call {
-            func,
-            type_args,
-            args,
-            ..
-        } => {
-            walk_expr(func, f)?;
-            for arg in type_args {
-                if let GenericArg::Type(ty) = arg {
-                    walk_type(ty, f)?;
-                }
-            }
-            for arg in args {
-                walk_expr(arg, f)?;
-            }
-            Ok(())
-        }
-        Expr::Unary { operand, .. } => walk_expr(operand, f),
-        Expr::InterpString { parts, .. } => {
-            for part in parts {
-                if let InterpPart::Formatted { expr, .. } = part {
-                    walk_expr(expr, f)?;
-                }
-            }
-            Ok(())
-        }
-        Expr::Paren(inner, _) => walk_expr(inner, f),
-        Expr::StructLiteral { fields, base, .. } => {
-            for field in fields {
-                walk_expr(&mut field.value, f)?;
-            }
-            if let Some(base) = base {
-                walk_expr(base, f)?;
-            }
-            Ok(())
-        }
-        Expr::FieldAccess { object, .. } => walk_expr(object, f),
-        Expr::EnumStructLiteral { fields, .. } => {
-            for field in fields {
-                walk_expr(&mut field.value, f)?;
-            }
-            Ok(())
-        }
-        Expr::Path { .. } => Ok(()),
-        Expr::Cast {
-            expr, target_type, ..
-        } => {
-            walk_expr(expr, f)?;
-            walk_type(target_type, f)
-        }
-        Expr::If {
-            condition,
-            then_block,
-            else_if_blocks,
-            else_block,
-            ..
-        } => {
-            walk_expr(condition, f)?;
-            walk_stmts(then_block, f)?;
-            for (cond, block) in else_if_blocks {
-                walk_expr(cond, f)?;
-                walk_stmts(block, f)?;
-            }
-            if let Some(block) = else_block {
-                walk_stmts(block, f)?;
-            }
-            Ok(())
-        }
-        Expr::Block { stmts, .. }
-        | Expr::Unsafe { stmts, .. }
-        | Expr::Pool { stmts, .. }
-        | Expr::Loop { body: stmts, .. } => walk_stmts(stmts, f),
-        Expr::Reference { operand, .. } | Expr::Deref { operand, .. } => walk_expr(operand, f),
-        Expr::Range { start, end, .. } => {
-            walk_expr(start, f)?;
-            walk_expr(end, f)
-        }
-        Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => {
-            for element in elements {
-                walk_expr(element, f)?;
-            }
-            Ok(())
-        }
-        Expr::Index { object, index, .. } => {
-            walk_expr(object, f)?;
-            walk_expr(index, f)
-        }
-        Expr::TensorIndex {
-            object, indices, ..
-        } => {
-            walk_expr(object, f)?;
-            for index in indices {
-                match index {
-                    TensorIndexArg::Position(expr) => walk_expr(expr, f)?,
-                    TensorIndexArg::Range {
-                        start, end, step, ..
-                    } => {
-                        walk_expr(start, f)?;
-                        walk_expr(end, f)?;
-                        if let Some(step) = step {
-                            walk_expr(step, f)?;
-                        }
-                    }
-                    TensorIndexArg::FullAxis(_) => {}
-                }
-            }
-            Ok(())
-        }
-        Expr::TupleIndex { object, .. } => walk_expr(object, f),
-        Expr::ArrayRest { array, .. } => walk_expr(array, f),
-        Expr::Match {
-            scrutinee, arms, ..
-        } => {
-            walk_expr(scrutinee, f)?;
-            for arm in arms {
-                walk_arm(arm, f)?;
-            }
-            Ok(())
-        }
-        Expr::Closure {
-            params, ret, body, ..
-        } => {
-            for param in params.iter_mut() {
-                walk_closure_param(param, f)?;
-            }
-            if let Some(ret) = ret {
-                walk_type(ret, f)?;
-            }
-            walk_expr(body, f)
-        }
-        Expr::Try { operand, .. } => walk_expr(operand, f),
+    fn bind(&mut self, name: &Identifier) {
+        self.locals.push(name.name.clone());
     }
-}
 
-fn walk_arm(arm: &mut MatchArm, f: SiteFn) -> Result<(), ModuleError> {
-    for pattern in &mut arm.patterns {
-        walk_pattern(pattern, f)?;
-    }
-    if let Some(guard) = &mut arm.guard {
-        walk_expr(guard, f)?;
-    }
-    walk_expr(&mut arm.body, f)
-}
-
-fn walk_pattern(pattern: &mut Pattern, f: SiteFn) -> Result<(), ModuleError> {
-    // As in `walk_expr`, the callback runs first: resolving an imported variant turns a
-    // binding or an unqualified variant into a `Pattern::Enum`, whose payload still needs
-    // walking afterwards.
-    f(Site::Pattern(pattern))?;
-
-    let payload = match pattern {
-        Pattern::Wildcard(_) | Pattern::Binding(_) | Pattern::Literal(_, _) => return Ok(()),
-        Pattern::Range { .. } => return Ok(()),
-        Pattern::At { pattern, .. } => return walk_pattern(pattern, f),
-        Pattern::Array { elements, .. } => {
-            for element in elements {
-                walk_pattern(element, f)?;
-            }
+    fn type_name(&mut self, name: &mut Identifier) -> Result<(), ModuleError> {
+        if self.is_local(&name.name) {
             return Ok(());
         }
-        Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => payload,
-    };
-    match payload {
-        EnumPatternPayload::Unit => Ok(()),
-        EnumPatternPayload::Tuple(subs) => {
-            for sub in subs {
-                walk_pattern(sub, f)?;
+        (self.f)(Site::TypeName(name))
+    }
+
+    /// Run `body` in a scope of its own: every local it binds is gone afterwards.
+    fn scoped(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Result<(), ModuleError>,
+    ) -> Result<(), ModuleError> {
+        let mark = self.locals.len();
+        let outcome = body(self);
+        self.locals.truncate(mark);
+        outcome
+    }
+
+    fn item(&mut self, item: &mut Item) -> Result<(), ModuleError> {
+        match item {
+            Item::Function(def) => self.scoped(|w| {
+                w.generics(&mut def.generics)?;
+                for predicate in &mut def.where_predicates {
+                    w.expr(predicate)?;
+                }
+                for param in &mut def.params {
+                    w.ty(&mut param.ty)?;
+                }
+                if let Some(ret) = &mut def.return_type {
+                    w.ty(ret)?;
+                }
+                for param in &def.params {
+                    w.bind(&param.name);
+                }
+                w.stmts(&mut def.body)
+            }),
+            Item::Struct(def) => self.scoped(|w| {
+                w.generics(&mut def.generics)?;
+                for predicate in &mut def.where_predicates {
+                    w.expr(predicate)?;
+                }
+                for field in &mut def.fields {
+                    w.ty(&mut field.ty)?;
+                }
+                Ok(())
+            }),
+            Item::Enum(def) => self.scoped(|w| {
+                w.generics(&mut def.generics)?;
+                for variant in &mut def.variants {
+                    match &mut variant.payload {
+                        VariantPayload::Unit => {}
+                        VariantPayload::Tuple(types) => {
+                            for ty in types {
+                                w.ty(ty)?;
+                            }
+                        }
+                        VariantPayload::Struct(fields) => {
+                            for field in fields {
+                                w.ty(&mut field.ty)?;
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }),
+            Item::Trait(def) => {
+                self.bounds(&mut def.supertraits)?;
+                for method in &mut def.methods {
+                    self.scoped(|w| {
+                        w.generics(&mut method.generics)?;
+                        for predicate in &mut method.where_predicates {
+                            w.expr(predicate)?;
+                        }
+                        for param in &mut method.params {
+                            w.ty(&mut param.ty)?;
+                        }
+                        if let Some(ret) = &mut method.return_type {
+                            w.ty(ret)?;
+                        }
+                        for param in &method.params {
+                            w.bind(&param.name);
+                        }
+                        match &mut method.default_body {
+                            Some(body) => w.stmts(body),
+                            None => Ok(()),
+                        }
+                    })?;
+                }
+                Ok(())
             }
-            Ok(())
-        }
-        EnumPatternPayload::Struct(fields) => {
-            for field in fields {
-                walk_pattern(&mut field.pattern, f)?;
+            Item::Impl(def) => self.scoped(|w| {
+                w.generics(&mut def.generics)?;
+                // The block's own type and trait are names an import may have renamed:
+                // `impl Pt` after `import geometry::{Point as Pt}` extends `Point`.
+                w.type_name(&mut def.type_name)?;
+                if let Some(trait_name) = &mut def.trait_name {
+                    w.type_name(trait_name)?;
+                }
+                for ty in &mut def.type_args {
+                    w.ty(ty)?;
+                }
+                for predicate in &mut def.where_predicates {
+                    w.expr(predicate)?;
+                }
+                for (_, ty) in &mut def.assoc_types {
+                    w.ty(ty)?;
+                }
+                for method in &mut def.methods {
+                    w.method(method)?;
+                }
+                Ok(())
+            }),
+            Item::Const(def) => {
+                self.ty(&mut def.ty)?;
+                self.expr(&mut def.value)
             }
-            Ok(())
+            Item::Newtype(def) => self.ty(&mut def.inner),
+            // An import is consumed at load time, an inline block is lifted into a module of
+            // its own there too, and the `@no_prelude` marker is dropped there: none survives
+            // to be walked.
+            Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => Ok(()),
         }
     }
-}
 
-fn walk_closure_param(param: &mut ClosureParam, f: SiteFn) -> Result<(), ModuleError> {
-    match &mut param.ty {
-        Some(ty) => walk_type(ty, f),
-        None => Ok(()),
+    /// Walk a `<...>` list, binding each parameter for the rest of the enclosing scope:
+    /// a const parameter's type and every trait a bound names are walked first.
+    fn generics(&mut self, params: &mut [GenericParam]) -> Result<(), ModuleError> {
+        for param in params.iter() {
+            self.bind(&param.name);
+        }
+        for param in params {
+            if let GenericParamKind::Const(ty) = &mut param.kind {
+                self.ty(ty)?;
+            }
+            self.bounds(&mut param.bounds)?;
+        }
+        Ok(())
+    }
+
+    /// Walk a bound list: each trait it names, and the types its `Trait<Assoc = T>` bind.
+    fn bounds(&mut self, bounds: &mut [TraitBound]) -> Result<(), ModuleError> {
+        for bound in bounds {
+            self.type_name(&mut bound.trait_name)?;
+            for (_, ty) in &mut bound.assoc_bindings {
+                self.ty(ty)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn method(&mut self, method: &mut MethodDef) -> Result<(), ModuleError> {
+        self.scoped(|w| {
+            w.generics(&mut method.generics)?;
+            for predicate in &mut method.where_predicates {
+                w.expr(predicate)?;
+            }
+            for param in &mut method.params {
+                w.ty(&mut param.ty)?;
+            }
+            if let Some(ret) = &mut method.return_type {
+                w.ty(ret)?;
+            }
+            for param in &method.params {
+                w.bind(&param.name);
+            }
+            w.stmts(&mut method.body)
+        })
+    }
+
+    fn ty(&mut self, ty: &mut Type) -> Result<(), ModuleError> {
+        match ty {
+            Type::Named(name) => self.type_name(name),
+            Type::Generic { name, args, .. } => {
+                self.type_name(name)?;
+                for arg in args {
+                    if let GenericArg::Type(inner) = arg {
+                        self.ty(inner)?;
+                    }
+                }
+                Ok(())
+            }
+            Type::Reference { inner, .. } => self.ty(inner),
+            Type::Array { element, .. } | Type::Slice { element, .. } => self.ty(element),
+            Type::Tuple { elements, .. } => {
+                for element in elements {
+                    self.ty(element)?;
+                }
+                Ok(())
+            }
+            Type::Function { params, ret, .. } => {
+                for param in params {
+                    self.ty(param)?;
+                }
+                self.ty(ret)
+            }
+            Type::Tensor { element_type, .. } => self.ty(element_type),
+            Type::ImplTrait {
+                trait_name,
+                assoc_bindings,
+                ..
+            } => {
+                self.type_name(trait_name)?;
+                for (_, ty) in assoc_bindings {
+                    self.ty(ty)?;
+                }
+                Ok(())
+            }
+            Type::DynTrait { trait_name, .. } => self.type_name(trait_name),
+        }
+    }
+
+    /// Walk a block: a binding it makes ends with it.
+    fn stmts(&mut self, stmts: &mut [Stmt]) -> Result<(), ModuleError> {
+        self.scoped(|w| {
+            for stmt in stmts {
+                w.stmt(stmt)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn stmt(&mut self, stmt: &mut Stmt) -> Result<(), ModuleError> {
+        match stmt {
+            Stmt::VarDecl { name, ty, init, .. } => {
+                if let Some(ty) = ty {
+                    self.ty(ty)?;
+                }
+                if let Some(init) = init {
+                    self.expr(init)?;
+                }
+                // The initializer is read before the name exists, so `val x = x + 1`
+                // still reads the outer `x`.
+                self.bind(name);
+                Ok(())
+            }
+            Stmt::Assign { place, value, .. } => {
+                self.place(place)?;
+                self.expr(value)
+            }
+            Stmt::Return { value, .. } => {
+                if let Some(value) = value {
+                    self.expr(value)?;
+                }
+                Ok(())
+            }
+            Stmt::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => {
+                self.expr(condition)?;
+                self.stmts(then_block)?;
+                for (cond, block) in else_if_blocks {
+                    self.expr(cond)?;
+                    self.stmts(block)?;
+                }
+                if let Some(block) = else_block {
+                    self.stmts(block)?;
+                }
+                Ok(())
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                self.expr(condition)?;
+                self.stmts(body)
+            }
+            Stmt::ForRange {
+                index,
+                iterator,
+                start,
+                end,
+                step,
+                adapters,
+                body,
+                ..
+            } => {
+                self.expr(start)?;
+                self.expr(end)?;
+                if let Some(step) = step {
+                    self.expr(step)?;
+                }
+                for adapter in adapters {
+                    self.expr(&mut adapter.callee)?;
+                }
+                self.scoped(|w| {
+                    if let Some(index) = index {
+                        w.bind(index);
+                    }
+                    w.bind(iterator);
+                    w.stmts(body)
+                })
+            }
+            Stmt::ForEach {
+                index,
+                iterator,
+                iterable,
+                adapters,
+                body,
+                ..
+            } => {
+                self.expr(iterable)?;
+                for adapter in adapters {
+                    self.expr(&mut adapter.callee)?;
+                }
+                self.scoped(|w| {
+                    if let Some(index) = index {
+                        w.bind(index);
+                    }
+                    w.bind(iterator);
+                    w.stmts(body)
+                })
+            }
+            Stmt::Break { value, .. } => {
+                if let Some(value) = value {
+                    self.expr(value)?;
+                }
+                Ok(())
+            }
+            Stmt::Continue { .. } => Ok(()),
+            Stmt::ValElse {
+                pattern,
+                value,
+                else_block,
+                ..
+            } => {
+                // The pattern's bindings reach the rest of the block, but neither the
+                // scrutinee nor the `else` arm, so both are walked before them.
+                self.expr(value)?;
+                self.stmts(else_block)?;
+                self.pattern(pattern)
+            }
+            Stmt::Const {
+                name, ty, value, ..
+            } => {
+                self.ty(ty)?;
+                self.expr(value)?;
+                self.bind(name);
+                Ok(())
+            }
+            Stmt::Expr(expr) => self.expr(expr),
+        }
+    }
+
+    /// Walk the expressions a place reaches through. The root binding is not a site:
+    /// a module qualifier cannot open an assignment target.
+    fn place(&mut self, place: &mut Place) -> Result<(), ModuleError> {
+        match place {
+            Place::Var(_) => Ok(()),
+            Place::Field { object, .. }
+            | Place::TupleIndex { object, .. }
+            | Place::Deref {
+                pointer: object, ..
+            } => self.expr(object),
+            Place::Index { object, index, .. } => {
+                self.expr(object)?;
+                self.expr(index)
+            }
+            Place::TensorIndex {
+                object, indices, ..
+            } => {
+                self.expr(object)?;
+                self.tensor_indices(indices)
+            }
+        }
+    }
+
+    fn tensor_indices(&mut self, indices: &mut [TensorIndexArg]) -> Result<(), ModuleError> {
+        for index in indices {
+            match index {
+                TensorIndexArg::Position(expr) => self.expr(expr)?,
+                TensorIndexArg::Range {
+                    start, end, step, ..
+                } => {
+                    self.expr(start)?;
+                    self.expr(end)?;
+                    if let Some(step) = step {
+                        self.expr(step)?;
+                    }
+                }
+                TensorIndexArg::FullAxis(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Offer a name-bearing expression to the callback unless a local shadows its head.
+    fn expr_site(&mut self, expr: &mut Expr) -> Result<(), ModuleError> {
+        let shadowed = match &*expr {
+            Expr::Identifier(name) => self.is_local(&name.name),
+            Expr::Path { type_name, .. } => self.is_local(&type_name.name),
+            Expr::EnumStructLiteral { enum_name, .. } => self.is_local(&enum_name.name),
+            _ => false,
+        };
+        if shadowed {
+            return Ok(());
+        }
+        (self.f)(Site::Expr(expr))
+    }
+
+    fn expr(&mut self, expr: &mut Expr) -> Result<(), ModuleError> {
+        // The callback runs before the descent: it may replace this node, and the
+        // replacement's children still need walking.
+        // A struct literal written as one is visited by its name alone; one the callback
+        // produced from a qualified `geometry::Point { .. }` is already resolved, and is not
+        // offered twice.
+        match expr {
+            Expr::Path { .. } | Expr::EnumStructLiteral { .. } | Expr::Identifier(_) => {
+                self.expr_site(expr)?
+            }
+            Expr::StructLiteral { name, .. } => self.type_name(name)?,
+            _ => {}
+        }
+
+        match expr {
+            Expr::Literal(_, _) | Expr::Identifier(_) => Ok(()),
+            Expr::Instance {
+                callee, type_args, ..
+            } => {
+                self.expr(callee)?;
+                self.generic_args(type_args)
+            }
+            Expr::Binary { left, right, .. } => {
+                self.expr(left)?;
+                self.expr(right)
+            }
+            Expr::Call {
+                func,
+                type_args,
+                args,
+                ..
+            } => {
+                self.expr(func)?;
+                self.generic_args(type_args)?;
+                for arg in args {
+                    self.expr(arg)?;
+                }
+                Ok(())
+            }
+            Expr::Unary { operand, .. } => self.expr(operand),
+            Expr::InterpString { parts, .. } => {
+                for part in parts {
+                    if let InterpPart::Formatted { expr, .. } = part {
+                        self.expr(expr)?;
+                    }
+                }
+                Ok(())
+            }
+            Expr::Paren(inner, _) => self.expr(inner),
+            Expr::StructLiteral { fields, base, .. } => {
+                for field in fields {
+                    self.expr(&mut field.value)?;
+                }
+                if let Some(base) = base {
+                    self.expr(base)?;
+                }
+                Ok(())
+            }
+            Expr::FieldAccess { object, .. } => self.expr(object),
+            Expr::EnumStructLiteral { fields, .. } => {
+                for field in fields {
+                    self.expr(&mut field.value)?;
+                }
+                Ok(())
+            }
+            Expr::Path { .. } => Ok(()),
+            Expr::Cast {
+                expr, target_type, ..
+            } => {
+                self.expr(expr)?;
+                self.ty(target_type)
+            }
+            Expr::If {
+                condition,
+                then_block,
+                else_if_blocks,
+                else_block,
+                ..
+            } => {
+                self.expr(condition)?;
+                self.stmts(then_block)?;
+                for (cond, block) in else_if_blocks {
+                    self.expr(cond)?;
+                    self.stmts(block)?;
+                }
+                if let Some(block) = else_block {
+                    self.stmts(block)?;
+                }
+                Ok(())
+            }
+            Expr::Block { stmts, .. }
+            | Expr::Unsafe { stmts, .. }
+            | Expr::Pool { stmts, .. }
+            | Expr::Loop { body: stmts, .. } => self.stmts(stmts),
+            Expr::Reference { operand, .. } | Expr::Deref { operand, .. } => self.expr(operand),
+            Expr::Range { start, end, .. } => {
+                self.expr(start)?;
+                self.expr(end)
+            }
+            Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => {
+                for element in elements {
+                    self.expr(element)?;
+                }
+                Ok(())
+            }
+            Expr::Index { object, index, .. } => {
+                self.expr(object)?;
+                self.expr(index)
+            }
+            Expr::TensorIndex {
+                object, indices, ..
+            } => {
+                self.expr(object)?;
+                self.tensor_indices(indices)
+            }
+            Expr::TupleIndex { object, .. } => self.expr(object),
+            Expr::ArrayRest { array, .. } => self.expr(array),
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.expr(scrutinee)?;
+                for arm in arms {
+                    self.arm(arm)?;
+                }
+                Ok(())
+            }
+            Expr::Closure {
+                params, ret, body, ..
+            } => self.scoped(|w| {
+                for param in params.iter_mut() {
+                    w.closure_param(param)?;
+                }
+                if let Some(ret) = ret {
+                    w.ty(ret)?;
+                }
+                for param in params.iter() {
+                    w.bind(&param.name);
+                }
+                w.expr(body)
+            }),
+            Expr::Try { operand, .. } => self.expr(operand),
+        }
+    }
+
+    fn generic_args(&mut self, args: &mut [GenericArg]) -> Result<(), ModuleError> {
+        for arg in args {
+            if let GenericArg::Type(ty) = arg {
+                self.ty(ty)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn arm(&mut self, arm: &mut MatchArm) -> Result<(), ModuleError> {
+        self.scoped(|w| {
+            for pattern in &mut arm.patterns {
+                w.pattern(pattern)?;
+            }
+            if let Some(guard) = &mut arm.guard {
+                w.expr(guard)?;
+            }
+            w.expr(&mut arm.body)
+        })
+    }
+
+    /// Walk a pattern, binding every name it introduces for the rest of the scope.
+    fn pattern(&mut self, pattern: &mut Pattern) -> Result<(), ModuleError> {
+        // As in `expr`, the callback runs first: resolving an imported variant turns a
+        // binding or an unqualified variant into a `Pattern::Enum`, whose payload still
+        // needs walking afterwards. Whatever is still a binding after it is a local.
+        (self.f)(Site::Pattern(pattern))?;
+
+        let payload = match pattern {
+            Pattern::Binding(name) => {
+                self.bind(name);
+                return Ok(());
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Range { .. } => {
+                return Ok(());
+            }
+            Pattern::At { name, pattern, .. } => {
+                self.bind(name);
+                return self.pattern(pattern);
+            }
+            Pattern::Array { elements, rest, .. } => {
+                for element in elements {
+                    self.pattern(element)?;
+                }
+                if let Some(binding) = rest.as_ref().and_then(|rest| rest.binding.as_ref()) {
+                    self.bind(binding);
+                }
+                return Ok(());
+            }
+            Pattern::Enum { payload, .. } | Pattern::UnqualifiedEnum { payload, .. } => payload,
+        };
+        match payload {
+            EnumPatternPayload::Unit => Ok(()),
+            EnumPatternPayload::Tuple(subs) => {
+                for sub in subs {
+                    self.pattern(sub)?;
+                }
+                Ok(())
+            }
+            EnumPatternPayload::Struct(fields) => {
+                for field in fields {
+                    self.pattern(&mut field.pattern)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn closure_param(&mut self, param: &mut ClosureParam) -> Result<(), ModuleError> {
+        match &mut param.ty {
+            Some(ty) => self.ty(ty),
+            None => Ok(()),
+        }
     }
 }

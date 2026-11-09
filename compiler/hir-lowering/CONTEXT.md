@@ -346,7 +346,9 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   struct rendered by a hole or a supplied `fmt_debug` gets the same helper for every field, at any
   depth through derived structs, whose `Debug` is written by hand (`emit_field_debug_helpers`):
   the backend's field-by-field rendering calls it. A newtype field is read through to its inner
-  type only when the newtype has no `Debug` of its own. `.clone()` on a non-`Copy` struct deriving
+  type only when the newtype has no `Debug` of its own. The rendering is headed by
+  `HirStruct.written_name`, which `written_name` strips of the module path module resolution put
+  on the canonical name, so `geometry::Point` prints as `Point` the way it was declared. `.clone()` on a non-`Copy` struct deriving
   `Clone` with a part whose clone runs code (`clone_is_a_call`: a `string`, a tensor, an
   `impl Clone` and not an inherent `clone`, a nested such struct, or a tuple, array or newtype of
   one) calls `S__clone$derived`, the impl a programmer would have written,

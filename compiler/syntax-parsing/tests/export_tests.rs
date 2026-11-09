@@ -123,11 +123,15 @@ fn export_marks_an_import_as_a_re_export() {
 }
 
 #[test]
-fn export_is_rejected_on_an_inline_module_block() {
-    let message = parse_error("export module geometry { }\n");
-    assert!(
-        message.contains("`export` cannot be applied to"),
-        "{}",
-        message
-    );
+fn export_marks_an_inline_module_block() {
+    let items = syntax_parsing::parse("export module geometry { }\nmodule hidden { }\n")
+        .expect("both blocks parse");
+    let exported: Vec<bool> = items
+        .iter()
+        .filter_map(|item| match item {
+            syntax_parsing::Item::Module(def) => Some(def.exported),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(exported, [true, false]);
 }

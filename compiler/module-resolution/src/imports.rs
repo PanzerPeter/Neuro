@@ -1,9 +1,9 @@
 //! Turn each module's `import` declarations into the name table its body is rewritten
 //! against.
 //!
-//! An import binds names *locally*, which is the one place this slice is not flat: two
-//! modules may bind the same name to different things. The table therefore lives per
-//! module and the rewriting pass consults the table of the module it is walking.
+//! An import binds names *locally*: two modules may bind the same name to different
+//! things. The table therefore lives per module and the rewriting pass consults the table
+//! of the module it is walking, then the tables of the modules enclosing it.
 
 use std::collections::HashMap;
 
@@ -17,12 +17,11 @@ use crate::{ModuleError, PreludeVariant};
 pub(crate) struct ImportScope {
     /// A qualifier written in this module → the module it names.
     modules: HashMap<String, usize>,
-    /// A bare name written in this module → the item name it stands for in the flat
-    /// namespace. Identity for an unrenamed import; the original for an `as` rename.
-    renames: HashMap<String, String>,
-    /// A bare name → the `(enum, variant)` it stands for.
+    /// A bare name written in this module → the declaration it stands for.
+    items: HashMap<String, Reexport>,
+    /// A bare name → the `(enum, variant)` it stands for, the enum by its canonical name.
     variants: HashMap<String, (String, String)>,
-    /// The subset of `renames` written with `export import`, which this module makes
+    /// The subset of `items` written with `export import`, which this module makes
     /// reachable through itself as well as binding locally.
     pub(crate) reexports: HashMap<String, Reexport>,
 }
@@ -32,8 +31,8 @@ impl ImportScope {
         self.modules.get(name).copied()
     }
 
-    pub(crate) fn rename(&self, name: &str) -> Option<&str> {
-        self.renames.get(name).map(String::as_str)
+    pub(crate) fn item(&self, name: &str) -> Option<&Reexport> {
+        self.items.get(name)
     }
 
     pub(crate) fn variant(&self, name: &str) -> Option<(&str, &str)> {
@@ -55,29 +54,22 @@ impl ImportScope {
         Ok(())
     }
 
-    /// Bind `name` to the flat-namespace item `item` declared in module `origin`.
+    /// Bind `name` to the declaration `target`.
     ///
     /// Under `export import` the binding is also recorded as a re-export: the name then
     /// reaches through this module too, which is the whole of what the form buys.
     fn bind_item(
         &mut self,
         name: &str,
-        item: &str,
-        origin: usize,
+        target: Reexport,
         from: &str,
         reexport: bool,
     ) -> Result<(), ModuleError> {
         self.reject_rebind(name, from)?;
-        self.renames.insert(name.to_string(), item.to_string());
         if reexport {
-            self.reexports.insert(
-                name.to_string(),
-                Reexport {
-                    module: origin,
-                    item: item.to_string(),
-                },
-            );
+            self.reexports.insert(name.to_string(), target.clone());
         }
+        self.items.insert(name.to_string(), target);
         Ok(())
     }
 
@@ -96,19 +88,10 @@ impl ImportScope {
         Ok(())
     }
 
-    /// Bind a prelude variant, which no diagnostic can result from: the caller has already
-    /// established that nothing else in this module claims the name.
-    fn seed_variant(&mut self, owner: &str, variant: &str) {
-        self.variants.insert(
-            variant.to_string(),
-            (owner.to_string(), variant.to_string()),
-        );
-    }
-
     /// Is `name` already bound in this module by an import?
     fn binds(&self, name: &str) -> bool {
         self.modules.contains_key(name)
-            || self.renames.contains_key(name)
+            || self.items.contains_key(name)
             || self.variants.contains_key(name)
     }
 
@@ -140,6 +123,18 @@ fn reject_reexport(reexport: bool, name: &str, what: &str, from: &str) -> Result
     })
 }
 
+/// Reject an import binding a name the module declares itself: the declaration and the
+/// import would compete for one spelling, and neither silently winning is safe.
+fn reject_declared(graph: &ModuleGraph, from: usize, name: &str) -> Result<(), ModuleError> {
+    if graph.declares_own(from, name) {
+        return Err(ModuleError::ImportShadowsDeclaration {
+            name: name.to_string(),
+            from: graph.display(from).to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Build one scope per module, in module order, settling re-exports first.
 pub(crate) fn resolve_imports(
     graph: &mut ModuleGraph,
@@ -151,28 +146,6 @@ pub(crate) fn resolve_imports(
     // this round may be exactly the one the next round makes resolvable.
     while install_reexports(graph, prelude) {}
     build_scopes(graph, Tolerance::Report, prelude)
-}
-
-/// Add the prelude's variant bindings to a module that did not opt out.
-///
-/// They are the weakest bindings in the language: a name this module declares, or already
-/// imported, keeps its meaning, and neither case is an error: the prelude is a fallback,
-/// so shadowing it is how a module overrides what the prelude offers.
-fn seed_prelude(
-    graph: &ModuleGraph,
-    id: usize,
-    prelude: &[PreludeVariant],
-    scope: &mut ImportScope,
-) {
-    if graph.no_prelude(id) {
-        return;
-    }
-    for entry in prelude {
-        if graph.declares(id, &entry.variant) || scope.binds(&entry.variant) {
-            continue;
-        }
-        scope.seed_variant(&entry.owner, &entry.variant);
-    }
 }
 
 /// Whether an import that cannot be resolved ends the pass or is passed over.
@@ -196,7 +169,6 @@ fn build_scopes(
                 outcome?;
             }
         }
-        seed_prelude(graph, id, prelude, &mut scope);
         scopes.push(scope);
     }
     Ok(scopes)
@@ -204,9 +176,6 @@ fn build_scopes(
 
 /// Copy one round of re-export tables onto the graph, reporting whether anything was new.
 fn install_reexports(graph: &mut ModuleGraph, prelude: &[PreludeVariant]) -> bool {
-    // A re-export names an item, never a prelude variant, so nothing here reads the
-    // seeded bindings, but `resolve_one` consults the prelude to decide whether an
-    // unresolvable head could be an enum, and must reach the same verdict either round.
     let Ok(scopes) = build_scopes(graph, Tolerance::Skip, prelude) else {
         return false;
     };
@@ -227,7 +196,8 @@ fn resolve_one(
     scope: &mut ImportScope,
 ) -> Result<(), ModuleError> {
     let segments: Vec<&str> = import.path.iter().map(|s| s.name.as_str()).collect();
-    let (module, consumed) = walk_path(graph, from, &segments);
+    let anchor = import.relative.then_some(import.parents);
+    let (module, consumed) = walk_path(graph, from, anchor, &segments)?;
     let owner = graph.display(from).to_string();
 
     // The whole path is a module: `import math`, `import ./utils::io`.
@@ -241,38 +211,68 @@ fn resolve_one(
         return bind_from_item(graph, from, import, module, segments[consumed], scope);
     }
 
-    // No segment named a module. A single segment can still be an enum whose variants are
-    // being imported, but only if an enum by that name exists: a head that names neither
-    // a module nor an enum used to be read as an enum regardless, which turned a typo, and
-    // any path to an out-of-scope module, into a binding that quietly meant nothing.
-    if consumed == 0
-        && segments.len() == 1
-        && names_an_enum(graph, prelude, segments[0])
-        && let ImportSelection::List(names) = &import.selection
-    {
-        for entry in names {
-            let bound = entry.alias.as_ref().unwrap_or(&entry.name);
-            scope.bind_variant(
-                &bound.name,
-                segments[0],
-                &entry.name.name,
-                &owner,
-                import.exported,
-            )?;
+    // No segment named a module. The head can still be an enum in scope whose variants
+    // are being imported, as a list (`import Shape::{Circle}`) or one at a time
+    // (`import Shape::Circle`), but only if an enum by that name is in scope: a head that
+    // names neither a module nor an enum used to be read as an enum regardless, which
+    // turned a typo into a binding that quietly meant nothing.
+    if consumed == 0 && !import.relative {
+        let enum_owner = enum_in_scope(graph, from, prelude, scope, segments[0]);
+        match (&enum_owner, segments.len(), &import.selection) {
+            (Some(enum_owner), 1, ImportSelection::List(names)) => {
+                for entry in names {
+                    let bound = entry.alias.as_ref().unwrap_or(&entry.name);
+                    reject_declared(graph, from, &bound.name)?;
+                    scope.bind_variant(
+                        &bound.name,
+                        enum_owner,
+                        &entry.name.name,
+                        &owner,
+                        import.exported,
+                    )?;
+                }
+                return Ok(());
+            }
+            (Some(enum_owner), 2, ImportSelection::Module | ImportSelection::Alias(_)) => {
+                let bound = match &import.selection {
+                    ImportSelection::Alias(alias) => alias.name.as_str(),
+                    _ => segments[1],
+                };
+                reject_declared(graph, from, bound)?;
+                return scope.bind_variant(bound, enum_owner, segments[1], &owner, import.exported);
+            }
+            _ => {}
         }
-        return Ok(());
     }
 
     Err(unresolved_head(graph, &segments, import, owner))
 }
 
-/// Could `head` name an enum reachable from anywhere in the program?
-///
-/// The prelude is checked separately from the graph because it is prepended *after* this
-/// pass: `Option` is declared in no loaded module yet, so only the caller's prelude list
-/// accounts for it.
-fn names_an_enum(graph: &ModuleGraph, prelude: &[PreludeVariant], head: &str) -> bool {
-    graph.declares_enum_anywhere(head) || prelude.iter().any(|entry| entry.owner == head)
+/// The canonical name of the enum `head` names in module `from`: one it or an enclosing
+/// module declares, one this module already imported, or one of the prelude's.
+fn enum_in_scope(
+    graph: &ModuleGraph,
+    from: usize,
+    prelude: &[PreludeVariant],
+    scope: &ImportScope,
+    head: &str,
+) -> Option<String> {
+    let mut current = Some(from);
+    while let Some(id) = current {
+        if graph.modules[id].declared.contains(head) && graph.declares_enum(id, head) {
+            return Some(graph.canonical(id, head));
+        }
+        current = graph.modules[id].parent;
+    }
+    if let Some(target) = scope.item(head)
+        && graph.declares_enum(target.module, &target.item)
+    {
+        return Some(graph.canonical(target.module, &target.item));
+    }
+    prelude
+        .iter()
+        .any(|entry| entry.owner == head)
+        .then(|| head.to_string())
 }
 
 /// The error for an import path that reached no module.
@@ -321,24 +321,38 @@ fn bind_from_module(
     let owner = graph.display(from).to_string();
     let last = &import.path[import.path.len() - 1].name;
     match &import.selection {
-        ImportSelection::Module => scope.bind_module(last, module, &owner, import.exported),
+        ImportSelection::Module => {
+            reject_declared(graph, from, last)?;
+            scope.bind_module(last, module, &owner, import.exported)
+        }
         ImportSelection::Alias(alias) => {
+            reject_declared(graph, from, &alias.name)?;
             scope.bind_module(&alias.name, module, &owner, import.exported)
         }
         ImportSelection::List(names) => {
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
                 let name = &entry.name.name;
+                reject_declared(graph, from, &bound.name)?;
                 // A listed name is a child module (`import ./utils::{io}`) or an item the
                 // module declares: the file system settles which.
-                match graph.resolve_segment(from, Some(module), name) {
+                match graph.resolve_child(module, name) {
                     Some(child) => {
+                        graph.check_block_reachable(from, child)?;
                         scope.bind_module(&bound.name, child, &owner, import.exported)?
                     }
                     None if graph.declares(module, name) => {
                         graph.check_visible(from, module, name)?;
-                        let (origin, flat) = graph.flat_origin(module, name);
-                        scope.bind_item(&bound.name, &flat, origin, &owner, import.exported)?
+                        let (origin, item) = graph.flat_origin(module, name);
+                        scope.bind_item(
+                            &bound.name,
+                            Reexport {
+                                module: origin,
+                                item,
+                            },
+                            &owner,
+                            import.exported,
+                        )?
                     }
                     None => {
                         return Err(ModuleError::UndeclaredItem {
@@ -380,8 +394,17 @@ fn bind_from_item(
                 ImportSelection::Alias(alias) => &alias.name,
                 _ => item,
             };
-            let (origin, flat) = graph.flat_origin(module, item);
-            scope.bind_item(bound, &flat, origin, &owner, import.exported)
+            reject_declared(graph, from, bound)?;
+            let (origin, original) = graph.flat_origin(module, item);
+            scope.bind_item(
+                bound,
+                Reexport {
+                    module: origin,
+                    item: original,
+                },
+                &owner,
+                import.exported,
+            )
         }
         // `import geometry::Shape::{Circle, Square}`: the tail is a type in the module,
         // so the listed names are its variants.
@@ -392,9 +415,17 @@ fn bind_from_item(
             // The listed names are variants of `item`, and a variant carries the enum's
             // visibility, so the enum itself is the only thing to gate.
             graph.check_visible(from, module, item)?;
+            let enum_owner = graph.canonical_through(module, item);
             for entry in names {
                 let bound = entry.alias.as_ref().unwrap_or(&entry.name);
-                scope.bind_variant(&bound.name, item, &entry.name.name, &owner, import.exported)?;
+                reject_declared(graph, from, &bound.name)?;
+                scope.bind_variant(
+                    &bound.name,
+                    &enum_owner,
+                    &entry.name.name,
+                    &owner,
+                    import.exported,
+                )?;
             }
             Ok(())
         }
@@ -402,25 +433,34 @@ fn bind_from_item(
 }
 
 /// Consume as many leading segments as name modules, returning the deepest module reached
-/// and how many segments it took. A head the importing module declares as a type names
+/// and how many segments it took. A head the importing module has in scope as a type names
 /// that type, not a same-named file, so it consumes nothing.
-fn walk_path(graph: &ModuleGraph, from: usize, segments: &[&str]) -> (Option<usize>, usize) {
-    let mut module = None;
-    let mut consumed = 0;
-    if segments
-        .first()
-        .is_some_and(|head| graph.declares_type(from, head))
-    {
-        return (module, consumed);
+fn walk_path(
+    graph: &ModuleGraph,
+    from: usize,
+    anchor: Option<u32>,
+    segments: &[&str],
+) -> Result<(Option<usize>, usize), ModuleError> {
+    let Some(head) = segments.first() else {
+        return Ok((None, 0));
+    };
+    if anchor.is_none() && graph.lexical_type(from, head) {
+        return Ok((None, 0));
     }
-    for segment in segments {
-        match graph.resolve_segment(from, module, segment) {
-            Some(id) => {
-                module = Some(id);
+    let Some(mut module) = graph.resolve_head(from, anchor, head) else {
+        return Ok((None, 0));
+    };
+    graph.check_block_reachable(from, module)?;
+    let mut consumed = 1;
+    for segment in &segments[1..] {
+        match graph.resolve_child(module, segment) {
+            Some(child) => {
+                graph.check_block_reachable(from, child)?;
+                module = child;
                 consumed += 1;
             }
             None => break,
         }
     }
-    (module, consumed)
+    Ok((Some(module), consumed))
 }

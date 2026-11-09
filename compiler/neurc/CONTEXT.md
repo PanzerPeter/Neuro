@@ -160,8 +160,8 @@ to be the root rather than to the prelude itself. `prelude.nr` marks its own sur
 `export` for the same reason it now has to.
 
 `load_program` also decides whether to prepend at all: `ResolvedProgram.no_prelude` reports the
-root file's `@no_prelude`, and the merged namespace is flat, so the prelude's declarations are
-either in the whole program or absent from all of it.
+root file's `@no_prelude`, and the prelude's declarations join the program as one list, so they
+are either in the whole program or absent from all of it.
 
 `prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
 validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint

@@ -134,11 +134,8 @@ impl Parser {
                 nt.exported = export.is_some();
                 items.push(Item::Newtype(nt));
             } else if self.check(&TokenKind::Module) {
-                reject_export(
-                    export,
-                    "an inline `module` block (its name is reached only from the file that declares it, so there is no outside to open it to)",
-                )?;
-                let module = self.parse_module_block(alias_decls)?;
+                let mut module = self.parse_module_block(alias_decls)?;
+                module.exported = export.is_some();
                 items.push(Item::Module(module));
             } else if self.check(&TokenKind::Import) {
                 let import = self.parse_import(export.is_some())?;
@@ -177,6 +174,7 @@ impl Parser {
         let close = self.consume(TokenKind::RightBrace, "'}' to close the module block")?;
         Ok(ModuleDef {
             name,
+            exported: false,
             items,
             span: start.span.merge(close.span),
         })
@@ -375,7 +373,9 @@ fn reject_export(export: Option<shared_types::Span>, what: &str) -> ParseResult<
 }
 
 /// Inject each trait's default methods into the `impl Trait for Type` blocks that
-/// omit them, a whole-program parse-time desugar (like type-alias expansion).
+/// omit them, a parse-time desugar over one file (like type-alias expansion). A trait
+/// and an impl in different modules meet only once names are resolved, so module
+/// resolution repeats this for them.
 ///
 /// After this pass every trait impl carries a concrete method for each trait method it
 /// is expected to provide, so semantic analysis and HIR lowering treat trait methods as
@@ -390,25 +390,22 @@ fn inject_trait_defaults(items: &mut [Item]) {
     apply_trait_defaults(items, &defaults);
 }
 
-/// Gather every trait's bodied methods, inline `module` blocks included. Traits are erased
-/// at parse time, so a trait declared beside a block still supplies defaults inside it.
+/// Gather every trait's bodied methods at this file's top level. A trait or an impl inside
+/// an inline `module` block is a different namespace, where a bare trait name may mean
+/// another declaration, so module resolution supplies those defaults by resolved name.
 fn collect_trait_defaults(
     items: &[Item],
     defaults: &mut std::collections::HashMap<String, Vec<TraitMethod>>,
 ) {
     for item in items.iter() {
-        match item {
-            Item::Trait(def) => {
-                let bodied: Vec<TraitMethod> = def
-                    .methods
-                    .iter()
-                    .filter(|m| m.default_body.is_some())
-                    .cloned()
-                    .collect();
-                defaults.insert(def.name.name.clone(), bodied);
-            }
-            Item::Module(def) => collect_trait_defaults(&def.items, defaults),
-            _ => {}
+        if let Item::Trait(def) = item {
+            let bodied: Vec<TraitMethod> = def
+                .methods
+                .iter()
+                .filter(|m| m.default_body.is_some())
+                .cloned()
+                .collect();
+            defaults.insert(def.name.name.clone(), bodied);
         }
     }
 }
@@ -418,10 +415,6 @@ fn apply_trait_defaults(
     defaults: &std::collections::HashMap<String, Vec<TraitMethod>>,
 ) {
     for item in items.iter_mut() {
-        if let Item::Module(def) = item {
-            apply_trait_defaults(&mut def.items, defaults);
-            continue;
-        }
         let Item::Impl(imp) = item else { continue };
         let Some(trait_name) = imp.trait_name.clone() else {
             continue;

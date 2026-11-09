@@ -5,3 +5,6 @@ choose<bool> same template     = true
 fmt::scale (module alias)      = 28
 report::clamp (re-export)      = 28
 scoring::combine (inline mod)  = 75
+report::Band::Normal level     = 1
+scale(doubled) (root's scale)  = 3
+choose (local over the import) = 6

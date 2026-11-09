@@ -71,48 +71,6 @@ instantiates per call and terminates.
 **Fix sketch**: register an instance's method signatures when a call first looks the method up, not
 when the instance is built, in the checker and in lowering's `register_instance_methods` alike.
 
-## BUG-138: a private function is reachable by its bare name after `import`
-
-- **Status**: open, confirmed
-- **Area**: `module-resolution` (the flat merge); `semantic-analysis` (call resolution)
-- **Severity**: minor. A program that breaks the visibility rule compiles; nothing is read
-  out of bounds
-
-**Minimal repro**
-
-Two files side by side:
-
-```text
-// lib.nr
-export func shown() -> i32 { 1 }
-
-func internal() -> i32 { 4 }
-
-// main.nr
-import ./lib
-
-func main() -> i32 {
-    internal()
-}
-```
-
-Expected: an error at `internal()`, since `internal` is not exported. Observed: `neurc run
-main.nr` exits 4. The qualified `lib::internal()` is refused as it should be.
-
-**Root cause**: confirmed in the behaviour, with the mechanism known. Modules merge into one flat
-namespace, and visibility is checked only where a
-path or an import list names the item. A bare name resolves in the merged namespace, where every
-module's private items sit beside the root's.
-
-**Workaround**: none needed to compile; to keep the rule, call imported items qualified or
-through an import list, which are checked.
-
-**Fix sketch**: record each merged item's home module and refuse a bare reference to a private
-item from another module. The hierarchical module namespaces planned for the standard library
-remove the flat merge and this with it. Regression tests: a bare call, a bare type name and a
-bare constant from a private item, each refused, and the same names from inside their own module
-still accepted.
-
 ## BUG-085: a struct passed by value never releases the `string` buffers it holds
 
 - **Status**: open, confirmed

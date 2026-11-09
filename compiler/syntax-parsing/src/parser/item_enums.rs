@@ -138,7 +138,17 @@ impl Parser {
         self.skip_newlines();
 
         let mut fields: Vec<FieldInit> = Vec::new();
+        let mut base: Option<Box<Expr>> = None;
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            // A variant takes no functional-update base, so `..base` settles that the
+            // path names a struct in another module: `geometry::Point { x, ..origin }`.
+            if self.check(&TokenKind::DotDot) {
+                self.advance(); // consume '..'
+                self.skip_newlines();
+                base = Some(Box::new(self.parse_expr(Precedence::Lowest)?));
+                self.skip_newlines();
+                break;
+            }
             let field_name = self.consume_identifier("field name")?;
             self.skip_newlines();
             // Shorthand `Variant { x }` binds the same-named in-scope identifier.
@@ -166,6 +176,18 @@ impl Parser {
 
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         let span = enum_name.span.merge(close.span);
+
+        if base.is_some() {
+            return Ok(Expr::StructLiteral {
+                name: Identifier {
+                    name: format!("{}::{}", enum_name.name, variant.name),
+                    span: enum_name.span.merge(variant.span),
+                },
+                fields,
+                base,
+                span,
+            });
+        }
 
         Ok(Expr::EnumStructLiteral {
             enum_name,

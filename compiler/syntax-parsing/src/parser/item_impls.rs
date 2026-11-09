@@ -29,19 +29,7 @@ impl Parser {
         // The first identifier is the struct name for an inherent `impl T`, or the
         // trait name when a `for` follows it (`impl Drop for T`). Read it, then peek
         // for `for` to decide which form this is.
-        let first = self.consume(TokenKind::Identifier(String::new()), "type or trait name")?;
-        let first_ident = if let TokenKind::Identifier(n) = first.kind {
-            Identifier {
-                name: n,
-                span: first.span,
-            }
-        } else {
-            return Err(ParseError::UnexpectedToken {
-                found: first.kind,
-                expected: "type or trait name".to_string(),
-                span: first.span,
-            });
-        };
+        let first_ident = self.consume_path_name("type or trait name")?;
 
         // Optional type arguments on the first name (`impl<T> Wrapper<T>` or the
         // trait side of a trait impl). Parsed to know the type constructor's args.
@@ -51,19 +39,7 @@ impl Parser {
         let (trait_name, type_name, type_args) = if self.check(&TokenKind::For) {
             self.advance(); // consume `for`
             self.skip_newlines();
-            let ty_token = self.consume(TokenKind::Identifier(String::new()), "struct name")?;
-            let ty = if let TokenKind::Identifier(n) = ty_token.kind {
-                Identifier {
-                    name: n,
-                    span: ty_token.span,
-                }
-            } else {
-                return Err(ParseError::UnexpectedToken {
-                    found: ty_token.kind,
-                    expected: "struct name".to_string(),
-                    span: ty_token.span,
-                });
-            };
+            let ty = self.consume_path_name("struct name")?;
             let ty_args = self.parse_optional_type_args()?;
             (Some(first_ident), ty, ty_args)
         } else {

@@ -433,13 +433,15 @@ pub struct ImportName {
 /// An `import` declaration.
 ///
 /// The declaration is consumed by module resolution and never reaches semantic
-/// analysis: after resolution every name is unqualified and the program is flat.
+/// analysis: after resolution every name is the canonical name of one declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDef {
-    /// `true` for the explicitly relative `import ./utils` form. Every module path is
-    /// resolved relative to the importing file either way; the marker records what the
-    /// author wrote.
+    /// `true` for a path written `./utils` or `../shared`, which starts at the importing
+    /// file's own directory. Without it a path starts at the program's root directory.
     pub relative: bool,
+    /// How many `../` the path opens with: the directories it climbs before its first
+    /// segment. Zero for `./utils` and for a root path.
+    pub parents: u32,
     /// The `::`-separated segments before any `{...}` list or `as` alias.
     pub path: Vec<Identifier>,
     pub selection: ImportSelection,
@@ -458,6 +460,9 @@ pub struct ImportDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleDef {
     pub name: Identifier,
+    /// `true` for `export module`. A private block is reached only from inside the
+    /// module that declares it, whatever its own items export.
+    pub exported: bool,
     pub items: Vec<Item>,
     pub span: Span,
 }
