@@ -56,6 +56,9 @@
       "include": "#pascal_types"
     },
     {
+      "include": "#namespaces"
+    },
+    {
       "include": "#parameter_labels"
     },
     {
@@ -463,14 +466,23 @@
           "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|bf16|f16|f32|f64|bool|string|char|void)\\b"
         },
         {
-          "comment": "Compiler-known collections and the types the prelude (`compiler/neurc/src/prelude.nr`) declares in every program.",
-          "name": "support.type.neuro",
-          "match": "\\b(Vec|HashMap|BTreeMap|Tensor|Option|Result|OrderedF32|OrderedF64|Chars|Device|PoolHandle)\\b"
+          "comment": "`f: once (T) -> U`, the one-shot callable in parameter type position. Matched before `#function_calls` so the call-shaped `once (` is not read as a call. `once` is contextual, not a lexer keyword, so it is only scoped here.",
+          "match": "(:\\s*)(once)\\b(?=\\s*\\()",
+          "captures": {
+            "2": {
+              "name": "keyword.special.neuro"
+            }
+          }
         },
         {
-          "comment": "Lang-item traits the compiler recognises by name.",
+          "comment": "Compiler-known collections and the types the prelude (`compiler/neurc/src/prelude.nr`) declares in every program.",
+          "name": "support.type.neuro",
+          "match": "\\b(Vec|HashMap|BTreeMap|StringBuilder|Tensor|Option|Result|OrderedF32|OrderedF64|ParseError|Chars|Range|Rev|Step|Map|Filter|Enumerate|Device|PoolHandle)\\b"
+        },
+        {
+          "comment": "Lang-item traits the compiler recognises by name, operator traits included.",
           "name": "support.type.trait.neuro",
-          "match": "\\b(Copy|Clone|Drop|PartialEq|Comparable|Hashable|Debug|Add|Sub|Mul|Div|Neg|Iterator|IntoIterator|PoolAware)\\b"
+          "match": "\\b(Copy|Clone|Drop|PartialEq|Comparable|Hashable|Debug|Iterator|IntoIterator|PoolAware|Add|Sub|Mul|Div|Rem|Neg|BitAnd|BitOr|BitXor|BitNot|Shl|MatMul|AddAssign|SubAssign|MulAssign|DivAssign|RemAssign|BitAndAssign|BitOrAssign|BitXorAssign|ShlAssign)\\b"
         }
       ]
     },
@@ -495,6 +507,11 @@
       "comment": "`const MAX_RETRIES` and friends. Two characters minimum, so a single-letter generic parameter (`T`, `N`) falls through to `#pascal_types` instead.",
       "name": "variable.other.constant.neuro",
       "match": "\\b\\p{Lu}[\\p{Lu}\\p{N}_]+\\b"
+    },
+    "namespaces": {
+      "comment": "A module path segment before `::` (`geo::Point`, `shapes::Shape::Circle`). Every module is a namespace, so this applies outside `import` too. A method turbofish (`s.parse::<i64>()`) is excluded by the lookbehind on `.`. Capitalised segments fall through to `#pascal_types`, which scopes them as types.",
+      "name": "entity.name.namespace.neuro",
+      "match": "(?<!\\.)\\b[_\\p{Ll}][\\p{L}\\p{N}_]*(?=\\s*::)"
     },
     "pascal_types": {
       "comment": "Any remaining capitalised name reads as a type. This is what colours user types at every *use* site; declaration sites are handled above.",

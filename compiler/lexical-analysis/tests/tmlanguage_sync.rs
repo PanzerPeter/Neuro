@@ -8,7 +8,8 @@
 //! Three properties are asserted, each standing for a bug class the grammar has
 //! actually shipped:
 //!
-//! 1. **Coverage**: every `#[token("word")]` keyword appears in the grammar.
+//! 1. **Coverage**: every `#[token("word")]` keyword appears in the grammar, and so does
+//!    every prelude type, prelude trait and operator trait the compiler names.
 //! 2. **No invention**: the grammar's `#keywords` rule lists *only* words the lexer
 //!    tokenizes, so a keyword planned for a later phase cannot be highlighted as if
 //!    the compiler already accepted it.
@@ -45,6 +46,9 @@ fn read(relative: &str) -> String {
 
 const GRAMMAR_PATH: &str = "neuro-language-support/syntaxes/neuro.tmLanguage.json";
 const TOKENS_PATH: &str = "compiler/lexical-analysis/src/tokens/mod.rs";
+const PRELUDE_PATH: &str = "compiler/neurc/src/prelude.nr";
+const OPERATOR_TRAITS_PATH: &str =
+    "compiler/semantic-analysis/src/type_checkers/operator_traits.rs";
 
 fn grammar_json() -> serde_json::Value {
     serde_json::from_str(&read(GRAMMAR_PATH)).expect("the TextMate grammar is valid JSON")
@@ -147,6 +151,54 @@ fn textmate_grammar_covers_every_lexer_keyword() {
         missing.is_empty(),
         "lexer keywords absent from {GRAMMAR_PATH}: {missing:?}\nAdd them to the matching \
          `keywords` or `constants` pattern; editor highlighting has no other link to the lexer."
+    );
+}
+
+/// Prelude `export` names and operator-trait names, scanned from the sources that declare
+/// them. A new prelude type or operator trait is otherwise unhighlighted with no failing
+/// check, because nothing else in the workspace reads the grammar.
+#[test]
+fn textmate_grammar_covers_prelude_and_operator_traits() {
+    let grammar = read(GRAMMAR_PATH);
+
+    let prelude = read(PRELUDE_PATH);
+    let prelude_names = prelude.lines().filter_map(|line| {
+        let rest = line.trim().strip_prefix("export ")?;
+        let rest = ["enum ", "struct ", "trait "]
+            .iter()
+            .find_map(|kind| rest.strip_prefix(kind))?;
+        Some(
+            rest.chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect::<String>(),
+        )
+    });
+
+    let operators = read(OPERATOR_TRAITS_PATH);
+    let operator_names = operators.lines().filter_map(|line| {
+        let rest = line.trim().strip_prefix('"')?;
+        let (name, tail) = rest.split_once('"')?;
+        tail.trim_start()
+            .starts_with("=> OpTraitSpec")
+            .then(|| name.to_string())
+    });
+
+    let names: Vec<String> = prelude_names.chain(operator_names).collect();
+    assert!(
+        names.len() > 30,
+        "found only {} prelude and operator-trait names; the layout of {PRELUDE_PATH} or \
+         {OPERATOR_TRAITS_PATH} changed and this test no longer sees them",
+        names.len()
+    );
+
+    let missing: Vec<&String> = names
+        .iter()
+        .filter(|name| !grammar_matches(&grammar, name))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "prelude or operator-trait names absent from {GRAMMAR_PATH}: {missing:?}\nAdd them to \
+         the `support.type` or `support.type.trait` pattern."
     );
 }
 

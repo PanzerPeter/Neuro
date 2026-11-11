@@ -10,6 +10,21 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.39.1] - 2026-11-11
+
+### Fixed
+
+- The editor grammar scopes `once` in a closure parameter type (`f: once (T) -> U`) as a keyword
+  instead of reading it as a call.
+- The editor grammar scopes the prelude and compiler-known type names it missed (`StringBuilder`,
+  `ParseError`, `Range`, `Rev`, `Step`, `Map`, `Filter`, `Enumerate`) as types, like `Vec`.
+- The editor grammar highlights the operator traits the compiler recognises by name (`Rem`,
+  `BitAnd`, `MatMul`, the `*Assign` family and the rest) with the other lang-item traits.
+- A module segment before `::` (`geo::Point`, `shapes::Shape::Circle`) gets the namespace scope
+  outside `import` too. A method turbofish (`s.parse::<i64>()`) is left alone.
+
+The VS Code extension is 1.3.0.
+
 ## [5.39.0] - 2026-11-09
 
 ### Added
