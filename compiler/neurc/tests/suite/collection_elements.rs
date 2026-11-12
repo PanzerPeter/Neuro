@@ -369,13 +369,13 @@ func main() -> i32 {
             + rows[0].inner.name.len() as i32 + grid[0][0].name.len() as i32
             + table.rows[0].inner.name.len() as i32 + pairs[0].1.len() as i32
     }
-    total
+    total % 256
 }
 "#
     );
     // bound 5 + whole 5 + inner 5 + deep 4 + held 4 + second 6, ten times.
     let exit = CompileTest::new().run_leak_checked("slot_position_literal.nr", &source);
-    assert_eq!(exit, 290 & 0xff);
+    assert_eq!(exit, 290 % 256);
 }
 
 /// A store into a position inside a slot releases what it displaces, a `string` and a
