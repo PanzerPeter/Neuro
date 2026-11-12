@@ -10,6 +10,15 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.39.3] - 2026-11-12
+
+### Documentation
+
+- Filed BUG-156: a trailing comma is refused after the last function parameter, call argument
+  or array element, although struct fields, enum variants, tuples and `match` arms accept one.
+- Filed BUG-157: `async`, `await`, `parallel`, `spawn`, `defer`, `extern`, `static`, `macro` and
+  `yield` are still accepted as identifiers, so a program using one breaks when the keyword lands.
+
 ## [5.39.2] - 2026-11-12
 
 ### Fixed

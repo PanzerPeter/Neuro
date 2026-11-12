@@ -5,6 +5,79 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-157: names planned as keywords are still accepted as identifiers
+
+- **Status**: open, confirmed
+- **Area**: `lexical-analysis` (keyword tokens) and the editor grammar's keyword list
+- **Severity**: minor. Nothing miscompiles today, but a program that uses one of the names stops
+  compiling when its keyword lands
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val async = 1
+    val spawn = 2
+    val defer = 3
+    async + spawn + defer
+}
+```
+
+Expected: each binding refused, because the name is reserved. Observed: `neurc check` passes and
+the program returns 6. `await`, `parallel`, `extern`, `static`, `macro` and `yield` are accepted
+the same way. `parallel`, `spawn`, `defer` and `extern` introduce constructs on the
+[Quick Roadmap](../README.md#quick-roadmap); the other five are held back by the language design.
+
+**Workaround**: keep the nine names out of identifiers.
+
+**Fix sketch**: lex the nine as keyword tokens, so a declaration that uses one fails with the
+ordinary "expected identifier" diagnostic, and add them to the editor grammar, which
+`tmlanguage_sync.rs` holds to the lexer's keyword set.
+
+## BUG-156: a trailing comma is refused in parameter lists, call arguments and array literals
+
+- **Status**: open, confirmed
+- **Area**: `syntax-parsing` (`item_functions.rs`, and the call-argument and array-literal loops
+  of the expression parser)
+- **Severity**: minor. The parser rejects the program; nothing miscompiles
+
+**Minimal repro**
+
+```neuro
+func add(
+    a: i32,
+    b: i32,
+) -> i32 {
+    a + b
+}
+
+func main() -> i32 {
+    val xs = [
+        1,
+        2,
+    ]
+    add(
+        xs[0],
+        xs[1],
+    )
+}
+```
+
+Expected: exit code 3. Observed: `unexpected token RightParen, expected parameter name` at the
+`)` that closes the parameter list. With that comma removed the array literal fails with
+`unexpected token RightBracket, expected expression`, and after that the call with
+`unexpected token RightParen, expected expression`. A generic parameter list and a closure's
+parameter list refuse the comma too. Struct fields, enum variants, struct-literal fields, tuple
+elements and `match` arms accept it, so one multi-line layout parses in some lists and not in
+others. Single-line lists are uneven in the same way: `C { a: 1, b: 2, }` parses and `[1, 2,]`
+does not.
+
+**Workaround**: leave the last comma out.
+
+**Fix sketch**: accept an optional comma before the closing delimiter in the list loops for
+parameters, generic parameters, closure parameters, call arguments and array literals, as the
+struct-literal and tuple loops already do.
+
 ## BUG-155: a panic in a standard-library body or an imported module reports a position in the program's file
 
 - **Status**: open, confirmed
