@@ -10,6 +10,14 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.39.4] - 2026-11-12
+
+### Documentation
+
+- The architecture rules now say what the code does. A slice's `lib.rs` may hold its entry
+  function's own body, and a slice has one public entry per driver use, each named in its
+  `CONTEXT.md`. Filed BUG-158 for the slices that still break them and for the missing check.
+
 ## [5.39.3] - 2026-11-12
 
 ### Documentation

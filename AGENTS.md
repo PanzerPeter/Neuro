@@ -113,7 +113,7 @@ never hand-format around it.
 - **No `unwrap()` / `expect()` in production code paths.** Return
   `Result<T, E>` with an actionable message. Tests may use them.
 - **`pub(crate)` is the default visibility.** `pub` is reserved for a slice's
-  single entry point. Do not widen a surface with permissive `pub use`.
+  entry points. Do not widen a surface with permissive `pub use`.
 - **Explicit integer widths** on public-facing APIs (`u32`, `i64`), not
   `usize` for domain values.
 - **Borrow rather than clone.** A `.clone()` in a hot compiler path needs a

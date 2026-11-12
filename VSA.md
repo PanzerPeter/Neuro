@@ -60,13 +60,13 @@ Silence, absence of objection, or topic continuation is not approval.
 | `AC-005` | Name a crate or module `utils`, `helpers`, `common`, `misc`, `manager`, `processor`, or `base`. |
 | `AC-006` | Generate backward-compatible constructs: versioned traits, deprecation attributes, wrapper shims, migration TODOs. → CTX-001 |
 | `AC-007` | Write comments describing WHAT the code does. Comments explain WHY. → CM-001 |
-| `AC-008` | Put logic in `lib.rs`. A Slice's `lib.rs` declares its public surface and nothing else. Internal `mod.rs` files are required by Rust and are exempt. |
+| `AC-008` | Put logic in `lib.rs` beyond the entry function's own body. A Slice's `lib.rs` declares its public surface and holds that body; everything else lives in a module. Internal `mod.rs` files are required by Rust and are exempt. |
 | `AC-009` | Put compilation logic in a Shared Kernel crate. Shared Kernel crates define types and pure operations on them. |
 
 ### ALWAYS
 | ID | Rule |
 |----|------|
-| `AC-010` | A Slice exposes exactly one public entry function. Its input and output types are named and owned by the Shared Kernel or by the Slice itself, never borrowed from a sibling Slice. |
+| `AC-010` | A Slice exposes one public entry function per driver use, each named in its CONTEXT.md. An entry only the Slice's own tests call is `pub(crate)`. Its input and output types are named and owned by the Shared Kernel or by the Slice itself, never borrowed from a sibling Slice. |
 | `AC-011` | Return `Result<T, E>` from the entry point. Errors are values. Panics are reserved for compiler bugs that cannot be expressed as a diagnostic. |
 | `AC-012` | **[BLOCKER]** Update the affected Slice's CONTEXT.md in the same commit as any change to its entry point, public surface, or Shared Kernel dependency. → Section 12 |
 | `AC-013` | Guard clauses and early returns at the top of every function. Nested conditional depth beyond 2 must be refactored before delivery. → CQ-001 |
@@ -133,7 +133,7 @@ the moment the second case appears, not before.
 
 | Component | Required | Responsibility |
 |-----------|----------|----------------|
-| `lib.rs` | yes | Public surface: the entry function, its error type, `pub use` of nothing else. No logic. → AC-008 |
+| `lib.rs` | yes | Public surface: the entry function and its body, its error type, `pub use` of nothing else. No other logic. → AC-008 |
 | Entry function | yes | One per Slice. Named for the transformation (`tokenize`, `parse`, `check_program`, `lower_program`). |
 | Error type | yes | One `thiserror` enum, owned by the Slice, whose variants carry a `Span`. → Section 10 |
 | Internal modules | yes | `pub(crate)` by default. One module per sub-concern, not per file-size limit. |
@@ -218,7 +218,7 @@ Action: identify the sub-concerns and propose a module split. Report the proposa
 split a file as a side effect of unrelated work.
 
 **`RT-002` [HIGH] [Hard Gate]** A Slice's CONTEXT.md Purpose needs "and", or the Slice
-grows a second public entry function.
+grows an entry function for a second capability.
 Action: halt. Propose two named Slices with CONTEXT.md outlines for both.
 
 **`RT-003` [HIGH]** A Shared Kernel crate gains a function containing a compilation rule

@@ -5,6 +5,27 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-158: four slices put logic in `lib.rs` and three expose test-only entry points
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering`, `llvm-backend`, `module-resolution`, `argument-binding` (`lib.rs`);
+  `mlir-backend` and `syntax-parsing` (public entries); `neurc` (`architecture_tests.rs`)
+- **Severity**: minor. Nothing misbehaves, but a rule in `VSA.md` is unchecked and broken
+
+`VSA.md` lets a slice's `lib.rs` hold the entry function's own body and nothing else. `lib.rs` is
+954 lines in `hir-lowering` (the `Lowerer` and name mangling), 707 in `llvm-backend` (`build_module`
+and the option types), 232 in `module-resolution` and 111 in `argument-binding`. `lexical-analysis`
+conforms. It also makes an entry that only a slice's own tests call `pub(crate)`.
+`mlir-backend::lower_program` and `translate_to_llvm_ir`, and `syntax-parsing::parse_expr`, are
+`pub` and called from tests. The architecture test checks neither rule.
+
+**Workaround**: none needed.
+
+**Fix sketch**: move each `lib.rs` body into a module per slice, make the three test entries
+`pub(crate)` and reach them from unit tests, and add a check for both rules to
+`architecture_tests.rs`. The driver-facing pairs (`compile` and `compile_to_ir`, `lower_for_link`
+and `lower_for_gpu`) stay public and are already named in their slices' CONTEXT.md.
+
 ## BUG-157: names planned as keywords are still accepted as identifiers
 
 - **Status**: open, confirmed
