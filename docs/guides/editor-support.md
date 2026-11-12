@@ -4,20 +4,11 @@ Syntax highlighting for `.nr` files ships in the repository under [`neuro-langua
 
 ## VS Code
 
-The extension highlights `.nr` files and sets comment, bracket and auto-closing behavior from `language-configuration.json`. Package it and install it:
+The extension highlights `.nr` files and sets comment, bracket and auto-closing behavior from `language-configuration.json`. It is listed in the Extensions view as **Neuro Language Support** (publisher `PanzerPeter`). No build or packaging step is needed: open the Extensions view, search for `Neuro Language Support`, and make sure it is installed and enabled.
 
-```bash
-cd neuro-language-support
-npm install -g @vscode/vsce      # once
-vsce package                     # -> neuro-language-support-<version>.vsix
-code --install-extension neuro-language-support-*.vsix --force
-```
-
-Run `Developer: Reload Window` afterwards. A grammar change does not reach editors that are already open.
+Run `Developer: Reload Window` after a grammar change. Editors that are already open do not pick up a new grammar on their own.
 
 ## Working on the grammar
-
-Symlink the folder into `~/.vscode/extensions/` instead of repackaging on every edit. A window reload then picks up each change.
 
 The grammar is `neuro-language-support/syntaxes/neuro.tmLanguage.json`, and it has no structural link to the lexer. `compiler/lexical-analysis/tests/tmlanguage_sync.rs` is that link. It checks three things:
 

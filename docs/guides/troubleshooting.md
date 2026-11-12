@@ -351,7 +351,7 @@ target/release/neurc compile program.nr
 
 **Symptoms**: `.nr` files show no syntax highlighting.
 
-**Solution**: install the extension from `neuro-language-support/` as described in [Editor Support](editor-support.md#vs-code), then run `Developer: Reload Window`. An editor that was already open does not pick up a new grammar on its own.
+**Solution**: open the Extensions view, check that **Neuro Language Support** is installed and enabled, then run `Developer: Reload Window`. See [Editor Support](editor-support.md#vs-code). An editor that was already open does not pick up a new grammar on its own.
 
 ### Git Shows Every File as Modified (Windows)
 

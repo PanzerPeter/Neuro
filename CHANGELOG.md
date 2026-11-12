@@ -10,6 +10,13 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.39.5] - 2026-11-12
+
+### Documentation
+
+- The editor guide and troubleshooting entry no longer tell readers to package and install the
+  VS Code extension by hand. It is listed in the Extensions view as Neuro Language Support.
+
 ## [5.39.4] - 2026-11-12
 
 ### Documentation
