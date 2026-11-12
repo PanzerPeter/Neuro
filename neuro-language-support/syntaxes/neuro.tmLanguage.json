@@ -35,6 +35,9 @@
       "include": "#type_declarations"
     },
     {
+      "include": "#screaming_variants"
+    },
+    {
       "include": "#keywords"
     },
     {
@@ -109,7 +112,7 @@
       ]
     },
     "unescaped_brace": {
-      "comment": "Outside a hole, a bare `}` is a lex error (`LexError::UnescapedClosingBrace`), not literal text \u2014 it is what catches a `{` that went missing. `\\}` is the way to write the brace itself, and is claimed by `#string_escapes` first. Listed after `#interpolation` so a hole's own closing brace ends the hole instead of landing here.",
+      "comment": "Outside a hole, a bare `}` is a lex error (`LexError::UnescapedClosingBrace`), not literal text. It is what catches a `{` that went missing. `\\}` is the way to write the brace itself, and is claimed by `#string_escapes` first. Listed after `#interpolation` so a hole's own closing brace ends the hole instead of landing here.",
       "name": "invalid.illegal.unescaped-closing-brace.neuro",
       "match": "\\}"
     },
@@ -156,6 +159,9 @@
         },
         {
           "include": "#chars"
+        },
+        {
+          "include": "#screaming_variants"
         },
         {
           "include": "#keywords"
@@ -489,6 +495,11 @@
     "constants": {
       "patterns": [
         {
+          "comment": "A lone `_`: the wildcard in a match arm or a destructuring pattern. Not the `_ name: T` parameter form, whose `_` is a label and belongs to `#parameter_labels`.",
+          "name": "constant.language.wildcard.neuro",
+          "match": "(?<![\\p{L}\\p{N}_])_(?![\\p{L}\\p{N}_])(?!\\s+[_\\p{L}][\\p{L}\\p{N}_]*\\s*:(?!:))"
+        },
+        {
           "name": "constant.language.boolean.neuro",
           "match": "\\b(true|false)\\b"
         },
@@ -502,6 +513,28 @@
     "builtin_functions": {
       "name": "support.function.builtin.neuro",
       "match": "\\b(print|println|panic|assert|unreachable)\\b(?=\\s*\\()"
+    },
+    "screaming_variants": {
+      "comment": "`Device::GPU` and `Device::GPU(0)`: an ALL-CAPS segment after a capitalised type is an enum variant, so it takes the type colour the qualifier already has. Module paths are lowercase (`geometry::ORIGIN_SHIFT`), so their constants keep `#screaming_constants`. Listed ahead of `#types`, which would otherwise claim `Device` at the same offset and leave the variant to a later rule.",
+      "match": "\\b(?!Self\\b)(\\p{Lu}[\\p{L}\\p{N}_]*)(::)(\\p{Lu}[\\p{Lu}\\p{N}_]+)\\b",
+      "captures": {
+        "1": {
+          "patterns": [
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#pascal_types"
+            }
+          ]
+        },
+        "2": {
+          "name": "keyword.operator.path.neuro"
+        },
+        "3": {
+          "name": "entity.name.type.neuro"
+        }
+      }
     },
     "screaming_constants": {
       "comment": "`const MAX_RETRIES` and friends. Two characters minimum, so a single-letter generic parameter (`T`, `N`) falls through to `#pascal_types` instead.",
@@ -519,8 +552,8 @@
       "match": "\\b\\p{Lu}[\\p{L}\\p{N}_]*\\b"
     },
     "parameter_labels": {
-      "comment": "The `external internal: T` parameter form (named arguments). The plain `#parameters` rule keys on a name sitting directly before the `:`, so it sees neither half of this one \u2014 the label is not before the colon and the internal name is not after a `(` or `,`. Listed ahead of `#parameters` because TextMate breaks a tie by position in the top-level array, never by match length.",
-      "match": "(?<=[(,])\\s*([_\\p{L}][\\p{L}\\p{N}_]*)\\s+([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=:(?!:))",
+      "comment": "The `external internal: T` parameter form (named arguments). The plain `#parameters` rule keys on a name sitting directly before the `:`, so it sees neither half of this one: the label is not before the colon, and the internal name is not after a `(`, `,`, `{` or `|`. Listed ahead of `#parameters` because TextMate breaks a tie by position in the top-level array, never by match length.",
+      "match": "(?<=[(,{|])\\s*([_\\p{L}][\\p{L}\\p{N}_]*)\\s+([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=:(?!:))",
       "captures": {
         "1": {
           "name": "entity.name.label.neuro"
@@ -531,8 +564,8 @@
       }
     },
     "parameters": {
-      "comment": "A name introduced by `(` or `,` and annotated with `:`, so function parameters and by extension the trailing fields of a struct definition or literal, which carry the same variable-ish colour.",
-      "match": "(?<=[(,])\\s*([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=:(?!:))",
+      "comment": "A name annotated with `:` and introduced by `(`, `,`, `{` or `|`, or starting its line. That covers function parameters, closure parameters (`|v: f32|`) and the fields of a struct definition or literal, which carry the same variable-ish colour.",
+      "match": "(?:(?<=[(,{|])|^)\\s*([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=:(?!:))",
       "captures": {
         "1": {
           "name": "variable.parameter.neuro"
@@ -569,7 +602,7 @@
       ]
     },
     "operators": {
-      "comment": "Every entry corresponds to a token the lexer produces. Longer forms precede the prefixes they contain, because ties at one offset go to the first rule listed. `*` is arithmetic even in dereference position and `&` is bitwise outside `&mut`/`&self`: nothing in a regex can tell those apart from multiplication and bitwise-and.",
+      "comment": "Every entry corresponds to a token the lexer produces. Longer forms precede the prefixes they contain, because ties at one offset go to the first rule listed. A prefix `&` or `*` (after an opening bracket, a comma, `:`, `=`, `->`, `=>`, `in` or `return`) is a reference or a dereference, because a binary operator needs a left operand. Anywhere else they are bitwise and arithmetic.",
       "patterns": [
         {
           "name": "keyword.operator.range.neuro",
@@ -619,12 +652,22 @@
           "match": "&&|\\|\\|"
         },
         {
+          "comment": "`&mut` and `&self` are references wherever they appear.",
           "match": "(&)(?=\\s*\\b(?:mut|self)\\b)",
           "captures": {
             "1": {
-              "name": "keyword.operator.reference.neuro"
+              "name": "storage.modifier.reference.neuro"
             }
           }
+        },
+        {
+          "comment": "A prefix `&` or `*` cannot be binary, because a binary operator needs a left operand. `&` is a reference and `*` a dereference. `&&`, `&=` and `*=` are excluded by the lookahead.",
+          "name": "storage.modifier.reference.neuro",
+          "match": "(?<=[(\\[{,:=]|[(\\[{,:=] |-> |=> |\\bin |\\breturn |^)&(?![&=])"
+        },
+        {
+          "name": "keyword.operator.dereference.neuro",
+          "match": "(?<=[(\\[{,:=]|[(\\[{,:=] |-> |=> |\\bin |\\breturn |^)\\*(?![*=])"
         },
         {
           "name": "keyword.operator.assignment.neuro",
@@ -663,12 +706,21 @@
     },
     "function_calls": {
       "comment": "Listed last, so a keyword, a builtin, or a capitalised type name has already claimed the identifier before it gets here.",
-      "match": "\\b([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=\\()",
-      "captures": {
-        "1": {
-          "name": "entity.name.function.call.neuro"
+      "patterns": [
+        {
+          "match": "\\b([_\\p{L}][\\p{L}\\p{N}_]*)\\s*(?=\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.call.neuro"
+            }
+          }
+        },
+        {
+          "comment": "A method turbofish `s.parse::<i64>()`. `#namespaces` skips a segment after `.`, so the method name lands here.",
+          "name": "entity.name.function.call.neuro",
+          "match": "(?<=\\.)[_\\p{L}][\\p{L}\\p{N}_]*(?=\\s*::\\s*<)"
         }
-      }
+      ]
     }
   }
 }

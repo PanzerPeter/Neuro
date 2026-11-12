@@ -10,6 +10,22 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.39.2] - 2026-11-12
+
+### Fixed
+
+- The editor grammar scopes struct fields, multi-line parameter lists and closure parameters
+  (`|v: f32|`) like other parameters. Fields at the start of a line or right after `{` were left
+  uncoloured while the ones after a comma were not.
+- A prefix `&` or `*` (`&items`, `*at`) is scoped as a reference or dereference instead of a
+  bitwise or arithmetic operator.
+- An enum variant after a capitalised type (`Device::GPU(0)`, `Device::CPU`) takes the type colour
+  instead of the constant colour. Module constants (`geometry::ORIGIN_SHIFT`) are unchanged.
+- A lone `_` is scoped as a wildcard, and a method turbofish (`s.parse::<i64>()`) colours the
+  method name like any other call.
+
+The VS Code extension is 1.3.1.
+
 ## [5.39.1] - 2026-11-11
 
 ### Fixed
