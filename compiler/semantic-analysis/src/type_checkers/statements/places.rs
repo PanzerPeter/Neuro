@@ -150,6 +150,10 @@ impl TypeChecker {
                 // Peeled to one `&` like a field read, so `c.n` on a `&mut &mut P` writes
                 // `P`'s field, and is writable only if every layer is `&mut`.
                 let obj_ty = self.check_expr(object, None)?.auto_deref();
+                // The object already failed to type-check and said so.
+                if matches!(obj_ty, Type::Unknown) {
+                    return None;
+                }
                 let Type::Struct(struct_name) = obj_ty.referent().clone() else {
                     self.record_error(TypeError::UnknownField {
                         struct_name: obj_ty.to_string(),
@@ -235,6 +239,9 @@ impl TypeChecker {
                 span: index_span,
             } => {
                 let obj_ty = self.check_index_base(object)?;
+                if matches!(obj_ty, Type::Unknown) {
+                    return None;
+                }
                 if !self.place_is_writable(&obj_ty, place) {
                     self.report_immutable_place(place);
                     return None;
@@ -273,6 +280,9 @@ impl TypeChecker {
                 span: index_span,
             } => {
                 let obj_ty = self.check_index_base(object)?;
+                if matches!(obj_ty, Type::Unknown) {
+                    return None;
+                }
                 if !self.place_is_writable(&obj_ty, place) {
                     self.report_immutable_place(place);
                     return None;

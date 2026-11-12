@@ -148,6 +148,20 @@ pub enum TokenKind {
     #[token("Self")]
     SelfUpper,
 
+    // Reserved words. `parallel`, `spawn`, `defer` and `extern` introduce constructs the
+    // parser does not have yet, and the rest are held back by the language design. One
+    // keyword token keeps all of them out of identifiers until then.
+    #[token("async", reserved_word)]
+    #[token("await", reserved_word)]
+    #[token("parallel", reserved_word)]
+    #[token("spawn", reserved_word)]
+    #[token("defer", reserved_word)]
+    #[token("extern", reserved_word)]
+    #[token("static", reserved_word)]
+    #[token("macro", reserved_word)]
+    #[token("yield", reserved_word)]
+    Reserved(String),
+
     // Identifiers (Unicode-aware)
     #[regex(r"[_\p{XID_Start}]\p{XID_Continue}*", |lex| lex.slice().to_string())]
     Identifier(String),
@@ -409,6 +423,11 @@ const TRIPLE_QUOTE: &str = "\"\"\"";
 /// Opening and closing delimiter of a block comment.
 const BLOCK_COMMENT_OPEN: &[u8] = b"/*";
 const BLOCK_COMMENT_CLOSE: &[u8] = b"*/";
+
+/// The spelling of a reserved word, kept so a diagnostic can name it.
+fn reserved_word(lex: &mut logos::Lexer<TokenKind>) -> String {
+    lex.slice().to_string()
+}
 
 /// Consume a nesting block comment, bumping the lexer past its closing delimiter.
 ///

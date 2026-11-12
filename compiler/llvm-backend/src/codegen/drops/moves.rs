@@ -291,7 +291,7 @@ impl<'ctx> CodegenContext<'ctx> {
 }
 
 /// Whether `expr` names a collection slot or a field, tuple or array element inside one.
-fn reads_through_collection_slot(expr: &HirExpr) -> bool {
+pub(crate) fn reads_through_collection_slot(expr: &HirExpr) -> bool {
     match &expr.kind {
         HirExprKind::Index { object, .. } => {
             matches!(

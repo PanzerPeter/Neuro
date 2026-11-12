@@ -187,7 +187,9 @@ impl Parser {
                 break;
             }
             self.advance(); // consume ','
-            self.skip_newlines();
+            if self.trailing_comma_before(&TokenKind::RightParen) {
+                break;
+            }
         }
         Ok(params)
     }
@@ -233,7 +235,9 @@ impl Parser {
                     break;
                 }
                 self.advance(); // ','
-                self.skip_newlines();
+                if self.trailing_comma_before(&TokenKind::Greater) {
+                    break;
+                }
                 continue;
             }
 
@@ -304,7 +308,9 @@ impl Parser {
                 break;
             }
             self.advance(); // ','
-            self.skip_newlines();
+            if self.trailing_comma_before(&TokenKind::Greater) {
+                break;
+            }
         }
 
         // An empty `<>` is impossible here: the first `consume` above already requires

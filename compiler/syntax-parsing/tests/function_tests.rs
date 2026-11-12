@@ -511,3 +511,52 @@ fn test_attributes_attach_to_a_const() {
     assert_eq!(def.attributes.len(), 1);
     assert_eq!(def.attributes[0].name.name, "allow");
 }
+
+// A trailing comma closes a list whose closing delimiter sits on a later line. On one
+// line it stays an error, which `error_tests.rs` pins for parameters and call arguments.
+
+#[test]
+fn regression_trailing_comma_closes_a_multi_line_parameter_list() {
+    let items = parse("func add(\n    a: i32,\n    b: i32,\n) -> i32 { a + b }").unwrap();
+    let Item::Function(func) = &items[0] else {
+        panic!("expected function item")
+    };
+    assert_eq!(func.params.len(), 2);
+}
+
+#[test]
+fn regression_trailing_comma_closes_a_multi_line_generic_parameter_list() {
+    let items = parse("func pick<\n    'a,\n    T,\n    U,\n>(a: T, b: U) -> T { a }").unwrap();
+    let Item::Function(func) = &items[0] else {
+        panic!("expected function item")
+    };
+    assert_eq!(func.generics.len(), 2);
+    assert!(parse("func pick<\n    'a,\n>(a: &'a i32) -> i32 { 0 }").is_ok());
+}
+
+#[test]
+fn regression_trailing_comma_closes_multi_line_expression_lists() {
+    for body in [
+        "f(\n        1,\n        2,\n    )",
+        "f(\n        first: 1,\n        second: 2,\n    )",
+        "[\n        1,\n        2,\n    ]",
+        "[\n        [1, 2],\n        [3, 4],\n    ]",
+        "|\n        a: i32,\n        b: i32,\n    | a + b",
+    ] {
+        let source = format!("func main() {{\n    val x = {body}\n}}");
+        assert!(
+            parse(&source).is_ok(),
+            "{source}: {:?}",
+            parse(&source).err()
+        );
+    }
+}
+
+#[test]
+fn a_trailing_comma_on_one_line_is_still_refused() {
+    for body in ["[1, 2,]", "|a, b,| a + b"] {
+        let source = format!("func main() {{\n    val x = {body}\n}}");
+        assert!(parse(&source).is_err(), "{source}");
+    }
+    assert!(parse("func pick<T, U,>(a: T, b: U) -> T { a }").is_err());
+}

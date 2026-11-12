@@ -273,3 +273,29 @@ fn derived_debug_prints_the_declared_name() {
     );
     assert_eq!(printed, "Point { x: 3 }\n");
 }
+
+/// A block imports the variants of an enum its enclosing module imported.
+#[test]
+fn regression_a_block_imports_variants_of_an_enum_its_enclosing_module_imported() {
+    let files = [
+        (
+            "geometry.nr",
+            "export enum Shape { Circle(i32), Square(i32) }\n",
+        ),
+        (
+            "main.nr",
+            "import geometry::{Shape}\n\
+             module inner {\n\
+                 import Shape::{Circle}\n\
+                 export func radius() -> i32 {\n\
+                     match Circle(4) {\n\
+                         Circle(r) => r,\n\
+                         Shape::Square(s) => s\n\
+                     }\n\
+                 }\n\
+             }\n\
+             func main() -> i32 { inner::radius() + 1 }\n",
+        ),
+    ];
+    assert_eq!(run_program(&files, "main.nr"), Ok(5));
+}

@@ -67,7 +67,7 @@ Field visibility is the exception. Checking `c.timeout` needs the receiver's typ
 
 Each module's imports become one import scope: module aliases, items and variant bindings. A module may not bind one name twice, and an import may not bind a name the module declares itself. `as` renames one of them. A local of the same name shadows any import.
 
-`import Shape::{Circle}` imports a list of variants and `import Shape::Circle` a single one. Either is read as a variant import only when no module is named `Shape` and an enum `Shape` is in scope: declared by the module or one around it, imported by an earlier line, or the prelude's. Otherwise it is `UnknownImportHead`.
+`import Shape::{Circle}` imports a list of variants and `import Shape::Circle` a single one. Either is read as a variant import only when no module is named `Shape` and an enum `Shape` is in scope: declared by the module or one around it, imported by an earlier line or by a module around it, or the prelude's. Otherwise it is `UnknownImportHead`.
 
 ### Re-exports
 

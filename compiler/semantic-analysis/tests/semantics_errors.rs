@@ -348,3 +348,22 @@ fn regression_generic_template_prints_with_its_own_parameters() {
         "{message}"
     );
 }
+
+#[test]
+fn regression_a_store_below_a_failed_place_reports_one_error() {
+    // The object of the place already failed to type-check, so it is `Type::Unknown`.
+    // A field or an index below it used to report against `<error>` as well.
+    for store in ["m[1].name = \"x\"", "m[1][0] = 2", "m[1].0 = 3"] {
+        let source = format!(
+            "struct Row {{ name: string }}\n\
+             func test() {{\n    mut m: HashMap<i32, Row> = HashMap::new()\n    {store}\n}}"
+        );
+        let items = syntax_parsing::parse(&source).unwrap();
+        let errors = type_check(&items).unwrap_err();
+        assert_eq!(errors.len(), 1, "{store}: {errors:?}");
+        assert!(
+            matches!(errors[0], TypeError::NotIndexable { .. }),
+            "{store}: {errors:?}"
+        );
+    }
+}

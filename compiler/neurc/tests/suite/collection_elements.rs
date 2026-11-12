@@ -5,7 +5,7 @@
 // Release is asserted the way `collection_string_ownership.rs` asserts it: the shapes
 // that would leak or double-free run in a loop, a user `Drop` prints when it runs, and
 // the exact drop order is the stdout.
-use crate::compile_harness::{rejected, run, stdout_of};
+use crate::compile_harness::{CompileTest, rejected, run, stdout_of};
 
 #[test]
 fn a_vec_of_structs_is_written_read_and_taken_through_its_slots() {
@@ -313,4 +313,120 @@ func main() -> i32 {
 }
 "#;
     assert_eq!(run("bug_033.nr", source), 19 + 2 + 10);
+}
+
+/// The fixture the slot-position store tests share: a row with a `string` at every kind
+/// of position a store can name.
+const SLOT_ROW: &str = r#"
+struct Inner { name: string }
+struct Row { cells: Vec<i32>, tag: (i32, string), name: string, pair: [string; 2], inner: Inner }
+struct Table { rows: Vec<Row> }
+
+func row(i: i32) -> Row {
+    Row {
+        cells: Vec::new(),
+        tag: (i, "t" + "{i}"),
+        name: "n" + "{i}",
+        pair: ["a" + "{i}", "b"],
+        inner: Inner { name: "i" + "{i}" }
+    }
+}
+"#;
+
+/// A literal stored into a position inside a slot is copied to the heap like one stored
+/// into the slot itself, so the slot's release never frees read-only data. Each of these
+/// stores aborted with `free(): invalid pointer` when the `Vec` was destroyed.
+#[test]
+fn regression_a_literal_stored_inside_a_slot_is_owned_by_the_slot() {
+    let source = format!(
+        "{SLOT_ROW}{}",
+        r#"
+func main() -> i32 {
+    mut total = 0
+    for i in 0..10 {
+        mut rows: Vec<Row> = Vec::new()
+        rows.push(row(i))
+        rows[0].name = "literal"
+        rows[0].tag.1 = "tagged"
+        rows[0].tag = (2, "whole")
+        rows[0].pair[1] = "fixed"
+        rows[0].pair[i % 2] = "runtime"
+        rows[0].inner.name = "nested"
+        rows[0].inner = Inner { name: "inner" }
+        val bound = "bound"
+        rows[0].name = bound
+        mut grid: Vec<Vec<Row>> = Vec::new()
+        grid.push(Vec::new())
+        grid[0].push(row(i))
+        grid[0][0].name = "deep"
+        mut table = Table { rows: Vec::new() }
+        table.rows.push(row(i))
+        table.rows[0].inner.name = "held"
+        mut pairs: Vec<(i32, string)> = Vec::new()
+        pairs.push((1, "p" + "{i}"))
+        pairs[0].1 = "second"
+        total += rows[0].name.len() as i32 + rows[0].tag.1.len() as i32
+            + rows[0].inner.name.len() as i32 + grid[0][0].name.len() as i32
+            + table.rows[0].inner.name.len() as i32 + pairs[0].1.len() as i32
+    }
+    total
+}
+"#
+    );
+    // bound 5 + whole 5 + inner 5 + deep 4 + held 4 + second 6, ten times.
+    let exit = CompileTest::new().run_leak_checked("slot_position_literal.nr", &source);
+    assert_eq!(exit, 290 & 0xff);
+}
+
+/// A store into a position inside a slot releases what it displaces, a `string` and a
+/// typed owner alike, and a user `Drop` runs once for the value that left.
+#[test]
+fn regression_a_store_inside_a_slot_releases_what_it_displaces() {
+    let source = format!(
+        "{SLOT_ROW}{}",
+        r#"
+struct Noisy { id: i32 }
+impl Drop for Noisy {
+    func drop(&mut self) { println("drop {self.id}") }
+}
+struct Cage { pet: Noisy, label: string }
+
+func main() -> i32 {
+    mut total = 0
+    for i in 0..10 {
+        mut rows: Vec<Row> = Vec::new()
+        rows.push(row(i))
+        rows[0].name = "own" + "{i}"
+        rows[0].name += "!"
+        rows[0].tag.1 = "tag" + "{i}"
+        rows[0].pair[0] = "left" + "{i}"
+        rows[0].inner.name = "in" + "{i}"
+        mut cells: Vec<i32> = Vec::new()
+        cells.push(i)
+        rows[0].cells = cells
+        mut more: Vec<i32> = Vec::new()
+        more.push(i)
+        more.push(i)
+        rows[0].cells = more
+        total += rows[0].name.len() as i32 + rows[0].cells.len() as i32
+    }
+    mut cages: Vec<Cage> = Vec::new()
+    cages.push(Cage { pet: Noisy { id: 1 }, label: "c" + "1" })
+    cages[0].pet = Noisy { id: 2 }
+    cages[0].label = "c" + "2"
+    println("stored")
+    total
+}
+"#
+    );
+    let test = CompileTest::new();
+    // "own0!" is 5 bytes and the second `cells` holds 2, ten times.
+    assert_eq!(
+        test.run_leak_checked("slot_position_displaced.nr", &source),
+        70
+    );
+    assert_eq!(
+        stdout_of("slot_position_drop_order.nr", &source),
+        "drop 1\nstored\ndrop 2\n"
+    );
 }

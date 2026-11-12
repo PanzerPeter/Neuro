@@ -177,6 +177,12 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `(2 + 3)` parsed as `f()(2 + 3)`, and a following `[1, 2]` as an index, both of which
   type-checked with a callable on the left. A leading `.` still continues, since it cannot start a
   statement.
+- **A trailing comma needs a line break before the closing delimiter.** Parameter lists, generic
+  parameter lists, closure parameters, call arguments and array literals ask
+  `trailing_comma_before(close)` after each `,`: it accepts the comma as the list's last token
+  only when a newline separated it from the delimiter, so `f(a, b,)` on one line is still an
+  error. The struct, enum, tuple, pattern and import loops do not use it and accept the comma
+  on one line as well (BUG-159).
 - **`@` (matmul) sits at `Precedence::Product`** with `*` `/` `%`: Appendix B row 4, as in PEP
   465, so a mix groups left to right (`a * b @ c` is `(a * b) @ c`), and looser than `as` so
   `a @ b as f32` casts the right operand. It is an ordinary left-associative infix in `is_binary_op` /

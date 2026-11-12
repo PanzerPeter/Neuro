@@ -578,6 +578,21 @@ fn tokenize_move_keyword() {
     assert!(matches!(result[1].kind, TokenKind::Pipe));
 }
 
+/// BUG-157: a word the language holds back is a keyword token, so it cannot be bound as
+/// an identifier and then break when its construct lands. A longer name is untouched.
+#[test]
+fn regression_reserved_words_are_not_identifiers() {
+    for word in [
+        "async", "await", "parallel", "spawn", "defer", "extern", "static", "macro", "yield",
+    ] {
+        let result = tokenize(word).unwrap();
+        assert_eq!(result[0].kind, TokenKind::Reserved(word.to_string()));
+    }
+    let result = tokenize("spawned async_io").unwrap();
+    assert!(matches!(result[0].kind, TokenKind::Identifier(_)));
+    assert!(matches!(result[1].kind, TokenKind::Identifier(_)));
+}
+
 #[test]
 fn tokenize_delimiters() {
     let result = tokenize("( ) { } [ ] , : ;").unwrap();

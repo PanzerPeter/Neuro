@@ -10,6 +10,41 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.39.6] - 2026-11-12
+
+### Changed
+
+- `async`, `await`, `parallel`, `spawn`, `defer`, `extern`, `static`, `macro` and `yield` are
+  reserved words. A binding, field, function or type with one of those names is now a parse
+  error, so no program can depend on a name its keyword will take (BUG-157). The editor grammar
+  scopes them as keywords.
+
+### Fixed
+
+- A store into a field, tuple element or array element of a `Vec` element (`rows[i].name = "new"`,
+  `rows[i].tag.1 = s`, `rows[i].pair[k] = s`) keeps the element's ownership intact. A string
+  literal stored there was freed when the `Vec` was destroyed, which aborted the program with
+  `free(): invalid pointer`, and whatever the store displaced was leaked, a `Vec` or a `Drop` value
+  included.
+- A store into a position below a run-time array index (`arr[k].name = "new"`,
+  `arr[k].inner.name = s`, `grid[i][j].cells = v`) releases what it displaces and hands the
+  position the new value's ownership. A literal stored there was freed at scope exit with the
+  same abort, and the displaced value was leaked.
+- A comma may follow the last element of a parameter list, a generic parameter list, a closure's
+  parameters, an argument list or an array literal when the closing delimiter is on a later line
+  (BUG-156). On one line it is still an error.
+- `import Shape::{Circle}` inside a `module` block finds an enum the enclosing module imported.
+  Before, the block had to spell the whole path, `import geometry::Shape::{Circle}`.
+- A store below a place that already failed to type-check (`m[1].name = "x"` on a `HashMap`)
+  reports the first error only, not a second one against `<error>`.
+
+### Documentation
+
+- Filed BUG-159: a trailing comma on one line is accepted in struct, enum, tuple, pattern and
+  import lists, and refused in parameter lists, argument lists and array literals.
+
+The VS Code extension is 1.3.2.
+
 ## [5.39.5] - 2026-11-12
 
 ### Documentation

@@ -119,6 +119,9 @@ impl Parser {
                         break;
                     }
                     self.advance(); // consume ','
+                    if self.trailing_comma_before(&TokenKind::Pipe) {
+                        break;
+                    }
                 }
             }
             self.consume(TokenKind::Pipe, "'|' to close closure parameters")?;
@@ -274,7 +277,9 @@ impl Parser {
                         break;
                     }
                     p.advance(); // consume ','
-                    p.skip_newlines();
+                    if p.trailing_comma_before(&TokenKind::RightParen) {
+                        break;
+                    }
                 }
             }
             // A call that named nothing carries no label list at all, so the overwhelmingly

@@ -2,7 +2,7 @@
   "name": "neuro-language-support",
   "displayName": "Neuro Language Support",
   "description": "Syntax highlighting and editor configuration for the Neuro programming language.",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "publisher": "PanzerPeter",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {

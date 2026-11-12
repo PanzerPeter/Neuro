@@ -5,7 +5,7 @@
 //! than layout ones: the aggregate moves when it holds a move-tracked value, a sub-place
 //! gives up one element at a time, and reading the aggregate as a whole afterwards is a
 //! use of a partially moved value.
-use crate::compile_harness::CompileTest;
+use crate::compile_harness::{CompileTest, stdout_of};
 
 #[test]
 fn an_array_of_strings_round_trips_through_codegen() {
@@ -887,5 +887,110 @@ func main() -> i32 {
     assert_eq!(
         crate::compile_harness::stdout_of("bug_154.nr", source),
         "xab\nycd\nzef\n"
+    );
+}
+
+/// The fixture the run-time-index store tests share.
+const INDEXED_ROW: &str = r#"
+struct Inner { name: string }
+struct Row { cells: Vec<i32>, tag: (i32, string), name: string, pair: [string; 2], inner: Inner }
+struct Shelf { rows: [Row; 2] }
+
+func row(i: i32) -> Row {
+    Row {
+        cells: Vec::new(),
+        tag: (i, "t" + "{i}"),
+        name: "n" + "{i}",
+        pair: ["a" + "{i}", "b" + "{i}"],
+        inner: Inner { name: "i" + "{i}" }
+    }
+}
+"#;
+
+/// A store into a position below a run-time array index disarms the position a literal
+/// lands in. The owner's flag used to stay armed, so scope exit freed read-only data:
+/// `free(): invalid pointer`.
+#[test]
+fn regression_a_literal_stored_below_a_runtime_index_is_not_freed() {
+    let source = format!(
+        "{INDEXED_ROW}{}",
+        r#"
+func main() -> i32 {
+    mut total = 0
+    for i in 0..10 {
+        val k = i % 2
+        mut rows = [row(i), row(i)]
+        rows[k].name = "literal"
+        rows[k].tag.1 = "tagged"
+        rows[k].inner.name = "nested"
+        rows[k].inner = Inner { name: "inner" }
+        rows[k].pair[1] = "fixed"
+        rows[k].pair[k] = "runtime"
+        rows[1 - k].tag = (2, "whole")
+        mut shelf = Shelf { rows: [row(i), row(i)] }
+        shelf.rows[k].name = "held"
+        total += rows[k].name.len() as i32 + rows[k].inner.name.len() as i32
+            + rows[1 - k].tag.1.len() as i32 + shelf.rows[k].name.len() as i32
+    }
+    total
+}
+"#
+    );
+    // literal 7 + inner 5 + whole 5 + held 4, ten times.
+    let exit = CompileTest::new().run_leak_checked("runtime_index_literal.nr", &source);
+    assert_eq!(exit, 210);
+}
+
+/// The same stores with owned values release what they displace, a `string` and a typed
+/// owner alike, and the value that arrives is released once at scope exit.
+#[test]
+fn regression_a_store_below_a_runtime_index_releases_what_it_displaces() {
+    let source = format!(
+        "{INDEXED_ROW}{}",
+        r#"
+struct Noisy { id: i32 }
+impl Drop for Noisy {
+    func drop(&mut self) { println("drop {self.id}") }
+}
+struct Cage { pet: Noisy }
+
+func main() -> i32 {
+    mut total = 0
+    for i in 0..10 {
+        val k = i % 2
+        mut rows = [row(i), row(i)]
+        rows[k].name = "own" + "{i}"
+        rows[k].name += "!"
+        rows[k].tag.1 = "tag" + "{i}"
+        rows[k].inner.name = "in" + "{i}"
+        rows[k].inner = Inner { name: "whole" + "{i}" }
+        rows[k].pair[0] = "left" + "{i}"
+        rows[k].pair[k] = "both" + "{i}"
+        mut cells: Vec<i32> = Vec::new()
+        cells.push(i)
+        rows[k].cells = cells
+        mut more: Vec<i32> = Vec::new()
+        more.push(i)
+        more.push(i)
+        rows[k].cells = more
+        total += rows[k].name.len() as i32 + rows[k].cells.len() as i32
+    }
+    mut cages = [Cage { pet: Noisy { id: 1 } }, Cage { pet: Noisy { id: 2 } }]
+    val at = total % 2 + 1
+    cages[at].pet = Noisy { id: 3 }
+    println("stored")
+    total
+}
+"#
+    );
+    let test = CompileTest::new();
+    // "own0!" is 5 bytes and the second `cells` holds 2, ten times: 70, so `at` is 1.
+    assert_eq!(
+        test.run_leak_checked("runtime_index_displaced.nr", &source),
+        70
+    );
+    assert_eq!(
+        stdout_of("runtime_index_drop_order.nr", &source),
+        "drop 2\nstored\ndrop 1\ndrop 3\n"
     );
 }

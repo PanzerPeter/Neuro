@@ -462,6 +462,11 @@
         {
           "name": "keyword.special.neuro",
           "match": "\\b(self|Self|where|as|dyn|move|unsafe)\\b"
+        },
+        {
+          "comment": "Words the lexer reserves for constructs the language does not have yet. They cannot be identifiers.",
+          "name": "keyword.other.reserved.neuro",
+          "match": "\\b(async|await|parallel|spawn|defer|extern|static|macro|yield)\\b"
         }
       ]
     },

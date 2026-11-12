@@ -75,6 +75,8 @@ The binding powers are one table in [`precedence.rs`](../../../compiler/syntax-p
 
 ### Statement boundaries
 
+A comma may follow the last element of a parameter list, an argument list or an array literal when the closing delimiter is on a later line.
+
 A newline ends a statement unless the line that ended asks to continue. A line continues when it ends with a binary operator, a comma or an opening delimiter. Inside an unclosed `(` or `[`, every line continues. A line that begins with `(`, `[`, `*`, `-`, `&`, `|` or `@` starts a new statement after a complete line, because each of those can also begin an expression. A line that begins with `|>` or `.` continues the one above, which is how multi-line pipelines and method chains are written.
 
 Nothing may follow a complete statement on its line except the `}` that closes its block. `val x = 5 6` is an error, not a binding of `5`.

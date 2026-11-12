@@ -7,6 +7,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 use super::context::CodegenContext;
+use super::drops::reads_through_collection_slot;
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Populate the struct definition table before code generation begins. The field
@@ -270,16 +271,20 @@ impl<'ctx> CodegenContext<'ctx> {
             &format!("{}.ptr", field_name),
         )?;
 
+        let field_ty = self
+            .struct_defs
+            .get(&struct_name)
+            .and_then(|fields| fields.iter().find(|(name, _)| name == field_name))
+            .map(|(_, ty)| ty.clone());
+        if let Some(field_ty) = field_ty
+            .as_ref()
+            .filter(|_| reads_through_collection_slot(object))
+        {
+            return self.store_into_slot_position(field_ptr, field_ty, val, value);
+        }
         // A place a borrow reaches belongs to whoever lent it, so no flag of this frame
         // tracks what the store displaces or what it leaves there.
-        let borrowed = match self.reached_through_borrow(object) {
-            true => self
-                .struct_defs
-                .get(&struct_name)
-                .and_then(|fields| fields.iter().find(|(name, _)| name == field_name))
-                .map(|(_, ty)| ty.clone()),
-            false => None,
-        };
+        let borrowed = field_ty.filter(|_| self.reached_through_borrow(object));
         self.store_held_position(object, field_name, field_ptr, borrowed, val, value)
     }
 
@@ -316,6 +321,10 @@ impl<'ctx> CodegenContext<'ctx> {
             index as u32,
             "tup.ptr",
         )?;
+        if reads_through_collection_slot(object) {
+            let element_ty = Type::from_hir(element_ty);
+            return self.store_into_slot_position(element_ptr, &element_ty, val, value);
+        }
         let borrowed = self
             .reached_through_borrow(object)
             .then(|| Type::from_hir(element_ty));
@@ -343,7 +352,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // Ordered as a binding's reassignment is: the position may be read on the way to
         // replacing itself, so its prior value loses its owner only once the new one
         // has been built.
-        self.displace_held_position(object, segment, value)?;
+        self.displace_held_position(object, segment, slot, val.get_type(), value)?;
         let owners = match &borrowed {
             Some(slot_ty) => {
                 self.drop_displaced_through_borrow(slot, slot_ty)?;

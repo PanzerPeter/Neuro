@@ -2,9 +2,10 @@
 //! array element, and re-arming the flags of what replaced it.
 
 use inkwell::IntPredicate;
-use inkwell::types::ArrayType;
+use inkwell::types::{ArrayType, BasicType, BasicTypeEnum};
 use inkwell::values::PointerValue;
 use neuro_hir::{HirExpr, HirExprKind, HirType};
+use shared_types::Literal;
 
 use crate::codegen::context::{CodegenContext, DropEntry, DropTarget};
 use crate::errors::{CodegenError, CodegenResult};
@@ -86,6 +87,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Release what the position `object.segment` loses to a store, then arm it for
     /// `value`. A segment is a field name or a literal array position, at any depth.
+    /// `position_ptr` addresses the position and `position_llvm` is its type, which
+    /// find it when an index above it is known only at run time.
     ///
     /// Only a position inside a binding this frame owns has flags to consult; a place
     /// reached through a borrow belongs to whoever lent it and is left alone here.
@@ -93,12 +96,27 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         object: &HirExpr,
         segment: &str,
+        position_ptr: PointerValue<'ctx>,
+        position_llvm: BasicTypeEnum<'ctx>,
         value: &HirExpr,
     ) -> CodegenResult<()> {
-        let Some((root, Some(path))) = Self::extend_place(object, segment) else {
+        let Some((root, path)) = Self::extend_place(object, segment) else {
             return Ok(());
         };
         let root = root.to_string();
+        let Some(path) = path else {
+            let Some((_, mut shape)) = place_shape(object) else {
+                return Ok(());
+            };
+            shape.push(Some(segment.to_string()));
+            return self.displace_runtime_position(
+                &root,
+                &shape,
+                position_ptr,
+                position_llvm,
+                value,
+            );
+        };
         let moved_in = self.moved_in_string_flags(value)?;
         self.drop_displaced_held_value(&root, &path)?;
         // A `string` position the store hands a fresh buffer takes ownership of it here:
@@ -140,10 +158,23 @@ impl<'ctx> CodegenContext<'ctx> {
         element_ptr: PointerValue<'ctx>,
         value: &HirExpr,
     ) -> CodegenResult<()> {
-        let Some((root, Some(prefix))) = Self::moved_place(object) else {
+        let Some((root, prefix)) = Self::moved_place(object) else {
             return Ok(());
         };
         let root = root.to_string();
+        let Some(prefix) = prefix else {
+            let Some((_, mut shape)) = place_shape(object) else {
+                return Ok(());
+            };
+            shape.push(None);
+            return self.displace_runtime_position(
+                &root,
+                &shape,
+                element_ptr,
+                array_llvm.get_element_type(),
+                value,
+            );
+        };
         let Some(entry) = self.live_drop_entry(&root) else {
             return Ok(());
         };
@@ -202,6 +233,80 @@ impl<'ctx> CodegenContext<'ctx> {
             self.drop_displaced_held_value(&root, &path)?;
             self.arm_stored_string_positions(&root, &path, value)?;
             self.store_held_string_flags(&root, &under(&path, &moved_in))?;
+            self.builder.build_unconditional_branch(next_bb)?;
+            self.builder.position_at_end(next_bb);
+        }
+        Ok(())
+    }
+
+    /// [`displace_held_position`] for a position below an index known only at run time
+    /// (`rows[k].name`, `rows[k].pair[j]`). No static path names the position, so each
+    /// tracked position of the same `shape` (a `None` segment is a run-time index) is
+    /// tested against the address being written, and the one written is released and
+    /// re-armed for `value`.
+    ///
+    /// Positions of one shape are disjoint and `position_llvm` wide, so a position is the
+    /// one written exactly when an owner it holds lies inside the written range.
+    fn displace_runtime_position(
+        &mut self,
+        root: &str,
+        shape: &[Option<String>],
+        position_ptr: PointerValue<'ctx>,
+        position_llvm: BasicTypeEnum<'ctx>,
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        let mut candidates: Vec<(Vec<String>, PointerValue<'ctx>)> = Vec::new();
+        for held in self
+            .live_drop_entry(root)
+            .map_or(&[][..], |entry| &entry.held)
+        {
+            let Some(prefix) = held.path.get(..shape.len()) else {
+                continue;
+            };
+            let fits = prefix
+                .iter()
+                .zip(shape)
+                .all(|(segment, expected)| expected.as_ref().is_none_or(|e| e == segment));
+            if fits && !candidates.iter().any(|(path, _)| path == prefix) {
+                candidates.push((prefix.to_vec(), held.storage_ptr));
+            }
+        }
+        let Some(size) = position_llvm.size_of() else {
+            return Ok(());
+        };
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let moved_in = self.moved_in_string_flags(value)?;
+        // Arming reads a forwarder call's owners once; every candidate needs them.
+        let forwarded = self.forwarded_holder_owners.clone();
+
+        let parent_fn = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("position store emitted outside a function".to_string())
+        })?;
+        let i64t = self.context.i64_type();
+        let written = self
+            .builder
+            .build_ptr_to_int(position_ptr, i64t, "pos.addr")?;
+        // ponytail: one compare per tracked position of this shape; switch on the
+        // indices instead if arrays of owners grow large enough for the chain to matter.
+        for (path, owner_ptr) in candidates {
+            let owner = self
+                .builder
+                .build_ptr_to_int(owner_ptr, i64t, "held.pos.addr")?;
+            let offset = self.builder.build_int_sub(owner, written, "held.pos.off")?;
+            let hit =
+                self.builder
+                    .build_int_compare(IntPredicate::ULT, offset, size, "held.pos.hit")?;
+            let release_bb = self.context.append_basic_block(parent_fn, "displace.pos");
+            let next_bb = self.context.append_basic_block(parent_fn, "displace.next");
+            self.builder
+                .build_conditional_branch(hit, release_bb, next_bb)?;
+            self.builder.position_at_end(release_bb);
+            self.drop_displaced_held_value(root, &path)?;
+            self.forwarded_holder_owners = forwarded.clone();
+            self.arm_stored_string_positions(root, &path, value)?;
+            self.store_held_string_flags(root, &under(&path, &moved_in))?;
             self.builder.build_unconditional_branch(next_bb)?;
             self.builder.position_at_end(next_bb);
         }
@@ -272,6 +377,27 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         Ok(())
     }
+}
+
+/// The binding `expr` is rooted in and the accessor segments taken through it, as
+/// `moved_place` resolves them, except that an index known only at run time keeps its
+/// place in the path as `None` instead of collapsing the path.
+fn place_shape(expr: &HirExpr) -> Option<(&str, Vec<Option<String>>)> {
+    let (object, segment) = match &expr.kind {
+        HirExprKind::Variable(name) => return Some((name, Vec::new())),
+        HirExprKind::FieldAccess { object, field } => (object, Some(field.clone())),
+        HirExprKind::TupleIndex { object, index } => (object, Some(index.to_string())),
+        HirExprKind::Index { object, index } => match &index.kind {
+            HirExprKind::Literal(Literal::Integer(value, _)) if *value >= 0 => {
+                (object, Some(value.to_string()))
+            }
+            _ => (object, None),
+        },
+        _ => return None,
+    };
+    let (root, mut shape) = place_shape(object)?;
+    shape.push(segment);
+    Some((root, shape))
 }
 
 /// `flags`, keyed by path below a position, re-keyed by path below the holder that

@@ -78,6 +78,28 @@ impl<'ctx> CodegenContext<'ctx> {
             .map_err(CodegenError::from)
     }
 
+    /// Store `val`, the evaluated `value`, at `position_ptr`: a field, tuple element or
+    /// array element of type `position_ty` inside a collection slot.
+    ///
+    /// The slot invariant covers every position inside it, however the place is reached,
+    /// so this is `v[i] = x` one level down: each `string` position of what arrives owns
+    /// its bytes, and what the store displaces is released, a `string` included. No drop
+    /// flag is consulted, since a slot has none.
+    pub(crate) fn store_into_slot_position(
+        &mut self,
+        position_ptr: PointerValue<'ctx>,
+        position_ty: &Type,
+        val: BasicValueEnum<'ctx>,
+        value: &HirExpr,
+    ) -> CodegenResult<()> {
+        let val = self.value_for_collection_slot(value, val, position_ty)?;
+        if self.slot_needs_release(position_ty) {
+            self.drop_slot_value(position_ptr, position_ty)?;
+        }
+        self.builder.build_store(position_ptr, val)?;
+        Ok(())
+    }
+
     /// A borrow of the slot at `slot_ptr` holding a `slot_ty`, as `&T` / `&mut T`
     /// values are represented: the slot's address, except for a shared `&string`, which
     /// is the fat pointer itself.

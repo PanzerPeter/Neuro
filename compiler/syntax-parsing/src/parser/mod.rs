@@ -256,6 +256,16 @@ impl Parser {
         }
     }
 
+    /// Call with the cursor just past a list's `,`. Skips newlines and reports whether
+    /// `close` follows, which makes that comma a trailing one. A trailing comma is
+    /// accepted only when the closing delimiter sits on a later line: `f(a, b,)` on one
+    /// line stays an error, reported by whatever parses the next element.
+    pub(super) fn trailing_comma_before(&mut self, close: &TokenKind) -> bool {
+        let line_ended = self.check(&TokenKind::Newline);
+        self.skip_newlines();
+        line_ended && self.check(close)
+    }
+
     /// The kind of the next token that is not a newline, without consuming anything.
     /// Used to decide whether a newline is a statement boundary or a continuation.
     pub(super) fn peek_next_nonnewline_kind(&self) -> Option<&TokenKind> {

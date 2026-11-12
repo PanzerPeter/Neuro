@@ -105,8 +105,9 @@ Reads `.nr` files from disk; writes nothing.
   file's flag (reported back as `ResolvedProgram.no_prelude`) decides. A non-root file's
   `@no_prelude` therefore takes its bindings, not its access to `Option`.
 - **A variant import is what is left when nothing named a module, and only if an enum by that
-  name is in scope**: declared by the module or one enclosing it, imported by an earlier line,
-  or one of the prelude's (the driver prepends the prelude after this pass, which is why the
+  name is in scope**: declared by the module or one enclosing it, imported by an earlier line or
+  by an enclosing module (whose finished scope `enum_in_scope` reads, a block being numbered
+  after its parent), or one of the prelude's (the driver prepends the prelude after this pass, which is why the
   prelude list is consulted directly). `import Shape::{Circle}` binds a list and
   `import Shape::Circle` one variant. Otherwise the import is `UnknownImportHead`, or
   `UnreachableInlineModule` when the head is a block that is not in scope here.

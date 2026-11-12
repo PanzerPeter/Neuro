@@ -16,7 +16,10 @@ Transform raw Neuro source text into a validated token stream as the first stage
 ## Notes
 A logos-generated lexer over UTF-8 source, using XID_Start / XID_Continue rules so Unicode
 identifiers are accepted without a hand-written scanner. Every keyword token exists to reserve
-its word against use as an identifier.
+its word against use as an identifier. `TokenKind::Reserved` does only that: it carries the
+spelling of a word the language holds back (`async`, `await`, `parallel`, `spawn`, `defer`,
+`extern`, `static`, `macro`, `yield`) and no parser rule consumes it, so one used as a name is an
+ordinary "unexpected token". A word leaves the variant when its construct gets a token of its own.
 
 `classify_error` exists because logos surfaces all unrecognised input as one generic error;
 reclassifying it (to `UnterminatedString`, for instance) gives the diagnostic layer a precise,

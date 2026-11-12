@@ -20,6 +20,7 @@ mod displace;
 mod emit;
 mod functions;
 mod moves;
+pub(crate) use moves::reads_through_collection_slot;
 
 pub(crate) use functions::{ENV_HEADER_FIELDS, is_pure_place};
 mod owned_strings;

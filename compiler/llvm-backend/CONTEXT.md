@@ -388,6 +388,15 @@ then belongs to the storage, and is tracked one of three ways:
   with no flag to guard it. A place moved into a payload is disowned all the same, a `string`
   included, since the enum can outlive it (BUG-154); with no flag in the payload, that `string`
   is released by nobody (BUG-082).
+
+  A store finds the position it displaces by static path (`displace_held_position`). An index
+  known only at run time has none: `arr[k] = v` compares the element address against each
+  tracked element (`displace_array_element`), and a position below such an index
+  (`arr[k].name = v`, `arr[k].pair[j] = v`) goes to `displace_runtime_position`, which takes the
+  place's shape with the index left open (`place_shape`), tests every tracked position of that
+  shape for an owner inside the written range, and releases and re-arms the one that matches.
+  Without it the position keeps the flag of the value it lost, and a literal stored there is
+  freed at scope exit.
 - **A function's return value.** `codegen/string_ownership.rs` reads every body once, before any is
   generated, and collects the functions whose every exit (each `return`, plus an expression tail)
   allocates. `impl` methods and associated functions are collected too, keyed by the
@@ -463,6 +472,14 @@ then belongs to the storage, and is tracked one of three ways:
   per-instantiation `__neuro_<kind>_drop_elems_<args>` helper walks the live slots with it for
   `emit_collection_free` and `clear()` (the `Vec` one from a start index); an overwrite, a map
   `remove`'s key and a duplicate `insert`'s incoming key are dropped through it directly.
+
+  The invariant reaches every position inside a slot, so a store below one (`rows[i].name = s`,
+  `rows[i].tag.1 = s`, `rows[i].pair[k] = s`, at any depth and however the collection is reached)
+  is the slot store one level down. The field, tuple-element and array-element stores test the
+  place with `reads_through_collection_slot` and hand it to `store_into_slot_position`, which
+  stages the value with `value_for_collection_slot` and destroys what it displaces with
+  `drop_slot_value`. A raw store there would leave a literal for the collection's release to
+  free, and would leak what the store displaced.
 
   Ownership leaving a slot: `produces_owned_string` answers `true` for `Vec::remove` /
   `swap_remove` on a `string` element; `produces_owned_option_payload` for `OPTION_TAKERS` (`pop`,

@@ -112,3 +112,25 @@ func main() -> i32 {
     // a is true, !b is true -> return 15
     assert_eq!(exit_code, 15, "Expected exit code 15");
 }
+
+/// BUG-157: a reserved word is refused as a binding, a field and a function name, so a
+/// program cannot depend on a name its keyword will later take.
+#[test]
+fn regression_a_reserved_word_is_not_a_name() {
+    use crate::compile_harness::assert_check_error;
+    assert_check_error(
+        "reserved_binding.nr",
+        "func main() -> i32 {\n    val async = 1\n    async\n}\n",
+        "unexpected token Reserved(\"async\"), expected variable name",
+    );
+    assert_check_error(
+        "reserved_field.nr",
+        "struct S { spawn: i32 }\nfunc main() -> i32 { 0 }\n",
+        "unexpected token Reserved(\"spawn\")",
+    );
+    assert_check_error(
+        "reserved_function.nr",
+        "func defer() -> i32 { 1 }\nfunc main() -> i32 { defer() }\n",
+        "unexpected token Reserved(\"defer\")",
+    );
+}

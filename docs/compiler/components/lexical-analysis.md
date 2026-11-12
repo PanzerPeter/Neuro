@@ -20,7 +20,7 @@ Most tokens are plain regular expressions in a [logos](https://crates.io/crates/
 ### Identifiers and numbers
 
 - Identifiers follow Unicode XID rules, so `计算` and `café` are identifiers.
-- Keywords reserve their word. Type names such as `i32`, `f64`, `bool`, `string` and `char` are ordinary identifiers, which lets a `type` alias or a `newtype` introduce one. The type checker resolves them.
+- Keywords reserve their word. So do nine words with no construct yet: `async`, `await`, `parallel`, `spawn`, `defer`, `extern`, `static`, `macro` and `yield` lex as one `Reserved` token that no parser rule accepts, so none of them can be a name. Type names such as `i32`, `f64`, `bool`, `string` and `char` are ordinary identifiers, which lets a `type` alias or a `newtype` introduce one. The type checker resolves them.
 - Integers are decimal, `0x` hex, `0o` octal or `0b` binary. `_` separates digits and never leads. An optional suffix from `i8` to `u64` attaches to the literal, as in `42u8` or `0xFFu8`.
 - A float has a fractional part, an exponent, or both (`1.5`, `1e3`, `1.5e-2`), and takes an optional `f16`, `bf16`, `f32` or `f64` suffix. A suffix needs one of those forms. `42f32` lexes as an integer followed by an identifier, and the parser rejects it.
 - An integer token carries its **magnitude** as a `u64`. Source never spells a negative literal (`-1` is `-` applied to `1`), so the lexer never produces a negative payload. What a magnitude means for a type is the checker's call.

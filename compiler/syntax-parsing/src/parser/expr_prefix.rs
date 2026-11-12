@@ -258,8 +258,8 @@ impl Parser {
             }),
 
             // Array literal `[e0, e1, ...]`. Elements parse at the lowest
-            // precedence so each may be a full expression; a trailing comma is not
-            // accepted (each element must be followed by `,` or the closing `]`).
+            // precedence so each may be a full expression. A trailing comma closes a
+            // literal whose `]` sits on a later line.
             TokenKind::LeftBracket => self.inside_delimiters(|p| {
                 p.skip_newlines();
                 let mut elements = Vec::new();
@@ -271,7 +271,9 @@ impl Parser {
                             break;
                         }
                         p.advance(); // consume ','
-                        p.skip_newlines();
+                        if p.trailing_comma_before(&TokenKind::RightBracket) {
+                            break;
+                        }
                     }
                 }
                 let close = p.consume(TokenKind::RightBracket, "']' to close array literal")?;

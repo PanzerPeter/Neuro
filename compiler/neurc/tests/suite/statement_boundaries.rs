@@ -114,3 +114,35 @@ func main() -> i32 {
     );
     assert_eq!(exit, 8);
 }
+
+/// BUG-156: a comma before a closing delimiter on a later line ends the list, in a
+/// parameter list, an argument list and an array literal as it does in a struct literal.
+#[test]
+fn regression_trailing_comma_closes_a_multi_line_list() {
+    let exit = run(
+        "trailing_comma.nr",
+        r#"
+func add(
+    a: i32,
+    b: i32,
+) -> i32 {
+    a + b
+}
+
+func main() -> i32 {
+    val xs = [
+        1,
+        2,
+    ]
+    val scale = |
+        v: i32,
+    | v * 1
+    add(
+        scale(xs[0]),
+        xs[1],
+    )
+}
+"#,
+    );
+    assert_eq!(exit, 3);
+}

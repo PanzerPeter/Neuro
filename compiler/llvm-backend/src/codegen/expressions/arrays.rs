@@ -10,6 +10,7 @@ use neuro_hir::{HirExpr, HirExprKind, HirStmt};
 use shared_types::Literal;
 
 use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
+use crate::codegen::drops::reads_through_collection_slot;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -149,12 +150,20 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let elem_ptr =
             self.array_element_ptr(base_ptr, elem_llvm, size, index, index.span.start)?;
+        if reads_through_collection_slot(object) {
+            return self.store_into_slot_position(elem_ptr, &element_ty, val, value);
+        }
         // The element this store displaces loses its owner once the new value exists, as
         // a field's does.
         match &index.kind {
-            HirExprKind::Literal(Literal::Integer(position, _)) if *position >= 0 => {
-                self.displace_held_position(object, &position.to_string(), value)?
-            }
+            HirExprKind::Literal(Literal::Integer(position, _)) if *position >= 0 => self
+                .displace_held_position(
+                    object,
+                    &position.to_string(),
+                    elem_ptr,
+                    elem_llvm,
+                    value,
+                )?,
             _ => self.displace_array_element(
                 object,
                 elem_llvm.array_type(size as u32),

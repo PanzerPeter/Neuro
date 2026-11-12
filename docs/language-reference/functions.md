@@ -40,6 +40,24 @@ func test() -> i32 {
 }
 ```
 
+A parameter list, an argument list and an array literal may be split across lines, and a comma may then follow the last element. On one line a trailing comma is an error.
+
+```neuro
+func blend(
+    base: i32,
+    tint: i32,
+) -> i32 {
+    base + tint
+}
+
+func main() -> i32 {
+    blend(
+        40,
+        2,
+    )
+}
+```
+
 Neuro has no default parameter values and no variadic functions: every parameter of a declared function must be given. A function that takes any number of values takes a slice:
 
 ```neuro

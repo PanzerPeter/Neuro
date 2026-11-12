@@ -164,7 +164,7 @@ fn build_scopes(
     for id in 0..graph.modules.len() {
         let mut scope = ImportScope::default();
         for import in &graph.modules[id].imports {
-            let outcome = resolve_one(graph, id, import, prelude, &mut scope);
+            let outcome = resolve_one(graph, id, import, prelude, &scopes, &mut scope);
             if tolerance == Tolerance::Report {
                 outcome?;
             }
@@ -193,6 +193,7 @@ fn resolve_one(
     from: usize,
     import: &ImportDef,
     prelude: &[PreludeVariant],
+    enclosing: &[ImportScope],
     scope: &mut ImportScope,
 ) -> Result<(), ModuleError> {
     let segments: Vec<&str> = import.path.iter().map(|s| s.name.as_str()).collect();
@@ -217,7 +218,7 @@ fn resolve_one(
     // names neither a module nor an enum used to be read as an enum regardless, which
     // turned a typo into a binding that quietly meant nothing.
     if consumed == 0 && !import.relative {
-        let enum_owner = enum_in_scope(graph, from, prelude, scope, segments[0]);
+        let enum_owner = enum_in_scope(graph, from, prelude, enclosing, scope, segments[0]);
         match (&enum_owner, segments.len(), &import.selection) {
             (Some(enum_owner), 1, ImportSelection::List(names)) => {
                 for entry in names {
@@ -249,11 +250,16 @@ fn resolve_one(
 }
 
 /// The canonical name of the enum `head` names in module `from`: one it or an enclosing
-/// module declares, one this module already imported, or one of the prelude's.
+/// module declares, one this module already imported, one an enclosing module imported,
+/// or one of the prelude's.
+///
+/// `enclosing` holds the finished scope of every module numbered below `from`. A block is
+/// numbered after the module that declares it, so each enclosing module's is among them.
 fn enum_in_scope(
     graph: &ModuleGraph,
     from: usize,
     prelude: &[PreludeVariant],
+    enclosing: &[ImportScope],
     scope: &ImportScope,
     head: &str,
 ) -> Option<String> {
@@ -264,10 +270,18 @@ fn enum_in_scope(
         }
         current = graph.modules[id].parent;
     }
-    if let Some(target) = scope.item(head)
-        && graph.declares_enum(target.module, &target.item)
-    {
-        return Some(graph.canonical(target.module, &target.item));
+    let mut visible = Some(scope);
+    let mut current = from;
+    while let Some(imports) = visible {
+        if let Some(target) = imports.item(head)
+            && graph.declares_enum(target.module, &target.item)
+        {
+            return Some(graph.canonical(target.module, &target.item));
+        }
+        visible = graph.modules[current].parent.and_then(|parent| {
+            current = parent;
+            enclosing.get(parent)
+        });
     }
     prelude
         .iter()

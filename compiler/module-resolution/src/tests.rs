@@ -1454,3 +1454,42 @@ fn a_root_block_and_a_root_file_may_not_share_a_path() {
         other => panic!("expected DuplicateModulePath, got {:?}", other.map(|_| ())),
     }
 }
+
+/// A variant import's head is an enum, and a block sees an enum its enclosing
+/// module imported exactly as it sees everything else that module imported.
+#[test]
+fn regression_a_variant_import_in_a_block_reads_the_enclosing_modules_imports() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "geometry.nr", "export enum Shape\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "import geometry::{Shape}\nmodule inner\nimport Shape::{Circle}\nmodule deep\n\
+         import Shape::Square\nexport func g\nbare Square\nend\nexport func f\nbare Circle\nend\n\
+         call inner::f\n",
+    );
+
+    let program = resolve(&root).expect("the block sees the enclosing module's import");
+    let variant_of = |function: &str| {
+        program.items.iter().find_map(|item| match item {
+            Item::Function(def) if def.name.name == function => match def.body.first() {
+                Some(Stmt::Expr(Expr::Call { func, .. })) => match func.as_ref() {
+                    Expr::Path {
+                        type_name, member, ..
+                    } => Some((type_name.name.clone(), member.name.clone())),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        })
+    };
+    assert_eq!(
+        variant_of("inner::f"),
+        Some(("geometry::Shape".into(), "Circle".into()))
+    );
+    assert_eq!(
+        variant_of("inner::deep::g"),
+        Some(("geometry::Shape".into(), "Square".into()))
+    );
+}

@@ -64,6 +64,7 @@ func main() -> i32 {
 ```
 
 - Every `val` and `mut` takes an initializer.
+- A name cannot be a keyword, or one of the words held back for later: `async`, `await`, `parallel`, `spawn`, `defer`, `extern`, `static`, `macro` and `yield`.
 - The type annotation is optional when the initializer determines the type (see [Type Annotations](#type-annotations)).
 - `mut` makes the binding reassignable. It does not change its type.
 - A `mut` pattern makes every binding in it mutable (see [Destructuring](#destructuring)).
