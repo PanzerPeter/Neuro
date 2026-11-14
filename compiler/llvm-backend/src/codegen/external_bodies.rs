@@ -671,8 +671,7 @@ mod tests {
             &context,
             &hir,
             OptimizationLevelSetting::O0,
-            source,
-            "external.nr",
+            &crate::tests::source_map("external.nr", source),
             external,
             gpu,
         )
@@ -886,8 +885,7 @@ mod tests {
             &context,
             &hir,
             OptimizationLevelSetting::O0,
-            KERNEL,
-            "kernel.nr",
+            &crate::tests::source_map("kernel.nr", KERNEL),
             &external,
             GpuVendor::Nvidia,
         )
@@ -984,8 +982,7 @@ mod tests {
             &context,
             &hir,
             OptimizationLevelSetting::O0,
-            source,
-            "plain.nr",
+            &crate::tests::source_map("plain.nr", source),
             &[],
             GpuVendor::Nvidia,
         )
@@ -1197,8 +1194,7 @@ enum ParseError { Empty, Invalid, OutOfRange }
                 &context,
                 &hir,
                 OptimizationLevelSetting::O0,
-                SOURCE,
-                "checked.nr",
+                &crate::tests::source_map("checked.nr", SOURCE),
                 &[external],
                 GpuVendor::Nvidia,
             )

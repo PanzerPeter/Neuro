@@ -382,12 +382,16 @@ neurc compile program.nr
 
 ## Common Warnings
 
-The compiler emits two lint warnings. Warnings never block compilation. Each names the lint, so you can silence it with `@allow(...)` on the enclosing function. The `at` range is a byte range into the source file, which is what the compiler prints today.
+The compiler emits two lint warnings. Warnings never block compilation. Each names the lint, so you can silence it with `@allow(...)` on the enclosing function, and points at the code the way an error does.
 
 ### `prefer_loop_over_while_true`
 
 ```text
-warning[prefer_loop_over_while_true] at <start>..<end>: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
+warning[prefer_loop_over_while_true]: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
+ --> main.nr:2:11
+  |
+2 |     while true {
+  |           ^^^^
 ```
 
 A `while` whose condition is the literal `true`. `loop { ... }` says the same thing:
@@ -405,7 +409,11 @@ loop {
 ### `float_cast_out_of_range`
 
 ```text
-warning[float_cast_out_of_range] at <start>..<end>: constant `1e20` does not fit `i32` and saturates to its maximum; use `.to_checked::<i32>()` for an `Option`, or silence with `@allow(float_cast_out_of_range)` on the enclosing function or `const`
+warning[float_cast_out_of_range]: constant `1e20` does not fit `i32` and saturates to its maximum; use `.to_checked::<i32>()` for an `Option`, or silence with `@allow(float_cast_out_of_range)` on the enclosing function or `const`
+ --> main.nr:2:13
+  |
+2 |     val x = 1e20 as i32
+  |             ^^^^^^^^^^^
 ```
 
 An `as` cast from a float to an integer, where the operand is a constant the target cannot hold, or NaN. The cast clamps the value (NaN becomes `0`), which is rarely what was meant. Fix the constant or widen the target. For a value known only at run time, `.to_checked::<T>()` returns `None` instead of clamping. If the clamp is intended, add `@allow(float_cast_out_of_range)` to the enclosing function or to the `const` holding the cast.

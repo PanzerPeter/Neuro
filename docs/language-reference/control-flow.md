@@ -92,7 +92,11 @@ while i < 10 {
 `while true { ... }` compiles and runs, but the compiler warns:
 
 ```text
-warning[prefer_loop_over_while_true] at 23..27: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
+warning[prefer_loop_over_while_true]: `while true { ... }` should be written as `loop { ... }`; silence with `@allow(prefer_loop_over_while_true)` on the enclosing function
+ --> main.nr:2:11
+  |
+2 |     while true {
+  |           ^^^^
 ```
 
 The lint has one name, in `snake_case`, and that is the name `@allow` takes. The motivation is style, not safety. The lint fires only on the bare literal `true`: a parenthesised `while (true) { ... }` is not flagged, and neither is a [`while val`](#if-val-and-while-val) loop. The replacement is [`loop`](#loop). To silence the warning on a function (typically when transcribing code from C, Python or JavaScript), attach the `@allow` attribute:

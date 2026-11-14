@@ -7,6 +7,7 @@ use inkwell::context::Context as LLVMContext;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicTypeEnum, FunctionType, PointerType};
 use inkwell::values::{BasicValueEnum, FunctionValue, GlobalValue, IntValue, PointerValue};
+use shared_types::SourceMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::codegen::expressions::matches::SavedBinding;
@@ -345,10 +346,9 @@ pub(crate) struct CodegenContext<'ctx> {
     /// the plain wrapping instruction is emitted. See.
     pub(crate) overflow_checks: bool,
 
-    /// `(path, text)` of the module being compiled, used to render `file:line:col`
-    /// in panic-family diagnostics. `None` when the caller did not supply source
-    /// (e.g. the library doctest); panic diagnostics then omit the location suffix.
-    pub(crate) source: Option<(String, String)>,
+    /// Every file of the program, used to render `file:line:col` in panic-family
+    /// diagnostics. A span no file holds renders no location suffix.
+    pub(crate) sources: SourceMap,
 
     /// Names of structs implementing the `Drop` lang-item (`impl Drop for T`).
     /// A binding of such a type gets a scope-exit destructor call. Empty for programs
@@ -525,7 +525,7 @@ impl<'ctx> CodegenContext<'ctx> {
             captured_drop_entries: HashMap::new(),
             const_values: HashMap::new(),
             overflow_checks: false,
-            source: None,
+            sources: SourceMap::default(),
             trait_methods: HashMap::new(),
             vtables: HashMap::new(),
             drop_types: std::collections::HashSet::new(),
@@ -705,11 +705,6 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Enabled for `-O0` (debug), disabled for `-O1..-O3` (release).
     pub(crate) fn set_overflow_checks(&mut self, enabled: bool) {
         self.overflow_checks = enabled;
-    }
-
-    /// Provide the module source so panic-family diagnostics can render `file:line:col`.
-    pub(crate) fn set_source(&mut self, path: String, text: String) {
-        self.source = Some((path, text));
     }
 
     /// Get the external `memcmp` declaration, inserting it on first use.

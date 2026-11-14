@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use llvm_backend::OptimizationLevelSetting;
-use shared_types::Span;
+use shared_types::{SourceMap, Span};
+use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,9 +10,6 @@ use std::process::{self, Command};
 
 /// The entry point every compiled executable must define.
 const MAIN_FUNCTION: &str = "main";
-
-/// U+FEFF, which some editors write at the start of a UTF-8 file.
-const BYTE_ORDER_MARK: char = '\u{feff}';
 
 /// The chip `@gpu` kernels are compiled for unless `--gpu-arch` names another. NVIDIA
 /// kernels ship as PTX, which the CUDA driver compiles for the GPU it finds, so the floor
@@ -273,6 +271,8 @@ struct LoadedProgram {
     module_count: usize,
     /// The file each module was read from, root first.
     files: Vec<PathBuf>,
+    /// Every parsed file, the prelude's included, in the one offset space their spans share.
+    sources: SourceMap,
 }
 
 /// Expand `input` and every module it reaches into one program, and give it the prelude.
@@ -281,15 +281,23 @@ struct LoadedProgram {
 /// `module-resolution`: that slice depends only on the AST it rewrites, so the driver is
 /// the single place it, the parser, and the prelude source meet.
 fn load_program(input: &Path) -> Result<LoadedProgram> {
-    let prelude = prelude::load()?;
+    let sources = RefCell::new(SourceMap::default());
+    let prelude = prelude::load(&mut sources.borrow_mut())?;
 
+    // The resolver names a module by its path under the root's directory; a diagnostic
+    // names it the way the root was named on the command line, so the root keeps its own
+    // spelling and every other module reads as a path from where `neurc` was run.
+    let root_dir = input.parent().unwrap_or(Path::new(""));
     // The resolver's own message names the file, the module, and what was expected, so it
     // is reported as-is rather than wrapped in a context line that would hide it behind
     // `check`'s single-line error rendering.
     let program = module_resolution::resolve_program(
         input,
         &|source, path| {
-            syntax_parsing::parse(source).map_err(|e| render_parse_error(path, source, &e))
+            let path = root_dir.join(path).display().to_string();
+            let base = sources.borrow_mut().add(path, source.to_string());
+            syntax_parsing::parse_at(source, base)
+                .map_err(|e| render_parse_error(&sources.borrow(), base, source, &e))
         },
         prelude.variants(),
     )
@@ -315,13 +323,13 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     // Named arguments are resolved against the whole program, so this runs only once the
     // prelude and every module are in one list, and before type checking, which is what
     // lets every later pass see an ordinary positional call.
+    let sources = sources.into_inner();
     argument_binding::bind_arguments(&mut items).map_err(|errors| {
-        let source = single_module_source(input, module_count);
         eprintln!("Argument errors found in {:?}:", input);
         for error in &errors {
             eprintln!(
                 "{}\n",
-                render_diagnostic(input, source.as_deref(), &error.to_string(), error.span())
+                render_diagnostic(&sources, &error.to_string(), error.span())
             );
         }
         anyhow::anyhow!("{} argument error(s) found", errors.len())
@@ -331,15 +339,22 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
         items,
         module_count,
         files,
+        sources,
     })
 }
 
-/// Render a syntax or lexical error the way a type error is rendered. An input that
-/// ended early is pointed at its end; an error with no location keeps its message alone.
-fn render_parse_error(path: &str, source: &str, error: &syntax_parsing::ParseError) -> String {
+/// Render a syntax or lexical error in the file `source` parsed at `base` the way a type
+/// error is rendered. An input that ended early is pointed at its end; an error with no
+/// location keeps its message alone.
+fn render_parse_error(
+    sources: &SourceMap,
+    base: usize,
+    source: &str,
+    error: &syntax_parsing::ParseError,
+) -> String {
     // The end of input is shown just past the last visible character: placed after a
     // trailing newline, the caret would sit on a line no editor shows.
-    let end = source.trim_end().len();
+    let end = base + source.trim_end().len();
     let span = match error {
         syntax_parsing::ParseError::UnexpectedEof { .. } => Some(Span::new(end, end)),
         other => other.span().map(|span| {
@@ -351,37 +366,34 @@ fn render_parse_error(path: &str, source: &str, error: &syntax_parsing::ParseErr
         }),
     };
     match span {
-        Some(span) => render_diagnostic(Path::new(path), Some(source), &error.to_string(), span),
+        Some(span) => render_diagnostic(sources, &error.to_string(), span),
         None => format!("error: {}", error),
     }
 }
 
-/// Render one diagnostic with its source location: the message, the file, the line
-/// and column, the offending source line, and a caret under the span.
-///
-/// `source` is `None` when the program spans several modules. A span then indexes
-/// the text of whichever module raised the error, not the root file's, so resolving
-/// it here would point confidently at the wrong line; the message is printed alone.
+/// Render one diagnostic with its source location: the message, the file the span
+/// falls in, the line and column, the offending source line, and a caret under the span.
 ///
 /// The column counts characters, not bytes: a caret placed at a byte column drifts
 /// away from the text it is meant to underline as soon as the line holds a
 /// multi-byte character.
-fn render_diagnostic(path: &Path, source: Option<&str>, message: &str, span: Span) -> String {
-    render_labeled("error", path, source, message, span)
+fn render_diagnostic(sources: &SourceMap, message: &str, span: Span) -> String {
+    render_labeled("error", sources, message, span)
 }
 
-/// Render one labeled span, the body of both an `error:` and its `note:` lines.
-fn render_labeled(
-    label: &str,
-    path: &Path,
-    source: Option<&str>,
-    message: &str,
-    span: Span,
-) -> String {
+/// Render one labeled span, the body of `error:`, `warning[...]:` and `note:` lines. A
+/// span no file holds, or one that runs past its file, prints the message alone.
+fn render_labeled(label: &str, sources: &SourceMap, message: &str, span: Span) -> String {
     let bare = || format!("{}: {}", label, message);
-    let Some(source) = source else { return bare() };
-    if span.start > span.end
-        || span.end > source.len()
+    let Some((file, start)) = sources.locate(span.start) else {
+        return bare();
+    };
+    let (path, source) = (&file.path, file.text.as_str());
+    let Some(len) = span.end.checked_sub(span.start) else {
+        return bare();
+    };
+    let span = Span::new(start, start + len);
+    if span.end > source.len()
         || !source.is_char_boundary(span.start)
         || !source.is_char_boundary(span.end)
     {
@@ -411,7 +423,7 @@ fn render_labeled(
         label = label,
         message = message,
         gutter = gutter,
-        path = path.display(),
+        path = path,
         line_no = line_no,
         column = column,
         line = source[line_start..line_end].trim_end_matches('\r'),
@@ -421,25 +433,23 @@ fn render_labeled(
 }
 
 /// Report type errors against the source they came from.
-///
-/// `source` is `None` for a multi-module program: see [`render_diagnostic`].
 fn report_type_errors(
     path: &Path,
-    source: Option<&str>,
+    sources: &SourceMap,
     errors: &[semantic_analysis::TypeError],
 ) -> anyhow::Error {
     eprintln!("Type errors found in {:?}:", path);
     for error in errors {
         eprintln!(
             "{}",
-            render_diagnostic(path, source, &error.to_string(), error.span())
+            render_diagnostic(sources, &error.to_string(), error.span())
         );
         // A use-after-move carries a second location: where the value went. It is the
         // half of that diagnostic a reader cannot find on their own.
         if let semantic_analysis::TypeError::UseOfMovedValue { moved_at, .. } = error {
             eprintln!(
                 "{}",
-                render_labeled("note", path, source, "moved here", *moved_at)
+                render_labeled("note", sources, "moved here", *moved_at)
             );
         }
         eprintln!();
@@ -450,17 +460,13 @@ fn report_type_errors(
 /// Render a lowering failure. The derivative transform's refusal is a user-facing
 /// diagnostic with a location; every other variant is a checker escape and has none.
 fn report_lowering_error(
-    path: &Path,
-    source: Option<&str>,
+    sources: &SourceMap,
     error: &hir_lowering::LoweringError,
 ) -> anyhow::Error {
     let hir_lowering::LoweringError::NotDifferentiable { span, .. } = error else {
         return anyhow::anyhow!("HIR lowering error: {}", error);
     };
-    eprintln!(
-        "{}",
-        render_diagnostic(path, source, &error.to_string(), *span)
-    );
+    eprintln!("{}", render_diagnostic(sources, &error.to_string(), *span));
     anyhow::anyhow!("`@grad` function could not be differentiated")
 }
 
@@ -471,34 +477,28 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
     let LoadedProgram {
         items: ast,
         module_count,
+        sources,
         ..
     } = load_program(path)?;
 
     match semantic_analysis::type_check(&ast) {
         Ok(warnings) => {
-            print_warnings(&warnings);
+            print_warnings(&sources, &warnings);
             // Lower the type-checked AST to typed HIR (Phase 1.8). The result is the
             // backend-agnostic contract every backend will consume; building it here
             // exercises the lowering end-to-end on every checked program.
-            let hir = hir_lowering::lower_program(&ast).map_err(|error| {
-                report_lowering_error(
-                    path,
-                    single_module_source(path, module_count).as_deref(),
-                    &error,
-                )
-            })?;
+            let hir = hir_lowering::lower_program(&ast)
+                .map_err(|error| report_lowering_error(&sources, &error))?;
             // Whether a `@gpu` body can become a kernel is decided by the backend that
             // lowers it, so a `check` that stopped at HIR would pass a body `compile`
             // refuses. Off Linux nothing can compile one, and `check` stays the type
             // check it is. Which bodies qualify does not depend on the vendor, and
             // NVIDIA's needs no toolkit to serialize, so `check` lowers for it.
             if cfg!(target_os = "linux") && gpu_functions(&hir).next().is_some() {
-                let source = single_module_source(path, module_count);
                 // Which bodies qualify does not depend on the tier either.
                 tensor_bodies(
                     &hir,
-                    path,
-                    source.as_deref(),
+                    &sources,
                     &GpuArch::default(),
                     mlir_backend::Overflow::Checked,
                 )?;
@@ -511,35 +511,19 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
             );
             Ok(())
         }
-        Err(errors) => Err(report_type_errors(
-            path,
-            single_module_source(path, module_count).as_deref(),
-            &errors,
-        )),
+        Err(errors) => Err(report_type_errors(path, &sources, &errors)),
     }
 }
 
-/// The source text to resolve diagnostics against, or `None` when the program has
-/// more than one module or the file cannot be re-read.
-fn single_module_source(path: &Path, module_count: usize) -> Option<String> {
-    (module_count == 1).then(|| read_source(path).ok())?
-}
-
-/// Read a source file the way the module loader does: a leading UTF-8 byte order mark
-/// is not part of the program, so it is dropped before any span is measured.
-fn read_source(path: &Path) -> std::io::Result<String> {
-    let text = fs::read_to_string(path)?;
-    Ok(match text.strip_prefix(BYTE_ORDER_MARK) {
-        Some(rest) => rest.to_string(),
-        None => text,
-    })
-}
-
-/// Render lint warnings to stderr. Warnings never block compilation; they are
-/// informational guidance for the author.
-fn print_warnings(warnings: &[semantic_analysis::Warning]) {
+/// Render lint warnings to stderr, each at its location like an error. Warnings never
+/// block compilation; they are informational guidance for the author.
+fn print_warnings(sources: &SourceMap, warnings: &[semantic_analysis::Warning]) {
     for warning in warnings {
-        eprintln!("{}", warning);
+        let label = format!("warning[{}]", warning.code.name());
+        eprintln!(
+            "{}\n",
+            render_labeled(&label, sources, &warning.message, warning.span)
+        );
     }
 }
 
@@ -561,9 +545,6 @@ fn compile_file(
 ) -> Result<PathBuf> {
     validate_source_file(input)?;
 
-    let source =
-        read_source(input).context(format!("Failed to read source file: {}", input.display()))?;
-
     log::info!("Compiling {}", input.display());
     log::info!("Using optimization level -O{}", optimization);
 
@@ -572,6 +553,7 @@ fn compile_file(
         items: ast,
         module_count,
         files,
+        sources,
     } = load_program(input)?;
     log::debug!("Resolved {} module(s)", module_count);
 
@@ -592,22 +574,16 @@ fn compile_file(
 
     log::debug!("Type checking...");
     let warnings = semantic_analysis::type_check(&ast)
-        .map_err(|errors| {
-            let rendered = (module_count == 1).then_some(source.as_str());
-            report_type_errors(input, rendered, &errors)
-        })
+        .map_err(|errors| report_type_errors(input, &sources, &errors))
         .context("Type checking failed")?;
-    print_warnings(&warnings);
+    print_warnings(&sources, &warnings);
 
     // Lower to typed HIR (Phase 1.8). The LLVM backend consumes this HIR directly:
     // every node carries its resolved type, so the backend no longer re-derives types
     // from the AST.
     log::debug!("Lowering to typed HIR...");
     let hir = hir_lowering::lower_program(&ast)
-        .map_err(|error| {
-            let rendered = (module_count == 1).then_some(source.as_str());
-            report_lowering_error(input, rendered, &error)
-        })
+        .map_err(|error| report_lowering_error(&sources, &error))
         .context("Failed to lower to HIR")?;
     log::debug!("Lowered {} HIR items", hir.items.len());
 
@@ -632,14 +608,13 @@ fn compile_file(
     let optimization =
         OptimizationLevelSetting::from_u8(optimization).context("Invalid optimization level")?;
 
-    let rendered = (module_count == 1).then_some(source.as_str());
     // The LLVM backend checks integer overflow on the debug tier alone, and so do the bodies
     // computed beside it.
     let overflow = match optimization {
         OptimizationLevelSetting::O0 => mlir_backend::Overflow::Checked,
         _ => mlir_backend::Overflow::Wrapping,
     };
-    let external = tensor_bodies(&hir, input, rendered, gpu, overflow)?;
+    let external = tensor_bodies(&hir, &sources, gpu, overflow)?;
     // A `.to(device)` links the GPU runtime as surely as a `@gpu` body does, and only the
     // backend sees which programs make one, so every link where the runtime can exist
     // offers what it needs.
@@ -650,16 +625,9 @@ fn compile_file(
     };
 
     if emit == EmitKind::LlvmIr {
-        let ir = llvm_backend::compile_to_ir(
-            &hir,
-            optimization,
-            &source,
-            &input.display().to_string(),
-            &external,
-            gpu.vendor,
-        )
-        .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
-        .context("Failed to generate LLVM IR")?;
+        let ir = llvm_backend::compile_to_ir(&hir, optimization, &sources, &external, gpu.vendor)
+            .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
+            .context("Failed to generate LLVM IR")?;
         let output_path = output
             .map(Path::to_path_buf)
             .unwrap_or_else(|| input.with_extension("ll"));
@@ -668,16 +636,9 @@ fn compile_file(
         return Ok(output_path);
     }
 
-    let object_code = llvm_backend::compile(
-        &hir,
-        optimization,
-        &source,
-        &input.display().to_string(),
-        &external,
-        gpu.vendor,
-    )
-    .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
-    .context("Failed to generate object code")?;
+    let object_code = llvm_backend::compile(&hir, optimization, &sources, &external, gpu.vendor)
+        .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
+        .context("Failed to generate object code")?;
 
     // MSVC expects .obj on Windows; .o is conventional on Unix.
     log::debug!("Writing object file...");
@@ -736,8 +697,7 @@ fn gpu_functions(hir: &neuro_hir::HirProgram) -> impl Iterator<Item = &neuro_hir
 /// a kernel is the user's error, reported at its function.
 fn tensor_bodies(
     hir: &neuro_hir::HirProgram,
-    path: &Path,
-    source: Option<&str>,
+    sources: &SourceMap,
     gpu: &GpuArch,
     overflow: mlir_backend::Overflow,
 ) -> Result<Vec<llvm_backend::ExternalBodies>> {
@@ -758,7 +718,7 @@ fn tensor_bodies(
                 "internal error: no MLIR body computes the tensor operation `{}`",
                 f.name
             );
-            eprintln!("{}\n", render_diagnostic(path, source, &message, f.span));
+            eprintln!("{}\n", render_diagnostic(sources, &message, f.span));
             anyhow::bail!("a tensor operation has no MLIR lowering");
         }
     }
@@ -783,8 +743,7 @@ fn tensor_bodies(
     if cfg!(not(target_os = "linux")) {
         if without_gpu_bodies(
             hir,
-            path,
-            source,
+            sources,
             "needs a GPU, which only Linux builds reach",
             "only Linux builds reach a GPU",
         ) {
@@ -803,7 +762,7 @@ fn tensor_bodies(
             mlir_backend::MlirError::GpuBodiesNotLowered(functions) => {
                 for (name, span) in functions {
                     let message = format!("`@gpu` function '{name}' cannot become a GPU kernel");
-                    eprintln!("{}\n", render_diagnostic(path, source, &message, *span));
+                    eprintln!("{}\n", render_diagnostic(sources, &message, *span));
                 }
             }
             mlir_backend::MlirError::KernelBodiesNotLowered(refusals) => {
@@ -812,10 +771,7 @@ fn tensor_bodies(
                         "`@kernel` function '{}' cannot lower {} to the GPU",
                         refusal.function, refusal.what
                     );
-                    eprintln!(
-                        "{}\n",
-                        render_diagnostic(path, source, &message, refusal.span)
-                    );
+                    eprintln!("{}\n", render_diagnostic(sources, &message, refusal.span));
                 }
             }
             _ => {}
@@ -863,8 +819,7 @@ fn body_guards(
 /// never reach a GPU. Returns whether any function was refused.
 fn without_gpu_bodies(
     hir: &neuro_hir::HirProgram,
-    path: &Path,
-    source: Option<&str>,
+    sources: &SourceMap,
     problem: &str,
     why: &str,
 ) -> bool {
@@ -887,7 +842,7 @@ fn without_gpu_bodies(
         };
         eprintln!(
             "{}\n",
-            render_labeled(label, path, source, &message, function.span)
+            render_labeled(label, sources, &message, function.span)
         );
     }
     refused

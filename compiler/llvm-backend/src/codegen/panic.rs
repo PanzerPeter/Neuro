@@ -125,14 +125,16 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Render the ` at file:line:col` suffix for a panic diagnostic from a byte offset.
-    /// Empty when no source was supplied (e.g. the library doctest path). The column
-    /// counts characters, not bytes, matching the compile-time diagnostics `neurc`
-    /// renders, so a multi-byte character earlier on the line does not shift it.
+    /// Render the ` at file:line:col` suffix for a panic diagnostic from a byte offset in
+    /// the program's offset space, naming the file the offset falls in. Empty when no file
+    /// holds it. The column counts characters, not bytes, matching the compile-time
+    /// diagnostics `neurc` renders, so a multi-byte character earlier on the line does not
+    /// shift it.
     fn panic_location_suffix(&self, offset: usize) -> String {
-        let Some((path, text)) = &self.source else {
+        let Some((file, offset)) = self.sources.locate(offset) else {
             return String::new();
         };
+        let (path, text) = (&file.path, &file.text);
         let before = text.get(..offset).unwrap_or(text);
         let line_start = before.rfind('\n').map_or(0, |i| i + 1);
         let line = before.matches('\n').count() + 1;

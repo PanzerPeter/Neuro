@@ -24,10 +24,12 @@ logic of its own**: every decision is delegated to the owning slice. What it own
 ### Pipeline order, and why it is that order
 Both `check_file` and `compile_file` run the same front half, so neither can skip a step:
 
-1. `load_program`: module resolution plus the prelude. It hands `syntax_parsing::parse` to
+1. `load_program`: module resolution plus the prelude. It hands `syntax_parsing::parse_at` to
    `module_resolution::resolve_program` and gets back the merged item list of every module the
-   root reaches through a qualified path. The closure it hands over renders a parse error with
-   `render_parse_error`, so a syntax error prints with its line and column like a type error. The parser is **passed in rather than depended on**
+   root reaches through a qualified path. The closure it hands over adds each file to the
+   program's `SourceMap` and parses it at the base the map returns, so every span names its own
+   file (see **Source map** below). It renders a parse error with `render_parse_error`, so a
+   syntax error prints with its line and column like a type error. The parser is **passed in rather than depended on**
    because `module-resolution` may not import a feature slice; neurc is the single place the
    two meet.
 2. `argument_binding::bind_arguments`: after the merge and the prelude, before type checking.
@@ -122,7 +124,8 @@ handed to the backend.
 module carries the linked MLIR bodies exactly as an executable does.
 
 ### The prelude
-`prelude::load()` parses `prelude.nr` once into a `Prelude` value that answers two questions:
+`prelude::load(sources)` adds `prelude.nr` to the source map as `<prelude>` and parses it once at its
+base into a `Prelude` value that answers two questions:
 `variants()`, every variant of the enums it declares except those in `QUALIFIED_ENUMS`
 (`ParseError`, whose `Empty` and `Invalid` are too plain to take from every module), handed to
 `module_resolution::resolve_program` so each module may write `Some` / `Ok` bare, and
@@ -195,9 +198,17 @@ same one). The step width follows from the decoded scalar's own magnitude, so a 
 text once. `.chars()` fills the fields in: the lowering builds the struct literal, and the fields
 stay private so nothing else can.
 
+### Source map
+Every file of a program, the prelude first as `<prelude>`, is added to one
+`shared_types::SourceMap` before it is parsed, and parsed at the base the map returns. Files sit
+end to end in one offset space, so a span alone says which file it indexes. A module is named
+by joining the resolver's display path to the root's directory as written on the command line:
+the root keeps its own spelling, every other module reads as a path from the working directory.
+The map is what every diagnostic below and the backend's panic locations resolve against.
+
 ### Diagnostic rendering
-`render_diagnostic` resolves a type error's span against the source and prints the file, the
-line, the column, the offending line and a caret run under the span. A `TypeError`'s own
+`render_diagnostic` resolves a type error's span through the source map and prints the file the
+span falls in, the line, the column, the offending line and a caret run under the span. A `TypeError`'s own
 `Display` carries no location any more: byte offsets are an internal representation, and
 `TypeError::span()` is what the driver renders instead. A use-after-move carries a second
 span and gets a `note: moved here` under the error, rendered by the same helper.
@@ -218,9 +229,7 @@ checker escape with no location and keeps the plain `HIR lowering error:` line.
 The column counts characters, not bytes: a caret placed at a byte column drifts off the text
 it underlines as soon as the line holds a multi-byte character.
 
-A program with more than one module prints the message alone. Spans share one space across
-merged modules (see the panic-location note below), so a span raised by an imported module
-resolved against the root file would point confidently at the wrong line.
+A span no file holds, or one that runs past its file, prints the message alone.
 
 ### Remaining pipeline facts
 `main` parses the command line, then runs the pipeline on a thread with a 256 MiB stack
@@ -229,12 +238,12 @@ resolved against the root file would point confidently at the wrong line.
 overflowed the 8 MiB main stack at about 5000 operands. A panic on that thread exits with 101.
 
 Lint warnings from `type_check` are forwarded to stderr by `print_warnings` in both entry
-points. Warnings never cause a non-zero exit: they are informational and may be silenced with
+points, rendered by `render_labeled` under a `warning[<code>]` label, at a location like an
+error's. Warnings never cause a non-zero exit: they are informational and may be silenced with
 `@allow(...)` on the enclosing function.
 
-The backend is handed the *root* file's source for panic-location rendering. Merged modules
-share one span space, the same approximation the prepended prelude has always had, so a panic
-diagnostic from a non-root module reports a position in the root file's coordinates.
+The backend is handed the whole source map for panic-location rendering, so a panic in any
+module, or in a prelude body, names the file it is written in.
 
 The two-step linker strategy (`cc` on Unix; clang, then lld-link, then cl.exe on Windows) is
 required because LLVM object files need a platform linker driver to attach the C runtime startup

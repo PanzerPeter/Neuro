@@ -133,7 +133,6 @@ Reads `.nr` files from disk; writes nothing.
   `val` / `var`, pattern and loop bindings, closure parameters, generic parameters) and offers no
   name whose head is one. Discovery and rewriting are the same traversal with different
   callbacks, so a new position cannot be handled by one and forgotten by the other.
-- Spans stay per-file, so merged modules share one offset space, exactly as the driver's
-  prepended prelude already does: a panic diagnostic from a non-root module reports a position
-  in the root file's coordinates, and a compile-time error in a program of more than one module
-  prints no location. Per-file attribution needs a multi-source span contract.
+- Spans are never touched here. The injected parser parses each file at its own base in the
+  program's one offset space, so a span from any module already names its file; this slice
+  only moves items between lists.

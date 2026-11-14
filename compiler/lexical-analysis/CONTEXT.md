@@ -9,6 +9,12 @@ Transform raw Neuro source text into a validated token stream as the first stage
 - Output: `Result<Vec<Token>, LexError>`, also exported as the alias `LexResult<Vec<Token>>`
 
 `LexError::span()` gives the range every variant carries, so a caller can render a location.
+The messages carry no position, since the rendered location already gives the line and column.
+
+`tokenize_at(source, base)` is the same tokenizer for the file that starts `base` bytes into a
+program's offset space (`shared_types::SourceMap`): every token span, every interpolation
+hole's span and the error's span move by `base`, so they name that file. The parser re-lexes a
+hole's text through it too, at the hole's own start.
 
 ## Shared Kernel
 - shared-types: `Span` for the byte range on every token, plus `IntSuffix` / `FloatSuffix`

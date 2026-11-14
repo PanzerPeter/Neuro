@@ -5,8 +5,8 @@ Emit native object code, or the textual LLVM module behind it, from the typed Ne
 
 ## Entry Point
 - Type: Library function
-- Input: `program: &neuro_hir::HirProgram, optimization: OptimizationLevelSetting, source: &str,
-  source_path: &str, external: &[ExternalBodies], gpu: GpuVendor`
+- Input: `program: &neuro_hir::HirProgram, optimization: OptimizationLevelSetting,
+  sources: &shared_types::SourceMap, external: &[ExternalBodies], gpu: GpuVendor`
 - Output: `Result<Vec<u8>, CodegenError>` from `compile`, or `Result<String, CodegenError>`
   from `compile_to_ir`, which prints the module instead of selecting instructions. `CodegenResult<T>`
   is the exported alias for `Result<T, CodegenError>`
@@ -34,9 +34,10 @@ an empty one and links nothing.
 GPU runtime linked (see below) and the DLPack device type a device tensor reports, and changes
 nothing in a program that never reaches a GPU.
 
-`source` / `source_path` are the original module text and path, kept solely to render
-`file:line:col` in panic-family runtime diagnostics. The column counts characters, as
-`neurc`'s compile-time diagnostics do. They affect nothing else.
+`sources` holds every file of the program in the one offset space its spans share, kept solely
+to render `file:line:col` in panic-family runtime diagnostics: a span resolves to the file it
+falls in, a module's or the prelude's. The column counts characters, as `neurc`'s compile-time
+diagnostics do. It affects nothing else.
 
 `optimization` selects two independent things. It picks the `TargetMachine`'s level, which
 governs instruction selection and register allocation; and it picks the LLVM IR pass

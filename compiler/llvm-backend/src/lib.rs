@@ -13,6 +13,7 @@ pub use errors::{CodegenError, CodegenResult};
 use inkwell::OptimizationLevel as LlvmOptimizationLevel;
 use inkwell::context::Context as LLVMContext;
 use neuro_hir::{HirConst, HirItem, HirProgram, HirSelfParam, HirTarget};
+use shared_types::SourceMap;
 use std::collections::HashMap;
 use types::Type;
 
@@ -127,8 +128,8 @@ pub enum GpuVendor {
 /// # Arguments
 ///
 /// * `optimization` - Optimization level (also selects overflow trapping at -O0)
-/// * `source` / `source_path` - Original module text and path, used only to render
-///   `file:line:col` in panic-family runtime diagnostics
+/// * `sources` - Every file of the program, used only to render `file:line:col` in
+///   panic-family runtime diagnostics
 /// * `external` - Bodies another backend computed, linked in place of this one's; each
 ///   set names where its buffers live, and a function may appear in at most one
 /// * `gpu` - The GPU `external`'s device bodies were built for, and device tensors live on
@@ -139,33 +140,27 @@ pub enum GpuVendor {
 /// use syntax_parsing::parse;
 /// use hir_lowering::lower_program;
 /// use llvm_backend::{compile, GpuVendor, OptimizationLevelSetting};
+/// use shared_types::SourceMap;
 ///
 /// let source = "func add(a: i32, b: i32) -> i32 { return a + b }";
-/// let ast = parse(source).unwrap();
+/// let mut sources = SourceMap::default();
+/// let base = sources.add("example.nr".to_string(), source.to_string());
+/// let ast = syntax_parsing::parse_at(source, base).unwrap();
 /// let hir = lower_program(&ast).unwrap();
 /// let object_code =
-///     compile(&hir, OptimizationLevelSetting::O2, source, "example.nr", &[], GpuVendor::Nvidia)
+///     compile(&hir, OptimizationLevelSetting::O2, &sources, &[], GpuVendor::Nvidia)
 ///         .unwrap();
 /// // Write object_code to file or link to executable
 /// ```
 pub fn compile(
     program: &HirProgram,
     optimization: OptimizationLevelSetting,
-    source: &str,
-    source_path: &str,
+    sources: &SourceMap,
     external: &[ExternalBodies],
     gpu: GpuVendor,
 ) -> CodegenResult<Vec<u8>> {
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(
-        &context,
-        program,
-        optimization,
-        source,
-        source_path,
-        external,
-        gpu,
-    )?;
+    let codegen_ctx = build_module(&context, program, optimization, sources, external, gpu)?;
     emit_object_code(&codegen_ctx, optimization)
 }
 
@@ -178,21 +173,12 @@ pub fn compile(
 pub fn compile_to_ir(
     program: &HirProgram,
     optimization: OptimizationLevelSetting,
-    source: &str,
-    source_path: &str,
+    sources: &SourceMap,
     external: &[ExternalBodies],
     gpu: GpuVendor,
 ) -> CodegenResult<String> {
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(
-        &context,
-        program,
-        optimization,
-        source,
-        source_path,
-        external,
-        gpu,
-    )?;
+    let codegen_ctx = build_module(&context, program, optimization, sources, external, gpu)?;
     // The target machine is built for its data layout and triple as much as for the
     // passes: IR without them is re-interpreted against the consumer's defaults.
     let (target_machine, target_triple) = host_target_machine(optimization)?;
@@ -208,8 +194,7 @@ fn build_module<'ctx>(
     context: &'ctx LLVMContext,
     program: &HirProgram,
     optimization: OptimizationLevelSetting,
-    source: &str,
-    source_path: &str,
+    sources: &SourceMap,
     external: &[ExternalBodies],
     gpu: GpuVendor,
 ) -> CodegenResult<CodegenContext<'ctx>> {
@@ -406,7 +391,7 @@ fn build_module<'ctx>(
 
     // Supply source so panic-family builtins can render `file:line:col` in their
     // runtime diagnostics.
-    codegen_ctx.set_source(source_path.to_string(), source.to_string());
+    codegen_ctx.sources = sources.clone();
 
     // Debug builds (-O0) trap on integer overflow; release builds wrap.
     codegen_ctx.set_overflow_checks(optimization == OptimizationLevelSetting::O0);

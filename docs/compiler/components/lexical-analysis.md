@@ -70,15 +70,15 @@ Every lexical failure is a `LexError` carrying the `Span` of the offending text,
 
 | Source | Message |
 |---|---|
-| `"abc` with no closing quote on its line | `error: lexical error: unterminated string literal starting at position N` |
-| `/*` never closed | `unterminated block comment starting at position N` |
-| `"v {x"` | `interpolation hole opened with `{` is never closed at position N: add the matching `}` ...` |
-| `"a } b"` | `unescaped `}` at position N is outside an interpolation hole: write `\}` ...` |
-| `"bad \q"` | `invalid escape sequence '\q' at position N` |
-| `$` outside any token | `unexpected character '$' at position N` |
-| A closing `"""` that shares its line with other text | `closing `"""` at position N must be on its own line ...` |
+| `"abc` with no closing quote on its line | `error: lexical error: unterminated string literal` |
+| `/*` never closed | `unterminated block comment` |
+| `"v {x"` | `interpolation hole opened with `{` is never closed: add the matching `}` ...` |
+| `"a } b"` | `unescaped `}` is outside an interpolation hole: write `\}` ...` |
+| `"bad \q"` | `invalid escape sequence '\q'` |
+| `$` outside any token | `unexpected character '$'` |
+| A closing `"""` that shares its line with other text | `closing `"""` must be on its own line ...` |
 
-Positions are byte offsets into the file. The lexer stops at the first error, and error recovery is on the [Quick Roadmap](../../../README.md#quick-roadmap).
+The messages carry no position, since the rendered location already gives the line and column. Spans are byte offsets into the program's one offset space, which places each file at its own base. The lexer stops at the first error, and error recovery is on the [Quick Roadmap](../../../README.md#quick-roadmap).
 
 ## Testing
 

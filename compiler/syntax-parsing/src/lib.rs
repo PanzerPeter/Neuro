@@ -1,5 +1,5 @@
 // Feature slice for AST generation and syntax analysis.
-// Public API: the `parse()` and `parse_expr()` entry points.
+// Public API: the `parse()`, `parse_at()` and `parse_expr()` entry points.
 
 mod errors;
 mod parser;
@@ -17,7 +17,7 @@ pub use ast_types::{
 };
 pub use errors::{ParseError, ParseResult};
 
-use lexical_analysis::tokenize;
+use lexical_analysis::{tokenize, tokenize_at};
 use parser::Parser;
 use precedence::Precedence;
 
@@ -45,7 +45,14 @@ use precedence::Precedence;
 /// }
 /// ```
 pub fn parse(source: &str) -> ParseResult<Vec<Item>> {
-    let tokens = tokenize(source)?;
+    parse_at(source, 0)
+}
+
+/// Parse one file of a multi-file program, whose text starts `base` bytes into the
+/// program's offset space (see `shared_types::SourceMap`), so every span in the result
+/// and in any error names this file.
+pub fn parse_at(source: &str, base: usize) -> ParseResult<Vec<Item>> {
+    let tokens = tokenize_at(source, base)?;
     let mut parser = Parser::new(tokens);
     parser.parse_program()
 }

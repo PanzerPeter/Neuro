@@ -8,6 +8,10 @@ Transform a Neuro token stream into a typed Abstract Syntax Tree for later compi
 - Input: `source: &str`
 - Output: `Result<Vec<Item>, ParseError>`
 
+`parse_at(source, base)` parses one file of a multi-file program at its base in the program's
+offset space (`shared_types::SourceMap`), through `tokenize_at`, so every span in the items and
+in an error names that file. `parse(source)` is `parse_at(source, 0)`.
+
 `ParseError::span()` gives the range an error points at, `None` for `UnexpectedEof` and
 `MaxDepthExceeded`, which have no token to point at. A wrapped `LexError` answers with its own.
 

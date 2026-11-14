@@ -53,14 +53,15 @@ fn bench_codegen(c: &mut Criterion) {
         let source = build_source(case);
         let ast = syntax_parsing::parse(source).expect("benchmark source must parse");
         let hir = hir_lowering::lower_program(&ast).expect("benchmark source must lower");
+        let mut sources = shared_types::SourceMap::default();
+        sources.add("bench.nr".to_string(), source.to_string());
 
         group.bench_with_input(BenchmarkId::new("compile", case), &hir, |b, program| {
             b.iter(|| {
                 let result = compile(
                     program,
                     OptimizationLevelSetting::O2,
-                    source,
-                    "bench.nr",
+                    &sources,
                     &[],
                     GpuVendor::Nvidia,
                 );

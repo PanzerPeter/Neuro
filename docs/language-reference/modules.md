@@ -328,9 +328,8 @@ reach it.
 A root file that declares a name the prelude also declares, such as its own `Result`, replaces the
 prelude's for the whole program.
 
-Diagnostics do not yet name the file they come from. A compile-time error in a program of more than one
-module prints no location, and a panic in a module other than the root reports a position in the root
-file's coordinates.
+A compile-time error or a runtime panic names the file it comes from, with its line and column, in
+whichever module it was raised. A panic inside a prelude body names `<prelude>`.
 
 ## See also
 

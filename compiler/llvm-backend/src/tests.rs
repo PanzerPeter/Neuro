@@ -52,6 +52,13 @@ fn host_bodies(
     }]
 }
 
+/// A program of one file, `text`, named `path` in its panic locations.
+pub(crate) fn source_map(path: &str, text: &str) -> shared_types::SourceMap {
+    let mut sources = shared_types::SourceMap::default();
+    sources.add(path.to_string(), text.to_string());
+    sources
+}
+
 /// Compile `source` to LLVM IR text, for the tests that assert on module structure
 /// rather than on the opaque object code `compile` returns.
 fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
@@ -62,8 +69,7 @@ fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
         &context,
         &hir,
         optimization,
-        source,
-        "outlining.nr",
+        &source_map("outlining.nr", source),
         &external,
         GpuVendor::Nvidia,
     )
@@ -82,8 +88,7 @@ fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String 
         &context,
         &hir,
         optimization,
-        source,
-        "optimized.nr",
+        &source_map("optimized.nr", source),
         &external,
         GpuVendor::Nvidia,
     )
@@ -1352,8 +1357,7 @@ fn a_constant_shift_is_bounded_by_its_operand_width() {
             &context,
             &hir,
             OptimizationLevelSetting::O0,
-            source,
-            "const_shift.nr",
+            &source_map("const_shift.nr", source),
             &[],
             GpuVendor::Nvidia,
         )
@@ -1432,8 +1436,7 @@ fn test_compile_simple_function() {
     let result = compile(
         &hir,
         OptimizationLevelSetting::O0,
-        source,
-        "test.nr",
+        &source_map("test.nr", source),
         &[],
         GpuVendor::Nvidia,
     );
@@ -1460,8 +1463,7 @@ fn test_compile_milestone_program() {
     let result = compile(
         &hir,
         OptimizationLevelSetting::O2,
-        source,
-        "test.nr",
+        &source_map("test.nr", source),
         &[],
         GpuVendor::Nvidia,
     );
@@ -1488,8 +1490,7 @@ fn test_overflow_checks_emit_valid_ir_at_o0() {
     let result = compile(
         &hir,
         OptimizationLevelSetting::O0,
-        source,
-        "test.nr",
+        &source_map("test.nr", source),
         &[],
         GpuVendor::Nvidia,
     );
@@ -1517,8 +1518,7 @@ fn test_overflow_wraps_emit_valid_ir_at_o2() {
     let result = compile(
         &hir,
         OptimizationLevelSetting::O2,
-        source,
-        "test.nr",
+        &source_map("test.nr", source),
         &[],
         GpuVendor::Nvidia,
     );

@@ -49,7 +49,7 @@ Compilation failed: Type checking failed
   Caused by (1): 1 type error(s) found
 ```
 
-`compile` and `run` print the failing stage's error chain: `Compilation failed:` (or `Run failed:`) followed by one `Caused by` line per cause. `check` prints only the top message, as `Error: <message>`. A program with more than one module prints its messages without a source line, because spans from merged modules share one offset space (see [Module Resolution](components/module-resolution.md#flat-namespace)). Lint warnings go to stderr and never change the exit status.
+`compile` and `run` print the failing stage's error chain: `Compilation failed:` (or `Run failed:`) followed by one `Caused by` line per cause. `check` prints only the top message, as `Error: <message>`. A diagnostic names the file it was raised in, whichever module that is (see [Module Resolution](components/module-resolution.md#spans)). Lint warnings go to stderr in the same shape and never change the exit status.
 
 | Command | Status | Meaning |
 |---|---|---|
@@ -90,8 +90,7 @@ The compiler needs LLVM 23 and MLIR, with the `LLVM_SYS_231_PREFIX`, `MLIR_SYS_2
 ## Known Limitations
 
 1. **Debug information**: no DWARF or PDB output, and no `-g` flag. It is on the [Quick Roadmap](../../README.md#quick-roadmap).
-2. **Diagnostics in multi-module programs**: spans index their own file, and the driver cannot yet tell which one. A compile error in a program of more than one module prints no location, and a panic in a module other than the root reports a position in the root file's coordinates.
-3. **System toolchain required**: linking needs `cc` on Unix, or clang, `lld-link` or MSVC on Windows. No linker is bundled.
+2. **System toolchain required**: linking needs `cc` on Unix, or clang, `lld-link` or MSVC on Windows. No linker is bundled.
 
 ## Source
 

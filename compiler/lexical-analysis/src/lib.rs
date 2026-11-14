@@ -1,9 +1,10 @@
 // Feature slice for tokenization and lexical processing.
-// Public API: `tokenize()`.
+// Public API: `tokenize()`, `tokenize_at()`.
 
 mod errors;
 mod tokens;
 
+use errors::shift;
 pub use errors::{LexError, LexResult};
 pub use tokens::{
     FloatSuffixToken, IntegerSuffixToken, InterpChunk, StringValue, Token, TokenKind,
@@ -79,6 +80,27 @@ pub fn tokenize(source: &str) -> LexResult<Vec<Token>> {
     let eof_span = Span::new(source.len(), source.len());
     tokens.push(Token::new(TokenKind::Eof, eof_span));
 
+    Ok(tokens)
+}
+
+/// Tokenize `source` as the text that starts `base` bytes into a program's offset space,
+/// so every token and error span, an interpolation hole's included, names this text
+/// and not another file's.
+pub fn tokenize_at(source: &str, base: usize) -> LexResult<Vec<Token>> {
+    let mut tokens = tokenize(source).map_err(|error| error.shifted(base))?;
+    if base == 0 {
+        return Ok(tokens);
+    }
+    for token in &mut tokens {
+        token.span = shift(token.span, base);
+        if let TokenKind::String(StringValue::Interp(chunks)) = &mut token.kind {
+            for chunk in chunks {
+                if let InterpChunk::Hole { span, .. } = chunk {
+                    *span = shift(*span, base);
+                }
+            }
+        }
+    }
     Ok(tokens)
 }
 

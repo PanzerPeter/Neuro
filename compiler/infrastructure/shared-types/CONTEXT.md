@@ -5,7 +5,7 @@ Provide the lightweight, zero-business-logic data structures used universally ac
 
 ## Entry Point
 - Type: Library (no entry function: pure data)
-- Public types: `Span`, `Identifier`, `Literal`, `IntSuffix`, `FloatSuffix`, `FormatSpec`,
+- Public types: `Span`, `SourceMap`, `SourceFile`, `Identifier`, `Literal`, `IntSuffix`, `FloatSuffix`, `FormatSpec`,
   `FormatAlign`, `FormatKind`
 - Constants: `MAX_FORMAT_WIDTH`, `MAX_FORMAT_PRECISION`
 
@@ -15,6 +15,11 @@ None. This is the lowest-level crate in the workspace.
 ## Notes
 `Span` is a half-open byte-offset range `[start, end)` carried by every token and AST node, so
 a diagnostic can point at exact source. `Identifier` pairs a `String` name with a `Span`.
+
+`SourceMap` lays a program's files end to end in one offset space, one byte apart, so a `Span`
+alone names its file without carrying one: `add` returns the base a file is parsed at, and
+`locate` maps an offset back to its file and the offset within it. A file's end-of-input offset
+belongs to it; the separating byte belongs to no file.
 
 `Literal` enumerates every compile-time constant kind. Three of them carry an **optional**
 suffix, and `None` vs `Some` is the whole inference contract:

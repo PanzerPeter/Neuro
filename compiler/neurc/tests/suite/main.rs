@@ -132,6 +132,7 @@ mod self_type;
 mod shape_generics;
 mod short_circuit_runtime;
 mod slices;
+mod source_spans;
 mod statement_boundaries;
 mod string_builder;
 mod string_concat;

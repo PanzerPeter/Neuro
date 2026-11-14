@@ -85,7 +85,7 @@ The prelude's variants (`Some`, `None`, `Ok`, `Err`) are looked up after every s
 
 ### Spans
 
-Spans are not per module. Modules share one offset space, the same approximation the prepended prelude already makes. A runtime panic in a non-root module therefore reports the root file's coordinates. A compile-time error in a program of more than one module prints its message with no location, because a span from another module would point at the wrong line of the root file.
+This slice never touches a span. The driver adds each file to the program's source map before parsing it and parses it at the base the map returns, so every file, the prelude included, has its own range in one offset space. A span from any module therefore names its own file, and a compile-time error or a runtime panic reports that file's line and column.
 
 ## Diagnostics
 

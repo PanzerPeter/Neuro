@@ -56,37 +56,6 @@ conforms. It also makes an entry that only a slice's own tests call `pub(crate)`
 `architecture_tests.rs`. The driver-facing pairs (`compile` and `compile_to_ir`, `lower_for_link`
 and `lower_for_gpu`) stay public and are already named in their slices' CONTEXT.md.
 
-## BUG-155: a panic in a standard-library body or an imported module reports a position in the program's file
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`, panic locations
-- **Severity**: minor. The message is right and the program aborts as it should, but the location
-  points at the wrong file
-
-**Minimal repro**
-
-```neuro
-func main() -> i32 {
-    val z = 0.0
-    val o = OrderedF64::new(z / z)
-    0
-}
-```
-
-Expected: a location naming the `new` call, or the standard library's own source. Observed:
-`panic: OrderedF64 cannot hold NaN at main.nr:6:1`, a line past the end of a five-line file. A
-standard-library body's spans are offsets into its own embedded source, and the panic location
-reads them against the program's file. A zero stride passed to a range value's `.step(n)` at run
-time reports the same kind of position, and so does a `panic` in any imported module of a
-multi-file program: a `Span` is a pair of byte offsets with no file, and the merged program has
-no way to say which file one indexes.
-
-**Workaround**: none. The message text still names the cause.
-
-**Fix sketch**: give a span the module it belongs to, which the hierarchical module namespaces
-on the roadmap need anyway, and resolve the panic location against that module's source. A
-narrower stopgap reports a standard-library panic at the call site that entered it.
-
 ## BUG-152: a method returning its own type nested in itself does not compile
 
 - **Status**: open, confirmed. Narrowed: the checker now stops the chain at 128 nested instances

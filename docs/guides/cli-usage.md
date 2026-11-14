@@ -134,7 +134,7 @@ Division by zero panics at every level. For the speed of the programs `neurc` pr
 
 ## Diagnostics
 
-Every diagnostic that names a location has the same shape: the message, ` --> file:line:column`, the source line and a caret under the span. The column counts characters. A program spread over several modules prints the message without a location, because a span from an imported module cannot be resolved against the root file. The examples of each kind of error are in [Troubleshooting](troubleshooting.md#compilation-errors).
+Every diagnostic that names a location has the same shape: the message, ` --> file:line:column`, the source line and a caret under the span. The column counts characters. The file is the one the span is in, so an error in an imported module names that module. A lint warning has the same shape under a `warning[<lint>]` label. The examples of each kind of error are in [Troubleshooting](troubleshooting.md#compilation-errors).
 
 - Parse errors stop at the first one and end with `Parsing failed`.
 - Type errors are all reported, then `N type error(s) found`. A use-after-move adds a `note: moved here` line.

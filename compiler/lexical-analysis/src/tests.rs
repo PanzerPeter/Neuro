@@ -1161,3 +1161,27 @@ fn regression_chained_tuple_index_lexes_as_two_indices() {
     assert!(matches!(kinds[7], TokenKind::Float(f) if (f - 0.5).abs() < 1e-10));
     assert!(matches!(kinds[10], TokenKind::Float(_)));
 }
+
+/// Every span `tokenize_at` hands back, an interpolation hole's and an error's included,
+/// is the one `tokenize` gives moved by the base.
+#[test]
+fn tokenize_at_moves_every_span_by_its_base() {
+    let source = "val s = \"n={n}\"";
+    let local = tokenize(source).unwrap();
+    let moved = tokenize_at(source, 100).unwrap();
+    assert_eq!(local.len(), moved.len());
+    for (a, b) in local.iter().zip(&moved) {
+        assert_eq!(
+            (a.span.start + 100, a.span.end + 100),
+            (b.span.start, b.span.end)
+        );
+    }
+    let hole = |tokens: &[Token]| match &interp_chunks(&tokens[3].kind)[1] {
+        InterpChunk::Hole { span, .. } => *span,
+        other => panic!("expected a hole, found {other:?}"),
+    };
+    assert_eq!(hole(&moved).start, hole(&local).start + 100);
+
+    let error = tokenize_at("val $", 100).unwrap_err();
+    assert_eq!(error.span(), Span::new(104, 105));
+}

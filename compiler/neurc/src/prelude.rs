@@ -13,11 +13,16 @@
 use anyhow::{Result, anyhow};
 use ast_types::PRELUDE_MODULE;
 use module_resolution::PreludeVariant;
+use shared_types::SourceMap;
 use syntax_parsing::Item;
 
 /// The prelude in Neuro source form, so the declarations read exactly as a user would
 /// write them and stay in one place as more items join them.
 const PRELUDE_SOURCE: &str = include_str!("prelude.nr");
+
+/// What a diagnostic or a panic location calls the prelude. It is no file on disk, so
+/// the name is one no program file can have.
+const PRELUDE_PATH: &str = "<prelude>";
 
 /// Prelude enums whose variants are written with the enum's name, so a module's bare names
 /// stay its own.
@@ -30,14 +35,16 @@ pub struct Prelude {
     variants: Vec<PreludeVariant>,
 }
 
-/// Parse the prelude.
+/// Parse the prelude as a file of `sources`, so a panic in one of its bodies is located
+/// in the prelude rather than in the program's own files.
 ///
 /// # Errors
 ///
 /// Returns an error if the prelude source itself fails to parse, which is a compiler
 /// bug rather than a fault in the program being compiled.
-pub fn load() -> Result<Prelude> {
-    let items = syntax_parsing::parse(PRELUDE_SOURCE).map_err(|e| {
+pub fn load(sources: &mut SourceMap) -> Result<Prelude> {
+    let base = sources.add(PRELUDE_PATH.to_string(), PRELUDE_SOURCE.to_string());
+    let items = syntax_parsing::parse_at(PRELUDE_SOURCE, base).map_err(|e| {
         anyhow!(
             "internal error: the compiler prelude failed to parse: {}",
             e
@@ -192,7 +199,7 @@ mod tests {
 
     #[test]
     fn binds_every_unqualified_prelude_enum_variant() {
-        let prelude = load().expect("the prelude parses");
+        let prelude = load(&mut SourceMap::default()).expect("the prelude parses");
         let bound: Vec<String> = prelude
             .variants()
             .iter()
@@ -208,7 +215,9 @@ mod tests {
     #[test]
     fn a_local_declaration_replaces_the_prelude_one() {
         let program = syntax_parsing::parse("enum Option { Nothing }").expect("program parses");
-        let combined = load().expect("the prelude parses").prepend(program);
+        let combined = load(&mut SourceMap::default())
+            .expect("the prelude parses")
+            .prepend(program);
         let options = combined
             .iter()
             .filter(|item| matches!(item, Item::Enum(def) if def.name.name == "Option"))
@@ -221,7 +230,9 @@ mod tests {
     #[test]
     fn shadowing_one_fallible_enum_withdraws_only_the_conversion_into_it() {
         let program = syntax_parsing::parse("enum Result { Fine }").expect("program parses");
-        let combined = load().expect("the prelude parses").prepend(program);
+        let combined = load(&mut SourceMap::default())
+            .expect("the prelude parses")
+            .prepend(program);
         let option_methods: Vec<&str> = combined
             .iter()
             .filter_map(|item| match item {
@@ -239,7 +250,9 @@ mod tests {
     #[test]
     fn a_program_step_withdraws_only_the_range_strides() {
         let program = syntax_parsing::parse("struct Step { n: i32 }").expect("program parses");
-        let combined = load().expect("the prelude parses").prepend(program);
+        let combined = load(&mut SourceMap::default())
+            .expect("the prelude parses")
+            .prepend(program);
         let methods = |owner: &str| -> Vec<String> {
             combined
                 .iter()
@@ -262,7 +275,9 @@ mod tests {
     #[test]
     fn shadowing_a_prelude_name_withdraws_what_depends_on_it() {
         let program = syntax_parsing::parse("enum Option { Nothing }").expect("program parses");
-        let combined = load().expect("the prelude parses").prepend(program);
+        let combined = load(&mut SourceMap::default())
+            .expect("the prelude parses")
+            .prepend(program);
         assert!(
             !combined
                 .iter()

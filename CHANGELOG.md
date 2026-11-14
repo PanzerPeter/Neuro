@@ -10,6 +10,26 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.40.0] - 2026-11-14
+
+### Added
+
+- A diagnostic in a program of several modules names the file it was raised in, with its line,
+  column, source line and caret. Type, parse, lexical, named-argument and `@grad` errors in an
+  imported module used to print their message with no location.
+- A run-time panic, a failed `assert` or a checked-arithmetic, index or range-step trap reports
+  the file, line and column of the module it is written in. One raised in an imported module
+  used to report a position in the root file's coordinates, and one raised inside a prelude body
+  (`OrderedF64::new` on NaN, a zero `.step(n)` on a range value) a line past the end of the
+  program's file. A prelude body is now named `<prelude>` (BUG-155).
+
+### Changed
+
+- A lint warning is printed like an error: `warning[<lint>]: <message>`, then the file, line,
+  column, source line and a caret. It used to print a byte range (`at 23..27`).
+- A lexical error's message no longer repeats its byte position (`at position N`): the rendered
+  location below it already gives the line and column.
+
 ## [5.39.6] - 2026-11-12
 
 ### Changed

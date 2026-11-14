@@ -63,6 +63,60 @@ impl Span {
     }
 }
 
+/// Every source file of one program, laid end to end in a single offset space, so a
+/// [`Span`] alone says which file it indexes.
+///
+/// A file is added before it is parsed and parsed at the base [`SourceMap::add`]
+/// returns. One byte separates consecutive files, so a span at a file's end of input
+/// still belongs to that file rather than to the next one.
+///
+/// # Examples
+///
+/// ```
+/// use shared_types::SourceMap;
+///
+/// let mut map = SourceMap::default();
+/// assert_eq!(map.add("a.nr".into(), "abc".into()), 0);
+/// let base = map.add("b.nr".into(), "xyz".into());
+/// let (file, local) = map.locate(base + 1).unwrap();
+/// assert_eq!((file.path.as_str(), local), ("b.nr", 1));
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct SourceMap {
+    files: Vec<SourceFile>,
+}
+
+/// One file of a [`SourceMap`]: the name a diagnostic gives it and its text.
+#[derive(Debug, Clone)]
+pub struct SourceFile {
+    pub path: String,
+    pub text: String,
+    base: usize,
+}
+
+impl SourceMap {
+    /// Add a file and return the offset its first byte takes in the program.
+    pub fn add(&mut self, path: String, text: String) -> usize {
+        let base = self
+            .files
+            .last()
+            .map_or(0, |file| file.base + file.text.len() + 1);
+        self.files.push(SourceFile { path, text, base });
+        base
+    }
+
+    /// The file `offset` falls in, and the offset within that file's text.
+    pub fn locate(&self, offset: usize) -> Option<(&SourceFile, usize)> {
+        let index = self
+            .files
+            .partition_point(|file| file.base <= offset)
+            .checked_sub(1)?;
+        let file = &self.files[index];
+        let local = offset - file.base;
+        (local <= file.text.len()).then_some((file, local))
+    }
+}
+
 /// Identifier representation with source location.
 ///
 /// Used for variable names, function names, and other user-defined identifiers
@@ -218,6 +272,27 @@ pub enum Literal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file owns its end-of-input offset, the separating byte belongs to no file, and
+    /// the next file starts after it.
+    #[test]
+    fn source_map_locates_each_file_up_to_its_end() {
+        let mut map = SourceMap::default();
+        assert_eq!(map.add("a".into(), "abc".into()), 0);
+        assert_eq!(map.add("b".into(), "".into()), 4);
+        assert_eq!(map.add("c".into(), "xy".into()), 5);
+        let at = |offset| {
+            map.locate(offset)
+                .map(|(file, local)| (file.path.as_str(), local))
+        };
+        assert_eq!(at(0), Some(("a", 0)));
+        assert_eq!(at(3), Some(("a", 3)));
+        assert_eq!(at(4), Some(("b", 0)));
+        assert_eq!(at(5), Some(("c", 0)));
+        assert_eq!(at(7), Some(("c", 2)));
+        assert_eq!(at(8), None);
+        assert!(SourceMap::default().locate(0).is_none());
+    }
 
     #[test]
     fn span_merge_works() {
