@@ -251,7 +251,7 @@ buffer. Neither the type checker (which scopes correctly, and rejects the name a
 block) nor the LLVM verifier could see it: at equal types the IR is well formed.
 
 `codegen_var_decl` calls `bind_name` only after the initializer's source has been read and
-disowned (`mark_moved_for_drop` and the string-flag loads). A declaration may shadow a name in
+disowned (`mark_moved_for_drop`). A declaration may shadow a name in
 its own block, and `val x = x` must disown the `x` it shadows; bound first, the name would
 resolve to the new slot, nothing would be disowned, and both slots would release one buffer.
 
@@ -261,8 +261,10 @@ directly rather than through a frame, because their scope is an arm rather than 
 
 ## String ABI
 `string` = anonymous LLVM struct `{ ptr, i64 }`:
-- field 0 (`ptr`): pointer to null-terminated UTF-8 bytes in `.rodata`
-- field 1 (`i64`): byte count **excluding** the null terminator
+- field 0 (`ptr`): the UTF-8 bytes, in `.rodata` for a literal or a heap buffer for an
+  allocation
+- field 1 (`i64`): the byte count **excluding** any null terminator, with the **owner bit** in
+  bit 63: set when the value owns its buffer, clear for a literal and a view
 
 Literals are emitted to `.rodata`, never heap-allocated; the appended NUL
 (`STRING_NULL_TERMINATOR` in `literals.rs`) exists only for C-string FFI validity. `len` is
@@ -323,181 +325,48 @@ the `len` contract). The frontend types the result as owned `String` even when a
 `&string`, so the value is never a reference.
 
 ### Heap-string ownership
-The fat pointer describes a `.rodata` literal and a `malloc`'d buffer identically, so ownership
-cannot be read off a value at runtime. It is decided at compile time instead, by
-`produces_owned_string` (`drops/owned_strings.rs`): an expression owns its buffer only if it is an
-`InterpString`, a `+` yielding `string`, `StringBuilder::to_string`, a `string.clone()`, or a call to a function
-`codegen/string_ownership.rs` proved allocates on every return path. Everything else (a literal,
-a variable, a `slice`) answers `false` and is never freed. The asymmetry is deliberate: a missed
-`true` leaks a buffer, a wrong `true` hands `.rodata` to `free`.
+Ownership is read off the value at run time (`drops/owned_strings.rs`). Every producer that
+allocates sets the owner bit (`build_owned_string_value`): `+`, an interpolation,
+`StringBuilder::to_string` and `string.clone()` (`copy_string_bytes`). A literal, a `.slice` /
+`.char_slice` result and a borrow have it clear: `codegen_reference` and `slot_borrow` hand out
+`string_view`, the same fat pointer with the bit masked off. Every reader of the length goes
+through `string_len`, which masks the bit: `.len()`, concatenation, `==`, hashing and ordering of
+a key, slicing, `char_at`, `.parse`, `push_str`, `print`, a panic message and an interpolation
+piece. A string is therefore at most 2^63 - 1 bytes.
 
-Consumers act on that answer in one of two ways. A consumer that keeps the value registers an
-owner for it: `codegen_var_decl` registers a `string` binding whose initializer owns its buffer as
-`DropTarget::HeapString`, so the scope-exit machinery releases it exactly as it releases a
-collection's storage, flag-guarded against a move. A consumer that copies the bytes out and keeps
-none of them calls `release_string_temporary` instead, which frees the buffer on the spot when the
-operand produced one. This is what makes an *anonymous* heap string, one no binding ever names,
-reachable by a release at all. Those consumers are `print` / `println`'s argument, an interpolation
-hole, both `+` operands, both `==` / `!=` operands, a `.len()` receiver, a `push_str` argument, a
-map key (an `insert`, and a lookup: `get` / `contains_key` / `remove`), and a statement whose value
-nothing reads. The release goes through `__neuro_release`, so a temporary a
-`pool` block allocated from the arena is left to the arena's own sweep.
+Because the release tests the bit (`release_string_value`: the buffer, or null when the bit is
+clear, handed to `__neuro_release`, which skips null and arena memory), `string` is a typed owner
+like a collection: `drop_target_of` answers `DropTarget::HeapString` and `holds_owner` answers
+`true`. Every `string` binding, by-value parameter, struct field, tuple or array element and enum
+payload is planned, flagged, moved and released by the ordinary drop machinery, and a literal that
+reaches a release is skipped there. No position has to prove what it stores, so there is no
+compile-time ownership analysis and no per-position flag arming: a call result, a branch, a
+`loop` value, a function value's argument and a store through `&mut` all release their buffer by
+the rules every other owner follows. A fat pointer copied without a move would be a double free,
+which the checker's move rules forbid.
 
-Reassigning a registered binding releases the buffer it displaces and then re-derives ownership from
-the assigned expression, so `s = s + "!"` frees the old buffer and keeps the new one while
-`s = "literal"` frees the old buffer and leaves the binding owning nothing.
+A consumer that copies the bytes out and keeps none of them releases a `string` no place still
+holds (`release_string_temporary`, keyed on `is_fresh_string`: a call, `+`, an interpolation, a
+branch, block, `loop` or `unsafe` value, whose yielded place was moved out, or a field of a fresh
+value). Those consumers are `print` / `println`, an interpolation hole, both `+` and `==` / `!=`
+operands, a `.len()`, `.clone()` or `.parse()` receiver, a `push_str` argument, a map lookup key and
+a statement whose value nothing reads. A by-value argument is moved into its callee, which owns it.
 
-A bare binding name proves nothing about ownership, but the binding it names does, at run time:
-`load_owned_string_flag` reads its flag before the move clears it, and `val u = t` / `s = t`
-store that value into the target's flag, so the buffer changes owner rather than losing one. A
-held `string` position named as a place (`m.label`, `t.0`, `a[1]`) hands over its own flag the
-same way (`owned_string_flag_ptr`), so `val taken = m.label` owns what the position owned. A
-binding that may ever own a buffer carries a `HeapString` entry: one whose initializer owns, one
-moved from a binding that may own, and every `mut` one (its flag starts clear for a literal, so
-`mut s = "x"` then `s = a + b` has a flag for the assignment to arm). An immutable binding holding
-a literal can never own and carries none. A holder moved whole does the same per position:
-`load_held_string_flags` reads every `string` position's flag off the source, a binding or a
-statically named place inside one (`val inner = o.inner`, keyed below that place: exactly the
-flags `mark_moved_for_drop` then clears), and `store_held_string_flags` writes them into the
-target's matching positions. A holder built from a
-literal collects the same thing per position while the declaration or assignment evaluates it
-(`literal_string_moves`): `codegen_literal_position` reads the flag of a `string` binding moved
-into a struct, tuple or array literal position (`Entry { label: t }`, nested literals included,
-each extending the path), and a functional update contributes its base's flags for the positions
-it takes. The collection is suspended inside any position that is not itself a literal, since a
-literal there (a call argument, a branch) builds some other value. A holder built through a
-branch (an `if`, an `else if` chain, a `match`, a block, nested to any depth) collects the same
-facts per arm: `open_branch_string_slots` declares one cleared `i1` per `string` position before
-the branch, `branch_string_slots` carries them only across the dispatch into it (the branch takes
-them at once, so a condition, a scrutinee, a guard or an arm's earlier statements never see them),
-and `codegen_branch_tail` stores what the taken arm's tail hands over: armed for a provable
-allocation, a moved binding's flag (the holder whole, or a `string` moved into a literal
-position), nothing for a literal. A tail that is itself a branch passes the slots on; a diverging
-arm stores nothing. The declaration or assignment then reads the slots into its positions. A
-bare `string` built through a branch is its own one position (path `[]`): the tail stores
-`argument_string_owner`, and `branch_string_owner` hands the slot to the binding's own flag, so
-`val s = if c { a + b } else { "lit" }` owns its buffer exactly when the first arm ran.
+A view of a fresh `string` (`(a + b).slice(..)`, `.char_slice`, a `&(a + b)` operand) needs its
+bytes after the consumer returns, so the fresh value is held to the end of its statement
+(`viewed_string_receiver`, `hold_to_statement_end`). The checker refuses to bind such a view to a
+name, and a `for` over one (`for c in (a + b).chars()`) has its temporary hoisted into a generated
+binding by `hir-lowering`, so the loop keeps it.
 
-A third kind of consumer STORES the fat pointer somewhere that outlives the expression. Ownership
-then belongs to the storage, and is tracked one of three ways:
-
-- **A position inside a holder** (a struct field, an array or tuple element, one of those nested).
-  `plan_held_drops` plans a `DropTarget::HeapString` held entry for every `string` position, with
-  its flag DISARMED: the type proves nothing. `arm_stored_string_positions` arms the positions the
-  initializer or field assignment stored a provable allocation into, walking the aggregate literal
-  in step with the held paths, plus the positions a call's callee always allocated (below). A
-  holder's move or its field's move clears those flags exactly as it
-  clears any other. An enum payload gets no such entry: its slot is destroyed under a tag switch
-  with no flag to guard it. A place moved into a payload is disowned all the same, a `string`
-  included, since the enum can outlive it (BUG-154); with no flag in the payload, that `string`
-  is released by nobody (BUG-082).
-
-  A store finds the position it displaces by static path (`displace_held_position`). An index
-  known only at run time has none: `arr[k] = v` compares the element address against each
-  tracked element (`displace_array_element`), and a position below such an index
-  (`arr[k].name = v`, `arr[k].pair[j] = v`) goes to `displace_runtime_position`, which takes the
-  place's shape with the index left open (`place_shape`), tests every tracked position of that
-  shape for an owner inside the written range, and releases and re-arms the one that matches.
-  Without it the position keeps the flag of the value it lost, and a literal stored there is
-  freed at scope exit.
-- **A function's return value.** `codegen/string_ownership.rs` reads every body once, before any is
-  generated, and collects the functions whose every exit (each `return`, plus an expression tail)
-  allocates. `impl` methods and associated functions are collected too, keyed by the
-  `Type__method` their call sites mangle (a struct's or an enum's alike), and a producer called
-  with arguments is a producer. The set is a fixpoint, because one producer can be another's only return path; it
-  starts empty and grows, so a recursive cycle never enters it. A name a local binding shadows is
-  excluded, since `codegen_call_dispatch` may send that call through the indirect path. A tail
-  `if` (with an `else`), `match` or block exits through each branch's own tail (`tail_exits`), and
-  a tail `loop` through the `break` values aimed at it (none when it has no `break`):
-  `loop_break_values` follows an unlabeled `break` to the innermost loop and a labeled one to its
-  label, and answers "unreadable" when any `break` in the body sits where its walk does not look. A
-  `return` written inside an expression (a `loop` body, an `if` or `match` used as a value, a
-  block) is an exit like any other: `collect_expression_returns` walks every such statement list
-  (never into a closure, whose returns leave the closure) and adds its returns. Missing one once
-  let a function that returned a literal through it be read as allocating, and its caller freed
-  the literal, so the walk covers every expression kind `walk` reaches.
-- **A holder's positions across a return.** The same pass reads every function returning a
-  struct, tuple or array through the same exits and records, per function, the paths of the
-  `string` positions EVERY exit stores an allocation into (`allocated_positions`: an aggregate
-  literal's positions `allocates` proves, and a call's positions this summary already proves, so
-  again a fixpoint growing from empty). `held_strings_returned` answers it, and
-  `collect_armed_positions` arms those positions wherever a call result is stored, so
-  `val e = make(&a)` owns what `make` allocated. A position some exit fills from a literal, a
-  parameter or anything unproven is not in the intersection and arms nothing.
-- **A forwarded parameter.** The pass's third answer: the functions whose every exit hands back
-  one `string` parameter unchanged (a read of it, or a call to another forwarder passing it on,
-  so again a growing fixpoint), with that parameter's index. What such a call yields is owned
-  exactly when its argument was, which is a runtime fact at the call: `argument_string_owner`
-  reads it (`true` for an argument that allocates, the flag of a binding, a nested forwarder's
-  answer) before the call's move clears it, and the call path leaves it in
-  `forwarded_string_owner` under the callee's name. A declaration or an assignment clears that
-  before evaluating its value and takes it only for its own call, so a stale answer is never
-  read, and anything it does not take owns nothing. A body that binds the parameter's name
-  anywhere (a `match` arm, an inner block) is never a forwarder, since its exit may read that
-  binding instead, and a function whose exits mix a forward with anything else is neither a
-  forwarder nor a producer.
-- **A holder's position filled from a parameter.** The same answer per position of a returned
-  holder (`held_strings_forwarded`): the positions every exit fills with one `string` parameter
-  unchanged, read only when that parameter appears nowhere else in the body (a closure capture
-  counts), since a second copy of its fat pointer would outlive the position's release. The call
-  reads each such argument's owner bit with `read_held_owner` before its move, and leaves them in
-  `forwarded_holder_owners` under the callee's name; `arm_stored_string_positions` takes them for
-  the binding the statement stores the holder into, as the bare forwarder's answer is taken.
-- **A by-value argument.** The same pass records the `string` parameters whose callee provably only
-  READS them, by a whitelist of positions that copy the bytes out (a `print`/`println` argument, an
-  interpolation hole, a binary operand, a `.len()` or `.clone()` receiver, a `push_str` argument,
-  anything under an `as` cast, an argument to another declared function, or to a method a
-  struct or enum receiver resolves to (`Type__method`), or to one called through a `&dyn Trait`,
-  whose parameter in that position is itself read only (in every implementor, for the last), and
-  the receiver of a `.slice()` / `.char_slice()` view read in one of these slots). Every other
-  occurrence is a retention. The last position
-  makes this summary a fixpoint too, growing from empty exactly like the return summary, and it
-  trusts no callee name a local binding shadows. `.clone()` qualifies only because a `string`
-  clone copies its bytes into a buffer of its own (`copy_string_bytes`) and is an owned producer;
-  it once handed back the receiver's fat pointer, which made every clone an alias. Which side then releases depends on where the argument came from. An
-  argument that ALLOCATED in place owns no flag, so `release_owned_arguments` frees it right after
-  the call, where the callee's frame is already gone. An argument that names a PLACE keeps the flag
-  it already had and is released by that place's own scope: the argument loop skips the move's
-  disarm for a read-only parameter, because the callee retains nothing past the call and a place
-  disarmed there would reach no release at all.
-
-- **A collection slot** (a `Vec` element, a map key or value). A slot has no flag, so an
-  invariant stands in for one: every `string` position of a slot's value owns its bytes. The
-  store makes it true. `value_for_collection_slot` (`collections/elements.rs`) reads
-  `stored_string_owners` before the move, stages the value and runs
-  `own_strings_stored_through_borrow`, which adopts each owned position and copies the rest (a
-  `.rodata` literal, a borrowed view), then moves the operand out (`mark_moved_for_drop`). `push`,
-  both operands of `insert` and `v[i] =` go through it. Reads never copy: `v[i]` loads the slot,
-  `get` / `get_mut` lend its address (the fat pointer itself for a shared `&string`, via
-  `slot_borrow`), and `pop`, `remove`, `swap_remove` and a displacing `insert` hand the value over
-  with its ownership. `drop_slot_value` destroys a slot's value: `emit_value_destructor` for typed
-  owners plus a release of every `string` position (an enum payload's are not reached). The
-  per-instantiation `__neuro_<kind>_drop_elems_<args>` helper walks the live slots with it for
-  `emit_collection_free` and `clear()` (the `Vec` one from a start index); an overwrite, a map
-  `remove`'s key and a duplicate `insert`'s incoming key are dropped through it directly.
-
-  The invariant reaches every position inside a slot, so a store below one (`rows[i].name = s`,
-  `rows[i].tag.1 = s`, `rows[i].pair[k] = s`, at any depth and however the collection is reached)
-  is the slot store one level down. The field, tuple-element and array-element stores test the
-  place with `reads_through_collection_slot` and hand it to `store_into_slot_position`, which
-  stages the value with `value_for_collection_slot` and destroys what it displaces with
-  `drop_slot_value`. A raw store there would leave a literal for the collection's release to
-  free, and would leak what the store displaced.
-
-  Ownership leaving a slot: `produces_owned_string` answers `true` for `Vec::remove` /
-  `swap_remove` on a `string` element; `produces_owned_option_payload` for `OPTION_TAKERS` (`pop`,
-  a map's `remove`, `insert`), so a `match` arm binding the payload registers it;
-  `collect_armed_positions` arms every `string` position of a struct bound straight from
-  `remove` / `swap_remove`; a consuming `for` registers each pass's binding through
-  `register_slot_owner`. A taker's result a statement discards is dropped by
-  `drop_discarded_slot_value`, which leaves typed owners to `drop_unbound_temporary` when that
-  path runs too (`temporary_drops_its_owners`).
-
-**Known limits**: among the covered positions, three shapes stay unproven
-and leak: a position a callee fills from a parameter or on only some paths, a function with one
-literal-returning path, and a parameter the callee may store. An anonymous owned string carried
-into a view-producing method (`(a + b).slice(...)`, `.chars()`) leaks. A struct taken out of a
-slot through an `Option` payload or a function's return owns none of its `string` positions.
+A collection slot stores whatever it is given, moved in (`value_for_collection_slot`), and
+`drop_slot_value` destroys a slot's value with `emit_value_destructor`, which reaches every
+`string` position, an enum payload's included. A store below a slot (`rows[i].name = s`, at any
+depth and however the collection is reached) is the slot store one level down: the field,
+tuple-element and array-element stores test the place with `reads_through_collection_slot` and
+hand it to `store_into_slot_position`, which destroys what it displaces with `drop_slot_value`. A
+value taken out of a slot (`pop`, `remove`, `swap_remove`, a displacing `insert`, a consuming
+`for`) carries its owner bits with it; a taker's result a statement discards is dropped by
+`drop_unbound_temporary`, or by `drop_discarded_slot_value` for a bare tensor.
 
 ## Struct ABI
 User structs lower to anonymous LLVM structs `{ T0, T1, ... }` in declaration order (no padding:
@@ -515,7 +384,7 @@ Values live on the stack via `alloca`, initialised field-by-field with `insertva
 `getelementptr`+`load`, writes `getelementptr`+`store`. A functional update
 (`Point { x: 1.0, ..p }`) seeds the aggregate from the base struct value rather than `get_undef()`
 and `insertvalue`s the explicit fields over it. Every field it does not write is moved out of the
-base, so those positions are disarmed there; the overridden ones stay the base's to release.
+base, so those positions are disowned there; the overridden ones stay the base's to release.
 
 `codegen_field_access` reads a field of a **non-place** object (a chain `o.inner.v`, a call result)
 with `extractvalue`, keeping the GEP-and-load path for a named binding.
@@ -1031,9 +900,8 @@ the enclosing block, which registers it, rather than to the pattern.
 the branch, and the else block runs in its own drop scope with its binding saved and restored. The
 success block's bindings are materialized by `bind_arm` and deliberately **not** restored: they
 belong to the enclosing block, which is the whole difference from a match arm. For the same reason
-their ownership is `ArmOwnership::EnclosingString` over a place: a `string` payload a collection's
-fallible reader copied out (`produces_owned_option_payload`) is registered in the ENCLOSING drop
-scope, where the binding lives, and every other payload stays with the place. A temporary scrutinee
+their ownership is `ArmOwnership::Enclosing` over a place: the payload stays with the place, which
+releases it. A temporary scrutinee
 has no owner left, so its payload is registered as a `match` arm's is (`ArmOwnership::Arm`), in the
 enclosing scope on a hit and in the else scope on a miss; a miss with no else binding destroys the
 whole value there. The else block is
@@ -1358,12 +1226,7 @@ owns something. At the value site such a capture's source is disowned (`mark_mov
 its flag takes the source's ownership (`capture_ownership`: a function value always owns the
 count its copy took, a `PoolAware` value stays the arena's). The release frees each owned capture
 under its flag (`DropTarget::Captured`, which plans the value's owners fresh at the release so one
-flag covers them all), then the block. A capture whose type holds `string` positions also gets one
-`i1` per position after the ownership flags (`EnvLayout::strings`, in `string_position_paths`
-order): the value site copies the source's position flags in (`held_string_flags_of`), the body's
-drop entry holds those positions with the environment's flags (`captured_string_positions`), so a
-field store through the capture re-arms one and a move of one out clears only it, and the release
-copies them into its fresh plan (`emit_captured_release`). Inside the body the same field and flag are the capture's
+flag covers them all), then the block. Inside the body the same field and flag are the capture's
 drop entry (`captured_drop_entries`, consulted by `live_drop_entry`, never emitted at the body's
 exits), so a body that moves the capture out, a `once` call, clears the flag and the release frees
 nothing twice. Reading a part of an owned capture that owns nothing (`n.id`) disowns nothing.
@@ -1386,15 +1249,9 @@ function does: the caller moved each one in, and a function value it holds was c
 `codegen_indirect_call`, which extracts both pointers and issues an indirect call with the
 environment as the hidden first argument.
 
-The `string` ownership summary reads each lifted closure body under its generated name, beside
-the functions. `codegen_var_decl` records, per alloca, the lifted name behind an immutable binding
-a closure literal initialized (`closure_bindings`), and `lifted_closure_name` resolves a callee
-through it, or directly for a literal called in place. A call it resolves gets the plain call's
-treatment: a read-only `string` argument stays the caller's and is released after the call, a
-closure whose every exit allocates is a producer for `produces_owned_string`, and a forwarding one
-leaves its argument's owner bit in `forwarded_string_owner` under the lifted name. A function value
-reached any other way (a parameter, a field, a `mut` binding) stays unresolved, so its arguments
-move and its result owns nothing. That leaks rather than frees a buffer something still holds.
+A by-value argument of a call through a function value moves into the callee, which owns it as
+a free function's parameter, and the result carries its own owner bit, so no call needs the
+callee's body in view.
 
 The environment outlives the scope that built it, and its owned captures with it. A borrowed
 capture's address does not, so the checker holds a closure that borrows to its borrowee's scope,
@@ -1454,9 +1311,7 @@ copies. Disarming the holder there left every owner in it unreleased. That is al
 the parser desugars it to a temporary plus one projection per leaf. A store into a field or an
 array element releases the displaced position and re-arms it (`displace_held_position`, at any
 depth; `displace_array_element` at a run-time index, which compares the written address against
-each tracked element). A moved binding or held place stored there hands its `string` flags to the
-position (`moved_in_string_flags`, read before the release), so `e.label = s` makes the position
-own what `s` owned. The position's own move clears its flag first, which is what lets a store
+each tracked element). The position's own move clears its flag first, which is what lets a store
 refill a moved-out place without a second release. Until BUG-075 only a field of a named binding did, so a nested field or an
 element lost its old value without a destructor.
 
@@ -1466,24 +1321,18 @@ to whoever lent it. A store there does two things the owner's flags cannot. It d
 displaced value when its type proves what it owns (`drop_displaced_through_borrow`: a user
 `Drop` type, a collection, or a holder of one, released like an unbound temporary; nothing
 inside a `pool`, and nothing holding a tensor or a `PoolAware` value, either of which may be
-arena memory the callee cannot see). And it leaves every `string` position it wrote owning heap
-bytes (`own_strings_stored_through_borrow`): the owner releases the position by its own flag,
-armed or not, so a `.rodata` literal left under an armed flag reached `free` and aborted. A
-position the value provably owns (an allocation, a moved binding's flag) keeps its buffer; any
-other gets a `malloc`'d copy, which at worst leaks. A displaced `string` or tensor still leaks
-(BUG-077). A reassignment re-arms the whole plan
-(`rearm_held_drop_flags`), which is unconditional because a held position exists only where its
-own type proves ownership.
+arena memory the callee cannot see), a `string` included, whose release tests its owner bit. A
+displaced tensor still leaks. A reassignment re-arms the binding's flag and the whole plan
+(`rearm_binding`), which is unconditional because a held position exists only where its own type
+proves ownership.
 
 A fresh value that owns something and that no binding ever owns is destroyed where it is last
 read (`drop_unbound_temporary`, BUG-047): a call, struct literal or enum construction whose
 statement value is discarded, and one a field is read from. It is stored to a slot, registered in
 a throwaway scope, and that scope's drops are emitted at once. A bare tensor is left to its
-statement and receiver consumers, which release it through its handle. A `string` position counts
-when the expression proves the temporary allocated it (`armed_temporary_positions`, the same
-`collect_armed_positions` a binding arms from): its flag is armed in the throwaway scope, and a
-temporary held to its statement's end holds each such position as a `HeapString` of its own, before
-the whole, so a `drop` still reads them.
+statement and receiver consumers, which release it through its handle. A field read off a fresh
+value is fresh itself (`is_fresh_value`), so `make().inner.name` destroys each level around the
+part its reader takes.
 
 A temporary something may still read through a borrow lives to the end of its statement:
 a receiver built for a `&self` call and the operand of a `&` passed to a call. `hold_to_statement_end`
@@ -1494,12 +1343,9 @@ releases it. `codegen_stmt` opens a mark on `statement_temporaries` and
 condition is a statement of its own on each pass.
 When the field read owns something it is moved out instead (`drop_temporary_except`): the held
 flags under that field are cleared first, so the reader keeps it and the rest is released. A
-`string` field always leaves with its reader, and the reader owns it exactly when the temporary
-armed that position: `collect_armed_positions` follows a field chain down from a fresh root
-(`make().inner.name`, `val r = make().inner`), and `produces_owned_string` asks it, so the reader
-releases it once. A struct with its own `Drop` impl is left whole when a holder or typed owner is
-moved out, since its destructor reads every field; a `string` field read off one leaves the
-destructor to run on the rest.
+struct with its own `Drop` impl is left whole when a holder or typed owner other than a `string`
+is moved out, since its destructor reads every field; a `string` field read off one leaves the
+destructor to run, the buffer staying live for the reader.
 Inside a `pool` it does nothing.
 
 Every lookup of a binding's drop entry goes through `live_drop_entry`, which matches the entry's
@@ -1513,13 +1359,15 @@ tuple or array literal per element (`codegen_tuple_literal`, `codegen_array_lite
 and array halves were missing until BUG-052, so `(weights, counts)` left both bindings armed and
 the value was released by its old binding and again by the holder. An enum construction disowns
 a payload whose type `holds_owner`, the payloads its drop releases under the tag switch; that half
-was missing until BUG-060, so `Some(xs)` released a `Vec` twice. A `string` payload is not
-released by the enum and keeps its source's ownership.
+was missing until BUG-060, so `Some(xs)` released a `Vec` twice. A `string` payload is released
+like any other, its owner bit deciding whether a buffer is freed.
 
-Two conservative edges keep it sound rather than complete. A `match` whose arms bind disowns the
-scrutinee's entire plan (`mark_held_moved_for_drop`), because which payload left depends on a
-runtime tag, so a part a binding arm left unbound leaks instead of being released twice (an arm
-that binds nothing restores the plan). And
+Two conservative edges keep it sound rather than complete. A `match` whose arms bind disowns
+everything the scrutinee place holds (`mark_held_moved_for_drop`: a bare binding, a field or
+element path, or the whole binding behind a run-time index), because which payload left depends
+on a runtime tag, so a part a binding arm left unbound leaks instead of being released twice. An
+arm that binds nothing restores the plan, and destroys a temporary scrutinee, which no arm owns
+otherwise (`??`'s fallback arm among them). And
 `collection_place_ptr` still copies a collection read out of something that is NOT a place (a
 call's result, say) into a temporary; that copy aliases the holder's buffer, so
 `reads_a_held_place` keeps it from being registered as an owner in its own right.
@@ -1546,9 +1394,8 @@ LIFO sweep as its only release, because a per-assignment free would return a poi
 still holds. A self-assignment (`p = p`) skips both the release and the move-marking, since the
 storage keeps the value it already had.
 
-**Known limits**: an anonymous heap `string` reaches no drop site, because it belongs to no
-binding; it is released at its consumer instead (see Heap-string ownership above), and one that
-escapes into a position able to store it is released by nobody.
+An anonymous heap `string` belongs to no binding; it is released at its consumer instead (see
+Heap-string ownership above), or moved into the position that stores it.
 
 ### Places: resolving the holder, addressing per form
 `codegen_place_store` has one arm per `HirPlace` form rather than one address computation,
@@ -1772,9 +1619,9 @@ ownership).
 
 A tensor binding is registered the same way, with `DropTarget::TensorBuffer`: the binding's storage
 holds the DLPack handle, so scope exit loads it and calls the handle's own `deleter` under the same
-flag, which releases the element buffer and the structure together. Unlike
-`HeapString` the ownership comes from the type alone: every tensor construction allocates, and
-there is no borrowed value of tensor type to confuse it with.
+flag, which releases the element buffer and the structure together. The ownership comes from
+the type alone: every tensor construction allocates, and there is no borrowed value of tensor
+type to confuse it with.
 
 New libc declarations these need: `free`, `realloc`, `memmove`, `memset`, `aligned_alloc`
 (alongside the existing `malloc`, `memcpy`, `memcmp`, `write`, `abort`, `snprintf`), each declared

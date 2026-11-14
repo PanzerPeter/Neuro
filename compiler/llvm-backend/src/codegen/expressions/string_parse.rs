@@ -50,10 +50,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(fat, 0, "parse.text")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat, 1, "parse.len")?
-            .into_int_value();
+        let len = self.string_len(fat)?;
 
         let i64_type = self.context.i64_type();
         let slot = self.entry_alloca(i64_type, "parse.bits")?;

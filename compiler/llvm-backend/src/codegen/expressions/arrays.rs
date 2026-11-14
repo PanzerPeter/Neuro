@@ -38,7 +38,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut agg = arr_llvm.get_undef();
         for (i, el) in elements.iter().enumerate() {
             // Same move as a tuple element: the array holder owns it from here.
-            let val = self.codegen_literal_position(i.to_string(), el)?;
+            let val = self.codegen_moved_into_literal(el)?;
             let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
             agg = self
                 .builder
@@ -156,36 +156,22 @@ impl<'ctx> CodegenContext<'ctx> {
         // The element this store displaces loses its owner once the new value exists, as
         // a field's does.
         match &index.kind {
-            HirExprKind::Literal(Literal::Integer(position, _)) if *position >= 0 => self
-                .displace_held_position(
-                    object,
-                    &position.to_string(),
-                    elem_ptr,
-                    elem_llvm,
-                    value,
-                )?,
+            HirExprKind::Literal(Literal::Integer(position, _)) if *position >= 0 => {
+                self.displace_held_position(object, &position.to_string(), elem_ptr, elem_llvm)?
+            }
             _ => self.displace_array_element(
                 object,
                 elem_llvm.array_type(size as u32),
                 base_ptr,
                 elem_ptr,
-                value,
             )?,
         }
-        let borrowed = self.reached_through_borrow(object);
-        let owners = match borrowed {
-            true => {
-                self.drop_displaced_through_borrow(elem_ptr, &element_ty)?;
-                self.stored_string_owners(value, &element_ty)?
-            }
-            false => Vec::new(),
-        };
+        if self.reached_through_borrow(object) {
+            self.drop_displaced_through_borrow(elem_ptr, &element_ty)?;
+        }
         self.builder.build_store(elem_ptr, val).map_err(|e| {
             CodegenError::LlvmError(format!("failed to store array element: {}", e))
         })?;
-        if borrowed {
-            self.own_strings_stored_through_borrow(elem_ptr, &element_ty, &owners)?;
-        }
         self.mark_moved_for_drop(value)?;
         Ok(())
     }

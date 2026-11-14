@@ -403,8 +403,6 @@ func main() -> i32 {
 - A position given up first is destroyed on its own path instead. Moving `p.field` into another binding leaves its siblings owned by `p`, and assigning to `p.field` destroys the value it displaces there.
 - Inside a `pool` block, a type with a destructor must implement `PoolAware` to be owned there. See [Pool blocks](control-flow.md#pool-blocks).
 
-Not yet supported: an enum's `string` payload is never released, so an enum value holding a `string` leaks it. Other owners in a payload, such as a `Vec` or a `Drop` struct, are released with the enum. See [What still leaks](memory-model.md#what-still-leaks).
-
 ## See also
 
 - [Memory model](memory-model.md): what is released and when, and what still leaks

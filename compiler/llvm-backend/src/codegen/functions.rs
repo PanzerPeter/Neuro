@@ -37,16 +37,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .get(func_name)
             .ok_or_else(|| CodegenError::UndefinedFunction(func_name.to_string()))?;
 
-        let forwarded = self.string_ownership.forwarded_param(func_name);
-        let held = self
-            .string_ownership
-            .held_strings_forwarded(func_name)
-            .to_vec();
-        let mut held_owners = Vec::new();
-        let mut forwarded_owner = None;
         let mut arg_values = Vec::new();
         let mut passed = Vec::new();
-        let mut forwarded_args = Vec::new();
         // An outlined tensor operation's body is built by MLIR, which reads a function
         // value it is handed and gives back no count: the caller keeps its own.
         let external = self.expanded_calls.contains_key(func_name);
@@ -57,27 +49,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 arg_values.push(BasicMetadataValueEnum::from(val));
                 continue;
             }
-            // The call hands this argument's buffer back, so what it yields is owned
-            // exactly when the argument was; the move below is about to clear that.
-            if forwarded == Some(index) {
-                forwarded_owner = Some(self.argument_string_owner(arg)?);
-            } else if let Some(owner) = self.forwarded_argument_owner(func_name, index, arg) {
-                forwarded_args.push((index, owner));
-            }
-            self.read_held_owner(&held, index, arg, &mut held_owners)?;
-            // A by-value argument moves an owned `Drop` place into the callee, which
-            // now owns it; clearing the flag prevents a double drop here. A
-            // borrow (`&x`) is not an identifier place, so it is left untouched.
-            // A parameter the callee provably only reads keeps its flag instead: the
-            // callee retains nothing past the call, `release_owned_arguments` below
-            // reaches only an argument that allocated in place, and a place that
-            // loses its flag here is then released by nobody.
+            // A by-value argument moves an owned place into the callee, which now owns
+            // it; clearing the flag prevents a double drop here. A borrow (`&x`) is not
+            // an identifier place, so it is left untouched.
             // `M::get` named as a function takes its receiver as a plain argument, and
             // only borrows it, so the value stays with whoever had it.
             let lent_self = index == 0
                 && self.shared_pointer_self.contains(func_name)
                 && !val.is_pointer_value();
-            if !lent_self && !self.string_ownership.param_is_read_only(func_name, index) {
+            if !lent_self {
                 self.mark_moved_for_drop(arg)?;
             }
             passed.push(val);
@@ -103,15 +83,6 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
-
-        self.release_owned_arguments(func_name, args, &passed)?;
-        self.release_forwarded_arguments(&forwarded_args, &passed)?;
-        if let Some(owner) = forwarded_owner {
-            self.forwarded_string_owner = Some((func_name.to_string(), owner));
-        }
-        if !held_owners.is_empty() {
-            self.forwarded_holder_owners = Some((func_name.to_string(), held_owners));
-        }
 
         Ok(call_result.try_as_basic_value().basic())
     }
@@ -197,34 +168,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let mut arg_values: Vec<BasicMetadataValueEnum> =
             vec![BasicMetadataValueEnum::from(self_arg)];
 
-        let forwarded = self.string_ownership.forwarded_param(mangled_name);
-        let held = self
-            .string_ownership
-            .held_strings_forwarded(mangled_name)
-            .to_vec();
-        let mut held_owners = Vec::new();
-        let mut forwarded_owner = None;
-        let mut passed = Vec::new();
-        let mut forwarded_args = Vec::new();
-        for (index, arg) in args.iter().enumerate() {
+        for arg in args {
             let val = self.codegen_expr(arg)?;
-            if forwarded == Some(index) {
-                forwarded_owner = Some(self.argument_string_owner(arg)?);
-            } else if let Some(owner) = self.forwarded_argument_owner(mangled_name, index, arg) {
-                forwarded_args.push((index, owner));
-            }
-            self.read_held_owner(&held, index, arg, &mut held_owners)?;
-            // A by-value argument moves an owned `Drop` place into the callee; the
-            // receiver's own ownership was settled above. A parameter the callee
-            // provably only reads keeps its flag, for the reason the plain-call path
-            // gives: nothing outlives the call, so its own scope is its releaser.
-            if !self
-                .string_ownership
-                .param_is_read_only(mangled_name, index)
-            {
-                self.mark_moved_for_drop(arg)?;
-            }
-            passed.push(val);
+            // A by-value argument moves an owned place into the callee; the receiver's
+            // own ownership was settled above.
+            self.mark_moved_for_drop(arg)?;
             arg_values.push(BasicMetadataValueEnum::from(val));
         }
 
@@ -233,14 +181,6 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build method call: {}", e)))?;
 
-        self.release_owned_arguments(mangled_name, args, &passed)?;
-        self.release_forwarded_arguments(&forwarded_args, &passed)?;
-        if let Some(owner) = forwarded_owner {
-            self.forwarded_string_owner = Some((mangled_name.to_string(), owner));
-        }
-        if !held_owners.is_empty() {
-            self.forwarded_holder_owners = Some((mangled_name.to_string(), held_owners));
-        }
         // A by-value `&self` receiver built for the call is owned by nothing once the call
         // returns. A consuming receiver belongs to the callee, and a receiver passed by
         // address was addressed in place, or held to the statement's end when it was built.

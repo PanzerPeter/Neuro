@@ -38,19 +38,13 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(lhs_struct, 0, "s1.ptr")?
             .into_pointer_value();
-        let len1 = self
-            .builder
-            .build_extract_value(lhs_struct, 1, "s1.len")?
-            .into_int_value();
+        let len1 = self.string_len(lhs_struct)?;
 
         let ptr2 = self
             .builder
             .build_extract_value(rhs_struct, 0, "s2.ptr")?
             .into_pointer_value();
-        let len2 = self
-            .builder
-            .build_extract_value(rhs_struct, 1, "s2.len")?
-            .into_int_value();
+        let len2 = self.string_len(rhs_struct)?;
 
         let len_eq = self
             .builder
@@ -92,11 +86,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Concatenate two string fat-pointers into a new owned `string`.
     ///
     /// Allocates `len1 + len2` bytes via `malloc` and copies both operands' bytes
-    /// in with `memcpy`, returning a fresh `{ ptr, len }`. The result is a new,
-    /// immutable, heap-backed string; the operands are read, not consumed. The
-    /// buffer has no null terminator (consistent with the fat-pointer `len`
-    /// contract) and is not yet freed: runtime heap strings leak until
-    /// `Drop` lands (Phase 1.7); see the alpha memory warning in the README.
+    /// in with `memcpy`, returning a fresh `{ ptr, len }` with its owner bit set. The
+    /// operands are read, not consumed. The buffer has no null terminator (consistent
+    /// with the fat-pointer `len` contract).
     pub(crate) fn codegen_string_concat(
         &self,
         lhs: BasicValueEnum<'ctx>,
@@ -109,18 +101,12 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(lhs_struct, 0, "cat.s1.ptr")?
             .into_pointer_value();
-        let len1 = self
-            .builder
-            .build_extract_value(lhs_struct, 1, "cat.s1.len")?
-            .into_int_value();
+        let len1 = self.string_len(lhs_struct)?;
         let ptr2 = self
             .builder
             .build_extract_value(rhs_struct, 0, "cat.s2.ptr")?
             .into_pointer_value();
-        let len2 = self
-            .builder
-            .build_extract_value(rhs_struct, 1, "cat.s2.len")?
-            .into_int_value();
+        let len2 = self.string_len(rhs_struct)?;
 
         let total_len = self.builder.build_int_add(len1, len2, "cat.len")?;
 
@@ -150,16 +136,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_call(memcpy_fn, &[dst2.into(), ptr2.into(), len2.into()], "")
             .map_err(|e| CodegenError::LlvmError(format!("failed to call memcpy: {}", e)))?;
 
-        let fat_ptr_type = self.type_mapper.map_type(&Type::String)?.into_struct_type();
-        let with_ptr = self
-            .builder
-            .build_insert_value(fat_ptr_type.get_undef(), buf, 0, "cat.res.ptr")?
-            .into_struct_value();
-        let fat_ptr = self
-            .builder
-            .build_insert_value(with_ptr, total_len, 1, "cat.res")?;
-
-        Ok(fat_ptr.into_struct_value().into())
+        self.build_owned_string_value(buf, total_len)
     }
 
     /// Normalize a string operand to its `{ ptr, len }` fat-pointer struct value.

@@ -77,24 +77,11 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let mut agg = match base {
             Some(base_expr) => {
-                let collecting = self.literal_string_moves.take();
-                let value = self.codegen_expr(base_expr);
-                self.literal_string_moves = collecting;
-                let value = value?.into_struct_value();
+                let value = self.codegen_expr(base_expr)?.into_struct_value();
                 let taken = |path: &[String]| {
                     path.first()
                         .is_some_and(|field| fields.iter().all(|init| &init.name != field))
                 };
-                if self.literal_string_moves.is_some() {
-                    let flags = self.load_held_string_flags(base_expr)?;
-                    if let Some(moves) = &mut self.literal_string_moves {
-                        for (path, owns) in flags.into_iter().filter(|(path, _)| taken(path)) {
-                            moves
-                                .flags
-                                .push(([moves.path.clone(), path].concat(), owns));
-                        }
-                    }
-                }
                 // The update moves every field it does not write out of the base, so the
                 // base stops owning those; the ones it overrides stay the base's to release.
                 for (field, _) in &def {
@@ -126,7 +113,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 })?;
             // A place stored into a struct field is moved into the aggregate,
             // so it must not also be dropped at the surrounding scope's exit.
-            let val = self.codegen_literal_position(field_init.name.clone(), &field_init.value)?;
+            let val = self.codegen_moved_into_literal(&field_init.value)?;
             agg = self
                 .builder
                 .build_insert_value(
@@ -176,16 +163,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 .map_err(|e| CodegenError::LlvmError(format!("failed to read field: {}", e)))?;
             // A temporary only read from is destroyed once the field is copied out. A
             // field that owns something is moved out instead, and the rest of the
-            // temporary is destroyed around it. A `string` field always leaves with the
-            // reader, which owns it exactly when the temporary did
-            // (`produces_owned_string`).
+            // temporary is destroyed around it.
             let field_owns = self
                 .struct_defs
                 .get(struct_name)
                 .and_then(|def| def.get(idx))
-                .is_some_and(|(_, ty)| {
-                    matches!(ty, Type::String) || self.drop_target_of(ty).is_some()
-                });
+                .is_some_and(|(_, ty)| self.drop_target_of(ty).is_some());
             let moved = field_owns.then_some(field_name);
             self.drop_temporary_except(object, aggregate, moved)?;
             return Ok(field);
@@ -352,20 +335,13 @@ impl<'ctx> CodegenContext<'ctx> {
         // Ordered as a binding's reassignment is: the position may be read on the way to
         // replacing itself, so its prior value loses its owner only once the new one
         // has been built.
-        self.displace_held_position(object, segment, slot, val.get_type(), value)?;
-        let owners = match &borrowed {
-            Some(slot_ty) => {
-                self.drop_displaced_through_borrow(slot, slot_ty)?;
-                self.stored_string_owners(value, slot_ty)?
-            }
-            None => Vec::new(),
-        };
+        self.displace_held_position(object, segment, slot, val.get_type())?;
+        if let Some(slot_ty) = &borrowed {
+            self.drop_displaced_through_borrow(slot, slot_ty)?;
+        }
         self.builder
             .build_store(slot, val)
             .map_err(|e| CodegenError::LlvmError(format!("failed to store field: {}", e)))?;
-        if let Some(slot_ty) = &borrowed {
-            self.own_strings_stored_through_borrow(slot, slot_ty, &owners)?;
-        }
         self.mark_moved_for_drop(value)?;
         Ok(())
     }

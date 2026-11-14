@@ -14,7 +14,6 @@ pub(crate) mod loop_index;
 pub(crate) mod outlining;
 pub(crate) mod panic;
 pub(crate) mod statements;
-pub(crate) mod string_ownership;
 pub(crate) mod structs;
 pub(crate) mod test_entry;
 pub(crate) mod val_else;

@@ -10,7 +10,7 @@ A `string` is an immutable UTF-8 value: a pointer to its bytes plus a stored byt
 val ordered = "a" < "b"   // error: cannot apply binary operator < to types string and string
 ```
 
-String literals live in read-only program memory and are never allocated. A `string` produced at run time (by `+`, by an interpolation, or by `StringBuilder::to_string`) lives on the heap. [Memory model](memory-model.md) says which owner releases each one.
+String literals live in read-only program memory and are never allocated. A `string` produced at run time (by `+`, by an interpolation, by `.clone()` or by `StringBuilder::to_string`) lives on the heap and owns its buffer, which its owner releases like any other value. The top bit of the stored length records which of the two a `string` is, so a string holds at most 2^63 - 1 bytes. [Memory model](memory-model.md) says when each one is released.
 
 The stored length is authoritative. `len` counts the bytes of the content and excludes the trailing NUL that keeps the pointer usable as a C string. Interior NUL bytes are ordinary content, so `"a\0b".len()` is `3`.
 
@@ -177,6 +177,18 @@ val empty = s.char_slice(5..5)        // "", the character count is a legal boun
 Only the bounds rule applies here, and a violation panics with `string char slice out of bounds`. A code point index cannot name a position inside a code point, so there is no alignment rule.
 
 A range `a..b` is not a value. It may be the argument of `.slice` or `.char_slice`, a `for` head, a tensor index or a `match` pattern, so `val r = 0..5` is a compile error.
+
+### Views of a temporary
+
+A view of a `string` nothing binds, such as `(a + b).slice(0..2)` or `(a + b).chars()`, borrows a buffer that is released when its statement ends. Reading the view in that statement is fine, and a `for` over one keeps the buffer for the whole loop. Binding, storing or returning the view is an error, `this borrow of a temporary may outlive its statement`: bind the string to a `val` first. A literal is never released, so `"abcd".slice(0..2)` may be bound.
+
+```neuro
+val a = "ab"
+println((a + "cd").slice(1..3))       // "bc", the buffer is released after the call
+for c in (a + "xyz").chars() { }      // the buffer lives until the loop ends
+val whole = a + "cd"
+val part = whole.slice(1..3)          // a view of a binding lives as long as it
+```
 
 ## Iterating Characters
 

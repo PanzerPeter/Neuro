@@ -3,9 +3,10 @@
 // tuples, place expressions (`self.total += n`, `entry.label = ...`), `StringBuilder`,
 // interpolation, and `&string` parameters. Every buffer here reaches a position that
 // outlives the expression that built it, so its holder releases it: a struct field, an
-// array or tuple element (not when it points at a literal), a function's return value
-// (released by the caller), or an argument the callee only reads (released at the call).
-// `transient_text.nr` covers buffers no position ever stores.
+// array or tuple element, a function's return value (released by the caller), or a by-value
+// argument (released by the callee). A literal in the same position owns nothing, which the
+// string itself records, so its release frees nothing. `transient_text.nr` covers buffers no
+// position ever stores.
 
 const ROUNDS: i32 = 300
 
@@ -28,19 +29,19 @@ impl Ledger {
     }
 }
 
-// Allocates on every return path, so the caller owns what it gets back.
+// Hands back a buffer it allocated, which the caller then owns.
 func tagged(kind: &string, id: i32) -> string {
     return kind + "-" + "{id}"
 }
 
-// Reads its argument and keeps none of it, so a buffer built for this call is
-// dead the moment it returns.
+// Takes its argument by value and keeps none of it, so a buffer built for this
+// call is released when it returns.
 func width(text: string) -> u64 {
     return text.len()
 }
 
 // Stores its argument in the value it hands back, so the buffer outlives the
-// call and the caller must leave it alone.
+// call and leaves with the result.
 func wrap(text: string, weight: i32) -> Entry {
     return Entry { label: text, weight: weight }
 }
@@ -50,7 +51,7 @@ func main() -> i32 {
 
     // A field, an array element and a tuple element each take a fresh buffer and
     // release it when their holder is destroyed. The literal in the same shape
-    // takes on nothing: freeing `.rodata` would abort rather than leak.
+    // owns nothing, so the same release leaves it alone.
     mut ledger = Ledger { total: 0, rows: 0 }
     mut i: i32 = 0
     while i < ROUNDS {
@@ -66,27 +67,24 @@ func main() -> i32 {
         ledger.record(pair.0.len())
 
         // Reassignment through a field place: the displaced buffer goes, and the
-        // replacement is owned only because it allocated.
+        // field owns the replacement.
         mut current = Entry { label: kind + "-first", weight: 0 }
         current.label = kind + "-second"
         ledger.record(current.label.len())
 
-        // The callee allocated on every path, so this binding owns the result.
+        // The callee allocated the result, so this binding owns it.
         val label: string = tagged(&kind, i)
         ledger.record(label.len())
 
-        // Built for the call and released at it.
+        // Built for the call and released by the callee.
         ledger.record(width(kind + "-probe"))
 
         i = i + 1
     }
 
-    // The boundary, once and deliberately outside the loop. `wrap` STORES its
-    // argument in the value it hands back, so the buffer outlives the call and
-    // the caller must not release it there; and a holder a call built proves
-    // nothing about who owns its positions, so the binding does not release it
-    // either. One buffer is leaked rather than one dangling pointer handed out,
-    // which is the direction every unproven case here errs in.
+    // Once, outside the loop: `wrap` STORES its argument in the value it hands
+    // back, so the buffer outlives the call, and the binding that takes the
+    // holder releases it with the holder.
     val kept = wrap(kind + "-kept", 3)
     ledger.record(kept.label.len())
 

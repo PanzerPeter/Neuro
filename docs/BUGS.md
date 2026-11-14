@@ -120,119 +120,10 @@ instantiates per call and terminates.
 **Fix sketch**: register an instance's method signatures when a call first looks the method up, not
 when the instance is built, in the checker and in lowering's `register_instance_methods` alike.
 
-## BUG-085: a struct passed by value never releases the `string` buffers it holds
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend`; parameter registration in `codegen/functions.rs` and
-  `plan_held_drops` in `codegen/drops/mod.rs`
-- **Severity**: major. An unbounded leak, one buffer per call, for an ordinary by-value
-  argument or a consuming `self` receiver
-
-**Minimal repro**
-
-```neuro
-struct C { label: string, n: i32 }
-
-impl C {
-    func into_n(self) -> i32 { self.n }
-}
-
-func take(c: C) -> i32 { c.n }
-
-func main() -> i32 {
-    mut t = 0
-    for i in 0..10 {
-        val a = C { label: "a" + "bc", n: 1 }
-        t = t + a.into_n()
-        val b = C { label: "a" + "bcd", n: 1 }
-        t = t + take(b)
-    }
-    t
-}
-```
-
-Expected: exit 20, with every `label` buffer released once, by the callee that took ownership of
-the struct. Observed: exit 20, and AddressSanitizer's leak check reports every buffer as leaked.
-`examples/showcase/owned_catalog.nr` shows it: its `catalog.into_report()` is commented as
-taking the field's buffer with it, and that buffer leaks. The one leak left in `examples/showcase/log_builder.nr`
-is this shape too: a consuming `self` method moving a `string` field out.
-
-**Root cause**: confirmed in the code. At the call the caller clears the drop flags of the
-struct it moves, including the flags of its `string` fields. The callee registers the
-parameter for destruction, but `plan_held_drops` starts every `string` position disarmed,
-because a type cannot prove a `string` owns its buffer. Nothing re-arms the position, so the
-callee skips the release, and the caller already gave it up.
-
-**Workaround**: pass the struct by `&` and let the caller keep ownership. Moving the field
-into a binding in the callee (`val s = c.label`) does not help: that binding owns nothing
-either.
-
-**Fix sketch**: the flags need to cross the call. Either pass each `string` position's flag as a
-hidden argument, or have the caller keep ownership of the positions when the callee's summary
-proves it only reads them (the way a read-only `string` parameter already works) and release
-them after the call. Regression tests: the repro in a loop under a leak check, a literal field
-that must not be freed, and a field the callee moves out and returns.
-
-## BUG-082: an enum that owns a `string` never releases it
-
-- **Status**: open, confirmed. Narrowed: an enum holding an owner now moves rather than
-  copies, so the double free this entry was filed for is a compile error
-- **Area**: `llvm-backend` (`enum_holds_owner` in `codegen/drops/mod.rs`)
-- **Severity**: major. An unbounded leak, one buffer per evaluation
-
-**Minimal repro**
-
-```neuro
-enum Msg {
-    Text(string),
-    Num(i32)
-}
-
-func make() -> u64 {
-    val m = Msg::Text("ab" + "cd")
-    7
-}
-
-func main() -> i32 {
-    mut t: u64 = 0
-    for i in 0..5 {
-        t = t + make()
-    }
-    if t != 35 { return 1 }
-    0
-}
-```
-
-Expected: each buffer `"ab" + "cd"` built is released when `m` leaves scope. Observed: the
-arithmetic is right, and AddressSanitizer's leak check reports the 4-byte buffers as leaked.
-
-A `string` binding moved into a payload (`Option::Some(w)`) belongs to the enum from then on, so it
-leaks with the enum, even when a `match` in the same function takes it out again: an arm's `string`
-binding owns nothing. Before, the scope that declared `w` freed it. That was correct only when the
-enum died in the same scope; any enum that left it read a freed buffer.
-
-The prelude's enums hit it too. A `Result<string, E>` holding a computed string leaks through `?`,
-`??`, `match` and a plain drop, and an enum payload that is a struct whose only owner is a `string`
-leaks the same way, because `holds_owner` answers `false` for that struct.
-
-**Root cause**: confirmed in the code. `enum_holds_owner` asks `holds_owner` of each payload
-type, which answers `false` for `string` by design: a `string` position owns its buffer only
-when the store that filled it allocated one, which is a runtime fact. A struct field carries
-that fact in a drop flag per position; an enum payload slot has none, because which payload
-is live depends on the tag.
-
-**Workaround**: hold the text in a struct field, or build it where it is read.
-
-**Fix sketch**: a flag per payload position cannot cross a call, so it would not reach
-`Result<string, E>`. Keeping the owner bit in the `string` value itself would, along with BUG-085
-and BUG-077; that is an open decision about the string representation. Regression tests: the repro,
-a payload built from a literal (must not be freed), and a payload moved out by a `match` (freed
-once, by the binding).
-
-## BUG-077: a store through a borrow leaks the `string` or tensor it displaces
+## BUG-077: a store through a borrow leaks the tensor it displaces
 
 - **Status**: open, confirmed. Narrowed: a displaced value whose type proves what it owns (a
-  user `Drop` type, a `Vec`, a map, or a holder of one) is now destroyed at the store
+  user `Drop` type, a `Vec`, a map, a `string`, or a holder of one) is now destroyed at the store
 - **Area**: `llvm-backend`; `drop_displaced_through_borrow` in `codegen/drops/mod.rs`
 - **Severity**: major. An unbounded leak, one buffer per store, through a `&mut` parameter, a
   `&mut self` receiver or a `*r` store
@@ -240,44 +131,33 @@ once, by the binding).
 **Minimal repro**
 
 ```neuro
-struct Named { name: string }
+struct Layer { w: Tensor<f32, [4]> }
 
-func rename(n: &mut Named, i: i32) { n.name = "item {i}" }
+func reset(l: &mut Layer) { l.w = Tensor::zeros() }
 
 func main() -> i32 {
-    mut n = Named { name: "a" + "b" }
+    mut l = Layer { w: Tensor::zeros() }
     mut i = 0
     while i < 1000 {
-        rename(&mut n, i)
+        reset(&mut l)
         i += 1
     }
-    n.name.len() as i32
+    0
 }
 ```
 
-Expected: each `rename` releases the buffer it displaces, and the last one is released at `n`'s
-scope exit. Observed: exit 8, and AddressSanitizer's leak check reports every displaced buffer,
-the first `"a" + "b"` included. A tensor field replaced through a borrow leaks the same way.
+Expected: each `reset` releases the tensor it displaces, and the last one is released at `l`'s
+scope exit. Observed: AddressSanitizer's leak check reports every displaced buffer.
 
-The stored value can leak too. A store through a borrow copies any `string` it cannot prove
-owned to the heap (`own_strings_stored_through_borrow`), so the owner's release never frees a
-`.rodata` literal, but the owner's flag stays clear, so nobody releases the copy:
-`func set(t: &mut (string, i32), v: string) { t.0 = v }` called as `set(&mut b, "abc")` in a
-loop leaks one copy per call, for a plain function and a generic instance alike.
+**Root cause**: confirmed in the code. The value behind the borrow may have come from a `pool`
+arena, and a callee cannot see whether its caller is inside one, so `may_hold_arena_memory`
+leaves any displaced value holding a tensor alone.
 
-**Root cause**: confirmed in the code. Whether a `string` position owns its buffer is a runtime
-flag of the binding that owns the place, and a store through a borrow runs in a frame that
-cannot see it, so it cannot tell a heap buffer from a `.rodata` literal and leaves the displaced
-value alone. A tensor is left alone for a different reason: the value behind the borrow may have
-come from a `pool` arena, and a callee cannot see whether its caller is inside one.
+**Workaround**: store through the owning binding (`l.w = ...` in the scope that owns `l`).
 
-**Workaround**: store through the owning binding (`n.name = ...` in the scope that owns `n`).
-
-**Fix sketch**: carry the flags with the reference, as a hidden argument per `string` position
-of a `&mut` parameter, or have the callee report which positions it wrote so the caller
-releases what they held before the call. Regression tests: the repro in a loop under a leak
-check, a literal in the place (must not be freed), and a tensor field inside and outside a
-`pool`.
+**Fix sketch**: release through the DLPack `deleter` only when the handle's buffer is not arena
+memory, which the release can test as `__neuro_release` does. Regression tests: the repro in a
+loop under a leak check, and a tensor field inside and outside a `pool`.
 
 ## BUG-027: a const generic parameter cannot be passed to another generic call
 

@@ -10,6 +10,34 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.44.0] - 2026-11-14
+
+### Changed
+
+- A `string` records whether it owns its buffer in the top bit of its stored length, so every
+  `string` position releases its buffer by the ordinary drop rules: a struct field, an enum
+  payload, a by-value argument, a return value, a closure capture and a store through `&mut`. A
+  literal in the same position owns nothing and is skipped. A `string` holds at most 2^63 - 1
+  bytes.
+- A view of a `string` nothing binds, such as `(a + b).slice(0..2)` or `(a + b).chars()`, keeps
+  that string until the end of its statement, and a `for` over one keeps it for the whole loop.
+  Binding, storing or returning such a view is now an error, `this borrow of a temporary may
+  outlive its statement`. A view of a literal is not affected.
+
+### Fixed
+
+- An enum holding a `string` now releases it (BUG-082), a struct passed by value releases the
+  strings it holds (BUG-085), and a store through a borrow releases the `string` it displaces
+  (BUG-077, whose tensor half stays open).
+- A function returning a literal on one path and an allocation on another, a `string` passed to a
+  function value or captured from a parameter, a holder built by a call, a branch or a `loop`, a
+  struct taken out of a collection through an `Option`, and a view of an unbound string no longer
+  leak.
+- A `match` on a field (`match h.opt { Some(s) => .. }`) or on an element at a run-time index
+  released the payload twice, once through the arm's binding and once through the holder.
+- An arm that binds nothing now releases a temporary scrutinee, so `f() ?? continue` and
+  `if val None = f()` no longer leak what `f()` returned.
+
 ## [5.43.0] - 2026-11-14
 
 ### Added

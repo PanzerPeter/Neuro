@@ -36,7 +36,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let value = self.coerce_if_needed(value, elem_llvm, element_ty)?;
         // Before the reserve: the copy may allocate, and a `pool` body's bump allocator
         // hands out addresses in call order, not in a way the buffer's growth depends on.
-        let value = self.value_for_collection_slot(value_expr, value, element_ty)?;
+        let value = self.value_for_collection_slot(value_expr, value)?;
 
         self.emit_vec_reserve(header, element_ty)?;
 
@@ -210,7 +210,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // before a reallocation points into the buffer the growth freed.
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element_ty)?;
-        let val = self.value_for_collection_slot(value, val, &element_ty)?;
+        let val = self.value_for_collection_slot(value, val)?;
         let header = self.collection_place_ptr(object, target_ty)?;
         let slot = self.checked_vec_slot(header, &element_ty, index, index.span.start)?;
         // The slot gives up what it held once the new value exists.

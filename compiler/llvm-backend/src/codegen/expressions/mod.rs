@@ -520,12 +520,13 @@ impl<'ctx> CodegenContext<'ctx> {
         ) {
             let value = self.codegen_expr(operand)?;
             // A `string` built for the borrow has no owner but its statement.
-            if self.produces_owned_string(operand) {
+            if super::drops::is_fresh_string(operand) {
                 let slot = self.entry_alloca(value.get_type(), "borrow.str")?;
                 self.builder.build_store(slot, value)?;
                 self.hold_to_statement_end(slot, DropTarget::HeapString)?;
             }
-            return Ok(value);
+            // A borrow owns nothing, whoever owns the bytes.
+            return Ok(self.string_view(value.into_struct_value())?.into());
         }
         match &operand.kind {
             HirExprKind::Variable(name) => {

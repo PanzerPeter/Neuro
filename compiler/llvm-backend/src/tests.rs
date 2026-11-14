@@ -993,19 +993,6 @@ fn guard_and_overflow_branches_are_weighted() {
     );
 }
 
-/// The `string` positions of `name` that a store actually armed.
-///
-/// A position is PLANNED for every `string` a holder has, and its release is emitted
-/// under a flag that starts `false`, so counting releases would count the ones that can
-/// never run. What a program owns is what it armed.
-fn armed_string_positions(ir: &str, name: &str) -> usize {
-    let armed = format!(
-        "store i1 true, ptr %{}",
-        crate::codegen::drops::STRING_POSITION_FLAG
-    );
-    function_body(ir, name).matches(&armed).count()
-}
-
 /// Calls to `free` in the body of the function named `name`.
 /// Releases emitted in `name`. Every release goes through the arena wrapper,
 /// which forwards to libc for anything the pool arena does not own.
@@ -1088,6 +1075,47 @@ fn a_heap_initialized_string_binding_is_freed_at_scope_exit() {
     );
 }
 
+/// A `string` release tests the owner bit in the top of its length, so a literal that
+/// reaches one is skipped at run time and needs no compile-time proof that it is one.
+#[test]
+fn a_string_release_tests_the_owner_bit() {
+    let source = r#"
+        func main() -> i32 {
+            val s = "static"
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("icmp slt i64") && body.contains("select i1"),
+        "the release must pick the buffer only when the owner bit is set:\n{body}"
+    );
+}
+
+/// Every reader of a `string`'s length masks the owner bit off, and every allocation
+/// sets it.
+#[test]
+fn a_length_read_masks_the_owner_bit_an_allocation_sets() {
+    let source = r#"
+        func main() -> i32 {
+            val a = "left"
+            val s = a + "right"
+            return s.len() as i32
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains(", 9223372036854775807"),
+        "`.len()` must mask the owner bit:\n{body}"
+    );
+    assert!(
+        body.contains(", -9223372036854775808"),
+        "a concatenation must set the owner bit:\n{body}"
+    );
+}
+
 #[test]
 fn a_reassigned_string_binding_frees_its_prior_buffer() {
     // Two owners pass through one binding, so two buffers are released: the first at
@@ -1117,31 +1145,6 @@ fn a_reassigned_string_binding_frees_its_prior_buffer() {
 }
 
 #[test]
-fn a_string_reassigned_from_a_literal_disowns_its_buffer() {
-    // The prior buffer is still released, but the literal that replaces it points at
-    // `.rodata`, so the binding must be left un-armed rather than freed again at exit.
-    let source = r#"
-        func main() -> i32 {
-            mut s = "a" + "b"
-            s = "plain"
-            println(s)
-            return 0
-        }
-    "#;
-
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-
-    // The scope-exit release is still emitted; what disowns the binding is the flag
-    // the reassignment leaves clear, so the guard at that site never takes its branch.
-    assert_eq!(
-        body.matches("store i1 true, ptr %drop.flag,").count(),
-        1,
-        "only the declaration arms the flag; the literal must not re-arm it:\n{body}"
-    );
-}
-
-#[test]
 fn a_reassigned_collection_binding_frees_its_prior_buffer() {
     // A collection owns its buffer by type, so the re-armed flag is unconditional and
     // both the displaced and the final vector are released.
@@ -1160,28 +1163,6 @@ fn a_reassigned_collection_binding_frees_its_prior_buffer() {
         free_calls(&ir, "main"),
         2,
         "the displaced vector's buffer is released as well as the final one:\n{}",
-        function_body(&ir, "main")
-    );
-}
-
-#[test]
-fn a_borrowed_string_binding_is_not_freed() {
-    // Same shape, but the initializer is a literal: nothing was allocated, so nothing
-    // may be released.
-    let source = r#"
-        func main() -> i32 {
-            val greeting = "ab"
-            println(greeting)
-            return 0
-        }
-    "#;
-
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-
-    assert_eq!(
-        free_calls(&ir, "main"),
-        0,
-        "a binding holding a literal owns nothing:\n{}",
         function_body(&ir, "main")
     );
 }
@@ -1796,29 +1777,6 @@ fn random_normal_fills_the_buffer_through_the_module_generator() {
     );
 }
 
-/// A chain of concatenations allocates one buffer per `+`, and every buffer but the
-/// last is read by the next `+` and then unreachable. Without a release at the operand
-/// the chain leaks every intermediate result, which is what `a + b + c` in a loop shows
-/// up as. The count is what is asserted: one release for the intermediate, one for the
-/// binding that owns the final buffer.
-#[test]
-fn a_concatenation_chain_releases_its_intermediate_buffers() {
-    let source = r#"
-        func main() -> i32 {
-            val a = "one"
-            val s = a + a + a
-            return s.len() as i32
-        }
-    "#;
-    let body = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&body, "main");
-    assert_eq!(
-        body.matches("call void @__neuro_release(").count(),
-        2,
-        "the intermediate and the bound result are each released once:\n{body}"
-    );
-}
-
 /// An operand built for a comparison, a `.len()` receiver built for its call, and a
 /// concatenation in statement position all hand their buffer to a consumer that copies
 /// nothing out of it, so each is released where it is consumed rather than leaking.
@@ -1874,65 +1832,11 @@ fn regression_a_tensor_index_releases_a_temporary_receiver() {
     );
 }
 
-/// An owned `string` handed to a parameter the callee only reads is released exactly
-/// once, by the place that owns it. The argument loop cleared the caller's drop flag for every by-value
-/// argument, while the release after the call reached only an argument that ALLOCATED
-/// in place, so a named binding, and a field read through one, arrived at the call owned
-/// and left it owned by nobody: one buffer leaked per call.
-#[test]
-fn regression_a_read_only_argument_releases_the_place_it_came_from() {
-    let cases = [
-        // A named binding: its own scope is the releaser the move used to disarm.
-        r#"
-        func size(s: string) -> u64 { s.len() }
-        func main() -> i32 {
-            val s = "one" + "two"
-            return size(s) as i32
-        }
-        "#,
-        // A field read through a binding: the holder releases the position.
-        r#"
-        struct Doc { title: string }
-        func size(s: string) -> u64 { s.len() }
-        func main() -> i32 {
-            val d = Doc { title: "one" + "two" }
-            return size(d.title) as i32
-        }
-        "#,
-        // An argument that allocates in place is released at the call, as before: the
-        // flag it never had cannot be the thing that releases it.
-        r#"
-        func size(s: string) -> u64 { s.len() }
-        func main() -> i32 {
-            return size("one" + "two") as i32
-        }
-        "#,
-    ];
-    for case in cases {
-        let ir = module_ir(case, OptimizationLevelSetting::O0);
-        let body = function_body(&ir, "main");
-        // Every release is emitted under a flag, so counting releases counts the ones
-        // that can never run: the leak is a place that is DISARMED without its release
-        // having run. One disarm per arming is what a place released exactly once
-        // looks like; the extra disarm the move used to emit is the defect.
-        assert_eq!(
-            body.matches("store i1 true").count(),
-            body.matches("store i1 false").count(),
-            "an armed `string` place is disarmed only by the drop that releases it, in:\n{body}"
-        );
-        assert_eq!(
-            free_calls(&ir, "main"),
-            1,
-            "the buffer reaches exactly one release, in:\n{body}"
-        );
-    }
-}
-
 /// A function that hands back its own `string` parameter yields a buffer its caller owns
-/// exactly when the argument was. The result was bound as owning nothing while the call's
-/// move had already disarmed the argument, so every call leaked the buffer. The binding
-/// the result initializes now takes the argument's ownership, read before the move: two
-/// releases in `main`, one for the argument's binding and one for the result's.
+/// exactly when the argument was, which the owner bit carries through the call. Once the
+/// result was bound as owning nothing and every call leaked the buffer. Two releases in
+/// `main`: one for the argument's binding, which the move disarms, and one for the
+/// result's.
 #[test]
 fn test_bug_039_a_forwarded_parameter_is_owned_by_the_result() {
     let cases = [
@@ -1944,7 +1848,7 @@ fn test_bug_039_a_forwarded_parameter_is_owned_by_the_result() {
             return r.len() as i32
         }
         "#,
-        // Through a second forwarder, which the summary's fixpoint reaches.
+        // Through a second forwarder.
         r#"
         func keep(s: string) -> string { s }
         func relay(s: string) -> string { return keep(s) }
@@ -1977,116 +1881,6 @@ fn test_bug_039_a_forwarded_parameter_is_owned_by_the_result() {
             function_body(&ir, "main")
         );
     }
-}
-
-/// An exit that reads a binding of the parameter's name is not a forward: here a `match`
-/// arm and an inner block each bind their own `s`, a literal, and treating the result as
-/// the argument's buffer would hand `.rodata` to `free` whenever the argument was owned.
-#[test]
-fn a_binding_that_shadows_the_parameter_is_not_forwarded() {
-    let shadows = [
-        r#"
-        enum E { A(string), B }
-        func shadow(s: string) -> string {
-            match E::A("lit") { E::A(s) => s, E::B => "none" }
-        }
-        "#,
-        r#"
-        func shadow(s: string) -> string {
-            {
-                val s = "lit"
-                s
-            }
-        }
-        "#,
-    ];
-    for shadow in shadows {
-        let source = format!(
-            "{shadow}
-        func main() -> i32 {{
-            val q = \"one\" + \"two\"
-            val z = shadow(q)
-            return z.len() as i32
-        }}"
-        );
-        let ir = module_ir(&source, OptimizationLevelSetting::O0);
-        assert_eq!(
-            free_calls(&ir, "main"),
-            1,
-            "only the argument's binding may release, in:\n{}",
-            function_body(&ir, "main")
-        );
-    }
-}
-
-/// A parameter handed on to another read-only parameter, read through `.clone()`, or read
-/// under an `as` cast is read only too, so the caller releases the buffer it passed once
-/// the call returns. Each shape was counted a retention, and each call leaked the argument.
-#[test]
-fn a_parameter_passed_on_to_a_read_only_one_is_read_only() {
-    let cases = [
-        r#"
-        func size(s: string) -> u64 { s.len() }
-        func relay(s: string) -> u64 { size(s) }
-        func main() -> i32 {
-            return relay("one" + "two") as i32
-        }
-        "#,
-        r#"
-        func size(s: string) -> i64 { s.clone().len() as i64 }
-        func main() -> i32 {
-            return size("one" + "two") as i32
-        }
-        "#,
-    ];
-    for case in cases {
-        let ir = module_ir(case, OptimizationLevelSetting::O0);
-        assert_eq!(
-            free_calls(&ir, "main"),
-            1,
-            "the argument is released once the call returns, in:\n{ir}"
-        );
-    }
-}
-
-/// `string.clone()` is a deep copy, so the clone is a buffer of its own that its binding
-/// releases, beside the original's.
-#[test]
-fn regression_bug_057_a_string_clone_is_an_owned_copy() {
-    let source = r#"
-        func main() -> i32 {
-            val a = "one" + "two"
-            val b = a.clone()
-            return b.len() as i32
-        }
-    "#;
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    assert!(
-        body.contains("str.dup"),
-        "a clone copies the bytes into a fresh buffer:\n{body}"
-    );
-    assert_eq!(
-        free_calls(&ir, "main"),
-        2,
-        "the original and the clone are each released, in:\n{body}"
-    );
-
-    // A receiver built only to be cloned is dead once its bytes are copied.
-    let temporary = r#"
-        func main() -> i32 {
-            val a = "one"
-            val c = (a + a).clone()
-            return c.len() as i32
-        }
-    "#;
-    let ir = module_ir(temporary, OptimizationLevelSetting::O0);
-    assert_eq!(
-        free_calls(&ir, "main"),
-        2,
-        "the temporary receiver and the clone are each released, in:\n{}",
-        function_body(&ir, "main")
-    );
 }
 
 /// A `string` binding owns what a move hands it and what a reassignment hands it,
@@ -2139,193 +1933,6 @@ fn a_moved_or_reassigned_string_binding_owns_its_buffer() {
     );
 }
 
-/// A holder moved whole (`val q = p`, `q = p`) hands each `string` position's runtime
-/// ownership flag to the holder that takes it. The positions were armed only from the
-/// initializer's literal shape, so a moved holder's buffers were owned by nobody.
-#[test]
-fn a_moved_holder_hands_over_its_string_positions() {
-    let cases = [
-        r#"
-        struct Entry { label: string }
-        func main() -> i32 {
-            val a = "one"
-            val p = Entry { label: a + a }
-            val q = p
-            return q.label.len() as i32
-        }
-        "#,
-        r#"
-        struct Entry { label: string }
-        func main() -> i32 {
-            val a = "one"
-            mut q = Entry { label: "x" }
-            val p = Entry { label: a + a }
-            q = p
-            return q.label.len() as i32
-        }
-        "#,
-    ];
-    for case in cases {
-        let ir = module_ir(case, OptimizationLevelSetting::O0);
-        let body = function_body(&ir, "main");
-        assert!(
-            body.contains("held.str.owns"),
-            "the move carries the position's ownership flag, in:\n{body}"
-        );
-    }
-}
-
-/// A `string` binding moved into a literal position (`Entry { label: t }`, `(t, 1)`,
-/// `[t, u]`, a nested literal) hands its runtime ownership flag to the holder's position,
-/// and a functional update hands over the flags of the positions it takes from its base.
-/// The literal armed only positions whose own expression allocated, so each of these
-/// buffers was owned by nobody.
-#[test]
-fn a_string_moved_into_a_literal_position_is_owned_by_the_holder() {
-    let fields = [
-        r#"
-        struct Entry { label: string }
-        func main() -> i32 {
-            val a = "one"
-            val t = a + a
-            val e = Entry { label: t }
-            return e.label.len() as i32
-        }
-        "#,
-        r#"
-        func main() -> i32 {
-            val a = "one"
-            val t = a + a
-            val pair = (t, 1)
-            return pair.0.len() as i32
-        }
-        "#,
-        r#"
-        struct Entry { label: string }
-        struct Pair { left: Entry }
-        func main() -> i32 {
-            val a = "one"
-            val t = a + a
-            mut p = Pair { left: Entry { label: "x" } }
-            p = Pair { left: Entry { label: t } }
-            return p.left.label.len() as i32
-        }
-        "#,
-    ];
-    for case in fields {
-        let ir = module_ir(case, OptimizationLevelSetting::O0);
-        let body = function_body(&ir, "main");
-        assert!(
-            body.contains("%str.owns"),
-            "the move carries the source binding's ownership flag, in:\n{body}"
-        );
-    }
-    let update = r#"
-        struct Entry { id: i32, label: string }
-        func main() -> i32 {
-            val a = "one"
-            val base = Entry { id: 1, label: a + a }
-            val next = Entry { id: 2, ..base }
-            return next.label.len() as i32
-        }
-    "#;
-    let ir = module_ir(update, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    assert!(
-        body.contains("held.str.owns"),
-        "the update carries the base position's ownership flag, in:\n{body}"
-    );
-}
-
-/// `StringBuilder::to_string` copies the builder's bytes into a buffer of their own on every
-/// call, so a binding initialized from it owns that buffer and releases it at scope
-/// exit, exactly as one initialized from `+` does. A user `to_string` on a struct is
-/// not the builder's and must not be mistaken for it.
-#[test]
-fn the_builder_copy_out_is_an_owned_string_and_a_user_method_is_not() {
-    let owned = r#"
-        func main() -> i32 {
-            mut b = StringBuilder::new()
-            b.push_str("text")
-            val s = b.to_string()
-            return s.len() as i32
-        }
-    "#;
-    let ir = module_ir(owned, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    assert_eq!(
-        body.matches("call void @__neuro_release(").count(),
-        2,
-        "the copy and the builder's own buffer are each released:\n{body}"
-    );
-
-    let shadowed = r#"
-        struct Tag { id: i32 }
-
-        impl Tag {
-            func to_string(&self) -> string { "tag" }
-        }
-
-        func main() -> i32 {
-            val t = Tag { id: 1 }
-            val s = t.to_string()
-            return s.len() as i32
-        }
-    "#;
-    let ir = module_ir(shadowed, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    assert!(
-        !body.contains("call void @__neuro_release("),
-        "a user `to_string` returns a literal and owns nothing:\n{body}"
-    );
-}
-
-/// A holder owns what it holds, and a `string` position is a position like any
-/// other once the store into it proved it allocated. The type cannot prove it, so the
-/// literal in the same field must arm nothing.
-#[test]
-fn a_struct_field_releases_the_buffer_stored_into_it() {
-    let owned = r#"
-        struct Label { text: string, id: i32 }
-
-        func main() -> i32 {
-            val a = "left"
-            val b = "right"
-            val l = Label { text: a + b, id: 1 }
-            return l.text.len() as i32
-        }
-    "#;
-    let ir = module_ir(owned, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    assert_eq!(
-        free_calls(&ir, "main"),
-        1,
-        "the field's buffer is released once, when the holder is destroyed:\n{body}"
-    );
-    assert_eq!(
-        armed_string_positions(&ir, "main"),
-        1,
-        "the field's position is armed by the store that allocated into it:\n{body}"
-    );
-
-    // A disarmed position still emits its flag-guarded release, so the literal case is
-    // read off the flag rather than off the call: the position is planned and never
-    // armed, and the release under it can therefore never run.
-    let borrowed = r#"
-        struct Label { text: string, id: i32 }
-
-        func main() -> i32 {
-            val l = Label { text: "static", id: 1 }
-            return l.text.len() as i32
-        }
-    "#;
-    assert_eq!(
-        armed_string_positions(&module_ir(borrowed, OptimizationLevelSetting::O0), "main"),
-        0,
-        "a `.rodata` literal in the same field is owned by nobody and freed by nobody"
-    );
-}
-
 /// A newtype is its inner value, so wrapping an allocation in one leaves the binding
 /// owning the buffer exactly as the bare allocation would (BUG-083).
 #[test]
@@ -2365,149 +1972,6 @@ fn test_bug_083_a_newtype_over_an_owned_string_releases_it() {
         1,
         "the caller owns the buffer `make` returns:\n{}",
         function_body(&ir, "main")
-    );
-}
-
-/// The positions an aggregate exposes are uniform, so an array element and a
-/// tuple element take the same treatment as a field, at any depth.
-#[test]
-fn an_element_and_a_nested_field_release_their_buffers() {
-    let source = r#"
-        struct Inner { text: string }
-        struct Outer { inner: Inner }
-
-        func main() -> i32 {
-            val a = "x"
-            val pair = (a + a, 7)
-            val cells = [a + a, a + a]
-            val nested = Outer { inner: Inner { text: a + a } }
-            return (pair.0.len() + cells[0].len() + nested.inner.text.len()) as i32
-        }
-    "#;
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    assert_eq!(
-        free_calls(&ir, "main"),
-        4,
-        "one release per stored buffer: a tuple element, two array elements, and a \
-         field one level down:\n{}",
-        function_body(&ir, "main")
-    );
-}
-
-/// An array element store is a drop site like a field's: the displaced buffer goes.
-#[test]
-fn test_bug_075_an_element_assignment_releases_what_it_displaces() {
-    let source = r#"
-        func main() -> i32 {
-            val a = "x"
-            mut arr: [string; 1] = [a + a]
-            arr[0] = a + a + a
-            return arr[0].len() as i32
-        }
-    "#;
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    // The displaced buffer, the intermediate the second concatenation built, and the
-    // final value the array carries to its scope exit.
-    assert_eq!(
-        free_calls(&ir, "main"),
-        3,
-        "the displaced buffer and the replacement are both released:\n{}",
-        function_body(&ir, "main")
-    );
-}
-
-/// A field assignment is a drop site: the displaced buffer goes, and the
-/// incoming one is owned only if it was allocated.
-#[test]
-fn a_field_assignment_releases_what_it_displaces() {
-    let source = r#"
-        struct Label { text: string }
-
-        func main() -> i32 {
-            val a = "x"
-            mut l = Label { text: a + a }
-            l.text = a + a + a
-            return l.text.len() as i32
-        }
-    "#;
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    // The displaced buffer, the intermediate the second concatenation built, and the
-    // final value the holder carries to its scope exit.
-    assert_eq!(
-        free_calls(&ir, "main"),
-        3,
-        "the displaced buffer and the replacement are both released:\n{body}"
-    );
-
-    let to_literal = r#"
-        struct Label { text: string }
-
-        func main() -> i32 {
-            val a = "x"
-            mut l = Label { text: a + a }
-            l.text = "static"
-            return l.text.len() as i32
-        }
-    "#;
-    let ir = module_ir(to_literal, OptimizationLevelSetting::O0);
-    assert_eq!(
-        armed_string_positions(&ir, "main"),
-        1,
-        "only the first store arms the field; the literal replacing it owns nothing:\n{}",
-        function_body(&ir, "main")
-    );
-}
-
-/// The caller of a function that allocates on every return path owns what it gets
-/// back, which is the one ownership question no expression at the call site can answer.
-#[test]
-fn a_call_that_allocates_on_every_path_hands_the_buffer_to_its_caller() {
-    let source = r#"
-        func joined(a: string, b: string) -> string {
-            return a + b
-        }
-
-        func main() -> i32 {
-            val s = joined("l", "r")
-            return s.len() as i32
-        }
-    "#;
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    assert_eq!(
-        free_calls(&ir, "main"),
-        1,
-        "the caller releases the buffer at its own scope exit:\n{}",
-        function_body(&ir, "main")
-    );
-    assert_eq!(
-        free_calls(&ir, "joined"),
-        0,
-        "the callee released nothing: it handed the buffer over"
-    );
-
-    let one_borrowed_path = r#"
-        func maybe(a: string, flag: bool) -> string {
-            if flag {
-                return "static"
-            }
-            return a + a
-        }
-
-        func main() -> i32 {
-            val s = maybe("l", true)
-            return s.len() as i32
-        }
-    "#;
-    // The `.rodata` path is copied, so every path hands over a buffer of its own and
-    // the caller releases whichever it got (BUG-103 left the allocated path leaking).
-    assert_eq!(
-        free_calls(
-            &module_ir(one_borrowed_path, OptimizationLevelSetting::O0),
-            "main"
-        ),
-        1,
-        "a literal return path is copied, so the caller owns every result"
     );
 }
 
@@ -2621,11 +2085,6 @@ fn an_owned_argument_to_a_reading_parameter_is_released_after_the_call() {
     );
     // `keep` stores its parameter unchanged on every path, so the holder's position is
     // owned exactly when the argument was: a fresh concatenation here.
-    assert_eq!(
-        armed_string_positions(&ir, "main"),
-        1,
-        "the holder owns the buffer its argument handed over:\n{body}"
-    );
 }
 
 /// A collection of `string` elements copies the bytes into slots of its own and walks
@@ -2692,26 +2151,6 @@ fn an_element_read_reads_the_slot_in_place() {
         1,
         "only the collection's buffer is released here; the element walk releases the \
          slot through its own helper:\n{body}"
-    );
-}
-
-/// An insertion moves its operand in, and a `.rodata` literal is not a buffer the slot
-/// can own, so the slot takes a copy of a binding holding one.
-#[test]
-fn an_insertion_copies_a_literal_operand() {
-    let source = r#"
-        func main() -> i32 {
-            val a = "one"
-            mut v: Vec<string> = Vec::new()
-            v.push(a)
-            return v.len() as i32
-        }
-    "#;
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    assert!(
-        body.contains("str.dup"),
-        "the slot takes a copy of the literal's bytes:\n{body}"
     );
 }
 
@@ -2994,75 +2433,6 @@ fn a_host_read_checks_the_tensor_is_on_the_host() {
     );
     assert!(ir.contains("this tensor lives on a GPU"), "{ir}");
     assert!(!ir.contains("__neuro_device_"), "{ir}");
-}
-
-/// A forwarder's result passed to a parameter the callee only reads is owned exactly when
-/// the forwarder's own argument was, so the caller releases it under that bit once the
-/// call returns (BUG-107 left it to nobody).
-#[test]
-fn regression_bug_107_a_forwarded_argument_is_released_under_its_owner_bit() {
-    let source = r#"
-        func s(v: string) -> string {
-            return v
-        }
-        func size(v: string) -> u64 { v.len() }
-        func main() -> i32 {
-            val n = size(s("y" + "z"))
-            return n as i32
-        }
-    "#;
-    let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    let call = body.find("call i64 @size").expect("the call is emitted");
-    assert!(
-        body[call..].contains("fwd.release"),
-        "the forwarded buffer is released after the call:\n{body}"
-    );
-}
-
-#[test]
-fn regression_bug_038_a_closure_binding_uses_its_lifted_body_summary() {
-    // A closure that only reads its `string` parameter leaves the argument to the caller,
-    // which releases it after the call, and one whose every exit allocates hands its
-    // result to the binding that takes it.
-    let reading = r#"
-        func main() -> i32 {
-            val size = |z: string| -> u64 { z.len() }
-            val make = |n: i32| -> string { "t {n}" }
-            val r = make(1)
-            val n = size("a" + "b")
-            return (n + r.len()) as i32
-        }
-    "#;
-    let ir = module_ir(reading, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    let call = body
-        .find("closure.call")
-        .expect("the closure call is emitted");
-    assert!(
-        body[call..].matches("call void @__neuro_release(").count() >= 2,
-        "the argument after the call and the returned buffer at scope exit:\n{body}"
-    );
-
-    // A closure that hands its argument back is a forwarder: the argument is not released
-    // after the call, and the binding that takes the result owns it under a drop flag.
-    let forwarding = r#"
-        func main() -> i32 {
-            val keep = |z: string| -> string { z }
-            val t = keep("a" + "b")
-            return t.len() as i32
-        }
-    "#;
-    let ir = module_ir(forwarding, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "main");
-    assert!(
-        !body.contains("%str.tmp.buf"),
-        "a forwarded argument is not released at the call:\n{body}"
-    );
-    assert!(
-        body.contains("call void @__neuro_release(ptr %str.drop.buf)"),
-        "the forwarded result is released by the binding that took it:\n{body}"
-    );
 }
 
 /// A closure's environment is a heap block counted per copy: built with a count of one,

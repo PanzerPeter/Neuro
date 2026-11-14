@@ -1,7 +1,7 @@
 //! Move sites: resolving the place a move names and clearing the drop flags of what
 //! left it.
 
-use inkwell::values::{IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirPlace};
 use shared_types::Literal;
 
@@ -119,10 +119,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // any part of it that owns something disowns the whole: what is left behind leaks
         // rather than being released along with the part already gone. Reading a part
         // that owns nothing (`n.id`) takes nothing.
-        // A `string` position the environment flags on its own is the exception: clearing
-        // that flag is all the move takes.
-        let takes_an_owner = self.drop_target_of(&ty).is_some()
-            && !(matches!(ty, Type::String) && entry.held.iter().any(|held| held.path == prefix));
+        let takes_an_owner = self.drop_target_of(&ty).is_some();
         if prefix.is_empty() || (matches!(entry.target, DropTarget::Captured(_)) && takes_an_owner)
         {
             flags.push(entry.flag_ptr);
@@ -140,6 +137,17 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_store(flag_ptr, zero)?;
         }
         Ok(())
+    }
+
+    /// Evaluate `value` into a position of the aggregate literal being built, and move it
+    /// in: the place it names stops owning what it held.
+    pub(crate) fn codegen_moved_into_literal(
+        &mut self,
+        value: &HirExpr,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let val = self.codegen_expr(value)?;
+        self.mark_moved_for_drop(value)?;
+        Ok(val)
     }
 
     /// The flag of every owner inside the array `iterable` names, as the element it sits
@@ -227,8 +235,7 @@ impl<'ctx> CodegenContext<'ctx> {
         if reads_through_collection_slot(expr) {
             return true;
         }
-        let ty = Type::from_hir(&expr.ty);
-        !matches!(ty, Type::String) && self.drop_target_of(&ty).is_none()
+        self.drop_target_of(&Type::from_hir(&expr.ty)).is_none()
     }
 
     /// Whether `expr` reads a value out of a position another binding already owns, so
@@ -250,8 +257,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .is_some_and(|entry| entry.held.iter().any(|held| held.path.starts_with(&prefix)))
     }
 
-    /// Disown every owner a binding holds, without touching the binding's own flag, and
-    /// hand back each cleared flag with the value it held.
+    /// Disown every owner the place `scrutinee` names holds, and hand back each cleared
+    /// flag with the value it held. A bare binding keeps its own flag unless it is the
+    /// enum itself; a position inside one (`h.opt`) gives up its own entry too.
     ///
     /// A `match` that binds a payload by value is the one move site with no place
     /// expression to name: which position left depends on the tag. Clearing all of them
@@ -260,19 +268,35 @@ impl<'ctx> CodegenContext<'ctx> {
     /// nothing, and stores the returned values back.
     pub(crate) fn mark_held_moved_for_drop(
         &mut self,
-        name: &str,
+        scrutinee: &HirExpr,
     ) -> CodegenResult<Vec<(PointerValue<'ctx>, IntValue<'ctx>)>> {
-        let flags: Vec<PointerValue<'ctx>> = self
-            .live_drop_entry(name)
-            .map(|entry| {
-                let mut flags: Vec<PointerValue<'ctx>> =
-                    entry.held.iter().map(|held| held.flag_ptr).collect();
-                if matches!(entry.target, DropTarget::EnumPayload(_)) {
-                    flags.push(entry.flag_ptr);
-                }
-                flags
-            })
-            .unwrap_or_default();
+        let flags: Vec<PointerValue<'ctx>> = match Self::moved_place(peel_newtype(scrutinee)) {
+            Some((name, Some(path))) => self
+                .live_drop_entry(name)
+                .map(|entry| {
+                    let mut flags: Vec<PointerValue<'ctx>> = entry
+                        .held
+                        .iter()
+                        .filter(|held| held.path.starts_with(&path))
+                        .map(|held| held.flag_ptr)
+                        .collect();
+                    if path.is_empty() && matches!(entry.target, DropTarget::EnumPayload(_)) {
+                        flags.push(entry.flag_ptr);
+                    }
+                    flags
+                })
+                .unwrap_or_default(),
+            // `a[i]` names no particular element, so the whole binding gives it up.
+            Some((name, None)) => self
+                .live_drop_entry(name)
+                .map(|entry| {
+                    std::iter::once(entry.flag_ptr)
+                        .chain(entry.held.iter().map(|held| held.flag_ptr))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
 
         let bool_ty = self.context.bool_type();
         let mut saved = Vec::with_capacity(flags.len());

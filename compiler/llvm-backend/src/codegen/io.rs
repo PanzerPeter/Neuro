@@ -118,10 +118,8 @@ impl<'ctx> CodegenContext<'ctx> {
         // returns, copied into the buffer or handed to `write` on the bypass path, and
         // retains none of them, so the buffer is dead the moment the last one leaves, and
         // the allocation and the free sit in the same block with nothing between them
-        // that could escape it. A borrowed argument (a literal, a variable, a slice)
-        // answers `false` here and is left alone.
-        let owns_argument = self.produces_owned_string(text);
-
+        // that could escape it. A place keeps its value, and a literal or a slice owns
+        // nothing for the release to give back.
         let emit = self.get_or_build_emit()?;
         let text_args: [BasicMetadataValueEnum; 2] = [ptr.into(), len.into()];
         self.builder.build_call(emit, &text_args, "")?;
@@ -142,10 +140,7 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.build_call(line_end, &[], "")?;
         }
 
-        if owns_argument {
-            let free_fn = self.release_fn()?;
-            self.builder.build_call(free_fn, &[ptr.into()], "")?;
-        }
+        self.release_string_temporary(text, value)?;
 
         Ok(())
     }
@@ -175,10 +170,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(fat, 0, "print.ptr")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat, 1, "print.len")?
-            .into_int_value();
+        let len = self.string_len(fat)?;
         Ok((ptr, len))
     }
 

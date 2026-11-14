@@ -55,10 +55,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(fat, 0, "cat.base.ptr")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat, 1, "cat.len")?
-            .into_int_value();
+        let len = self.string_len(fat)?;
         let offset = self.codegen_expr(offset_expr)?.into_int_value();
 
         let char_at = self.get_or_build_char_at()?;

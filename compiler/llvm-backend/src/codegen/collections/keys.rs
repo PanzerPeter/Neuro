@@ -113,10 +113,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .builder
                 .build_extract_value(key.into_struct_value(), 0, "key.str.ptr")?
                 .into_pointer_value();
-            let len = self
-                .builder
-                .build_extract_value(key.into_struct_value(), 1, "key.str.len")?
-                .into_int_value();
+            let len = self.string_len(key.into_struct_value())?;
             let helper = self.build_string_hash_helper()?;
             return Ok(self
                 .builder
@@ -221,18 +218,12 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(lhs_struct, 0, "lt.l.ptr")?
             .into_pointer_value();
-        let lhs_len = self
-            .builder
-            .build_extract_value(lhs_struct, 1, "lt.l.len")?
-            .into_int_value();
+        let lhs_len = self.string_len(lhs_struct)?;
         let rhs_ptr = self
             .builder
             .build_extract_value(rhs_struct, 0, "lt.r.ptr")?
             .into_pointer_value();
-        let rhs_len = self
-            .builder
-            .build_extract_value(rhs_struct, 1, "lt.r.len")?
-            .into_int_value();
+        let rhs_len = self.string_len(rhs_struct)?;
 
         let shorter =
             self.builder

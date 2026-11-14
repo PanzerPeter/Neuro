@@ -61,7 +61,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let fat = message.into_struct_value();
         let ptr = self.builder.build_extract_value(fat, 0, "panic.msg.ptr")?;
-        let len = self.builder.build_extract_value(fat, 1, "panic.msg.len")?;
+        let len = self.string_len(fat)?;
 
         let thunk = self.cold_message_panic_thunk(suffix)?;
         self.emit_cold_call(thunk, &[ptr.into(), len.into()])

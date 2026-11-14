@@ -55,12 +55,9 @@ impl<'ctx> CodegenContext<'ctx> {
         // A temporary has no binding left to own what the pattern takes out of it, so the
         // bindings do, exactly as a `match` arm's would. A place keeps its payload.
         let ownership = if is_pure_place(scrutinee) {
-            ArmOwnership::EnclosingString { scrutinee }
+            ArmOwnership::Enclosing
         } else {
-            ArmOwnership::Arm {
-                scrutinee,
-                shares: false,
-            }
+            ArmOwnership::Arm { shares: false }
         };
         // Deliberately not restored: these bindings belong to the enclosing block and
         // must stay visible to every statement after this one.
@@ -86,10 +83,7 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let temporary = !is_pure_place(scrutinee);
         let ownership = if temporary {
-            ArmOwnership::Arm {
-                scrutinee,
-                shares: false,
-            }
+            ArmOwnership::Arm { shares: false }
         } else {
             ArmOwnership::Enclosing
         };

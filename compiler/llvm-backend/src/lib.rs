@@ -244,10 +244,7 @@ fn build_module<'ctx>(
     gpu: GpuVendor,
     tests: Option<&[String]>,
 ) -> CodegenResult<CodegenContext<'ctx>> {
-    // A `string` literal a function returns beside an allocation is copied, so every
-    // exit owns its buffer and the caller releases each one.
-    let promoted = codegen::string_ownership::promote_literal_exits(&program.items);
-    let items: &[HirItem] = promoted.as_deref().unwrap_or(&program.items);
+    let items: &[HirItem] = &program.items;
     let external_symbol = |name: &str, memory: BodyMemory| {
         external
             .iter()
@@ -428,11 +425,6 @@ fn build_module<'ctx>(
     codegen_ctx.hashable_impls = hashable_impls;
     codegen_ctx.field_newtypes = field_newtypes;
     codegen_ctx.set_consuming_self_methods(consuming_self_methods);
-    // Read the two call-boundary facts about owned `string` buffers off the whole
-    // program: they cannot be derived at a call site, where the callee's body is out of
-    // view. Cheap and unconditional, because the analysis is a single walk and answers
-    // `false` for a program that never calls anything returning or taking a `string`.
-    codegen_ctx.set_string_ownership(codegen::string_ownership::analyze(items));
     codegen_ctx.set_trait_methods(trait_methods);
 
     // Supply source so panic-family builtins can render `file:line:col` in their

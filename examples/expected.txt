@@ -105,6 +105,7 @@ ownership/move_semantics.nr      0
 ownership/pool_arena.nr          3
 ownership/returned_reference.nr  60
 ownership/slices.nr              43
+ownership/string_owners.nr       47
 
 # --- operators: bitwise, compound assignment, overloading, `??`, `?` --------
 operators/bitwise_ops.nr           1

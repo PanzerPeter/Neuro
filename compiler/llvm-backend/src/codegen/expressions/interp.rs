@@ -46,6 +46,9 @@ enum PieceOwner<'ctx> {
     /// `__neuro_exp` all do. The buffer is ours only when it is not the borrowed one
     /// handed in, which is a runtime pointer comparison.
     OwnedUnlessSameAs(PointerValue<'ctx>),
+    /// A `string` value whose owner bit, read before the length was masked, says whether
+    /// the buffer is ours: a hole's fresh value, or what a `Debug` impl returned.
+    OwnedIf(IntValue<'ctx>),
 }
 
 /// A rendered piece: its `{ ptr, len }` fat pointer and who owns the bytes.
@@ -78,10 +81,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 HirInterpPart::Formatted { expr, spec } => {
                     let ty = Type::from_hir(&expr.ty);
                     let value = self.codegen_expr(expr)?;
-                    // A hole holding a nested producer, `"{a + b}"`, hands us a buffer
-                    // of our own, which a `string` rendering passes straight through.
-                    let incoming = if self.produces_owned_string(expr) {
-                        PieceOwner::Owned
+                    // A hole holding a fresh `string`, `"{a + b}"`, hands us its buffer when
+                    // it owns one, which a `string` rendering passes straight through.
+                    let incoming = if super::super::drops::is_fresh_string(expr) {
+                        PieceOwner::OwnedIf(self.string_owns(value.into_struct_value())?)
                     } else {
                         PieceOwner::Borrowed
                     };
@@ -124,7 +127,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_int_add(offset, piece.len, "interp.offset")?;
         }
 
-        self.build_string_value(buf, total)
+        self.build_owned_string_value(buf, total)
     }
 
     /// Release a rendered piece's buffer, if the rendering allocated it.
@@ -137,6 +140,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 Ok(())
             }
             PieceOwner::OwnedUnlessSameAs(source) => self.free_if_distinct(piece.ptr, source),
+            PieceOwner::OwnedIf(owns) => self.release_if(
+                owns,
+                self.build_string_value(piece.ptr, piece.len)?
+                    .into_struct_value(),
+            ),
         }
     }
 
@@ -193,6 +201,27 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.free_if_distinct(source, result_ptr)?;
                 Ok((result, PieceOwner::Owned))
             }
+            // The source is released when it is ours and the transform did not hand it
+            // back; the result is ours when the transform allocated, or handed back a
+            // source that was.
+            PieceOwner::OwnedIf(owns) => {
+                let (result_ptr, _) = self.split_string_value(result)?;
+                let same = self.builder.build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    source,
+                    result_ptr,
+                    "interp.same",
+                )?;
+                let distinct = self.builder.build_not(same, "interp.distinct")?;
+                let release = self.builder.build_and(owns, distinct, "interp.release")?;
+                let zero = self.context.i64_type().const_zero();
+                self.release_if(
+                    release,
+                    self.build_string_value(source, zero)?.into_struct_value(),
+                )?;
+                let result_owned = self.builder.build_or(owns, distinct, "interp.owned")?;
+                Ok((result, PieceOwner::OwnedIf(result_owned)))
+            }
             _ => Ok((result, PieceOwner::OwnedUnlessSameAs(source))),
         }
     }
@@ -207,10 +236,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(structure, 0, "interp.piece.ptr")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(structure, 1, "interp.piece.len")?
-            .into_int_value();
+        let len = self.string_len(structure)?;
         Ok((ptr, len))
     }
 
@@ -340,8 +366,14 @@ impl<'ctx> CodegenContext<'ctx> {
         value: BasicValueEnum<'ctx>,
         ty: &Type,
     ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
-        let rendered = self.call_own_method(ty, DEBUG_STRING_METHOD, &[value], "dbg.impl")?;
-        Ok((rendered, PieceOwner::Owned))
+        let rendered = self
+            .call_own_method(ty, DEBUG_STRING_METHOD, &[value], "dbg.impl")?
+            .into_struct_value();
+        let owns = self.string_owns(rendered)?;
+        Ok((
+            self.string_view(rendered)?.into(),
+            PieceOwner::OwnedIf(owns),
+        ))
     }
 
     /// The name the programmer wrote for struct key `name`. The two differ only for a
@@ -384,14 +416,16 @@ impl<'ctx> CodegenContext<'ctx> {
         spec: &FormatSpec,
         incoming: PieceOwner<'ctx>,
     ) -> CodegenResult<(BasicValueEnum<'ctx>, PieceOwner<'ctx>)> {
+        let value: BasicValueEnum<'ctx> = self.string_view(value.into_struct_value())?.into();
         if spec.kind == FormatKind::Debug {
-            let (source, _) = self.split_string_value(value)?;
             let quoted = self.build_quoted(value, b'"')?;
             // `__neuro_quote` always allocates, so a buffer we brought in is now dead.
-            if matches!(incoming, PieceOwner::Owned) {
-                let free_fn = self.release_fn()?;
-                self.builder.build_call(free_fn, &[source.into()], "")?;
-            }
+            let (ptr, len) = self.split_string_value(value)?;
+            self.free_piece(&Piece {
+                ptr,
+                len,
+                owner: incoming,
+            })?;
             return Ok((quoted, PieceOwner::Owned));
         }
         Ok((value, incoming))

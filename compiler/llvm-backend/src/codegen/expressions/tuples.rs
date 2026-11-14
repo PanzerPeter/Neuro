@@ -38,7 +38,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // An owned place written as an element moves into the aggregate, exactly as
             // it does into a struct field; left armed, the binding and the tuple's own
             // holder would each release it.
-            let val = self.codegen_literal_position(i.to_string(), el)?;
+            let val = self.codegen_moved_into_literal(el)?;
             let val = self.coerce_if_needed(val, field_llvm[i], el_ty)?;
             agg = self
                 .builder

@@ -53,10 +53,6 @@ impl<'ctx> CodegenContext<'ctx> {
     /// already evaluated the new value, so the field may be read on the way to
     /// replacing itself. The storage the position addresses does not move, so re-arming
     /// is a flag store and needs no second plan.
-    ///
-    /// A `string` position is released here but left disarmed: `p.name = "lit"`
-    /// displaces an owner and takes on none, so what re-arms it is the incoming value's
-    /// own shape, through [`arm_stored_string_positions`].
     pub(crate) fn drop_displaced_held_value(
         &mut self,
         name: &str,
@@ -77,16 +73,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let armed = self.context.bool_type().const_int(1, false);
         for (storage_ptr, flag_ptr, target) in pending {
             self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
-            if matches!(target, DropTarget::HeapString) {
-                continue;
-            }
             self.builder.build_store(flag_ptr, armed)?;
         }
         Ok(())
     }
 
-    /// Release what the position `object.segment` loses to a store, then arm it for
-    /// `value`. A segment is a field name or a literal array position, at any depth.
+    /// Release what the position `object.segment` loses to a store, then arm it for the
+    /// value replacing it. A segment is a field name or a literal array position, at any depth.
     /// `position_ptr` addresses the position and `position_llvm` is its type, which
     /// find it when an index above it is known only at run time.
     ///
@@ -98,7 +91,6 @@ impl<'ctx> CodegenContext<'ctx> {
         segment: &str,
         position_ptr: PointerValue<'ctx>,
         position_llvm: BasicTypeEnum<'ctx>,
-        value: &HirExpr,
     ) -> CodegenResult<()> {
         let Some((root, path)) = Self::extend_place(object, segment) else {
             return Ok(());
@@ -109,21 +101,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 return Ok(());
             };
             shape.push(Some(segment.to_string()));
-            return self.displace_runtime_position(
-                &root,
-                &shape,
-                position_ptr,
-                position_llvm,
-                value,
-            );
+            return self.displace_runtime_position(&root, &shape, position_ptr, position_llvm);
         };
-        let moved_in = self.moved_in_string_flags(value)?;
-        self.drop_displaced_held_value(&root, &path)?;
-        // A `string` position the store hands a fresh buffer takes ownership of it here:
-        // the release above left every such position disarmed, because the type says
-        // nothing about what the incoming value owns. A moved binding hands its flags over.
-        self.arm_stored_string_positions(&root, &path, value)?;
-        self.store_held_string_flags(&root, &under(&path, &moved_in))
+        self.drop_displaced_held_value(&root, &path)
     }
 
     /// Whether the place `expr` names is reached through a reference: a `&mut` binding
@@ -156,7 +136,6 @@ impl<'ctx> CodegenContext<'ctx> {
         array_llvm: ArrayType<'ctx>,
         array_ptr: PointerValue<'ctx>,
         element_ptr: PointerValue<'ctx>,
-        value: &HirExpr,
     ) -> CodegenResult<()> {
         let Some((root, prefix)) = Self::moved_place(object) else {
             return Ok(());
@@ -172,7 +151,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 &shape,
                 element_ptr,
                 array_llvm.get_element_type(),
-                value,
             );
         };
         let Some(entry) = self.live_drop_entry(&root) else {
@@ -189,7 +167,6 @@ impl<'ctx> CodegenContext<'ctx> {
         if tracked.is_empty() {
             return Ok(());
         }
-        let moved_in = self.moved_in_string_flags(value)?;
 
         let parent_fn = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("element store emitted outside a function".to_string())
@@ -231,8 +208,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_conditional_branch(hit, release_bb, next_bb)?;
             self.builder.position_at_end(release_bb);
             self.drop_displaced_held_value(&root, &path)?;
-            self.arm_stored_string_positions(&root, &path, value)?;
-            self.store_held_string_flags(&root, &under(&path, &moved_in))?;
             self.builder.build_unconditional_branch(next_bb)?;
             self.builder.position_at_end(next_bb);
         }
@@ -243,7 +218,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// (`rows[k].name`, `rows[k].pair[j]`). No static path names the position, so each
     /// tracked position of the same `shape` (a `None` segment is a run-time index) is
     /// tested against the address being written, and the one written is released and
-    /// re-armed for `value`.
+    /// re-armed.
     ///
     /// Positions of one shape are disjoint and `position_llvm` wide, so a position is the
     /// one written exactly when an owner it holds lies inside the written range.
@@ -253,7 +228,6 @@ impl<'ctx> CodegenContext<'ctx> {
         shape: &[Option<String>],
         position_ptr: PointerValue<'ctx>,
         position_llvm: BasicTypeEnum<'ctx>,
-        value: &HirExpr,
     ) -> CodegenResult<()> {
         let mut candidates: Vec<(Vec<String>, PointerValue<'ctx>)> = Vec::new();
         for held in self
@@ -277,9 +251,6 @@ impl<'ctx> CodegenContext<'ctx> {
         if candidates.is_empty() {
             return Ok(());
         }
-        let moved_in = self.moved_in_string_flags(value)?;
-        // Arming reads a forwarder call's owners once; every candidate needs them.
-        let forwarded = self.forwarded_holder_owners.clone();
 
         let parent_fn = self.current_function.ok_or_else(|| {
             CodegenError::InternalError("position store emitted outside a function".to_string())
@@ -304,9 +275,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_conditional_branch(hit, release_bb, next_bb)?;
             self.builder.position_at_end(release_bb);
             self.drop_displaced_held_value(root, &path)?;
-            self.forwarded_holder_owners = forwarded.clone();
-            self.arm_stored_string_positions(root, &path, value)?;
-            self.store_held_string_flags(root, &under(&path, &moved_in))?;
             self.builder.build_unconditional_branch(next_bb)?;
             self.builder.position_at_end(next_bb);
         }
@@ -328,49 +296,17 @@ impl<'ctx> CodegenContext<'ctx> {
         pending
     }
 
-    /// Arm `flag_ptr` for the value a reassignment has just stored, so scope exit
-    /// releases the incoming value rather than the one already released.
-    ///
-    /// Ownership is re-derived from the assigned expression, not assumed: a `string`
-    /// binding owns a buffer only when the expression that produced it allocated one, so
-    /// reassigning a heap string from a `.rodata` literal must leave the flag clear.
-    /// Every other target's type proves the ownership on its own.
-    pub(crate) fn rearm_drop_flag(
+    /// Re-arm a reassigned binding's own flag and every held position under it, so
+    /// scope exit releases the incoming value rather than the one already released.
+    pub(crate) fn rearm_binding(
         &mut self,
         flag_ptr: PointerValue<'ctx>,
-        target: &DropTarget,
-        value: &HirExpr,
+        name: &str,
     ) -> CodegenResult<()> {
-        let owns_new_value = match target {
-            DropTarget::HeapString => self.produces_owned_string(value),
-            _ => true,
-        };
-        let bool_ty = self.context.bool_type();
-        self.builder
-            .build_store(flag_ptr, bool_ty.const_int(owns_new_value as u64, false))?;
-        Ok(())
-    }
-
-    /// Re-arm every held position of a reassigned binding, so scope exit releases what
-    /// the incoming holder holds rather than what the released one held.
-    ///
-    /// Unconditional for a position whose own type proves it owns something, which no
-    /// assignment can change. A `string` position is skipped and left disarmed: its
-    /// ownership comes from the expression stored into it, so
-    /// [`arm_stored_string_positions`] arms it from the incoming value instead.
-    pub(crate) fn rearm_held_drop_flags(&mut self, name: &str) -> CodegenResult<()> {
-        let flags: Vec<PointerValue<'ctx>> = self
-            .live_drop_entry(name)
-            .map(|entry| {
-                entry
-                    .held
-                    .iter()
-                    .filter(|held| !matches!(held.target, DropTarget::HeapString))
-                    .map(|held| held.flag_ptr)
-                    .collect()
-            })
-            .unwrap_or_default();
-
+        let mut flags = vec![flag_ptr];
+        if let Some(entry) = self.live_drop_entry(name) {
+            flags.extend(entry.held.iter().map(|held| held.flag_ptr));
+        }
         let armed = self.context.bool_type().const_int(1, false);
         for flag_ptr in flags {
             self.builder.build_store(flag_ptr, armed)?;
@@ -398,13 +334,4 @@ fn place_shape(expr: &HirExpr) -> Option<(&str, Vec<Option<String>>)> {
     let (root, mut shape) = place_shape(object)?;
     shape.push(segment);
     Some((root, shape))
-}
-
-/// `flags`, keyed by path below a position, re-keyed by path below the holder that
-/// position sits at `prefix` in.
-fn under<T: Copy>(prefix: &[String], flags: &[(Vec<String>, T)]) -> Vec<(Vec<String>, T)> {
-    flags
-        .iter()
-        .map(|(path, flag)| (prefix.iter().chain(path).cloned().collect(), *flag))
-        .collect()
 }

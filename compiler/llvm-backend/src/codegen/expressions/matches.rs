@@ -14,7 +14,7 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind, HirMatchArm, HirMatchBinding, HirMatchTest, HirPatternStep};
 
-use crate::codegen::context::{CodegenContext, DropTarget};
+use crate::codegen::context::CodegenContext;
 use crate::codegen::drops::is_pure_place;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -39,24 +39,13 @@ struct BindingSlot<'ctx> {
 
 /// Who releases what an arm's bindings take out of the scrutinee.
 #[derive(Clone, Copy)]
-pub(crate) enum ArmOwnership<'e> {
+pub(crate) enum ArmOwnership {
     /// A `match` arm: the caller has opened a scope for these bindings, and the payload
-    /// they take is theirs for the arm's duration. `scrutinee` is the expression it came
-    /// out of, which is what says whether a `string` payload is a buffer of its own.
-    /// `shares` says the scrutinee keeps its function values, so a binding of one takes
-    /// a count of its own.
-    Arm {
-        scrutinee: &'e HirExpr,
-        shares: bool,
-    },
-    /// A `val ... else` binding, whose release belongs to the binding it introduces into
-    /// the enclosing scope rather than to the pattern.
+    /// they take is theirs for the arm's duration. `shares` says the scrutinee keeps its
+    /// function values, so a binding of one takes a count of its own.
+    Arm { shares: bool },
+    /// A `val ... else` binding out of a place, which keeps its payload.
     Enclosing,
-    /// A `val ... else` success binding. Like `Enclosing`, except that a `string` payload
-    /// the scrutinee provably handed out as a buffer of its own (a collection's fallible
-    /// reader) is registered in the enclosing scope, which is where the binding lives.
-    /// Every other payload stays unregistered, as `Enclosing` leaves it.
-    EnclosingString { scrutinee: &'e HirExpr },
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -68,7 +57,6 @@ impl<'ctx> CodegenContext<'ctx> {
         arms: &[HirMatchArm],
         result_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let slots = self.branch_string_slots.take();
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("match outside function".to_string()))?;
@@ -90,12 +78,8 @@ impl<'ctx> CodegenContext<'ctx> {
         // through a borrow.
         let copies = self.shares_on_copy(scrut_sem.referent());
         let mut disowned = Vec::new();
-        if let HirExprKind::Variable(name) = &scrutinee.kind
-            && !copies
-            && arms.iter().any(|arm| !arm.bindings.is_empty())
-        {
-            let name = name.clone();
-            disowned = self.mark_held_moved_for_drop(&name)?;
+        if !copies && arms.iter().any(|arm| !arm.bindings.is_empty()) {
+            disowned = self.mark_held_moved_for_drop(scrutinee)?;
         }
         let shares = is_pure_place(scrutinee) && disowned.is_empty();
 
@@ -144,15 +128,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 for (flag_ptr, owned) in &disowned {
                     self.builder.build_store(*flag_ptr, *owned)?;
                 }
+                // A temporary scrutinee no arm binding takes from has no other owner, and
+                // nothing in this arm can name it.
+                self.drop_unbound_temporary(scrutinee, scrut_val)?;
             }
             self.codegen_arm_body(
                 arm,
                 &slots_of_arm,
-                ArmOwnership::Arm { scrutinee, shares },
+                ArmOwnership::Arm { shares },
                 result_slot,
                 merge_bb,
                 guard_failed,
-                slots.as_deref(),
             )?;
         }
 
@@ -433,19 +419,14 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Bring the arm's stored bindings into scope, evaluate its guard (if any), then its
     /// body into the result slot, branching to `merge_bb` on success or `guard_failed`
     /// when the guard fails. Bindings are removed from the name maps before returning.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the arm, its slots and the three target blocks are per-arm state the match lowering already holds; a parameter struct would only rename them"
-    )]
     fn codegen_arm_body(
         &mut self,
         arm: &HirMatchArm,
         binding_slots: &[BindingSlot<'ctx>],
-        ownership: ArmOwnership<'_>,
+        ownership: ArmOwnership,
         result_slot: Option<PointerValue<'ctx>>,
         merge_bb: BasicBlock<'ctx>,
         guard_failed: BasicBlock<'ctx>,
-        slots: Option<&[(Vec<String>, PointerValue<'ctx>)]>,
     ) -> CodegenResult<()> {
         // An arm binding takes its payload BY VALUE out of a scrutinee the match already
         // disowned, so for the arm's duration the binding is the only owner. Its own drop
@@ -466,7 +447,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         match result_slot {
             Some(slot) => {
-                let val = self.codegen_branch_tail(&arm.body, slots)?;
+                let val = self.codegen_expr(&arm.body)?;
                 if !self.current_block_terminated() {
                     self.mark_moved_for_drop(&arm.body)?;
                     self.builder.build_store(slot, val)?;
@@ -501,7 +482,7 @@ impl<'ctx> CodegenContext<'ctx> {
         bindings: &[HirMatchBinding],
         scrut_alloca: PointerValue<'ctx>,
         scrut_sem: &Type,
-        ownership: ArmOwnership<'_>,
+        ownership: ArmOwnership,
     ) -> CodegenResult<Vec<SavedBinding<'ctx>>> {
         let binding_slots = self.binding_slots(bindings)?;
         self.store_bindings(bindings, &binding_slots, 0, scrut_alloca, scrut_sem)?;
@@ -558,7 +539,7 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         bindings: &[HirMatchBinding],
         binding_slots: &[BindingSlot<'ctx>],
-        ownership: ArmOwnership<'_>,
+        ownership: ArmOwnership,
     ) -> CodegenResult<Vec<SavedBinding<'ctx>>> {
         let mut saved = Vec::with_capacity(bindings.len());
         for (binding, slot) in bindings.iter().zip(binding_slots) {
@@ -568,48 +549,15 @@ impl<'ctx> CodegenContext<'ctx> {
                 sem,
             } = slot;
             let payload = binding.paths.iter().any(|path| !path.is_empty());
-            match (ownership, payload) {
-                (ArmOwnership::Arm { scrutinee, shares }, true) => {
-                    if shares && self.holds_function(sem) {
-                        self.retain_held_functions(*alloca, sem)?;
-                    }
-                    self.register_arm_payload(&binding.name, *alloca, sem, scrutinee)?;
+            if let (ArmOwnership::Arm { shares }, true) = (ownership, payload) {
+                if shares && self.holds_function(sem) {
+                    self.retain_held_functions(*alloca, sem)?;
                 }
-                (ArmOwnership::EnclosingString { scrutinee }, true)
-                    if matches!(sem, Type::String)
-                        && self.produces_owned_option_payload(scrutinee) =>
-                {
-                    let _ =
-                        self.register_local_drop(&binding.name, *alloca, DropTarget::HeapString)?;
-                }
-                _ => {}
+                self.register_owned_binding(&binding.name, *alloca, sem)?;
             }
             saved.push(self.bind_name(&binding.name, *alloca, *llvm_ty, sem.clone()));
         }
         Ok(saved)
-    }
-
-    /// Register an arm's payload binding for release when the arm ends.
-    ///
-    /// A `string` payload is the one whose type proves nothing, exactly as a `string`
-    /// binding's does: it is released only where the scrutinee provably handed out a
-    /// buffer of its own, which a collection's fallible reader does and nothing else yet
-    /// does. Every other payload type carries its own proof.
-    fn register_arm_payload(
-        &mut self,
-        name: &str,
-        alloca: PointerValue<'ctx>,
-        sem: &Type,
-        scrutinee: &HirExpr,
-    ) -> CodegenResult<()> {
-        if !matches!(sem, Type::String) {
-            return self.register_owned_binding(name, alloca, sem);
-        }
-        if !self.produces_owned_option_payload(scrutinee) {
-            return Ok(());
-        }
-        let _ = self.register_local_drop(name, alloca, DropTarget::HeapString)?;
-        Ok(())
     }
 
     /// Register `name` in the three name maps, returning whatever the name meant

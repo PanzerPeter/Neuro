@@ -55,7 +55,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn holds_owner_besides_functions(&self, ty: &Type) -> bool {
         match ty {
             Type::Function { .. } => false,
-            Type::Collection { .. } | Type::Tensor { .. } => true,
+            Type::Collection { .. } | Type::Tensor { .. } | Type::String => true,
             Type::Struct(name) => {
                 self.drop_types.contains(name)
                     || self.struct_defs.get(name).is_some_and(|fields| {

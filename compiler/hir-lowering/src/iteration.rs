@@ -41,6 +41,8 @@ pub(crate) const LOOP_INDEX_TYPE: HirType = HirType::U64;
 const CHARS_OFFSET_FIELD: &str = "offset";
 /// The `for`-head form that drives a `Chars` iterator by that cursor.
 const CHAR_INDICES_METHOD: &str = "char_indices";
+/// The `string` methods whose result views the receiver's bytes.
+const STRING_VIEWS: [&str; 2] = ["slice", "char_slice"];
 
 /// Where a protocol loop's position binding takes its value.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,6 +55,90 @@ pub(crate) enum LoopPosition {
 }
 
 impl Lowerer {
+    /// Bind every `string` temporary `expr` borrows (`&(a + b)`, the receiver of
+    /// `(a + b).slice(..)`) to a generated `__iter_src_N` declared in `prelude`, and read
+    /// the binding in its place, so the temporary lives as long as the scope `prelude`
+    /// opens.
+    fn hoist_borrowed_temporaries(&mut self, expr: HirExpr, prelude: &mut Vec<HirStmt>) -> HirExpr {
+        let HirExpr { kind, ty, span } = expr;
+        let kind = match kind {
+            HirExprKind::Reference { operand, mutable } => HirExprKind::Reference {
+                operand: Box::new(self.hoist_temporary_string(*operand, prelude)),
+                mutable,
+            },
+            HirExprKind::StructLiteral { name, fields, base } => HirExprKind::StructLiteral {
+                name,
+                fields: fields
+                    .into_iter()
+                    .map(|mut field| {
+                        field.value =
+                            Box::new(self.hoist_borrowed_temporaries(*field.value, prelude));
+                        field
+                    })
+                    .collect(),
+                base,
+            },
+            HirExprKind::Call { callee, args } => {
+                let callee = match callee.kind {
+                    HirExprKind::FieldAccess { object, field } => {
+                        let object = match STRING_VIEWS.contains(&field.as_str()) {
+                            true => self.hoist_temporary_string(*object, prelude),
+                            false => self.hoist_borrowed_temporaries(*object, prelude),
+                        };
+                        HirExpr::new(
+                            HirExprKind::FieldAccess {
+                                object: Box::new(object),
+                                field,
+                            },
+                            callee.ty,
+                            callee.span,
+                        )
+                    }
+                    other => HirExpr::new(other, callee.ty, callee.span),
+                };
+                HirExprKind::Call {
+                    callee: Box::new(callee),
+                    args: args
+                        .into_iter()
+                        .map(|arg| self.hoist_borrowed_temporaries(arg, prelude))
+                        .collect(),
+                }
+            }
+            other => other,
+        };
+        HirExpr::new(kind, ty, span)
+    }
+
+    /// `operand` itself when it is not an owned `string` built in place, and otherwise a
+    /// read of the `__iter_src_N` binding it is moved into.
+    fn hoist_temporary_string(&mut self, operand: HirExpr, prelude: &mut Vec<HirStmt>) -> HirExpr {
+        let built = matches!(operand.ty, HirType::String)
+            && !matches!(
+                operand.kind,
+                HirExprKind::Literal(_)
+                    | HirExprKind::Variable(_)
+                    | HirExprKind::FieldAccess { .. }
+                    | HirExprKind::TupleIndex { .. }
+                    | HirExprKind::NewtypeAccess { .. }
+                    | HirExprKind::Index { .. }
+                    | HirExprKind::Deref { .. }
+            );
+        if !built {
+            return self.hoist_borrowed_temporaries(operand, prelude);
+        }
+        self.protocol_counter += 1;
+        let name = format!("__iter_src_{}", self.protocol_counter);
+        let (ty, span) = (operand.ty.clone(), operand.span);
+        prelude.push(HirStmt::VarDecl {
+            name: name.clone(),
+            ty: ty.clone(),
+            init: Some(operand),
+            mutable: false,
+            span,
+        });
+        variable(&name, ty, span)
+    }
+
     /// Whether `ty` iterates through the protocol rather than as a built-in sequence.
     pub(crate) fn iterates_by_protocol(&self, ty: &HirType) -> bool {
         nominal_name(ty).is_some_and(|name| {
@@ -106,13 +192,17 @@ impl Lowerer {
                 .map(|_| format!("__iter_pos_{}", self.protocol_counter)),
         };
 
-        let mut prelude = vec![HirStmt::VarDecl {
+        // A `string` temporary the iterator borrows must outlive the loop, not just the
+        // declaration of `__iter_N`, whose end is where a statement's temporaries die.
+        let mut prelude = Vec::new();
+        let iter_init = self.hoist_borrowed_temporaries(iter_init, &mut prelude);
+        prelude.push(HirStmt::VarDecl {
             name: iter_binding.clone(),
             ty: iter_ty.clone(),
             init: Some(iter_init),
             mutable: true,
             span,
-        }];
+        });
         if let Some(plan) = &plan {
             prelude.extend(plan.prelude.iter().cloned());
         }

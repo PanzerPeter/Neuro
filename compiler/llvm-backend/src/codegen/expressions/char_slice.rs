@@ -74,15 +74,12 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
-        let fat = self.string_receiver_struct(receiver)?;
+        let fat = self.viewed_string_receiver(receiver)?;
         let base_ptr = self
             .builder
             .build_extract_value(fat, 0, "cslice.base.ptr")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat, 1, "cslice.len")?
-            .into_int_value();
+        let len = self.string_len(fat)?;
 
         let i64_ty = self.context.i64_type();
         let start_cp = self.slice_index_to_i64(start_expr)?;

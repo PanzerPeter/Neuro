@@ -78,11 +78,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 // Both operands move into the map, so each is made to own its bytes here.
                 // The helper stores the key only for a new entry and drops it otherwise.
                 let key = match args.first() {
-                    Some(expr) => self.value_for_collection_slot(expr, key, &key_ty)?,
+                    Some(expr) => self.value_for_collection_slot(expr, key)?,
                     None => key,
                 };
                 let value = match args.get(1) {
-                    Some(expr) => self.value_for_collection_slot(expr, value, &value_ty)?,
+                    Some(expr) => self.value_for_collection_slot(expr, value)?,
                     None => value,
                 };
                 let value_llvm = self.collection_value_type(&value_ty)?;

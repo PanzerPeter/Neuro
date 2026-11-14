@@ -375,7 +375,10 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   `Match` on `__iter_N.next()`. Arm 0 tests the `Some` tag and binds payload slot 0 to the loop
   variable; arm 1 is a `Wildcard` whose body breaks, exactly as the `?` desugar's failure arm
   terminates its block. The label rides on the emitted `while`, so `break`/`continue`, labeled
-  or not, resolve against it with no backend change.
+  or not, resolve against it with no backend change. A `string` temporary the iterator borrows
+  (`(a + b).chars()`, the receiver of `(a + b).slice(..)`) is hoisted into an `__iter_src_N`
+  binding declared ahead of `__iter_N` (`hoist_borrowed_temporaries`): the backend releases a
+  temporary at the end of its statement, which for `__iter_N`'s declaration is before the loop.
   Two details are load-bearing. The `next` receiver carries the ITERATOR's type, not the call's
   result: the backend recovers the method symbol from the receiver, so typing it as the result
   sends `next` looking for a builtin on `Option`. And the element type is read out of the

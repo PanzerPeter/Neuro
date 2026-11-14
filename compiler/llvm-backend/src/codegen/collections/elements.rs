@@ -13,7 +13,7 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirExprKind};
 
 use super::{FIELD_CAP, FIELD_LEN, collection_arg};
-use crate::codegen::context::{CodegenContext, DropTarget};
+use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
 
@@ -33,10 +33,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(fat_ptr, 0, "str.src")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat_ptr, 1, "str.src.len")?
-            .into_int_value();
+        let len = self.string_len(fat_ptr)?;
 
         let empty = self.builder.build_int_compare(
             IntPredicate::EQ,
@@ -50,41 +47,25 @@ impl<'ctx> CodegenContext<'ctx> {
             .into_int_value();
         let copy = self.build_malloc(bytes, "str.dup")?;
         self.build_memcpy_call(copy, source, len)?;
-        self.build_string_value(copy, len)
+        self.build_owned_string_value(copy, len)
     }
 
-    /// The value to write into a slot of type `slot_ty`, given `value`, the evaluated
+    /// The value to write into a slot, given `value`, the evaluated
     /// `expr`, and move it out of whatever `expr` names.
-    ///
-    /// Every `string` position of the result owns its bytes: the ones `expr` owned are
-    /// handed over, the rest copied. The owners are read before the move clears them.
     pub(crate) fn value_for_collection_slot(
         &mut self,
         expr: &HirExpr,
         value: BasicValueEnum<'ctx>,
-        slot_ty: &Type,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        if !self.slot_holds_string(slot_ty) {
-            self.mark_moved_for_drop(expr)?;
-            return Ok(value);
-        }
-        let owners = self.stored_string_owners(expr, slot_ty)?;
-        let staged = self.entry_alloca(value.get_type(), "slot.value")?;
-        self.builder.build_store(staged, value)?;
-        self.own_strings_stored_through_borrow(staged, slot_ty, &owners)?;
         self.mark_moved_for_drop(expr)?;
-        self.builder
-            .build_load(value.get_type(), staged, "slot.owned")
-            .map_err(CodegenError::from)
+        Ok(value)
     }
 
     /// Store `val`, the evaluated `value`, at `position_ptr`: a field, tuple element or
     /// array element of type `position_ty` inside a collection slot.
     ///
-    /// The slot invariant covers every position inside it, however the place is reached,
-    /// so this is `v[i] = x` one level down: each `string` position of what arrives owns
-    /// its bytes, and what the store displaces is released, a `string` included. No drop
-    /// flag is consulted, since a slot has none.
+    /// This is `v[i] = x` one level down, however the place is reached: what the store
+    /// displaces is released, and no drop flag is consulted, since a slot has none.
     pub(crate) fn store_into_slot_position(
         &mut self,
         position_ptr: PointerValue<'ctx>,
@@ -92,7 +73,7 @@ impl<'ctx> CodegenContext<'ctx> {
         val: BasicValueEnum<'ctx>,
         value: &HirExpr,
     ) -> CodegenResult<()> {
-        let val = self.value_for_collection_slot(value, val, position_ty)?;
+        let val = self.value_for_collection_slot(value, val)?;
         if self.slot_needs_release(position_ty) {
             self.drop_slot_value(position_ptr, position_ty)?;
         }
@@ -111,28 +92,21 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         if !mutable && matches!(slot_ty, Type::String) {
             let string_llvm = self.collection_value_type(slot_ty)?;
-            return self
+            let fat = self
                 .builder
-                .build_load(string_llvm, slot_ptr, "slot.str.view")
-                .map_err(CodegenError::from);
+                .build_load(string_llvm, slot_ptr, "slot.str")?
+                .into_struct_value();
+            return Ok(self.string_view(fat)?.into());
         }
         Ok(slot_ptr.into())
     }
 
-    /// Whether a slot of `ty` owns anything its release must give back: a typed owner, or
-    /// a `string` position, which a slot always owns.
+    /// Whether a slot of `ty` owns anything its release must give back.
     pub(crate) fn slot_needs_release(&self, ty: &Type) -> bool {
-        self.holds_owner(ty) || self.slot_holds_string(ty)
+        self.holds_owner(ty)
     }
 
-    /// Whether a value of `ty` is a `string` or has one at a fixed position inside it.
-    fn slot_holds_string(&self, ty: &Type) -> bool {
-        matches!(ty, Type::String) || !self.string_position_paths(ty).is_empty()
-    }
-
-    /// Destroy the value a slot holds at `slot_ptr`: every typed owner inside it, and
-    /// every `string` position, which the slot invariant says owns its bytes. An enum
-    /// payload's `string` is not reached, as no position of an enum is.
+    /// Destroy the value a slot holds at `slot_ptr`, and every owner inside it.
     pub(crate) fn drop_slot_value(
         &mut self,
         slot_ptr: PointerValue<'ctx>,
@@ -141,52 +115,23 @@ impl<'ctx> CodegenContext<'ctx> {
         if self.holds_owner(ty) {
             self.emit_value_destructor(slot_ptr, ty)?;
         }
-        for position_ptr in self.string_positions_of(slot_ptr, ty)? {
-            self.release_slot_string(position_ptr)?;
-        }
         Ok(())
     }
 
     /// Register `name`, whose storage `ptr` holds a `ty` value just taken out of a slot,
-    /// as that value's owner in the innermost scope. The slot owned every `string`
-    /// position, so the binding does too, which a binding's own planning cannot know.
+    /// as that value's owner in the innermost scope.
     pub(crate) fn register_slot_owner(
         &mut self,
         name: &str,
         ptr: PointerValue<'ctx>,
         ty: &Type,
     ) -> CodegenResult<()> {
-        if matches!(ty, Type::String) {
-            self.register_local_drop(name, ptr, DropTarget::HeapString)?;
-            return Ok(());
-        }
-        self.register_owned_binding(name, ptr, ty)?;
-        let flags: Vec<PointerValue<'ctx>> = self
-            .drop_scopes
-            .last()
-            .and_then(|scope| scope.last())
-            .filter(|entry| entry.name == name)
-            .map(|entry| {
-                entry
-                    .held
-                    .iter()
-                    .filter(|held| matches!(held.target, DropTarget::HeapString))
-                    .map(|held| held.flag_ptr)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let armed = self.context.bool_type().const_int(1, false);
-        for flag_ptr in flags {
-            self.builder.build_store(flag_ptr, armed)?;
-        }
-        Ok(())
+        self.register_owned_binding(name, ptr, ty)
     }
 
     /// Destroy `value`, the result of the statement `expr`, when it is a value a
     /// collection gave up (`pop`, `remove`, `swap_remove`, the value `insert` displaced)
-    /// and nothing binds it. A bare `string` is the consumer's: the statement already
-    /// released it as the owned string it is. A value the unbound-temporary path destroys
-    /// (a user destructor, a function value) has only its `string` positions left here.
+    /// and nothing binds it, when the unbound-temporary path does not: a bare tensor.
     pub(crate) fn drop_discarded_slot_value(
         &mut self,
         expr: &HirExpr,
@@ -195,19 +140,18 @@ impl<'ctx> CodegenContext<'ctx> {
         let Some(element_ty) = taken_slot_type(expr) else {
             return Ok(());
         };
-        if self.pool_depth > 0 || !self.slot_needs_release(&element_ty) {
-            return Ok(());
-        }
         let result_ty = Type::from_hir(&expr.ty);
-        if result_ty == element_ty && matches!(element_ty, Type::String) {
+        if self.pool_depth > 0
+            || !self.slot_needs_release(&element_ty)
+            || self.temporary_drops_its_owners(&result_ty)
+        {
             return Ok(());
         }
-        let strings_only = self.temporary_drops_its_owners(&result_ty);
         let staged = self.entry_alloca(value.get_type(), "taken.discarded")?;
         self.builder.build_store(staged, value)?;
         let option = match &result_ty {
             Type::Enum(option) if result_ty != element_ty => option.clone(),
-            _ => return self.release_taken_value(staged, &element_ty, strings_only),
+            _ => return self.drop_slot_value(staged, &element_ty),
         };
         let parent_fn = self
             .current_function
@@ -249,45 +193,9 @@ impl<'ctx> CodegenContext<'ctx> {
             0,
             "taken.payload.slot",
         )?;
-        self.release_taken_value(slot_ptr, &element_ty, strings_only)?;
+        self.drop_slot_value(slot_ptr, &element_ty)?;
         self.builder.build_unconditional_branch(done_bb)?;
         self.builder.position_at_end(done_bb);
-        Ok(())
-    }
-
-    /// Destroy a value taken out of a slot at `ptr`, or with `strings_only` just release
-    /// its `string` positions, when another path destroys its typed owners.
-    fn release_taken_value(
-        &mut self,
-        ptr: PointerValue<'ctx>,
-        ty: &Type,
-        strings_only: bool,
-    ) -> CodegenResult<()> {
-        if !strings_only {
-            return self.drop_slot_value(ptr, ty);
-        }
-        for position_ptr in self.string_positions_of(ptr, ty)? {
-            self.release_slot_string(position_ptr)?;
-        }
-        Ok(())
-    }
-
-    /// Release the buffer behind the `string` fat pointer stored at `slot_ptr`.
-    pub(super) fn release_slot_string(
-        &mut self,
-        slot_ptr: PointerValue<'ctx>,
-    ) -> CodegenResult<()> {
-        let fat_ptr_ty = self.string_fat_ptr_type();
-        let buffer_ptr = self
-            .builder
-            .build_struct_gep(fat_ptr_ty, slot_ptr, 0, "slot.str.addr")?;
-        let buffer = self.builder.build_load(
-            self.context.ptr_type(inkwell::AddressSpace::default()),
-            buffer_ptr,
-            "slot.str.buf",
-        )?;
-        let release = self.release_fn()?;
-        self.builder.build_call(release, &[buffer.into()], "")?;
         Ok(())
     }
 

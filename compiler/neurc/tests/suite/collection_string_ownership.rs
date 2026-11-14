@@ -351,42 +351,16 @@ func main() -> i32 {
     assert_eq!(exit, 11);
 }
 
-/// The `string` releases `main` emits for `source`, read off its textual IR. A
-/// collection's own buffer is released under another name, and once per exit path, so
-/// it is not counted.
-fn main_string_releases(test: &CompileTest, filename: &str, source: &str) -> usize {
-    let source_path = test.write_source(filename, source);
-    let ir_path = source_path.with_extension("ll");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_neurc"))
-        .args(["compile", "--emit", "llvm-ir", "-o"])
-        .arg(&ir_path)
-        .arg(&source_path)
-        .output()
-        .expect("run neurc");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let ir = std::fs::read_to_string(&ir_path).expect("read IR");
-    let start = ir.find("@main(").expect("main is defined");
-    let body = &ir[start..];
-    let end = body.find("\n}\n").unwrap_or(body.len());
-    body[..end]
-        .matches("call void @__neuro_release(ptr %str.drop.buf")
-        .count()
-}
-
 /// `val Some(s) = v.pop() else { ... }` takes the same owned payload a `match` arm
-/// does, and releases it the same way. The success binding registered no owner, and the
-/// payload leaked once per evaluation.
+/// does, and releases it the same way. The success binding once registered no owner, and
+/// the payload leaked once per evaluation.
 #[test]
 fn a_val_else_string_payload_is_released_like_a_match_arms() {
     let test = CompileTest::new();
     let val_else = r#"
 func main() -> i32 {
     mut v: Vec<string> = Vec::new()
-    v.push("x")
+    v.push("x" + "")
     val Some(s) = v.pop() else {
         return 2
     }
@@ -396,18 +370,13 @@ func main() -> i32 {
     let matched = r#"
 func main() -> i32 {
     mut v: Vec<string> = Vec::new()
-    v.push("x")
+    v.push("x" + "")
     return match v.pop() {
         Some(s) => s.len() as i32,
         None => 2
     }
 }
 "#;
-    let by_val_else = main_string_releases(&test, "val_else_payload.nr", val_else);
-    let by_match = main_string_releases(&test, "match_payload.nr", matched);
-    assert!(by_val_else > 0, "the payload is released at all");
-    assert_eq!(
-        by_val_else, by_match,
-        "the two forms release the payload alike"
-    );
+    assert_eq!(test.run_leak_checked("val_else_payload.nr", val_else), 1);
+    assert_eq!(test.run_leak_checked("match_payload.nr", matched), 1);
 }

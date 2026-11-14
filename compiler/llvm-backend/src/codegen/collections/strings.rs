@@ -99,16 +99,7 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder
             .build_call(memcpy, &[copy.into(), buffer.into(), len.into()], "")?;
 
-        let fat_ptr_type = self.type_mapper.map_type(&Type::String)?.into_struct_type();
-        let with_ptr = self
-            .builder
-            .build_insert_value(fat_ptr_type.get_undef(), copy, 0, "str.res.ptr")?
-            .into_struct_value();
-        Ok(self
-            .builder
-            .build_insert_value(with_ptr, len, 1, "str.res")?
-            .into_struct_value()
-            .into())
+        self.build_owned_string_value(copy, len)
     }
 
     /// Split a `string` / `&string` operand into its data pointer and byte length.
@@ -132,10 +123,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(fat_ptr, 0, "str.arg.ptr")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat_ptr, 1, "str.arg.len")?
-            .into_int_value();
+        let len = self.string_len(fat_ptr)?;
         Ok((data, len))
     }
 

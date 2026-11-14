@@ -8,8 +8,9 @@
 // program declares no `Drop` types: the scope stack stays empty and nothing is
 // emitted.
 
+use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use neuro_hir::{HirExpr, HirExprKind, HirType};
+use neuro_hir::{HirExpr, HirExprKind};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -24,27 +25,25 @@ pub(crate) use moves::reads_through_collection_slot;
 
 pub(crate) use functions::{ENV_HEADER_FIELDS, is_pure_place};
 mod owned_strings;
-pub(crate) use owned_strings::builds_its_own_buffer;
-mod string_positions;
+pub(crate) use owned_strings::{builds_its_own_buffer, is_fresh_string};
 
 /// The name an unbound temporary's drop entry is registered under. `__` is rejected in
 /// every declared name, so no move site can reach the entry.
 pub(crate) const UNBOUND_TEMPORARY: &str = "__unbound_temporary";
 
-/// The drop flag of a `string` position inside a holder. It is the one flag that
-/// starts `false`, so its name is what tells an armed position from a planned one.
-pub(crate) const STRING_POSITION_FLAG: &str = "str.owned.flag";
-
 /// Whether `expr` builds a value no binding owns. Anything else may be a read of a value
-/// some binding still owns.
-fn is_fresh_value(expr: &HirExpr) -> bool {
-    matches!(
-        expr.kind,
+/// some binding still owns. A field read off a fresh value leaves with its reader, the
+/// rest of the value being destroyed around it (`drop_temporary_except`), so it is fresh
+/// too.
+pub(crate) fn is_fresh_value(expr: &HirExpr) -> bool {
+    match &expr.kind {
         HirExprKind::Call { .. }
-            | HirExprKind::StructLiteral { .. }
-            | HirExprKind::EnumConstruct { .. }
-            | HirExprKind::Closure { .. }
-    )
+        | HirExprKind::StructLiteral { .. }
+        | HirExprKind::EnumConstruct { .. }
+        | HirExprKind::Closure { .. } => true,
+        HirExprKind::FieldAccess { object, .. } => is_fresh_value(object),
+        _ => false,
+    }
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -71,14 +70,7 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// Resolve how a binding of `binding_ty` is destroyed at scope exit, or `None`
-    /// when it owns nothing that needs releasing. The HIR carries the binding's
-    /// resolved type, so this reads it directly.
-    pub(crate) fn drop_target(&self, binding_ty: &HirType) -> Option<DropTarget> {
-        self.drop_target_of(&Type::from_hir(binding_ty))
-    }
-
-    /// The same resolution over an already-lowered type, for the call sites that reach
-    /// codegen with a [`Type`] rather than the HIR it came from.
+    /// when it owns nothing that needs releasing.
     ///
     /// A newtype needs no arm: `Type::from_hir` erases it to its inner type, so a
     /// newtype wrapping an owner resolves to whatever the inner type resolves to.
@@ -92,6 +84,9 @@ impl<'ctx> CodegenContext<'ctx> {
             Type::Tensor { .. } => Some(DropTarget::TensorBuffer),
             // A function value holds a count of its environment.
             Type::Function { .. } => Some(DropTarget::FunctionValue),
+            // A `string` owns its buffer when its owner bit says so, which the release
+            // tests, so every `string` position is an owner like any other.
+            Type::String => Some(DropTarget::HeapString),
             Type::Struct(name) if self.drop_types.contains(name) => {
                 Some(DropTarget::UserDrop(name.clone()))
             }
@@ -99,26 +94,20 @@ impl<'ctx> CodegenContext<'ctx> {
                 Some(DropTarget::EnumPayload(name.clone()))
             }
             // Owns nothing itself, but something inside it does: the work is in the
-            // held entries the registration plans alongside this target. A `string`
-            // position counts here even though a `string` binding does not, because a
-            // position has storage of its own that the store into it can arm.
-            other if self.holds_owner(other) || self.holds_string_position(other) => {
-                Some(DropTarget::Aggregate)
-            }
+            // held entries the registration plans alongside this target.
+            other if self.holds_owner(other) => Some(DropTarget::Aggregate),
             _ => None,
         }
     }
 
     /// Whether a value of `ty` owns anything that must be released, directly or through
     /// a position inside it.
-    ///
-    /// A `string` answers `false` on purpose: a string binding owns its buffer only when
-    /// its initializer allocated one ([`produces_owned_string`]), which is a property of
-    /// the expression and not of the type, so no position reached through a type can be
-    /// proven to own one.
     pub(crate) fn holds_owner(&self, ty: &Type) -> bool {
         match ty {
-            Type::Collection { .. } | Type::Tensor { .. } | Type::Function { .. } => true,
+            Type::Collection { .. }
+            | Type::Tensor { .. }
+            | Type::Function { .. }
+            | Type::String => true,
             Type::Struct(name) => {
                 self.drop_types.contains(name)
                     || self
@@ -131,26 +120,6 @@ impl<'ctx> CodegenContext<'ctx> {
             Type::Tuple(elements) => elements.iter().any(|e| self.holds_owner(e)),
             _ => false,
         }
-    }
-
-    /// Whether a value of `ty` has a `string` position inside it: a struct field, an
-    /// array or tuple element, or one reached through those.
-    ///
-    /// Separate from [`holds_owner`] because the two answer different questions. A
-    /// typed owner is destroyed wherever the type appears, an enum payload slot
-    /// included, where no flag exists to guard it. A `string` position is destroyed only
-    /// when the store into it provably allocated, which needs the flag, so it is planned
-    /// where a flag can be planned and nowhere else.
-    fn holds_string_position(&self, ty: &Type) -> bool {
-        // Every element of an array has the same type, so one answers for all of them.
-        // Asking `held_positions` would build an entry per element first.
-        if let Type::Array { element, size } = ty {
-            return *size > 0
-                && (matches!(**element, Type::String) || self.holds_string_position(element));
-        }
-        self.held_positions(ty).iter().any(|(_, position_ty)| {
-            matches!(position_ty, Type::String) || self.holds_string_position(position_ty)
-        })
     }
 
     /// Whether any variant of the named enum carries a payload field that owns something.
@@ -195,14 +164,17 @@ impl<'ctx> CodegenContext<'ctx> {
         if !is_fresh_value(expr) || self.pool_depth > 0 || self.current_block_terminated() {
             return Ok(());
         }
-        let armed = self.armed_temporary_positions(expr);
-        if !self.temporary_drops_its_owners(&ty) && armed.is_empty() {
+        if !self.temporary_drops_its_owners(&ty) {
             return Ok(());
         }
+        // A `string` field leaves its buffer alive until the reader releases it, so the
+        // destructor may still read it.
         let moves_an_owner = moved.is_some_and(|field| {
-            self.held_positions(&ty)
-                .iter()
-                .any(|(name, field_ty)| name == field && self.drop_target_of(field_ty).is_some())
+            self.held_positions(&ty).iter().any(|(name, field_ty)| {
+                name == field
+                    && !matches!(field_ty, Type::String)
+                    && self.drop_target_of(field_ty).is_some()
+            })
         });
         if moves_an_owner && matches!(self.drop_target_of(&ty), Some(DropTarget::UserDrop(_))) {
             return Ok(());
@@ -212,25 +184,6 @@ impl<'ctx> CodegenContext<'ctx> {
         let depth = self.drop_scopes.len();
         self.push_drop_scope();
         self.register_owned_binding(UNBOUND_TEMPORARY, slot, &ty)?;
-        // The scope pushed above holds the temporary's entry alone.
-        let armed_flags: Vec<PointerValue<'ctx>> = self
-            .drop_scopes
-            .last()
-            .and_then(|scope| scope.last())
-            .map(|entry| {
-                entry
-                    .held
-                    .iter()
-                    .filter(|held| matches!(held.target, DropTarget::HeapString))
-                    .filter(|held| armed.contains(&held.path))
-                    .map(|held| held.flag_ptr)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let one = self.context.bool_type().const_int(1, false);
-        for flag_ptr in armed_flags {
-            self.builder.build_store(flag_ptr, one)?;
-        }
         if let Some(field) = moved {
             // The scope pushed above holds the temporary's entry alone; it has no binding
             // for `live_drop_entry` to resolve.
@@ -270,49 +223,10 @@ impl<'ctx> CodegenContext<'ctx> {
         if !is_fresh_value(expr) || self.pool_depth > 0 {
             return Ok(());
         }
-        // Held before the whole, so the statement's end, which releases in reverse,
-        // runs a `drop` that may read them while they still hold their bytes.
-        for path in self.armed_temporary_positions(expr) {
-            let position_ptr = self.position_ptr(slot, &ty, &path)?;
-            self.hold_to_statement_end(position_ptr, DropTarget::HeapString)?;
-        }
         if !self.temporary_drops_its_owners(&ty) {
             return Ok(());
         }
         self.hold_to_statement_end(slot, DropTarget::Captured(ty))
-    }
-
-    /// The `string` positions of the fresh value `expr` that its construction provably
-    /// allocated into, which the temporary owns. A typed owner proves itself through the
-    /// type; these are the positions only the expression can prove.
-    pub(super) fn armed_temporary_positions(&self, expr: &HirExpr) -> Vec<Vec<String>> {
-        let mut armed = Vec::new();
-        self.collect_armed_positions(expr, &mut Vec::new(), &mut armed);
-        armed
-    }
-
-    /// Address of the position `path` names inside the value of `ty` at `storage_ptr`.
-    fn position_ptr(
-        &self,
-        storage_ptr: PointerValue<'ctx>,
-        ty: &Type,
-        path: &[String],
-    ) -> CodegenResult<PointerValue<'ctx>> {
-        let mut ptr = storage_ptr;
-        let mut holder = ty.clone();
-        for segment in path {
-            let positions = self.held_positions(&holder);
-            let Some(index) = positions.iter().position(|(name, _)| name == segment) else {
-                return Err(CodegenError::InternalError(format!(
-                    "a held position '{}' that its holder does not have",
-                    segment
-                )));
-            };
-            let holder_llvm = self.get_any_llvm_type(&holder)?;
-            ptr = self.aggregate_position_ptr(holder_llvm, ptr, index as u32, "held.str.ptr")?;
-            holder = positions[index].1.clone();
-        }
-        Ok(ptr)
     }
 
     /// Register `target` at `slot` for release when the current statement ends, or at any
@@ -378,8 +292,8 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Nothing tracks a borrowed place, so there is no flag to consult, and none is
     /// needed: nothing can be moved out of a borrow, so the value behind one is always
-    /// live. What the release needs instead is a type that proves what it owns. A
-    /// `string` position proves nothing and stays disarmed, and a value holding a tensor
+    /// live. What the release needs instead is a type that proves what it owns. A value
+    /// holding a tensor
     /// or a `PoolAware` value is left alone, because either may belong to a `pool`'s
     /// arena, which a callee cannot see from where its caller stands. Inside a `pool`
     /// the arena owns what the block allocates, as for a temporary.
@@ -448,11 +362,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let holder_llvm = self.get_any_llvm_type(ty)?;
         for (index, (segment, position_ty)) in positions.into_iter().enumerate() {
-            let is_string = matches!(position_ty, Type::String);
-            if !is_string
-                && !self.holds_owner(&position_ty)
-                && !self.holds_string_position(&position_ty)
-            {
+            if !self.holds_owner(&position_ty) {
                 continue;
             }
             let position_ptr = self.aggregate_position_ptr(
@@ -462,20 +372,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 &format!("held.{}.ptr", segment),
             )?;
             path.push(segment);
-            // A `string` position starts DISARMED: the type proves nothing, so the
-            // position owns a buffer only once a store that provably allocated has
-            // armed it. Every other target's type is the proof, so it starts armed.
-            if is_string {
-                let flag_ptr = self.disarmed_drop_flag()?;
-                out.push(HeldDrop {
-                    path: path.clone(),
-                    storage_ptr: position_ptr,
-                    flag_ptr,
-                    target: DropTarget::HeapString,
-                });
-                let _ = path.pop();
-                continue;
-            }
             if let Some(target) = self.drop_target_of(&position_ty)
                 && !matches!(target, DropTarget::Aggregate)
             {
@@ -528,20 +424,6 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(flag_ptr)
     }
 
-    /// The same slot, initialized to `false`, for a position that owns nothing until a
-    /// store proves it does. The initializing store is in the entry block so a position
-    /// a conditional never writes still reads a definite `false` at scope exit.
-    ///
-    /// Named apart from [`arm_drop_flag`]'s slot because the two carry different claims:
-    /// this one says "not yet", and a `store i1 true` against it is the whole record of
-    /// which `string` positions a program actually owns.
-    fn disarmed_drop_flag(&mut self) -> CodegenResult<PointerValue<'ctx>> {
-        let bool_ty = self.context.bool_type();
-        let flag_ptr = self.entry_alloca(bool_ty, STRING_POSITION_FLAG)?;
-        self.builder.build_store(flag_ptr, bool_ty.const_zero())?;
-        Ok(flag_ptr)
-    }
-
     /// Record an owned `Drop`-typed binding for destruction at scope exit.
     ///
     /// Allocates the binding's `i1` drop flag (initialized `true`) and pushes a
@@ -588,12 +470,8 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// How a `move` closure's environment releases a capture of type `ty`, or `None`
-    /// when the value owns nothing. A `string` keeps its own target: whether it owns a
-    /// buffer is the runtime flag moved in with it, not its type.
+    /// when the value owns nothing.
     pub(crate) fn captured_drop_target(&self, ty: &Type) -> Option<DropTarget> {
-        if matches!(ty, Type::String) {
-            return Some(DropTarget::HeapString);
-        }
         self.drop_target_of(ty)
             .map(|_| DropTarget::Captured(ty.clone()))
     }
@@ -647,150 +525,38 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// The paths of the `string` positions a value of `ty` holds, in the order
-    /// [`Self::plan_held_drops`] gives them flags.
-    pub(crate) fn string_position_paths(&self, ty: &Type) -> Vec<Vec<String>> {
-        let mut out = Vec::new();
-        self.collect_string_paths(ty, &mut Vec::new(), &mut out);
-        out
-    }
-
-    fn collect_string_paths(&self, ty: &Type, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
-        for (segment, position_ty) in self.held_positions(ty) {
-            let is_string = matches!(position_ty, Type::String);
-            if !is_string
-                && !self.holds_owner(&position_ty)
-                && !self.holds_string_position(&position_ty)
-            {
-                continue;
-            }
-            path.push(segment);
-            if is_string {
-                out.push(path.clone());
-            } else {
-                self.collect_string_paths(&position_ty, path, out);
-            }
-            let _ = path.pop();
-        }
-    }
-
-    /// The `string` positions of a captured value of `ty` at `storage_ptr`, each guarded by
-    /// the flag `flags` holds for its path (in [`Self::string_position_paths`] order): the
-    /// held entries a closure body's capture carries, so a field store re-arms one.
-    pub(crate) fn captured_string_positions(
-        &mut self,
-        storage_ptr: PointerValue<'ctx>,
-        ty: &Type,
-        flags: &[PointerValue<'ctx>],
-    ) -> CodegenResult<Vec<HeldDrop<'ctx>>> {
-        let paths = self.string_position_paths(ty);
-        let mut held = Vec::new();
-        self.plan_held_drops(storage_ptr, ty, &mut Vec::new(), &mut held)?;
-        Ok(held
-            .into_iter()
-            .filter(|position| matches!(position.target, DropTarget::HeapString))
-            .filter_map(|mut position| {
-                let index = paths.iter().position(|path| *path == position.path)?;
-                position.flag_ptr = *flags.get(index)?;
-                Some(position)
-            })
-            .collect())
-    }
-
-    /// Release the captured value of `ty` at `storage_ptr` when `owns_ptr` says the
-    /// environment owns it, its `string` positions owning what `flags` say: the flags
-    /// moved in with the capture, which its type alone cannot prove.
-    pub(crate) fn emit_captured_release(
-        &mut self,
-        storage_ptr: PointerValue<'ctx>,
-        owns_ptr: PointerValue<'ctx>,
-        ty: &Type,
-        flags: &[PointerValue<'ctx>],
-    ) -> CodegenResult<()> {
-        let parent_fn = self.current_function.ok_or_else(|| {
-            CodegenError::InternalError("a capture release outside a function".into())
-        })?;
-        let bool_ty = self.context.bool_type();
-        let owns = self
-            .builder
-            .build_load(bool_ty, owns_ptr, "capture.owns")?
-            .into_int_value();
-        let run_bb = self.context.append_basic_block(parent_fn, "capture.drop");
-        let cont_bb = self.context.append_basic_block(parent_fn, "capture.cont");
-        self.builder
-            .build_conditional_branch(owns, run_bb, cont_bb)?;
-        self.builder.position_at_end(run_bb);
-        let depth = self.drop_scopes.len();
-        self.push_drop_scope();
-        self.register_owned_binding(UNBOUND_TEMPORARY, storage_ptr, ty)?;
-        let paths = self.string_position_paths(ty);
-        let positions: Vec<(Vec<String>, PointerValue<'ctx>)> = self
-            .drop_scopes
-            .last()
-            .and_then(|scope| scope.last())
-            .map(|entry| {
-                entry
-                    .held
-                    .iter()
-                    .filter(|held| matches!(held.target, DropTarget::HeapString))
-                    .map(|held| (held.path.clone(), held.flag_ptr))
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (path, flag_ptr) in positions {
-            let Some(source) = paths
-                .iter()
-                .position(|p| *p == path)
-                .and_then(|i| flags.get(i))
-            else {
-                continue;
-            };
-            let owned = self
-                .builder
-                .build_load(bool_ty, *source, "capture.string.owns")?;
-            self.builder.build_store(flag_ptr, owned)?;
-        }
-        self.emit_drops_through(depth)?;
-        self.pop_drop_scope();
-        self.builder.build_store(owns_ptr, bool_ty.const_zero())?;
-        self.builder.build_unconditional_branch(cont_bb)?;
-        self.builder.position_at_end(cont_bb);
-        Ok(())
-    }
-
-    /// Whether each `string` position of the binding `name` (a value of `ty`) owns its
-    /// buffer now, in `string_position_paths` order: false where nothing records it.
-    pub(crate) fn held_string_flags_of(
-        &mut self,
+    /// Address of an aggregate's `index`-th position, for a struct, tuple, or array
+    /// holder alike.
+    ///
+    /// `build_struct_gep` refuses an array pointee, so an array indexes through a
+    /// two-step GEP instead. Every index reaching here is a constant read off the
+    /// holder's own layout.
+    pub(crate) fn aggregate_position_ptr(
+        &self,
+        holder_llvm: BasicTypeEnum<'ctx>,
+        base_ptr: PointerValue<'ctx>,
+        index: u32,
         name: &str,
-        ty: &Type,
-    ) -> CodegenResult<Vec<IntValue<'ctx>>> {
-        let bool_ty = self.context.bool_type();
-        let flags: Vec<Option<PointerValue<'ctx>>> = self
-            .string_position_paths(ty)
-            .iter()
-            .map(|path| {
-                self.live_drop_entry(name).and_then(|entry| {
-                    entry
-                        .held
-                        .iter()
-                        .find(|held| {
-                            held.path == *path && matches!(held.target, DropTarget::HeapString)
-                        })
-                        .map(|held| held.flag_ptr)
-                })
-            })
-            .collect();
-        flags
-            .into_iter()
-            .map(|flag| match flag {
-                Some(flag_ptr) => Ok(self
-                    .builder
-                    .build_load(bool_ty, flag_ptr, "capture.string.owned")?
-                    .into_int_value()),
-                None => Ok(bool_ty.const_zero()),
-            })
-            .collect()
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        if !holder_llvm.is_array_type() {
+            return self
+                .builder
+                .build_struct_gep(holder_llvm, base_ptr, index, name)
+                .map_err(CodegenError::from);
+        }
+        let i64_ty = self.context.i64_type();
+        // SAFETY: `index` is a position of `holder_llvm`'s own layout, so it is within
+        // the array's length by construction and the GEP stays inside the object.
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(
+                    holder_llvm,
+                    base_ptr,
+                    &[i64_ty.const_zero(), i64_ty.const_int(index as u64, false)],
+                    name,
+                )
+                .map_err(CodegenError::from)
+        }
     }
 
     /// The positions a value of `ty` holds, in declaration order, as `(accessor

@@ -11,7 +11,6 @@ use shared_types::SourceMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::codegen::expressions::matches::SavedBinding;
-use crate::codegen::string_ownership::StringOwnership;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::type_mapping::TypeMapper;
 use crate::types::{CollectionKind, Type};
@@ -198,24 +197,6 @@ pub(crate) struct LoopTargets<'ctx> {
 /// `false` when the value is moved out, so the scope-exit drop is elided for a
 /// moved value, the runtime drop-flag mechanism that keeps conditional
 /// moves sound.
-/// See [`CodegenContext::literal_string_moves`].
-#[derive(Default)]
-pub(crate) struct LiteralStringMoves<'ctx> {
-    /// Where the literal being built sits below the holder.
-    pub(crate) path: Vec<String>,
-    /// Each moved position's path below the holder, and whether its source owned the
-    /// buffer at the move.
-    pub(crate) flags: Vec<(Vec<String>, IntValue<'ctx>)>,
-}
-
-/// See [`CodegenContext::branch_string_slots`]: each slot's position path below the
-/// holder, and the slot.
-pub(crate) type BranchStringSlots<'ctx> = Vec<(Vec<String>, PointerValue<'ctx>)>;
-
-/// The owner bit of each `string` position a holder forwarder filled from an argument,
-/// by the position's path.
-pub(crate) type HeldOwners<'ctx> = Vec<(Vec<String>, IntValue<'ctx>)>;
-
 pub(crate) struct DropEntry<'ctx> {
     /// Source binding name, used to clear the flag when the value is moved.
     pub(crate) name: String,
@@ -259,14 +240,11 @@ pub(crate) enum DropTarget {
     /// its header points at. Carries the collection's own type, which is what says
     /// whether a slot holds a `string` the collection owns.
     Collection(Type),
-    /// A `string` binding initialized from a producer that always allocates
-    /// (interpolation or `+`): release the buffer its fat pointer points at.
-    /// Only a binding whose initializer was proven to allocate carries this, so
-    /// a `.rodata` literal is never handed to `free`.
+    /// A `string`: release the buffer its fat pointer points at when the owner bit in
+    /// its length is set. A literal and a view have it clear, so the release skips them.
     HeapString,
-    /// A tensor binding: release the buffer its owning pointer addresses. Unlike
-    /// `HeapString`, a tensor's type alone proves the ownership: every construction
-    /// allocates, and there is no borrowed spelling of an owned tensor.
+    /// A tensor binding: release the buffer its owning pointer addresses. Every
+    /// construction allocates, and there is no borrowed spelling of an owned tensor.
     TensorBuffer,
     /// A `PoolAware` value the enclosing `pool` body owns. It carries a drop flag so a
     /// move out of it is tracked like any other, but its release is the arena's LIFO
@@ -360,18 +338,6 @@ pub(crate) struct CodegenContext<'ctx> {
     /// caller must clear the receiver's drop flag or the value is released twice.
     pub(crate) consuming_self_methods: std::collections::HashSet<String>,
 
-    /// What crosses a call boundary about owned `string` buffers: which functions hand
-    /// one back, and which `string` parameters a callee only reads. Both are properties
-    /// of the whole program rather than of an expression, so they are read once before
-    /// any body is generated. Empty for a program with no `string`-typed calls, in which
-    /// case every query answers `false` and nothing is emitted.
-    pub(crate) string_ownership: StringOwnership,
-
-    /// The lifted body behind each immutable binding initialized with a closure literal,
-    /// keyed by the binding's storage. A call through that binding can then consult
-    /// [`Self::string_ownership`] under the body's generated name. Keyed by the alloca
-    /// rather than the name, so a shadowing binding never inherits another's entry.
-    pub(crate) closure_bindings: HashMap<PointerValue<'ctx>, String>,
     /// The owned captures of the closure body being emitted, by name: the drop entry the
     /// creating scope registered, seen from inside the body so a move or a reassignment
     /// there settles the environment's flag. Never emitted at the body's own exits.
@@ -397,29 +363,6 @@ pub(crate) struct CodegenContext<'ctx> {
     /// `Drop`-typed bindings declared in it, in declaration order; on normal scope
     /// exit they are dropped in reverse (LIFO). Empty unless `drop_types` is non-empty.
     pub(crate) drop_scopes: Vec<Vec<DropEntry<'ctx>>>,
-
-    /// While a declaration or an assignment builds its holder from an aggregate literal,
-    /// the ownership each `string` binding moved into one of the literal's positions
-    /// carries, for the holder to take once it is registered. `None` everywhere else,
-    /// including while a position that is not itself a literal is evaluated.
-    pub(crate) literal_string_moves: Option<LiteralStringMoves<'ctx>>,
-
-    /// While a declaration or an assignment builds its holder through a branch (`if`,
-    /// `match`, a block), one `i1` slot per `string` position of the holder: each arm's
-    /// tail stores which of them it owns. Set only across the dispatch into the branch,
-    /// which takes it at once, so nothing evaluated before the arms ever sees it.
-    pub(crate) branch_string_slots: Option<BranchStringSlots<'ctx>>,
-
-    /// The callee and the ownership of the argument the last call to a `string`
-    /// forwarder handed back: whether the buffer that call yields is owned, read before
-    /// the call's move cleared the argument's flag. A declaration or an assignment
-    /// clears it, evaluates its value and takes it only for its own call, so a stale
-    /// answer is never read.
-    pub(crate) forwarded_string_owner: Option<(String, IntValue<'ctx>)>,
-    /// The owner bits a call to a holder forwarder read off the arguments it stores, by
-    /// the path of the position each fills, keyed by the callee: what the binding the
-    /// statement stores the holder into arms its positions with.
-    pub(crate) forwarded_holder_owners: Option<(String, HeldOwners<'ctx>)>,
 
     /// Whether the body being generated is a `&mut self` method, whose `self` is the
     /// caller's storage rather than a value this frame owns. A store into it displaces a
@@ -520,8 +463,6 @@ impl<'ctx> CodegenContext<'ctx> {
             loop_targets: Vec::new(),
             struct_defs: HashMap::new(),
             struct_written_names: HashMap::new(),
-            string_ownership: StringOwnership::default(),
-            closure_bindings: HashMap::new(),
             captured_drop_entries: HashMap::new(),
             const_values: HashMap::new(),
             overflow_checks: false,
@@ -535,10 +476,6 @@ impl<'ctx> CodegenContext<'ctx> {
             hashable_impls: std::collections::HashSet::new(),
             field_newtypes: HashMap::new(),
             drop_scopes: Vec::new(),
-            literal_string_moves: None,
-            branch_string_slots: None,
-            forwarded_string_owner: None,
-            forwarded_holder_owners: None,
             borrowed_self: false,
             shared_pointer_self: HashSet::new(),
             statement_temporaries: Vec::new(),
@@ -675,10 +612,6 @@ impl<'ctx> CodegenContext<'ctx> {
         consuming_self_methods: std::collections::HashSet<String>,
     ) {
         self.consuming_self_methods = consuming_self_methods;
-    }
-
-    pub(crate) fn set_string_ownership(&mut self, string_ownership: StringOwnership) {
-        self.string_ownership = string_ownership;
     }
 
     pub(crate) fn set_body_memory(&mut self, body_memory: crate::BodyMemory) {

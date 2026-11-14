@@ -795,9 +795,11 @@ elision its result borrows `self`, so such a call on an owned local is reported.
 impl's lifetimes returns what the receiver borrows, which the receiver walk covers.
 
 The same set types a temporary receiver. `temporary_views` holds the spans of calls whose result
-borrows a value that dies with its statement (`make().view()`), a chain on one, and a value built
-around one (`propagate_temporary_view`). Reading one in place is fine; binding, storing or returning
-it is `TemporaryBorrowEscapes`. `is_local_to_function` treats
+borrows a value that dies with its statement (`make().view()`, and `.slice`, `.char_slice`,
+`.chars` or `.char_indices` on an owned `string` temporary that is not a literal: the backend
+releases that string at the statement's end), a chain on one, and a value built around one
+(`propagate_temporary_view`). Reading one in place is fine; binding, storing or returning it is
+`TemporaryBorrowEscapes`. `is_local_to_function` treats
 an absent name (a constant, an out-of-scope place) as non-local, so a valid program is never
 rejected.
 

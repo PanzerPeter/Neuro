@@ -12,7 +12,6 @@ use neuro_hir::{HirExpr, HirExprKind, HirImpl, HirItem, HirMethod, HirSelfParam,
 use std::collections::HashMap;
 
 use crate::codegen::context::CodegenContext;
-use crate::codegen::string_ownership::dyn_callee;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -355,23 +354,13 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_load(ptr_ty, slot_ptr, "dyn.fn")?
             .into_pointer_value();
 
-        // The arguments' ownership is a direct call's, with the parameter read only when
-        // every implementor only reads it: otherwise a by-value argument moves into the
-        // callee, which may keep or destroy it.
-        let callee = dyn_callee(trait_name, method);
+        // The arguments' ownership is a direct call's: a by-value argument moves into
+        // the callee, which keeps or destroys it.
         let mut call_args: Vec<BasicMetadataValueEnum<'ctx>> = vec![data_ptr.into()];
         let mut param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
-        let mut passed = Vec::new();
-        let mut forwarded_args = Vec::new();
-        for (index, arg) in args.iter().enumerate() {
+        for arg in args {
             let value = self.codegen_expr(arg)?;
-            if let Some(owner) = self.forwarded_argument_owner(&callee, index, arg) {
-                forwarded_args.push((index, owner));
-            }
-            if !self.string_ownership.param_is_read_only(&callee, index) {
-                self.mark_moved_for_drop(arg)?;
-            }
-            passed.push(value);
+            self.mark_moved_for_drop(arg)?;
             param_types.push(value.get_type().into());
             call_args.push(value.into());
         }
@@ -387,8 +376,6 @@ impl<'ctx> CodegenContext<'ctx> {
         let call = self
             .builder
             .build_indirect_call(fn_type, fn_ptr, &call_args, "dyn.call")?;
-        self.release_owned_arguments(&callee, args, &passed)?;
-        self.release_forwarded_arguments(&forwarded_args, &passed)?;
         Ok(call.try_as_basic_value().basic())
     }
 }

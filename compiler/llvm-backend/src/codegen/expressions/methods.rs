@@ -25,16 +25,11 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         match kind {
             // `string.len()` reads field 1 of the fat pointer `{ ptr, i64 }`, the
-            // stored byte length. O(1), no scan; the value is already the u64 length.
+            // stored byte length with the owner bit masked off. O(1), no scan.
             // A `&string` receiver is auto-dereferenced first.
             BuiltinMethod::StringLen => {
                 let struct_val = self.string_receiver_struct(receiver)?;
-                let len = self
-                    .builder
-                    .build_extract_value(struct_val, 1, "str.len")
-                    .map_err(|e| {
-                        CodegenError::LlvmError(format!("failed to extract string length: {}", e))
-                    })?;
+                let len: BasicValueEnum<'ctx> = self.string_len(struct_val)?.into();
                 // Only the length word leaves the call, so a receiver built for it (the
                 // `(a + b).len()` shape) is dead once that word is in hand.
                 self.release_string_temporary(receiver, struct_val.into())?;
@@ -183,15 +178,12 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         };
 
-        let fat = self.string_receiver_struct(receiver)?;
+        let fat = self.viewed_string_receiver(receiver)?;
         let base_ptr = self
             .builder
             .build_extract_value(fat, 0, "slice.base.ptr")?
             .into_pointer_value();
-        let len = self
-            .builder
-            .build_extract_value(fat, 1, "slice.len")?
-            .into_int_value();
+        let len = self.string_len(fat)?;
 
         let i64_ty = self.context.i64_type();
         let start = self.slice_index_to_i64(start_expr)?;
@@ -371,6 +363,21 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// An owned `string` and an immutable `&string` are both already the struct. A `&mut
     /// string` receiver is the referent's address, so it is loaded through.
+    /// A `string` receiver a view is taken of. A fresh one lives to the end of its
+    /// statement, which is as long as the checker lets a view of it live.
+    pub(super) fn viewed_string_receiver(
+        &mut self,
+        receiver: &HirExpr,
+    ) -> CodegenResult<StructValue<'ctx>> {
+        let fat = self.string_receiver_struct(receiver)?;
+        if crate::codegen::drops::is_fresh_string(receiver) {
+            let slot = self.entry_alloca(fat.get_type(), "viewed.str")?;
+            self.builder.build_store(slot, fat)?;
+            self.hold_to_statement_end(slot, crate::codegen::context::DropTarget::HeapString)?;
+        }
+        Ok(fat)
+    }
+
     pub(super) fn string_receiver_struct(
         &mut self,
         receiver: &HirExpr,

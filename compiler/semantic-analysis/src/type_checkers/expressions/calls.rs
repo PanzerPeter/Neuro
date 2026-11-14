@@ -869,21 +869,27 @@ impl TypeChecker {
                 }
                 // The receiver is read through every borrow: `r.abs()` on a `&f64` is
                 // `abs` on the `f64`, and `rr.get()` on a `&&P` dispatches on `&P`.
-                let obj_ty = self
-                    .check_expr(object, None)
-                    .unwrap_or(Type::Unknown)
-                    .auto_deref();
+                let raw_ty = self.check_expr(object, None).unwrap_or(Type::Unknown);
+                let owned_text = matches!(raw_ty, Type::String);
+                let obj_ty = raw_ty.auto_deref();
                 if matches!(obj_ty, Type::Unknown) {
                     return Some(Type::Unknown);
                 }
                 // A result borrowing an owned temporary, or read from a value that does,
-                // lives no longer than its statement. The builtin views answer for their own
-                // temporaries: `.iter()` refuses one, and `.chars()` keeps the text's fat
-                // pointer, which a temporary `string` leaves valid.
+                // lives no longer than its statement. The builtin container views answer
+                // for their own temporaries: `.iter()` refuses one. A view of an owned
+                // `string` temporary is one like any other, since the string is released
+                // when its statement ends; a literal is never released, so a view of one
+                // is not.
+                let temporary = Self::place_root_name(object).is_none();
                 if self.temporary_views.contains(&object.span())
-                    || (Self::place_root_name(object).is_none()
+                    || (temporary
                         && !views_builtin_receiver(&obj_ty, &field.name)
                         && self.result_borrows_owned_receiver(&obj_ty, &field.name))
+                    || (temporary
+                        && owned_text
+                        && STRING_VIEW_METHODS.contains(&field.name.as_str())
+                        && !is_string_literal(object))
                 {
                     let _ = self.temporary_views.insert(*span);
                 }
@@ -1416,4 +1422,17 @@ fn closure_literal_arg(arg: &Expr) -> bool {
         arg = inner;
     }
     matches!(arg, Expr::Closure { .. })
+}
+
+/// The `string` methods whose result is a view into the receiver's bytes.
+const STRING_VIEW_METHODS: [&str; 4] = ["slice", "char_slice", "chars", "char_indices"];
+
+/// Whether `expr` is a string literal, parenthesized or not: `.rodata` text that no
+/// statement end releases.
+fn is_string_literal(expr: &ast_types::Expr) -> bool {
+    match expr {
+        ast_types::Expr::Paren(inner, _) => is_string_literal(inner),
+        ast_types::Expr::Literal(shared_types::Literal::String(_), _) => true,
+        _ => false,
+    }
 }

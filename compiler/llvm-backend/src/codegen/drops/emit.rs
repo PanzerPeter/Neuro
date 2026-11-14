@@ -9,28 +9,17 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// Release the heap buffer behind a `string` fat pointer held in `storage_ptr`.
-    ///
-    /// Emitted only for a binding registered as [`DropTarget::HeapString`], whose
-    /// initializer [`produces_owned_string`] proved allocates.
+    /// Release the buffer behind the `string` held in `storage_ptr`, when its owner bit
+    /// says the value owns one.
     pub(super) fn emit_heap_string_free(
         &mut self,
         storage_ptr: PointerValue<'ctx>,
     ) -> CodegenResult<()> {
-        let fat_ptr_ty = self.string_fat_ptr_type();
-        let buffer =
-            self.builder
-                .build_struct_gep(fat_ptr_ty, storage_ptr, 0, "str.drop.buf.addr")?;
-        let buffer = self.builder.build_load(
-            self.context.ptr_type(inkwell::AddressSpace::default()),
-            buffer,
-            "str.drop.buf",
-        )?;
-        let free_fn = self.release_fn()?;
-        self.builder
-            .build_call(free_fn, &[buffer.into()], "")
-            .map_err(|e| CodegenError::LlvmError(format!("failed to free string: {}", e)))?;
-        Ok(())
+        let fat = self
+            .builder
+            .build_load(self.string_fat_ptr_type(), storage_ptr, "str.drop")?
+            .into_struct_value();
+        self.release_string_value(fat)
     }
 
     /// Release the tensor a binding in `storage_ptr` owns, through the DLPack `deleter`
@@ -153,6 +142,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.emit_collection_free(storage_ptr, &collection_ty)?
             }
             Some(DropTarget::TensorBuffer) => self.emit_tensor_buffer_free(storage_ptr)?,
+            Some(DropTarget::HeapString) => self.emit_heap_string_free(storage_ptr)?,
             Some(DropTarget::FunctionValue) => self.emit_function_release(storage_ptr)?,
             Some(DropTarget::EnumPayload(enum_name)) => {
                 self.emit_enum_payload_drop(storage_ptr, &enum_name)?

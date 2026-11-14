@@ -131,7 +131,8 @@ never hand-format around it.
 Backend-specific invariants (see `compiler/llvm-backend/CONTEXT.md` for the
 authoritative version):
 
-- String ABI is a `{ ptr, i64 }` fat pointer.
+- String ABI is a `{ ptr, i64 }` fat pointer. Bit 63 of the length is the owner bit, set when
+  the value owns its buffer, and every reader of the length masks it.
 - Struct ABI is an anonymous LLVM struct in declaration order.
 - `semantic-analysis` is not a production dependency of the backend; `neurc`
   owns the pipeline ordering.

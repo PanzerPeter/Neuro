@@ -19,49 +19,33 @@ Related pages: [Ownership and Borrowing](ownership.md) for moves, borrows and `D
 | Owners held inside a destroyed value | A struct field, array or tuple element, enum payload or newtype inner value goes back with the value that holds it |
 | A value moved out of a position | Destroyed on the path it moved to, never twice |
 | Allocations inside a `pool` block | One bump region, released in reverse order at the closing brace. A type with a destructor implements `PoolAware` to live in one. An allocation stored into something that outlives the block is routed to the heap instead |
-| A heap `string` stored into a struct field, array element or tuple element | With the holder, when the store into that position provably allocated or moved in a buffer its source binding owned |
-| A heap `string` a function returns | By the caller, when every one of the function's return paths allocates |
-| A heap `string` passed by value to a parameter the callee only reads | At the call it was built for |
-| A value in a collection slot | By the collection; every `string` inside a slot owns its bytes, and a `.rodata` literal is copied on the way in |
+| A heap `string`, wherever it is held | Like any other owner: with its binding, its holder (a struct field, an array or tuple element, an enum payload), its callee for a by-value argument, its caller for a return value, or the store that displaces it, through `&mut` included |
+| A value in a collection slot | By the collection |
+
+A `string` records in the top bit of its stored length whether it owns its buffer. A literal and a
+view (a `&string`, a `.slice` or `.char_slice` result) own nothing, and a release skips them, so
+the same rules cover a literal and a heap buffer in every position.
 
 An anonymous heap `string` (what `+`, interpolation and `StringBuilder::to_string` produce) belongs to
-no binding, so it is released at the consumer that reads and discards it: a `+` or `==` operand,
-a `.len()` receiver, a `push_str` argument, a `println` argument, an interpolation hole, or a
-statement whose value nothing reads. A loop that formats output holds a flat heap rather than a
-growing one.
+no binding, so it is released at the end of the statement that made it unless the statement
+moved it somewhere: at the consumer that reads and discards it (a `+` or `==` operand, a `.len()`
+receiver, a `push_str` argument, a `println` argument, an interpolation hole, a statement whose
+value nothing reads), or at the statement's end when a view of it is read there
+(`(a + b).slice(0..2)`). A `for` over a view of one (`for c in (a + b).chars()`) keeps it for the
+whole loop. Binding such a view to a name is a compile error, since it would outlive the buffer. A
+loop that formats output holds a flat heap rather than a growing one.
 
-A collection owns what its slots hold. `v.push(x)` and `m.insert(k, v)` move their arguments in;
-a `string` the argument owned is adopted, and a literal is copied, so every `string` in a slot owns
-its bytes. Reads do not copy: `v[i]` names the slot, and `get` / `get_mut` lend it. `pop`,
+A collection owns what its slots hold. `v.push(x)` and `m.insert(k, v)` move their arguments in.
+Reads do not copy: `v[i]` names the slot, and `get` / `get_mut` lend it. `pop`,
 `remove`, `swap_remove`, a displacing `insert` and a consuming `for x in v` hand a value over with
 its ownership. A slot that is overwritten, removed, or cleared drops what it held, and the
 collection drops its live slots when it is dropped.
 
 ## What still leaks
 
-The storing positions above are covered only where the compiler can *prove* who owns the buffer.
-Three shapes it cannot prove, each leaking one buffer rather than dangling one:
-
-- a holder a call built (`val e = wrap(a + b)`), because the call says nothing about which of
-  its positions own what;
-- a function with one return path that hands back a literal, which disqualifies the whole
-  function;
-- a parameter the callee may store, return, or write through a reference.
-
-Freeing a `.rodata` literal, or a buffer something else still holds, is a worse failure than
-holding one, so every unproven case answers the same way.
-
-An anonymous `string` handed into a view-producing method (`(a + b).slice(...)`, `.chars()`)
-leaks, because the release belongs at the end of the view's life, which nothing tracks yet.
-`.clone()` is not such a method: it copies the bytes into a buffer of its own.
-
-A struct taken out of a collection through an `Option` (`match v.pop()`, a map's `remove`) or
-returned from a function that took it out does not release its `string` fields; one bound
-straight from `v.remove(i)` does.
-
 A `match` arm that binds part of an enum payload disowns the whole scrutinee, so a part of that
-variant the arm did not bind is not destroyed. An arm that binds nothing leaves the scrutinee
-owning everything, and it is destroyed at its own scope exit.
+variant the arm did not bind is not destroyed. An arm that binds nothing leaves a place scrutinee
+owning everything, destroyed at its own scope exit, and destroys a temporary one on the spot.
 
 ## Open defects
 

@@ -3,8 +3,10 @@
 // `pool { }`, a struct with `impl` methods, `&string` parameters, and `.slice(range)`. Each
 // string is owned by nobody: a `+` chain, an interpolation and a `StringBuilder::to_string`
 // copy each allocate a buffer that one consumer reads before it becomes unreachable.
-// Nothing binds these to a name, so they are released where they are consumed. With a large
-// `ROUNDS` the heap stays flat.
+// Nothing binds these to a name, so they are released where they are consumed, or, when a
+// view is taken of one, where the statement reading the view ends. A struct handed over by
+// value releases the text it holds where its new owner ends. With a large `ROUNDS` the heap
+// stays flat.
 
 const ROUNDS: i32 = 200
 
@@ -29,6 +31,11 @@ impl Column {
 // so the buffer it allocated has no reader left the moment `push_str` returns.
 func append_row(out: &mut StringBuilder, label: &string, value: i32) {
     out.push_str(label + "=" + "{value}" + ";")
+}
+
+// Takes the column by value: its title is released when this call returns.
+func title_bytes(column: Column) -> u64 {
+    return column.title.len()
 }
 
 func main() -> i32 {
@@ -95,7 +102,29 @@ func main() -> i32 {
         return 95
     }
 
+    // A view of a buffer nothing binds keeps that buffer to the end of its statement,
+    // and a `for` over one keeps it for the whole loop. The checker refuses to bind such
+    // a view to a name, which would outlive the buffer.
+    mut viewed: u64 = 0
+    mut k: i32 = 0
+    while k < ROUNDS {
+        viewed = viewed + ("row " + "{k}").slice(0..3).len()
+        for c in (label + "{k}").chars() {
+            if c == 'n' {
+                viewed = viewed + 1
+            }
+        }
+        k = k + 1
+    }
+    if viewed != 800 {
+        return 96
+    }
+    if title_bytes(Column { title: "del" + "ta" }) != 5 {
+        return 97
+    }
+
     println("header bytes: {header_bytes}")
+    println("viewed bytes: {viewed}")
     println("pooled bytes: {pooled}")
     println("rows: {i}")
     return (transcript.len() % 251) as i32

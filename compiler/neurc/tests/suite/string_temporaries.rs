@@ -194,8 +194,8 @@ func main() -> i32 {
 }
 
 /// A buffer a binding still owns is not released by a consumer that merely reads it:
-/// `s.len()` and `s == t` take a place expression, which `produces_owned_string` answers
-/// `false` for, so the binding's own scope-exit release stays the only one.
+/// `s.len()` and `s == t` take a place expression, which is no temporary, so the
+/// binding's own scope-exit release stays the only one.
 #[test]
 fn a_bound_buffer_is_not_released_twice_by_a_reader() {
     let test = CompileTest::new();

@@ -213,8 +213,8 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Ownership** | Moves, `Copy`, borrow exclusivity, references in fields, lifetimes, deterministic `Drop`, `pool { }` arenas ([reference](docs/language-reference/ownership.md)) |
 | **Modules and toolchain** | File and inline modules, each its own namespace, `import` and re-exports, a `std` library embedded in `neurc` with its prelude; `neurc check` / `run` / `compile` on LLVM 23, `neurc test` for `@test` functions, `--emit obj` for C and NumPy ([reference](docs/language-reference/modules.md)) |
 
-> **Alpha memory note.** Memory is reclaimed deterministically, except in the handful of positions
-> whose owner the compiler cannot prove, which leak a buffer rather than risk a dangling one. The
+> **Alpha memory note.** Memory is reclaimed deterministically, except in a few shapes that leak a
+> buffer rather than risk a dangling one. The
 > [memory model](docs/language-reference/memory-model.md#what-still-leaks) lists them, and this note
 > goes when that list is empty.
 
