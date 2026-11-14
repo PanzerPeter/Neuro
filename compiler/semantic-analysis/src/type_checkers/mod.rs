@@ -470,6 +470,7 @@ mod backward;
 mod closures;
 mod collections;
 mod const_eval;
+pub(crate) mod container_iterators;
 mod declarations;
 mod derivable;
 mod exhaustiveness;

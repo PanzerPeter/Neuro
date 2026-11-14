@@ -1198,11 +1198,6 @@ pub enum TypeError {
     PairHeadOverNonPair { found: Type, span: Span },
 
     #[error(
-        "`.{method}()` walks a map's entries by reference in a `for` head (`for x in m.{method}()`) and is not a value; to keep them, copy each one out in the loop (`out.push(x.clone())`)"
-    )]
-    MapViewOutsideHead { method: String, span: Span },
-
-    #[error(
         "cannot iterate over a value of type {found}: the `IntoIterator` / `Iterator` protocol is implemented on the owned type; iterate the value itself, or write `&mut` to drive an `Iterator` in place"
     )]
     BorrowedIterableHead { found: Type, span: Span },
@@ -1800,7 +1795,6 @@ impl TypeError {
             | Self::NotIterable { span, .. }
             | Self::BorrowedIterableHead { span, .. }
             | Self::PairHeadOverNonPair { span, .. }
-            | Self::MapViewOutsideHead { span, .. }
             | Self::LoopAdapterNotCallable { span, .. }
             | Self::LoopAdapterInput { span, .. }
             | Self::LoopAdapterOutput { span, .. }

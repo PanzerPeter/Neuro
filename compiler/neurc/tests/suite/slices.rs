@@ -237,6 +237,43 @@ func main() -> i32 {
     );
 }
 
+/// Regression: `&xs[i]` over a scalar element of a borrowed slice took the address of a
+/// copy in the borrowing frame, so a returned borrow read whatever the next call left
+/// there. The `&mut` form shares the path and must still write the element in place.
+#[test]
+fn regression_a_borrowed_scalar_element_points_into_the_slice() {
+    let source = r#"
+func at(xs: &[i32], i: u64) -> &i32 {
+    &xs[i]
+}
+
+func bump(xs: &mut [i32]) {
+    val r = &mut xs[2]
+    *r += 30
+}
+
+func noise(n: i32) -> i32 {
+    val pad = [n, n, n, n, n, n, n, n]
+    pad[0] + pad[7]
+}
+
+func main() -> i32 {
+    mut a: [i32; 3] = [7, 12, 3]
+    val held = {
+        val r = at(&a, 1)
+        println("{noise(99)}")
+        *r
+    }
+    bump(&mut a)
+    held + a[2]
+}
+"#;
+    let code = CompileTest::new()
+        .compile_and_run("slice_borrow_element.nr", source)
+        .expect("should compile and run");
+    assert_eq!(code, 12 + 33);
+}
+
 /// Compile `source` at `-O0` under `name`, run it, and return the standard error
 /// of a run that must abort. Panics if it compiles badly or exits cleanly.
 fn run_expecting_abort(name: &str, source: &str) -> String {

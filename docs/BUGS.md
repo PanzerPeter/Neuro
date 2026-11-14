@@ -5,6 +5,35 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-160: a generic struct literal with a `&[T]` field and no annotation does not compile
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering` (struct literal field types for an inferred generic instance)
+- **Severity**: major. Valid source stops the compiler at LLVM verification
+
+**Minimal repro**
+
+```neuro
+struct G<A> { items: &[A], n: u64 }
+
+func main() -> i32 {
+    val a = [7, 8]
+    val t = G { items: &a, n: 5 }
+    t.items[1] + t.n as i32
+}
+```
+
+Expected: exit code 13. Observed: `module verification failed: "Invalid InsertValueInst
+operands!"`. The literal's fields are lowered without their declared types, so `&a` stays a
+pointer instead of being unsized to the `{ ptr, i64 }` view, and `5` is typed `i32` for the `u64`
+field. A generic field that is not a slice (`struct G<A> { x: A, n: u64 }`) lowers correctly.
+
+**Workaround**: annotate the binding (`val t: G<i32> = G { ... }`), which compiles and exits 13.
+
+**Fix sketch**: infer the instance's type arguments in lowering as the checker does, matching a
+`&[A]` field against the argument's unsized element type, then lower each field against its
+substituted type.
+
 ## BUG-159: a trailing comma on one line is accepted in some lists and refused in others
 
 - **Status**: open, confirmed

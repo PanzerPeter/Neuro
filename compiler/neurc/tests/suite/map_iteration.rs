@@ -283,35 +283,6 @@ func main() -> i32 {
 }
 
 #[test]
-fn keys_outside_a_head_are_refused() {
-    assert_check_error(
-        "map_keys_value.nr",
-        r#"
-func main() -> i32 {
-    val m: HashMap<i32, i32> = HashMap::new()
-    val ks = m.keys()
-    0
-}
-"#,
-        "`.keys()` walks a map's entries by reference in a `for` head",
-    );
-}
-
-#[test]
-fn values_outside_a_head_are_refused() {
-    assert_check_error(
-        "map_values_value.nr",
-        r#"
-func main() -> i32 {
-    val m: BTreeMap<i32, i32> = BTreeMap::new()
-    m.values().len() as i32
-}
-"#,
-        "`.values()` walks a map's entries by reference in a `for` head",
-    );
-}
-
-#[test]
 fn a_pair_head_over_a_single_item_is_refused() {
     assert_check_error(
         "map_pair_single.nr",

@@ -419,10 +419,11 @@ fn a_pair_head_needs_a_two_element_item() {
     assert_eq!(errors.len(), 2, "got {errors:?}");
 }
 
-/// Outside a head the views are refused rather than resolved, and a type's own `keys`
-/// method is an ordinary call in a head.
+/// Outside a head a view is the prelude's iterator value, so a program checked without
+/// the prelude has no such method; a type's own `keys` method is an ordinary call in a
+/// head.
 #[test]
-fn a_map_view_is_a_head_form_only() {
+fn a_map_view_value_needs_the_prelude() {
     let errors = semantic_errors(&program(
         r#"
     val m: HashMap<i32, i32> = HashMap::new()
@@ -431,7 +432,7 @@ fn a_map_view_is_a_head_form_only() {
 "#,
     ));
     assert!(
-        matches!(errors.as_slice(), [TypeError::MapViewOutsideHead { method, .. }] if method == "keys"),
+        matches!(errors.as_slice(), [TypeError::MethodNotFound { method_name, .. }] if method_name == "keys"),
         "got {errors:?}"
     );
     let errors = semantic_errors(&format!(

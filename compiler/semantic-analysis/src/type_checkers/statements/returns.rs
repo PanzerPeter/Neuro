@@ -159,6 +159,9 @@ impl TypeChecker {
     /// Whether calling `method` on an owned receiver of type `receiver` yields a value
     /// that points into that receiver.
     pub(crate) fn result_borrows_owned_receiver(&self, receiver: &Type, method: &str) -> bool {
+        if crate::type_checkers::container_iterators::views_builtin_receiver(receiver, method) {
+            return true;
+        }
         let (Type::Struct(name) | Type::Enum(name) | Type::Newtype(name)) = receiver else {
             return false;
         };

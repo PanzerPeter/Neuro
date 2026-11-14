@@ -554,6 +554,13 @@ impl<'ctx> CodegenContext<'ctx> {
             // it, and the statement releases what it owns.
             _ => match self.held_place_ptr(operand)? {
                 Some(ptr) => Ok(ptr.into()),
+                // A scalar element of a borrowed slice is no projecting place, but its
+                // borrow is still its slot: a copy here would dangle once returned.
+                None if let HirExprKind::Index { object, index } = &operand.kind
+                    && let Some(ptr) = self.slice_element_borrow(object, index)? =>
+                {
+                    Ok(ptr.into())
+                }
                 None => {
                     let value = self.codegen_expr(operand)?;
                     let slot = self.entry_alloca(value.get_type(), "borrow.temp")?;

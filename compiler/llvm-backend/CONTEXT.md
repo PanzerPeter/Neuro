@@ -922,7 +922,9 @@ of a block it had already freed would be a use-after-free.
 only. An operand `held_place_ptr` finds no storage for is a temporary the checker let
 through as a call argument; it is stored into an entry-block slot (`borrow.temp`) and the slot's
 address is lent, which outlives the borrow because the borrow ends with the statement. What it
-owns is released there (see Drop ABI). `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
+owns is released there (see Drop ABI). A scalar element of a borrowed slice is no temporary:
+`held_place_ptr` projects only into aggregate elements, so `slice_element_borrow` lends the
+element's own slot, since a copy would dangle once `&xs[i]` is returned. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
 is what `HirPlace::Deref` lowers to.
 **Auto-deref is value-driven**: a borrowed receiver lowers to a `PointerValue`, so
 `string_receiver_struct`, `StructClone`, `codegen_method_call`, and `get_struct_ptr_and_type` load
@@ -1701,6 +1703,10 @@ Buffer layouts, per kind:
 - **`BTreeMap<K, V>`**: `{ K key, V value }` slots kept sorted by key: binary search to look up,
   `memmove` the tail to insert or erase. That gives the ordered iteration the type promises; a
   multi-way tree would change only the insert/erase constant, not this ABI.
+- **View intrinsics.** The prelude's `keys()` / `values()` iterators walk a map through four
+  methods `codegen_map_method` emits: `__slot_count` (the hashed `cap`, the ordered `len`),
+  `__slot_live(i)` (a hashed slot's state is `FULL`), and `__key_at(i)` / `__value_at(i)`, a
+  shared `slot_borrow` of the slot's half, as `get` lends one.
 - **`StringBuilder`**: a byte run; `len` and `cap` are byte counts and `used` stays zero. It carries no
   type arguments, so one instantiation serves every program. `push_str` reserves through
   `__neuro_string_reserve(header, extra)`: capacity becomes `max(cap * 2, len + extra, 8)`, so one

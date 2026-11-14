@@ -16,7 +16,7 @@ use inkwell::types::StructType;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::HirExpr;
 
-use super::{FIELD_LEN, collection_arg};
+use super::{FIELD_CAP, FIELD_LEN, collection_arg};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
@@ -141,6 +141,42 @@ impl<'ctx> CodegenContext<'ctx> {
                 Ok(Some(self.build_option_value(
                     result_ty, present, value, &value_ty,
                 )?))
+            }
+            // The prelude-private steps a `keys()` / `values()` view walks with. A hashed
+            // table's entries lie anywhere below its capacity; the ordered one keeps them
+            // in a dense prefix of `len` slots.
+            "__slot_count" => {
+                let field = match kind {
+                    CollectionKind::HashMap => FIELD_CAP,
+                    _ => FIELD_LEN,
+                };
+                Ok(Some(
+                    self.load_header_field(header, field, "map.slots")?.into(),
+                ))
+            }
+            "__slot_live" => {
+                let slot = self
+                    .lower_map_argument(args, 0, &Type::U64)?
+                    .into_int_value();
+                let state = self.load_slot_state(header, &key_ty, &value_ty, slot)?;
+                let full = self.builder.build_int_compare(
+                    IntPredicate::EQ,
+                    state,
+                    self.context.i8_type().const_int(STATE_FULL, false),
+                    "map.live",
+                )?;
+                Ok(Some(full.into()))
+            }
+            "__key_at" | "__value_at" => {
+                let slot = self
+                    .lower_map_argument(args, 0, &Type::U64)?
+                    .into_int_value();
+                let (field, half_ty) = match method {
+                    "__key_at" => (SlotField::Key, &key_ty),
+                    _ => (SlotField::Value, &value_ty),
+                };
+                let ptr = self.map_slot_field_ptr(kind, header, &key_ty, &value_ty, slot, field)?;
+                Ok(Some(self.slot_borrow(ptr, half_ty, false)?))
             }
             _ => Err(CodegenError::InternalError(format!(
                 "unknown map method '{}' reached codegen",

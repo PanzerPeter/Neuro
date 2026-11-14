@@ -1,7 +1,8 @@
 // Showcase: the iteration protocol carrying a small stream pipeline. Integration example:
 // `IntoIterator` and `Iterator` with associated types, `.map` and `.filter` both as head
 // adapters and as adapter values a function returns, a range value strided and reversed
-// into the same adapters, a bound `S: Iterator<Item = i32>`,
+// into the same adapters, an array walked by borrow with `.iter()` into an adapter chain a
+// function returns, a bound `S: Iterator<Item = i32>`,
 // generic structs, closures in a struct field, `|>` and `>>` over every function-value
 // spelling, `Option`, and `for`-in. A source, a transform and a filter are three types,
 // each an `Iterator`, and one `for` head drives the chain one element at a time. No
@@ -146,6 +147,13 @@ func boosted(readings: Readings, factor: i32, floor: i32) -> Filter<Map<Readings
     readings.into_iter().map(|sample| sample * factor).filter(|scaled| *scaled > floor)
 }
 
+// The samples walked by borrow. `.iter()` is the library's `Iter<i32>`, yielding `&i32`,
+// so the chain over it may leave the function: it borrows the caller's samples, not a
+// copy of them. The closures read through each borrow, so neither needs a `*`.
+func spikes(samples: &[i32], floor: i32) -> Map<Filter<Iter<i32>, &i32>, &i32, i32> {
+    samples.iter().filter(|sample| sample > floor).map(|sample| sample * 2)
+}
+
 // Any stream of `i32`, an adapter chain included, consumed through the bound alone.
 func stream_total<S: Iterator<Item = i32>>(stream: S) -> i32 {
     mut total = 0
@@ -241,6 +249,10 @@ func main() -> i32 {
     val every_other = (0..readings.samples.len()).rev().step(2)
     val alternate = every_other.map(|i| readings.samples[i])
     println("every other sample, newest first, totals {stream_total(alternate)}")
+
+    // The same samples borrowed in place rather than copied into an iterator: the chain
+    // `spikes` returns reads `readings.samples` itself, through the same consumer.
+    println("spikes above 8, doubled, total {stream_total(spikes(&readings.samples, 8))}")
 
     // An adapted head over an array, enumerated. The position counts what the
     // chain YIELDED, so it stays dense however much the filter drops.

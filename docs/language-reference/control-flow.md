@@ -284,7 +284,25 @@ for name in ages.keys() { }        // name: &string
 for age in ages.values() { }       // age: &i32
 ```
 
-A `BTreeMap` walks in ascending key order; a `HashMap` promises no order. `.keys()` and `.values()` are head forms that lend one half of each entry, and they take the adapters and `.enumerate()` like any other head. See [Types](types.md#hashmapk-v-and-btreemapk-v) for the map surface.
+A `BTreeMap` walks in ascending key order; a `HashMap` promises no order. Over a map binding, `.keys()` and `.values()` are head forms that lend one half of each entry, and they take the adapters and `.enumerate()` like any other head. See [Types](types.md#hashmapk-v-and-btreemapk-v) for the map surface.
+
+### Borrowing Iterator Values: `.iter()`, `.keys()` and `.values()`
+
+The heads above walk a container inside one loop. To store the walk, hand it to a function or return it, take it as a value. `.iter()` on an array, a slice or a `Vec<T>` returns the standard library's `Iter<T>`, which yields a `&T` per element. Outside a `for` head, a map's `.keys()` and `.values()` return `HashKeys<K, V>` and `HashValues<K, V>`, or `BTreeKeys` and `BTreeValues` for a `BTreeMap`, yielding `&K` and `&V`:
+
+```neuro
+func above(scores: &[i32], floor: i32) -> Filter<Iter<i32>, &i32> {
+    scores.iter().filter(|s| s > floor)
+}
+
+func roster(teams: &BTreeMap<string, i32>) -> BTreeKeys<string, i32> {
+    teams.keys()
+}
+```
+
+Each is an ordinary `Iterator`, so it takes the [adapter values](#the-iteration-protocol), a generic `I: Iterator<Item = &T>` parameter and every `for` head, `&mut it` included. The value borrows its container and copies nothing. While it lives, the container cannot be pushed to, inserted into or moved, and one over a function's own local cannot be returned. The receiver must be a binding, a part of one or a borrow: `make().iter()` would walk a value that dies with its statement, and is refused.
+
+A direct `it.next()` hands back a borrow the checker ties to `it` itself, so two results of `next` cannot be held at once. A `for` head and `while val Option::Some(x) = it.next()` take one at a time and are unaffected.
 
 ### Pair Heads
 

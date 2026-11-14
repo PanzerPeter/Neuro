@@ -424,6 +424,12 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   prelude-private intrinsics lower per instance in `lower_method_call`, ahead of the impl lookup:
   `x.__to_u64()` to a `Cast` to `u64`, `x.__offset(k)` to `(x as u64).wrapping_add(k)` cast back
   to `x`'s type. No backend learns ranges exist.
+- **Container iterator values** (`container_iterators.rs`). `lower_method_call` hands `.iter()` on
+  an array, slice or `Vec` and `.keys()` / `.values()` on a map to `lower_container_iterator`,
+  ahead of every other builtin: a `StructLiteral` of the prelude's `Iter` (the receiver borrowed
+  shared and unsized to `&[T]` with `SliceCoerce`) or map view (the map borrowed shared), with its
+  cursor at zero. The view's walk calls the map intrinsics `__slot_count`, `__slot_live`,
+  `__key_at` and `__value_at`, which `lower_collection_method` types like any collection method.
 - **Traits.** The parser has already injected each trait's default methods into the matching
   `impl Trait for Type` blocks, so trait impls and their inherited defaults lower through the
   ordinary inherent-impl path, and a trait-bounded generic monomorphizes to concrete dispatch with

@@ -435,6 +435,110 @@ impl Iterator for Chars {
     }
 }
 
+// The iterator `.iter()` hands out over an array, a slice or a `Vec`: a cursor over a
+// borrow of the elements, yielding each one as `&T`.
+//
+// The borrow is what keeps the walk from copying or consuming the container, and what
+// keeps the container from changing while the iterator lives. As with `Chars`, the
+// fields are private and the compiler fills them in.
+export struct Iter<T> {
+    items: &[T],
+    position: u64
+}
+
+impl<T> Iterator for Iter<T> {
+    type Item = &T
+    func next(&mut self) -> Option<&T> {
+        if self.position >= self.items.len() {
+            return Option::None
+        }
+        val at = self.position
+        self.position = at + 1
+        Option::Some(&self.items[at])
+    }
+}
+
+// `m.keys()` and `m.values()` written outside a `for` head: cursors over a borrowed map's
+// entries, yielding `&K` or `&V`. A `HashMap` scatters its entries across its slots and a
+// `BTreeMap` keeps them sorted in a dense prefix, so a field can hold only one of the two
+// and each map has its own pair. A `BTreeMap` view walks in ascending key order.
+//
+// A map's slots have no surface in the language, so the walk steps with intrinsics
+// private to the prelude: `__slot_count()` is how many slots to visit, `__slot_live(i)`
+// whether hashed slot `i` holds an entry, and `__key_at(i)` / `__value_at(i)` borrow its
+// key or value.
+export struct HashKeys<K, V> {
+    map: &HashMap<K, V>,
+    slot: u64
+}
+
+impl<K, V> Iterator for HashKeys<K, V> {
+    type Item = &K
+    func next(&mut self) -> Option<&K> {
+        while self.slot < self.map.__slot_count() {
+            val at = self.slot
+            self.slot = at + 1
+            if self.map.__slot_live(at) {
+                return Option::Some(self.map.__key_at(at))
+            }
+        }
+        Option::None
+    }
+}
+
+export struct HashValues<K, V> {
+    map: &HashMap<K, V>,
+    slot: u64
+}
+
+impl<K, V> Iterator for HashValues<K, V> {
+    type Item = &V
+    func next(&mut self) -> Option<&V> {
+        while self.slot < self.map.__slot_count() {
+            val at = self.slot
+            self.slot = at + 1
+            if self.map.__slot_live(at) {
+                return Option::Some(self.map.__value_at(at))
+            }
+        }
+        Option::None
+    }
+}
+
+export struct BTreeKeys<K, V> {
+    map: &BTreeMap<K, V>,
+    slot: u64
+}
+
+impl<K, V> Iterator for BTreeKeys<K, V> {
+    type Item = &K
+    func next(&mut self) -> Option<&K> {
+        if self.slot >= self.map.__slot_count() {
+            return Option::None
+        }
+        val at = self.slot
+        self.slot = at + 1
+        Option::Some(self.map.__key_at(at))
+    }
+}
+
+export struct BTreeValues<K, V> {
+    map: &BTreeMap<K, V>,
+    slot: u64
+}
+
+impl<K, V> Iterator for BTreeValues<K, V> {
+    type Item = &V
+    func next(&mut self) -> Option<&V> {
+        if self.slot >= self.map.__slot_count() {
+            return Option::None
+        }
+        val at = self.slot
+        self.slot = at + 1
+        Option::Some(self.map.__value_at(at))
+    }
+}
+
 // The device a tensor's buffer lives on, and the argument `tensor.to(device)` takes.
 //
 // The backend finds the host variant by its name and treats every other variant as a

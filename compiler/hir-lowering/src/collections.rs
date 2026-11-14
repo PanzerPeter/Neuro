@@ -129,13 +129,17 @@ impl Lowerer {
                 (vec![HirType::String], HirType::Void)
             }
             (HirCollectionKind::StringBuilder, "to_string") => (vec![], HirType::String),
-            (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "keys") => (
-                vec![],
-                HirType::Collection {
-                    kind: HirCollectionKind::Vec,
-                    args: vec![key],
-                },
-            ),
+            // The prelude-private steps of a map view's walk.
+            (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "__slot_count") => {
+                (vec![], HirType::U64)
+            }
+            (HirCollectionKind::HashMap, "__slot_live") => (vec![HirType::U64], HirType::Bool),
+            (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "__key_at") => {
+                (vec![HirType::U64], borrow_of(key, false))
+            }
+            (HirCollectionKind::HashMap | HirCollectionKind::BTreeMap, "__value_at") => {
+                (vec![HirType::U64], borrow_of(value, false))
+            }
             _ => {
                 return Err(LoweringError::UnresolvedCall {
                     target: format!("{}.{}", recv, method),

@@ -943,6 +943,9 @@ impl Lowerer {
         if method == CHARS_METHOD && matches!(recv.referent(), HirType::String) {
             return self.lower_chars_iterator(object, span);
         }
+        if let Some(iterator) = self.lower_container_iterator(&object, method, span)? {
+            return Ok(iterator);
+        }
 
         // The shape-manipulation intrinsics consume a tensor by value, so a borrowed
         // receiver falls through to the ordinary method surface exactly as the checker

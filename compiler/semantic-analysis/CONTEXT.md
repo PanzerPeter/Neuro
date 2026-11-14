@@ -499,6 +499,19 @@ loop.
   type parameter; `check_range_intrinsic` types them inside the prelude only, ahead of
   `MethodNotFound` on a type-parameter receiver.
 
+- **Container iterator values.** `type_checkers/container_iterators.rs`, asked first on a builtin
+  receiver (`check_container_iterator`). `.iter()` on an array, a slice or a `Vec` types as the
+  prelude's `Iter<T>`, and `m.keys()` / `m.values()` as `HashKeys` / `HashValues` /
+  `BTreeKeys` / `BTreeValues<K, V>`, each yielding a shared borrow. The call registers the same
+  transient borrow `.slice` does, and the call-result walk makes a binding hold it. A receiver
+  that is neither a place nor a borrow is `CannotBorrowValue`; a program without the prelude's
+  struct gets no method. `views_builtin_receiver` tells `result_borrows_owned_receiver` that these
+  and `.chars()` point into an owned receiver, so one over a local cannot be returned or stored
+  through a reference. The views step with four map intrinsics, `__slot_count`, `__slot_live`
+  (hashed only), `__key_at` and `__value_at`, typed in the prelude only by `check_map_intrinsic`
+  ahead of the collection method table. A generic struct's fields resolve as their own module, so
+  a prelude view's `&HashMap<K, V>` field needs no key bound (`check_key_type`).
+
 ### The iteration protocol
 `type_checkers/iteration.rs`. A `Stmt::ForEach` head that is neither a collection, an array,
 nor a slice falls through to `iteration_item`, which answers what one step binds:
@@ -1547,8 +1560,8 @@ compiler-known nominal type, never `Copy` and always move-tracked.
   (`map_loop_item`): `(K, V)` by value, recording the move; `(&K, &V)` through `&m`; `(&K, &mut V)`
   through `&mut m`, a key never lent mutably. `m.keys()` / `m.values()` over a map place
   (`map_view_receiver`, the place typed by `projection_type`) is a head form binding `&K` / `&V`,
-  and the loop binding holds a shared borrow of the map. Anywhere else the two names on a map are
-  `MapViewOutsideHead`. A `Stmt::ForEach` marked `pair` needs a two-element tuple item, else
+  and the loop binding holds a shared borrow of the map. Anywhere else they are values
+  (**Container iterator values** below). A `Stmt::ForEach` marked `pair` needs a two-element tuple item, else
   `PairHeadOverNonPair`, reported once with the item bound as `Unknown` so the parser's
   destructuring declarations stay silent.
 - A type-parameter key needs only the map's key traits; it moves into its slot like a value.

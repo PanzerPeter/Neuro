@@ -8,6 +8,7 @@ use super::lending::Lend;
 use super::{COLLECTION_CTOR, TypeChecker, VEC_WITH_CAPACITY, declarations, eval_const_predicate};
 use crate::errors::TypeError;
 use crate::type_checkers::closures::closure_context;
+use crate::type_checkers::container_iterators::views_builtin_receiver;
 use crate::type_checkers::declarations::traits::{
     collect_self_assoc, declares_generics, signature_types,
 };
@@ -876,9 +877,12 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
                 // A result borrowing an owned temporary, or read from a value that does,
-                // lives no longer than its statement.
+                // lives no longer than its statement. The builtin views answer for their own
+                // temporaries: `.iter()` refuses one, and `.chars()` keeps the text's fat
+                // pointer, which a temporary `string` leaves valid.
                 if self.temporary_views.contains(&object.span())
                     || (Self::place_root_name(object).is_none()
+                        && !views_builtin_receiver(&obj_ty, &field.name)
                         && self.result_borrows_owned_receiver(&obj_ty, &field.name))
                 {
                     let _ = self.temporary_views.insert(*span);
@@ -1017,6 +1021,11 @@ impl TypeChecker {
                         // compiler-known set of intrinsic methods. A scalar receiver
                         // arrives read through its borrows; a `&string`, `&Vec` or
                         // `&Tensor` keeps its one `&`, which some intrinsics refuse.
+                        if let Some(ret) =
+                            self.check_container_iterator(object, &obj_ty, &field.name, args, *span)
+                        {
+                            return Some(ret);
+                        }
                         if let Some(ret) = self.resolve_collection_method(
                             &obj_ty,
                             object,

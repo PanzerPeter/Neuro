@@ -1,4 +1,4 @@
-// `@test` and `neurc test` (§8.4): discovery across modules, one process per test, a panic
+// `@test` and `neurc test`: discovery across modules, one process per test, a panic
 // failing only its own test, `std::testing`, and the forms the attribute refuses.
 
 use crate::compile_harness::{CompileTest, assert_check_error, neurc_path, run};

@@ -335,6 +335,9 @@ impl TypeChecker {
             return;
         }
 
+        // The fields resolve as their own module, so a prelude struct's field gets the
+        // prelude's latitude (`check_key_type`).
+        let outer = std::mem::replace(&mut self.current_module, def.module);
         self.enter_generic_scope(&def.generics, &def.lifetimes);
         let mut fields: Vec<(String, Type)> = Vec::new();
         for field in &def.fields {
@@ -343,6 +346,7 @@ impl TypeChecker {
             }
         }
         self.exit_generic_scope();
+        self.current_module = outer;
 
         self.struct_defs.insert(def.name.name.clone(), fields);
         self.declared_lifetimes

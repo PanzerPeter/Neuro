@@ -309,7 +309,7 @@ for x in &a {  }                     // iterate over a borrow
 - **Element type**: any sized type. An array of `Copy` elements is itself `Copy`. An array holding an owner (a `string`, a non-`Copy` struct) moves rather than copies, and reading one element out moves that element. See [Ownership of an element](ownership.md#ownership-of-elements).
 - **Literals** must be homogeneous. The length is the element count, which must equal `N` when a `[T; N]` annotation is present.
 - **Bounds**: an out-of-range index panics in every build, with `panic: array index out of bounds at <file>:<line>:<col>`. Unlike integer overflow, which wraps in release builds, an index past the end has no defined result to fall back on.
-- **Iteration**: `for x in arr` and `for x in &arr` bind each element in order, and `for (i, x) in arr.enumerate()` also binds its `u64` position (see [Control Flow](control-flow.md)).
+- **Iteration**: `for x in arr` and `for x in &arr` bind each element in order, and `for (i, x) in arr.enumerate()` also binds its `u64` position. `arr.iter()` is the same walk as a value, an `Iter<T>` yielding `&T` (see [Control Flow](control-flow.md#borrowing-iterator-values-iter-keys-and-values)).
 
 ## Borrowed Slices (`&[T]` / `&mut [T]`)
 
@@ -347,7 +347,7 @@ func main() -> i32 {
 - **`.slice(range)`** on an array, a `Vec<T>`, or another slice yields a `&[T]` view over the named sub-range, copying nothing. It accepts `a..b` and `a..=b`. An out-of-range or reversed range panics in every build, because the view outlives the check.
 - **`.len()`** is O(1), read from the view's length: the borrowed run's length, not the container's.
 - **Indexing** is bounds-checked as on the owning container. `xs[i] = v` requires a `&mut [T]`, and the write reaches the buffer, so the owner sees it.
-- **Iteration**: a slice is a borrow, so `for x in xs` binds each element as a `&T`, or as a `&mut T` over a `&mut [T]`, which writes the element in place (`*x += 1`). `.enumerate()` works on a slice as it does on an array.
+- **Iteration**: a slice is a borrow, so `for x in xs` binds each element as a `&T`, or as a `&mut T` over a `&mut [T]`, which writes the element in place (`*x += 1`). `.enumerate()` works on a slice as it does on an array, and `xs.iter()` is an `Iter<T>` value over the view.
 - **Borrow rules** are the ordinary ones. A live view counts as a shared borrow of the place it came from, so a `&mut` of that place is rejected while the view is alive. Returning a view of a function-local buffer is rejected as a dangling reference. See [Ownership and Borrowing](ownership.md).
 
 ## Tuples
@@ -545,6 +545,7 @@ func main() -> i32 {
 | `v.clear()` | nothing | Drops every element, keeping the buffer |
 | `for x in v` | nothing | Iterates the live elements in order, consuming `v` |
 | `for x in &v` / `&mut v` | nothing | Iterates the elements as `&T` / `&mut T`, leaving `v` usable |
+| `v.iter()` | `Iter<T>` | An iterator value yielding `&T`; holds `v` borrowed while it lives |
 
 `for x in v` consumes `v` whatever its element type. Each pass owns the element it is handed, and leaving the loop early drops the ones it did not reach. `for x in &v` binds each element as a `&T`, read in place. `for x in &mut v` binds a `&mut T` that writes the slot. Either way `v` stays borrowed for the whole loop, so the body cannot push to it.
 
@@ -566,8 +567,9 @@ Both share one surface:
 | `for (k, v) in m` | nothing | Moves each entry out as a `(K, V)` pair, consuming `m` |
 | `for (k, v) in &m` / `&mut m` | nothing | Binds `(&K, &V)` / `(&K, &mut V)`, leaving `m` usable |
 | `for k in m.keys()` / `for v in m.values()` | nothing | Binds `&K` / `&V`, leaving `m` usable |
+| `m.keys()` / `m.values()` as values | `HashKeys<K, V>` / `HashValues<K, V>`, or `BTreeKeys` / `BTreeValues` | Iterator values yielding `&K` / `&V`; hold `m` borrowed while they live |
 
-A map head yields one entry per pass, and a pair head `(k, v)` takes it apart; a single binding holds the tuple. A key is never lent mutably, since it decides where its entry lives. `m.keys()` and `m.values()` exist only as `for` heads. They copy nothing out of the map, and they cannot be bound to a name. As with a `Vec`, a borrowed head holds `m` for the whole loop, so the body cannot insert into it.
+A map head yields one entry per pass, and a pair head `(k, v)` takes it apart; a single binding holds the tuple. A key is never lent mutably, since it decides where its entry lives. `m.keys()` and `m.values()` copy nothing out of the map. In a `for` head they walk it in place; anywhere else they are iterator values that bind, pass and return, a `BTreeMap`'s ascending. As with a `Vec`, a borrowed head or a live view holds `m`, so nothing can insert into it meanwhile.
 
 `HashMap` has average-O(1) lookup and walks its entries in no promised order. `BTreeMap` keeps its entries ordered by key, so every head walks them **ascending**. Pick it when iteration order matters.
 
@@ -615,7 +617,6 @@ The one requirement is that equal keys hash equally. The integers, `bool`, `char
 ### Current limits
 
 - An element may not hold a reference or a function value.
-- `m.keys()` and `m.values()` are `for` heads, not values: they cannot be bound, passed or returned.
 - A `string` does not meet a `Comparable` bound, so a generic `BTreeMap<K, V>` with `K: Comparable` cannot be instantiated at `string`, though `BTreeMap<string, V>` written directly works.
 - `Vec<T>` does not go through the [`Iterator` protocol](control-flow.md#the-iteration-protocol). `for x in v` lowers to a counted loop, as `for x in arr` does, and so does `for (i, x) in v.enumerate()`. The protocol is what a user-defined type implements to stand in a `for` head.
 

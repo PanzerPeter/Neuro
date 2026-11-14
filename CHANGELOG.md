@@ -10,6 +10,26 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.43.0] - 2026-11-14
+
+### Added
+
+- `.iter()` on an array, a slice or a `Vec<T>` returns `Iter<T>`, an iterator value yielding `&T`.
+  Outside a `for` head, `m.keys()` and `m.values()` return `HashKeys<K, V>` / `HashValues<K, V>`
+  for a `HashMap` and `BTreeKeys<K, V>` / `BTreeValues<K, V>` for a `BTreeMap`, yielding `&K` and
+  `&V`, a `BTreeMap`'s in ascending key order. Each binds, passes to a generic
+  `Iterator<Item = &T>` parameter, takes `.map`, `.filter` and `.enumerate()`, and returns from a
+  function over a parameter's container. The container cannot be mutated or moved while one
+  lives; one over a local cannot be returned or leave its block, and one over a temporary
+  container is refused. `m.keys()` and `m.values()` outside a head were an error before.
+
+### Fixed
+
+- `&xs[i]` over a scalar element of a borrowed slice pointed at a copy in the borrowing frame, so
+  a returned `&i32` read whatever the next call left on the stack. It now points into the slice.
+- `func f(s: string) -> Chars { s.chars() }` compiled and returned an iterator over a released
+  string. A `.chars()` over an owned local is now refused on return, as `.iter()` is.
+
 ## [5.42.0] - 2026-11-14
 
 ### Added

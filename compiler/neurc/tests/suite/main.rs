@@ -20,6 +20,7 @@ mod basic_features;
 mod bitwise_operators;
 mod block_scoped_bindings;
 mod borrow_exclusivity;
+mod borrowing_iterator_values;
 mod builtin_methods;
 mod char_type;
 mod checked_float_conversion;

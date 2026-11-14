@@ -106,6 +106,13 @@ impl TypeChecker {
         if ty.is_integer() || matches!(ty, Type::Bool | Type::Char | Type::String) {
             return Some(());
         }
+        // The prelude's map views name a map they only borrow, never build or search, and
+        // a key bound there would keep a `BTreeMap<string, V>` view from being an
+        // `Iterator`, since `string` meets no `Comparable` bound yet. Each instance's key
+        // was checked where its map's type was written.
+        if self.in_prelude() && matches!(ty, Type::Generic(_)) {
+            return Some(());
+        }
         // A struct key routes equality, hashing and ordering through the traits it
         // implements, derived or written by hand, so each one the map needs must be there.
         // A type parameter supplies them through its bounds, and each instance's key is
@@ -208,14 +215,8 @@ impl TypeChecker {
         let Type::Collection { kind, args: params } = recv.referent().clone() else {
             return None;
         };
-        if matches!(kind, CollectionKind::HashMap | CollectionKind::BTreeMap)
-            && super::iteration::MAP_VIEWS.contains(&method)
-        {
-            self.record_error(TypeError::MapViewOutsideHead {
-                method: method.to_string(),
-                span,
-            });
-            return Some(Type::Unknown);
+        if let Some(ret) = self.check_map_intrinsic(kind, &params, method, args, span) {
+            return Some(ret);
         }
         let spec = collection_method(kind, method)?;
 

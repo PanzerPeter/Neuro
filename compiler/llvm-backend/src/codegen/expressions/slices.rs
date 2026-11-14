@@ -348,6 +348,22 @@ impl<'ctx> CodegenContext<'ctx> {
             .map(Some)
     }
 
+    /// The slot of `s[index]` for a borrow `&s[index]`, whatever the element: the borrow
+    /// must point into the run, where a read of a scalar element would load a copy.
+    pub(crate) fn slice_element_borrow(
+        &mut self,
+        object: &HirExpr,
+        index: &HirExpr,
+    ) -> CodegenResult<Option<PointerValue<'ctx>>> {
+        let obj_ty = Type::from_hir(&object.ty);
+        if !matches!(obj_ty.referent(), Type::Slice(_)) {
+            return Ok(None);
+        }
+        let (base, element_ty, len) = self.slice_source(object, &obj_ty)?;
+        self.slice_element_ptr(base, &element_ty, len, index, index.span.start)
+            .map(Some)
+    }
+
     /// Address of element `index` in a borrowed run, emitting the same bounds guard the
     /// owning container gets; only the bound is a runtime length.
     fn slice_element_ptr(
