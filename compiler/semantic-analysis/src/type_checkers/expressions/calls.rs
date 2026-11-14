@@ -613,12 +613,23 @@ impl TypeChecker {
             );
         let mut lent = Vec::new();
         for (arg, param) in order {
-            // A scalar parameter, written as one or a type parameter the turbofish or an
-            // earlier argument has bound, types its argument as a non-generic call's does,
-            // so a literal there takes it. A function-typed one hands a closure literal
-            // the signature inferred so far. Lowering applies the same rule.
+            // A scalar or `&string` parameter, written as one or through a type parameter
+            // the turbofish or an earlier argument has bound, types its argument as a
+            // non-generic call's does, so a literal there takes it. A function-typed one
+            // hands a closure literal the signature inferred so far. Lowering applies the
+            // same rule.
             let expected = match param {
                 Type::Generic(name) => subst.get(name).cloned(),
+                Type::Reference {
+                    inner,
+                    mutable: false,
+                } => match &**inner {
+                    Type::Generic(name) => subst.get(name).map(|bound| Type::Reference {
+                        inner: Box::new(bound.clone()),
+                        mutable: false,
+                    }),
+                    _ => Some(param.clone()),
+                },
                 Type::Function { .. } => {
                     let open: Vec<String> = sig
                         .param_names
@@ -630,7 +641,9 @@ impl TypeChecker {
                 }
                 other => Some(other.clone()),
             }
-            .filter(|ty| ty.is_scalar() || matches!(ty, Type::Function { .. }));
+            .filter(|ty| {
+                ty.is_scalar() || ty.is_string_view() || matches!(ty, Type::Function { .. })
+            });
             if matches!(param, Type::Function { .. }) {
                 self.function_value_slot = function_value_position(arg);
             }

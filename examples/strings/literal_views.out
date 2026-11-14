@@ -1,0 +1,6 @@
+Training run
+length("text") = 4
+epoch is 8 wide
+loss is measured in nats
+lr = 0.01, momentum = unset
+length(&built) = 8

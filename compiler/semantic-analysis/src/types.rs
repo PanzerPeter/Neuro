@@ -466,6 +466,11 @@ impl Type {
         self.is_numeric() || self.is_half_float() || self.is_bool() || self.is_char()
     }
 
+    /// `&string`, the one reference type a string literal takes from its context.
+    pub(crate) fn is_string_view(&self) -> bool {
+        matches!(self, Type::Reference { inner, mutable: false } if matches!(**inner, Type::String))
+    }
+
     /// Normalize a string operand for equality: a `&string` slice and an owned
     /// `string` compare the same UTF-8 bytes, so a single string reference
     /// is peeled to `string`. Other `&T` are left intact; a scalar borrow has already

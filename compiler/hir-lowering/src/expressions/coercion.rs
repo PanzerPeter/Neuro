@@ -94,8 +94,16 @@ pub(super) fn literal_type(lit: &Literal, expected: Option<&HirType>) -> HirType
         },
         Literal::Boolean(_) => HirType::Bool,
         Literal::Char(_) => HirType::Char,
-        Literal::String(_) => HirType::String,
+        Literal::String(_) => match expected {
+            Some(t) if is_string_view(t) => t.clone(),
+            _ => HirType::String,
+        },
     }
+}
+
+/// `&string`, the one reference type a string literal takes from its context.
+pub(super) fn is_string_view(ty: &HirType) -> bool {
+    matches!(ty, HirType::Reference { inner, mutable: false } if matches!(**inner, HirType::String))
 }
 
 /// The scalar value a match-pattern literal denotes, as the low bits of an `i64`
@@ -332,5 +340,25 @@ fn join_extents(
         (Some(1), _) => Some((right, right_name)),
         (_, Some(1)) => Some((left, left_name)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_string_literal_is_typed_by_a_shared_string_reference_only() {
+        let lit = Literal::String("text".to_string());
+        let reference = |mutable| HirType::Reference {
+            inner: Box::new(HirType::String),
+            mutable,
+        };
+        assert_eq!(
+            literal_type(&lit, Some(&reference(false))),
+            reference(false)
+        );
+        assert_eq!(literal_type(&lit, Some(&reference(true))), HirType::String);
+        assert_eq!(literal_type(&lit, None), HirType::String);
     }
 }

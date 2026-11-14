@@ -186,7 +186,7 @@ val lang: string = "Neuro"
 val same: bool = (&lang == "Neuro")   // slice vs owned literal, lang stays usable
 ```
 
-`string` slicing methods and the two string representations are covered in [Strings](strings.md).
+A string literal is a `&string` wherever one is expected, so `describe("Neuro")` needs no `&` ([Literals as `&string`](strings.md#literals-as-string)). `string` slicing methods and the two string representations are covered in [Strings](strings.md).
 
 ## Mutable borrows (`&mut T`)
 

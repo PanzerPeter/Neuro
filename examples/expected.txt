@@ -62,6 +62,7 @@ types/underscore_separators.nr      0
 
 # --- strings: the `string` slice and the growable `StringBuilder` -----------
 strings/char.nr                  65
+strings/literal_views.nr         33
 strings/string_builder.nr        27
 strings/string_char_slice.nr     19
 strings/string_chars.nr          31
@@ -173,7 +174,7 @@ showcase/batch_arena.nr              4
 showcase/bin_tally.nr                53
 showcase/borrow_discipline.nr        48
 showcase/borrowed_records.nr         48
-showcase/borrowed_text.nr            25
+showcase/borrowed_text.nr            34
 showcase/buffered_report.nr          40
 showcase/closures.nr                 236
 showcase/composed_loss.nr            13

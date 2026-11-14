@@ -152,7 +152,12 @@ impl TypeChecker {
                 }
                 Literal::Boolean(_) => Some(Type::Bool),
                 Literal::Char(_) => Some(Type::Char), // Char literals have char type
-                Literal::String(_) => Some(Type::String), // String literals have string type
+                // A literal is a view of read-only data, so where `&string` is expected it
+                // is that view directly, as a numeric literal takes its expected type.
+                Literal::String(_) => match expected {
+                    Some(ty) if ty.is_string_view() => Some(ty.clone()),
+                    _ => Some(Type::String),
+                },
             },
 
             Expr::InterpString { parts, .. } => self.check_interp_string(parts),

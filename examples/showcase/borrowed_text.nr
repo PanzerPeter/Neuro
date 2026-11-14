@@ -1,8 +1,8 @@
 // Showcase: explicit lifetime annotations over borrowed text. Integration example: `<'a>`
 // on reference parameters and the return, `&string` and borrowed `.slice` and `.char_slice`
-// views, if-expressions, and a lifetime alongside a type parameter. A lifetime is a
-// well-formedness annotation, erased after checking, so `&'a string` costs the same as
-// `&string`.
+// views, string literals passed where `&string` is expected, if-expressions, and a lifetime
+// alongside a type parameter. A lifetime is a well-formedness annotation, erased after
+// checking, so `&'a string` costs the same as `&string`.
 
 // The classic signature: two borrows sharing one lifetime, returning a borrow
 // that lives as long as both inputs.
@@ -43,6 +43,13 @@ func main() -> i32 {
     println("tagged_len(winner, _)  = {n}")
     println("left still bound       = {left}")
 
+    // A literal goes straight into a `&string` parameter with no `&`: it is already a view
+    // of read-only text, so nothing is borrowed and nothing is freed.
+    val picked = longest("tensor", prefix)   // "tensor" beats "sp" -> "tensor"
+    val lit_len = tagged_len("abc", 7)       // a literal beside a type parameter -> 3
+    println("longest(\"tensor\", prefix) = {picked}")
+    println("tagged_len(\"abc\", 7)     = {lit_len}")
+
     // Multi-byte text is where the two index units part company: 'ö' is one character
     // but two bytes, so the same 0..2 range means different things.
     val label = "größe"
@@ -54,12 +61,14 @@ func main() -> i32 {
     println("label.char_slice(0..3) = {three}   ({three.len()} bytes)")
 
     // 8 (len "spectrum") + 2 (len "sp") + 8 (tagged_len) = 18, plus the character
-    // slices: 2 ("gr") + 4 ("grö") = 24.
+    // slices: 2 ("gr") + 4 ("grö") = 24, plus the literal calls: 6 ("tensor") + 3 = 33.
     val total = winner.len() as i32
         + prefix.len() as i32
         + n
         + chars.len() as i32
         + three.len() as i32
+        + picked.len() as i32
+        + lit_len
     val agree = if chars == bytes { 1 } else { 0 }
     println("total                  = {total}")
     return total + agree

@@ -39,6 +39,22 @@ Triple-quoted literals take the same escapes.
 
 A single-quoted `char` literal holds one code point, such as `'A'` or `'\u{1F44D}'`. See [Types](types.md) for `char`.
 
+### Literals as `&string`
+
+A literal is accepted where a `&string` is expected, with no `&`, the way an unsuffixed number takes its type from context. Its bytes are already read-only program memory, so nothing is borrowed and nothing is released:
+
+```neuro
+func length(s: &string) -> u64 { s.len() }
+
+val n = length("text")                 // 4
+val title: &string = "Training run"
+val lr = find("lr") ?? "unset"         // find returns Option<&string>
+```
+
+The context is a `&string` parameter, binding, return, field, payload or element, or a generic `&T` whose `T` a turbofish or an earlier argument bound to `string` (`id::<string>("text")`). An unbound `&T` takes no literal, and neither do `&mut string` and `&&string`. An interpolated literal is built fresh and owns its buffer, so it is an ordinary `string`. Any `string` value other than a plain literal is borrowed with `&`.
+
+See [`examples/strings/literal_views.nr`](../../examples/strings/literal_views.nr) for each position checked against its expected output.
+
 ## String Interpolation
 
 A `{...}` hole in a string literal holds an expression. The whole literal is a `string` built fresh each time it is reached:

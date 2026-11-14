@@ -232,7 +232,8 @@ with `calls`, `enums`, `structs`, `matches`, `sequences`, `coercion`, `try_op`, 
 ### Contextual typing
 Two derivations take their type from context and faithfully mirror the checker:
 - **Literals** take a suffix type, else the expected type when it fits the literal's family, else
-  the default `i32` / `f64`.
+  the default `i32` / `f64`. A string literal takes an expected `&string` (`is_string_view`) and
+  is `string` otherwise. Both are the same `{ ptr, i64 }` value, so the backend lowers them alike.
 - **A body's trailing expression** is an implicit return, typed against the declared return type.
   Nested block and `if`-arm tails inherit the same way: `lower_if_expr` takes the expected type if
   there is one, else the first arm's type, and `lower_block_value` threads it to the tail: the
@@ -455,7 +456,9 @@ the type's instance the same way, plus any turbofish, and calls that instance's 
 (`lower_generic_assoc_call`). `lower_generic_args`, shared by all three, lowers a closure literal
 for a function-typed parameter after the other arguments, as the checker types it, with a hint of
 what they bound (`generic_closure_hint`; `mentions_any` leaves a position naming an unbound
-parameter open), and keeps the arguments in their own order.
+parameter open), and keeps the arguments in their own order. An argument is lowered against its
+parameter only when that is a scalar or `&string`, written as one or through a type parameter
+already bound, so a literal there takes it, as the checker types it.
 
 Every function, struct and enum instance records its depth: one more than the body that requested
 it (`mono_depth`, set as each worklist item is emitted). Past `MAX_INSTANCE_DEPTH` the request is

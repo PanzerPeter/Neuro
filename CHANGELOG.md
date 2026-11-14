@@ -10,6 +10,17 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.45.0] - 2026-11-14
+
+### Added
+
+- A string literal is accepted where a `&string` is expected, with no `&`: `length("text")`,
+  `val title: &string = "Run"`, a returned `"nats"`, a `&string` field or `Option<&string>`
+  payload, and `opt ?? "unset"`. The literal is a view of read-only data, so nothing is borrowed
+  or freed. A generic call passes it through a `&string` parameter, or a `&T` whose `T` the
+  turbofish bound (`id::<string>("text")`). An owned `string` and an interpolated literal are still
+  borrowed with `&`.
+
 ## [5.44.1] - 2026-11-14
 
 ### Fixed

@@ -552,10 +552,35 @@ impl Lowerer {
                             }
                             None => None,
                         },
+                        ast_types::Type::Reference {
+                            inner,
+                            mutable: false,
+                            ..
+                        } => match inner.as_ref() {
+                            ast_types::Type::Named(ident) => match subst.get(&ident.name) {
+                                Some(bound) => Some(bound.clone()),
+                                None if gnames.contains(&ident.name)
+                                    || cnames.contains(&ident.name) =>
+                                {
+                                    None
+                                }
+                                // Only a hint: a name this scope cannot resolve leaves the
+                                // argument to be typed on its own, as before.
+                                None => self.resolve_type(inner).ok(),
+                            }
+                            .filter(|ty| matches!(ty, HirType::String))
+                            .map(|ty| HirType::Reference {
+                                inner: Box::new(ty),
+                                mutable: false,
+                            }),
+                            _ => None,
+                        },
                         _ => None,
                     }
                     .filter(|ty| {
-                        super::coercion::is_scalar(ty) || matches!(ty, HirType::Function { .. })
+                        super::coercion::is_scalar(ty)
+                            || super::coercion::is_string_view(ty)
+                            || matches!(ty, HirType::Function { .. })
                     });
                     self.lower_expr(arg, expected.as_ref())?
                 }

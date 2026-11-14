@@ -283,6 +283,11 @@ resolve registers as `Unknown` rather than `void`, so its call sites stay quiet.
 - `Type::peel_string_ref` normalizes `&string` → `string`, one layer, string only. It is what
   makes an owned `string` and a `&string` slice interchangeable for `==`, `!=`, and `+`, while
   `i32 == &string` stays a type error.
+- A string literal is `Type::String` unless the expected type is `&string`
+  (`Type::is_string_view`), which it then takes: it is a view of read-only data, so nothing is
+  borrowed or freed. `&mut string`, `&&string` and an unbound `&T` take nothing. A generic call
+  passes a parameter's type down as the expected type only for a scalar or `&string`, written as
+  one or through a type parameter the turbofish or an earlier argument bound.
 - `+` on two strings yields a new owned `Type::String`. Any other arithmetic op on a string, or
   mixing a string with a non-string, is `InvalidBinaryOperator`. Comparison and `+` operands are
   **not consuming positions**, so they borrow to read and never move.

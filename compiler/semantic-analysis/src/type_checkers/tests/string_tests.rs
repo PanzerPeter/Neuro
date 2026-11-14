@@ -367,3 +367,25 @@ fn string_plus_integer_is_rejected() {
             .any(|e| matches!(e, TypeError::InvalidBinaryOperator { .. }))
     );
 }
+
+/// A string literal takes `&string` from its context, and only that reference type.
+#[test]
+fn string_literal_takes_a_shared_string_reference_from_context() {
+    let lit = Expr::Literal(Literal::String("text".to_string()), Span::new(0, 6));
+    let view = Type::Reference {
+        inner: Box::new(Type::String),
+        mutable: false,
+    };
+    let exclusive = Type::Reference {
+        inner: Box::new(Type::String),
+        mutable: true,
+    };
+    let mut checker = TypeChecker::new();
+    assert_eq!(checker.check_expr(&lit, Some(&view)), Some(view));
+    assert_eq!(
+        checker.check_expr(&lit, Some(&exclusive)),
+        Some(Type::String)
+    );
+    assert_eq!(checker.check_expr(&lit, None), Some(Type::String));
+    assert!(!checker.has_errors());
+}

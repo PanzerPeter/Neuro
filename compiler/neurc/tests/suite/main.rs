@@ -139,6 +139,7 @@ mod std_library;
 mod string_builder;
 mod string_concat;
 mod string_interpolation;
+mod string_literal_views;
 mod string_owner_bit;
 mod string_parse;
 mod string_slice;
