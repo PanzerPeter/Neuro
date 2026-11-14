@@ -13,7 +13,7 @@ one and checks two things:
 
 | Directory       | What it covers | Reference |
 | --------------- | -------------- | --------- |
-| `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println` | [Functions](../docs/language-reference/functions.md) |
+| `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println`, `@test` functions run by `neurc test` | [Functions](../docs/language-reference/functions.md) |
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md), [Generics and traits](../docs/language-reference/generics-and-traits.md) |
 | `strings/`      | `string` literals and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, `.parse::<T>()`, the growable `StringBuilder` | [Strings](../docs/language-reference/strings.md) |
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes, `@gpu` kernels, hand-written `@kernel` functions and their `partition` write form, device transfer with `.to` and the operations that then run on the device | [Tensors](../docs/language-reference/tensors.md) |
@@ -171,7 +171,7 @@ in each program has the full description. The three module files under
 - [`perceptron.nr`](showcase/perceptron.nr): A two-neuron feed-forward pass with structs, `impl` blocks, associated functions, `&self` methods and `as` casts.
 - [`quantized_readings.nr`](showcase/quantized_readings.nr): Sensor readings quantized with `.to_checked::<u8>()`, which rejects out-of-range and NaN values where `as u8` would clamp them.
 - [`render_settings.nr`](showcase/render_settings.nr): A render pipeline called with named arguments in a different order from the declaration, plus a positional `_` parameter.
-- [`running_stats.nr`](showcase/running_stats.nr): An online mean accumulator with mixed `i32` and `f64` fields, direct field mutation and an `.is_nan()` guard.
+- [`running_stats.nr`](showcase/running_stats.nr): An online mean accumulator with mixed `i32` and `f64` fields, direct field mutation and an `.is_nan()` guard, checked by `@test` functions that `neurc test` runs.
 - [`season_table.nr`](showcase/season_table.nr): A league table of non-`Copy` records: `+` moves two half-seasons into one, `+=` and `-=` update a `Vec` element, a field and a `&mut` parameter in place, and one `lt` supplies `<=`, `>` and a generic `T: Comparable`, beside closures and `Option`.
 - [`simulation.nr`](showcase/simulation.nr): A bit-flag state machine on a struct field, using `|=`, `&=`, `^=` and `<<=`, and `~` through a `BitNot` impl.
 - [`unit_types.nr`](showcase/unit_types.nr): Newtype units of measure (`Meters` and `Seconds` both wrap `i32`) that the compiler keeps apart.

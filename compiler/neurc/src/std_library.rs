@@ -15,7 +15,10 @@ use shared_types::SourceMap;
 use syntax_parsing::Item;
 
 /// Every standard-library module, as `std::<name>` and its source.
-const MODULES: &[(&str, &str)] = &[("prelude", include_str!("../std/prelude.nr"))];
+const MODULES: &[(&str, &str)] = &[
+    ("prelude", include_str!("../std/prelude.nr")),
+    ("testing", include_str!("../std/testing.nr")),
+];
 
 /// The module whose enums lend their variants to every module.
 const PRELUDE: &str = "prelude";

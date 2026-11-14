@@ -162,6 +162,7 @@ mod tensor_shape_manipulation;
 mod tensor_sort;
 mod tensor_types;
 mod tensor_values;
+mod test_harness;
 mod traits;
 mod triple_quoted_strings;
 mod tuple_element_places;

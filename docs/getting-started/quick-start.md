@@ -130,12 +130,14 @@ Every type error in the file is reported, not just the first.
 
 ## Workflow
 
-Use `check` while you write, since it gives the fastest feedback. Use `run` to try a change, and
+Use `check` while you write, since it gives the fastest feedback. Use `run` to try a change,
+`test` to run the program's [`@test` functions](../language-reference/functions.md#tests), and
 `compile` when you want a binary to keep:
 
 ```bash
 neurc check program.nr
 neurc run program.nr
+neurc test program.nr
 neurc compile program.nr -o program
 ./program
 ```

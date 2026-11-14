@@ -10,6 +10,8 @@ Emit native object code, or the textual LLVM module behind it, from the typed Ne
 - Output: `Result<Vec<u8>, CodegenError>` from `compile`, or `Result<String, CodegenError>`
   from `compile_to_ir`, which prints the module instead of selecting instructions. `CodegenResult<T>`
   is the exported alias for `Result<T, CodegenError>`
+- `compile_tests` takes the same inputs plus `tests: &[String]` and returns the object code of a
+  `neurc test` executable (see Test Entry)
 
 `CodegenError` implements `From<inkwell::builder::BuilderError>`, so the several hundred
 builder calls inside codegen use `?` directly. A builder failure is always an internal
@@ -1285,6 +1287,17 @@ building its call, and it takes the block's last instruction
 because inkwell's `CallSiteValue` does not convert to an `InstructionValue`. Draining in front of
 the panic path is not only about not losing bytes: it is what keeps the stderr diagnostic behind
 the stdout output that led up to it.
+
+## Test Entry
+`compile_tests` builds the same module as `compile` and, before the output drain is placed,
+`define_test_entry` (`codegen/test_entry.rs`) replaces the C entry point. The program's own `main`,
+when there is one, is renamed `neuro.program_main`; calls already emitted hold the function value,
+not its name, so a test calling `main()` still reaches it. The new `main(argc, argv)` reads
+`atoi(argv[1])` and switches on it to `tests[i]`, returning 0 once the test returns and 2 for an
+index that names no test or no argument at all. Its returns are `@main`'s, so the drain above
+covers whatever a test printed, and a test that panics aborts its own process only: the harness
+runs the executable once per index. The argument is read through the C runtime's `argv`, which a
+Windows fallback link with `/ENTRY:main` skips; only the `clang` link passes it.
 
 ## String Interpolation ABI
 `codegen/expressions/interp.rs` renders each part to a `{ ptr, len }` fat pointer and concatenates

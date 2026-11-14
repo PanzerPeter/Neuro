@@ -7,9 +7,11 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - Type: CLI
 - Input: `neurc check <file.nr>` |
   `neurc compile <file.nr> [-O<0-3>] [-o <output>] [--emit exe|obj|llvm-ir] [--gpu-arch <chip>]` |
-  `neurc run <file.nr> [-O<0-3>] [--gpu-arch <chip>]`
+  `neurc run <file.nr> [-O<0-3>] [--gpu-arch <chip>]` |
+  `neurc test <file.nr> [-O<0-3>] [--gpu-arch <chip>]`
 - Output: an executable binary on success, an unlinked object file under `--emit obj`, or a
-  textual LLVM module under `--emit llvm-ir`;
+  textual LLVM module under `--emit llvm-ir`; under `test`, a verdict per `@test` function on
+  stdout and exit status 0 only when every test passed;
   diagnostics and non-fatal lint warnings to stderr
 
 ## Shared Kernel
@@ -82,6 +84,19 @@ to the system linker, so the user saw `undefined reference to 'main'` naming the
 startup object rather than their own program. `check` is unaffected: type-checking a module
 with no `main` is legitimate.
 
+### `neurc test`
+`test_file` runs the same front half and backend as `compile`, with `compile_file`'s
+`Entry::Tests`: no `main` is required, `test_functions` lists the `@test` functions in item order
+(the standard library's are skipped, by their `std::` names and `PRELUDE_MODULE`), and
+`llvm_backend::compile_tests` builds an executable whose entry runs the test its first argument
+indexes. The executable is linked into a temporary directory and run once per test, one at a
+time, so a panic, which aborts, fails only its own test. A test passes when its process exits 0.
+Output of a passing test is dropped; a failing test's stdout and stderr are printed under its
+name after the verdicts, with the signal that ended it, then a summary line. Discovery reads the
+AST because the HIR carries no attributes; the checker has already held each test to its shape.
+The names printed are the canonical ones, so a test in `shapes.nr` reads `shapes::square`.
+`compile`, `run` and `check` treat a `@test` function as an ordinary function.
+
 ### `--gpu-arch`
 `--gpu-arch` names a chip, and the vendor is read off its prefix, as clang's `--offload-arch`
 does: `sm_NN` is NVIDIA (`GpuTarget::Nvidia`, `GpuVendor::Nvidia`), `gfxNNN` is AMD
@@ -127,7 +142,8 @@ module carries the linked MLIR bodies exactly as an executable does.
 `std_library::load(sources)` parses every module in `MODULES`, each Neuro source under `std/`
 embedded with `include_str!` so a compiler binary needs no library tree beside it. Each is added
 to the source map as `<std>/<name>.nr` and parsed at its base, so a panic in a library body names
-that module. Today the table holds one module, `prelude`. The result is a
+that module. Today the table holds `prelude` and `testing`, whose `is_close` and `assert_close`
+compare floats within a tolerance for `@test` functions. The result is a
 `module_resolution::StandardLibrary`, handed to `resolve_program`, which loads the modules as
 `std::<name>` and returns them in the item list ahead of the program's own. The driver prepends
 nothing and drops nothing: a program's own `Option` lives beside the library's (module resolution

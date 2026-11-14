@@ -11,6 +11,9 @@ use std::process::{self, Command};
 /// The entry point every compiled executable must define.
 const MAIN_FUNCTION: &str = "main";
 
+/// The attribute that makes a function a test for `neurc test`.
+const TEST_ATTRIBUTE: &str = "test";
+
 /// The chip `@gpu` kernels are compiled for unless `--gpu-arch` names another. NVIDIA
 /// kernels ship as PTX, which the CUDA driver compiles for the GPU it finds, so the floor
 /// is what matters: every GPU at or above it runs them, and element-wise arithmetic needs
@@ -129,6 +132,16 @@ enum Commands {
         build: BuildArgs,
     },
 
+    /// Compile a Neuro source file's `@test` functions and run each in its own process
+    Test {
+        /// Input source file
+        #[arg(value_name = "FILE")]
+        input: PathBuf,
+
+        #[command(flatten)]
+        build: BuildArgs,
+    },
+
     /// Check syntax and types without generating code
     Check {
         /// Input source file
@@ -177,8 +190,9 @@ fn drive(cli: Cli) {
             build.optimization,
             emit,
             &build.gpu_arch.unwrap_or_default(),
+            Entry::Main,
         ) {
-            Ok(output_path) => {
+            Ok((output_path, _)) => {
                 println!(
                     "Successfully compiled {} -> {}",
                     input.display(),
@@ -197,6 +211,15 @@ fn drive(cli: Cli) {
         ) {
             Ok(code) => process::exit(code),
             Err(e) => report_failure("Run failed", &e),
+        },
+
+        Commands::Test { input, build } => match test_file(
+            &input,
+            build.optimization,
+            &build.gpu_arch.unwrap_or_default(),
+        ) {
+            Ok(passed) => process::exit(if passed { 0 } else { 1 }),
+            Err(e) => report_failure("Test failed", &e),
         },
 
         Commands::Check { input } => {
@@ -239,7 +262,14 @@ fn run_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<i32> {
         executable.set_extension("exe");
     }
 
-    compile_file(input, Some(&executable), optimization, EmitKind::Exe, gpu)?;
+    compile_file(
+        input,
+        Some(&executable),
+        optimization,
+        EmitKind::Exe,
+        gpu,
+        Entry::Main,
+    )?;
 
     let status = Command::new(&executable)
         .status()
@@ -248,6 +278,96 @@ fn run_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<i32> {
     // A child killed by a signal carries no exit code; 1 keeps that a failure rather
     // than reporting the run as a success.
     Ok(status.code().unwrap_or(1))
+}
+
+/// Compile `input`'s tests into one executable in a temporary directory and run it once per
+/// test, printing each verdict and, for a failure, what the test wrote. Returns whether every
+/// test passed.
+///
+/// A test passes when its process exits 0. One that panics aborts only its own process, so
+/// the next test still runs and nothing needs unwinding.
+fn test_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<bool> {
+    let dir = tempfile::tempdir().context("Failed to create temporary directory")?;
+    let stem = input.file_stem().unwrap_or_else(|| OsStr::new("tests"));
+    let mut executable = dir.path().join(stem);
+    if cfg!(target_os = "windows") {
+        executable.set_extension("exe");
+    }
+
+    let (_, tests) = compile_file(
+        input,
+        Some(&executable),
+        optimization,
+        EmitKind::Exe,
+        gpu,
+        Entry::Tests,
+    )?;
+
+    println!("running {} test(s)", tests.len());
+    let mut failures = Vec::new();
+    // ponytail: one test at a time; run them on a thread pool if suites grow slow.
+    for (index, name) in tests.iter().enumerate() {
+        let output = Command::new(&executable)
+            .arg(index.to_string())
+            .output()
+            .with_context(|| format!("Failed to execute {}", executable.display()))?;
+        if output.status.success() {
+            println!("test {name} ... ok");
+        } else {
+            println!("test {name} ... FAILED");
+            failures.push((name, output));
+        }
+    }
+
+    if !failures.is_empty() {
+        println!("\nfailures:");
+        for (name, output) in &failures {
+            println!("\n---- {name} ----");
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+            print!("{}", String::from_utf8_lossy(&output.stderr));
+            // A test killed by a signal says nothing of its own.
+            if output.status.code().is_none() {
+                println!("terminated by {}", output.status);
+            }
+        }
+    }
+    println!(
+        "\ntest result: {}. {} passed; {} failed",
+        if failures.is_empty() { "ok" } else { "FAILED" },
+        tests.len() - failures.len(),
+        failures.len()
+    );
+    Ok(failures.is_empty())
+}
+
+/// The program's `@test` functions in declaration order, by the names the backend gives
+/// them. The standard library's are its own and never run with a program's.
+fn test_functions(items: &[syntax_parsing::Item]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syntax_parsing::Item::Function(def)
+                if def.module != ast_types::PRELUDE_MODULE
+                    && !def.name.name.starts_with("std::")
+                    && def
+                        .attributes
+                        .iter()
+                        .any(|attr| attr.name.name == TEST_ATTRIBUTE) =>
+            {
+                Some(def.name.name.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a linked executable's entry point runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    /// The program's `main`, which it must have.
+    Main,
+    /// The test its first argument names: see `llvm_backend::compile_tests`.
+    Tests,
 }
 
 /// Validate that a file has the .nr extension
@@ -530,14 +650,17 @@ fn print_warnings(sources: &SourceMap, warnings: &[semantic_analysis::Warning]) 
 /// the input name without its extension (plus `.exe` on Windows); for an object it
 /// defaults to the input name with the platform object extension, and for IR to the
 /// input name with `.ll`. `gpu` is what `@gpu` bodies and device tensors are built for.
-/// Returns the path it wrote, which `run` needs and `compile` reports.
+/// `entry` is what the executable's entry point runs.
+/// Returns the path it wrote, which `run` needs and `compile` reports, and the tests the
+/// entry point indexes, empty unless `entry` is [`Entry::Tests`].
 fn compile_file(
     input: &Path,
     output: Option<&Path>,
     optimization: u8,
     emit: EmitKind,
     gpu: &GpuArch,
-) -> Result<PathBuf> {
+    entry: Entry,
+) -> Result<(PathBuf, Vec<String>)> {
     validate_source_file(input)?;
 
     log::info!("Compiling {}", input.display());
@@ -585,8 +708,10 @@ fn compile_file(
     // An executable needs an entry point. Without this the pipeline runs to
     // completion and the failure surfaces as the system linker's `undefined
     // reference to 'main'`, which names the C runtime rather than the program.
-    // An object file is not linked here and may well be a library, so it is exempt.
+    // An object file is not linked here and may well be a library, so it is exempt, and a
+    // test build brings its own.
     if emit == EmitKind::Exe
+        && entry == Entry::Main
         && !hir
             .items
             .iter()
@@ -628,12 +753,21 @@ fn compile_file(
             .unwrap_or_else(|| input.with_extension("ll"));
         fs::write(&output_path, ir)
             .with_context(|| format!("Failed to write LLVM IR file {}", output_path.display()))?;
-        return Ok(output_path);
+        return Ok((output_path, Vec::new()));
     }
 
-    let object_code = llvm_backend::compile(&hir, optimization, &sources, &external, gpu.vendor)
-        .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
-        .context("Failed to generate object code")?;
+    let tests = match entry {
+        Entry::Main => Vec::new(),
+        Entry::Tests => test_functions(&ast),
+    };
+    let object_code = match entry {
+        Entry::Main => llvm_backend::compile(&hir, optimization, &sources, &external, gpu.vendor),
+        Entry::Tests => {
+            llvm_backend::compile_tests(&hir, optimization, &sources, &external, gpu.vendor, &tests)
+        }
+    }
+    .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))
+    .context("Failed to generate object code")?;
 
     // MSVC expects .obj on Windows; .o is conventional on Unix.
     log::debug!("Writing object file...");
@@ -649,7 +783,7 @@ fn compile_file(
             .unwrap_or_else(|| input.with_extension(object_extension));
         fs::write(&output_path, &object_code)
             .with_context(|| format!("Failed to write object file {}", output_path.display()))?;
-        return Ok(output_path);
+        return Ok((output_path, tests));
     }
 
     // The object lives in a temporary directory that is removed on return, after the
@@ -674,7 +808,7 @@ fn compile_file(
     link_object_to_executable(&object_path, &output_path, libs)
         .context("Failed to link object file to executable")?;
 
-    Ok(output_path)
+    Ok((output_path, tests))
 }
 
 /// The `@gpu` functions in `hir`, `fallback: true` ones included, and the `@kernel` ones.

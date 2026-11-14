@@ -43,8 +43,15 @@ const DERIVABLE_TRAITS: &[&str] = &[
 
 /// The attributes some pass acts on. The set is fixed by the language, so any other name is an error:
 /// ignoring it would let a misspelled `@no_grad` leave a call differentiated.
-const IMPLEMENTED_ATTRIBUTES: &[&str] =
-    &[DERIVE_ATTRIBUTE, "grad", "no_grad", "gpu", "kernel", ALLOW];
+const IMPLEMENTED_ATTRIBUTES: &[&str] = &[
+    DERIVE_ATTRIBUTE,
+    "grad",
+    "no_grad",
+    "gpu",
+    "kernel",
+    "test",
+    ALLOW,
+];
 
 /// The lint opt-out, the one attribute a `const` takes.
 const ALLOW: &str = "allow";
@@ -56,7 +63,6 @@ const PENDING_ATTRIBUTES: &[&str] = &[
     "model",
     "export",
     "inline",
-    "test",
     "cfg",
     "deprecated",
 ];

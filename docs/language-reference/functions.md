@@ -344,6 +344,42 @@ A user-defined function named `panic`, `assert` or `unreachable` shadows the bui
 
 `return`, `break` and `continue` diverge the same way, so an `if` or `match` arm that uses one takes its type from its siblings, see [expressions.md](expressions.md#if-expressions).
 
+## Tests
+
+`@test` marks a function as a test. A test takes no parameters, returns nothing and is not generic, and it passes unless it panics:
+
+```neuro
+import std::testing::{assert_close}
+
+func clamp(x: i32, low: i32, high: i32) -> i32 {
+    if x < low { low } else if x > high { high } else { x }
+}
+
+@test
+func clamp_keeps_values_in_range() {
+    assert(clamp(-1, 0, 10) == 0)
+    assert(clamp(11, 0, 10) == 10)
+}
+
+@test
+func tenths_add_up() {
+    assert_close(0.1 + 0.2, 0.3, 1.0e-12)
+}
+```
+
+`neurc test file.nr` builds the program with a generated entry point and runs each test in its own process. A failing `assert` aborts only that test's process, so the rest still run. Tests are found in every module the program reaches, but not in the standard library. A test file needs no `main`. If it has one, a test may call it. `neurc compile`, `run` and `check` treat a test as an ordinary function. The [CLI guide](../guides/cli-usage.md#test) shows the output.
+
+`std::testing` compares floats:
+
+| Function | Behaviour |
+|---|---|
+| `is_close(actual: f64, expected: f64, tolerance: f64) -> bool` | `true` when the two differ by at most `tolerance` while `expected` is at most 1 in magnitude, and by at most `tolerance * \|expected\|` above that. Equal values are close, infinities included. `NaN` is close to nothing. |
+| `assert_close(actual: f64, expected: f64, tolerance: f64)` | Panics with `assert_close: <actual> is not within <tolerance> of <expected>` unless `is_close` holds. |
+
+An `f32` is passed with `as f64`. Both take `f64` only until the language has a bound for float types.
+
+A test with parameters, a return value or generic parameters is a compile error, and so is `@test` on a method or a struct.
+
 ## Standard Output Builtins
 
 `print` and `println` write text to standard output. Unlike the panic builtins they return: the result is `void`, so a call is a statement and not a value.

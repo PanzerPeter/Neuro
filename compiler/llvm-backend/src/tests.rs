@@ -72,6 +72,7 @@ fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
         &source_map("outlining.nr", source),
         &external,
         GpuVendor::Nvidia,
+        None,
     )
     .expect("module generation failed");
     codegen_ctx.module.print_to_string().to_string()
@@ -91,6 +92,7 @@ fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String 
         &source_map("optimized.nr", source),
         &external,
         GpuVendor::Nvidia,
+        None,
     )
     .expect("module generation failed");
     let (machine, triple) =
@@ -1360,6 +1362,7 @@ fn a_constant_shift_is_bounded_by_its_operand_width() {
             &source_map("const_shift.nr", source),
             &[],
             GpuVendor::Nvidia,
+            None,
         )
         .map(|ctx| ctx.module.print_to_string().to_string())
     };
@@ -3102,5 +3105,45 @@ fn a_closure_environment_is_counted_on_the_heap() {
     assert!(
         release.contains("call void @free"),
         "the closure's release frees the environment:\n{release}"
+    );
+}
+
+/// A test build's C `main` dispatches on `argv[1]` and its returns drain standard output,
+/// while the program's own `main` keeps its body, and its callers, under another symbol.
+#[test]
+fn test_entry_replaces_main_and_keeps_the_program_main_callable() {
+    let source = "func main() -> i32 {\n    println(\"program\")\n    3\n}\nfunc check_main() {\n    assert(main() == 3)\n}\nfunc prints() {\n    println(\"x\")\n}\n";
+    let hir = lower(source);
+    let context = LLVMContext::create();
+    let tests = ["check_main".to_string(), "prints".to_string()];
+    let ir = build_module(
+        &context,
+        &hir,
+        OptimizationLevelSetting::O0,
+        &source_map("tests.nr", source),
+        &[],
+        GpuVendor::Nvidia,
+        Some(&tests),
+    )
+    .expect("a test build should verify")
+    .module
+    .print_to_string()
+    .to_string();
+    assert!(ir.contains("define i32 @main(i32 "), "{ir}");
+    assert!(ir.contains("define i32 @neuro.program_main()"), "{ir}");
+    let check_main = function_body(&ir, "check_main");
+    assert!(
+        check_main.contains("call i32 @neuro.program_main()"),
+        "{check_main}"
+    );
+    let entry = function_body(&ir, "main");
+    assert!(entry.contains("call i32 @atoi("), "{entry}");
+    assert!(entry.contains("call void @check_main()"), "{entry}");
+    assert!(entry.contains("call void @prints()"), "{entry}");
+    // The entry's own exits drain what a test printed; the renamed body no longer does.
+    assert_eq!(
+        entry.matches("ret i32").count(),
+        entry.matches("call void @neuro.print.flush()").count(),
+        "{entry}"
     );
 }

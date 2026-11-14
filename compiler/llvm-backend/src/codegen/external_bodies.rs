@@ -674,6 +674,7 @@ mod tests {
             &crate::tests::source_map("external.nr", source),
             external,
             gpu,
+            None,
         )
         .expect("a module with linked bodies should build and verify");
         for symbol in ["ext_scale", "ext_consume"] {
@@ -888,6 +889,7 @@ mod tests {
             &crate::tests::source_map("kernel.nr", KERNEL),
             &external,
             GpuVendor::Nvidia,
+            None,
         )
         .expect("a module with a kernel launcher should build and verify")
         .module
@@ -985,6 +987,7 @@ mod tests {
             &crate::tests::source_map("plain.nr", source),
             &[],
             GpuVendor::Nvidia,
+            None,
         )
         .expect("the module should build and verify");
         codegen_ctx.module.print_to_string().to_string()
@@ -1197,6 +1200,7 @@ enum ParseError { Empty, Invalid, OutOfRange }
                 &crate::tests::source_map("checked.nr", SOURCE),
                 &[external],
                 GpuVendor::Nvidia,
+                None,
             )
             .expect("a checked body links")
             .module

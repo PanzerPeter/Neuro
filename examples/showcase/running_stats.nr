@@ -2,7 +2,11 @@
 // `f64` fields, direct field mutation on a `mut` binding, `&self` query methods, `while`,
 // `as`, and `.is_nan()` guarding against a non-finite sample. This program advances the
 // state by assigning fields directly in `main` and keeps the methods read-only. For the
-// in-place `&mut self` style, see `structs/mut_self_accumulator.nr`.
+// in-place `&mut self` style, see `structs/mut_self_accumulator.nr`. The `@test` functions at
+// the end check the same methods: `neurc test` runs each one in its own process, and
+// `std::testing::assert_close` compares floats within a tolerance.
+
+import std::testing::{assert_close}
 
 struct RunningStats {
     count: i32,
@@ -60,4 +64,26 @@ func main() -> i32 {
     val code = avg as i32
     println("truncated exit code = {code}")
     return code              // 5
+}
+
+@test
+func empty_mean_is_zero() {
+    assert(RunningStats::new().mean() == 0.0)
+}
+
+@test
+func mean_of_one_to_ten() {
+    mut stats = RunningStats::new()
+    for i in 1..11 {
+        stats.sum = stats.sum + (i as f64)
+        stats.count = stats.count + 1
+    }
+    assert_close(stats.mean(), 5.5, 1.0e-12)
+}
+
+@test
+func a_nan_sample_is_untrustworthy() {
+    val zero: f64 = 0.0
+    val stats = RunningStats { count: 1, sum: zero / zero }
+    assert(!stats.is_trustworthy())
 }

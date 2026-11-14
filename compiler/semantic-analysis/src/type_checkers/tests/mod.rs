@@ -31,6 +31,7 @@ mod string_tests;
 mod tensor_reduce_tests;
 mod tensor_shape_tests;
 mod tensor_tests;
+mod test_attribute_tests;
 mod trait_tests;
 mod try_tests;
 mod val_else_tests;

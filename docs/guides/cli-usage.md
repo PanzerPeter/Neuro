@@ -123,6 +123,44 @@ The executable is removed once the program exits, so `run` never leaves a binary
 - The program's own exit code, when it was built and started. `main`'s return value is the status, truncated to 8 bits by the OS.
 - `1`: compilation, linking or process startup failed, or the program was killed by a signal.
 
+### test
+
+Compile a source file's `@test` functions and run each in its own process.
+
+```bash
+neurc test <file.nr> [options]
+```
+
+**Options**:
+- `-O, --optimization <0-3>`: default `0`. Integer overflow fails a test at `-O0` and wraps above it. See [Optimization levels](#optimization-levels).
+- `--gpu-arch <CHIP>`: as for `compile`. See [Choosing a GPU](#choosing-a-gpu).
+
+The file needs no `main`. Tests run one after another, in the order the program declares them. A test in another module is named by its path:
+
+```text
+running 3 test(s)
+test adds ... ok
+test wrong_sum ... FAILED
+test shapes::square ... ok
+
+failures:
+
+---- wrong_sum ----
+checking 1 + 1
+assertion failed at calc.nr:12:5
+terminated by signal: 6 (SIGABRT)
+
+test result: FAILED. 2 passed; 1 failed
+```
+
+A passing test's output is dropped. A failing test's stdout and stderr are printed under its name.
+
+**Exit codes**:
+- `0`: every test passed, or there were none.
+- `1`: a test failed, or compilation or linking failed.
+
+On Windows the test executable reads its test index from the command line, which only a link through `clang` passes. The `lld-link` and `cl.exe` fallbacks start the program without the C runtime that parses it.
+
 ## Optimization levels
 
 `-O` applies to `compile` and `run`.

@@ -113,6 +113,11 @@ module per declaration kind beside it. `tests/` is split by subject.
   on a free function that is not also `@grad`, with no argument or one `fallback:` whose value
   is the literal `true` or `false` (`GpuForm` at the attribute otherwise). Whether the body can become a kernel is the GPU
   backend's rule, decided at compile time, so `check` accepts a body `compile` refuses.
+  `check_test_attributes` (`type_checkers/test_functions.rs`) holds `@test` to the one shape
+  `neurc test`'s entry can call (`TestForm` at the attribute otherwise): bare, on a free
+  function that is not generic, takes no parameters and returns unit, read off the registered
+  signature so `-> ()` counts as none. A method or a struct carrying it is refused too. Which
+  functions are tests, and how they run, is the driver's.
   `check_kernel_attributes` (`type_checkers/kernel.rs`) holds `@kernel` to its form (`KernelForm`
   throughout): a free function, not beside `@gpu` or `@grad`, with one `threads:` array of one to
   three positive integer literals whose product is at most 1024; a `void` return; parameters that

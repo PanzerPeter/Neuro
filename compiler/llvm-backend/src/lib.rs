@@ -160,7 +160,44 @@ pub fn compile(
     gpu: GpuVendor,
 ) -> CodegenResult<Vec<u8>> {
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(&context, program, optimization, sources, external, gpu)?;
+    let codegen_ctx = build_module(
+        &context,
+        program,
+        optimization,
+        sources,
+        external,
+        gpu,
+        None,
+    )?;
+    emit_object_code(&codegen_ctx, optimization)
+}
+
+/// Compile a typed HIR program to object code whose entry point runs one test.
+///
+/// The same pipeline as [`compile`], with the C `main` replaced: the executable runs
+/// `tests[i]` for the index `i` given as its first argument and exits 0 once it returns,
+/// so a test that panics fails alone in its own process. An index naming no test exits 2.
+/// The program's own `main`, if it has one, is kept under another symbol, so a test may
+/// call it. Each name in `tests` must be a function of `program` taking nothing and
+/// returning unit.
+pub fn compile_tests(
+    program: &HirProgram,
+    optimization: OptimizationLevelSetting,
+    sources: &SourceMap,
+    external: &[ExternalBodies],
+    gpu: GpuVendor,
+    tests: &[String],
+) -> CodegenResult<Vec<u8>> {
+    let context = LLVMContext::create();
+    let codegen_ctx = build_module(
+        &context,
+        program,
+        optimization,
+        sources,
+        external,
+        gpu,
+        Some(tests),
+    )?;
     emit_object_code(&codegen_ctx, optimization)
 }
 
@@ -178,7 +215,15 @@ pub fn compile_to_ir(
     gpu: GpuVendor,
 ) -> CodegenResult<String> {
     let context = LLVMContext::create();
-    let codegen_ctx = build_module(&context, program, optimization, sources, external, gpu)?;
+    let codegen_ctx = build_module(
+        &context,
+        program,
+        optimization,
+        sources,
+        external,
+        gpu,
+        None,
+    )?;
     // The target machine is built for its data layout and triple as much as for the
     // passes: IR without them is re-interpreted against the consumer's defaults.
     let (target_machine, target_triple) = host_target_machine(optimization)?;
@@ -197,6 +242,7 @@ fn build_module<'ctx>(
     sources: &SourceMap,
     external: &[ExternalBodies],
     gpu: GpuVendor,
+    tests: Option<&[String]>,
 ) -> CodegenResult<CodegenContext<'ctx>> {
     // A `string` literal a function returns beside an allocation is copied, so every
     // exit owns its buffer and the caller releases each one.
@@ -524,6 +570,10 @@ fn build_module<'ctx>(
     }
 
     codegen_ctx.define_derivative_homes()?;
+
+    if let Some(tests) = tests {
+        codegen_ctx.define_test_entry(tests)?;
+    }
 
     // Drain buffered standard output on every path out of the process. Runs here because
     // only a finished module knows whether it prints at all, and because the exit paths

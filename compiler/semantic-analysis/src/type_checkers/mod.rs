@@ -496,6 +496,7 @@ mod tensor_reduce;
 mod tensor_shape;
 mod tensor_sort;
 mod tensors;
+mod test_functions;
 mod val_else;
 
 #[cfg(test)]
@@ -1271,6 +1272,7 @@ impl TypeChecker {
         self.check_grad_attributes(items);
         self.check_gpu_attributes(items);
         self.check_kernel_attributes(items);
+        self.check_test_attributes(items);
 
         // Pass 4: check function, method, and const bodies. Each body is checked as the
         // module it was written in, which is what a private field is measured against.

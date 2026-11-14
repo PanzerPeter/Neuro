@@ -10,6 +10,20 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.42.0] - 2026-11-14
+
+### Added
+
+- `@test` marks a function of no parameters returning nothing as a test, and `neurc test file.nr`
+  runs every test in the program's modules, each in its own process: a failing `assert` or any
+  other panic fails only that test, and the rest still run. It prints `ok` or `FAILED` per test,
+  the output of each failed test, and a summary, and exits 0 only when every test passed. A test
+  file needs no `main`; a program's `main` stays callable from a test, and `compile`, `run` and
+  `check` treat a test as an ordinary function. A test with parameters, a return value or generic
+  parameters, or `@test` on a method or a struct, is a compile error.
+- `std::testing::is_close(actual, expected, tolerance)` and `assert_close` compare `f64` values
+  within a tolerance, absolute up to magnitude 1 and relative above it.
+
 ## [5.41.1] - 2026-11-14
 
 ### Fixed

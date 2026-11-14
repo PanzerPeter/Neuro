@@ -1567,6 +1567,9 @@ pub enum TypeError {
     #[error("`@kernel` {problem}")]
     KernelForm { problem: String, span: Span },
 
+    #[error("`@test` {problem}")]
+    TestForm { problem: String, span: Span },
+
     #[error("`@grad` function '{function}' {problem}")]
     GradSignature {
         function: String,
@@ -1822,6 +1825,7 @@ impl TypeError {
             | Self::NoGradForm { span, .. }
             | Self::GpuForm { span, .. }
             | Self::KernelForm { span, .. }
+            | Self::TestForm { span, .. }
             | Self::GradSignature { span, .. }
             | Self::GradGeneratedNameTaken { span, .. }
             | Self::BackwardUnavailable { span, .. }
