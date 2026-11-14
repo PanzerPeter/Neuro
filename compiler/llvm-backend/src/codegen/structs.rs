@@ -7,7 +7,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
 use super::context::CodegenContext;
-use super::drops::reads_through_collection_slot;
+use super::drops::{TakenPosition, reads_through_collection_slot};
 
 impl<'ctx> CodegenContext<'ctx> {
     /// Populate the struct definition table before code generation begins. The field
@@ -169,7 +169,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .get(struct_name)
                 .and_then(|def| def.get(idx))
                 .is_some_and(|(_, ty)| self.drop_target_of(ty).is_some());
-            let moved = field_owns.then_some(field_name);
+            let moved = field_owns.then_some(TakenPosition::Named(field_name));
             self.drop_temporary_except(object, aggregate, moved)?;
             return Ok(field);
         }

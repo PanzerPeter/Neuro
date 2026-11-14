@@ -520,6 +520,10 @@ impl<'ctx> CodegenContext<'ctx> {
         {
             let name = name.clone();
             let eq = self.codegen_derived_struct_eq(&name, lhs, rhs)?;
+            // The comparison reads both operands and keeps neither, so one built for it
+            // (`k == make()`) has no owner left once it answers.
+            self.drop_unbound_temporary(left, lhs)?;
+            self.drop_unbound_temporary(right, rhs)?;
             return match op {
                 BinaryOp::Equal => Ok(eq.into()),
                 _ => Ok(self.builder.build_not(eq, "struct_ne")?.into()),

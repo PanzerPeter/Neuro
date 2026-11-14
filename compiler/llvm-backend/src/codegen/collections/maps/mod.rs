@@ -18,6 +18,7 @@ use neuro_hir::HirExpr;
 
 use super::{FIELD_CAP, FIELD_LEN, collection_arg};
 use crate::codegen::context::CodegenContext;
+use crate::codegen::drops::is_fresh_value;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
 
@@ -240,7 +241,10 @@ impl<'ctx> CodegenContext<'ctx> {
         // The lookup only compared the key, so a key built for this call has no reader
         // left; what follows works on the slot index alone.
         if let Some(expr) = args.first() {
-            self.release_string_temporary(expr, key)?;
+            self.drop_unbound_temporary(expr, key)?;
+            if !is_fresh_value(expr) {
+                self.release_string_temporary(expr, key)?;
+            }
         }
         Ok(slot)
     }

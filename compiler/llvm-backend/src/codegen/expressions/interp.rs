@@ -89,6 +89,11 @@ impl<'ctx> CodegenContext<'ctx> {
                         PieceOwner::Borrowed
                     };
                     let (rendered, owner) = self.render_hole(value, &ty, spec, incoming)?;
+                    // Any other hole is only read by its rendering, so a struct built for
+                    // it (`{make():?}`) has no owner once the text exists.
+                    if !matches!(ty, Type::String) {
+                        self.drop_unbound_temporary(expr, value)?;
+                    }
                     let (ptr, len) = self.split_string_value(rendered)?;
                     pieces.push(Piece { ptr, len, owner });
                 }

@@ -5,6 +5,7 @@ use inkwell::values::BasicValueEnum;
 use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
+use crate::codegen::drops::TakenPosition;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -73,8 +74,22 @@ impl<'ctx> CodegenContext<'ctx> {
                 )));
             }
         };
-        self.builder
+        let element = self
+            .builder
             .build_extract_value(struct_val, index as u32, "tup.idx")
-            .map_err(|e| CodegenError::LlvmError(format!("failed to extract tuple element: {}", e)))
+            .map_err(|e| {
+                CodegenError::LlvmError(format!("failed to extract tuple element: {}", e))
+            })?;
+        // A tuple built only to be read (`(make(), 1).1`) owns what was moved into it, and
+        // nothing else will release it. The element read leaves with its reader.
+        if matches!(value, BasicValueEnum::StructValue(_)) {
+            let position = index.to_string();
+            self.drop_temporary_except(
+                object,
+                struct_val.into(),
+                Some(TakenPosition::Named(&position)),
+            )?;
+        }
+        Ok(element)
     }
 }

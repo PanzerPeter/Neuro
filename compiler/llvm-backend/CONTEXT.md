@@ -1327,12 +1327,14 @@ displaced tensor still leaks. A reassignment re-arms the binding's flag and the 
 proves ownership.
 
 A fresh value that owns something and that no binding ever owns is destroyed where it is last
-read (`drop_unbound_temporary`, BUG-047): a call, struct literal or enum construction whose
-statement value is discarded, and one a field is read from. It is stored to a slot, registered in
-a throwaway scope, and that scope's drops are emitted at once. A bare tensor is left to its
-statement and receiver consumers, which release it through its handle. A field read off a fresh
-value is fresh itself (`is_fresh_value`), so `make().inner.name` destroys each level around the
-part its reader takes.
+read (`drop_unbound_temporary`, BUG-047): a call, struct, tuple or array literal or enum
+construction whose statement value is discarded, one a field, tuple element or array element is
+read from, and one only a derived `==` / `!=`, a map lookup key or a `{x:?}` hole reads. It is
+stored to a slot, registered in a throwaway scope, and that scope's drops are emitted at once. A
+bare tensor is left to its statement and receiver consumers, which release it through its handle.
+A field, tuple element or array element read off a fresh value is fresh itself (`is_fresh_value`),
+so `make().inner.name` and `[a(), b()][i].name` destroy each level around the part the reader
+takes. An element of a `Vec` or a slice is not: the collection only lends it.
 
 A temporary something may still read through a borrow lives to the end of its statement:
 a receiver built for a `&self` call and the operand of a `&` passed to a call. `hold_to_statement_end`
@@ -1342,7 +1344,9 @@ releases it. `codegen_stmt` opens a mark on `statement_temporaries` and
 `release_statement_temporaries` emits and unregisters what is left at the statement's end. A `while`
 condition is a statement of its own on each pass.
 When the field read owns something it is moved out instead (`drop_temporary_except`): the held
-flags under that field are cleared first, so the reader keeps it and the rest is released. A
+flags under that field are cleared first, so the reader keeps it and the rest is released. An
+array element read at a run-time index clears the flags of the element at that index, found from
+the element's address (`TakenPosition::Element`). A
 struct with its own `Drop` impl is left whole when a holder or typed owner other than a `string`
 is moved out, since its destructor reads every field; a `string` field read off one leaves the
 destructor to run, the buffer staying live for the reader.

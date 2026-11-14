@@ -71,10 +71,10 @@ names the rule. Programs that compile today stop compiling, so it wants a change
   `mlir-backend` and `syntax-parsing` (public entries); `neurc` (`architecture_tests.rs`)
 - **Severity**: minor. Nothing misbehaves, but a rule in `VSA.md` is unchecked and broken
 
-`VSA.md` lets a slice's `lib.rs` hold the entry function's own body and nothing else. `lib.rs` is
-954 lines in `hir-lowering` (the `Lowerer` and name mangling), 707 in `llvm-backend` (`build_module`
-and the option types), 232 in `module-resolution` and 111 in `argument-binding`. `lexical-analysis`
-conforms. It also makes an entry that only a slice's own tests call `pub(crate)`.
+`VSA.md` lets a slice's `lib.rs` hold the entry function's own body and nothing else. `lib.rs`
+holds the `Lowerer` and name mangling in `hir-lowering`, `build_module` and the option types in
+`llvm-backend`, and more than its entry in `module-resolution` and `argument-binding`.
+`lexical-analysis` conforms. It also makes an entry that only a slice's own tests call `pub(crate)`.
 `mlir-backend::lower_program` and `translate_to_llvm_ir`, and `syntax-parsing::parse_expr`, are
 `pub` and called from tests. The architecture test checks neither rule.
 

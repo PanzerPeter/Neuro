@@ -10,7 +10,7 @@
 
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use neuro_hir::{HirExpr, HirExprKind};
+use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -32,18 +32,35 @@ pub(crate) use owned_strings::{builds_its_own_buffer, is_fresh_string};
 pub(crate) const UNBOUND_TEMPORARY: &str = "__unbound_temporary";
 
 /// Whether `expr` builds a value no binding owns. Anything else may be a read of a value
-/// some binding still owns. A field read off a fresh value leaves with its reader, the
-/// rest of the value being destroyed around it (`drop_temporary_except`), so it is fresh
-/// too.
+/// some binding still owns. A field, tuple element or array element read off a fresh value
+/// leaves with its reader, the rest of the value being destroyed around it
+/// (`drop_temporary_except`), so it is fresh too.
 pub(crate) fn is_fresh_value(expr: &HirExpr) -> bool {
     match &expr.kind {
         HirExprKind::Call { .. }
         | HirExprKind::StructLiteral { .. }
         | HirExprKind::EnumConstruct { .. }
+        | HirExprKind::TupleLiteral { .. }
+        | HirExprKind::ArrayLiteral { .. }
         | HirExprKind::Closure { .. } => true,
-        HirExprKind::FieldAccess { object, .. } => is_fresh_value(object),
+        HirExprKind::FieldAccess { object, .. } | HirExprKind::TupleIndex { object, .. } => {
+            is_fresh_value(object)
+        }
+        // An element of a fresh array, not of a `Vec` or a slice, which only lend theirs.
+        HirExprKind::Index { object, .. } => {
+            matches!(object.ty, HirType::Array { .. }) && is_fresh_value(object)
+        }
         _ => false,
     }
+}
+
+/// The position of a fresh temporary that its reader took (`make().f`, `(a(), b()).0`,
+/// `[a(), b()][i]`), so the release of the rest leaves it alone.
+pub(crate) enum TakenPosition<'a, 'ctx> {
+    /// A field or tuple element, by name.
+    Named(&'a str),
+    /// An array element at a run-time index.
+    Element(IntValue<'ctx>),
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -139,8 +156,8 @@ impl<'ctx> CodegenContext<'ctx> {
     /// (`make().id`). No scope exit reaches such a value, so without this its destructor
     /// never ran (BUG-047).
     ///
-    /// Only a call, a struct literal, an enum construction or a closure literal is fresh;
-    /// anything else may be a read of a value some binding still owns. Inside a `pool` it
+    /// Only what [`is_fresh_value`] accepts is fresh; anything else may be a read of a value
+    /// some binding still owns. Inside a `pool` it
     /// does nothing: the arena, not a scope, owns what the block allocates.
     pub(crate) fn drop_unbound_temporary(
         &mut self,
@@ -150,15 +167,15 @@ impl<'ctx> CodegenContext<'ctx> {
         self.drop_temporary_except(expr, value, None)
     }
 
-    /// [`Self::drop_unbound_temporary`], leaving out the field `moved` when one owning
-    /// field has been moved out of the temporary (`make().f`): the reader owns that one,
+    /// [`Self::drop_unbound_temporary`], leaving out the position `moved` when one owning
+    /// position has been moved out of the temporary (`make().f`): the reader owns that one,
     /// and every other position is still the temporary's to release. A struct with a
     /// destructor of its own is left whole, since its `drop` reads every field.
     pub(crate) fn drop_temporary_except(
         &mut self,
         expr: &HirExpr,
         value: BasicValueEnum<'ctx>,
-        moved: Option<&str>,
+        moved: Option<TakenPosition<'_, 'ctx>>,
     ) -> CodegenResult<()> {
         let ty = Type::from_hir(&expr.ty);
         if !is_fresh_value(expr) || self.pool_depth > 0 || self.current_block_terminated() {
@@ -169,13 +186,13 @@ impl<'ctx> CodegenContext<'ctx> {
         }
         // A `string` field leaves its buffer alive until the reader releases it, so the
         // destructor may still read it.
-        let moves_an_owner = moved.is_some_and(|field| {
+        let moves_an_owner = matches!(moved, Some(TakenPosition::Named(field)) if
             self.held_positions(&ty).iter().any(|(name, field_ty)| {
                 name == field
                     && !matches!(field_ty, Type::String)
                     && self.drop_target_of(field_ty).is_some()
             })
-        });
+        );
         if moves_an_owner && matches!(self.drop_target_of(&ty), Some(DropTarget::UserDrop(_))) {
             return Ok(());
         }
@@ -184,10 +201,10 @@ impl<'ctx> CodegenContext<'ctx> {
         let depth = self.drop_scopes.len();
         self.push_drop_scope();
         self.register_owned_binding(UNBOUND_TEMPORARY, slot, &ty)?;
-        if let Some(field) = moved {
+        if let Some(taken) = moved {
             // The scope pushed above holds the temporary's entry alone; it has no binding
             // for `live_drop_entry` to resolve.
-            let taken: Vec<PointerValue<'ctx>> = self
+            let positions: Vec<(String, PointerValue<'ctx>)> = self
                 .drop_scopes
                 .last()
                 .and_then(|scope| scope.last())
@@ -195,14 +212,31 @@ impl<'ctx> CodegenContext<'ctx> {
                     entry
                         .held
                         .iter()
-                        .filter(|held| held.path.first().is_some_and(|f| f == field))
-                        .map(|held| held.flag_ptr)
+                        .filter_map(|held| Some((held.path.first()?.clone(), held.flag_ptr)))
                         .collect()
                 })
                 .unwrap_or_default();
             let zero = self.context.bool_type().const_zero();
-            for flag_ptr in taken {
-                self.builder.build_store(flag_ptr, zero)?;
+            for (position, flag_ptr) in positions {
+                match &taken {
+                    TakenPosition::Named(field) if position == *field => {
+                        self.builder.build_store(flag_ptr, zero)?;
+                    }
+                    TakenPosition::Element(index) => {
+                        let Ok(element) = position.parse::<u64>() else {
+                            continue;
+                        };
+                        let at = index.get_type().const_int(element, false);
+                        let kept = self.builder.build_int_compare(
+                            inkwell::IntPredicate::NE,
+                            *index,
+                            at,
+                            "tmp.kept",
+                        )?;
+                        self.builder.build_store(flag_ptr, kept)?;
+                    }
+                    TakenPosition::Named(_) => {}
+                }
             }
         }
         self.emit_drops_through(depth)?;

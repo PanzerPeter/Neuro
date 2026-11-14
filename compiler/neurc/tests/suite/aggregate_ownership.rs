@@ -994,3 +994,45 @@ func main() -> i32 {
         "drop 2\nstored\ndrop 1\ndrop 3\n"
     );
 }
+
+/// A tuple or array literal that is only read (`(mk(), 1).1`, `[a(), b()][1]`) owns the
+/// elements moved into it and has no binding to release them, so the literal itself is
+/// released once the element is read, every position but the one handed to the reader.
+#[test]
+fn regression_read_tuple_or_array_literal_leaks_its_elements() {
+    let source = r#"
+struct K { name: string, n: i32 }
+
+func mk(i: i32) -> K { K { name: "k" + "{i}", n: i } }
+func mkv(i: i32) -> Vec<i32> {
+    mut v: Vec<i32> = Vec::new()
+    v.push(i)
+    v
+}
+
+func main() -> i32 {
+    mut t = 0
+    for i in 0..10 {
+        val j = i % 2
+        t = t + (mk(i), 1).1 + (mk(i), 2).0.n
+        t = t + [mk(1), mk(2)][1].n + [mk(3), mk(4)][j].n
+        t = t + [mkv(1), mkv(2)][j].len() as i32 + (mkv(5), mkv(6)).0[0]
+        val k = (mk(7), mkv(8)).0
+        val v = [mkv(1), mkv(9)][j]
+        t = t + k.n + v[0]
+        val s = ("x" + "y", 1).0
+        t = t + s.len() as i32 + ["a" + "b", "c"][j].len() as i32
+        (mk(i), mkv(i))
+    }
+    t - 300
+}
+"#;
+    let test = CompileTest::new();
+    // Per round: 1 + i, then 2 + (3 or 4), then 1 + 5, then 7 + (1 or 9), then 2 + (2 or 1).
+    // Summed over ten rounds: 10 + 45, 20 + 35, 10 + 50, 70 + 50, 20 + 15, which is 325;
+    // `main` returns it less 300 to fit an exit code.
+    assert_eq!(
+        test.run_leak_checked("read_aggregate_literal.nr", source),
+        25
+    );
+}

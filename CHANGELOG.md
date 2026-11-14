@@ -10,6 +10,17 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.44.1] - 2026-11-14
+
+### Fixed
+
+- A tuple or array literal that is only read (`(make(), 1).1`, `[a(), b()][i].name`) released
+  nothing it held, so every element moved into it leaked. The rest of the literal is now released
+  once the element is read, and an array element read at a run-time index stays with its reader.
+- A struct built only to be compared by a derived `==` or `!=`, used as a map lookup key
+  (`m.get(make())`, `.contains_key`, `.remove`), or rendered by a `{x:?}` hole leaked the strings
+  and collections it held. It is released once the comparison, lookup or rendering is done.
+
 ## [5.44.0] - 2026-11-14
 
 ### Changed

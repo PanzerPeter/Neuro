@@ -65,7 +65,9 @@ pub(crate) fn is_fresh_string(expr: &HirExpr) -> bool {
         | HirExprKind::Unsafe { .. }
         | HirExprKind::Loop { .. } => true,
         HirExprKind::NewtypeConstruct { value, .. } => is_fresh_string(value),
-        HirExprKind::FieldAccess { .. } => is_fresh_value(expr),
+        HirExprKind::FieldAccess { .. }
+        | HirExprKind::TupleIndex { .. }
+        | HirExprKind::Index { .. } => is_fresh_value(expr),
         _ => false,
     }
 }

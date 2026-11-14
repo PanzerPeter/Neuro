@@ -816,3 +816,68 @@ func main() -> i32 {
         51
     );
 }
+
+/// A struct built for a derived `==` or for a map lookup key is only read, so it is
+/// released when the comparison or the lookup answers. Both read their operand through
+/// the derived `PartialEq` / `Hashable` expansion, which kept the operand and released
+/// nothing.
+#[test]
+fn regression_derived_eq_and_map_key_temporary_leaks() {
+    let source = r#"
+@derive(PartialEq, Hashable)
+struct K { name: string, n: i32 }
+
+func mk(i: i32) -> K { K { name: "k{i}", n: i } }
+
+func main() -> i32 {
+    mut t = 0
+    for i in 0..10 {
+        val k = mk(1)
+        if k == mk(1) { t = t + 1 }
+        if mk(i) != k { t = t + 1 }
+        mut m: HashMap<K, i32> = HashMap::new()
+        m.insert(mk(1), 4)
+        if val Some(v) = m.get(mk(1)) { t = t + *v }
+        if val Some(v) = m.get(K { name: "k" + "1", n: 1 }) { t = t + *v }
+        if m.contains_key(mk(2)) { t = t + 100 }
+        if m.remove(mk(i)).is_some() { t = t + 1 }
+    }
+    t
+}
+"#;
+    let test = CompileTest::new();
+    // Each round: 1 for `==`, 1 for `!=` except at i = 1, 8 for the two lookups, and 1
+    // for the removal at i = 1.
+    assert_eq!(
+        test.run_leak_checked("derived_eq_map_key_temporary.nr", source),
+        10 + 9 + 80 + 1
+    );
+}
+
+/// A `{x:?}` hole over a struct built for it renders the struct and then has no reader
+/// left for it, so the struct is released with the scratch rendering.
+#[test]
+fn regression_debug_hole_temporary_leaks() {
+    let source = r#"
+@derive(Debug)
+struct K { name: string, n: i32 }
+
+func mk(i: i32) -> K { K { name: "k{i}", n: i } }
+
+func main() -> i32 {
+    mut t: u64 = 0
+    for i in 0..10 {
+        val s = "{mk(i):?}"
+        t = t + s.len()
+        println("{mk(i):?}")
+    }
+    t as i32
+}
+"#;
+    let test = CompileTest::new();
+    // `K { name: "k0", n: 0 }` is 22 bytes.
+    assert_eq!(
+        test.run_leak_checked("debug_hole_temporary.nr", source),
+        220
+    );
+}

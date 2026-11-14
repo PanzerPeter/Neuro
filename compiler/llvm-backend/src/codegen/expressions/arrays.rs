@@ -10,7 +10,7 @@ use neuro_hir::{HirExpr, HirExprKind, HirStmt};
 use shared_types::Literal;
 
 use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
-use crate::codegen::drops::reads_through_collection_slot;
+use crate::codegen::drops::{TakenPosition, is_fresh_value, reads_through_collection_slot};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -110,9 +110,27 @@ impl<'ctx> CodegenContext<'ctx> {
         let (base_ptr, element_ty, size) = self.array_place_ptr(object, obj_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let elem_ptr = self.array_element_ptr(base_ptr, elem_llvm, size, index, span.start)?;
-        self.builder
+        let element = self
+            .builder
             .build_load(elem_llvm, elem_ptr, "arr.idx")
-            .map_err(|e| CodegenError::LlvmError(format!("failed to load array element: {}", e)))
+            .map_err(|e| CodegenError::LlvmError(format!("failed to load array element: {}", e)))?;
+        // An array built only to be read (`[a(), b()][i]`) owns what was moved into it, and
+        // nothing else will release it. The element read leaves with its reader.
+        if !matches!(obj_ty, Type::Reference { .. })
+            && is_fresh_value(object)
+            && self.holds_owner(&element_ty)
+        {
+            let array = self.builder.build_load(
+                elem_llvm.array_type(size as u32),
+                base_ptr,
+                "arr.tmp.whole",
+            )?;
+            let taken =
+                self.builder
+                    .build_ptr_diff(elem_llvm, elem_ptr, base_ptr, "arr.tmp.taken")?;
+            self.drop_temporary_except(object, array, Some(TakenPosition::Element(taken)))?;
+        }
+        Ok(element)
     }
 
     /// Lower an array element assignment `place[index] = value`: bounds-check
