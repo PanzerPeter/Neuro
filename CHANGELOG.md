@@ -10,6 +10,14 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.41.1] - 2026-11-14
+
+### Fixed
+
+- CI's clippy step passes again on Rust 1.100, whose `duplicated_attributes` lint now flags the
+  lexer's repeated logos callbacks and priorities. The lint is expected on `TokenKind` alone, and
+  an item that sat after a test module in the LLVM backend's codegen context moved above it.
+
 ## [5.41.0] - 2026-11-14
 
 ### Added

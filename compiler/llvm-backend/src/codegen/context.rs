@@ -838,6 +838,19 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 }
 
+/// The release one open `pool` region owes whoever leaves it: the registrations to sweep
+/// back to `registered`, the host arena's `mark` and the device arena's, if any.
+#[derive(Clone, Copy)]
+pub(crate) struct PoolExit<'ctx> {
+    /// The index in `drop_scopes` of the region's body scope.
+    pub(crate) scope: usize,
+    /// The function the region's body is emitted into.
+    pub(crate) function: Option<FunctionValue<'ctx>>,
+    pub(crate) mark: IntValue<'ctx>,
+    pub(crate) device_mark: Option<IntValue<'ctx>>,
+    pub(crate) registered: Option<PointerValue<'ctx>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BuiltinMethod, resolve_builtin_method};
@@ -1027,17 +1040,4 @@ mod tests {
         assert!(resolve_builtin_method(&Type::F64, "checked_add").is_none());
         assert!(resolve_builtin_method(&Type::I32, "checked_div").is_none());
     }
-}
-
-/// The release one open `pool` region owes whoever leaves it: the registrations to sweep
-/// back to `registered`, the host arena's `mark` and the device arena's, if any.
-#[derive(Clone, Copy)]
-pub(crate) struct PoolExit<'ctx> {
-    /// The index in `drop_scopes` of the region's body scope.
-    pub(crate) scope: usize,
-    /// The function the region's body is emitted into.
-    pub(crate) function: Option<FunctionValue<'ctx>>,
-    pub(crate) mark: IntValue<'ctx>,
-    pub(crate) device_mark: Option<IntValue<'ctx>>,
-    pub(crate) registered: Option<PointerValue<'ctx>>,
 }

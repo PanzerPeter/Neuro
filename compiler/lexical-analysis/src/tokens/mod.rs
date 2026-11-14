@@ -77,6 +77,10 @@ pub enum InterpChunk {
 #[derive(Debug, Clone, PartialEq, Logos)]
 #[logos(skip r"[ \t\r]+")]
 #[logos(error = LexError)]
+#[expect(
+    clippy::duplicated_attributes,
+    reason = "logos takes one #[token]/#[regex] per pattern, so variants with several patterns repeat the callback and priority"
+)]
 pub enum TokenKind {
     // Phase 1 Keywords
     #[token("func")]
