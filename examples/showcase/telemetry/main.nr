@@ -2,7 +2,9 @@
 // example: a sibling module, a directory module with a child, `import` in its three shapes
 // (a name list, a rename, and a module alias), the prelude, `export` visibility, an inline
 // `module { }` block, `export import` re-exports, and module namespaces: a name declared in
-// two modules, a path in a pattern and an `impl` header, and a local shadowing an import.
+// two modules, a path in a pattern and an `impl` header, a local shadowing an import, and
+// the standard library: a module that imports from `std::prelude` and a root `Range` that
+// lives beside the library's.
 //
 //   showcase/telemetry/
 //     main.nr          <- this file, the root module, plus the inline module `scoring`
@@ -13,7 +15,7 @@
 
 // Names taken from a sibling module, one of them renamed.
 
-import ./stats::{Summary, summarize, pick as choose}
+import ./stats::{Summary, summarize, first_above, pick as choose}
 
 // A name from the directory module, plus its child module under a shorter name.
 import report::{weight_of}
@@ -47,6 +49,13 @@ module scoring {
 // a namespace, so the two are different functions and neither has to be renamed.
 func scale(value: i32) -> i32 {
     value + 1
+}
+
+// The root may declare a name the prelude declares too. This `Range` is the band of
+// readings the program accepts; a range written `0..5` is still the library's `Range`.
+struct Range {
+    lo: i32,
+    hi: i32
 }
 
 // A trait from another module, named by its path in the impl header. `doubled` is not
@@ -117,5 +126,18 @@ func main() -> i32 {
     println("scale(doubled) (root's scale)  = {bumped}")
     println("choose (local over the import) = {choose}")
 
-    tally + choose                                              // 75 + 6 = 81
+    // `first_above` comes from the file that opted out of the prelude and imported
+    // `Option` from `std::prelude`: the same type `??` unwraps here.
+    val loud_at = first_above(samples, 30) ?? 0                // 40 sits at index 1
+    val accepted = Range { lo: 10, hi: 35 }
+    mut inside = 0
+    for i in 0..5 {
+        if samples[i] >= accepted.lo && samples[i] <= accepted.hi {
+            inside += 1
+        }
+    }                                                           // 12, 33, 18 -> 3
+    println("first_above (std::prelude)     = {loud_at}")
+    println("own Range beside 0..5          = {inside}")
+
+    tally + choose + loud_at + inside                           // 75 + 6 + 1 + 3 = 85
 }

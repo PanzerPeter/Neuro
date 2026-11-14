@@ -8,3 +8,5 @@ scoring::combine (inline mod)  = 75
 report::Band::Normal level     = 1
 scale(doubled) (root's scale)  = 3
 choose (local over the import) = 6
+first_above (std::prelude)     = 1
+own Range beside 0..5          = 3

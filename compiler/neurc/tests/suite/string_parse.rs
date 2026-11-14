@@ -479,23 +479,26 @@ fn a_user_parse_method_keeps_its_own_meaning() {
     assert_eq!(CompileTest::new().compile_and_run("user.nr", source), Ok(3));
 }
 
+/// LIM-272: a program's own `Result` or `ParseError` once displaced the prelude's, and
+/// `.parse` refused to run. The library's types are always in the program now, and the
+/// root's own take a path of their own.
 #[test]
-fn a_program_that_replaces_the_prelude_types_is_told_so() {
-    let call = "func main() -> i32 {\n    val r = \"1\".parse::<i32>()\n    0\n}\n";
-    for (declared, name) in [
-        ("enum ParseError { Bad }", "ParseError"),
-        ("struct ParseError { line: i32 }", "ParseError"),
-        ("enum Result { Fine }", "Result"),
-        ("enum Result<T, E> { Good(T), Bad(E) }", "Result"),
+fn parse_works_beside_a_program_s_own_result_and_parse_error() {
+    let call = "func main() -> i32 {\n    \"12\".parse::<i32>() ?? 0\n}\n";
+    for declared in [
+        "enum ParseError { Bad }",
+        "struct ParseError { line: i32 }",
+        "enum Result { Fine }",
+        "enum Result<T, E> { Good(T), Bad(E) }",
+        "@no_prelude",
     ] {
-        let error = refused(&format!("{declared}\n{call}"));
-        assert!(
-            error.contains(&format!("replaces or removes `{name}`")),
-            "`{declared}`: {error}"
+        let source = format!("{declared}\n{call}");
+        assert_eq!(
+            CompileTest::new().compile_and_run("own_types.nr", &source),
+            Ok(12),
+            "`{declared}`"
         );
     }
-    let error = refused(&format!("@no_prelude\n{call}"));
-    assert!(error.contains("replaces or removes"), "{error}");
 }
 
 #[test]

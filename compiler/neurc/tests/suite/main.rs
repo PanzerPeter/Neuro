@@ -134,6 +134,7 @@ mod short_circuit_runtime;
 mod slices;
 mod source_spans;
 mod statement_boundaries;
+mod std_library;
 mod string_builder;
 mod string_concat;
 mod string_interpolation;

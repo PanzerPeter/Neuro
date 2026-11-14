@@ -101,7 +101,7 @@ pub enum TypeError {
     ParseTargetUnsupported { ty: Type, span: Span },
 
     #[error(
-        "`.parse` answers with the prelude's `Result<T, ParseError>`, and this program replaces or removes `{name}`: rename the local `{name}` or drop `@no_prelude`"
+        "`.parse` answers with the standard library's `Result<T, ParseError>`, and `{name}` is missing from this program or has another shape"
     )]
     ParseNeedsPrelude { name: String, span: Span },
 
@@ -1167,7 +1167,7 @@ pub enum TypeError {
     StoresReferenceToLocal { name: String, span: Span },
 
     #[error(
-        "a range value is the prelude's `Range`, which this program replaces or leaves out (its own `Range`, `Option` or `Iterator`, or `@no_prelude`); a range still works in a `for` head and as a `.slice()` argument"
+        "a range value is the standard library's `Range`, which is missing from this program; a range still works in a `for` head and as a `.slice()` argument"
     )]
     RangeNotAllowed { span: Span },
 

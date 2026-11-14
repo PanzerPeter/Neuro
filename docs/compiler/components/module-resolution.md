@@ -1,7 +1,7 @@
 # Module Resolution
 
 **Crate**: `compiler/module-resolution`
-**Entry Point**: `pub fn resolve_program(root: &Path, parse_module: &ParseModule<'_>, prelude: &[PreludeVariant]) -> Result<ResolvedProgram, ModuleError>`
+**Entry Point**: `pub fn resolve_program(root: &Path, parse_module: &ParseModule<'_>, library: StandardLibrary) -> Result<ResolvedProgram, ModuleError>`
 
 Module resolution expands a root `.nr` file into the one item list the rest of the compiler sees. Read this page when you change imports, visibility or module paths. `ParseModule` is a callback that takes a module's source and the path that names it in a diagnostic.
 
@@ -9,13 +9,13 @@ Module resolution expands a root `.nr` file into the one item list the rest of t
 
 Resolution loads every module that a path or an `import` reaches, resolves each name against the scope it is written in, enforces what each module exports, and rewrites every reference to the canonical name of the declaration it reaches. A declaration in `geometry.nr` is named `geometry::Point` from then on. One in the root file keeps its bare name. Semantic analysis, HIR lowering and both backends see one program of distinct names and never learn that modules exist.
 
-`neurc` runs it right after parsing the root file. It prepends the prelude's declarations to the result, unless the root file opts out with `@no_prelude`.
+`neurc` runs it right after parsing the standard library, which it embeds and hands over as `StandardLibrary`: each `std::<name>` module already parsed, the prelude variants every module may write bare, and the traits a `@no_prelude` file keeps. The library's modules join the graph, so the result already holds them, first.
 
 ## Architecture
 
 - **Dependencies**: `ast-types` (the tree it walks and rewrites), `shared-types`, `thiserror`. It depends on no feature slice.
-- **The parser is injected.** The caller passes in `syntax_parsing::parse`, so this slice never imports a feature slice. `neurc` is the one place the parser, the prelude source and this slice meet. The unit tests use a stub parser. A returned error is already a rendered diagnostic, and `ModuleError::Parse` prints it unchanged.
-- **Public API**: `resolve_program`, `ParseModule`, `ResolvedProgram`, `ResolvedModule`, `PreludeVariant`, `ModuleError`.
+- **The parser is injected.** The caller passes in `syntax_parsing::parse`, so this slice never imports a feature slice. `neurc` is the one place the parser, the standard library source and this slice meet. The unit tests use a stub parser. A returned error is already a rendered diagnostic, and `ModuleError::Parse` prints it unchanged.
+- **Public API**: `resolve_program`, `ParseModule`, `ResolvedProgram`, `ResolvedModule`, `StandardLibrary`, `StdModule`, `PreludeVariant`, `ModuleError`.
 - **Passes**: load the module graph, resolve imports into one scope per module, rewrite every name, then rename the declarations and supply trait defaults across modules. The files are [`loader.rs`](../../../compiler/module-resolution/src/loader.rs) (discovery, module paths and the module graph), [`imports.rs`](../../../compiler/module-resolution/src/imports.rs) (import scopes, re-exports and variant imports), [`walk.rs`](../../../compiler/module-resolution/src/walk.rs) (the one traversal that discovery and rewriting share, which also tracks locals), [`rewriter.rs`](../../../compiler/module-resolution/src/rewriter.rs) (name lookup) and [`defaults.rs`](../../../compiler/module-resolution/src/defaults.rs).
 
 ## Behavior
@@ -24,7 +24,7 @@ Resolution loads every module that a path or an `import` reaches, resolves each 
 
 A module's path is where its file sits under the root directory, with `/` read as `::`: `utils/io.nr` is `utils::io`, and `utils/mod.nr` is `utils`. An inline block adds its name to its parent's path. A file reached through `../` keeps a `..` segment for each level it sits above the root.
 
-Every declaration outside the root module is renamed to its path followed by its name, and every reference to it is rewritten to match. Two modules that each declare `helper` therefore reach the type checker as two names. The root's declarations stay bare, so a single-file program's diagnostics are unchanged. Derived `Debug` prints the declared name, not the canonical one.
+Every declaration outside the root module is renamed to its path followed by its name, and every reference to it is rewritten to match. Two modules that each declare `helper` therefore reach the type checker as two names. The root's declarations stay bare, so a single-file program's diagnostics are unchanged. So do `std::prelude`'s, because the later passes know `Option`, `Result` and `Range` by name. A root declaration with a prelude name would then share one, so it takes the root file's stem as its path instead (`main::Result`) and the two coexist. Derived `Debug` prints the declared name, not the canonical one.
 
 ### Name lookup
 
@@ -77,11 +77,13 @@ Each module's imports become one import scope: module aliases, items and variant
 
 The parser copies a trait's default methods into the impls of the same file. A trait and an impl in different modules, or inside blocks, meet only once names are canonical, so this pass copies each default body into every `impl Trait for Type` that does not write the method. The body was resolved in the trait's module, so the copy names what that module meant.
 
-### Prelude
+### Standard library and prelude
 
-The prelude's variants (`Some`, `None`, `Ok`, `Err`) are looked up after every scope from the module outward. The prelude is therefore the weakest binding: an explicit import or a local declaration of `Some` keeps its meaning.
+The library's modules are registered under a `std` module as its exported children, built from the same parts as an inline block, so a path or an import reaches `std::prelude::Option` by the ordinary rules. A `std` path head never reaches the file system.
 
-`@no_prelude` on a file gives that file none of the variant bindings. The prelude's declarations join the program as one list, so the root file's `@no_prelude` decides whether they are prepended at all. It is reported back as `ResolvedProgram.no_prelude`.
+`std::prelude`'s declarations and its variants (`Some`, `None`, `Ok`, `Err`) are looked up after every scope from the module outward. The prelude is therefore the weakest binding: an explicit import or a local declaration of `Some` keeps its meaning. `import std::prelude::{Some}` binds a variant, because the language writes the prelude that way.
+
+`@no_prelude` on a file takes the prelude away from that file alone, apart from the traits the driver lists as language items. A prelude name written there is `OptedOutOfPrelude`, since the declaration is in the program anyway and would otherwise reach the type checker.
 
 ### Spans
 

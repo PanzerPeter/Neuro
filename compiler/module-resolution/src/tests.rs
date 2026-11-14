@@ -13,7 +13,9 @@ use ast_types::{
 use shared_types::{Identifier, Literal, Span};
 use tempfile::TempDir;
 
-use crate::{ModuleError, PreludeVariant, ResolvedProgram, resolve_program};
+use crate::{
+    ModuleError, PreludeVariant, ResolvedProgram, StandardLibrary, StdModule, resolve_program,
+};
 
 fn ident(name: &str) -> Identifier {
     Identifier {
@@ -271,13 +273,39 @@ fn write(dir: &Path, rel: &str, source: &str) -> PathBuf {
 }
 
 fn resolve(root: &Path) -> Result<ResolvedProgram, ModuleError> {
-    resolve_program(root, &|source, _| stub_parse(source), &[])
+    resolve_program(
+        root,
+        &|source, _| stub_parse(source),
+        StandardLibrary::default(),
+    )
 }
 
-/// Resolve with the prelude the driver really supplies, so a fixture can be written the
-/// way source is: `Some` and `Ok` bare, with no import above them.
+/// Resolve with a standard library shaped like the driver's, so a fixture can be written
+/// the way source is: `Option` and `Some` bare, with no import above them. `Iterator` stands
+/// for the traits a `@no_prelude` file keeps, and `std::text` for a library module that is
+/// not the prelude.
 fn resolve_with_prelude(root: &Path) -> Result<ResolvedProgram, ModuleError> {
-    let prelude: Vec<PreludeVariant> = [
+    let std_module = |name: &str, source: &str| StdModule {
+        name: name.to_string(),
+        display: format!("<std>/{name}.nr"),
+        items: stub_parse(source).expect("the stub library parses"),
+    };
+    let modules = vec![
+        std_module(
+            "prelude",
+            "export enum Option
+export enum Result
+export enum Iterator
+",
+        ),
+        std_module(
+            "text",
+            "export func trim
+func scan
+",
+        ),
+    ];
+    let variants: Vec<PreludeVariant> = [
         ("Option", "Some"),
         ("Option", "None"),
         ("Result", "Ok"),
@@ -289,7 +317,12 @@ fn resolve_with_prelude(root: &Path) -> Result<ResolvedProgram, ModuleError> {
         variant: variant.to_string(),
     })
     .collect();
-    resolve_program(root, &|source, _| stub_parse(source), &prelude)
+    let library = StandardLibrary {
+        modules,
+        variants,
+        language_items: vec!["Iterator".to_string()],
+    };
+    resolve_program(root, &|source, _| stub_parse(source), library)
 }
 
 /// The name every function item declares, in program order.
@@ -324,6 +357,21 @@ fn first_callee(program: &ResolvedProgram) -> Option<String> {
             },
             _ => None,
         })
+}
+
+/// The type annotating the one parameter of the function `name` declares.
+fn param_type(program: &ResolvedProgram, name: &str) -> String {
+    program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Function(def) if def.name.name == name => match &def.params.first()?.ty {
+                Type::Named(ty) => Some(ty.name.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no function `{name}` with a named parameter type"))
 }
 
 /// The first match-arm pattern anywhere in the resolved program.
@@ -1003,7 +1051,6 @@ fn the_prelude_binds_a_variant_no_import_mentions() {
 
     let program = resolve_with_prelude(&root).expect("resolution succeeds");
 
-    assert!(!program.no_prelude);
     match first_pattern(&program) {
         Some(Pattern::Enum {
             enum_name, variant, ..
@@ -1080,13 +1127,168 @@ fn no_prelude_leaves_a_bare_variant_unbound() {
 }
 
 #[test]
-fn no_prelude_on_the_root_is_reported_to_the_driver() {
+fn no_prelude_takes_a_bare_prelude_type_away() {
     let dir = TempDir::new().expect("temp dir");
-    let root = write(dir.path(), "main.nr", "no_prelude\nexport func main\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "no_prelude\nexport func main\nbare Option\n",
+    );
+
+    match resolve_with_prelude(&root) {
+        Err(ModuleError::OptedOutOfPrelude { name, path, .. }) => {
+            assert_eq!(name, "Option");
+            assert_eq!(path, "std::prelude::Option");
+        }
+        other => panic!("expected OptedOutOfPrelude, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn no_prelude_names_the_qualified_path_of_a_bare_variant() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "no_prelude\nexport func main\nbare Some\n",
+    );
+
+    match resolve_with_prelude(&root) {
+        Err(ModuleError::OptedOutOfPrelude { path, .. }) => {
+            assert_eq!(path, "std::prelude::Option::Some")
+        }
+        other => panic!("expected OptedOutOfPrelude, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn no_prelude_keeps_the_language_traits() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "no_prelude\nexport func main\nbare Iterator\n",
+    );
+
+    resolve_with_prelude(&root).expect("a language trait stays in scope");
+}
+
+#[test]
+fn a_no_prelude_file_imports_names_and_variants_from_the_prelude() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "no_prelude\nimport std::prelude::{Option, Some}\nexport func main\nbare Option\npat Some(v)\n",
+    );
 
     let program = resolve_with_prelude(&root).expect("resolution succeeds");
 
-    assert!(program.no_prelude);
+    match first_pattern(&program) {
+        Some(Pattern::Enum {
+            enum_name, variant, ..
+        }) => {
+            assert_eq!(enum_name.name, "Option");
+            assert_eq!(variant.name, "Some");
+        }
+        other => panic!("expected a resolved enum pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_full_std_path_lands_on_the_prelude_declaration() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "export func main\ncall std::prelude::Option::Some\n",
+    );
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    assert_eq!(first_callee(&program).as_deref(), Some("Option::Some"));
+}
+
+#[test]
+fn std_is_never_read_from_a_file_beside_the_program() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "std.nr", "unparsable\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "export func main\ncall std::text::trim\n",
+    );
+
+    let program = resolve_with_prelude(&root).expect("`std` names the library");
+
+    assert_eq!(program.modules.len(), 1, "the library is not a file module");
+    assert!(declared_names(&program).contains(&"std::text::trim".to_string()));
+}
+
+#[test]
+fn a_private_library_item_is_out_of_reach() {
+    let dir = TempDir::new().expect("temp dir");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "export func main\ncall std::text::scan\n",
+    );
+
+    match resolve_with_prelude(&root) {
+        Err(ModuleError::PrivateItem { item, .. }) => assert_eq!(item, "scan"),
+        other => panic!("expected PrivateItem, got {:?}", other.map(|_| ())),
+    }
+}
+
+/// The library's modules are loaded between the root and the rest, but a file module's
+/// stamp is still its index in `ResolvedProgram.modules`.
+#[test]
+fn a_file_module_is_stamped_with_its_index_in_the_module_table() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "math.nr", "export func sqrt\n");
+    let root = write(dir.path(), "main.nr", "export func main\ncall math::sqrt\n");
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    let stamp = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Function(def) if def.name.name == "math::sqrt" => Some(def.module),
+            _ => None,
+        })
+        .expect("math::sqrt is in the program");
+    assert_eq!(program.modules[stamp as usize].path, "math");
+}
+
+/// LIM-272: a root `Result` once displaced the prelude's for every module. The two now
+/// coexist: the root's takes the root file's stem as its path.
+#[test]
+fn a_root_declaration_with_a_prelude_name_coexists_with_it() {
+    let dir = TempDir::new().expect("temp dir");
+    write(dir.path(), "sub.nr", "param run: Result\n");
+    let root = write(
+        dir.path(),
+        "main.nr",
+        "enum Result\nimport sub\nexport func main\nparam own: Result\n",
+    );
+
+    let program = resolve_with_prelude(&root).expect("resolution succeeds");
+
+    let enums: Vec<&str> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Enum(def) => Some(def.name.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        enums.contains(&"Result") && enums.contains(&"main::Result"),
+        "{enums:?}"
+    );
+    assert_eq!(param_type(&program, "own"), "main::Result");
+    assert_eq!(param_type(&program, "sub::run"), "Result");
 }
 
 #[test]
@@ -1116,7 +1318,6 @@ fn a_module_that_kept_the_prelude_still_gets_it_beside_one_that_did_not() {
 
     let program = resolve_with_prelude(&root).expect("resolution succeeds");
 
-    assert!(!program.no_prelude);
     match first_pattern(&program) {
         Some(Pattern::Enum { enum_name, .. }) => assert_eq!(enum_name.name, "Result"),
         other => panic!("expected a resolved enum pattern, got {:?}", other),
@@ -1232,7 +1433,8 @@ fn a_renamed_import_reaches_impl_bound_and_struct_literal_positions() {
         Ok(items)
     };
 
-    let program = resolve_program(&root, &parse, &[]).expect("resolution succeeds");
+    let program =
+        resolve_program(&root, &parse, StandardLibrary::default()).expect("resolution succeeds");
 
     let mut seen = Vec::new();
     for item in &program.items {

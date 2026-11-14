@@ -577,14 +577,14 @@ match a {
 
 ### `Option<T>` and `Result<T, E>`
 
-These two generic enums are the standard library's absence and failure types. They are available in **every program without a declaration**, because the compiler prepends an implicit prelude:
+These two generic enums are the standard library's absence and failure types. They are available in **every program without a declaration**, because every module implicitly imports them from `std::prelude`:
 
 ```neuro
 enum Option<T> { Some(T), None }
 enum Result<T, E> { Ok(T), Err(E) }
 ```
 
-They are ordinary generic enums: nothing about them is special-cased in the type checker or the backend, and a program that declares its own `Option` or `Result` shadows the prelude entry.
+They are ordinary generic enums: nothing about them is special-cased in the type checker or the backend, and a module that declares its own `Option` or `Result` shadows the prelude's inside that module only.
 
 ```neuro
 func unwrap_or(o: Option<i32>, fallback: i32) -> i32 {

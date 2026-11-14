@@ -5,7 +5,7 @@ Bind every call site's arguments to the callee's parameters in declaration order
 
 ## Entry Point
 - Type: Library function, `bind_arguments`
-- Input: `items: &mut [Item]`: the whole program, every module merged and the prelude prepended
+- Input: `items: &mut [Item]`: the whole program, every module and the standard library merged
 - Output: `Result<(), Vec<ArgumentError>>`: the items are rewritten in place; every call that cannot be bound is reported, not just the first
 
 ## Shared Kernel

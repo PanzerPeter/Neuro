@@ -1,8 +1,12 @@
 @no_prelude
 
-// Module `stats`: turns a batch of raw readings into a summary value. Nothing here is
-// fallible, so this file opts out of the prelude. `main.nr` and `report/mod.nr` still get
-// `Some` and `None`. `total` is private to this module and read only through `mean()`.
+// Module `stats`: turns a batch of raw readings into a summary value. It opts out of the
+// prelude, so no prelude name is in scope here until an import below brings it in.
+// `main.nr` and `report/mod.nr` still get `Option`, `Some` and `None` bare. `total` is
+// private to this module and read only through `mean()`.
+
+// The one prelude type this file needs, named from the module the prelude really is.
+import std::prelude::{Option, Some, None}
 
 export struct Summary {
     export count: i32,
@@ -45,4 +49,16 @@ export func summarize(samples: [i32; 5]) -> Summary {
     }
 
     Summary::new(buffer.len() as i32, total, peak)
+}
+
+// The position of the first reading above `limit`, or `None` when every one stays under.
+export func first_above(samples: [i32; 5], limit: i32) -> Option<i32> {
+    mut index = 0
+    for sample in samples {
+        if sample > limit {
+            return Some(index)
+        }
+        index += 1
+    }
+    None
 }

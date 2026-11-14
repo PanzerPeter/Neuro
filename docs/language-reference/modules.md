@@ -135,6 +135,11 @@ so the two fallible types and their four variants are in scope in every file, wi
 `ParseError`, the error [`.parse`](strings.md#parsing-text) returns, is in scope the same way, but its
 variants keep the `ParseError::` prefix.
 
+The prelude is an ordinary module, `std::prelude`. The standard library is Neuro source embedded in `neurc`
+and compiled with every program, so a compiler binary needs no library files beside it. `std` names it
+from every module, and a `std.nr` beside the program does not change that. `std::prelude::Option`,
+`import std::prelude::{Option}` and a bare `Option` all reach the same declaration.
+
 
 ```neuro
 func halve(n: i32) -> Option<i32> {
@@ -146,7 +151,9 @@ func halve(n: i32) -> Option<i32> {
 A prelude binding is the weakest one there is, and shadowing it is never an error:
 
 - a **local declaration** of the name wins inside the module that declares it. A module with its own
-  `Option`, or its own `None`, keeps its own meaning;
+  `Option`, or its own `None`, keeps its own meaning, and every other module still reaches the
+  library's. This holds for the root file too: a root `Result` and the library's `Result` are two
+  types, and a diagnostic names the root's with the root file's name in front (`main::Result`);
 - an **explicit import** of the name wins too. `import Reading::{Some}` binds `Some` to that enum
   rather than colliding with the prelude's.
 
@@ -156,16 +163,34 @@ the file that holds it.
 
 ```neuro
 @no_prelude
+import std::prelude::{Option, Some, None}
 
-// `Some`, `None`, `Ok`, and `Err` are ordinary names in this file.
-func triangular(n: i32) -> i32 {
-    n * (n + 1) / 2
+func first_square_over(limit: i32) -> Option<i32> {
+    for n in 1..limit {
+        if n * n > limit {
+            return Some(n)
+        }
+    }
+    None
+}
+
+// `Result` was not imported, so it is written by its path.
+func checked(n: i32) -> std::prelude::Result<i32, i32> {
+    if n < 0 {
+        std::prelude::Result::Err(n)
+    } else {
+        std::prelude::Result::Ok(n)
+    }
 }
 ```
 
-On a non-root file, `@no_prelude` takes away that file's variant bindings. On the **root** file it also
-drops the prelude's declarations from the whole program. `Option` and `Result` are then declared
-nowhere: the prelude's declarations are either in the program or absent from all of it.
+`@no_prelude` takes the prelude's names away from that file alone, types and variants alike. A bare
+`Option` there is an error that names the import to write. The file then imports what it needs from
+`std::prelude`, variants included, or writes the full path. Other files keep their prelude, and the
+standard library is still compiled with the program, so `.parse` and a range value still work in the
+file that opted out. The traits the language dispatches through (`Iterator`, `IntoIterator`, `Copy`,
+`Clone`, `Debug`, `Hashable` and `PoolAware`) stay in scope, because a `for` loop, `@derive` and a
+`pool` block reach them whatever the file imports.
 
 `print` / `println` (and the panic family) are **not** in the prelude. They are compiler builtins
 resolved by name, so `@no_prelude` does not take them away. Only a local declaration of the same name
@@ -310,6 +335,7 @@ declaration lives.
 | An import of a name the module declares | ``size` is imported in `main.nr`, which declares a `size` of its own … rename the import with `as`` |
 | `import math::{cbrt}` where `math.nr` has no `cbrt` | ``module `math` declares no item named `cbrt` `` |
 | Two imports binding one name | ``sqrt` is imported twice … rename one of them with `as`` |
+| A prelude name in a `@no_prelude` file | ``Option` comes from `std::prelude`, and `main.nr` opts out of the prelude with `@no_prelude`; write `import std::prelude::{Option}` or `std::prelude::Option`` |
 | `Some(n)` in a pattern with no import behind it | ``variant `Some` is used without its enum … write `Enum::Some` or add `import Enum::{Some}`` |
 | Reaching a declaration with no `export` | ``internal` is private to module `lib` … write `export` before its declaration`` |
 | Reaching a field with no `export` | ``field 'timeout' of struct 'Config' is private to the module that declares it`` |
@@ -319,17 +345,12 @@ declaration lives.
 
 ## What has not landed yet
 
-The prelude is not a module you can name. `std::prelude` describes the effect, but the driver prepends
-the declarations and seeds the variant bindings directly. So `import std::prelude::{Option}` is an error
-(`std::prelude` does not name a module), and there is no way to import a *subset* of the prelude.
-`@no_prelude` on a non-root file drops that file's variant bindings only; `Option` and `Result` still
-reach it.
-
-A root file that declares a name the prelude also declares, such as its own `Result`, replaces the
-prelude's for the whole program.
+`std::prelude` is the one module of the standard library so far. The names the compiler implements
+itself (`print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `Tensor`, `einsum`) have no
+declaration in it yet. `@no_prelude` does not take them away, and `std::prelude::Vec` is not a path.
 
 A compile-time error or a runtime panic names the file it comes from, with its line and column, in
-whichever module it was raised. A panic inside a prelude body names `<prelude>`.
+whichever module it was raised. A panic inside a prelude body names `<std>/prelude.nr`.
 
 ## See also
 
@@ -347,8 +368,9 @@ whichever module it was raised. A panic inside a prelude body names `<prelude>`.
   `geometry.nr`, exit code `10`
 - [`examples/modules/prelude.nr`](../../examples/modules/prelude.nr), `Option`, `Result`, and their
   variants named with no import at all, exit code `25`
-- [`examples/modules/no_prelude.nr`](../../examples/modules/no_prelude.nr), the `@no_prelude` opt-out, exit
-  code `36`
+- [`examples/modules/no_prelude.nr`](../../examples/modules/no_prelude.nr), the `@no_prelude` opt-out and
+  imports from `std::prelude`, exit code `42`
 - [`examples/showcase/telemetry/`](../../examples/showcase/telemetry/), file modules, an inline block, an
-  `export import` re-export, `export` visibility, the implicit prelude, and one module opting out with
-  `@no_prelude`, working alongside structs, generics, `Vec<T>`, `Option`, and enums
+  `export import` re-export, `export` visibility, the implicit prelude, one module opting out with
+  `@no_prelude` and importing `Option` from `std::prelude`, and a root `Range` beside the library's,
+  working alongside structs, generics, `Vec<T>`, `Option`, and enums

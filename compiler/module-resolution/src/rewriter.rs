@@ -13,7 +13,7 @@ use shared_types::Identifier;
 use crate::imports::ImportScope;
 use crate::loader::{ModuleGraph, site_segments, split_segments};
 use crate::walk::{Site, walk_items};
-use crate::{ModuleError, PreludeVariant};
+use crate::{ModuleError, StandardLibrary};
 
 /// The module every program starts from, whose names stay bare.
 const ROOT: usize = 0;
@@ -24,7 +24,7 @@ const SELF_TYPE: &str = "Self";
 pub(crate) fn resolve_names(
     graph: &mut ModuleGraph,
     scopes: &[ImportScope],
-    prelude: &[PreludeVariant],
+    std: &StandardLibrary,
 ) -> Result<(), ModuleError> {
     for id in 0..graph.modules.len() {
         let mut items = std::mem::take(&mut graph.modules[id].items);
@@ -32,7 +32,7 @@ pub(crate) fn resolve_names(
             let resolver = Resolver {
                 graph,
                 scopes,
-                prelude,
+                std,
                 from: id,
             };
             let mut rewrite = |site: Site<'_>| resolver.site(site);
@@ -56,15 +56,15 @@ enum Binding {
 struct Resolver<'a> {
     graph: &'a ModuleGraph,
     scopes: &'a [ImportScope],
-    prelude: &'a [PreludeVariant],
+    std: &'a StandardLibrary,
     from: usize,
 }
 
 impl Resolver<'_> {
     /// What `name` stands for in module `from`: an import or a declaration of the module
-    /// itself, then of each module enclosing it, then the prelude's variants. `None` for a
-    /// name nothing in scope declares, which is left to the type checker: a prelude type or
-    /// function, or a builtin.
+    /// itself, then of each module enclosing it, then `std::prelude`'s declarations and its
+    /// enums' variants. `None` for a name nothing in scope declares, which is left to the
+    /// type checker: a builtin, or a type the compiler implements.
     fn lookup(&self, name: &str) -> Option<Binding> {
         let mut current = Some(self.from);
         while let Some(id) = current {
@@ -88,13 +88,43 @@ impl Resolver<'_> {
             }
             current = self.graph.modules[id].parent;
         }
-        if self.graph.no_prelude(self.from) {
+        let opted_out = self.graph.no_prelude(self.from);
+        if let Some(prelude) = self.graph.prelude()
+            && self.graph.declares(prelude, name)
+            && (!opted_out || self.std.language_items.iter().any(|item| item == name))
+        {
+            return Some(Binding::Item(self.graph.canonical(prelude, name)));
+        }
+        if opted_out {
             return None;
         }
-        self.prelude
+        self.std
+            .variants
             .iter()
             .find(|entry| entry.variant == name)
             .map(|entry| Binding::Variant(entry.owner.clone(), entry.variant.clone()))
+    }
+
+    /// Reject a `std::prelude` name written bare in a file that opted out of the prelude.
+    ///
+    /// The declaration is in the program whatever the file says, so without this the name
+    /// would still reach it through the type checker.
+    fn reject_opted_out(&self, name: &str) -> Result<(), ModuleError> {
+        if !self.graph.no_prelude(self.from) {
+            return Ok(());
+        }
+        let path = if self.graph.prelude_declares(name) {
+            format!("std::prelude::{name}")
+        } else if let Some(entry) = self.std.variants.iter().find(|entry| entry.variant == name) {
+            format!("std::prelude::{}::{name}", entry.owner)
+        } else {
+            return Ok(());
+        };
+        Err(ModuleError::OptedOutOfPrelude {
+            name: name.to_string(),
+            path,
+            from: self.graph.display(self.from).to_string(),
+        })
     }
 
     /// Reject a bare name nothing in scope accounts for when the root module declares it.
@@ -151,7 +181,10 @@ impl Resolver<'_> {
                 Ok(())
             }
             Some(Binding::Module(_)) => Ok(()),
-            None => self.reject_root_leak(name),
+            None => {
+                self.reject_root_leak(name)?;
+                self.reject_opted_out(name)
+            }
         }
     }
 
@@ -186,6 +219,7 @@ impl Resolver<'_> {
 
         let Some(mut module) = start else {
             self.reject_root_leak(head)?;
+            self.reject_opted_out(head)?;
             if self.graph.has_inline_block_named(head) {
                 return Err(ModuleError::UnreachableInlineModule {
                     path,

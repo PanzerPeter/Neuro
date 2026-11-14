@@ -415,9 +415,9 @@ impl TypeChecker {
 
     /// The `Chars` iterator type `.chars()` yields, with the receiver's borrow recorded.
     ///
-    /// The type is the prelude's, so a program compiled with `@no_prelude` has no
+    /// The type is the standard library's, so a program checked without it has no
     /// iterator to hand out and gets the same unknown-type diagnostic any other missing
-    /// prelude declaration produces.
+    /// library declaration produces.
     pub(crate) fn chars_iterator(&mut self, object: &Expr, call_span: Span) -> Type {
         self.register_slice_borrow(object, call_span);
         if !self.is_declared_struct(CHARS_STRUCT) {
@@ -749,7 +749,7 @@ impl TypeChecker {
 
     /// `string.parse::<T>()`: nullary, `T` an integer, a float or `bool`, and the result
     /// `Result<T, ParseError>`. The backend builds that value by variant name, so a program
-    /// that declares its own `Result` or `ParseError` of another shape is told here.
+    /// checked without the standard library's `Result` or `ParseError` is told here.
     fn check_parse(&mut self, type_args: &[GenericArg], args: &[Expr], span: Span) -> Type {
         let Some(target) = self.nullary_turbofish_target(PARSE_METHOD, type_args, args, span)
         else {

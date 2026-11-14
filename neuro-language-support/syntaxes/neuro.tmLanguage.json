@@ -486,7 +486,7 @@
           }
         },
         {
-          "comment": "Compiler-known collections and the types the prelude (`compiler/neurc/src/prelude.nr`) declares in every program.",
+          "comment": "Compiler-known collections and the types the prelude (`compiler/neurc/std/prelude.nr`) declares in every program.",
           "name": "support.type.neuro",
           "match": "\\b(Vec|HashMap|BTreeMap|StringBuilder|Tensor|Option|Result|OrderedF32|OrderedF64|ParseError|Chars|Range|Rev|Step|Map|Filter|Enumerate|Device|PoolHandle)\\b"
         },

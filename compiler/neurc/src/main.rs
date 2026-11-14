@@ -56,7 +56,7 @@ fn parse_gpu_arch(chip: &str) -> Result<GpuArch, String> {
 /// later keep in libc itself.
 const GPU_RUNTIME_LIBS: &[&str] = &["-ldl"];
 
-mod prelude;
+mod std_library;
 
 #[derive(Parser)]
 #[command(name = "neurc")]
@@ -264,25 +264,26 @@ fn validate_source_file(path: &Path) -> Result<()> {
     }
 }
 
-/// One program, ready for the type checker: every module's items merged, with the prelude
-/// in front of them.
+/// One program, ready for the type checker: every module's items merged, the standard
+/// library's in front of them.
 struct LoadedProgram {
     items: Vec<syntax_parsing::Item>,
     module_count: usize,
     /// The file each module was read from, root first.
     files: Vec<PathBuf>,
-    /// Every parsed file, the prelude's included, in the one offset space their spans share.
+    /// Every parsed file, the standard library's included, in the one offset space their
+    /// spans share.
     sources: SourceMap,
 }
 
-/// Expand `input` and every module it reaches into one program, and give it the prelude.
+/// Expand `input`, every module it reaches and the standard library into one program.
 ///
-/// The parser and the prelude's variant names are passed in rather than imported by
+/// The parser and the parsed standard library are passed in rather than imported by
 /// `module-resolution`: that slice depends only on the AST it rewrites, so the driver is
-/// the single place it, the parser, and the prelude source meet.
+/// the single place it, the parser, and the library source meet.
 fn load_program(input: &Path) -> Result<LoadedProgram> {
     let sources = RefCell::new(SourceMap::default());
-    let prelude = prelude::load(&mut sources.borrow_mut())?;
+    let library = std_library::load(&mut sources.borrow_mut())?;
 
     // The resolver names a module by its path under the root's directory; a diagnostic
     // names it the way the root was named on the command line, so the root keeps its own
@@ -299,7 +300,7 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
             syntax_parsing::parse_at(source, base)
                 .map_err(|e| render_parse_error(&sources.borrow(), base, source, &e))
         },
-        prelude.variants(),
+        library,
     )
     .map_err(|e| match e {
         // Already a rendered diagnostic with its location; printed as a type error is.
@@ -312,16 +313,10 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
 
     let module_count = program.modules.len();
     let files = program.modules.iter().map(|m| m.file.clone()).collect();
-    // The prelude's declarations join the program as one list, so they are either in the
-    // program or absent from all of it; `@no_prelude` on the root file is what decides.
-    let mut items = if program.no_prelude {
-        program.items
-    } else {
-        prelude.prepend(program.items)
-    };
+    let mut items = program.items;
 
     // Named arguments are resolved against the whole program, so this runs only once the
-    // prelude and every module are in one list, and before type checking, which is what
+    // standard library and every module are in one list, and before type checking, which is what
     // lets every later pass see an ordinary positional call.
     let sources = sources.into_inner();
     argument_binding::bind_arguments(&mut items).map_err(|errors| {

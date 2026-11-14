@@ -23,10 +23,12 @@
 //! reaches *through* a module it was not declared in: the importing module records where
 //! the declaration really lives, and a qualified path lands on it in a single step.
 //!
-//! Every module also starts with the implicit prelude's variant bindings, so `Some` and
-//! `Ok` read as themselves without an import. They are the weakest binding there is: an
-//! explicit import of the same name wins, and so does a local declaration of it. A file
-//! written with `@no_prelude` gets none of them.
+//! The standard library arrives parsed from the driver and is loaded as modules under a
+//! `std` root that every module can name. Every module also sees `std::prelude`'s names
+//! and its enums' variants without an import (`Option`, `Some`, `Ok`). They are the
+//! weakest binding there is: an explicit import of the same name wins, and so does a local
+//! declaration of it. A file written with `@no_prelude` gets none of them but the traits
+//! the language dispatches through, and imports the rest from `std::prelude`.
 
 use std::path::Path;
 
@@ -46,21 +48,41 @@ pub use loader::ResolvedModule;
 /// The merged program a root file expands to.
 #[derive(Debug, Clone)]
 pub struct ResolvedProgram {
-    /// Every loaded module's items, root module first, in load order.
+    /// Every loaded module's items, the standard library's first, then the root module's,
+    /// then the rest in load order.
     pub items: Vec<Item>,
-    /// One entry per loaded module, for diagnostics and driver reporting.
+    /// One entry per module loaded from a file, for diagnostics and driver reporting. The
+    /// standard library's modules have no file and are not listed.
     pub modules: Vec<ResolvedModule>,
-    /// Whether the root file was written with `@no_prelude`. The prelude's declarations
-    /// join the program's one item list, so they are a property of the program rather
-    /// than of any one file: the root is the file that decides for it.
-    pub no_prelude: bool,
+}
+
+/// The standard library as the driver hands it over.
+///
+/// Its sources belong to the driver, which embeds them; this slice is told what they hold
+/// for the same reason it is handed a parser: it may not reach into another slice to find
+/// out.
+#[derive(Debug, Clone, Default)]
+pub struct StandardLibrary {
+    /// One entry per `std::<name>` module. The one named `prelude` is the implicit prelude.
+    pub modules: Vec<StdModule>,
+    /// The `std::prelude` enum variants a module may write bare.
+    pub variants: Vec<PreludeVariant>,
+    /// The `std::prelude` names a `@no_prelude` file still sees bare: the traits the language
+    /// itself dispatches through.
+    pub language_items: Vec<String>,
+}
+
+/// One module of the standard library, already parsed.
+#[derive(Debug, Clone)]
+pub struct StdModule {
+    /// The segment after `std::`.
+    pub name: String,
+    /// What a diagnostic calls the module's source, which is no file on disk.
+    pub display: String,
+    pub items: Vec<Item>,
 }
 
 /// One enum variant the implicit prelude binds in every module that did not opt out.
-///
-/// The prelude's contents belong to the driver, which owns the prelude source; this slice
-/// is told what to bind for the same reason it is handed a parser: it may not reach into
-/// another slice to find out.
 #[derive(Debug, Clone)]
 pub struct PreludeVariant {
     /// The enum the variant belongs to, by its canonical name.
@@ -150,6 +172,16 @@ pub enum ModuleError {
     },
 
     #[error(
+        "`{name}` comes from `std::prelude`, and `{from}` opts out of the prelude with \
+         `@no_prelude`; write `import std::prelude::{{{name}}}` or `{path}`"
+    )]
+    OptedOutOfPrelude {
+        name: String,
+        path: String,
+        from: String,
+    },
+
+    #[error(
         "variant `{variant}` is used without its enum in `{from}` but no import brings it \
          into scope; write `Enum::{variant}` or add `import Enum::{{{variant}}}`"
     )]
@@ -209,9 +241,8 @@ pub enum ModuleError {
 /// Parsing is supplied by the caller rather than imported: this slice depends only on the
 /// AST it rewrites, so the parser stays on the driver's side of the boundary. It is
 /// called with a module's source and the path to name that module by in a diagnostic.
-/// `prelude`
-/// names the enum variants every module may write bare (`Some`, `None`, `Ok`, `Err`)
-/// and comes from the caller for the same reason.
+/// `library` is the standard library, embedded in and parsed by the caller for the same
+/// reason.
 ///
 /// # Errors
 ///
@@ -223,10 +254,11 @@ pub enum ModuleError {
 pub fn resolve_program(
     root: &Path,
     parse_module: &ParseModule<'_>,
-    prelude: &[PreludeVariant],
+    mut library: StandardLibrary,
 ) -> Result<ResolvedProgram, ModuleError> {
-    let mut graph = loader::ModuleGraph::load(root, parse_module)?;
-    let scopes = imports::resolve_imports(&mut graph, prelude)?;
-    rewriter::resolve_names(&mut graph, &scopes, prelude)?;
+    let modules = std::mem::take(&mut library.modules);
+    let mut graph = loader::ModuleGraph::load(root, parse_module, modules)?;
+    let scopes = imports::resolve_imports(&mut graph, &library.variants)?;
+    rewriter::resolve_names(&mut graph, &scopes, &library)?;
     Ok(graph.into_program())
 }

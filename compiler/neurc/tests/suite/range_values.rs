@@ -320,26 +320,23 @@ fn the_walk_is_private_to_the_prelude() {
     );
 }
 
-/// A program's own `Range` displaces the prelude's, and with it the range value; a range
-/// still works in a `for` head and as a slice argument.
+/// LIM-272: a program's own `Range` once displaced the prelude's and with it the range
+/// value. The two coexist now: a range is still the library's `Range`.
 #[test]
-fn a_program_range_displaces_the_value() {
-    assert_check_error(
-        "range_values_displaced.nr",
-        "struct Range { a: i32 }\nfunc main() -> i32 {\n    val r = 0..3\n    0\n}\n",
-        "a range value is the prelude's `Range`",
-    );
+fn a_program_range_coexists_with_the_value() {
     let source = r#"
 struct Range { a: i32 }
 func main() -> i32 {
-    val xs = [1, 2, 3, 4]
+    val r = 0..3
     mut s = 0
+    for i in r { s += i }
+    val xs = [1, 2, 3, 4]
     for x in xs.slice(1..3) { s += x }
     for i in (0..3).rev() { s += i }
     s + Range { a: 1 }.a
 }
 "#;
-    assert_exit("range_values_own_range.nr", source, 9);
+    assert_exit("range_values_own_range.nr", source, 12);
 }
 
 /// The prelude's `step` shares its name with a program's own: a labelled call binds the

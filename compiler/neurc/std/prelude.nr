@@ -1,8 +1,10 @@
-// Implicit standard library: compiled into every program.
+// `std::prelude`: the module every Neuro module imports implicitly, compiled into every
+// program.
 //
-// These declarations are ordinary Neuro source, parsed by the same parser as user
-// code and prepended to the program's items. A user declaration of the same name
-// replaces the entry here, so a program may define its own `Option` or `Result`.
+// These declarations are ordinary Neuro source, parsed by the same parser as user code and
+// loaded as a module of the standard library. A module's own declaration of the same name
+// shadows the entry here inside that module, so a program may define its own `Option` or
+// `Result` beside these.
 
 // The absence-or-presence type: `Option::Some(v)` carries a value, `Option::None`
 // carries nothing.

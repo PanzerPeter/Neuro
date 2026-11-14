@@ -203,7 +203,7 @@ fn resolve_one(
 
     // The whole path is a module: `import math`, `import ./utils::io`.
     if let (Some(module), true) = (module, consumed == segments.len()) {
-        return bind_from_module(graph, from, import, module, scope);
+        return bind_from_module(graph, from, import, module, prelude, scope);
     }
 
     // All but the last segment is a module, so the last names something inside it:
@@ -218,7 +218,7 @@ fn resolve_one(
     // names neither a module nor an enum used to be read as an enum regardless, which
     // turned a typo into a binding that quietly meant nothing.
     if consumed == 0 && !import.relative {
-        let enum_owner = enum_in_scope(graph, from, prelude, enclosing, scope, segments[0]);
+        let enum_owner = enum_in_scope(graph, from, enclosing, scope, segments[0]);
         match (&enum_owner, segments.len(), &import.selection) {
             (Some(enum_owner), 1, ImportSelection::List(names)) => {
                 for entry in names {
@@ -251,14 +251,13 @@ fn resolve_one(
 
 /// The canonical name of the enum `head` names in module `from`: one it or an enclosing
 /// module declares, one this module already imported, one an enclosing module imported,
-/// or one of the prelude's.
+/// or, unless the module opted out, one of `std::prelude`'s.
 ///
 /// `enclosing` holds the finished scope of every module numbered below `from`. A block is
 /// numbered after the module that declares it, so each enclosing module's is among them.
 fn enum_in_scope(
     graph: &ModuleGraph,
     from: usize,
-    prelude: &[PreludeVariant],
     enclosing: &[ImportScope],
     scope: &ImportScope,
     head: &str,
@@ -283,10 +282,9 @@ fn enum_in_scope(
             enclosing.get(parent)
         });
     }
-    prelude
-        .iter()
-        .any(|entry| entry.owner == head)
-        .then(|| head.to_string())
+    let prelude = graph.prelude().filter(|_| !graph.no_prelude(from))?;
+    (graph.declares(prelude, head) && graph.declares_enum(prelude, head))
+        .then(|| graph.canonical(prelude, head))
 }
 
 /// The error for an import path that reached no module.
@@ -330,6 +328,7 @@ fn bind_from_module(
     from: usize,
     import: &ImportDef,
     module: usize,
+    prelude: &[PreludeVariant],
     scope: &mut ImportScope,
 ) -> Result<(), ModuleError> {
     let owner = graph.display(from).to_string();
@@ -364,6 +363,19 @@ fn bind_from_module(
                                 module: origin,
                                 item,
                             },
+                            &owner,
+                            import.exported,
+                        )?
+                    }
+                    // The language writes the prelude as `import std::prelude::{Option, Some, ...}`,
+                    // so its variants are importable from it by their bare names.
+                    None if Some(module) == graph.prelude()
+                        && let Some(entry) = prelude.iter().find(|v| &v.variant == name) =>
+                    {
+                        scope.bind_variant(
+                            &bound.name,
+                            &entry.owner,
+                            &entry.variant,
                             &owner,
                             import.exported,
                         )?

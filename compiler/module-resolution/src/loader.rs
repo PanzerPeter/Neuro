@@ -6,16 +6,25 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
-use ast_types::{ImportDef, ImportSelection, Item, ModuleDef, ModuleId};
+use ast_types::{ImportDef, ImportSelection, Item, ModuleDef, ModuleId, PRELUDE_MODULE};
 
 use crate::walk::{Site, walk_items};
-use crate::{ModuleError, ParseModule};
+use crate::{ModuleError, ParseModule, StdModule};
 
 /// U+FEFF, which some editors write at the start of a UTF-8 file.
 const BYTE_ORDER_MARK: char = '\u{feff}';
 
 /// The type name a path may open with inside an `impl` or a trait, which names no module.
 const SELF_TYPE: &str = "Self";
+
+/// The path head that names the standard library from every module.
+const STD_ROOT: &str = "std";
+
+/// The standard-library module every module imports implicitly.
+const PRELUDE: &str = "prelude";
+
+/// The module every program starts from.
+const ROOT: usize = 0;
 
 /// A module that was loaded, as reported back to the driver.
 #[derive(Debug, Clone)]
@@ -105,19 +114,31 @@ pub(crate) struct ModuleGraph {
     pub(crate) modules: Vec<Module>,
     by_file: HashMap<PathBuf, usize>,
     root_dir: PathBuf,
+    /// The module `std` names, whose children are the standard library's modules. `None`
+    /// when the caller supplied no standard library.
+    std_root: Option<usize>,
+    /// `std::prelude`, whose names every module sees unless it opts out.
+    prelude: Option<usize>,
 }
 
 impl ModuleGraph {
     /// Load `root` and every module reachable from it.
-    pub(crate) fn load(root: &Path, parse_module: &ParseModule<'_>) -> Result<Self, ModuleError> {
+    pub(crate) fn load(
+        root: &Path,
+        parse_module: &ParseModule<'_>,
+        std: Vec<StdModule>,
+    ) -> Result<Self, ModuleError> {
         let file = canonical(root)?;
         let root_dir = parent_dir(&file);
         let mut graph = ModuleGraph {
             modules: Vec::new(),
             by_file: HashMap::new(),
             root_dir,
+            std_root: None,
+            prelude: None,
         };
         graph.load_file(file, None, parse_module)?;
+        graph.load_std(std)?;
 
         // Each module is visited once: `ensure_chain` walks a whole path in one call, so a
         // module loaded later cannot deepen an already-visited module's chain.
@@ -131,6 +152,33 @@ impl ModuleGraph {
         }
         graph.check_module_paths()?;
         Ok(graph)
+    }
+
+    /// Register the standard library: a `std` module holding each of the caller's modules as
+    /// an exported child. Made of the same parts as an inline block, so a path or an import
+    /// reaches `std::prelude::Option` by the rules every module already follows, and no file
+    /// beside the program is ever consulted for it.
+    fn load_std(&mut self, std: Vec<StdModule>) -> Result<(), ModuleError> {
+        if std.is_empty() {
+            return Ok(());
+        }
+        let hub = self.push_module(std_origin(STD_ROOT, "<std>", None), Vec::new(), false)?;
+        self.std_root = Some(hub);
+        for module in std {
+            let path = format!("{STD_ROOT}::{}", module.name);
+            let origin = std_origin(&path, &module.display, Some(hub));
+            let id = self.push_module(origin, module.items, false)?;
+            self.modules[hub]
+                .inline_children
+                .insert(module.name.clone(), id);
+            self.modules[hub]
+                .exported_blocks
+                .insert(module.name.clone());
+            if module.name == PRELUDE {
+                self.prelude = Some(id);
+            }
+        }
+        Ok(())
     }
 
     /// The paths an import in module `id` binds a name to, inner modules first, so a block
@@ -208,8 +256,10 @@ impl ModuleGraph {
             let written = &segments[..segments.len() - 1];
             let head = &written[0];
             if head == SELF_TYPE
+                || head == STD_ROOT
                 || view.lexical_type(id, head)
                 || view.lexical_block(id, head).is_some()
+                || view.prelude_type(id, head)
             {
                 return Ok(());
             }
@@ -255,7 +305,10 @@ impl ModuleGraph {
             // An inline block is already loaded and holds no file children, so reaching
             // one ends the descent before the file system is consulted at all. A locally
             // declared type wins over a same-named file for the same reason.
-            None if self.lexical_block(from, head).is_some() || self.lexical_type(from, head) => {
+            None if self.lexical_block(from, head).is_some()
+                || self.lexical_type(from, head)
+                || (head == STD_ROOT && self.std_root.is_some()) =>
+            {
                 return Ok(());
             }
             None => self.root_dir.clone(),
@@ -499,6 +552,9 @@ impl ModuleGraph {
                 if let Some(block) = self.lexical_block(from, segment) {
                     return Some(block);
                 }
+                if segment == STD_ROOT && self.std_root.is_some() {
+                    return self.std_root;
+                }
                 self.root_dir.clone()
             }
             Some(levels) => climb(&self.modules[from].ref_dir, levels),
@@ -623,9 +679,29 @@ impl ModuleGraph {
     /// Used only to explain a path that resolved nothing: a block is reached from inside
     /// the module that declares it, which is the one way a real module can fail to be found.
     pub(crate) fn has_inline_block_named(&self, name: &str) -> bool {
-        self.modules
-            .iter()
-            .any(|module| module.inline_children.contains_key(name))
+        self.modules.iter().enumerate().any(|(id, module)| {
+            Some(id) != self.std_root && module.inline_children.contains_key(name)
+        })
+    }
+
+    /// `std::prelude`, when the caller supplied one.
+    pub(crate) fn prelude(&self) -> Option<usize> {
+        self.prelude
+    }
+
+    /// Does `std::prelude` declare `name`?
+    pub(crate) fn prelude_declares(&self, name: &str) -> bool {
+        self.prelude
+            .is_some_and(|prelude| self.modules[prelude].declared.contains(name))
+    }
+
+    /// Does module `from` see a `std::prelude` type called `name` bare? Such a head opens a
+    /// type path (`Option::Some`), exactly as a type the module declares does.
+    fn prelude_type(&self, from: usize, name: &str) -> bool {
+        !self.no_prelude(from)
+            && self
+                .prelude
+                .is_some_and(|prelude| self.modules[prelude].declared_types.contains(name))
     }
 
     /// Is `name` reachable from outside module `id`?
@@ -648,7 +724,22 @@ impl ModuleGraph {
 
     /// The name module `id`'s declaration `name` carries once resolution is done: its
     /// module path in front of it, or the bare name for the root.
+    ///
+    /// `std::prelude`'s names stay bare like the root's: they are the language's own `Option`
+    /// and `Range`, which the later passes know by name. A root declaration of one of them
+    /// therefore takes the root file's stem as its path, so the two coexist.
     pub(crate) fn canonical(&self, id: usize, name: &str) -> String {
+        if Some(id) == self.prelude {
+            return name.to_string();
+        }
+        if id == ROOT && self.prelude_declares(name) {
+            let stem = self.modules[ROOT]
+                .file
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            return canonical_name(&stem, name);
+        }
         canonical_name(&self.modules[id].path, name)
     }
 
@@ -712,32 +803,64 @@ impl ModuleGraph {
         }
     }
 
-    pub(crate) fn into_program(self) -> crate::ResolvedProgram {
-        // The prelude's declarations join the program as one list, so opting out of them
-        // is a decision for the program rather than for a file, and the root is the file
-        // that makes it.
-        let no_prelude = self.modules.first().is_some_and(|root| root.no_prelude);
+    pub(crate) fn into_program(mut self) -> crate::ResolvedProgram {
+        // The standard library goes first, as the prelude always has: a pass that settles
+        // the first declaration of a name sees the library's before the program's.
+        let (library, files): (Vec<usize>, Vec<usize>) =
+            (0..self.modules.len()).partition(|id| self.is_std(*id));
+        // A file module's id is its index in `modules` below, so the table the driver gets
+        // back reads by the id each item carries. The library's modules number after them.
+        let mut stamps: HashMap<usize, ModuleId> = files
+            .iter()
+            .chain(&library)
+            .enumerate()
+            .map(|(stamp, id)| (*id, stamp as ModuleId))
+            .collect();
+        // The prelude's own id is fixed, so the passes that let its bodies reach what a
+        // program may not (`__char_at`) know it without being told.
+        if let Some(prelude) = self.prelude {
+            stamps.insert(prelude, PRELUDE_MODULE);
+        }
         let mut items = Vec::new();
         let mut modules = Vec::new();
-        for (id, module) in self.modules.into_iter().enumerate() {
+        for id in library.into_iter().chain(files) {
+            let stamp = stamps.get(&id).copied().unwrap_or(PRELUDE_MODULE);
             // Every reference was already rewritten to the canonical name, so renaming
             // the declarations is what makes the two meet.
-            for mut item in module.items {
-                rename_declaration(&mut item, &module.path);
-                stamp_module(&mut item, id as ModuleId);
+            for mut item in std::mem::take(&mut self.modules[id].items) {
+                if let Some(name) = declared_name(&mut item) {
+                    name.name = self.canonical(id, &name.name);
+                }
+                stamp_module(&mut item, stamp);
                 items.push(item);
             }
-            modules.push(ResolvedModule {
-                path: module.path,
-                file: module.file,
-            });
+            if !self.is_std(id) {
+                modules.push(ResolvedModule {
+                    path: self.modules[id].path.clone(),
+                    file: self.modules[id].file.clone(),
+                });
+            }
         }
         crate::defaults::inject_trait_defaults(&mut items);
-        crate::ResolvedProgram {
-            items,
-            modules,
-            no_prelude,
-        }
+        crate::ResolvedProgram { items, modules }
+    }
+
+    /// Is module `id` the `std` root or one of the standard library's modules?
+    fn is_std(&self, id: usize) -> bool {
+        self.std_root.is_some_and(|hub| self.encloses(hub, id))
+    }
+}
+
+/// Where a standard-library module sits: under `std`, with no file or directory of its own,
+/// so a `./` path written in one starts nowhere and none takes file children.
+fn std_origin(path: &str, display: &str, parent: Option<usize>) -> ModuleOrigin {
+    ModuleOrigin {
+        path: path.to_string(),
+        display: display.to_string(),
+        file: PathBuf::from(display),
+        ref_dir: PathBuf::new(),
+        child_dir: None,
+        parent,
     }
 }
 
@@ -851,21 +974,17 @@ fn display_path(file: &Path, root_dir: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// Give a declaration its canonical name: `path::Name` outside the root module.
-fn rename_declaration(item: &mut Item, path: &str) {
-    if path.is_empty() {
-        return;
+/// The name a declaration introduces, for renaming it to its canonical one.
+fn declared_name(item: &mut Item) -> Option<&mut shared_types::Identifier> {
+    match item {
+        Item::Function(def) => Some(&mut def.name),
+        Item::Struct(def) => Some(&mut def.name),
+        Item::Enum(def) => Some(&mut def.name),
+        Item::Trait(def) => Some(&mut def.name),
+        Item::Const(def) => Some(&mut def.name),
+        Item::Newtype(def) => Some(&mut def.name),
+        Item::Impl(_) | Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => None,
     }
-    let name = match item {
-        Item::Function(def) => &mut def.name,
-        Item::Struct(def) => &mut def.name,
-        Item::Enum(def) => &mut def.name,
-        Item::Trait(def) => &mut def.name,
-        Item::Const(def) => &mut def.name,
-        Item::Newtype(def) => &mut def.name,
-        Item::Impl(_) | Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => return,
-    };
-    name.name = canonical_name(path, &name.name);
 }
 
 /// Record which module a declaration was loaded from, on the item kinds whose bodies

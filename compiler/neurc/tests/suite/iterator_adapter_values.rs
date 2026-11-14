@@ -435,28 +435,20 @@ func main() -> i32 { 0 }
     );
 }
 
-/// A program's own `Map` displaces the prelude adapter, so `.map` on an iterator is an
-/// ordinary lookup again, while `.filter` still builds the prelude's `Filter`.
+/// LIM-272: a program's own `Map` once displaced the prelude adapter. The two coexist now,
+/// so `.map` still builds the library's adapter beside the program's struct.
 #[test]
-fn a_declared_map_type_displaces_only_its_adapter() {
-    let shadowed = with_count(
-        r#"
-struct Map { rows: i32 }
-
-func main() -> i32 {
-    val m = count(3).map(|v| v)
-    0
-}
-"#,
-    );
-    assert_check_error("adapter_shadowed_map.nr", &shadowed, "has no method 'map'");
-    let kept = with_count(
+fn a_declared_map_type_coexists_with_the_adapter() {
+    let source = with_count(
         r#"
 struct Map { rows: i32 }
 
 func main() -> i32 {
     val grid = Map { rows: 4 }
     mut total = 0
+    for v in count(3).map(|v| v * 10) {
+        total += v
+    }
     val big = count(5).filter(|v| v > 3)
     for v in big {
         total += v
@@ -465,5 +457,5 @@ func main() -> i32 {
 }
 "#,
     );
-    assert_exit("adapter_shadowed_kept.nr", &kept, 13);
+    assert_exit("adapter_own_map.nr", &source, 73);
 }

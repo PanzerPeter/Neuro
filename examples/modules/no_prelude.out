@@ -1,2 +1,3 @@
-triangular(8) = 36
-no Option, no Result, still printing
+triangular(8)         = 36
+first_square_over(30) = 6
+checked(36)           = 36

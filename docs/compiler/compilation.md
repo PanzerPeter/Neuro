@@ -11,7 +11,7 @@ Every command runs the same front half in the same order, so none can skip a ste
 | 1 | Read the root file | the driver (`compiler/neurc`) | Checks the `.nr` extension, then reads the source. A leading UTF-8 byte order mark is dropped. |
 | 2 | [Lexical analysis](components/lexical-analysis.md) | `syntax_parsing::parse` | A token stream |
 | 3 | [Parsing](components/syntax-parsing.md) | `syntax_parsing::parse` | An AST for each file |
-| 4 | [Module resolution](components/module-resolution.md) | `module_resolution::resolve_program` | One flat item list covering every reachable module. The driver prepends the prelude unless the root file has `@no_prelude`. |
+| 4 | [Module resolution](components/module-resolution.md) | `module_resolution::resolve_program` | One flat item list covering every reachable module and the standard library. |
 | 5 | [Argument binding](components/argument-binding.md) | `argument_binding::bind_arguments` | The same list with each named call in declaration order and no labels |
 | 6 | [Semantic analysis](components/semantic-analysis.md) | `semantic_analysis::type_check` | A pass or the full set of type errors, plus lint warnings. The AST is not annotated. |
 | 7 | [HIR lowering](components/hir-lowering.md) | `hir_lowering::lower_program` | Typed HIR (`neuro-hir`), where every expression carries its type and every tensor operation is outlined into a function of its own |
@@ -95,7 +95,7 @@ The compiler needs LLVM 23 and MLIR, with the `LLVM_SYS_231_PREFIX`, `MLIR_SYS_2
 ## Source
 
 - [`compiler/neurc/src/main.rs`](../../compiler/neurc/src/main.rs): the driver, the command line and the link step
-- [`compiler/neurc/src/prelude.nr`](../../compiler/neurc/src/prelude.nr) and [`prelude.rs`](../../compiler/neurc/src/prelude.rs): the prelude the driver prepends
+- [`compiler/neurc/std/prelude.nr`](../../compiler/neurc/std/prelude.nr) and [`std_library.rs`](../../compiler/neurc/src/std_library.rs): the standard library the driver embeds and hands to module resolution
 - [`compiler/neurc/CONTEXT.md`](../../compiler/neurc/CONTEXT.md): why the stages run in this order
 
 ## See also

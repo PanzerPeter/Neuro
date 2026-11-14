@@ -123,50 +123,32 @@ handed to the backend.
 `--emit` names the artifact, not the pipeline that produced it: an object file or an `llvm-ir`
 module carries the linked MLIR bodies exactly as an executable does.
 
-### The prelude
-`prelude::load(sources)` adds `prelude.nr` to the source map as `<prelude>` and parses it once at its
-base into a `Prelude` value that answers two questions:
-`variants()`, every variant of the enums it declares except those in `QUALIFIED_ENUMS`
-(`ParseError`, whose `Empty` and `Invalid` are too plain to take from every module), handed to
-`module_resolution::resolve_program` so each module may write `Some` / `Ok` bare, and
-`prepend()`, the declarations themselves. Reading the variant list **off the parsed prelude** is
-what keeps `prelude.nr` the single place the prelude's contents are stated; module resolution is
-*told* them for the same reason it is handed the parser.
+### The standard library
+`std_library::load(sources)` parses every module in `MODULES`, each Neuro source under `std/`
+embedded with `include_str!` so a compiler binary needs no library tree beside it. Each is added
+to the source map as `<std>/<name>.nr` and parsed at its base, so a panic in a library body names
+that module. Today the table holds one module, `prelude`. The result is a
+`module_resolution::StandardLibrary`, handed to `resolve_program`, which loads the modules as
+`std::<name>` and returns them in the item list ahead of the program's own. The driver prepends
+nothing and drops nothing: a program's own `Option` lives beside the library's (module resolution
+renames a root one to `main::Option`).
 
-A prelude item whose name the program already declares is dropped, so a local declaration
-shadows it. The items are otherwise ordinary declarations: nothing downstream special-cases
-`Option` or `Result`. `PoolAware` and `PoolHandle` are the one pair a compiler pass looks up by
-name: `semantic-analysis` asks whether a type has an `impl PoolAware` before letting a `pool`
-block own a value with a destructor. It reads the answer out of the ordinary trait-impl table, so
-the declaration here stays an ordinary trait and a program that shadows `PoolAware` gets its own.
-The derivable traits `Copy`, `Clone`, `Debug` and `Hashable` are declared here the same way.
-`semantic-analysis` adds what a trait declaration cannot say yet (`Copy` requires `Clone`) and
-which types implement them with no impl (the scalars, `string`, a struct carrying the derive).
+It carries two lists besides the modules. `variants` is every variant of the prelude's enums except
+those in `QUALIFIED_ENUMS` (`ParseError`, whose `Empty` and `Invalid` are too plain to take from
+every module, and `Device`), so each module may write `Some` / `Ok` bare. Reading it **off the
+parsed prelude** keeps `std/prelude.nr` the single place the prelude's contents are stated.
+`language_items` is the prelude's traits a `@no_prelude` file keeps (`LANGUAGE_ITEMS`), and a unit
+test checks each is still a prelude trait.
 
-Dropping one item takes with it every prelude declaration written against it. `Chars::next`
-returns `Option<char>`, so a program declaring its own `Option` would leave the prelude's own
-body compiled against a type that is no longer there. `PRELUDE_DEPENDENCIES` records those
-edges (`Chars`, the adapters `Map`, `Filter` and `Enumerate`, and `Range` need `Option` and
-`Iterator`; `Rev` and `Step` need those and `Range`, so they follow it in the table;
-`PoolAware` needs `PoolHandle`), and `dropped_declarations` closes over them.
-`is_dropped` also drops an `impl` block extending a displaced type: those methods belong to the
-prelude's type, not to whatever the program put in its place. A method naming another prelude
-type is withdrawn alone (`PRELUDE_METHOD_DEPENDENCIES`, applied by `withdraw_methods`):
-`Option::ok_or` builds a `Result` and `Result::ok` an `Option`, so a program declaring its own
-`Result` keeps `Option::map` and the `is_*` tests. `Range::rev` names `Rev`, and `Range::step` /
-`Rev::step` name `Step`, so a program's own `Step` leaves ranges reversible but not stridable.
+The declarations are ordinary items, stamped `PRELUDE_MODULE` (`ModuleId::MAX`) by module
+resolution so the checker and argument binding recognise a prelude body. `PoolAware` and
+`PoolHandle` are the one pair a compiler pass looks up by name: `semantic-analysis` asks whether a
+type has an `impl PoolAware` before letting a `pool` block own a value with a destructor. It reads
+the answer out of the ordinary trait-impl table. The derivable traits `Copy`, `Clone`, `Debug` and
+`Hashable` are declared here the same way. `semantic-analysis` adds which types implement them with
+no impl (the scalars, `string`, a struct carrying the derive).
 
-`prepend` stamps every prelude declaration with `PRELUDE_MODULE` (`ModuleId::MAX`), an id no
-loaded file can hold. The prelude is prepended *after* module resolution has numbered the
-program's files, so leaving it at 0 would make its internals private to whichever file happens
-to be the root rather than to the prelude itself. `prelude.nr` marks its own surface with
-`export` for the same reason it now has to.
-
-`load_program` also decides whether to prepend at all: `ResolvedProgram.no_prelude` reports the
-root file's `@no_prelude`, and the prelude's declarations join the program as one list, so they
-are either in the whole program or absent from all of it.
-
-`prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
+`std/prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
 validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint
 iterator `string.chars()` hands out, the adapters, `Range` / `Rev` / `Step`, the value a range
 written outside a `for` head builds and its `.rev()` / `.step(n)` forms, `Device`, the enum `tensor.to(device)` takes, and the
@@ -179,16 +161,16 @@ implement `Hashable`.
 The two protocol traits are what `for` desugars against: `Iterator` declares
 `type Item` and `next(&mut self) -> Option<Self::Item>`; `IntoIterator` declares `type Item`,
 `type Iter`, and `into_iter(self) -> Self::Iter`. They are ordinary trait declarations:
-nothing in the checker or the lowerer treats them as lang items, and a program declaring its
-own `Iterator` shadows them like any other prelude name. `type Iter` carries no `: Iterator`
+nothing in the checker or the lowerer treats them as lang items, and a module declaring its
+own `Iterator` shadows them inside that module like any other prelude name. `type Iter` carries no `: Iterator`
 bound because an associated-type *declaration* has no bound syntax yet; the requirement is
 enforced where the loop is built, on the type `into_iter` actually returns.
 
 `Device` is `CPU | GPU(i32)`, and its variant names and `GPU`'s one `i32` field are
 load-bearing: the LLVM backend looks `CPU` up by name to tell a transfer to the host from one to a
 GPU, and reads the index out of `GPU`'s payload. It is
-otherwise an ordinary prelude enum: a program declaring its own `Device` shadows it, and then
-`.to` no longer accepts that program's values.
+otherwise an ordinary prelude enum: a module declaring its own `Device` shadows it there, and
+`.to` does not accept that module's values.
 
 `Chars` holds a `&string` view and a `u64` byte cursor, and its `impl Iterator` is written in
 ordinary Neuro: the one thing it cannot say in source is the decode itself, which it takes from
@@ -199,7 +181,7 @@ text once. `.chars()` fills the fields in: the lowering builds the struct litera
 stay private so nothing else can.
 
 ### Source map
-Every file of a program, the prelude first as `<prelude>`, is added to one
+Every file of a program, the standard library's first as `<std>/<name>.nr`, is added to one
 `shared_types::SourceMap` before it is parsed, and parsed at the base the map returns. Files sit
 end to end in one offset space, so a span alone says which file it indexes. A module is named
 by joining the resolver's display path to the root's directory as written on the command line:

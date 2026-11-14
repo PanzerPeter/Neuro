@@ -44,9 +44,8 @@ impl TypeChecker {
     /// Type a range written as a value: `Range<T>` over the bounds' integer type.
     ///
     /// A `Range<T>` the value is expected to be types an unsuffixed literal bound. A
-    /// program that declares its own `Range`, or its own `Option` or `Iterator` (which
-    /// take the prelude's with them), has no range value, and the expression is the error
-    /// it always was.
+    /// program checked without the standard library's `Range` has no range value, and the
+    /// expression is the error it always was.
     pub(crate) fn check_range_value(
         &mut self,
         start: &Expr,

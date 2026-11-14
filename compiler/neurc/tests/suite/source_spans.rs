@@ -135,8 +135,14 @@ fn a_panic_in_a_prelude_body_names_the_prelude() {
         "func main() -> i32 {\n    val z = 0.0\n    val o = OrderedF64::new(z / z)\n    0\n}\n";
     let stride = "func main() -> i32 {\n    val r = 0..4\n    mut t = 0\n    for i in r.step(t) { t += i }\n    t\n}\n";
     for (source, message) in [
-        (nan, "panic: OrderedF64 cannot hold NaN at <prelude>:"),
-        (stride, "panic: range step must be positive at <prelude>:"),
+        (
+            nan,
+            "panic: OrderedF64 cannot hold NaN at <std>/prelude.nr:",
+        ),
+        (
+            stride,
+            "panic: range step must be positive at <std>/prelude.nr:",
+        ),
     ] {
         let stderr = panic_of(&[("main.nr", source)]);
         assert!(stderr.contains(message), "{stderr}");

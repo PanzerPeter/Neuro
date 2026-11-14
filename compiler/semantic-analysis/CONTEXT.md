@@ -362,7 +362,7 @@ a wrong count):
 - `string.chars() -> Chars` (nullary), the prelude's codepoint iterator. Like `.slice` it
   registers a transient borrow of the receiver, because the iterator holds a view into the
   receiver's bytes rather than owning them. `Chars` is a prelude declaration, so a program
-  compiled with `@no_prelude` (or one shadowing it) gets `UnknownTypeName` instead;
+  checked without the standard library gets `UnknownTypeName` instead;
 - `string.__char_at(offset) -> char`, gated on `in_prelude()` (the declaration being checked
   carries `ast_types::PRELUDE_MODULE`). It is the decode step `Chars::next` is written against;
   the language specifies no byte-indexed read of a string, so every other module sees

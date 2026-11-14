@@ -46,7 +46,7 @@ fn read(relative: &str) -> String {
 
 const GRAMMAR_PATH: &str = "neuro-language-support/syntaxes/neuro.tmLanguage.json";
 const TOKENS_PATH: &str = "compiler/lexical-analysis/src/tokens/mod.rs";
-const PRELUDE_PATH: &str = "compiler/neurc/src/prelude.nr";
+const PRELUDE_PATH: &str = "compiler/neurc/std/prelude.nr";
 const OPERATOR_TRAITS_PATH: &str =
     "compiler/semantic-analysis/src/type_checkers/operator_traits.rs";
 

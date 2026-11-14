@@ -5,8 +5,8 @@ Expand a root `.nr` file into the single item list its program is built from: lo
 
 ## Entry Point
 - Type: Library function, `resolve_program`
-- Input: `root: &Path`, a `&ParseModule` (`dyn Fn(&str, &str) -> Result<Vec<Item>, String>`) parser supplied by the caller (called with a module's source and the path that names it in a diagnostic), and `prelude: &[PreludeVariant]`: the enum variants every module may write bare
-- Output: `Result<ResolvedProgram, ModuleError>`: `items: Vec<ast_types::Item>`, each stamped with the module it came from and named canonically, one `ResolvedModule` per loaded module (its path and file), and `no_prelude`, the root file's opt-out
+- Input: `root: &Path`, a `&ParseModule` (`dyn Fn(&str, &str) -> Result<Vec<Item>, String>`) parser supplied by the caller (called with a module's source and the path that names it in a diagnostic), and `library: StandardLibrary`: each `std::<name>` module already parsed (`StdModule`), the `std::prelude` variants every module may write bare (`PreludeVariant`), and the prelude traits a `@no_prelude` file keeps
+- Output: `Result<ResolvedProgram, ModuleError>`: `items: Vec<ast_types::Item>`, the standard library's first, each stamped with the module it came from and named canonically, and one `ResolvedModule` per module loaded from a file (its path and file)
 
 ## Shared Kernel
 - ast-types: the `Item` / `Stmt` / `Expr` / `Type` tree this slice walks and rewrites
@@ -93,23 +93,37 @@ Reads `.nr` files from disk; writes nothing.
   consults. One module may not bind one name twice, and an import may not bind a name the
   module declares itself (`ImportShadowsDeclaration`): each would make one spelling mean two
   things. A local shadows any of them, because the walk never offers a local to the callback.
-- **The prelude is the weakest binding there is.** Its variants (`Some`, `None`, `Ok`, `Err`)
-  are consulted only after every scope from the module outward, so `import Reading::{Some}` and
-  a local `func None` each keep their meaning. The variant list is an input rather than a
-  constant here because the prelude's contents belong to the driver, which owns the prelude
-  source: the same reason the parser is injected.
-- **`@no_prelude` marks a file, and the root decides for the program.** The loader consumes
-  `Item::NoPrelude` into the module's own flag, an inline block inherits the file that holds it,
-  and a module with the flag sees no prelude variant. The prelude's *declarations* are prepended
-  by the driver as one list, so they are in the program or absent from all of it, and the root
-  file's flag (reported back as `ResolvedProgram.no_prelude`) decides. A non-root file's
-  `@no_prelude` therefore takes its bindings, not its access to `Option`.
+- **The standard library is a set of graph modules under `std`.** The driver embeds and parses
+  it, for the same reason the parser is injected: its contents belong to the driver. `load_std`
+  registers a `std` module with no items whose exported inline children are the library's
+  modules, so `std::prelude::Option`, `import std::prelude` and the visibility rule need no case
+  of their own. A `std` path head reaches that module from every scope before the file system is
+  consulted, so a `std.nr` beside the program is never loaded through it. The library's modules
+  are not reported as `ResolvedModule`s: they have no file, and `check` counts the program's.
+- **`std::prelude`'s names stay bare, so a root declaration of one takes a path.** The checker,
+  lowering and backends know `Option`, `Result`, `Range` and the adapters by name, so
+  `canonical` leaves the prelude's declarations unprefixed. The root's are bare too, so a root
+  `enum Result` would share the name: `canonical` gives it the root file's stem instead
+  (`main::Result`) and the two coexist. The prelude's items are stamped `PRELUDE_MODULE`, the id
+  the checker and argument binding recognise its bodies by.
+- **The prelude is the weakest binding there is.** Its declarations and its variants (`Some`,
+  `None`, `Ok`, `Err`) are consulted only after every scope from the module outward, so
+  `import Reading::{Some}` and a local `func None` each keep their meaning. A prelude type opens
+  a type path (`Option::Some`) the way a declared one does, in discovery and in the rewrite.
+  Since the language writes the prelude as `import std::prelude::{Option, Some, ...}`,
+  `import std::prelude::{Some}` binds the variant.
+- **`@no_prelude` marks a file, and takes the prelude from that file alone.** The loader
+  consumes `Item::NoPrelude` into the module's own flag and an inline block inherits the file
+  that holds it. A module with the flag sees none of the prelude but the driver's
+  `language_items`, the traits a `for` loop, `@derive` and a `pool` dispatch through. The
+  declarations are in the program whatever a file says, so a prelude name written bare there
+  would still reach them through the type checker: `reject_opted_out` makes it
+  `OptedOutOfPrelude`, naming the import to write.
 - **A variant import is what is left when nothing named a module, and only if an enum by that
   name is in scope**: declared by the module or one enclosing it, imported by an earlier line or
   by an enclosing module (whose finished scope `enum_in_scope` reads, a block being numbered
-  after its parent), or one of the prelude's (the driver prepends the prelude after this pass, which is why the
-  prelude list is consulted directly). `import Shape::{Circle}` binds a list and
-  `import Shape::Circle` one variant. Otherwise the import is `UnknownImportHead`, or
+  after its parent), or one of `std::prelude`'s when the module did not opt out.
+  `import Shape::{Circle}` binds a list and `import Shape::Circle` one variant. Otherwise the import is `UnknownImportHead`, or
   `UnreachableInlineModule` when the head is a block that is not in scope here.
 - **A bare `None` is a binding until a scope says otherwise.** `Some(n)` carries a payload
   and parses as `Pattern::UnqualifiedEnum`, so it is unambiguous and an error when nothing

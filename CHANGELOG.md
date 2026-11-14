@@ -10,6 +10,32 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.41.0] - 2026-11-14
+
+### Added
+
+- The standard library is rooted at `std` and embedded in `neurc`, so a compiler binary needs no
+  library files beside it. The prelude is the module `std::prelude`: `std::prelude::Option`,
+  `import std::prelude::{Option, Some, None}` and `import std::prelude as pre` all reach the
+  declarations a bare `Option` does, from every module. A `std.nr` beside the program does not
+  shadow it.
+- `import Device::{CPU}` imports a prelude enum's variants even when they are not bare by
+  default, as an import does for any enum in scope.
+
+### Changed
+
+- `@no_prelude` takes the prelude's names away from the file that carries it, types and variants
+  alike, and from no other file. A bare `Option` there is now an error that names the import to
+  write. The standard library is still compiled with the program, so `.parse`, range values and
+  `.chars()` keep working in the file that opted out, and the traits a `for` loop or `@derive`
+  dispatch through (`Iterator`, `Clone`, ...) stay in scope. On the root file it used to remove
+  the prelude from the whole program, and on any other file it removed only the variants.
+- A root file may declare a name the prelude declares, such as its own `Result`, `Range` or
+  `Map`, without taking the library's away from the rest of the program. The library's type keeps
+  working everywhere (`?` in another module, `.parse`, range values, `.map` on an iterator), and
+  a diagnostic names the root's with the file's name in front (`main::Result`).
+- A panic inside a prelude body names `<std>/prelude.nr` instead of `<prelude>`.
+
 ## [5.40.0] - 2026-11-14
 
 ### Added
