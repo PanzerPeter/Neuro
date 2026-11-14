@@ -133,7 +133,8 @@ import std::prelude::{Option, Some, None, Result, Ok, Err}
 
 so the two fallible types and their four variants are in scope in every file, with no `import` at all.
 `ParseError`, the error [`.parse`](strings.md#parsing-text) returns, is in scope the same way, but its
-variants keep the `ParseError::` prefix.
+variants keep the `ParseError::` prefix. So are `IoError` and `IoErrorKind`, what the
+[file and input calls](standard-library.md#errors-ioerror) fail with.
 
 The prelude is an ordinary module, `std::prelude`. The standard library is Neuro source embedded in `neurc`
 and compiled with every program, so a compiler binary needs no library files beside it. `std` names it
@@ -345,8 +346,9 @@ declaration lives.
 
 ## What has not landed yet
 
-`std::prelude` is the one module of the standard library so far. The names the compiler implements
-itself (`print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `Tensor`, `einsum`) have no
+The standard library's modules are `std::prelude`, `std::testing` ([Tests](functions.md#tests)), and
+`std::fs`, `std::env`, `std::io` and `std::time` ([Standard Library](standard-library.md)). The names
+the compiler implements itself (`print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `Tensor`, `einsum`) have no
 declaration in it yet. `@no_prelude` does not take them away, and `std::prelude::Vec` is not a path.
 
 A compile-time error or a runtime panic names the file it comes from, with its line and column, in

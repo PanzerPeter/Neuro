@@ -99,6 +99,9 @@ impl TypeChecker {
             if let Some(ret) = self.resolve_einsum_builtin(func_name, args, span) {
                 return Some(ret);
             }
+            if let Some(ret) = self.resolve_os_intrinsic(func_name, args, span) {
+                return Some(ret);
+            }
         }
 
         let func_ty = if let Some(ty) = self.functions.get(func_name) {

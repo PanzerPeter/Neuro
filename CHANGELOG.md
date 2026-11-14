@@ -10,6 +10,26 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.46.0] - 2026-11-14
+
+### Added
+
+- The standard library reaches the operating system. `std::fs` reads and writes whole files
+  (`read_to_string`, `read_bytes`, `write`, `write_bytes`, `remove_file`). `std::env::args()` returns
+  the command line and `std::env::var(name)` an environment variable. `std::io::read_line()` reads
+  standard input a line at a time, and `std::time::Instant` / `Duration` time a run on a monotonic
+  clock. Files and input fail with `IoError`, now in the prelude: an `IoErrorKind` (`NotFound`,
+  `PermissionDenied`, `InvalidData`, `Other`) and a message naming the file and the system's
+  reason, so `?` carries a failure from any of these calls. A program that calls none of them links
+  none of the runtime behind them.
+- `neurc run file.nr -- args...` passes everything after `--` to the program.
+
+### Fixed
+
+- `cargo clippy` on the current stable toolchain failed on an unfulfilled
+  `clippy::duplicated_attributes` expectation on the lexer's token enum. The lint no longer fires
+  there, so the expectation is gone.
+
 ## [5.45.0] - 2026-11-14
 
 ### Added

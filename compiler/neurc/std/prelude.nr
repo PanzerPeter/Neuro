@@ -92,6 +92,24 @@ export enum ParseError {
     OutOfRange
 }
 
+// Why a file, stream or command-line call failed: `std::fs`, `std::io` and every reader built
+// on them fail with this one type, because `?` does not widen an error. Its variants are
+// written with the enum's name, as `ParseError`'s are.
+export enum IoErrorKind {
+    NotFound,
+    PermissionDenied,
+    InvalidData,
+    Other
+}
+
+// `message` is written for a person: what was being done, to which file, and the system's
+// reason.
+@derive(Debug)
+export struct IoError {
+    export kind: IoErrorKind,
+    export message: string
+}
+
 // The derivable traits. `@derive` writes each of these impls field by field; a program
 // may write one by hand instead and name any of them as a bound. The scalars, `string`,
 // and a struct carrying the derive implement them with no impl block here.
@@ -119,6 +137,17 @@ impl Debug for ParseError {
             ParseError::Empty => out.push_str("Empty"),
             ParseError::Invalid => out.push_str("Invalid"),
             ParseError::OutOfRange => out.push_str("OutOfRange")
+        }
+    }
+}
+
+impl Debug for IoErrorKind {
+    func fmt_debug(&self, out: &mut StringBuilder) {
+        match self {
+            IoErrorKind::NotFound => out.push_str("NotFound"),
+            IoErrorKind::PermissionDenied => out.push_str("PermissionDenied"),
+            IoErrorKind::InvalidData => out.push_str("InvalidData"),
+            IoErrorKind::Other => out.push_str("Other")
         }
     }
 }

@@ -28,6 +28,8 @@ pub(crate) struct TypeChecker {
     /// between this and the struct's own module, and nothing else in the checker
     /// depends on it.
     current_module: ModuleId,
+    /// The standard library's modules, whose bodies alone may call the runtime intrinsics.
+    library_modules: HashSet<ModuleId>,
     /// Enum definitions: name → ordered list of variants. The order is the
     /// declaration order, which is also the discriminant order used by codegen.
     ///
@@ -485,6 +487,7 @@ mod loop_adapters;
 mod matches;
 mod moves;
 pub(crate) mod operator_traits;
+mod os_intrinsics;
 mod pools;
 mod range_values;
 mod resolution;
@@ -512,6 +515,7 @@ impl TypeChecker {
             struct_modules: HashMap::new(),
             private_fields: HashMap::new(),
             current_module: 0,
+            library_modules: HashSet::new(),
             enum_defs: HashMap::new(),
             generic_enums: HashMap::new(),
             enum_instances: HashMap::new(),
@@ -1119,6 +1123,7 @@ impl TypeChecker {
         // declaration rather than as a duplicate symbol in the backend.
         self.check_reserved_names(items);
         self.check_attribute_names(items);
+        self.library_modules = os_intrinsics::library_modules(items);
 
         // Pass 0a: pre-register newtype NAMES so a newtype used as a struct
         // field, enum payload, or another newtype's inner resolves regardless of

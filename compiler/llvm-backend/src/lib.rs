@@ -567,6 +567,12 @@ fn build_module<'ctx>(
         codegen_ctx.define_test_entry(tests)?;
     }
 
+    // The library's bodies are all emitted; the ones nothing calls go before anything asks
+    // whether the program reads its command line or calls the OS runtime.
+    codegen_ctx.prune_unused_library_functions();
+    codegen_ctx.store_program_arguments()?;
+    codegen_ctx.finish_stdin_sync()?;
+
     // Drain buffered standard output on every path out of the process. Runs here because
     // only a finished module knows whether it prints at all, and because the exit paths
     // it edits (`main`'s returns, `abort`, `llvm.trap`) are all emitted by now.
@@ -591,6 +597,10 @@ fn build_module<'ctx>(
             &codegen_ctx.module,
             codegen_ctx.gpu_vendor,
         )?;
+    }
+
+    if codegen_ctx.requires_os_runtime() {
+        codegen::os_runtime::link_os_runtime(codegen_ctx.context, &codegen_ctx.module)?;
     }
 
     if codegen_ctx.requires_text_parser() {

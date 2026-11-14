@@ -84,6 +84,11 @@ const MODE_BLOCK: u64 = 1;
 /// printing its progress is watchable while it runs.
 const MODE_LINE: u64 = 2;
 
+/// What runs before standard input is read: a drain of the buffer when the module prints,
+/// and nothing otherwise. Its body is written once the module is complete, because only
+/// then is it known whether the module prints.
+const STDIN_SYNC_FN: &str = "neuro.stdin.sync";
+
 /// The `.rodata` global holding the single byte `println` appends.
 const NEWLINE_GLOBAL: &str = "neuro.print.newline";
 
@@ -533,6 +538,42 @@ impl<'ctx> CodegenContext<'ctx> {
             }
         }
 
+        if let Some(block) = resume_at {
+            self.builder.position_at_end(block);
+        }
+        Ok(())
+    }
+
+    /// The function to call before reading standard input. See [`STDIN_SYNC_FN`].
+    pub(crate) fn stdin_sync_fn(&self) -> FunctionValue<'ctx> {
+        let ty = self.context.void_type().fn_type(&[], false);
+        self.extern_fn(STDIN_SYNC_FN, ty)
+    }
+
+    /// Write the body of [`STDIN_SYNC_FN`], or delete it when nothing the program kept
+    /// reads standard input.
+    pub(crate) fn finish_stdin_sync(&mut self) -> CodegenResult<()> {
+        let Some(sync) = self.module.get_function(STDIN_SYNC_FN) else {
+            return Ok(());
+        };
+        if !super::os_runtime::is_used(sync) {
+            // SAFETY: the declaration has no use, and nothing holds its handle.
+            unsafe { sync.delete() };
+            return Ok(());
+        }
+        let flush = if self.module.get_global(BUFFER_GLOBAL).is_some() {
+            Some(self.get_or_build_flush()?)
+        } else {
+            None
+        };
+        let resume_at = self.builder.get_insert_block();
+        let entry = self.context.append_basic_block(sync, "entry");
+        self.builder.position_at_end(entry);
+        if let Some(flush) = flush {
+            self.builder.build_call(flush, &[], "")?;
+        }
+        self.builder.build_return(None)?;
+        sync.set_linkage(Linkage::Private);
         if let Some(block) = resume_at {
             self.builder.position_at_end(block);
         }

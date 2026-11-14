@@ -41,6 +41,7 @@ mod iteration;
 mod iterator_adapters;
 mod loop_adapters;
 mod operator_traits;
+mod os_intrinsics;
 mod range_values;
 mod statements;
 mod tensor_apply;

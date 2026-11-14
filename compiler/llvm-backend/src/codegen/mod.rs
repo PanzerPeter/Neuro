@@ -11,6 +11,7 @@ pub(crate) mod external_bodies;
 pub(crate) mod functions;
 pub(crate) mod io;
 pub(crate) mod loop_index;
+pub(crate) mod os_runtime;
 pub(crate) mod outlining;
 pub(crate) mod panic;
 pub(crate) mod statements;

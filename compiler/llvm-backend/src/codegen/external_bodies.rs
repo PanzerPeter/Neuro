@@ -573,7 +573,7 @@ pub(crate) fn link_text_parser<'ctx>(
     Ok(())
 }
 
-fn link_ir<'ctx>(
+pub(crate) fn link_ir<'ctx>(
     context: &'ctx Context,
     module: &Module<'ctx>,
     ir: &str,
@@ -594,7 +594,7 @@ fn parse_ir<'ctx>(context: &'ctx Context, ir: &str, what: &str) -> CodegenResult
         .map_err(|e| CodegenError::LlvmError(format!("failed to parse {what}: {e}")))
 }
 
-fn internalize(module: &Module<'_>, names: &[&str]) {
+pub(crate) fn internalize(module: &Module<'_>, names: &[&str]) {
     for name in names {
         if let Some(function) = module.get_function(name) {
             function.set_linkage(Linkage::Internal);

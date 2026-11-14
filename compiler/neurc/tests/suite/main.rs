@@ -149,6 +149,7 @@ mod struct_by_value;
 mod struct_shorthand_update;
 mod structs;
 mod supertraits;
+mod system_io;
 mod tail_if_return;
 mod tensor_apply;
 mod tensor_compound_assign;

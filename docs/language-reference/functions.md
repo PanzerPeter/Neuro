@@ -223,7 +223,7 @@ Every program needs a `main` entry point, declared as `func main() -> i32` with 
 
 The return value is the process exit status: `0` for success, and any other value signals an error by convention.
 
-Any other signature is refused. `func main(argc: i32) -> i32` gives `` `main` must be declared `func main() -> i32`: it takes no parameters, found 1 ``. The C runtime passes `argc` as the first argument and reads the return register as the exit status, so no other shape has a defined exit code.
+Any other signature is refused. `func main(argc: i32) -> i32` gives `` `main` must be declared `func main() -> i32`: it takes no parameters, found 1 ``. The C runtime passes `argc` as the first argument and reads the return register as the exit status, so no other shape has a defined exit code. The command line is read with [`std::env::args()`](standard-library.md#command-line-and-environment-stdenv) instead.
 
 ## Scope
 
@@ -414,7 +414,7 @@ The text is read, not consumed, so the value stays usable afterwards. A user-def
 
 Output is buffered. A call copies its bytes into a page-sized buffer, which reaches the operating system when it fills, so a printing loop makes one write per buffer rather than one or two per call. The buffer is emptied on every path out of the program (`main` returning, a panic, a debug-build overflow trap), so buffering never loses output, and a line printed before a panic appears before the panic's diagnostic.
 
-When standard output is a terminal, the buffer is emptied at the end of every `println`, so progress is visible while the program runs. A pipe or a file gets the full buffer, as with C's standard library. `print` writes no line terminator, so its bytes wait for the next `println` or for the program to finish.
+When standard output is a terminal, the buffer is emptied at the end of every `println`, so progress is visible while the program runs. A pipe or a file gets the full buffer, as with C's standard library. `print` writes no line terminator, so its bytes wait for the next `println`, a read of standard input with [`std::io::read_line`](standard-library.md#standard-input-stdioread_line), or the program's end.
 
 ## Closures and Lambdas
 

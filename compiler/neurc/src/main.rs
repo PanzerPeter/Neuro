@@ -130,6 +130,10 @@ enum Commands {
 
         #[command(flatten)]
         build: BuildArgs,
+
+        /// Arguments for the program, after `--`: `std::env::args()` lists them after its name
+        #[arg(last = true, value_name = "ARGS")]
+        args: Vec<std::ffi::OsString>,
     },
 
     /// Compile a Neuro source file's `@test` functions and run each in its own process
@@ -204,10 +208,11 @@ fn drive(cli: Cli) {
 
         // `run` forwards the program's own exit code, so a Neuro program's status is
         // what the shell sees; a compiler or linker failure is the driver's own 1.
-        Commands::Run { input, build } => match run_file(
+        Commands::Run { input, build, args } => match run_file(
             &input,
             build.optimization,
             &build.gpu_arch.unwrap_or_default(),
+            &args,
         ) {
             Ok(code) => process::exit(code),
             Err(e) => report_failure("Run failed", &e),
@@ -251,7 +256,12 @@ fn report_failure(prefix: &str, error: &anyhow::Error) -> ! {
 /// The executable is never written beside the source: a `run` leaves no artifact behind,
 /// which is what separates it from `compile` followed by an invocation. The temporary
 /// directory is removed when this function returns, after the child has exited.
-fn run_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<i32> {
+fn run_file(
+    input: &Path,
+    optimization: u8,
+    gpu: &GpuArch,
+    args: &[std::ffi::OsString],
+) -> Result<i32> {
     let dir = tempfile::tempdir().context("Failed to create temporary directory")?;
 
     // Keep the source's own name so the program sees a meaningful argv[0] and a crash
@@ -272,6 +282,7 @@ fn run_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<i32> {
     )?;
 
     let status = Command::new(&executable)
+        .args(args)
         .status()
         .with_context(|| format!("Failed to execute {}", executable.display()))?;
 

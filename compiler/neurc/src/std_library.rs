@@ -18,6 +18,10 @@ use syntax_parsing::Item;
 const MODULES: &[(&str, &str)] = &[
     ("prelude", include_str!("../std/prelude.nr")),
     ("testing", include_str!("../std/testing.nr")),
+    ("fs", include_str!("../std/fs.nr")),
+    ("io", include_str!("../std/io.nr")),
+    ("env", include_str!("../std/env.nr")),
+    ("time", include_str!("../std/time.nr")),
 ];
 
 /// The module whose enums lend their variants to every module.
@@ -25,7 +29,7 @@ const PRELUDE: &str = "prelude";
 
 /// Prelude enums whose variants are written with the enum's name, so a module's bare names
 /// stay its own.
-const QUALIFIED_ENUMS: &[&str] = &["ParseError", "Device"];
+const QUALIFIED_ENUMS: &[&str] = &["ParseError", "IoErrorKind", "Device"];
 
 /// The prelude's traits the language itself dispatches through. They stay in scope in a file
 /// written with `@no_prelude`, because a `for` loop, `@derive` and a `pool` reach them

@@ -76,6 +76,7 @@ cross/
 !compiler/llvm-backend/src/codegen/gpu_runtime.ll
 !compiler/llvm-backend/src/codegen/gpu_runtime_hip.ll
 !compiler/llvm-backend/src/codegen/text_parse.ll
+!compiler/llvm-backend/src/codegen/os_runtime.ll
 
 # linker / package manager artifacts
 *.map

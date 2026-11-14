@@ -360,6 +360,26 @@ impl Lowerer {
             return self.lower_tensor_einsum(args, span);
         }
 
+        if let Some((params, ret)) = crate::os_intrinsics::os_intrinsic_signature(name) {
+            let args = self.lower_args(args, &params)?;
+            let callee = HirExpr::new(
+                HirExprKind::Variable(name.to_string()),
+                HirType::Function {
+                    params,
+                    ret: Box::new(ret.clone()),
+                },
+                span,
+            );
+            return Ok(HirExpr::new(
+                HirExprKind::Call {
+                    callee: Box::new(callee),
+                    args,
+                },
+                ret,
+                span,
+            ));
+        }
+
         Err(LoweringError::UnresolvedCall {
             target: name.to_string(),
         })

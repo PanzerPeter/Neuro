@@ -1,0 +1,4 @@
+steps: 10
+mode: default
+sum 49995000, timed: true
+0 lines of input

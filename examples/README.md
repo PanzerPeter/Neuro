@@ -21,6 +21,7 @@ one and checks two things:
 | `operators/`    | Bitwise ops, compound assignment, integer intrinsics, operator overloading, `??` coalescing, `?` propagation, `\|>` pipelines, `>>` composition | [Operators](../docs/language-reference/operators.md) |
 | `control_flow/` | `if` / `else`, `for` over ranges and adapters, `for` over maps, ranges as values, borrowing iterators (`.iter()`, `.keys()`, `.values()`) as values, the iterator protocol, `while`, `loop`, block and `unsafe` expressions, `match` and its nested, `@` and array patterns, `val-else`, `if val` / `while val`, panics, lints | [Control Flow](../docs/language-reference/control-flow.md) |
 | `structs/`      | Struct definition, field access and mutation, `&self` and `&mut self` methods, generic methods, supertraits, `Self`, derives, hand-written `Clone` / `Copy` / `Debug` and the bounds that name them | [Structs and Enums](../docs/language-reference/structs.md) |
+| `system/`       | `std::fs` file reads and writes and the `IoError` they fail with, `std::env` arguments and variables, `std::io::read_line`, `std::time::Instant` | [Standard library](../docs/language-reference/standard-library.md) |
 | `modules/`      | Multi-file programs, `mod.nr` directory modules, qualified paths, `import`, per-module namespaces, inline `module` blocks, re-export facades, the prelude and its opt-out | [Modules](../docs/language-reference/modules.md) |
 | `showcase/`     | Bigger programs proving many features work **together** | see the index below |
 
@@ -184,6 +185,7 @@ in each program has the full description. The three module files under
 - [`scan_guard.nr`](showcase/scan_guard.nr): Deterministic `Drop` with labeled exits: `break 'label` out of nested loops, and a labeled `loop` whose `break` carries a value.
 - [`sensor_pipeline.nr`](showcase/sensor_pipeline.nr): `Option` and `Result` used as generic enums with structs, borrowed parameters, a generic `choose<T>` and a guarded `match`.
 - [`settings_loader.nr`](showcase/settings_loader.nr): Typed settings read from raw text: `.parse::<i32>()`, `.ok_or`, `.map_err`, `?` lifting errors into one enum, and `??` with a default.
+- [`run_journal.nr`](showcase/run_journal.nr): A run that saves its journal with `std::fs`, reloads it and resumes from the last epoch the file records, taking its epoch count from `std::env::args()` and timing itself with `std::time::Instant`; a damaged journal is reported through `.map_err` and `?`.
 
 ### Multi-file
 

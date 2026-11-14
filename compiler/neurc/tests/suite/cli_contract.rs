@@ -200,6 +200,39 @@ func main() -> i32 {
     );
 }
 
+/// What follows `--` is the program's command line, not the driver's.
+#[test]
+fn run_forwards_arguments_after_a_double_dash() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source = r#"
+func main() -> i32 {
+    val args = std::env::args()
+    println(args.get(1) ?? "none")
+    println(args.get(2) ?? "none")
+    args.len() as i32
+}
+"#;
+    let source_path = write_source(&temp_dir, "run_args.nr", source);
+
+    let output = Command::new(neurc_path())
+        .arg("run")
+        .arg(&source_path)
+        .args(["--", "-O2", "two words"])
+        .output()
+        .expect("Failed to execute neurc run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        "-O2\ntwo words\n"
+    );
+}
+
 /// The executable goes to a temporary directory, so `run` leaves the source tree clean.
 /// Without this, running an example twice would litter `examples/` with binaries.
 #[test]

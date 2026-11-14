@@ -361,6 +361,15 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.codegen_io_builtin(name, args)?;
                     return Ok(None);
                 }
+                if CodegenContext::is_os_intrinsic(name) && !self.functions.contains_key(name) {
+                    let neuro_hir::HirType::Function { ret, .. } = &callee.ty else {
+                        return Err(CodegenError::InternalError(format!(
+                            "`{name}` reached codegen without a function type"
+                        )));
+                    };
+                    let result = Type::from_hir(ret);
+                    return Ok(Some(self.codegen_os_intrinsic(name, args, &result)?));
+                }
                 self.codegen_call(name, args)
             }
 

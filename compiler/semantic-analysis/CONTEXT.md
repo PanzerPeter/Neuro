@@ -373,6 +373,12 @@ a wrong count):
   registers a transient borrow of the receiver, because the iterator holds a view into the
   receiver's bytes rather than owning them. `Chars` is a prelude declaration, so a program
   checked without the standard library gets `UnknownTypeName` instead;
+- the standard library's runtime intrinsics (`__read_text`, `__arg`, `__monotonic_nanos`, ...),
+  free functions typed by `os_intrinsic_signature` in `type_checkers/os_intrinsics.rs` and checked
+  through `check_call_args`. They resolve only while `current_module` is one of
+  `library_modules`, the prelude's id plus every module declaring a `std::` name (which no program
+  can), so a program calling one gets `UndefinedFunction`. Lowering and the backend keep their own
+  copies of the table;
 - `string.__char_at(offset) -> char`, gated on `in_prelude()` (the declaration being checked
   carries `ast_types::PRELUDE_MODULE`). It is the decode step `Chars::next` is written against;
   the language specifies no byte-indexed read of a string, so every other module sees

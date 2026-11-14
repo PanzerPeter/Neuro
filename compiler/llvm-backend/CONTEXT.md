@@ -172,6 +172,31 @@ generated from `text_parse.c`, like the GPU runtime, by `tools/regen_gpu_runtime
 holds the text as an exact fraction of big integers, so all four formats round once and no libc
 behaviour shows through.
 
+**The OS runtime.** `codegen/os_runtime.rs` lowers the standard library's runtime intrinsics
+(`__read_text`, `__read_bytes`, `__write_text` / `__write_bytes`, `__remove_file`, `__arg_count`,
+`__arg`, `__env_var`, `__read_line`, `__monotonic_nanos`) to calls into `codegen/os_runtime.ll`,
+generated from `os_runtime.c` by `tools/regen_gpu_runtime.sh`. A `&string` or `&[u8]` argument goes
+as its pointer and masked length. An entry that returns text writes a `malloc` buffer and its length
+through two out-slots and returns a status, and the answer is built from the intrinsic's declared
+result: an owned `string`, `(string, i32)`, or `(Vec<u8>, string, i32)`, whose buffer is the
+vector's on success and the reason's on failure. `read_line` first calls `neuro.stdin.sync`, which
+`finish_stdin_sync` (in `io.rs`) gives a stdout drain when the module prints and deletes when it is
+unused. The C source includes no header and uses only fixed-width types, so one `.ll` serves every
+host. What differs by system is reached through hook globals that `link_os_runtime` initializes
+after the link: `__neuro_errno_location` (`__errno_location`, `__error` or `_errno`), and
+`clock_gettime` with `CLOCK_MONOTONIC`'s per-system id, or Windows' `QueryPerformanceCounter` /
+`QueryPerformanceFrequency`.
+
+Every library function is emitted, so after the bodies `prune_unused_library_functions` deletes
+each `std::`-named function nothing uses, to a fixpoint, and then the runtime declarations only
+they called. `requires_os_runtime` then asks whether any entry is still used, and only then is the
+runtime linked. `store_program_arguments` runs when `__neuro_arg_count` or `__neuro_arg` is used: a
+test entry (`main(argc, argv)`) stores both into `__neuro_argc` / `__neuro_argv` first; otherwise
+`main` is renamed `neuro.program_main` and a new `main(argc, argv)` stores them and returns its
+result. On Windows the stored pair comes from `__p___argc` / `__p___argv`, because a link that names
+`main` as the image entry passes it no arguments. A program that does no I/O keeps its `main`
+untouched and links nothing.
+
 **The GPU runtime.** A module that defines `__neuro_gpu_panic` links `codegen/gpu_runtime.ll`
 for `GpuVendor::Nvidia` or `codegen/gpu_runtime_hip.ll` for `GpuVendor::Amd`
 (`link_gpu_runtime`): one with any `Device` bodies defines it before the first function, and a

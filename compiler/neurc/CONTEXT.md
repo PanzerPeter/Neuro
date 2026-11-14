@@ -7,7 +7,7 @@ Orchestrate the full Neuro compiler pipeline and expose it as a CLI tool.
 - Type: CLI
 - Input: `neurc check <file.nr>` |
   `neurc compile <file.nr> [-O<0-3>] [-o <output>] [--emit exe|obj|llvm-ir] [--gpu-arch <chip>]` |
-  `neurc run <file.nr> [-O<0-3>] [--gpu-arch <chip>]` |
+  `neurc run <file.nr> [-O<0-3>] [--gpu-arch <chip>] [-- <program args>...]` |
   `neurc test <file.nr> [-O<0-3>] [--gpu-arch <chip>]`
 - Output: an executable binary on success, an unlinked object file under `--emit obj`, or a
   textual LLVM module under `--emit llvm-ir`; under `test`, a verdict per `@test` function on
@@ -67,7 +67,8 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    check.
 
 `run_file` adds nothing to that order. It calls `compile_file` with an output path inside a
-temporary directory, executes the result, and exits with the child's own status, so a Neuro
+temporary directory, executes the result with whatever followed `--` as its arguments, and exits
+with the child's own status, so a Neuro
 program's exit code is what the shell sees and a `run` leaves no artifact in the source tree.
 `compile_file` therefore returns the path it linked rather than printing the success banner
 itself: the banner belongs to `compile`, and printing it under `run` would inject a compiler
@@ -142,16 +143,19 @@ module carries the linked MLIR bodies exactly as an executable does.
 `std_library::load(sources)` parses every module in `MODULES`, each Neuro source under `std/`
 embedded with `include_str!` so a compiler binary needs no library tree beside it. Each is added
 to the source map as `<std>/<name>.nr` and parsed at its base, so a panic in a library body names
-that module. Today the table holds `prelude` and `testing`, whose `is_close` and `assert_close`
-compare floats within a tolerance for `@test` functions. The result is a
+that module. Today the table holds `prelude`; `testing`, whose `is_close` and `assert_close`
+compare floats within a tolerance for `@test` functions; and `fs`, `io`, `env` and `time`, written
+against the runtime intrinsics only a library body may call (see `semantic-analysis`). The backend
+deletes the library functions a program never calls, so those four cost a program nothing unless it
+uses them. The result is a
 `module_resolution::StandardLibrary`, handed to `resolve_program`, which loads the modules as
 `std::<name>` and returns them in the item list ahead of the program's own. The driver prepends
 nothing and drops nothing: a program's own `Option` lives beside the library's (module resolution
 renames a root one to `main::Option`).
 
 It carries two lists besides the modules. `variants` is every variant of the prelude's enums except
-those in `QUALIFIED_ENUMS` (`ParseError`, whose `Empty` and `Invalid` are too plain to take from
-every module, and `Device`), so each module may write `Some` / `Ok` bare. Reading it **off the
+those in `QUALIFIED_ENUMS` (`ParseError` and `IoErrorKind`, whose `Empty`, `Invalid` and
+`NotFound` are too plain to take from every module, and `Device`), so each module may write `Some` / `Ok` bare. Reading it **off the
 parsed prelude** keeps `std/prelude.nr` the single place the prelude's contents are stated.
 `language_items` is the prelude's traits a `@no_prelude` file keeps (`LANGUAGE_ITEMS`), and a unit
 test checks each is still a prelude trait.
@@ -164,7 +168,8 @@ the answer out of the ordinary trait-impl table. The derivable traits `Copy`, `C
 `Hashable` are declared here the same way. `semantic-analysis` adds which types implement them with
 no impl (the scalars, `string`, a struct carrying the derive).
 
-`std/prelude.nr` currently declares `Option<T>`, `Result<T, E>`, the `OrderedF32` / `OrderedF64`
+`std/prelude.nr` currently declares `Option<T>`, `Result<T, E>`, `ParseError`, `IoError` and
+`IoErrorKind` (what `std::fs` and `std::io` fail with), the `OrderedF32` / `OrderedF64`
 validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint
 iterator `string.chars()` hands out, the adapters, `Range` / `Rev` / `Step`, the value a range
 written outside a `for` head builds and its `.rev()` / `.step(n)` forms, `Device`, the enum `tensor.to(device)` takes, and the

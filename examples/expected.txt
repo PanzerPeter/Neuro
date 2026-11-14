@@ -76,6 +76,10 @@ strings/string_slice_method.nr   12
 strings/strings.nr               0
 strings/triple_quoted.nr         6
 
+# --- system: files, the command line, the environment, stdin, time ----------
+system/command_line.nr           0
+system/files.nr                  0
+
 # --- tensors: Tensor<T, [dims]>: construction, shapes, operators, reductions -
 tensors/tensor_construction.nr        6
 tensors/tensor_dynamic_shapes.nr      42
@@ -213,6 +217,7 @@ showcase/ranked_batch.nr             130
 showcase/ranked_finish.nr            176
 showcase/render_settings.nr          99
 showcase/replay_buffer.nr            79
+showcase/run_journal.nr              5
 showcase/ridge_objective.nr          23
 showcase/robust_fit.nr               23
 showcase/running_stats.nr            5
