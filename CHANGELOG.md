@@ -10,6 +10,15 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.49.1] - 2026-11-15
+
+### Fixed
+
+- The lexer builds clean under clippy 1.100, whose `duplicated_attributes` lint reads the repeated
+  callback and priority arguments of Logos token attributes as duplicates.
+- The `std::env` test no longer expects a non-ASCII variable value on Windows, where the runtime
+  still reads the environment through the ANSI code page.
+
 ## [5.49.0] - 2026-11-15
 
 ### Added

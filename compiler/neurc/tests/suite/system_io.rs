@@ -160,17 +160,20 @@ func main() -> i32 {
     0
 }
 "#;
+    // Windows hands the runtime its environment in the ANSI code page, not UTF-8, so the
+    // non-ASCII value is checked where the bytes pass through unchanged.
+    let value = if cfg!(windows) { "hello" } else { "héllo" };
     let out = stdout_with(
         source,
         &Run {
             args: &["one", "two words", ""],
-            env: &[("NEURO_SET", "héllo"), ("NEURO_EMPTY", "")],
+            env: &[("NEURO_SET", value), ("NEURO_EMPTY", "")],
             ..Run::default()
         },
     );
     assert_eq!(
         out,
-        "4\n[one]\n[two words]\n[]\nhéllo\nunset\n\nno name\nno name\n"
+        format!("4\n[one]\n[two words]\n[]\n{value}\nunset\n\nno name\nno name\n")
     );
 }
 
