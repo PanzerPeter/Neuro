@@ -79,6 +79,7 @@ mod hir_lowering;
 mod if_block_expressions;
 mod if_val;
 mod immutable_borrows;
+mod impl_trait_return;
 mod implicit_prelude;
 mod imports;
 mod inline_modules;

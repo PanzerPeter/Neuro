@@ -1,5 +1,4 @@
-//! Function declarations: signature registration, body checking, and the
-//! return-position `impl Trait` resolution its tail expression drives.
+//! Function declarations: signature registration and body checking.
 //!
 //! One of the declaration-kind modules under `declarations`; each adds methods
 //! to the same `impl TypeChecker` block.
@@ -8,8 +7,7 @@ use crate::errors::TypeError;
 use crate::type_checkers::val_else::{stmt_diverges, stmts_diverge};
 use crate::type_checkers::{BoundInfo, GenericFnSig, TypeChecker};
 use crate::types::{FunctionMode, Type};
-use ast_types::{Expr, FunctionDef, Stmt};
-use shared_types::Span;
+use ast_types::{FunctionDef, Stmt};
 use std::collections::HashMap;
 
 /// The program's entry point, called by the C runtime.
@@ -20,16 +18,6 @@ const MAIN_FUNCTION: &str = "main";
 const ROOT_MODULE: ast_types::ModuleId = 0;
 
 impl TypeChecker {
-    /// Register a function's signature without checking its body.
-    ///
-    /// Run over every function before any body is checked, so a call resolves
-    /// regardless of source order: the same order-independence structs, enums,
-    /// traits, and constants already get, and what mutual recursion requires.
-    ///
-    /// A generic function (non-empty `func.generics`) is a template: its type
-    /// parameters are put in scope so the signature resolves with [`Type::Generic`]
-    /// placeholders, and it is recorded in `generic_funcs` rather than `functions`.
-    /// Concrete instantiation happens per call site.
     /// The program's entry point is called by the C runtime, which passes `argc` as the
     /// first argument and reads the return register as the exit status. Only the root
     /// module's `main` is that entry point; another module's `main` reaches here under its
@@ -53,6 +41,20 @@ impl TypeChecker {
         });
     }
 
+    /// Register a function's signature without checking its body.
+    ///
+    /// Run over every function before any body is checked, so a call resolves
+    /// regardless of source order: the same order-independence structs, enums,
+    /// traits, and constants already get, and what mutual recursion requires.
+    ///
+    /// A generic function (non-empty `func.generics`) is a template: its type
+    /// parameters are put in scope so the signature resolves with [`Type::Generic`]
+    /// placeholders, and it is recorded in `generic_funcs` rather than `functions`.
+    /// Concrete instantiation happens per call site.
+    ///
+    /// A return-position `impl Trait` is registered as `Unknown`: its concrete type is
+    /// what the body produces, which [`Self::resolve_impl_returns`] reads once every
+    /// signature is known.
     pub(crate) fn register_function_signature(&mut self, func: &FunctionDef) -> Option<()> {
         // Put the generic type + const parameters in scope for signature
         // resolution. A parameter may not shadow a built-in type name.
@@ -88,15 +90,9 @@ impl TypeChecker {
             }
         }
 
-        // Resolve return type (default to Void if not specified). Return-position
-        // `impl Trait` is static dispatch: it resolves transparently to the one
-        // concrete type the body constructs, so callers see that type directly.
+        // Resolve return type (default to Void if not specified).
         let return_type = match &func.return_type {
-            Some(ast_types::Type::ImplTrait {
-                trait_name,
-                assoc_bindings,
-                span,
-            }) => self.resolve_impl_return(&trait_name.name, assoc_bindings, &func.body, *span),
+            Some(ast_types::Type::ImplTrait { .. }) => Type::Unknown,
             // A return type that failed to resolve was reported; `Unknown` keeps each call
             // site from reporting it again as a `void` it never wrote.
             Some(ret_ty) => self.resolve_type(ret_ty).unwrap_or(Type::Unknown),
@@ -195,11 +191,57 @@ impl TypeChecker {
             return None;
         };
 
-        // Enter function scope
+        let warnings_before = self.warnings.len();
+        self.enter_function_body(func, &param_types, &return_type);
+
+        // Check function body. The implicit return is checked once, below, against the
+        // declared return type: checking it here as well would run its effects twice:
+        // a by-value argument would be recorded as moved a second time (and then
+        // reported as a use of the value it moved itself), and any diagnostic it
+        // produced would be recorded twice.
+        let tail_returns = Self::tail_is_implicit_return(&func.body, &return_type);
+        let leading = if tail_returns {
+            &func.body[..func.body.len() - 1]
+        } else {
+            &func.body[..]
+        };
+        for stmt in leading {
+            let _ = self.check_stmt(stmt);
+        }
+
+        // A trailing expression acts as an expression-based return, so it must
+        // match the declared return type.
+        if tail_returns {
+            self.check_implicit_return(&func.body, &return_type);
+        } else if !matches!(return_type, Type::Void | Type::Unknown) && !stmts_diverge(&func.body) {
+            // Nothing produces the declared value and control can reach the end of the
+            // body. The backend leaves that block without a return, LLVM terminates it
+            // with `unreachable` (a legal terminator, so the verifier stays silent),
+            // and the program runs off the end of the function at runtime.
+            self.record_error(TypeError::MissingReturn {
+                expected: return_type.clone(),
+                span: func.name.span,
+            });
+        }
+
+        self.drop_allowed_warnings(warnings_before, &func.attributes);
+
+        self.leave_function_body();
+        self.exit_generic_scope();
+
+        Some(())
+    }
+
+    /// Open `func`'s body scope with its parameters bound, as every body check starts.
+    pub(super) fn enter_function_body(
+        &mut self,
+        func: &FunctionDef,
+        param_types: &[Type],
+        return_type: &Type,
+    ) {
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
         self.in_kernel = crate::type_checkers::kernel::kernel_attribute(&func.attributes).is_some();
-        let warnings_before = self.warnings.len();
 
         // Reference-typed parameters outlive the call, so a returned reference may
         // safely borrow one (single-input-reference elision). Owned
@@ -233,48 +275,15 @@ impl TypeChecker {
         if self.in_kernel {
             self.enter_kernel_outs(func);
         }
+    }
 
-        // Check function body. The implicit return is checked once, below, against the
-        // declared return type: checking it here as well would run its effects twice:
-        // a by-value argument would be recorded as moved a second time (and then
-        // reported as a use of the value it moved itself), and any diagnostic it
-        // produced would be recorded twice.
-        let tail_returns = Self::tail_is_implicit_return(&func.body, &return_type);
-        let leading = if tail_returns {
-            &func.body[..func.body.len() - 1]
-        } else {
-            &func.body[..]
-        };
-        for stmt in leading {
-            let _ = self.check_stmt(stmt);
-        }
-
-        // A trailing expression acts as an expression-based return, so it must
-        // match the declared return type.
-        if tail_returns {
-            self.check_implicit_return(&func.body, &return_type);
-        } else if !matches!(return_type, Type::Void) && !stmts_diverge(&func.body) {
-            // Nothing produces the declared value and control can reach the end of the
-            // body. The backend leaves that block without a return, LLVM terminates it
-            // with `unreachable` (a legal terminator, so the verifier stays silent),
-            // and the program runs off the end of the function at runtime.
-            self.record_error(TypeError::MissingReturn {
-                expected: return_type.clone(),
-                span: func.name.span,
-            });
-        }
-
-        self.drop_allowed_warnings(warnings_before, &func.attributes);
-
-        // Exit function scope
+    /// Close the scope [`Self::enter_function_body`] opened.
+    pub(super) fn leave_function_body(&mut self) {
         self.pop_scope();
         self.current_function_return_type = None;
         self.in_kernel = false;
         self.kernel_outs.clear();
         self.current_fn_outliving.clear();
-        self.exit_generic_scope();
-
-        Some(())
     }
 
     /// Whether the last statement of a body is its implicit return.
@@ -383,113 +392,5 @@ impl TypeChecker {
         }
         let sig = self.generic_funcs.get(&func.name.name)?;
         Some((sig.params.clone(), sig.ret.clone()))
-    }
-
-    /// Resolve a return-position `impl Trait` to the single concrete type the
-    /// body produces, and verify that type implements the named trait.
-    ///
-    /// `impl Trait` in return position is static dispatch: exactly one concrete type
-    /// flows out of the function, so it is resolved transparently rather than kept
-    /// opaque: the caller receives that concrete type at zero runtime cost. The
-    /// concrete type is read structurally from the body's result expression, which this
-    /// phase restricts to a direct constructor (struct literal or enum value); richer
-    /// forms await closures and iterators.
-    pub(super) fn resolve_impl_return(
-        &mut self,
-        trait_name: &str,
-        assoc_bindings: &[(shared_types::Identifier, ast_types::Type)],
-        body: &[Stmt],
-        span: Span,
-    ) -> Type {
-        if !self.traits.contains_key(trait_name) {
-            self.record_error(TypeError::UnknownTrait {
-                trait_name: trait_name.to_string(),
-                span,
-            });
-            return Type::Unknown;
-        }
-        let Some(concrete) = Self::body_result_expr(body).and_then(|e| self.shallow_result_type(e))
-        else {
-            self.record_error(TypeError::ImplReturnNotInferable {
-                trait_name: trait_name.to_string(),
-                span,
-            });
-            return Type::Unknown;
-        };
-        if !self.type_implements_trait(&concrete, trait_name) {
-            self.record_error(TypeError::ImplReturnDoesNotImplement {
-                trait_name: trait_name.to_string(),
-                ty: concrete.clone(),
-                span,
-            });
-            return concrete;
-        }
-        // `-> impl Trait<Assoc = T>` promises the caller what the concrete type's impl
-        // bound the associated type to, so the two must agree.
-        let bound = ast_types::TraitBound {
-            trait_name: shared_types::Identifier {
-                name: trait_name.to_string(),
-                span,
-            },
-            assoc_bindings: assoc_bindings.to_vec(),
-        };
-        let resolved = self.resolve_bounds(std::slice::from_ref(&bound));
-        for info in &resolved {
-            self.check_assoc_bindings(info, &concrete, span);
-        }
-        concrete
-    }
-
-    /// The expression a function body evaluates to: its trailing expression, or the
-    /// operand of a trailing `return`. Used only for return-position `impl Trait`
-    /// resolution.
-    pub(super) fn body_result_expr(body: &[Stmt]) -> Option<&Expr> {
-        match body.last()? {
-            Stmt::Expr(expr) => Some(expr),
-            Stmt::Return { value, .. } => value.as_ref(),
-            _ => None,
-        }
-    }
-
-    /// The concrete type of a directly-constructed expression, read structurally without
-    /// full type checking. Only the forms whose nominal type is evident from the
-    /// syntax are recognized (a struct literal, an enum value, or a newtype
-    /// construction), plus the tail of a block or `if`. Any other shape yields `None`,
-    /// which surfaces as `ImplReturnNotInferable`.
-    pub(super) fn shallow_result_type(&self, expr: &Expr) -> Option<Type> {
-        match expr {
-            Expr::Paren(inner, _) => self.shallow_result_type(inner),
-            Expr::StructLiteral { name, .. } => self
-                .struct_defs
-                .contains_key(&name.name)
-                .then(|| Type::Struct(name.name.clone())),
-            Expr::EnumStructLiteral { enum_name, .. } => self.shallow_enum_type(&enum_name.name),
-            // A unit (`E::V`) or tuple (`E::V(..)`) enum value; a same-shaped path that
-            // does not name an enum is an associated-function call and is not inferable.
-            Expr::Path { type_name, .. } => self.shallow_enum_type(&type_name.name),
-            Expr::Call { func, .. } => match func.as_ref() {
-                Expr::Path { type_name, .. } => self.shallow_enum_type(&type_name.name),
-                Expr::Identifier(ident) => self
-                    .newtype_defs
-                    .contains_key(&ident.name)
-                    .then(|| Type::Newtype(ident.name.clone())),
-                _ => None,
-            },
-            Expr::Block { stmts, .. } => {
-                Self::body_result_expr(stmts).and_then(|e| self.shallow_result_type(e))
-            }
-            Expr::If { then_block, .. } => {
-                Self::body_result_expr(then_block).and_then(|e| self.shallow_result_type(e))
-            }
-            _ => None,
-        }
-    }
-
-    /// The nominal enum type a construction names, for return-position `impl Trait`
-    /// inference. A generic enum yields `None`: its base name is not a type, and the
-    /// concrete instance depends on a payload this shallow read does not inspect.
-    pub(super) fn shallow_enum_type(&self, name: &str) -> Option<Type> {
-        (self.enum_defs.contains_key(name) && !self.is_generic_enum(name))
-            .then(|| Type::Enum(name.to_string()))
     }
 }

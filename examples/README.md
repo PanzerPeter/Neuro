@@ -152,7 +152,7 @@ in each program has the full description. The three module files under
 - [`ranked_finish.nr`](showcase/ranked_finish.nr): `.enumerate()` on arrays, `Vec` and ranges, with a `u64` position that indexes back into the array it came from.
 - [`sensor_windows.nr`](showcase/sensor_windows.nr): One `&[T]` and `&mut [T]` signature over an array and a `Vec`, windowed with `.slice(range)` without copying elements.
 - [`status_report.nr`](showcase/status_report.nr): A status report built from live readings, with format specs `:.N`, `:x`, `:>W`, `:<W` and `:+d`, checked against their exact text.
-- [`stream_pipeline.nr`](showcase/stream_pipeline.nr): `Iterator` with associated types and `.map` / `.filter` adapters, both in `for` heads and as adapter values a function returns and a generic consumer drives, a reversed and strided range value and an array walked by borrow with `.iter()` fed through the same adapters and consumer, chained with `|>` and `>>` into a stream with no intermediate array.
+- [`stream_pipeline.nr`](showcase/stream_pipeline.nr): `Iterator` with associated types and `.map` / `.filter` adapters, both in `for` heads and as adapter values that a function returns (by type name or as `impl Iterator`) and a generic consumer drives, a reversed and strided range value and an array walked by borrow with `.iter()` fed through the same adapters and consumer, chained with `|>` and `>>` into a stream with no intermediate array.
 - [`word_scanner.nr`](showcase/word_scanner.nr): A small tokenizer on `.chars()` and `.char_indices()` that cuts tokens out by byte offset, on non-ASCII input.
 
 ### Traits, generics and closures

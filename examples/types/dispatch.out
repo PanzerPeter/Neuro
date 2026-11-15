@@ -1,4 +1,5 @@
 loud_static(&Dog)  static  -> 15
 loud_dyn(&Dog)     dynamic -> 19   (volume 15 + inherited legs 4)
 loud_dyn(&Bird)    dynamic -> 10   (volume 8 + overridden legs 2)
-total                      -> 44
+even_sizes(7) herd static  -> 36   (volumes 6 + 12 + 18)
+total                      -> 80

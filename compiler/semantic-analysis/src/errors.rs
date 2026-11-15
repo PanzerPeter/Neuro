@@ -735,7 +735,7 @@ pub enum TypeError {
     ImplTraitNotAllowedHere { span: Span },
 
     #[error(
-        "cannot infer the concrete type of the `impl {trait_name}` return: return a direct constructor (a struct literal or enum value); other forms await closures/iterators"
+        "cannot infer the concrete type of the `impl {trait_name}` return: the body must end in a value whose type does not depend on this function's own result, directly or through another `impl Trait` function"
     )]
     ImplReturnNotInferable { trait_name: String, span: Span },
 

@@ -17,6 +17,7 @@ use shared_types::Literal;
 use crate::{Lowerer, LoweringError};
 
 mod declared_receivers;
+mod impl_returns;
 mod mono;
 pub(crate) use mono::{generic_name_sets, mentions_any};
 mod register;
@@ -441,7 +442,7 @@ impl Lowerer {
                 span: param.span,
             });
         }
-        let return_type = self.declared_return_type(&func.return_type, &func.body)?;
+        let return_type = self.declared_return_type(func)?;
 
         let target = target_of(&func.attributes);
         self.push_scope();
@@ -593,8 +594,6 @@ impl Lowerer {
     }
 }
 
-/// The expression a body evaluates to: its trailing expression, or the operand of a
-/// trailing `return`. Used for return-position `impl Trait` resolution.
 /// The name a struct was declared with: its canonical name less the module path
 /// resolution put in front of it, so `{p:?}` reads `Point` wherever `Point` is declared.
 pub(crate) fn written_name(canonical: &str) -> String {
@@ -603,14 +602,6 @@ pub(crate) fn written_name(canonical: &str) -> String {
         .next()
         .unwrap_or(canonical)
         .to_string()
-}
-
-fn body_result_expr(body: &[ast_types::Stmt]) -> Option<&ast_types::Expr> {
-    match body.last()? {
-        ast_types::Stmt::Expr(expr) => Some(expr),
-        ast_types::Stmt::Return { value, .. } => value.as_ref(),
-        _ => None,
-    }
 }
 
 /// Lower the surface `self` receiver kind to its HIR counterpart.

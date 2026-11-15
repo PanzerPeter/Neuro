@@ -293,3 +293,61 @@ func main() -> i32 { 0 }
         .expect("make should be lowered");
     assert_eq!(make.return_type, HirType::Struct("Square".to_string()));
 }
+
+fn return_type_of(program: &neuro_hir::HirProgram, name: &str) -> HirType {
+    program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HirItem::Function(f) if f.name == name => Some(f.return_type.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{name} should be lowered"))
+}
+
+/// The concrete type is what the body produces, read by lowering the body: a call
+/// result, a binding, and a call to an `impl Trait` function declared later.
+#[test]
+fn impl_trait_return_over_any_body_resolves_to_what_it_produces() {
+    let program = lower(
+        r#"
+trait Shape {
+    func area(&self) -> i32
+}
+struct Square { side: i32 }
+impl Shape for Square {
+    func area(&self) -> i32 { self.side * self.side }
+}
+struct Twice<T> { inner: T }
+impl<T: Shape> Shape for Twice<T> {
+    func area(&self) -> i32 { self.inner.area() * 2 }
+}
+func base(n: i32) -> Square { Square { side: n } }
+func outer(n: i32) -> impl Shape { Twice { inner: inner(n) } }
+func inner(n: i32) -> impl Shape {
+    val s = base(n)
+    s
+}
+func wrap<T: Shape>(x: T) -> impl Shape { Twice { inner: x } }
+func main() -> i32 { outer(2).area() + wrap(base(1)).area() }
+"#,
+    );
+    assert_eq!(
+        return_type_of(&program, "inner"),
+        HirType::Struct("Square".to_string())
+    );
+    let HirType::Struct(outer) = return_type_of(&program, "outer") else {
+        panic!("`outer` returns a struct instance");
+    };
+    assert!(outer.starts_with("Twice"), "got {outer}");
+    let generic_instance = program.items.iter().find_map(|item| match item {
+        HirItem::Function(f) if f.name.starts_with("wrap") && f.name != "wrap" => {
+            Some(f.return_type.clone())
+        }
+        _ => None,
+    });
+    assert!(
+        matches!(&generic_instance, Some(HirType::Struct(name)) if name.starts_with("Twice")),
+        "got {generic_instance:?}"
+    );
+}

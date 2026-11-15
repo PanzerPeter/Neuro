@@ -44,6 +44,13 @@ func loud_dyn(s: &dyn Speaker) -> i32 {
     s.volume() + s.legs()
 }
 
+// `impl Trait` in return position is static dispatch too. The caller gets the one
+// concrete type the body produces, here an adapter chain over a range, without the
+// signature having to spell it.
+func even_sizes(n: i32) -> impl Iterator<Item = i32> {
+    (1..n).filter(|size| size % 2 == 0)
+}
+
 func main() -> i32 {
     val d = Dog { size: 5 }    // volume 15, legs 4 (inherited default)
     val b = Bird { size: 4 }   // volume  8, legs 2 (overridden)
@@ -57,7 +64,14 @@ func main() -> i32 {
     println("loud_dyn(&Dog)     dynamic -> {a}   (volume 15 + inherited legs 4)")
     println("loud_dyn(&Bird)    dynamic -> {c}   (volume 8 + overridden legs 2)")
 
-    val total = stat + a + c
+    // Sizes 2, 4 and 6, each a Dog called through static dispatch.
+    mut herd = 0
+    for size in even_sizes(7) {
+        herd += loud_static(&Dog { size: size })
+    }
+    println("even_sizes(7) herd static  -> {herd}   (volumes 6 + 12 + 18)")
+
+    val total = stat + a + c + herd
     println("total                      -> {total}")
-    total                      // 15 + 19 + 10 = 44
+    total                      // 15 + 19 + 10 + 36 = 80
 }

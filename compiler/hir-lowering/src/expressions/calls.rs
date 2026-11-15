@@ -511,10 +511,7 @@ impl Lowerer {
             .map(|param| self.resolve_type(&param.ty))
             .collect::<Result<Vec<_>, _>>()
             .and_then(|params| {
-                let ret = match &template.return_type {
-                    Some(t) => self.resolve_type(t)?,
-                    None => HirType::Void,
-                };
+                let ret = self.template_return_type(template, &params)?;
                 Ok((params, ret))
             });
         self.type_subst = saved_ty;

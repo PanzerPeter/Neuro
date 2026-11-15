@@ -725,10 +725,8 @@ impl Lowerer {
                 span: param.span,
             });
         }
-        let return_type = match &template.return_type {
-            Some(t) => self.resolve_type(t)?,
-            None => HirType::Void,
-        };
+        let param_types: Vec<HirType> = params.iter().map(|param| param.ty.clone()).collect();
+        let return_type = self.template_return_type(template, &param_types)?;
 
         let target = super::target_of(&template.attributes);
         self.push_scope();

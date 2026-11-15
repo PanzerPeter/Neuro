@@ -2,7 +2,7 @@
 // `IntoIterator` and `Iterator` with associated types, `.map` and `.filter` both as head
 // adapters and as adapter values a function returns, a range value strided and reversed
 // into the same adapters, an array walked by borrow with `.iter()` into an adapter chain a
-// function returns, a bound `S: Iterator<Item = i32>`,
+// function returns as `impl Iterator<Item = i32>`, a bound `S: Iterator<Item = i32>`,
 // generic structs, closures in a struct field, `|>` and `>>` over every function-value
 // spelling, `Option`, and `for`-in. A source, a transform and a filter are three types,
 // each an `Iterator`, and one `for` head drives the chain one element at a time. No
@@ -149,8 +149,10 @@ func boosted(readings: Readings, factor: i32, floor: i32) -> Filter<Map<Readings
 
 // The samples walked by borrow. `.iter()` is the library's `Iter<i32>`, yielding `&i32`,
 // so the chain over it may leave the function: it borrows the caller's samples, not a
-// copy of them. The closures read through each borrow, so neither needs a `*`.
-func spikes(samples: &[i32], floor: i32) -> Map<Filter<Iter<i32>, &i32>, &i32, i32> {
+// copy of them. The closures read through each borrow, so neither needs a `*`. Its type,
+// `Map<Filter<Iter<i32>, &i32>, &i32, i32>`, is long to write, so the signature promises
+// only what a caller uses: some iterator of `i32`. The compiler fills in the rest.
+func spikes(samples: &[i32], floor: i32) -> impl Iterator<Item = i32> {
     samples.iter().filter(|sample| sample > floor).map(|sample| sample * 2)
 }
 

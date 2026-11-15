@@ -83,7 +83,9 @@ module per declaration kind beside it. `tests/` is split by subject.
   before any body is checked, so a call resolves regardless of source order and mutually recursive
   functions can name each other. `check_function` reads the signature back via
   `lookup_registered_signature` rather than resolving it twice. The root module's `main` must
-  resolve to `func main() -> i32` with no generics (`InvalidMainSignature`).
+  resolve to `func main() -> i32` with no generics (`InvalidMainSignature`). A return-position
+  `impl Trait` registers as `Unknown`. **3b'. `resolve_impl_returns`** (`declarations/impl_returns.rs`)
+  then gives each one the type its body produces: see Dispatch below.
 - **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
   signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every
   differentiated parameter `&mut` over a float element with literal extents (`GradSignature`),
@@ -1129,11 +1131,16 @@ whose flag is set only by the `Reference` arm, so a bare `dyn Trait` is
 method takes `&self`/`&mut self` (`TraitNotObjectSafe`). `assignable(found, expected)` is ordinary
 compatibility **plus** the single implicit `&T` → `&dyn Trait` unsizing coercion, and backs the
 call-argument, return, annotated-binding and struct-literal field checks. A method call on a `DynObject` receiver types
-against the trait's declared signature. Return-position `impl Trait` resolves transparently in
-`check_function` via `resolve_impl_return`, which reads the concrete type structurally from the
-body's result expression (`shallow_result_type`: struct literal, enum value, newtype
-construction, or a block/`if` tail) and verifies it implements the trait, so callers see the
-concrete type at zero cost. Errors: `ImplTraitNotAllowedHere`, `ImplReturnNotInferable`,
+against the trait's declared signature. Return-position `impl Trait` resolves transparently to the type
+the body produces, so callers see the concrete type at zero cost. `resolve_impl_returns` takes
+each such signature out of `functions` / `generic_funcs` and checks the body with its tail typed
+against nothing (`probe_body_type`), keeping no error or warning; a clean check gives the type,
+which must implement the trait and meet its `Assoc = T` bindings. A body calling an unresolved
+one fails and waits for the next round, so order does not matter and a body depending on its own
+result never resolves (`ImplReturnNotInferable`, also for a body ending in no value; a body with
+errors of its own is left to pass 4). A failed check forgets the struct and enum instances it
+made, since an instance reports its errors only when it is made. Pass 4 then checks the body
+against the type found. Errors: `ImplTraitNotAllowedHere`, `ImplReturnNotInferable`,
 `ImplReturnDoesNotImplement`.
 
 ### Closures

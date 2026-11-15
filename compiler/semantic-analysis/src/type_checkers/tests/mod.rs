@@ -15,6 +15,7 @@ mod generic_tests;
 mod gpu_tests;
 mod grad_tests;
 mod held_borrow_tests;
+mod impl_return_tests;
 mod intrinsic_tests;
 mod iteration_tests;
 mod iterator_adapter_tests;

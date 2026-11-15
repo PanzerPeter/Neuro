@@ -441,9 +441,14 @@ In **return** position, `impl Trait` names the one concrete type the body produc
 
 ```neuro
 func make() -> impl Shape { Square { side: 3 } }
+
+// The body's type is `Filter<Range<u32>, u32>`; the signature says only what a caller needs.
+func evens(n: u32) -> impl Iterator<Item = u32> {
+    (0..n).filter(|x| x % 2 == 0)
+}
 ```
 
-The body must return a direct constructor (a struct literal or enum value) for the concrete type to be inferable. Other forms, such as a binding, are rejected with ``cannot infer the concrete type of the `impl Shape` return``.
+The body may end in any expression: a constructor, a binding, a call, an `if`/`else`, or an adapter chain. An early `return` must produce the same type. A function may return the result of another `impl Trait` function, declared before or after it, but its type cannot depend on its own result: a function that calls itself for its value, directly or through another `impl Trait` function, is rejected with ``cannot infer the concrete type of the `impl Shape` return``, as is a body that ends in no value. In a generic function, each instance returns the type its own body produces. Only a free function returns `impl Trait` so far; a method spells out its return type.
 
 ### `dyn Trait`: dynamic dispatch
 

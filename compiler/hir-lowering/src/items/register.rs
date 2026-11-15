@@ -9,8 +9,6 @@ use neuro_hir::HirType;
 
 use crate::{EnumVariantData, Lowerer, LoweringError};
 
-use super::body_result_expr;
-
 /// The `@derive(...)` attribute name and the trait arguments lowering cares about.
 const DERIVE_ATTRIBUTE: &str = "derive";
 pub(crate) const COPY_TRAIT: &str = "Copy";
@@ -90,7 +88,7 @@ impl Lowerer {
                 _ => {}
             }
         }
-        Ok(())
+        self.resolve_impl_returns(items)
     }
 
     pub(super) fn register_struct(&mut self, def: &StructDef) -> Result<(), LoweringError> {
@@ -431,11 +429,15 @@ impl Lowerer {
             return Ok(());
         }
 
+        // Its body decides an `impl Trait` return, once every signature is known.
+        if super::impl_returns::returns_impl_trait(func) {
+            return Ok(());
+        }
         let mut params = Vec::with_capacity(func.params.len());
         for param in &func.params {
             params.push(self.resolve_type(&param.ty)?);
         }
-        let ret = self.declared_return_type(&func.return_type, &func.body)?;
+        let ret = self.declared_return_type(func)?;
         self.functions.insert(func.name.name.clone(), (params, ret));
         if crate::autodiff::is_grad(&func.attributes) {
             let grad = crate::autodiff::GradParams::of(crate::param_names(func), &func.attributes)?;
@@ -444,73 +446,22 @@ impl Lowerer {
         Ok(())
     }
 
-    /// The resolved return type of a function, resolving return-position `impl Trait`
-    /// to the concrete type the body constructs.
-    ///
-    /// `impl Trait` in return position is static dispatch, since exactly one concrete type
-    /// leaves the function, so it is transparent here, exactly as the checker resolved
-    /// it. The concrete type is read structurally from the body's result expression; the
-    /// checker has already verified it exists and implements the trait.
+    /// The resolved return type of a non-generic function. A return-position
+    /// `impl Trait` reads the type `resolve_impl_returns` found for its body.
     pub(crate) fn declared_return_type(
         &mut self,
-        return_type: &Option<ast_types::Type>,
-        body: &[ast_types::Stmt],
+        func: &FunctionDef,
     ) -> Result<HirType, LoweringError> {
-        match return_type {
-            Some(ast_types::Type::ImplTrait { trait_name, .. }) => {
-                match body_result_expr(body).and_then(|e| self.shallow_result_type(e)) {
-                    Some(ty) => Ok(ty),
-                    None => Err(LoweringError::UnresolvedType {
-                        name: format!("impl {}", trait_name.name),
-                    }),
-                }
-            }
+        match &func.return_type {
+            Some(ast_types::Type::ImplTrait { trait_name, .. }) => self
+                .functions
+                .get(&func.name.name)
+                .map(|(_, ret)| ret.clone())
+                .ok_or_else(|| LoweringError::UnresolvedType {
+                    name: format!("impl {}", trait_name.name),
+                }),
             Some(t) => self.resolve_type(t),
             None => Ok(HirType::Void),
-        }
-    }
-
-    /// The concrete type of a directly-constructed expression, read structurally
-    /// Mirrors the checker's inference for return-position `impl Trait`;
-    /// duplicated rather than shared because the two slices own separate type tables.
-    pub(super) fn shallow_result_type(&mut self, expr: &ast_types::Expr) -> Option<HirType> {
-        use ast_types::Expr;
-        match expr {
-            Expr::Paren(inner, _) => self.shallow_result_type(inner),
-            Expr::StructLiteral { name, .. } => self
-                .structs
-                .contains_key(&name.name)
-                .then(|| HirType::Struct(name.name.clone())),
-            Expr::EnumStructLiteral { enum_name, .. } => self
-                .enums
-                .contains_key(&enum_name.name)
-                .then(|| HirType::Enum(enum_name.name.clone())),
-            Expr::Path { type_name, .. } => self
-                .enums
-                .contains_key(&type_name.name)
-                .then(|| HirType::Enum(type_name.name.clone())),
-            Expr::Call { func, .. } => match func.as_ref() {
-                Expr::Path { type_name, .. } => self
-                    .enums
-                    .contains_key(&type_name.name)
-                    .then(|| HirType::Enum(type_name.name.clone())),
-                Expr::Identifier(ident) => {
-                    let inner_ast = self.newtypes.get(&ident.name)?.clone();
-                    let inner = self.resolve_type(&inner_ast).ok()?;
-                    Some(HirType::Newtype {
-                        name: ident.name.clone(),
-                        inner: Box::new(inner),
-                    })
-                }
-                _ => None,
-            },
-            Expr::Block { stmts, .. } => {
-                body_result_expr(stmts).and_then(|e| self.shallow_result_type(e))
-            }
-            Expr::If { then_block, .. } => {
-                body_result_expr(then_block).and_then(|e| self.shallow_result_type(e))
-            }
-            _ => None,
         }
     }
 

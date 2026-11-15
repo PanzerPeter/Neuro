@@ -653,8 +653,13 @@ marker trait gets an empty impl. A `&string` cannot be a trait object (its refer
 pointer), which the checker refuses written directly and lowering reports as `StringTraitObject`
 when a generic instance reaches it. A method call on a `DynObject` receiver types from the trait
 declaration, naming no implementor, and `lower_supplied_trait_method` leaves it to the vtable. Return-position
-`impl Trait` resolves to its concrete type through `declared_return_type` /
-`shallow_result_type`.
+`impl Trait` resolves to the type its body produces (`items/impl_returns.rs`): `register_items`
+ends with `resolve_impl_returns`, which lowers each body with `lower_inferred_body` on a clone of
+the `Lowerer` and registers the tail's type, in rounds as the checker does, so a body calling an
+unregistered one waits. `adopt_instances` makes in the real `Lowerer` the generic instances the
+type names, which the clone made and dropped. A generic template's return is probed per instance
+(`template_return_type`, from `instance_signature` and `lower_template`), with `probing_returns`
+stopping a body that reaches itself.
 
 An **associated type** reaches lowering as a `Type::Named` spelled `Self::Item`. `enter_impl_assoc`
 adds each `impl` block's bindings to `type_subst` under that spelling for the block's signature

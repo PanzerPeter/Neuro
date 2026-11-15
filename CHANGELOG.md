@@ -10,6 +10,24 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.47.0] - 2026-11-15
+
+### Added
+
+- A function returning `impl Trait` may end in any expression: a call result, a binding, an
+  `if`/`else`, or an adapter chain such as `(0..n).filter(|x| x % 2 == 0)`. Before, the body had to
+  end in a struct literal or enum value. The caller gets the concrete type the body produces, so
+  the value binds, passes to a generic and drives a `for` head with no indirection. One such
+  function may call another declared before or after it. A body whose type depends on its own
+  result, directly or through another `impl Trait` function, is refused, as is a body that ends in
+  no value. An early `return` must produce the same type as the tail.
+
+### Fixed
+
+- A generic function returning `impl Trait` (`func make<T>(x: T) -> impl Show`) passed type
+  checking and then failed to compile with "cannot resolve type annotation 'impl Show'". Each
+  instance now returns the type its body produces.
+
 ## [5.46.0] - 2026-11-14
 
 ### Added

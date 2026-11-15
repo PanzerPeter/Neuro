@@ -299,6 +299,9 @@ struct Lowerer {
     /// declaration wraps the parameter in. See `items::declared_receivers`. A span names
     /// one call only within a body, so this is emptied after each.
     param_receivers: HashMap<shared_types::Span, u32>,
+    /// The `impl Trait` functions whose bodies are being lowered to find their return
+    /// type, so one whose body reaches itself fails instead of recursing.
+    probing_returns: HashSet<String>,
     /// Monomorphization worklist: instances discovered but not yet lowered.
     mono_pending: Vec<MonoInstance>,
     /// How many instances deep the body being lowered sits: 0 for an ordinary item, and
@@ -501,6 +504,7 @@ impl Lowerer {
             const_subst: HashMap::new(),
             const_types: HashMap::new(),
             param_receivers: HashMap::new(),
+            probing_returns: HashSet::new(),
             mono_pending: Vec::new(),
             mono_depth: 0,
             mono_seen: HashSet::new(),

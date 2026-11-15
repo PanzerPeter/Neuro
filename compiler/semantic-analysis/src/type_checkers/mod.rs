@@ -1272,6 +1272,9 @@ impl TypeChecker {
                 let _ = self.register_function_signature(func);
             }
         }
+        // Pass 3b': each return-position `impl Trait` takes the type its body produces,
+        // which a body can only be checked for once every other signature is known.
+        self.resolve_impl_returns(items);
 
         // Pass 3c: `@grad` signatures, which need every signature registered so the names
         // the derivative transform generates can be tested against the whole program.

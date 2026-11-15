@@ -32,7 +32,7 @@ val b: i64 = a         // error: type mismatch: expected i64, found i32
 val c: i64 = a as i64  // ok
 ```
 
-**Inference stops at signatures.** A local binding infers its type from its initializer, and a literal with no context defaults to `i32` or `f64`. Parameter and return types are always written. The parser refuses a parameter without a type.
+**Inference stops at signatures.** A local binding infers its type from its initializer, and a literal with no context defaults to `i32` or `f64`. Parameter and return types are always written; a return-position `impl Trait` is the one return type read from the body. The parser refuses a parameter without a type.
 
 **Lexical scopes.** Every block opens a scope. An inner binding may shadow an outer one of the same name, and the outer binding is visible again when the block ends.
 
@@ -59,6 +59,7 @@ val c: i64 = a as i64  // ok
 | 2d | Field rules of `@derive(Debug, Clone, PartialEq, Hashable)` | a field may implement the trait by hand, so this waits for every impl |
 | 3 | Register module-level constants | they must be visible in every function body |
 | 3b | Register every free function signature, and require `func main() -> i32` at the root | a call resolves regardless of source order, and mutually recursive functions can name each other |
+| 3b' | Give each return-position `impl Trait` the type its body produces, by checking the body and keeping only the type | a body can be checked only once every signature it calls is known |
 | 3c | `@grad` signature rules (with the form rule of `@no_grad`), then `@gpu` and `@kernel` forms | every signature is resolved, so a generated name can be tested against every declared struct |
 | 4 | Check function, method and const bodies | every signature is known, so forward references resolve |
 | 5 | Lints (`run_lints`) | they run regardless of type errors, so style guidance always reaches the developer |

@@ -6,6 +6,7 @@
 mod consts;
 mod enums;
 mod functions;
+mod impl_returns;
 mod impls;
 mod newtypes;
 mod structs;

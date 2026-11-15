@@ -145,7 +145,7 @@ impl Lowerer {
     /// with the type of what it ends with: its last expression, or a trailing `if` with an
     /// `else`. A body ending in any other statement returns nothing. The checker infers
     /// the same, and refuses a `return` in such a body.
-    fn lower_inferred_body(
+    pub(crate) fn lower_inferred_body(
         &mut self,
         stmts: &[Stmt],
     ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
